@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     arq_heavy_queue_name: str = "dramaforge:heavy"
     worker_kind: Literal["default", "heavy"] = "default"
 
+    # Agnes AI OpenAI-compatible hub (local BYOK). Never log the raw key.
+    agnes_enabled: bool = False
+    agnes_api_key: str = Field(default="", description="User BYOK for Agnes hub")
+    agnes_base_url: str = Field(default="https://apihub.agnes-ai.com/v1")
+    agnes_image_model: str = Field(default="agnes-image-2.1-flash")
+    agnes_video_model: str = Field(default="agnes-video-v2.0")
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_cors(cls, value: object) -> object:
@@ -57,6 +64,10 @@ class Settings(BaseSettings):
             items = [part.strip() for part in value.split(",") if part.strip()]
             return items
         return value
+
+    def agnes_configured(self) -> bool:
+        """True when BYOK is present and hub is enabled."""
+        return bool(self.agnes_enabled and self.agnes_api_key.strip())
 
 
 @lru_cache
