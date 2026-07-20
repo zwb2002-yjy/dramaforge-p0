@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "notes": "Empty inventory placeholder. Add desensitized sample image files named <sample_id>.jpg|.png and list pairs here. Do not commit real-user biometrics without review.",
+  "pairs_same": [],
+  "pairs_diff": [],
+  "anomalies": []
+}

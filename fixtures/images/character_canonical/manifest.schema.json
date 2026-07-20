@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dramaforge://fixtures/character_canonical/manifest",
+  "title": "S0-A character_canonical fixture manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "pairs_same", "pairs_diff", "anomalies"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "notes": { "type": "string" },
+    "pairs_same": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["a", "b", "character_id"],
+        "properties": {
+          "a": { "type": "string", "description": "sample id (filename stem)" },
+          "b": { "type": "string" },
+          "character_id": { "type": "string" }
+        }
+      }
+    },
+    "pairs_diff": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["a", "b"],
+        "properties": {
+          "a": { "type": "string" },
+          "b": { "type": "string" },
+          "character_id_a": { "type": "string" },
+          "character_id_b": { "type": "string" }
+        }
+      }
+    },
+    "anomalies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": {
+            "type": "string",
+            "enum": ["no_face", "multiple_faces", "occlusion", "low_quality"]
+          }
+        }
+      }
+    }
+  }
+}
