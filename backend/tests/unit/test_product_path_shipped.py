@@ -157,6 +157,17 @@ async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
     assert all(len(s.node_ids) == 9 for s in shots)
     assert all(s.face_checked and s.continuity_checked for s in shots)
     assert all(s.face_status is not None for s in shots)
+    # Deliberate character mismatch must not score as near-identity
+    mismatched = await produce_shots_p0(
+        session,
+        project_id=project.id,
+        user_id=user.id,
+        n=1,
+        mismatch_face_on_shot=1,
+    )
+    assert mismatched[0].face_status in {"blocked", "needs_human", "warning"} or (
+        mismatched[0].face_score is not None and mismatched[0].face_score < 0.95
+    )
     for s in shots:
         for key in s.node_ids:
             assert key in s.run_ids and key in s.artifact_ids

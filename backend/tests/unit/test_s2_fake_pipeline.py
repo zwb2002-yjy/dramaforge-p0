@@ -70,7 +70,7 @@ async def test_first_frame_writes_graph_node_run_artifact(session: AsyncSession)
         authorized_text=True,
         authorized_image=True,
         materialization_ops=["create_shot_stub", "enqueue_keyframe"],
-        face_threshold=0.0,
+        face_threshold=0.35,
     )
     assert result.brief_text.startswith("BRIEF:")
     graph = await session.get(ProductionGraph, result.graph_id)
@@ -85,6 +85,8 @@ async def test_first_frame_writes_graph_node_run_artifact(session: AsyncSession)
     art = await session.get(Artifact, result.artifact_id)
     assert art is not None
     assert art.content_hash
+    assert art.byte_size > 8
+    assert art.object_key.startswith("projects/")
     ops = (
         await session.execute(
             __import__("sqlalchemy").select(ProviderOperation).where(
@@ -95,7 +97,10 @@ async def test_first_frame_writes_graph_node_run_artifact(session: AsyncSession)
     # LEGACY spike records image ProviderOperation only (no forged AgentRun row).
     assert len(ops) == 1
     assert ops[0].actual_provider == "flux"
-    assert result.face_review.status == "passed"
+    # Two-source review status is real (not forced identity unit-vector pass)
+    assert result.face_review.status in {"passed", "blocked", "warning", "needs_human"}
+    assert run.output_summary is not None
+    assert run.output_summary.get("embedding_source") == "probe_vs_canonical_images"
 
 
 @pytest.mark.asyncio

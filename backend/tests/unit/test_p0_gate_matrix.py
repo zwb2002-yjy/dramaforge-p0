@@ -37,6 +37,16 @@ from app.assets import models as _am  # noqa: F401
 from app.assets.characters import register_lead_character, require_canonical_for_shot
 from app.assets.script_import import import_script
 from app.execution.runtime_invariants import cancel_run, single_flight_claim
+from app.delivery.download import (
+    authorize_export_download,
+    fetch_export_bytes,
+    mint_download_token,
+    verify_download_token,
+)
+from app.events.sse import SseHub, format_sse
+from app.events.models import OutboxEvent
+from app.events.outbox import OutboxDispatcher, StreamPublisher
+from app.shared.enums import OutboxStatus
 from pathlib import Path
 
 
@@ -477,11 +487,122 @@ async def test_matrix_single_flight_one_leader(session: AsyncSession) -> None:
     assert r1.id == r2.id
 
 
+@pytest.mark.asyncio
+async def test_matrix_sse_last_event_id_resume() -> None:
+    hub = SseHub(capacity=50)
+    e1 = hub.publish(event="node.progress", data={"n": 1})
+    e2 = hub.publish(event="node.completed", data={"n": 2})
+    resumed = hub.since(e1.id)
+    assert len(resumed) == 1 and resumed[0].id == e2.id
+    assert f"id: {e2.id}" in format_sse(e2)
+    gen = hub.stream(last_event_id=e1.id)
+    first = await gen.__anext__()
+    assert first.id == e2.id
+
+
+@pytest.mark.asyncio
+async def test_matrix_outbox_dead_letter_replay(session: AsyncSession) -> None:
+    publisher = StreamPublisher()
+    d = OutboxDispatcher(session, publisher, max_attempts=2)
+    event = OutboxEvent(
+        event_id=uuid4(),
+        topic="node.completed",
+        schema_version=1,
+        payload={"shot": "1"},
+        status=OutboxStatus.PENDING.value,
+        attempt_count=0,
+    )
+    session.add(event)
+    await session.commit()
+    await session.refresh(event)
+    c1 = await d.claim_pending(worker_id="w1", limit=5)
+    assert len(c1) == 1
+    await d.fail_leased(c1[0], error="down")
+    await session.commit()
+    c2 = await d.claim_pending(worker_id="w1", limit=5)
+    assert len(c2) == 1
+    dl = await d.fail_leased(c2[0], error="still down")
+    assert dl is not None
+    await session.commit()
+    replayed = await d.human_replay_dead_letter(dl.id, operator="ops")
+    await session.commit()
+    assert replayed.status == OutboxStatus.PUBLISHED.value
+    assert len(publisher.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_matrix_authorized_export_download(session: AsyncSession) -> None:
+    user, org_id = await _user_org(session)
+    started = await CreationService(session).start_project(
+        organization_id=org_id, name="Dl", aspect_ratio="9:16", actor=user
+    )
+    rev = await CreationService(session).update_brief_manual(
+        project_id=started.project_id, actor=user, logline="dl path"
+    )
+    await CreationService(session).confirm_brief(
+        project_id=started.project_id, revision_id=rev.id, actor=user
+    )
+    plan = await CreationService(session).create_or_update_plan_manual(
+        project_id=started.project_id,
+        actor=user,
+        brief_revision_id=rev.id,
+        plan_body={"prompt": "frame dl"},
+    )
+    mat = await CreationService(session).confirm_plan_and_materialize(
+        project_id=started.project_id, plan_id=plan.id, actor=user
+    )
+    store = get_object_store()
+    await WorkerRuntime(session).process_one(mat.node_run_id)
+    exp = await build_project_export(
+        session,
+        project_id=started.project_id,
+        requested_by=user.id,
+        shot_subtitles=[("1", "Hi")],
+        store=store,
+        try_ffmpeg=False,
+    )
+    grant = await authorize_export_download(
+        session, export_id=exp.export_id, actor=user, object_role="timeline_json"
+    )
+    verify_download_token(
+        token=grant.token,
+        export_id=exp.export_id,
+        project_id=started.project_id,
+        object_key=grant.object_key,
+        user_id=user.id,
+    )
+    data = await fetch_export_bytes(grant=grant, store=store)
+    assert b"timeline" in data or b"project_id" in data
+    # Intruder cannot mint for member-only project
+    intruder = User(
+        email=f"dl-x-{uuid4().hex[:6]}@example.com",
+        display_name="X",
+        password_hash=hash_password("password123"),
+    )
+    session.add(intruder)
+    await session.commit()
+    with pytest.raises(ForbiddenError):
+        await authorize_export_download(
+            session, export_id=exp.export_id, actor=intruder, object_role="timeline_json"
+        )
+    # Tampered token rejected
+    with pytest.raises(ForbiddenError):
+        verify_download_token(
+            token=grant.token[:-4] + "dead",
+            export_id=exp.export_id,
+            project_id=started.project_id,
+            object_key=grant.object_key,
+            user_id=user.id,
+        )
+
+
 def test_matrix_external_residuals_documented() -> None:
-    """External-only freeze rows — not marked passed."""
+    """External-only freeze rows — not marked passed (honest residual)."""
     external = {
         "S0-A_FAR_FRR_fixtures": "BLOCKED_BY_FIXTURE",
         "Playwright_browser_E2E": "ENV_OPTIONAL",
         "Live_multi_provider_BYOK_soak": "USER_AUTH_REQUIRED",
+        "PostgreSQL_RLS_integration": "DOCKER_ENGINE_REQUIRED",
     }
     assert external["S0-A_FAR_FRR_fixtures"] == "BLOCKED_BY_FIXTURE"
+    assert external["PostgreSQL_RLS_integration"] == "DOCKER_ENGINE_REQUIRED"

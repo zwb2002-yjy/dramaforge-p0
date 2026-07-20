@@ -1,8 +1,7 @@
-"""LEGACY_SPIKE — not product path.
+"""LEGACY helper — not the S2 product path (no Outbox/Arq).
 
-In-process GraphVersion → NodeRun → Adapter → Artifact helper used for early
-adapter/algorithm experiments. Does NOT satisfy S2 Gate (no Outbox/Arq/MinIO
-product chain, no real Brief/AgentRun, face self-compare). Prefer HTTP + Worker.
+Still must use two-source face review from image bytes (never self-match).
+Product path: AgentRunScheduler enqueue + WorkerRuntime + product_path.
 """
 
 from __future__ import annotations
@@ -15,17 +14,22 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.consistency.face_review import FaceReviewResult, face_review_hook, face_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.service import GraphService
 from app.providers.fake import FakeFluxAdapter, FakeOpenAIAdapter
 from app.shared.errors import ValidationAppError
+from app.storage.minio_store import get_object_store
 
-
-@dataclass(frozen=True)
-class FaceReviewResult:
-    status: str
-    score: float | None
-    rule: str
+# Re-export for existing tests/imports
+__all__ = [
+    "FaceReviewResult",
+    "FirstFrameResult",
+    "FirstFramePipeline",
+    "MaterializationWhitelist",
+    "face_review_hook",
+    "get_node_run",
+]
 
 
 @dataclass(frozen=True)
@@ -58,22 +62,6 @@ class MaterializationWhitelist:
                 raise ValidationAppError(f"materialization op not allowed: {op}")
             applied.append(op)
         return applied
-
-
-def face_review_hook(
-    *,
-    embedding: list[float] | None,
-    canonical: list[float] | None,
-    threshold: float = 0.35,
-) -> FaceReviewResult:
-    if embedding is None or canonical is None:
-        return FaceReviewResult(status="needs_human", score=None, rule="missing_embedding")
-    if len(embedding) != 512 or len(canonical) != 512:
-        return FaceReviewResult(status="blocked", score=None, rule="dim_mismatch")
-    score = sum(a * b for a, b in zip(embedding, canonical, strict=True))
-    if score >= threshold:
-        return FaceReviewResult(status="passed", score=score, rule="threshold")
-    return FaceReviewResult(status="blocked", score=score, rule="below_threshold")
 
 
 def _input_hash(payload: dict[str, object]) -> str:
@@ -215,29 +203,65 @@ class FirstFramePipeline:
         self._session.add(img_op)
         await self._session.flush()
 
-        content_hash = str(poll.get("content_hash") or hashlib_sha(str(artifact_uri)))
+        # Persist real media bytes to shared store (same singleton as Worker/export)
+        store = get_object_store()
+        if hasattr(self.flux, "blobs") and img_remote in getattr(self.flux, "blobs", {}):
+            probe_bytes = self.flux.blobs[img_remote]  # type: ignore[attr-defined]
+        else:
+            probe_bytes = f"keyframe:{img_remote}:{plan}".encode()
+        # Canonical is a distinct reference image (not the probe) — two-source review
+        canon_create = await self.flux.create(
+            {"prompt": f"canonical-ref:{idea}", "kind": "keyframe"}
+        )
+        canon_remote = str(canon_create.get("remote_task_id") or uuid4())
+        if hasattr(self.flux, "blobs") and canon_remote in getattr(self.flux, "blobs", {}):
+            canon_bytes = self.flux.blobs[canon_remote]  # type: ignore[attr-defined]
+        else:
+            canon_bytes = f"canonical:{canon_remote}".encode()
+        object_key = f"projects/{project_id}/nodes/keyframe/{node_run.id}.png"
+        stored = await store.put_bytes(
+            object_key=object_key, data=probe_bytes, mime_type="image/png"
+        )
+        canon_key = f"projects/{project_id}/canonical/{node_run.id}.png"
+        await store.put_bytes(
+            object_key=canon_key, data=canon_bytes, mime_type="image/png"
+        )
+
         artifact = Artifact(
             project_id=project_id,
             artifact_type="image",
             storage_state="available",
-            object_key=str(artifact_uri),
-            content_hash=content_hash,
-            mime_type="image/png",
-            byte_size=1024,
+            object_key=stored.object_key,
+            content_hash=stored.content_hash,
+            mime_type=stored.mime_type,
+            byte_size=stored.byte_size,
             produced_by_run_id=node_run.id,
         )
         self._session.add(artifact)
         await self._session.flush()
 
+        # Two-source face review only (never identity match of same vector)
+        thr = face_threshold if face_threshold > 0 else 0.35
+        face_out = face_review_images(
+            probe_image_bytes=probe_bytes,
+            canonical_image_bytes=canon_bytes,
+            threshold=thr,
+        )
+        review = FaceReviewResult(
+            status=face_out.status, score=face_out.score, rule=face_out.rule
+        )
+
         node_run.status = "completed"
         node_run.result_artifact_id = artifact.id
         node_run.provider_cost = img_op.provider_cost or Decimal("0")
-        node_run.output_summary = {"artifact_id": str(artifact.id)}
+        node_run.output_summary = {
+            "artifact_id": str(artifact.id),
+            "face_review": review.status,
+            "face_score": review.score,
+            "canonical_object_key": canon_key,
+            "embedding_source": "probe_vs_canonical_images",
+        }
         node.latest_successful_run_id = node_run.id
-
-        emb = [0.0] * 512
-        emb[0] = 1.0
-        review = face_review_hook(embedding=emb, canonical=emb, threshold=face_threshold)
         await self._session.commit()
 
         return FirstFrameResult(

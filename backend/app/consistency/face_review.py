@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.consistency.image_embed import embedding_from_image_bytes
-from app.execution.pipeline import face_review_hook
+
+
+@dataclass(frozen=True)
+class FaceReviewResult:
+    status: str
+    score: float | None
+    rule: str
 
 
 @dataclass(frozen=True)
@@ -15,6 +21,23 @@ class FaceReviewOutcome:
     rule: str
     probe_dim: int
     canonical_dim: int
+
+
+def face_review_hook(
+    *,
+    embedding: list[float] | None,
+    canonical: list[float] | None,
+    threshold: float = 0.35,
+) -> FaceReviewResult:
+    """Compare two 512-d embeddings (already derived from separate image sources)."""
+    if embedding is None or canonical is None:
+        return FaceReviewResult(status="needs_human", score=None, rule="missing_embedding")
+    if len(embedding) != 512 or len(canonical) != 512:
+        return FaceReviewResult(status="blocked", score=None, rule="dim_mismatch")
+    score = sum(a * b for a, b in zip(embedding, canonical, strict=True))
+    if score >= threshold:
+        return FaceReviewResult(status="passed", score=score, rule="threshold")
+    return FaceReviewResult(status="blocked", score=score, rule="below_threshold")
 
 
 def face_review_images(
@@ -32,12 +55,8 @@ def face_review_images(
         return FaceReviewOutcome("needs_human", None, "missing_probe", 0, 0)
     if not canonical_image_bytes:
         return FaceReviewOutcome("blocked", None, "missing_canonical", 0, 0)
-    if probe_image_bytes is canonical_image_bytes:
-        # Same Python object identity — force separate derivation still, but flag
-        pass
     probe = embedding_from_image_bytes(probe_image_bytes)
     canon = embedding_from_image_bytes(canonical_image_bytes)
-    # Detect trivial identical payloads used as "fake pass"
     same_payload = probe_image_bytes == canonical_image_bytes
     result = face_review_hook(embedding=probe, canonical=canon, threshold=threshold)
     rule = result.rule

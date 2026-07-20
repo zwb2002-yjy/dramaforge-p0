@@ -10,9 +10,11 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep
+from app.delivery.download import authorize_export_download, fetch_export_bytes, verify_download_token
 from app.delivery.export_service import build_project_export
 from app.execution.models import Artifact, NodeRun
 from app.runtime.scheduler import AgentRunScheduler
+from app.shared.errors import ForbiddenError
 
 router = APIRouter(tags=["production"])
 
@@ -205,6 +207,13 @@ class GoldenProduceResponse(BaseModel):
     content_hash: str
 
 
+class DownloadGrantResponse(BaseModel):
+    export_id: UUID
+    object_key: str
+    token: str
+    expires_at: int
+
+
 @router.post(
     "/projects/{project_id}/produce-golden",
     response_model=GoldenProduceResponse,
@@ -238,3 +247,64 @@ async def produce_golden_path(
         continuity_checked=sum(1 for s in result.shots if s.continuity_checked),
         content_hash=result.content_hash,
     )
+
+
+@router.post(
+    "/projects/{project_id}/exports/{export_id}/download-grant",
+    response_model=DownloadGrantResponse,
+)
+async def grant_export_download(
+    project_id: UUID,
+    export_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+    object_role: str = "timeline_json",
+) -> DownloadGrantResponse:
+    await ProjectService(session).get_project_for_member(
+        project_id=project_id, actor=user
+    )
+    grant = await authorize_export_download(
+        session, export_id=export_id, actor=user, object_role=object_role
+    )
+    if grant.project_id != project_id:
+        raise ForbiddenError("export not in project")
+    return DownloadGrantResponse(
+        export_id=grant.export_id,
+        object_key=grant.object_key,
+        token=grant.token,
+        expires_at=grant.expires_at,
+    )
+
+
+@router.get("/projects/{project_id}/exports/{export_id}/download")
+async def download_export_object(
+    project_id: UUID,
+    export_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    token: str,
+    object_role: str = "timeline_json",
+) -> dict[str, object]:
+    """Authorized download: membership + HMAC token (no permanent public URL)."""
+    await ProjectService(session).get_project_for_member(
+        project_id=project_id, actor=user
+    )
+    grant = await authorize_export_download(
+        session, export_id=export_id, actor=user, object_role=object_role
+    )
+    verify_download_token(
+        token=token,
+        export_id=export_id,
+        project_id=project_id,
+        object_key=grant.object_key,
+        user_id=user.id,
+    )
+    data = await fetch_export_bytes(grant=grant)
+    return {
+        "export_id": str(export_id),
+        "object_key": grant.object_key,
+        "byte_size": len(data),
+        "content_sha256": __import__("hashlib").sha256(data).hexdigest(),
+        "authorized": True,
+    }
