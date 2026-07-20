@@ -17,6 +17,7 @@ os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
 from app.access import models as _access_models  # noqa: E402,F401
 from app.config import clear_settings_cache, get_settings  # noqa: E402
 from app.creation import models as _creation_models  # noqa: E402,F401
+from app.delivery import models as _delivery_models  # noqa: E402,F401
 from app.events import models as _event_models  # noqa: E402,F401
 from app.execution import models as _execution_models  # noqa: E402,F401
 from app.main import create_app  # noqa: E402

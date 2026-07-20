@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     arq_default_queue_name: str = "dramaforge:default"
     arq_heavy_queue_name: str = "dramaforge:heavy"
     worker_kind: Literal["default", "heavy"] = "default"
+    worker_token: str = Field(
+        default="dev-worker-token",
+        description="Shared secret for /api/v1/worker/tick (local Worker substitute)",
+    )
 
     # Agnes AI OpenAI-compatible hub (local BYOK). Never log the raw key.
     agnes_enabled: bool = False

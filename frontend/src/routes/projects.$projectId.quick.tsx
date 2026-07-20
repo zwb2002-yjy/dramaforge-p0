@@ -6,9 +6,10 @@ import {
   confirmBrief,
   confirmPlan,
   createPlan,
-  executeNodeRun,
+  fetchCsrf,
   fetchSnapshot,
   updateBrief,
+  apiSend,
 } from "../lib/api";
 import { projectRoute } from "./projects.$projectId";
 
@@ -17,6 +18,37 @@ export const projectQuickRoute = createRoute({
   path: "/quick",
   component: QuickModePage,
 });
+
+async function enqueueNodeRun(projectId: string, nodeRunId: string) {
+  const csrf = await fetchCsrf();
+  return apiSend<{ node_run_id: string; status: string; job_id: string }>(
+    "POST",
+    `/api/v1/projects/${projectId}/node-runs/${nodeRunId}/enqueue`,
+    {},
+    csrf,
+  );
+}
+
+async function workerTick() {
+  return apiSend<{ processed: number }>(
+    "POST",
+    "/api/v1/worker/tick",
+    {},
+    undefined,
+  ).catch(async () => {
+    // worker token header required
+    const res = await fetch("/api/v1/worker/tick", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "X-Worker-Token": "dev-worker-token",
+      },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return (await res.json()) as { processed: number };
+  });
+}
 
 function QuickModePage() {
   const { projectId } = projectQuickRoute.useParams();
@@ -32,7 +64,7 @@ function QuickModePage() {
     queryKey: ["snapshot", projectId],
     queryFn: () => fetchSnapshot(projectId),
     enabled: projectId !== "demo",
-    refetchInterval: 3000,
+    refetchInterval: 2000,
   });
 
   const flow = useMutation({
@@ -45,11 +77,16 @@ function QuickModePage() {
       setPlanId(plan.id);
       const mat = await confirmPlan(projectId, plan.id);
       setNodeRunId(mat.node_run_id);
-      const run = await executeNodeRun(projectId, mat.node_run_id);
-      return run;
+      // Product path: enqueue only — Adapter runs in Worker
+      const enq = await enqueueNodeRun(projectId, mat.node_run_id);
+      // Local dev: tick worker (same code path as arq execute_node_run)
+      const tick = await workerTick();
+      return { enq, tick, nodeRunId: mat.node_run_id };
     },
-    onSuccess: async (run) => {
-      setMsg(`NodeRun status=${run.status}`);
+    onSuccess: async (r) => {
+      setMsg(
+        `enqueued job=${r.enq.job_id}; worker processed=${r.tick.processed}; run=${r.nodeRunId}`,
+      );
       await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
     },
     onError: (e: Error) => setMsg(e.message),
@@ -59,7 +96,7 @@ function QuickModePage() {
     <div data-testid="quick-mode">
       <h2>快速模式</h2>
       <p>
-        Project <code>{projectId}</code> — 与专业入口共享同一项目事实。
+        Project <code>{projectId}</code> — 与专业入口共享同一项目。Adapter 仅在 Worker 执行。
       </p>
       <label>
         Brief logline
@@ -70,14 +107,14 @@ function QuickModePage() {
         <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} />
       </label>
       <button type="button" onClick={() => flow.mutate()} disabled={flow.isPending}>
-        {flow.isPending ? "执行中…" : "确认 Brief/Plan 并生成首帧"}
+        {flow.isPending ? "执行中…" : "确认 Brief/Plan → 入队 → Worker 生产"}
       </button>
       {msg && <p data-testid="flow-msg">{msg}</p>}
       {briefRev && <p>Brief revision: {briefRev}</p>}
       {planId && <p>Plan: {planId}</p>}
       {nodeRunId && <p>NodeRun: {nodeRunId}</p>}
 
-      <h3>快照</h3>
+      <h3>快照（轮询 PostgreSQL）</h3>
       {snapshot.data ? (
         <div data-testid="snapshot-panel">
           <p>Runs: {snapshot.data.node_runs.length}</p>

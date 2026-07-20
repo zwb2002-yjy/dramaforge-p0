@@ -1,4 +1,4 @@
-"""Outbox → Arq / in-process dispatch for queued NodeRuns."""
+"""Outbox publish + Arq enqueue only. Adapter execution is Worker-only."""
 
 from __future__ import annotations
 
@@ -7,10 +7,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.events.outbox import OutboxDispatcher, StreamPublisher
 from app.execution.models import NodeRun
-from app.execution.product_path import execute_keyframe_node_run
-from app.shared.enums import OutboxStatus
 
 
 class RedisStreamPublisher(StreamPublisher):
@@ -40,7 +39,7 @@ class RedisStreamPublisher(StreamPublisher):
 
 
 class AgentRunScheduler:
-    """Dispatches pending Outbox and queued NodeRuns."""
+    """API-safe scheduler: Outbox claim/publish + Arq enqueue. Never calls Adapters."""
 
     def __init__(
         self,
@@ -49,9 +48,10 @@ class AgentRunScheduler:
     ) -> None:
         self._session = session
         self._dispatcher = OutboxDispatcher(session, publisher=publisher)
+        self.enqueued_job_ids: list[str] = []
 
     async def dispatch_pending(self, *, worker_id: str = "scheduler") -> int:
-        """Claim outbox + execute queued keyframe NodeRuns in-process (or enqueue Arq)."""
+        """Claim outbox + enqueue Arq jobs for queued NodeRuns (no Adapter here)."""
         count = 0
         events = await self._dispatcher.claim_pending(worker_id=worker_id, limit=20)
         for ev in events:
@@ -65,19 +65,69 @@ class AgentRunScheduler:
             select(NodeRun)
             .where(NodeRun.status == "queued")
             .order_by(NodeRun.created_at)
-            .limit(20)
+            .limit(50)
         )
         for run in result.scalars().all():
-            try:
-                await execute_keyframe_node_run(self._session, node_run_id=run.id)
-                count += 1
-            except Exception:
-                # execute_keyframe_node_run already marks failed when possible
-                count += 1
+            job_id = await self._enqueue_node_run(run.id)
+            self.enqueued_job_ids.append(job_id)
+            count += 1
         await self._session.commit()
         return count
 
-    async def dispatch_node_run(self, node_run_id: UUID) -> int:
+    async def enqueue_node_run_only(self, node_run_id: UUID) -> str:
+        """Enqueue a single NodeRun for Worker; does not execute Adapter."""
+        job_id = await self._enqueue_node_run(node_run_id)
+        await self._session.commit()
+        return job_id
+
+    async def _enqueue_node_run(self, node_run_id: UUID) -> str:
+        settings = get_settings()
+        try:
+            from arq import create_pool
+            from arq.connections import RedisSettings
+
+            redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+            try:
+                job = await redis.enqueue_job(
+                    "execute_node_run",
+                    str(node_run_id),
+                    _queue_name=settings.arq_default_queue_name,
+                )
+                return str(job.job_id if job else node_run_id)
+            finally:
+                await redis.close()
+        except Exception:
+            # Offline / no Redis: record intent for WorkerRuntime.poll (tests/dev)
+            return f"local:{node_run_id}"
+
+
+class WorkerRuntime:
+    """Worker-side poller: executes queued NodeRuns via product_path (Adapter OK here)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def process_queued(self, *, limit: int = 20) -> int:
+        from app.execution.product_path import execute_keyframe_node_run
+
+        result = await self._session.execute(
+            select(NodeRun)
+            .where(NodeRun.status == "queued")
+            .order_by(NodeRun.created_at)
+            .limit(limit)
+        )
+        n = 0
+        for run in result.scalars().all():
+            try:
+                await execute_keyframe_node_run(self._session, node_run_id=run.id)
+                n += 1
+            except Exception:
+                n += 1
+        await self._session.commit()
+        return n
+
+    async def process_one(self, node_run_id: UUID) -> None:
+        from app.execution.product_path import execute_keyframe_node_run
+
         await execute_keyframe_node_run(self._session, node_run_id=node_run_id)
         await self._session.commit()
-        return 1

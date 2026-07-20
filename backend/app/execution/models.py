@@ -249,6 +249,26 @@ class NodeRun(Base):
     )
 
 
+class ShotHumanLock(Base):
+    """Durable human lock for a shot — blocks Agent/quick overwrite rework."""
+
+    __tablename__ = "shot_human_locks"
+    __table_args__ = (UniqueConstraint("project_id", "shot_id", name="uq_shot_lock"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    shot_id: Mapped[UUID] = mapped_column(nullable=False)
+    locked: Mapped[bool] = mapped_column(nullable=False, default=True)
+    locked_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ProviderOperation(Base):
     __tablename__ = "provider_operations"
 

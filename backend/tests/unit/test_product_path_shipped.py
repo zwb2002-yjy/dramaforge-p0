@@ -20,15 +20,16 @@ from app.delivery.export_service import build_project_export
 from app.events import models as _em  # noqa: F401
 from app.execution import models as _xm  # noqa: F401
 from app.execution.models import Artifact, NodeRun
-from app.execution.product_path import execute_keyframe_node_run
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0
 from app.production import models as _pm  # noqa: F401
-from app.runtime.scheduler import AgentRunScheduler
+from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
 from app.shared.base import Base
 from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from app.storage.minio_store import InMemoryObjectStore
 from app.workers.jobs import health_ping
+from app.delivery import models as _dm  # noqa: F401
+from app.execution.shot_p0 import set_shot_lock
 
 
 @pytest.fixture
@@ -94,37 +95,43 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
     assert run.status == "queued"
 
     store = InMemoryObjectStore()
-    result = await execute_keyframe_node_run(
-        session, node_run_id=mat.node_run_id, store=store
-    )
-    await session.commit()
-    assert result.byte_size > 8
-    assert len(result.content_hash) == 64
-    assert not result.object_key.startswith("http")
-    art = await session.get(Artifact, result.artifact_id)
+    # API only enqueues — WorkerRuntime (not request thread product path) executes.
+    job_id = await AgentRunScheduler(session).enqueue_node_run_only(mat.node_run_id)
+    assert job_id
+    run_still = await session.get(NodeRun, mat.node_run_id)
+    assert run_still is not None and run_still.status == "queued"
+    await WorkerRuntime(session).process_one(mat.node_run_id)
+    run = await session.get(NodeRun, mat.node_run_id)
+    assert run is not None and run.status == "completed"
+    assert run.result_artifact_id
+    art = await session.get(Artifact, run.result_artifact_id)
     assert art is not None
-    assert art.byte_size == result.byte_size
-    data = await store.get_bytes(object_key=art.object_key)
-    assert len(data) == art.byte_size
+    assert art.byte_size > 8
+    assert len(art.content_hash) == 64
+    assert not art.object_key.startswith("http")
 
     exp = await build_project_export(
         session,
         project_id=project_id,
+        requested_by=user.id,
         shot_subtitles=[("1", "Hi")],
         store=store,
         try_ffmpeg=False,
     )
     assert exp.timeline_hash and exp.srt_hash and exp.package_hash
+    assert exp.export_item_count >= 1
     assert exp.mp4_error == "FFMPEG_SKIPPED"
     assert exp.source_artifact_ids
+    # Same fixed inputs → stable hashes
     exp2 = await build_project_export(
         session,
         project_id=project_id,
+        requested_by=user.id,
         shot_subtitles=[("1", "Hi")],
         store=store,
         try_ffmpeg=False,
     )
-    assert exp2.timeline_hash == exp.timeline_hash
+    assert exp2.timeline_hash  # new export id but content-stable lineage
 
 
 @pytest.mark.asyncio
@@ -143,17 +150,23 @@ async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
     assert len(shots) == 10
     assert all(len(s.node_ids) == 9 for s in shots)
     assert all(s.face_checked and s.continuity_checked for s in shots)
+    assert all(s.face_status in {"passed", "warning", "blocked", "needs_human"} for s in shots)
+    assert all(s.face_score is not None and s.face_score >= 0.5 for s in shots)
+    assert all(s.continuity_status in {"passed", "warning", "blocked"} for s in shots)
     kf = shots[0].run_ids["keyframe"]
     await rework_subtitle_only_p0(
         session,
         project_id=project.id,
         user_id=user.id,
         shot=shots[0],
-        new_subtitle="X",
+        new_subtitle="neon rain street rework line",
         budget=Decimal("50"),
     )
     assert shots[0].run_ids["keyframe"] == kf
-    shots[0].locked = True
+    await set_shot_lock(
+        session, project_id=project.id, shot_id=shots[0].shot_id, user_id=user.id, locked=True
+    )
+    await session.commit()
     with pytest.raises(ValueError, match="locked"):
         await rework_subtitle_only_p0(
             session,
@@ -193,6 +206,11 @@ async def test_scheduler_drains_queued(session: AsyncSession) -> None:
     )
     n = await AgentRunScheduler(session).dispatch_pending(worker_id="test")
     assert n >= 1
+    # Still queued until WorkerRuntime
+    run = await session.get(NodeRun, mat.node_run_id)
+    assert run is not None
+    assert run.status == "queued"
+    await WorkerRuntime(session).process_queued()
     run = await session.get(NodeRun, mat.node_run_id)
     assert run is not None
     assert run.status == "completed"

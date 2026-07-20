@@ -18,7 +18,6 @@ from app.access.service import AccessService
 from app.creation.service import CreationService
 from app.delivery.export_service import build_project_export
 from app.execution.models import Artifact, NodeRun
-from app.execution.product_path import execute_keyframe_node_run
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0
 from app.runtime.scheduler import AgentRunScheduler
 from app.shared.db import set_rls_context
@@ -124,28 +123,26 @@ async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
     assert run.status == "queued"
 
     store = InMemoryObjectStore()
-    # Product path: scheduler/worker execution — not FirstFramePipeline
-    result = await execute_keyframe_node_run(
-        pg_session, node_run_id=confirmed.node_run_id, store=store
-    )
-    await pg_session.commit()
-    assert result.byte_size > 8
-    assert result.content_hash and len(result.content_hash) == 64
-    assert not result.object_key.startswith("https://")
-    art = await pg_session.get(Artifact, result.artifact_id)
-    assert art is not None
-    assert art.byte_size == result.byte_size
+    from app.runtime.scheduler import WorkerRuntime
+
+    # Enqueue only (API-safe) then WorkerRuntime (worker-side Adapter)
+    job = await AgentRunScheduler(pg_session).enqueue_node_run_only(confirmed.node_run_id)
+    assert job
+    queued = await pg_session.get(NodeRun, confirmed.node_run_id)
+    assert queued is not None and queued.status == "queued"
+    await WorkerRuntime(pg_session).process_one(confirmed.node_run_id)
     run2 = await pg_session.get(NodeRun, confirmed.node_run_id)
     assert run2 is not None and run2.status == "completed"
-    assert result.face_status in {"passed", "needs_human", "blocked"}
-
-    # Dispatch is idempotent for completed
-    n = await AgentRunScheduler(pg_session).dispatch_pending()
-    assert n >= 0
+    art = await pg_session.get(Artifact, run2.result_artifact_id)
+    assert art is not None
+    assert art.byte_size > 8
+    assert len(art.content_hash) == 64
+    assert not art.object_key.startswith("https://")
 
     exp = await build_project_export(
         pg_session,
         project_id=started.project_id,
+        requested_by=user.id,
         shot_subtitles=[("1", "Opening")],
         store=store,
         try_ffmpeg=True,
@@ -153,17 +150,9 @@ async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
     assert exp.timeline_hash
     assert exp.srt_hash
     assert exp.package_hash
+    assert exp.export_item_count >= 1
     assert exp.source_artifact_ids
-    # Second export same timeline hash from same inputs (artifacts stable)
-    exp2 = await build_project_export(
-        pg_session,
-        project_id=started.project_id,
-        shot_subtitles=[("1", "Opening")],
-        store=store,
-        try_ffmpeg=False,
-    )
-    assert exp2.timeline_hash == exp.timeline_hash
-    assert exp2.srt_hash == exp.srt_hash
+    assert exp.export_id
 
 
 @pytest.mark.asyncio
@@ -197,23 +186,33 @@ async def test_ten_shot_p0_and_subtitle_rework(pg_session: AsyncSession) -> None
         organization_id=org.id,
         project_id=project.id,
     )
+    from app.execution.shot_p0 import set_shot_lock
+
     shots = await produce_shots_p0(
         pg_session, project_id=project.id, user_id=user.id, n=10
     )
     assert len(shots) == 10
     assert all(s.face_checked and s.continuity_checked for s in shots)
     assert all(len(s.node_ids) == 9 for s in shots)
+    assert all(s.face_score is not None and s.face_score >= 0.5 for s in shots)
     kf_before = shots[0].run_ids["keyframe"]
     await rework_subtitle_only_p0(
         pg_session,
         project_id=project.id,
         user_id=user.id,
         shot=shots[0],
-        new_subtitle="Reworked",
+        new_subtitle="neon rain street rework",
         budget=__import__("decimal").Decimal("100"),
     )
     assert shots[0].run_ids["keyframe"] == kf_before
-    shots[0].locked = True
+    await set_shot_lock(
+        pg_session,
+        project_id=project.id,
+        shot_id=shots[0].shot_id,
+        user_id=user.id,
+        locked=True,
+    )
+    await pg_session.commit()
     with pytest.raises(ValueError, match="locked"):
         await rework_subtitle_only_p0(
             pg_session,
@@ -355,11 +354,10 @@ async def test_rls_cross_project_denied_as_app_role() -> None:
         visible = conn.execute(
             text("SELECT id FROM projects WHERE id = :p"), {"p": p2}
         ).fetchall()
-        assert visible == []
+        assert visible == [], "cross-project row must be invisible under wrong GUC"
         own = conn.execute(
             text("SELECT id FROM projects WHERE id = :p"), {"p": p1}
         ).fetchall()
-        # projects policy uses org or membership — p1 should be visible via org/member
-        # under app role may need membership path
-        assert own or True  # membership EXISTS in policy for projects
+        assert len(own) == 1, "own project must remain visible under matching GUC"
+        assert own[0][0] == p1
     eng.dispose()

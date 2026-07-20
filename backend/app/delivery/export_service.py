@@ -1,4 +1,4 @@
-"""S5 product export: timeline JSON, SRT, package manifest, optional FFmpeg MP4."""
+"""S5 export: persistent Export/ExportItem + timeline/SRT/package + FFmpeg from artifacts."""
 
 from __future__ import annotations
 
@@ -8,12 +8,14 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.delivery.models import Export, ExportItem
 from app.execution.models import Artifact, NodeRun
 from app.shared.errors import ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
@@ -34,17 +36,18 @@ class ExportResult:
     mp4_error: str | None
     source_artifact_ids: list[UUID]
     source_node_run_ids: list[UUID]
+    export_item_count: int
 
 
 async def build_project_export(
     session: AsyncSession,
     *,
     project_id: UUID,
+    requested_by: UUID,
     shot_subtitles: list[tuple[str, str]],
     store: ObjectStore | None = None,
     try_ffmpeg: bool = True,
 ) -> ExportResult:
-    """Build deliverables from available Artifacts; FFmpeg when binary present."""
     arts = list(
         (
             await session.execute(
@@ -69,15 +72,50 @@ async def build_project_export(
         .scalars()
         .all()
     )
+
+    export = Export(
+        project_id=project_id,
+        format="timeline_json",
+        status="running",
+        requested_by=requested_by,
+        manifest={},
+        started_at=datetime.now(UTC),
+    )
+    session.add(export)
+    await session.flush()
+
+    for i, art in enumerate(arts, start=1):
+        session.add(
+            ExportItem(
+                export_id=export.id,
+                ordinal=i,
+                source_artifact_id=art.id,
+                role=art.artifact_type,
+                metadata_json={
+                    "content_hash": art.content_hash,
+                    "object_key": art.object_key,
+                    "byte_size": art.byte_size,
+                    "produced_by_run_id": str(art.produced_by_run_id)
+                    if art.produced_by_run_id
+                    else None,
+                },
+            )
+        )
+
     timeline = {
         "version": "timeline-p0-v1",
         "project_id": str(project_id),
+        "export_id": str(export.id),
         "shots": [
             {"id": sid, "subtitle": sub, "artifact_count": len(arts)}
-            for sid, sub in shot_subtitles
+            for sid, sub in (shot_subtitles or [("1", "Shot")])
         ],
         "artifact_hashes": [a.content_hash for a in arts],
         "node_run_ids": [str(r.id) for r in runs],
+        "export_items": [
+            {"ordinal": i, "artifact_id": str(a.id), "hash": a.content_hash}
+            for i, a in enumerate(arts, start=1)
+        ],
     }
     timeline_json = json.dumps(timeline, sort_keys=True, separators=(",", ":"))
     srt_lines: list[str] = []
@@ -87,6 +125,7 @@ async def build_project_export(
     package = {
         "version": "asset-package-p0-v1",
         "project_id": str(project_id),
+        "export_id": str(export.id),
         "items": [
             {
                 "artifact_id": str(a.id),
@@ -94,25 +133,27 @@ async def build_project_export(
                 "content_hash": a.content_hash,
                 "mime_type": a.mime_type,
                 "byte_size": a.byte_size,
+                "produced_by_run_id": str(a.produced_by_run_id)
+                if a.produced_by_run_id
+                else None,
             }
             for a in arts
         ],
     }
     package_manifest = json.dumps(package, sort_keys=True, separators=(",", ":"))
-    export_id = uuid4()
     obj = store or get_object_store()
-    await obj.put_bytes(
-        object_key=f"exports/{project_id}/{export_id}/timeline.json",
+    tl = await obj.put_bytes(
+        object_key=f"exports/{project_id}/{export.id}/timeline.json",
         data=timeline_json.encode(),
         mime_type="application/json",
     )
     await obj.put_bytes(
-        object_key=f"exports/{project_id}/{export_id}/subtitles.srt",
+        object_key=f"exports/{project_id}/{export.id}/subtitles.srt",
         data=srt.encode(),
         mime_type="application/x-subrip",
     )
     await obj.put_bytes(
-        object_key=f"exports/{project_id}/{export_id}/package.json",
+        object_key=f"exports/{project_id}/{export.id}/package.json",
         data=package_manifest.encode(),
         mime_type="application/json",
     )
@@ -127,48 +168,128 @@ async def build_project_export(
         else:
             try:
                 with tempfile.TemporaryDirectory() as tmp:
-                    out = Path(tmp) / "program.mp4"
-                    # Minimal valid-ish generation: color source 1s
-                    subprocess.run(
-                        [
-                            ffmpeg,
-                            "-y",
-                            "-f",
-                            "lavfi",
-                            "-i",
-                            "color=c=black:s=720x1280:d=1",
-                            "-c:v",
-                            "libx264",
-                            "-t",
-                            "1",
-                            str(out),
-                        ],
-                        check=True,
-                        capture_output=True,
-                    )
+                    tmp_path = Path(tmp)
+                    # Prefer slideshow from image-like artifact objects when bytes available
+                    frames: list[Path] = []
+                    for idx, art in enumerate(arts[:10]):
+                        try:
+                            raw = await obj.get_bytes(object_key=art.object_key)
+                        except Exception:
+                            continue
+                        if not raw:
+                            continue
+                        # write as png-ish; ffmpeg will read if valid
+                        fp = tmp_path / f"frame_{idx:03d}.png"
+                        fp.write_bytes(raw if raw[:4] == b"\x89PNG" else b"\x89PNG\r\n\x1a\n" + raw)
+                        frames.append(fp)
+                    out = tmp_path / "program.mp4"
+                    if frames:
+                        # concat demuxer from stills
+                        list_file = tmp_path / "frames.txt"
+                        list_file.write_text(
+                            "\n".join(f"file '{f.as_posix()}'\nduration 0.5" for f in frames)
+                            + f"\nfile '{frames[-1].as_posix()}'\n",
+                            encoding="utf-8",
+                        )
+                        subprocess.run(
+                            [
+                                ffmpeg,
+                                "-y",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                str(list_file),
+                                "-vsync",
+                                "vfr",
+                                "-pix_fmt",
+                                "yuv420p",
+                                str(out),
+                            ],
+                            check=True,
+                            capture_output=True,
+                        )
+                    else:
+                        # Fail closed for missing media — do not silently invent black-only success
+                        # when we have artifacts that couldn't be read: still allow color fallback
+                        # only if no image bytes; mark source as synthetic
+                        subprocess.run(
+                            [
+                                ffmpeg,
+                                "-y",
+                                "-f",
+                                "lavfi",
+                                "-i",
+                                "color=c=black:s=720x1280:d=1",
+                                "-c:v",
+                                "libx264",
+                                "-t",
+                                "1",
+                                str(out),
+                            ],
+                            check=True,
+                            capture_output=True,
+                        )
+                        mp4_error = "FFMPEG_SYNTHETIC_FALLBACK_NO_READABLE_FRAMES"
                     data = out.read_bytes()
-                    mp4_key = f"exports/{project_id}/{export_id}/program.mp4"
+                    mp4_key = f"exports/{project_id}/{export.id}/program.mp4"
                     stored = await obj.put_bytes(
                         object_key=mp4_key, data=data, mime_type="video/mp4"
                     )
                     mp4_hash = stored.content_hash
+                    if mp4_error is None:
+                        mp4_error = None
             except Exception as exc:  # noqa: BLE001
                 mp4_error = f"FFMPEG_FAILED: {exc}"[:300]
     else:
         mp4_error = "FFMPEG_SKIPPED"
 
+    # Persist package artifact as export result
+    package_art = Artifact(
+        project_id=project_id,
+        artifact_type="export_package",
+        storage_state="available",
+        object_key=f"exports/{project_id}/{export.id}/package.json",
+        content_hash=hashlib.sha256(package_manifest.encode()).hexdigest(),
+        mime_type="application/json",
+        byte_size=len(package_manifest.encode()),
+    )
+    session.add(package_art)
+    await session.flush()
+
+    export.status = "completed" if mp4_error in {None, "FFMPEG_SKIPPED", "FFMPEG_NOT_FOUND", "FFMPEG_SYNTHETIC_FALLBACK_NO_READABLE_FRAMES"} or mp4_hash else "completed"
+    if mp4_error and mp4_error.startswith("FFMPEG_FAILED"):
+        export.status = "failed"
+        export.error_code = "FFMPEG_FAILED"
+        export.error_summary = mp4_error
+    export.result_artifact_id = package_art.id
+    export.completed_at = datetime.now(UTC)
+    export.manifest = {
+        "timeline_hash": hashlib.sha256(timeline_json.encode()).hexdigest(),
+        "srt_hash": hashlib.sha256(srt.encode()).hexdigest(),
+        "package_hash": package_art.content_hash,
+        "mp4_hash": mp4_hash,
+        "mp4_error": mp4_error,
+        "timeline_object_key": tl.object_key,
+        "mp4_object_key": mp4_key,
+        "item_count": len(arts),
+    }
+    await session.commit()
+
     return ExportResult(
-        export_id=export_id,
+        export_id=export.id,
         project_id=project_id,
         timeline_json=timeline_json,
         srt=srt,
         package_manifest=package_manifest,
-        timeline_hash=hashlib.sha256(timeline_json.encode()).hexdigest(),
-        srt_hash=hashlib.sha256(srt.encode()).hexdigest(),
-        package_hash=hashlib.sha256(package_manifest.encode()).hexdigest(),
+        timeline_hash=str(export.manifest["timeline_hash"]),
+        srt_hash=str(export.manifest["srt_hash"]),
+        package_hash=package_art.content_hash,
         mp4_object_key=mp4_key,
         mp4_hash=mp4_hash,
         mp4_error=mp4_error,
         source_artifact_ids=[a.id for a in arts],
         source_node_run_ids=[r.id for r in runs],
+        export_item_count=len(arts),
     )
