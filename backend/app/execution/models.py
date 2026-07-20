@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     BigInteger,
     DateTime,
+    Enum,
     ForeignKey,
     Integer,
     Numeric,
@@ -25,6 +26,86 @@ from sqlalchemy.types import JSON
 
 from app.shared.base import Base
 
+_node_type = Enum(
+    "prompt_compose",
+    "keyframe",
+    "face_review",
+    "video",
+    "video_review",
+    "voice",
+    "subtitle",
+    "composite",
+    "continuity_review",
+    "export",
+    name="node_type",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
+_node_run_status = Enum(
+    "queued",
+    "running",
+    "cancel_requested",
+    "cached",
+    "blocked_budget",
+    "completed",
+    "completed_after_cancel",
+    "failed",
+    "cancelled",
+    name="node_run_status",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
+_artifact_type = Enum(
+    "image",
+    "video",
+    "audio",
+    "subtitle",
+    "timeline",
+    "export_package",
+    "document",
+    name="artifact_type",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
+_artifact_state = Enum(
+    "quarantined",
+    "available",
+    "cold",
+    "delete_requested",
+    "deleted",
+    name="artifact_state",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
+_provider_purpose = Enum(
+    "primary",
+    "schema_repair",
+    "transport_retry",
+    "provider_fallback",
+    name="provider_operation_purpose",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
+_provider_status = Enum(
+    "created",
+    "submitted",
+    "running",
+    "cancel_requested",
+    "cancelled",
+    "succeeded",
+    "failed",
+    "timed_out",
+    name="provider_operation_status",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
+
 
 class GraphNode(Base):
     __tablename__ = "graph_nodes"
@@ -37,7 +118,9 @@ class GraphNode(Base):
         ForeignKey("graph_versions.id", ondelete="CASCADE"), nullable=False
     )
     node_key: Mapped[str] = mapped_column(String(120), nullable=False)
-    node_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    node_type: Mapped[str] = mapped_column(
+        _node_type.with_variant(String(40), "sqlite"), nullable=False
+    )
     display_name: Mapped[str] = mapped_column(String(160), nullable=False)
     input_schema: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     output_schema: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
@@ -86,8 +169,14 @@ class Artifact(Base):
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False
     )
-    artifact_type: Mapped[str] = mapped_column(String(40), nullable=False)
-    storage_state: Mapped[str] = mapped_column(String(32), nullable=False, default="quarantined")
+    artifact_type: Mapped[str] = mapped_column(
+        _artifact_type.with_variant(String(40), "sqlite"), nullable=False
+    )
+    storage_state: Mapped[str] = mapped_column(
+        _artifact_state.with_variant(String(32), "sqlite"),
+        nullable=False,
+        default="quarantined",
+    )
     object_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -124,7 +213,11 @@ class NodeRun(Base):
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued")
+    status: Mapped[str] = mapped_column(
+        _node_run_status.with_variant(String(40), "sqlite"),
+        nullable=False,
+        default="queued",
+    )
     input_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     output_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -167,13 +260,21 @@ class ProviderOperation(Base):
         ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=True
     )
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    purpose: Mapped[str] = mapped_column(String(40), nullable=False, default="primary")
+    purpose: Mapped[str] = mapped_column(
+        _provider_purpose.with_variant(String(40), "sqlite"),
+        nullable=False,
+        default="primary",
+    )
     operation_kind: Mapped[str] = mapped_column(String(80), nullable=False)
     actual_provider: Mapped[str] = mapped_column(String(64), nullable=False)
     actual_model: Mapped[str] = mapped_column(String(120), nullable=False)
     provider_operation_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(String(40), nullable=False, default="created")
+    status: Mapped[str] = mapped_column(
+        _provider_status.with_variant(String(40), "sqlite"),
+        nullable=False,
+        default="created",
+    )
     request_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     response_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     token_usage: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)

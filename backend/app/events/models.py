@@ -11,6 +11,7 @@ from sqlalchemy.types import JSON
 
 from app.shared.base import Base
 from app.shared.enums import OutboxStatus
+from app.shared.pg_enums import OUTBOX_STATUS, col_enum
 
 
 class EventLog(Base):
@@ -46,7 +47,7 @@ class OutboxEvent(Base):
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=OutboxStatus.PENDING.value
+        col_enum(OUTBOX_STATUS), nullable=False, default=OutboxStatus.PENDING.value
     )
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime] = mapped_column(

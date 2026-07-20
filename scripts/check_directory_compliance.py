@@ -64,6 +64,7 @@ LOCAL_ONLY_ROOT = {
     "coverage",
     ".venv",
     "venv",
+    ".env",  # local secrets only; never committed
 }
 
 FORBIDDEN_TRACKED_PARTS = {
@@ -118,6 +119,9 @@ def check_sensitive_on_disk(root: Path) -> list[str]:
         if any(part in skip_parts for part in rel_parts):
             continue
         name = path.name
+        # Local gitignored root .env is expected for dev; git index check still blocks commit.
+        if name == ".env" and path.parent == root:
+            continue
         if name in FORBIDDEN_FILE_NAMES or (
             name.startswith(".env.") and name != ".env.example"
         ):

@@ -44,10 +44,14 @@ class FakeFluxAdapter:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
         self._tasks: dict[str, dict[str, Any]] = {}
+        self.blobs: dict[str, bytes] = {}
 
     async def create(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append({"op": "create", "request": request})
         task_id = f"fake-flux-{uuid4()}"
+        # Deterministic non-empty PNG-ish payload for MinIO/hash proof
+        blob = b"\x89PNG\r\n\x1a\n" + str(request.get("prompt", "frame")).encode()
+        self.blobs[task_id] = blob
         self._tasks[task_id] = {
             "status": "succeeded",
             "artifact_uri": f"minio://fake/{task_id}.png",

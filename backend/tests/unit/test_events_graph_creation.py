@@ -112,4 +112,5 @@ def test_start_project_zero_text_providers(client: TestClient) -> None:
     body = r.json()
     assert body["text_provider_operations"] == 0
     assert body["experience_mode"] == "quick"
+    assert body.get("brief_revision_id")
     assert client.get(f"/api/v1/projects/{body['project_id']}").status_code == 200

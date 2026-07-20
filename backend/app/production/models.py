@@ -14,6 +14,7 @@ from sqlalchemy.types import JSON
 from app.shared.base import Base
 from app.shared.enums import GraphStatus
 from app.shared.errors import ValidationAppError
+from app.shared.pg_enums import GRAPH_STATUS, col_enum
 
 
 class ProductionGraph(Base):
@@ -35,7 +36,7 @@ class ProductionGraph(Base):
     scope_entity_id: Mapped[UUID] = mapped_column(nullable=False)
     template_key: Mapped[str] = mapped_column(String(80), nullable=False)
     status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=GraphStatus.DRAFT.value
+        col_enum(GRAPH_STATUS), nullable=False, default=GraphStatus.DRAFT.value
     )
     current_version_id: Mapped[UUID | None] = mapped_column(nullable=True)
     created_by: Mapped[UUID] = mapped_column(
@@ -67,7 +68,7 @@ class GraphVersion(Base):
     )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=GraphStatus.DRAFT.value
+        col_enum(GRAPH_STATUS), nullable=False, default=GraphStatus.DRAFT.value
     )
     definition_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     # In-memory / JSON definition body used by app layer (not a free simplified table).

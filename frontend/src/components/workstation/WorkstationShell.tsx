@@ -40,7 +40,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
         <main className="workstation-main">{children}</main>
         <aside className="inspector" data-testid="workstation-inspector">
           <h3>检查器</h3>
-          <p>任务状态、成本与审核将在后续阶段显示。</p>
+          <p>任务状态与 Artifact 见项目快照 API；快速/专业共用 Project。</p>
         </aside>
       </div>
     </div>

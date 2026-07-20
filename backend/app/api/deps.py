@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import User
 from app.access.service import AccessService
 from app.config import Settings, get_settings
-from app.shared.db import get_session
+from app.shared.db import get_session, set_rls_context
 from app.shared.errors import ForbiddenError, UnauthorizedError
 from app.shared.security import (
     CSRF_COOKIE,
@@ -42,6 +42,8 @@ async def get_current_user(
         user_id: UUID = parse_session_token(dramaforge_session, secret=settings.session_secret)
     except ValueError as exc:
         raise UnauthorizedError("invalid session") from exc
+    # Establish user RLS context early (org/project refined by route services).
+    await set_rls_context(session, user_id=user_id)
     return await AccessService(session).get_user(user_id)
 
 

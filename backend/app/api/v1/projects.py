@@ -68,6 +68,7 @@ async def create_project(
         budget_currency=body.budget_currency,
         target_platform=body.target_platform,
     )
+    await session.commit()
     return ProjectRead(
         id=project.id,
         organization_id=project.organization_id,
@@ -119,6 +120,7 @@ async def set_experience_mode(
     pref = await ProjectService(session).set_experience_mode(
         project_id=project_id, actor=user, mode=body.experience_mode
     )
+    await session.commit()
     return PreferenceRead(
         user_id=pref.user_id,
         project_id=pref.project_id,

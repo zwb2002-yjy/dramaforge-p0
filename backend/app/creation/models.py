@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     CHAR,
     DateTime,
+    Enum,
     ForeignKey,
     Integer,
     Numeric,
@@ -22,6 +23,27 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+
+_creation_plan_status = Enum(
+    "draft",
+    "awaiting_confirmation",
+    "confirmed",
+    "superseded",
+    "cancelled",
+    name="creation_plan_status",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
+_creative_revision_source = Enum(
+    "user",
+    "agent",
+    "imported",
+    name="creative_revision_source",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
 
 
 class CreativeBrief(Base):
@@ -60,11 +82,17 @@ class CreativeBriefRevision(Base):
     )
     revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
     supersedes_revision_id: Mapped[UUID | None] = mapped_column(nullable=True)
-    source_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_kind: Mapped[str] = mapped_column(
+        _creative_revision_source.with_variant(String(16), "sqlite"), nullable=False
+    )
     source_agent_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
     source_text: Mapped[str] = mapped_column(Text, nullable=False)
     brief: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    status: Mapped[str] = mapped_column(
+        _creation_plan_status.with_variant(String(32), "sqlite"),
+        nullable=False,
+        default="draft",
+    )
     confirmed_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
@@ -94,7 +122,11 @@ class CreationPlan(Base):
     materialization_schema_version: Mapped[str] = mapped_column(
         String(40), nullable=False, default="materialization-p0-v1"
     )
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    status: Mapped[str] = mapped_column(
+        _creation_plan_status.with_variant(String(32), "sqlite"),
+        nullable=False,
+        default="draft",
+    )
     confirmed_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )

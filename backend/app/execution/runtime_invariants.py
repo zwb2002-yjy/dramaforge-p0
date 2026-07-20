@@ -35,6 +35,17 @@ async def find_cached_run(
     return result.scalars().first()
 
 
+async def _next_attempt_no(session: AsyncSession, graph_node_id: UUID) -> int:
+    result = await session.execute(
+        select(NodeRun.attempt_no)
+        .where(NodeRun.graph_node_id == graph_node_id)
+        .order_by(NodeRun.attempt_no.desc())
+        .limit(1)
+    )
+    current = result.scalar_one_or_none()
+    return 1 if current is None else int(current) + 1
+
+
 async def run_or_cache(
     session: AsyncSession,
     *,
@@ -48,6 +59,7 @@ async def run_or_cache(
     produce: bool = True,
 ) -> tuple[NodeRun, Decimal]:
     """Return (run, new_budget). Cached runs have zero provider cost."""
+    attempt = await _next_attempt_no(session, graph_node.id)
     cached = await find_cached_run(
         session,
         project_id=project_id,
@@ -59,7 +71,7 @@ async def run_or_cache(
             project_id=project_id,
             graph_version_id=graph_version_id,
             graph_node_id=graph_node.id,
-            attempt_no=cached.attempt_no + 1,
+            attempt_no=attempt,
             idempotency_key=f"{graph_node.node_key}:{input_hash}:cache:{uuid4()}",
             input_hash=input_hash,
             status="cached",
@@ -79,7 +91,7 @@ async def run_or_cache(
             project_id=project_id,
             graph_version_id=graph_version_id,
             graph_node_id=graph_node.id,
-            attempt_no=1,
+            attempt_no=attempt,
             idempotency_key=f"{graph_node.node_key}:{input_hash}:budget:{uuid4()}",
             input_hash=input_hash,
             status="blocked_budget",
@@ -93,14 +105,18 @@ async def run_or_cache(
 
     art_id = None
     if produce:
+        payload = f"node:{graph_node.node_key}:{input_hash}".encode()
+        import hashlib
+
+        ch = hashlib.sha256(payload).hexdigest()
         art = Artifact(
             project_id=project_id,
             artifact_type="image",
             storage_state="available",
-            object_key=f"minio://local/{uuid4()}.bin",
-            content_hash=input_hash,
+            object_key=f"projects/{project_id}/nodes/{uuid4()}.bin",
+            content_hash=ch if len(input_hash) != 64 else input_hash,
             mime_type="application/octet-stream",
-            byte_size=1,
+            byte_size=len(payload),
         )
         session.add(art)
         await session.flush()
@@ -110,7 +126,7 @@ async def run_or_cache(
         project_id=project_id,
         graph_version_id=graph_version_id,
         graph_node_id=graph_node.id,
-        attempt_no=1,
+        attempt_no=attempt,
         idempotency_key=f"{graph_node.node_key}:{input_hash}:{uuid4()}",
         input_hash=input_hash,
         status="completed",

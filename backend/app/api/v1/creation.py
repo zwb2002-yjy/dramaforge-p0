@@ -1,7 +1,8 @@
-"""Creation experience routes (S1.5 shell)."""
+"""Creation experience routes (start_project, brief, plan, materialize)."""
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, status
@@ -19,14 +20,57 @@ class StartProjectRequest(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     aspect_ratio: str = Field(pattern="^(9:16|16:9)$")
     experience_mode: ExperienceMode = ExperienceMode.QUICK
+    idea: str = ""
 
 
 class StartProjectResponse(BaseModel):
     project_id: UUID
     experience_mode: ExperienceMode
+    brief_id: UUID
+    brief_revision_id: UUID
     event_id: UUID
     outbox_id: UUID
     text_provider_operations: int
+
+
+class BriefUpdateRequest(BaseModel):
+    logline: str = Field(min_length=1, max_length=2000)
+    tone: str = ""
+    audience: str = ""
+
+
+class BriefRevisionResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    status: str
+    brief: dict[str, Any]
+    content_hash: str
+
+
+class PlanRequest(BaseModel):
+    brief_revision_id: UUID
+    plan: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlanResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    status: str
+    context_hash: str
+
+
+class ConfirmPlanRequest(BaseModel):
+    materialization_ops: list[str] = Field(
+        default_factory=lambda: ["create_shot_stub", "enqueue_keyframe"]
+    )
+
+
+class ConfirmPlanResponse(BaseModel):
+    plan_id: UUID
+    graph_id: UUID
+    graph_version_id: UUID
+    node_run_id: UUID
+    materialization_ops: list[str]
 
 
 @router.post(
@@ -46,11 +90,113 @@ async def start_project(
         aspect_ratio=body.aspect_ratio,
         actor=user,
         experience_mode=body.experience_mode,
+        idea=body.idea,
     )
     return StartProjectResponse(
         project_id=result.project_id,
         experience_mode=ExperienceMode(result.experience_mode),
+        brief_id=result.brief_id,
+        brief_revision_id=result.brief_revision_id,
         event_id=result.event_id,
         outbox_id=result.outbox_id,
         text_provider_operations=result.text_provider_operations,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/brief",
+    response_model=BriefRevisionResponse,
+)
+async def update_brief(
+    project_id: UUID,
+    body: BriefUpdateRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> BriefRevisionResponse:
+    rev = await CreationService(session).update_brief_manual(
+        project_id=project_id,
+        actor=user,
+        logline=body.logline,
+        tone=body.tone,
+        audience=body.audience,
+    )
+    return BriefRevisionResponse(
+        id=rev.id,
+        project_id=rev.project_id,
+        status=rev.status,
+        brief=dict(rev.brief),
+        content_hash=rev.content_hash,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/brief/{revision_id}/confirm",
+    response_model=BriefRevisionResponse,
+)
+async def confirm_brief(
+    project_id: UUID,
+    revision_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> BriefRevisionResponse:
+    rev = await CreationService(session).confirm_brief(
+        project_id=project_id, revision_id=revision_id, actor=user
+    )
+    return BriefRevisionResponse(
+        id=rev.id,
+        project_id=rev.project_id,
+        status=rev.status,
+        brief=dict(rev.brief),
+        content_hash=rev.content_hash,
+    )
+
+
+@router.post("/projects/{project_id}/plans", response_model=PlanResponse)
+async def create_plan(
+    project_id: UUID,
+    body: PlanRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> PlanResponse:
+    plan = await CreationService(session).create_or_update_plan_manual(
+        project_id=project_id,
+        actor=user,
+        brief_revision_id=body.brief_revision_id,
+        plan_body=body.plan or {"prompt": "opening keyframe"},
+    )
+    return PlanResponse(
+        id=plan.id,
+        project_id=plan.project_id,
+        status=plan.status,
+        context_hash=plan.context_hash,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/plans/{plan_id}/confirm",
+    response_model=ConfirmPlanResponse,
+)
+async def confirm_plan(
+    project_id: UUID,
+    plan_id: UUID,
+    body: ConfirmPlanRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ConfirmPlanResponse:
+    result = await CreationService(session).confirm_plan_and_materialize(
+        project_id=project_id,
+        plan_id=plan_id,
+        actor=user,
+        materialization_ops=body.materialization_ops,
+    )
+    return ConfirmPlanResponse(
+        plan_id=result.plan_id,
+        graph_id=result.graph_id,
+        graph_version_id=result.graph_version_id,
+        node_run_id=result.node_run_id,
+        materialization_ops=result.materialization_ops,
     )

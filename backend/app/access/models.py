@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Enum,
     ForeignKey,
     Integer,
     Numeric,
@@ -23,6 +24,32 @@ from sqlalchemy.types import JSON
 
 from app.shared.base import Base
 from app.shared.enums import ExperienceMode, MemberRole, ProjectStage
+
+# PG native enums (create_type=False — Alembic owns types); SQLite uses string values.
+_member_role = Enum(
+    MemberRole,
+    name="member_role",
+    native_enum=True,
+    create_constraint=False,
+    values_callable=lambda e: [m.value for m in e],
+    validate_strings=True,
+)
+_project_stage = Enum(
+    ProjectStage,
+    name="project_stage",
+    native_enum=True,
+    create_constraint=False,
+    values_callable=lambda e: [m.value for m in e],
+    validate_strings=True,
+)
+_experience_mode = Enum(
+    ExperienceMode,
+    name="experience_mode",
+    native_enum=True,
+    create_constraint=False,
+    values_callable=lambda e: [m.value for m in e],
+    validate_strings=True,
+)
 
 
 class Organization(Base):
@@ -66,13 +93,15 @@ class OrganizationMember(Base):
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    role: Mapped[MemberRole | str] = mapped_column(
+        _member_role.with_variant(String(32), "sqlite"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     def role_enum(self) -> MemberRole:
-        return MemberRole(self.role)
+        return self.role if isinstance(self.role, MemberRole) else MemberRole(self.role)
 
 
 class Project(Base):
@@ -84,7 +113,11 @@ class Project(Base):
         ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(160), nullable=False)
-    stage: Mapped[str] = mapped_column(String(32), nullable=False, default=ProjectStage.DRAFT.value)
+    stage: Mapped[ProjectStage | str] = mapped_column(
+        _project_stage.with_variant(String(32), "sqlite"),
+        nullable=False,
+        default=ProjectStage.DRAFT,
+    )
     aspect_ratio: Mapped[str] = mapped_column(String(8), nullable=False)
     target_platform: Mapped[str] = mapped_column(String(40), nullable=False, default="general")
     style_bible: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
@@ -110,7 +143,9 @@ class ProjectMember(Base):
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    role: Mapped[MemberRole | str] = mapped_column(
+        _member_role.with_variant(String(32), "sqlite"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -126,8 +161,10 @@ class UserProjectPreference(Base):
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    experience_mode: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=ExperienceMode.WORKBENCH.value
+    experience_mode: Mapped[ExperienceMode | str] = mapped_column(
+        _experience_mode.with_variant(String(32), "sqlite"),
+        nullable=False,
+        default=ExperienceMode.WORKBENCH,
     )
     last_guided_step: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

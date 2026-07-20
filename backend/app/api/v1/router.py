@@ -2,12 +2,13 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, creation, events, projects
+from app.api.v1 import auth, creation, events, production, projects
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(projects.router)
 api_router.include_router(creation.router)
+api_router.include_router(production.router)
 api_router.include_router(events.router)
 
 

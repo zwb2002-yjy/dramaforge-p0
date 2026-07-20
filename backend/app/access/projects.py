@@ -15,6 +15,7 @@ from app.access.models import (
     User,
     UserProjectPreference,
 )
+from app.shared.db import set_rls_context
 from app.shared.enums import ExperienceMode, MemberRole, ProjectStage
 from app.shared.errors import ForbiddenError, NotFoundError, ValidationAppError
 
@@ -76,15 +77,13 @@ class ProjectService:
                 experience_mode=ExperienceMode.WORKBENCH.value,
             )
         )
-        await self._session.commit()
+        # Caller owns the unit of work (flush only; no mid-service commit).
+        await self._session.flush()
         await self._session.refresh(project)
         return project
 
     async def get_project_for_member(self, *, project_id: UUID, actor: User) -> Project:
-        result = await self._session.execute(select(Project).where(Project.id == project_id))
-        project = result.scalar_one_or_none()
-        if project is None:
-            raise NotFoundError("project not found")
+        # Membership check first without relying solely on RLS (defense in depth).
         member = await self._session.execute(
             select(ProjectMember).where(
                 ProjectMember.project_id == project_id,
@@ -92,7 +91,18 @@ class ProjectService:
             )
         )
         if member.scalar_one_or_none() is None:
+            # May also be invisible under RLS
             raise ForbiddenError("not a member of this project")
+        result = await self._session.execute(select(Project).where(Project.id == project_id))
+        project = result.scalar_one_or_none()
+        if project is None:
+            raise NotFoundError("project not found")
+        await set_rls_context(
+            self._session,
+            user_id=actor.id,
+            organization_id=project.organization_id,
+            project_id=project.id,
+        )
         return project
 
     async def set_experience_mode(
@@ -115,6 +125,6 @@ class ProjectService:
             self._session.add(pref)
         else:
             pref.experience_mode = mode.value
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(pref)
         return pref

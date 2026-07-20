@@ -1,0 +1,39 @@
+"""PostgreSQL enum column helpers (Alembic owns CREATE TYPE)."""
+
+from __future__ import annotations
+
+from sqlalchemy import Enum, String
+
+from app.shared.enums import ExperienceMode, GraphStatus, MemberRole, OutboxStatus, ProjectStage
+
+
+def pg_str_enum(name: str, *values: str) -> Enum:
+    return Enum(
+        *values,
+        name=name,
+        create_constraint=False,
+        native_enum=True,
+        validate_strings=True,
+    )
+
+
+def pg_py_enum(enum_cls: type, name: str) -> Enum:
+    return Enum(
+        enum_cls,
+        name=name,
+        native_enum=True,
+        create_constraint=False,
+        values_callable=lambda e: [m.value for m in e],
+        validate_strings=True,
+    )
+
+
+def col_enum(pg: Enum, sqlite_len: int = 32) -> object:
+    return pg.with_variant(String(sqlite_len), "sqlite")
+
+
+MEMBER_ROLE = pg_py_enum(MemberRole, "member_role")
+PROJECT_STAGE = pg_py_enum(ProjectStage, "project_stage")
+EXPERIENCE_MODE = pg_py_enum(ExperienceMode, "experience_mode")
+OUTBOX_STATUS = pg_py_enum(OutboxStatus, "outbox_status")
+GRAPH_STATUS = pg_py_enum(GraphStatus, "graph_status")

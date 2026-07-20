@@ -55,7 +55,7 @@ class GraphService:
         self._session.add(version)
         await self._session.flush()
         graph.current_version_id = version.id
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(graph)
         return graph
 
@@ -75,7 +75,7 @@ class GraphService:
         assert_graph_version_mutable(version)
         version.definition = definition
         version.definition_hash = definition_hash(definition)
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(version)
         return version
 
@@ -90,6 +90,6 @@ class GraphService:
         if graph is not None:
             graph.status = GraphStatus.PUBLISHED.value
             graph.current_version_id = version.id
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(version)
         return version

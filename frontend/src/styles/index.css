@@ -116,6 +116,120 @@ a:hover {
   gap: 0.75rem;
 }
 
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 1.25rem;
+}
+
+.status-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  background: #121a24;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.status-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.status-ok {
+  color: #7dd3c0;
+}
+
+.status-bad {
+  color: #f0a0a0;
+}
+
+.status-pending {
+  color: var(--muted);
+}
+
+.actions a {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  background: #121a24;
+}
+
+.actions a:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.flow-list {
+  margin: 0.75rem 0 1rem;
+  padding-left: 1.25rem;
+  color: var(--text);
+}
+
+.flow-list li {
+  margin: 0.35rem 0;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.node-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.9rem 0 1rem;
+}
+
+.node-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.82rem;
+  background: #0f1419;
+  color: var(--brand);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin: 1rem 0;
+  max-width: 420px;
+}
+
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.auth-form input,
+.auth-form textarea,
+[data-testid="quick-mode"] textarea {
+  background: #0f1419;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+}
+
+[data-testid="quick-mode"] label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.5rem 0;
+  color: var(--muted);
+}
+
 button {
   background: var(--panel);
   color: var(--text);
