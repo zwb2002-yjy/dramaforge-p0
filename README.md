@@ -4,7 +4,9 @@ DramaForge 是面向 1-6 人短剧制作团队私有化部署的镜头级 AI 生
 
 ## 当前状态
 
-仓库已完成 `BOOT-0` 可运行骨架：FastAPI `/health`、Arq default/heavy Worker 入口、React 工作台壳、Docker Compose（PostgreSQL / Redis / MinIO / API / Workers）、质量门禁与目录合规检查。业务运行时（会话、RLS、Graph 执行、Provider）从 S1 起按 Gate 落地。
+仓库已经实现 `BOOT-0` 应用骨架：FastAPI `/health`、Arq default/heavy Worker 入口、React 工作台壳、Docker Compose（PostgreSQL / Redis / MinIO / API / Workers）、质量入口与目录合规检查均已落地。当前仍处于 BOOT-0 验收恢复阶段：本地可运行检查需要统一复核，容器健康因本机缺少 Docker CLI 尚未验证，因此不能把 BOOT-0 Gate 标为全部通过。
+
+S0-A 的视觉一致性入口、纯函数和样本采集规范已经提交，但真实 InsightFace/FAR/FRR Gate 因缺少合法样本处于 `BLOCKED_BY_FIXTURE`。当前唯一执行任务、外部暂停项和后续 `READY` 队列以 [`docs/开发执行检查点.md`](docs/开发执行检查点.md) 为准。
 
 P0 完成标准是使用一份 3-5 场、至少 10 Shot、至少 1 名主角的冻结样本，完成从正式 Project、Brief/Plan、资产和参考，到图像、视频、语音、字幕、合成、审核和 `MP4 + SRT + 素材包 + timeline_json` 的可追溯交付。
 
@@ -137,7 +139,9 @@ git worktree list
 git branch --all
 ```
 
-每个任务开始、完成、失败、暂停或合并时，通过 `.agent-control/control.ps1 -Operation log` 追加事实记录。写入 subagent 在基线提交后使用独立 `agent/<task-id>` 分支与 `.worktrees/<task-id>`。
+每个任务开始、完成、失败、暂停或合并时，通过 `.agent-control/control.ps1 -Operation log` 追加事实记录。私有 `origin` 和认证核验前只允许一个写入 Agent 本地串行提交；远端可用后，写入 subagent 使用独立 `agent/<task-id>` 分支、`.worktrees/<task-id>` 和 PR。
+
+Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在开发检查点定义可观察效果和验收证据；完成并合并后重算当前阶段 Gate，继续最高优先级的 `READY` Task。某个外部条件暂停时，只暂停依赖它的路径；P0 完成后按 `P1.1 -> P1.2 -> P1.3 -> P2` 自动建立阶段合同并继续开发，除非遇到需要用户账号、付费、受限数据、不可逆操作或会改变产品路线的真实阻塞。
 
 ## 产品阶段
 

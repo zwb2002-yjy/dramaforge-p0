@@ -1,19 +1,36 @@
 # DramaForge Agent 执行协议
 
-**状态：强制执行**  
-**版本：v3.0**  
+**状态：强制执行**
+
+**版本：v3.1**
+
 **最近修订：2026-07-20**
 
-## 1. 目的
+## 1. 目的与边界
 
-本协议只解决两个问题：
+本协议为当前及未来所有开发任务规定三件事：
 
-1. Agent 或 subagent 做了什么、做到哪里，必须在本地留下可读记录。
-2. 多个写入 Agent 通过 Git 分支、GitHub 和独立 worktree 隔离，不能同时修改同一个工作区。
+1. 每个 Task 在开始前先定义可观察的完成效果和验收证据，结束时在本地留下可恢复事实。
+2. Agent 在普通失败后自行诊断、修复和回归；Task 完成后继续下一个 Task，阶段 Gate 通过后继续下一个阶段。
+3. 多个写入 Agent 使用 Git 分支、GitHub PR 和独立 worktree 隔离，由主 Agent 复核和合并。
 
-它不是调度器，也不判断哪个进程“拥有”仓库。项目不使用观察器、后台监控、Session、Token、心跳、进程数量门禁或恢复状态机。
+完整的任务选择、自修复和阶段推进规则由 [`agent.md`](agent.md) 定义；本协议只规定记录语义、恢复方式和 Git 隔离。它不是调度器，也不判断哪个进程“拥有”仓库。项目不使用观察器、后台监控、Session、Token、心跳、进程数量门禁或恢复状态机。
 
-## 2. 本地进度账本
+## 2. Task 合同先于执行
+
+任何 Task 写入 `STARTED` 前，必须先在 [`docs/开发执行检查点.md`](docs/开发执行检查点.md) 写出 Task 合同，至少包含：
+
+- 唯一且稳定的 Task ID。
+- 可由用户或测试观察的完成效果。
+- 负责范围与明确非范围。
+- 前置条件和外部依赖。
+- 必须取得的验收证据。
+- 预计改动模块或文件所有权。
+- 可以写入 `COMPLETED` 的准确条件。
+
+如果当前检查点没有可执行 Task，主 Agent 应根据当前阶段 Gate 创建一个最小、可验证、前置条件已满足的 `READY` Task，而不是等待用户逐项拆任务。
+
+## 3. 本地进度账本
 
 本地账本固定为：
 
@@ -21,35 +38,29 @@
 .agent-control/PROGRESS.jsonl
 ```
 
-该文件只追加、不进入 Git。每一行是一条独立 JSON 记录。脚本会通过 Git common directory 定位主工作区，因此从任何关联 worktree 调用时仍写入同一份账本。控制脚本只提供三个动作：
+该文件只追加、不进入 Git。每行是一条独立 JSON 记录。控制脚本通过 Git common directory 定位主工作区，因此从关联 worktree 调用时仍写入同一份账本。脚本只提供三个动作：
 
-- `log`：追加一条记录。
+- `log`：追加一条事实记录。
 - `tail`：查看最近记录。
-- `open`：查看最后状态仍为 `STARTED` 或 `PAUSED` 的任务。
+- `open`：查看每个 `task_id` 最后一条状态仍为 `STARTED` 或 `PAUSED` 的任务。
 
-允许的状态只有：
-
-```text
-STARTED
-COMPLETED
-FAILED
-PAUSED
-MERGED
-```
-
-每个可独立分派的工作必须使用唯一 `task_id`。例如：
+允许的状态及准确语义：
 
 ```text
-BOOT-0.1
-BOOT-0.1/backend-shell
-BOOT-0.1/frontend-shell
+STARTED   Task 合同已写明，执行已经开始
+COMPLETED Task 完成效果和合同要求的全部验收证据均已满足
+FAILED    当前方案已被证据否定，且已记录替代 Task、回滚或终止原因
+PAUSED    Task 尚未完成，准确的外部继续条件已经记录
+MERGED    已复核并进入 main，不代表所属阶段 Gate 已通过
 ```
 
-记录包含时间、任务、Agent、状态、摘要、分支、worktree、改动文件、测试、commit、证据和下一步。不得写入访问令牌、BYOK、密码、私钥、完整 Provider 响应或其他秘密；脚本会做基础脱敏，但不能替代 Agent 的保密责任。
+阶段完成与 Task 完成严格分离。只有阶段的全部 Gate 和阶段级回归通过后，才能记录对应 `STAGE-<name>` 完成；单个 Task 的 `COMPLETED` 或 `MERGED` 不能代替阶段验收。
 
-控制脚本在追加单行时会短暂独占日志文件，避免两个进程把同一行写坏。这个毫秒级文件锁只保护 JSONL 写入，不代表任务所有权，也不会阻止其他 Agent 开发。
+账本是只追加事实流。发现历史记录把“代码已写”误记为 `COMPLETED` 时，不得改写旧 JSONL；应对同一个 `task_id` 追加新的 `PAUSED`、`FAILED` 或其他符合当前事实的状态，并在 `summary`、`evidence` 和 `next_step` 中解释更正原因。`open` 只显示最后状态为 `STARTED` 或 `PAUSED` 的任务，因此状态更正后可以恢复到真实断点。
 
-## 3. 标准记录方式
+记录不得包含访问令牌、BYOK、密码、私钥、完整 Provider 响应、原始受限 fixture 或其他秘密。脚本的基础脱敏不能替代 Agent 的保密责任。
+
+## 4. 标准记录方式
 
 开始任务前记录：
 
@@ -57,56 +68,69 @@ BOOT-0.1/frontend-shell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1 `
   -Operation log `
   -Status STARTED `
-  -TaskId BOOT-0.1/backend-shell `
-  -Agent grok-subagent-backend `
-  -Summary "建立后端项目骨架" `
-  -Branch agent/boot-0.1-backend `
-  -Worktree .worktrees/boot-0.1-backend `
-  -NextStep "创建 FastAPI health 路由"
+  -TaskId S1-SESSION-0.1 `
+  -Agent grok-subagent-session `
+  -Summary "建立可验收的 Cookie 会话纵向切片" `
+  -Branch agent/s1-session-0.1 `
+  -Worktree .worktrees/s1-session-0.1 `
+  -NextStep "先运行会话未授权失败测试"
 ```
 
-完成任务后立即记录：
+Task 合同全部通过后记录：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1 `
   -Operation log `
   -Status COMPLETED `
-  -TaskId BOOT-0.1/backend-shell `
-  -Agent grok-subagent-backend `
-  -Summary "后端骨架和健康检查完成" `
-  -Branch agent/boot-0.1-backend `
-  -Worktree .worktrees/boot-0.1-backend `
-  -ChangedFiles "backend/pyproject.toml;backend/app/main.py" `
-  -Tests "pytest: passed" `
+  -TaskId S1-SESSION-0.1 `
+  -Agent grok-subagent-session `
+  -Summary "Cookie 会话切片及未授权回归已通过" `
+  -Branch agent/s1-session-0.1 `
+  -Worktree .worktrees/s1-session-0.1 `
+  -ChangedFiles "backend/app/...;backend/tests/..." `
+  -Tests "targeted pytest: passed; backend regression: passed" `
   -Commit "<sha>" `
-  -NextStep "主 Agent 审查并创建或更新 PR"
+  -Evidence "unauthorized=401;authorized=200" `
+  -NextStep "主 Agent 复核 diff、合同和回归后合并"
 ```
 
-失败或暂停同样要立即记录，并在 `next_step` 中写清继续条件。任务合并到 `main` 后，主 Agent追加 `MERGED`，记录 PR、merge commit 或等价证据。
+失败或暂停也必须立即记录，并在 `next_step` 中写清替代方案或唯一继续条件。任务进入 `main` 后，主 Agent 追加 `MERGED`，记录 PR、merge commit 或等价证据。
 
-查看最近记录和中断点：
+查看最近记录和断点：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1 -Operation tail -Tail 30
 powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1 -Operation open
 ```
 
-`open` 只根据每个 `task_id` 的最后一条状态判断。发现未闭合的 `STARTED` 或 `PAUSED` 后，先检查其分支、worktree、commit、diff 和测试，再决定继续、失败或完成；不要盲目重跑。
+## 5. 连续执行与中断恢复
 
-## 4. 主 Agent 与 subagent
+主 Agent 必须遵守 [`agent.md`](agent.md) 的持续开发控制循环：恢复事实、执行一个 `READY` Task、自修复、复核合并、重算 Gate，然后继续同阶段下一 Task 或下一阶段合同任务。完成一个 Task、一个 subagent 批次或一次提交都不是等待“继续”的理由。
 
-主 Agent 负责拆分任务、指定分支和 worktree、复核结果并合并。subagent 只处理被分派的范围。主 Agent 在派出前记录任务和分支；subagent 启动后自行记录 `STARTED`，返回前自行记录 `COMPLETED`、`FAILED` 或 `PAUSED`，避免执行过程只存在于主 Agent 的聊天上下文。
+Agent 重启后按事实恢复：
 
-- 只读 subagent 可以并行，不需要分支或 worktree。主 Agent 在派出前记录 `STARTED`，收到结论后记录 `COMPLETED`、`FAILED` 或 `PAUSED`。
-- 写入 subagent 必须使用独立分支和独立 worktree。不能让多个写入 Agent 共用仓库根目录。
-- 每个写入 subagent 在自己的分支提交改动，并将分支推送到 GitHub。不得直接推送 `main`。
-- 主 Agent必须检查 diff、测试和冻结合同，再通过 PR 或明确的本地合并顺序进入 `main`。
-- 分支不能消除逻辑冲突。同一文件最好只分给一个 subagent；确需并行修改时，由主 Agent承担后续冲突解决和联合测试。
-- subagent 的自然语言汇报不是完成证据。至少要有 commit、改动文件和测试结果；主 Agent复核后再写 `MERGED`。
+1. 运行 `open` 和 `tail`，查看未闭合任务和最近状态更正。
+2. 运行 `git status --short`、`git worktree list`、`git branch --all` 和 `git remote -v`。
+3. 对每个未闭合任务检查 Task 合同、分支、worktree、最新 commit、未提交 diff 和测试结果。
+4. 根据事实追加 `COMPLETED`、`FAILED` 或 `PAUSED`；不得依赖口头汇报，也不得盲目重跑已有证据的工作。
+5. 读取开发检查点，选择最高优先级的 `READY` Task 并继续控制循环。
 
-## 5. Git 分支、worktree 与 GitHub
+普通编译、测试、类型、迁移、依赖、进程退出、接口、数据、UI 和分支冲突由 Agent 按 `agent.md` 自行循环修复。只有真实外部输入、不可逆操作、受限权限或会改变产品路线的合同冲突才能暂停对应工作。一个外部 `PAUSED` Task 不阻止其他不依赖它的 `READY` Task。
 
-仓库有基线提交后，写入任务采用以下结构：
+## 6. 主 Agent 与 subagent
+
+主 Agent 负责维护检查点、拆分 Task、分配文件所有权、指定分支/worktree、复核结果、合并和重算阶段 Gate。subagent 只处理被分派的 Task 合同范围。
+
+- 只读 subagent 可以并行，不需要分支或 worktree，但仍须留下开始和结束记录。
+- 私有 `origin` 和认证核验前，只允许一个写入 Agent 在本地串行工作并提交；不得把本地分支冒充为远端协作或 PR 证据。
+- 远端可用后，写入 subagent 必须使用独立分支和独立 worktree，不能共享仓库根工作区；每个写入 subagent 自行记录 `STARTED` 和结束状态，在自己的分支提交并创建或更新 PR。
+- 同一文件尽量只分配给一个写入 subagent。确需交叉修改时，由主 Agent 负责冲突解决和合并后联合回归。
+- subagent 的自然语言汇报不是完成证据。至少需要 commit、改动文件、实际测试结果和 Task 合同逐项结论。
+- 主 Agent 不一次性派出具有依赖关系的后续 Task；每轮合并后重新计算 `READY` 队列和文件所有权。
+
+## 7. Git 分支、worktree 与 GitHub
+
+仓库有基线提交且私有远端已经核验后，并行写入任务使用：
 
 ```text
 branch:   agent/<task-id>
@@ -117,34 +141,25 @@ GitHub:   同名远端分支 + PR
 示例：
 
 ```powershell
-git worktree add .worktrees/boot-0.1-backend -b agent/boot-0.1-backend main
-git -C .worktrees/boot-0.1-backend push -u origin agent/boot-0.1-backend
+git worktree add .worktrees/s1-session-0.1 -b agent/s1-session-0.1 main
+git -C .worktrees/s1-session-0.1 push -u origin agent/s1-session-0.1
 ```
 
 规则：
 
-1. 初始基线提交之前，只允许并行只读；写入必须串行，因为尚无可供 worktree 分叉的提交。
+1. 以下并行写入规则只在私有 `origin` 和认证核验通过后启用；此前只允许一个写入 Agent 本地串行提交。
 2. 一个写入 subagent 对应一个分支和一个 worktree。
-3. 分支创建、首次推送、PR、测试结果、合并和清理都要写入本地账本。
-4. GitHub 私有仓库、`origin` 和认证未核验前不得推送。不得把访问令牌写入 remote URL、文件、日志或命令记录。
-5. 禁止 force push、历史重写、`git reset --hard`、`git clean -fd` 和用 checkout 覆盖用户改动。
-6. 合并成功并确认不再需要后，才能移除 worktree 和分支；清理结果记录为 `MERGED` 的证据或后续记录。
+3. 分支创建、首次推送、PR、测试、合并和清理都写入本地账本。
+4. GitHub 私有仓库、`origin` 和认证未核验前不得假装远端流程已经启用，也不得把访问令牌写入 URL、文件、日志或命令记录。
+5. 若没有 `origin`，本地可继续执行不依赖共享 PR 历史的单 Agent 串行工作；不得启动多个写入 subagent。远端缺失本身不允许伪造 PR 证据。
+6. 主 Agent 复核 diff、测试和 Task 合同后，远端可用时通过 PR 进入 `main`；远端不可用时只允许当前单 Agent 的明确本地串行提交。
+7. 禁止 force push、历史重写、`git reset --hard`、`git clean -fd` 和用 checkout 覆盖用户改动。
+8. 合并并确认不再需要后，才能移除 worktree 和分支。
 
-GitHub 保存分支、提交、PR、审查和合并历史，是团队共享事实；`PROGRESS.jsonl` 保存当前机器上的执行断点，是本机事实。二者用途不同，不能互相替代。
+GitHub 保存团队共享的分支、提交、PR、审查和合并历史；`PROGRESS.jsonl` 保存当前机器上的执行断点。两者用途不同，不能互相替代。
 
-## 6. 中断恢复
+## 8. 当前状态入口
 
-没有心跳和自动接管。Agent 重启后只做以下检查：
+本协议不写死 BOOT-0、S1 或任何一次性任务状态。当前产品阶段、工程 Gate、外部暂停项、`READY` 队列和唯一执行任务，以 [`docs/开发执行检查点.md`](docs/开发执行检查点.md) 为准。
 
-1. 运行 `open` 查看未闭合任务。
-2. 运行 `git status --short`、`git worktree list` 和 `git branch --all`。
-3. 对每个未闭合任务检查对应 worktree、分支、最新 commit、未提交 diff 和测试结果。
-4. 根据事实追加 `COMPLETED`、`FAILED` 或 `PAUSED`，再继续工作。
-
-没有记录到本地或 Git 的口头完成声明一律不算完成。
-
-## 7. BOOT-0 当前状态
-
-DramaForge 当前没有初始提交、没有远端配置，也没有 `frontend/`、`backend/` 或 `docker-compose.yml`。`BOOT-0.1` 应用开发尚未开始。
-
-第一位写入 Agent 先在主工作区串行完成并提交基线。只有基线提交存在且 GitHub 私有远端核验完成后，后续写入 subagent 才能按本协议并行创建分支、worktree 和 PR。
+检查点每次 Task 合并后必须更新。它应回答：现在在哪个阶段、哪条 Gate 已有证据、哪条尚未关闭、当前 Task 要产生什么可观察效果、完成后自动进入什么任务。没有记录到检查点、本地账本或 Git 的口头完成声明一律不算完成。
