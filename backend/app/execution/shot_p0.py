@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.consistency.continuity import continuity_four_layers
 from app.consistency.face_review import face_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ShotHumanLock
 from app.execution.product_path import execute_media_node_run
@@ -71,15 +72,23 @@ class ShotRecord:
     canonical_object_key: str | None = None
 
 
-def continuity_check(*, subtitle: str, visual_desc: str) -> tuple[str, str]:
-    if not subtitle.strip():
-        return "blocked", "empty_subtitle"
-    if not visual_desc.strip():
-        return "blocked", "empty_visual"
-    tokens = [t for t in subtitle.lower().split() if len(t) > 3]
-    if tokens and not any(t in visual_desc.lower() for t in tokens[:3]):
-        return "warning", "subtitle_visual_weak_overlap"
-    return "passed", "ok"
+def continuity_check(
+    *,
+    subtitle: str,
+    visual_desc: str,
+    lead_name: str | None = None,
+    prior_visual: str | None = None,
+    shot_id: str | None = None,
+) -> tuple[str, str, list[dict[str, object]]]:
+    report = continuity_four_layers(
+        subtitle=subtitle,
+        visual_desc=visual_desc,
+        lead_name=lead_name,
+        prior_visual=prior_visual,
+        shot_id=shot_id,
+    )
+    rule = report.violations[0].rule_key if report.violations else "ok"
+    return report.status, rule, list(report.to_dict()["violations"])  # type: ignore[arg-type]
 
 
 async def is_shot_locked(session: AsyncSession, *, project_id: UUID, shot_id: UUID) -> bool:
@@ -258,8 +267,11 @@ async def produce_shots_p0(
             rec.node_ids[key] = node.id
 
             if key == "continuity_review":
-                cont_status, cont_rule = continuity_check(
-                    subtitle=rec.subtitle, visual_desc=visual
+                cont_status, cont_rule, cont_viols = continuity_check(
+                    subtitle=rec.subtitle,
+                    visual_desc=visual,
+                    lead_name="Lin Xia" if "lin xia" in visual.lower() else None,
+                    shot_id=str(shot_id),
                 )
                 run = await _queue_and_run(
                     session,
@@ -276,6 +288,7 @@ async def produce_shots_p0(
                     **(run.output_summary or {}),
                     "review": cont_status,
                     "rule": cont_rule,
+                    "violations": cont_viols,
                 }
                 rec.continuity_checked = True
                 rec.continuity_status = cont_status
@@ -389,8 +402,10 @@ async def rework_subtitle_only_p0(
         node = await session.get(GraphNode, shot.node_ids[key])
         assert node is not None
         if key == "continuity_review":
-            cont_status, cont_rule = continuity_check(
-                subtitle=new_subtitle, visual_desc=visual
+            cont_status, cont_rule, cont_viols = continuity_check(
+                subtitle=new_subtitle,
+                visual_desc=visual,
+                shot_id=str(shot.shot_id),
             )
             run = await _queue_and_run(
                 session,
@@ -408,6 +423,7 @@ async def rework_subtitle_only_p0(
                 **(run.output_summary or {}),
                 "review": cont_status,
                 "rule": cont_rule,
+                "violations": cont_viols,
             }
             shot.continuity_status = cont_status
         else:

@@ -190,3 +190,51 @@ async def export_project(
         source_node_run_ids=result.source_node_run_ids,
         export_item_count=result.export_item_count,
     )  # export_status available on service result if API extended later
+
+
+class GoldenProduceResponse(BaseModel):
+    shot_count: int
+    character_id: UUID
+    canonical_object_key: str
+    export_id: UUID
+    timeline_hash: str
+    srt_hash: str
+    package_hash: str
+    face_checked: int
+    continuity_checked: int
+    content_hash: str
+
+
+@router.post(
+    "/projects/{project_id}/produce-golden",
+    response_model=GoldenProduceResponse,
+)
+async def produce_golden_path(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> GoldenProduceResponse:
+    """Import frozen golden script if needed path via fixture, produce 10 shots, export."""
+    from app.execution.golden_path import run_golden_p0_path
+
+    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    result = await run_golden_p0_path(
+        session,
+        project_id=project_id,
+        user_id=user.id,
+        try_ffmpeg=True,
+    )
+    await session.commit()
+    return GoldenProduceResponse(
+        shot_count=result.shot_count,
+        character_id=result.character_id,
+        canonical_object_key=result.canonical_object_key,
+        export_id=result.export.export_id,
+        timeline_hash=result.export.timeline_hash,
+        srt_hash=result.export.srt_hash,
+        package_hash=result.export.package_hash,
+        face_checked=sum(1 for s in result.shots if s.face_checked),
+        continuity_checked=sum(1 for s in result.shots if s.continuity_checked),
+        content_hash=result.content_hash,
+    )

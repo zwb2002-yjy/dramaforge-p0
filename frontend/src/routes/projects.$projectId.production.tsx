@@ -7,6 +7,7 @@ import {
   fetchProjectShots,
   fetchSnapshot,
   importScript,
+  produceGolden,
 } from "../lib/api";
 import { projectRoute } from "./projects.$projectId";
 
@@ -124,6 +125,21 @@ function ProductionPage() {
     onError: (e: Error) => setMsg(e.message),
   });
 
+  const goldenMut = useMutation({
+    mutationFn: async () => {
+      if (projectId === "demo") throw new Error("请从首页创建真实项目");
+      return produceGolden(projectId);
+    },
+    onSuccess: async (r) => {
+      setMsg(
+        `golden shots=${r.shot_count} face=${r.face_checked} cont=${r.continuity_checked} export=${r.export_id.slice(0, 8)}…`,
+      );
+      await qc.invalidateQueries({ queryKey: ["shots", projectId] });
+      await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
+    },
+    onError: (e: Error) => setMsg(e.message),
+  });
+
   return (
     <div data-testid="production-mode">
       <h2>专业生产</h2>
@@ -153,6 +169,14 @@ function ProductionPage() {
           disabled={exportMut.isPending}
         >
           {exportMut.isPending ? "导出中…" : "导出 timeline/SRT/素材包"}
+        </button>
+        <button
+          type="button"
+          data-testid="produce-golden"
+          onClick={() => goldenMut.mutate()}
+          disabled={goldenMut.isPending}
+        >
+          {goldenMut.isPending ? "生产中…" : "黄金路径：导入+10 Shot 全节点+导出"}
         </button>
       </div>
       {msg && <p data-testid="production-msg">{msg}</p>}

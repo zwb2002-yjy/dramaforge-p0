@@ -274,3 +274,21 @@ export async function exportProject(projectId: string): Promise<ExportResponse> 
   const csrf = await fetchCsrf();
   return apiSend("POST", `/api/v1/projects/${projectId}/exports`, {}, csrf);
 }
+
+export type GoldenProduceResponse = {
+  shot_count: number;
+  character_id: string;
+  canonical_object_key: string;
+  export_id: string;
+  timeline_hash: string;
+  srt_hash: string;
+  package_hash: string;
+  face_checked: number;
+  continuity_checked: number;
+  content_hash: string;
+};
+
+export async function produceGolden(projectId: string): Promise<GoldenProduceResponse> {
+  const csrf = await fetchCsrf();
+  return apiSend("POST", `/api/v1/projects/${projectId}/produce-golden`, {}, csrf);
+}
