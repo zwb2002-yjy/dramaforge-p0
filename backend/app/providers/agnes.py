@@ -1,12 +1,17 @@
 """Agnes AI OpenAI-compatible hub client (image + video).
 
-Used as local BYOK transport. Domain Adapter names stay flux/kling at the edge;
-this module is the HTTP implementation when AGNES_* env is configured.
+Real endpoints verified against apihub.agnes-ai.com:
+  GET  /v1/models
+  POST /v1/images/generations  -> { data: [{ url }] }
+  POST /v1/videos              -> { id/task_id, status: queued|... }
+  GET  /v1/videos/{task_id}    -> poll status / result
+
 Never logs the full API key.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import uuid4
 
@@ -16,12 +21,9 @@ from app.config import Settings, get_settings
 
 
 class AgnesHubClient:
-    """Thin httpx client for Agnes OpenAI-compatible endpoints."""
-
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
-        base = self._settings.agnes_base_url.rstrip("/")
-        self._base = base
+        self._base = self._settings.agnes_base_url.rstrip("/")
         self._key = self._settings.agnes_api_key.strip()
         self._image_model = self._settings.agnes_image_model
         self._video_model = self._settings.agnes_video_model
@@ -37,7 +39,6 @@ class AgnesHubClient:
         return bool(self._key and self._settings.agnes_enabled)
 
     async def create_image(self, *, prompt: str, size: str = "1024x1024") -> dict[str, Any]:
-        """POST /images/generations (OpenAI-compatible). Falls back to task bookkeeping."""
         if not self.configured():
             raise RuntimeError("Agnes hub not configured (AGNES_ENABLED + AGNES_API_KEY)")
         remote_id = f"agnes-img-{uuid4()}"
@@ -48,70 +49,158 @@ class AgnesHubClient:
             "n": 1,
             "size": size,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(url, headers=self._headers(), json=body)
-            # Store status without full response dumps in logs
-            data: dict[str, Any]
-            try:
-                data = resp.json()
-            except Exception:
-                data = {"raw_status": resp.status_code}
-            ok = resp.status_code < 400
-            image_url = None
-            if isinstance(data, dict):
-                items = data.get("data")
-                if isinstance(items, list) and items:
-                    first = items[0]
-                    if isinstance(first, dict):
-                        image_url = first.get("url") or first.get("b64_json")
+        last_err = "unknown"
+        # Free hub can return 503 / disconnect mid-body; retry with backoff.
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            for attempt in range(1, 6):
+                try:
+                    resp = await client.post(url, headers=self._headers(), json=body)
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {"raw_status": resp.status_code}
+                    ok = resp.status_code < 400
+                    image_url = None
+                    if isinstance(data, dict):
+                        items = data.get("data")
+                        if isinstance(items, list) and items:
+                            first = items[0]
+                            if isinstance(first, dict):
+                                image_url = first.get("url") or first.get("b64_json")
+                    if ok and image_url:
+                        self._tasks[remote_id] = {
+                            "kind": "image",
+                            "status": "succeeded",
+                            "http_status": resp.status_code,
+                            "artifact_uri": image_url,
+                            "error": None,
+                        }
+                        return {
+                            "remote_task_id": remote_id,
+                            "status": "succeeded",
+                            "artifact_uri": image_url,
+                        }
+                    last_err = f"agnes image http {resp.status_code}: {str(data)[:120]}"
+                    # Retry transient hub overload
+                    if resp.status_code in {408, 429, 500, 502, 503, 504}:
+                        await asyncio.sleep(2.0 * attempt)
+                        continue
+                except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+                    last_err = f"{type(exc).__name__}: {exc}"
+                    await asyncio.sleep(2.0 * attempt)
+                    continue
+                break
             self._tasks[remote_id] = {
                 "kind": "image",
-                "status": "succeeded" if ok else "failed",
-                "http_status": resp.status_code,
-                "artifact_uri": image_url or f"agnes://image/{remote_id}",
-                "error": None if ok else str(data)[:200],
+                "status": "failed",
+                "artifact_uri": None,
+                "error": last_err[:300],
             }
-            if not ok:
-                return {
-                    "remote_task_id": remote_id,
-                    "status": "failed",
-                    "error": f"agnes image http {resp.status_code}",
-                }
-            return {"remote_task_id": remote_id, "status": "succeeded"}
+            return {
+                "remote_task_id": remote_id,
+                "status": "failed",
+                "error": last_err[:300],
+            }
 
     async def create_video(self, *, prompt: str) -> dict[str, Any]:
-        """Best-effort video create; hub paths vary — records remote task for poll."""
+        """POST /videos — async task creation."""
         if not self.configured():
             raise RuntimeError("Agnes hub not configured (AGNES_ENABLED + AGNES_API_KEY)")
-        remote_id = f"agnes-vid-{uuid4()}"
-        # Common OpenAI-compatible video paths; try video generations style endpoint.
-        url = f"{self._base}/videos/generations"
+        url = f"{self._base}/videos"
         body = {"model": self._video_model, "prompt": prompt}
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, headers=self._headers(), json=body)
             try:
                 data = resp.json()
             except Exception:
                 data = {"raw_status": resp.status_code}
             ok = resp.status_code < 400
+            task_id = None
+            if isinstance(data, dict):
+                task_id = (
+                    data.get("task_id")
+                    or data.get("video_id")
+                    or data.get("id")
+                )
+            if not ok or not task_id:
+                return {
+                    "remote_task_id": str(task_id or uuid4()),
+                    "status": "failed",
+                    "error": f"agnes video http {resp.status_code}: {str(data)[:200]}",
+                }
+            remote_id = str(task_id)
             self._tasks[remote_id] = {
                 "kind": "video",
-                "status": "succeeded" if ok else "failed",
+                "status": str(data.get("status", "queued")),
                 "http_status": resp.status_code,
-                "artifact_uri": f"agnes://video/{remote_id}",
-                "error": None if ok else str(data)[:200],
+                "artifact_uri": None,
+                "error": None,
             }
-            if not ok:
-                return {
-                    "remote_task_id": remote_id,
-                    "status": "failed",
-                    "error": f"agnes video http {resp.status_code}",
-                }
-            return {"remote_task_id": remote_id, "status": "succeeded"}
+            return {
+                "remote_task_id": remote_id,
+                "status": str(data.get("status", "queued")),
+            }
+
+    async def poll_video(self, remote_task_id: str) -> dict[str, Any]:
+        """GET /videos/{id} for async video tasks."""
+        if not self.configured():
+            raise RuntimeError("Agnes hub not configured")
+        url = f"{self._base}/videos/{remote_task_id}"
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(url, headers=self._headers())
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"raw_status": resp.status_code}
+            if resp.status_code >= 400:
+                return {"status": "failed", "error": f"poll http {resp.status_code}"}
+            status = str(data.get("status", "unknown"))
+            # Normalize completed variants
+            if status in {"succeeded", "completed", "success", "done"}:
+                status = "succeeded"
+            elif status in {"failed", "error"}:
+                status = "failed"
+            elif status in {"queued", "pending", "processing", "running", "in_progress"}:
+                status = "running" if status != "queued" else "queued"
+            uri = None
+            if isinstance(data, dict):
+                meta = data.get("metadata")
+                if isinstance(meta, dict):
+                    uri = meta.get("url") or meta.get("video_url")
+                out = data.get("output")
+                if isinstance(out, dict):
+                    uri = uri or out.get("url")
+                elif isinstance(out, str):
+                    uri = uri or out
+                uri = uri or data.get("url") or data.get("video_url")
+                if isinstance(data.get("data"), dict):
+                    uri = uri or data["data"].get("url")
+            self._tasks[remote_task_id] = {
+                "kind": "video",
+                "status": status,
+                "artifact_uri": uri,
+                "error": data.get("error") if isinstance(data, dict) else None,
+            }
+            out: dict[str, Any] = {
+                "status": status,
+                "progress": float(data.get("progress", 0) or 0) / 100.0
+                if isinstance(data.get("progress"), (int, float)) and data.get("progress", 0) > 1
+                else float(data.get("progress", 0) or 0),
+            }
+            if uri:
+                out["artifact_uri"] = uri
+            if status == "failed":
+                out["error"] = str(data.get("error", data))[:300]
+            return out
 
     async def poll(self, remote_task_id: str) -> dict[str, Any]:
         task = self._tasks.get(remote_task_id)
+        if task and task.get("kind") == "video":
+            return await self.poll_video(remote_task_id)
         if task is None:
+            # try video poll anyway
+            if remote_task_id.startswith("task_") or remote_task_id.startswith("agnes-vid"):
+                return await self.poll_video(remote_task_id)
             return {"status": "failed", "error": "unknown task"}
         return {
             "status": task["status"],
@@ -119,6 +208,20 @@ class AgnesHubClient:
             "artifact_uri": task.get("artifact_uri"),
             "error": task.get("error"),
         }
+
+    async def wait_video(
+        self, remote_task_id: str, *, timeout_s: float = 300.0, interval_s: float = 3.0
+    ) -> dict[str, Any]:
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        last: dict[str, Any] = {"status": "queued"}
+        while asyncio.get_event_loop().time() < deadline:
+            last = await self.poll_video(remote_task_id)
+            if last.get("status") in {"succeeded", "failed", "cancelled"}:
+                return last
+            await asyncio.sleep(interval_s)
+        last["status"] = "failed"
+        last["error"] = "timeout waiting for video"
+        return last
 
     async def cancel(self, remote_task_id: str) -> dict[str, Any]:
         if remote_task_id in self._tasks:
@@ -131,8 +234,6 @@ class AgnesHubClient:
 
 
 class AgnesImageAdapter:
-    """Image Adapter surface (maps to domain flux capability when configured)."""
-
     provider = "flux"
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -153,8 +254,6 @@ class AgnesImageAdapter:
 
 
 class AgnesVideoAdapter:
-    """Video Adapter surface (maps to domain kling capability when configured)."""
-
     provider = "kling"
 
     def __init__(self, settings: Settings | None = None) -> None:

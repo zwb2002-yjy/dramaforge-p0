@@ -183,34 +183,54 @@ class FirstFramePipeline:
         self._session.add(text_op)
 
         img_create = await self.flux.create({"prompt": plan, "kind": "keyframe"})
-        img_remote = str(img_create["remote_task_id"])
+        img_remote = str(img_create.get("remote_task_id") or uuid4())
+        if str(img_create.get("status", "failed")) not in {"succeeded", "completed", "success"}:
+            node_run.status = "failed"
+            node_run.output_summary = {
+                "error": img_create.get("error") or "image create failed",
+            }
+            await self._session.flush()
+            raise ValidationAppError(
+                f"IMAGE_PROVIDER_FAILED: {img_create.get('error') or img_create.get('status')}"
+            )
         poll = await self.flux.poll(img_remote)
         img_cost = await self.flux.fetch_cost(img_remote)
+        poll_status = str(poll.get("status", "failed"))
+        artifact_uri = poll.get("artifact_uri") or img_create.get("artifact_uri")
+        if poll_status not in {"succeeded", "completed", "success"} or not artifact_uri:
+            node_run.status = "failed"
+            node_run.output_summary = {"error": poll.get("error") or "image poll failed"}
+            await self._session.flush()
+            raise ValidationAppError(
+                f"IMAGE_PROVIDER_FAILED: {poll.get('error') or poll_status}"
+            )
 
+        provider_name = getattr(self.flux, "provider", "flux")
+        model_name = "agnes-image" if provider_name == "flux" and type(self.flux).__name__.startswith("Agnes") else "fake-flux"
         img_op = ProviderOperation(
             node_run_id=node_run.id,
             attempt_no=1,
             purpose="primary",
             operation_kind="image.keyframe",
-            actual_provider="flux",
-            actual_model="fake-flux",
+            actual_provider=provider_name,
+            actual_model=model_name,
             provider_operation_id=img_remote,
             request_fingerprint=hashlib_sha(plan),
-            status=str(poll.get("status", "failed")),
+            status=poll_status if poll_status in {"succeeded", "completed"} else "succeeded",
             request_summary={"kind": "keyframe"},
-            response_summary={"status": poll.get("status")},
+            response_summary={"status": poll_status},
             provider_cost=Decimal(str(img_cost.get("amount", 0.0))),
             currency=str(img_cost.get("currency", "USD")),
         )
         self._session.add(img_op)
         await self._session.flush()
 
-        content_hash = str(poll.get("content_hash", "0" * 64))
+        content_hash = str(poll.get("content_hash") or hashlib_sha(str(artifact_uri)))
         artifact = Artifact(
             project_id=project_id,
             artifact_type="image",
             storage_state="available",
-            object_key=str(poll.get("artifact_uri", f"minio://fake/{img_remote}.png")),
+            object_key=str(artifact_uri),
             content_hash=content_hash,
             mime_type="image/png",
             byte_size=1024,
