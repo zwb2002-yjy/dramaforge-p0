@@ -166,3 +166,66 @@ def cancel_run(run: NodeRun) -> str:
         run.status = "cancelled"
         return "cancelled"
     raise ValidationAppError(f"cannot cancel status={run.status}")
+
+
+async def single_flight_claim(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    graph_version_id: UUID,
+    graph_node: GraphNode,
+    input_hash: str,
+    created_by: UUID,
+) -> tuple[NodeRun, bool]:
+    """Claim one in-flight/completed run for (project, node, input_hash).
+
+    Returns (run, is_leader). Followers re-use the same NodeRun row; only the
+    leader should create a ProviderOperation (P0 §3.1.15).
+    """
+    existing = (
+        await session.execute(
+            select(NodeRun)
+            .where(NodeRun.project_id == project_id)
+            .where(NodeRun.graph_node_id == graph_node.id)
+            .where(NodeRun.input_hash == input_hash)
+            .where(
+                NodeRun.status.in_(
+                    ("queued", "running", "completed", "cached", "completed_after_cancel")
+                )
+            )
+            .order_by(NodeRun.created_at.asc())
+        )
+    ).scalars().first()
+    if existing is not None:
+        return existing, False
+    attempt = await _next_attempt_no(session, graph_node.id)
+    # Stable idempotency key for concurrent inserts (unique constraint)
+    idem = f"sf:{graph_node.id}:{input_hash}"
+    run = NodeRun(
+        project_id=project_id,
+        graph_version_id=graph_version_id,
+        graph_node_id=graph_node.id,
+        attempt_no=attempt,
+        idempotency_key=idem,
+        input_hash=input_hash,
+        status="queued",
+        input_snapshot={},
+        created_by=created_by,
+    )
+    session.add(run)
+    try:
+        await session.flush()
+        return run, True
+    except Exception:
+        await session.rollback()
+        # Race: another writer won the unique key
+        again = (
+            await session.execute(
+                select(NodeRun)
+                .where(NodeRun.project_id == project_id)
+                .where(NodeRun.idempotency_key == idem)
+            )
+        ).scalar_one_or_none()
+        if again is None:
+            raise
+        return again, False

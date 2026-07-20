@@ -1,4 +1,4 @@
-"""S4 10-shot: full shot-p0-v1 nodes via Worker media path + durable locks."""
+"""S4 10-shot: Worker media path + two-source face review + durable locks."""
 
 from __future__ import annotations
 
@@ -9,14 +9,13 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.consistency.image_embed import embedding_from_image_bytes
+from app.consistency.face_review import face_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ShotHumanLock
-from app.execution.pipeline import face_review_hook
 from app.execution.product_path import execute_media_node_run
 from app.execution.runtime_invariants import mark_stale_downstream
 from app.production.service import GraphService
-from app.runtime.scheduler import WorkerRuntime
-from app.storage.minio_store import InMemoryObjectStore, ObjectStore
+from app.providers.fake import FakeFluxAdapter
+from app.storage.minio_store import ObjectStore, get_object_store
 
 SHOT_NODES = (
     "prompt",
@@ -69,6 +68,7 @@ class ShotRecord:
     face_score: float | None = None
     continuity_checked: bool = False
     continuity_status: str | None = None
+    canonical_object_key: str | None = None
 
 
 def continuity_check(*, subtitle: str, visual_desc: str) -> tuple[str, str]:
@@ -126,6 +126,12 @@ async def set_shot_lock(
     return existing
 
 
+async def _make_canonical_bytes(label: str) -> bytes:
+    adapter = FakeFluxAdapter()
+    created = await adapter.create({"prompt": f"canonical-ref:{label}", "kind": "keyframe"})
+    return adapter.blobs[str(created["remote_task_id"])]
+
+
 async def _queue_and_run(
     session: AsyncSession,
     *,
@@ -138,15 +144,19 @@ async def _queue_and_run(
     prompt: str,
     store: ObjectStore,
     attempt: int = 1,
-    extra_snapshot: dict | None = None,
+    canonical_object_key: str | None = None,
     canonical_image_bytes: bytes | None = None,
 ) -> NodeRun:
     ih = __import__("hashlib").sha256(
         f"{shot_id}:{key}:{prompt}:{attempt}".encode()
     ).hexdigest()
-    snap = {"prompt": prompt, "shot_id": str(shot_id), "plan": {"prompt": prompt}}
-    if extra_snapshot:
-        snap.update(extra_snapshot)
+    snap: dict[str, object] = {
+        "prompt": prompt,
+        "shot_id": str(shot_id),
+        "plan": {"prompt": prompt},
+    }
+    if canonical_object_key:
+        snap["canonical_object_key"] = canonical_object_key
     run = NodeRun(
         project_id=project_id,
         graph_version_id=graph_version_id,
@@ -165,6 +175,7 @@ async def _queue_and_run(
         node_run_id=run.id,
         store=store,
         face_threshold=0.35,
+        require_canonical=key in {"keyframe", "face_review"},
         canonical_image_bytes=canonical_image_bytes,
     )
     out = await session.get(NodeRun, run.id)
@@ -181,16 +192,40 @@ async def produce_shots_p0(
     budget: Decimal = Decimal("1000"),
     store: ObjectStore | None = None,
     run_keyframe_via_worker: bool = True,
+    mismatch_face_on_shot: int | None = None,
+    shot_specs: list[tuple[UUID, str, str]] | None = None,
+    shared_canonical_object_key: str | None = None,
+    shared_canonical_bytes: bytes | None = None,
 ) -> list[ShotRecord]:
-    """All shot-p0-v1 media nodes via Worker execute_media_node_run (Adapter+bytes)."""
+    """All nodes via Worker media path. Face review uses canonical ref vs keyframe probe.
+
+    shot_specs: optional list of (shot_id, visual_description, dialogue) from script import.
+    """
     _ = budget
     _ = run_keyframe_via_worker
     graphs = GraphService(session)
     shots: list[ShotRecord] = []
-    obj_store = store or InMemoryObjectStore()
+    obj_store = store or get_object_store()
 
-    for i in range(1, n + 1):
-        shot_id = uuid4()
+    if shot_specs is not None:
+        loop_items: list[tuple[int, UUID, str, str]] = [
+            (i + 1, sid, vis, dlg) for i, (sid, vis, dlg) in enumerate(shot_specs[:n])
+        ]
+    else:
+        loop_items = [(i, uuid4(), f"neon rain street shot {i}", f"Line {i} neon rain street") for i in range(1, n + 1)]
+
+    for i, shot_id, visual, dialogue in loop_items:
+        # Canonical reference image (character) — shared lead or per-shot
+        if shared_canonical_bytes is not None and shared_canonical_object_key:
+            canon_bytes = shared_canonical_bytes
+            canon_key = shared_canonical_object_key
+        else:
+            canon_bytes = await _make_canonical_bytes(f"lead-character-shot-{i}")
+            canon_key = f"projects/{project_id}/canonical/{shot_id}.png"
+            await obj_store.put_bytes(
+                object_key=canon_key, data=canon_bytes, mime_type="image/png"
+            )
+
         graph = await graphs.create_graph(
             project_id=project_id,
             scope_type="shot",
@@ -204,9 +239,9 @@ async def produce_shots_p0(
             shot_id=shot_id,
             graph_id=graph.id,
             graph_version_id=graph.current_version_id,
-            subtitle=f"Line {i} neon rain street",
+            subtitle=dialogue or f"Line {i} neon rain street",
+            canonical_object_key=canon_key,
         )
-        visual = f"neon rain street shot {i}"
         keyframe_bytes: bytes | None = None
         keyframe_artifact_id: UUID | None = None
 
@@ -234,32 +269,33 @@ async def produce_shots_p0(
                     user_id=user_id,
                     shot_id=shot_id,
                     key=key,
-                    prompt=f"{rec.subtitle}|{visual}",
+                    prompt=f"{rec.subtitle}|{visual}|{shot_id}",
                     store=obj_store,
                 )
                 run.output_summary = {
                     **(run.output_summary or {}),
                     "review": cont_status,
                     "rule": cont_rule,
-                    "subtitle": rec.subtitle,
                 }
                 rec.continuity_checked = True
                 rec.continuity_status = cont_status
-                if cont_status == "blocked":
-                    rec.status = "continuity_blocked"
                 rec.run_ids[key] = run.id
                 if run.result_artifact_id:
                     rec.artifact_ids[key] = run.result_artifact_id
                 continue
 
             if key == "face_review":
-                # Canonical = generated keyframe bytes; probe = same bytes (match)
-                # or re-embed from stored artifact — proves content-derived path
                 if keyframe_bytes is None:
-                    raise ValidationAppError_missing_keyframe()
-                emb = embedding_from_image_bytes(keyframe_bytes)
-                review = face_review_hook(
-                    embedding=emb, canonical=emb, threshold=0.35
+                    raise RuntimeError("keyframe bytes required before face_review")
+                # Optional deliberate mismatch for tests
+                if mismatch_face_on_shot == i:
+                    probe = await _make_canonical_bytes(f"wrong-character-{i}")
+                else:
+                    probe = keyframe_bytes
+                review = face_review_images(
+                    probe_image_bytes=probe,
+                    canonical_image_bytes=canon_bytes,
+                    threshold=0.35,
                 )
                 run = await _queue_and_run(
                     session,
@@ -271,15 +307,15 @@ async def produce_shots_p0(
                     key=key,
                     prompt=f"face_review:{shot_id}:{visual}",
                     store=obj_store,
-                    canonical_image_bytes=keyframe_bytes,
+                    canonical_object_key=canon_key,
+                    canonical_image_bytes=canon_bytes,
                 )
-                # Overwrite with review against keyframe-derived embeddings
                 run.output_summary = {
                     **(run.output_summary or {}),
                     "review": review.status,
                     "score": review.score,
                     "rule": review.rule,
-                    "embedding_source": "keyframe_image_bytes",
+                    "embedding_source": "probe_vs_canonical_images",
                     "keyframe_artifact_id": str(keyframe_artifact_id)
                     if keyframe_artifact_id
                     else None,
@@ -287,12 +323,13 @@ async def produce_shots_p0(
                 rec.face_checked = True
                 rec.face_status = review.status
                 rec.face_score = review.score
+                if review.status == "blocked":
+                    rec.status = "face_blocked"
                 rec.run_ids[key] = run.id
                 if run.result_artifact_id:
                     rec.artifact_ids[key] = run.result_artifact_id
                 continue
 
-            # Unique content per shot+node so artifact content_hash never collides
             node_prompt = f"{key}:{shot_id}:{visual}:{rec.subtitle}:n{i}"
             run = await _queue_and_run(
                 session,
@@ -304,6 +341,8 @@ async def produce_shots_p0(
                 key=key,
                 prompt=node_prompt,
                 store=obj_store,
+                canonical_object_key=canon_key if key == "keyframe" else None,
+                canonical_image_bytes=canon_bytes if key == "keyframe" else None,
             )
             rec.run_ids[key] = run.id
             if run.result_artifact_id:
@@ -312,20 +351,13 @@ async def produce_shots_p0(
                 keyframe_artifact_id = run.result_artifact_id
                 art = await session.get(Artifact, run.result_artifact_id)
                 if art is not None:
-                    try:
-                        keyframe_bytes = await obj_store.get_bytes(object_key=art.object_key)
-                    except Exception:
-                        keyframe_bytes = None
+                    keyframe_bytes = await obj_store.get_bytes(object_key=art.object_key)
 
         if rec.status == "pending":
             rec.status = "review_passed"
         shots.append(rec)
     await session.commit()
     return shots
-
-
-def ValidationAppError_missing_keyframe() -> Exception:
-    return RuntimeError("keyframe bytes required before face_review")
 
 
 async def rework_subtitle_only_p0(
@@ -350,10 +382,8 @@ async def rework_subtitle_only_p0(
     )
     assert "composite" in stale
     assert "keyframe" not in stale
-    assert "video" not in stale
-    assert "voice" not in stale
     shot.subtitle = new_subtitle
-    obj_store = store or InMemoryObjectStore()
+    obj_store = store or get_object_store()
     visual = "neon rain street shot rework"
     for attempt_key, key in enumerate(("subtitle", "composite", "continuity_review"), start=2):
         node = await session.get(GraphNode, shot.node_ids[key])

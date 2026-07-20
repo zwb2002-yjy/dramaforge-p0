@@ -9,10 +9,9 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.consistency.image_embed import embedding_from_image_bytes
+from app.consistency.face_review import face_review_images
 from app.creation.models import CreationPlan
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
-from app.execution.pipeline import face_review_hook
 from app.production.service import GraphService
 from app.providers.fake import FakeFluxAdapter
 from app.shared.errors import ValidationAppError
@@ -179,6 +178,17 @@ async def execute_media_node_run(
             node_type=node_type,
         )
 
+    adapter = flux or FakeFluxAdapter()
+    obj_store = store or get_object_store()
+    snap = run.input_snapshot or {}
+    # Resolve canonical from snapshot object key before enforce (Worker path).
+    if canonical_image_bytes is None:
+        snap_canon = snap.get("canonical_object_key")
+        if isinstance(snap_canon, str) and snap_canon:
+            try:
+                canonical_image_bytes = await obj_store.get_bytes(object_key=snap_canon)
+            except Exception:
+                canonical_image_bytes = None
     if require_canonical and canonical_embedding is None and canonical_image_bytes is None:
         run.status = "failed"
         run.error_code = "CANONICAL_REFERENCE_REQUIRED"
@@ -190,13 +200,11 @@ async def execute_media_node_run(
     run.started_at = datetime.now(UTC)
     await session.flush()
 
-    adapter = flux or FakeFluxAdapter()
-    obj_store = store or get_object_store()
-    prompt = str((run.input_snapshot or {}).get("plan", {}))
-    if isinstance(run.input_snapshot.get("plan"), dict):
-        prompt = str(run.input_snapshot["plan"].get("prompt", prompt))
+    prompt = str(snap.get("plan", {}))
+    if isinstance(snap.get("plan"), dict):
+        prompt = str(snap["plan"].get("prompt", prompt))
     else:
-        prompt = str(run.input_snapshot.get("prompt", f"{node_type}:{run.id}"))
+        prompt = str(snap.get("prompt", f"{node_type}:{run.id}"))
 
     # Produce media bytes by node type via Adapter contract
     kind = node_type
@@ -257,21 +265,18 @@ async def execute_media_node_run(
     face_status: str | None = None
     face_score: float | None = None
     if node_type in {"keyframe", "face_review"}:
-        # Embeddings MUST come from generated image bytes
-        emb = embedding_from_image_bytes(data)
+        # Two-source review only. Never self-match probe to itself.
         if canonical_image_bytes is not None:
-            canon = embedding_from_image_bytes(canonical_image_bytes)
-        elif canonical_embedding is not None:
-            canon = canonical_embedding
+            review = face_review_images(
+                probe_image_bytes=data,
+                canonical_image_bytes=canonical_image_bytes,
+                threshold=face_threshold,
+            )
+            face_status = review.status
+            face_score = review.score
         else:
-            # Same generated image as self-ref only when no canonical provided for S2 smoke;
-            # identity match proves content-derived embedding path.
-            canon = emb
-        review = face_review_hook(
-            embedding=emb, canonical=canon, threshold=face_threshold
-        )
-        face_status = review.status
-        face_score = review.score
+            face_status = "needs_human"
+            face_score = None
 
     run.status = "completed"
     run.result_artifact_id = art.id

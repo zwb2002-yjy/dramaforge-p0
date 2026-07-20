@@ -1,4 +1,4 @@
-"""MinIO object storage for Artifacts (binaries only; DB holds key/hash/size)."""
+"""MinIO object storage — single process-wide store for product + tests."""
 
 from __future__ import annotations
 
@@ -25,9 +25,11 @@ class ObjectStore(Protocol):
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
 
+    def clear(self) -> None: ...
+
 
 class InMemoryObjectStore:
-    """Test double when MinIO is unavailable."""
+    """Process-wide test/dev store (shared singleton via get_object_store)."""
 
     def __init__(self) -> None:
         self._objects: dict[str, bytes] = {}
@@ -48,11 +50,20 @@ class InMemoryObjectStore:
             raise KeyError(object_key)
         return self._objects[object_key]
 
+    def clear(self) -> None:
+        self._objects.clear()
+
+    def keys(self) -> list[str]:
+        return list(self._objects.keys())
+
 
 class MinioObjectStore:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         self._client = None
+
+    def clear(self) -> None:
+        return None
 
     def _ensure_client(self):  # type: ignore[no-untyped-def]
         if self._client is not None:
@@ -104,17 +115,31 @@ class MinioObjectStore:
             response.release_conn()
 
 
-_memory = InMemoryObjectStore()
+# Process-wide singleton — Worker, export, and tests MUST share this when not using MinIO.
+_MEMORY_SINGLETON = InMemoryObjectStore()
+_minio_singleton: MinioObjectStore | None = None
 
 
 def get_object_store(settings: Settings | None = None) -> ObjectStore:
-    """Prefer MinIO; fall back to memory if client import/connect fails in unit tests."""
+    """Return the process object store.
+
+    - test env: always shared InMemory singleton
+    - otherwise: MinIO if reachable, else same InMemory singleton (not a new instance)
+    """
+    global _minio_singleton
     cfg = settings or get_settings()
     if cfg.app_env == "test":
-        return _memory
+        return _MEMORY_SINGLETON
     try:
-        store = MinioObjectStore(cfg)
-        store._ensure_client()
-        return store
+        if _minio_singleton is None:
+            _minio_singleton = MinioObjectStore(cfg)
+            _minio_singleton._ensure_client()
+        return _minio_singleton
     except Exception:
-        return _memory
+        return _MEMORY_SINGLETON
+
+
+def reset_object_store_for_tests() -> InMemoryObjectStore:
+    """Clear shared memory store between tests."""
+    _MEMORY_SINGLETON.clear()
+    return _MEMORY_SINGLETON

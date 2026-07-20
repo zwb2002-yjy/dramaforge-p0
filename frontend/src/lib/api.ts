@@ -215,3 +215,62 @@ export type ProjectSnapshot = {
 export function fetchSnapshot(projectId: string): Promise<ProjectSnapshot> {
   return apiGet(`/api/v1/projects/${projectId}/snapshot`);
 }
+
+export type ScriptImportResponse = {
+  script_document_id: string;
+  episode_id: string;
+  scene_count: number;
+  shot_count: number;
+  shot_ids: string[];
+  lead_character: string | null;
+  content_hash: string;
+  character_id: string | null;
+  canonical_object_key: string | null;
+};
+
+export async function importScript(
+  projectId: string,
+  filename: string,
+  text: string,
+  registerLead = true,
+): Promise<ScriptImportResponse> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/scripts/import`,
+    { filename, text, register_lead: registerLead },
+    csrf,
+  );
+}
+
+export type ShotRead = {
+  id: string;
+  scene_id: string;
+  shot_number: number;
+  shot_type: string;
+  visual_description: string;
+  dialogue: string;
+  sort_order: number;
+  status: string;
+  version: number;
+};
+
+export function fetchProjectShots(projectId: string): Promise<ShotRead[]> {
+  return apiGet(`/api/v1/projects/${projectId}/shots`);
+}
+
+export type ExportResponse = {
+  export_id: string;
+  timeline_hash: string;
+  srt_hash: string;
+  package_hash: string;
+  mp4_object_key: string | null;
+  mp4_hash: string | null;
+  mp4_error: string | null;
+  export_item_count: number;
+};
+
+export async function exportProject(projectId: string): Promise<ExportResponse> {
+  const csrf = await fetchCsrf();
+  return apiSend("POST", `/api/v1/projects/${projectId}/exports`, {}, csrf);
+}

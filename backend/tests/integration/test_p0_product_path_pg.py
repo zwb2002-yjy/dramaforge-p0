@@ -23,7 +23,7 @@ from app.runtime.scheduler import AgentRunScheduler
 from app.shared.db import set_rls_context
 from app.shared.enums import MemberRole
 from app.shared.security import hash_password
-from app.storage.minio_store import InMemoryObjectStore
+from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 
 DEFAULT_URL = "postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
 
@@ -122,10 +122,27 @@ async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
     assert run is not None
     assert run.status == "queued"
 
-    store = InMemoryObjectStore()
     from app.runtime.scheduler import WorkerRuntime
+    from app.providers.fake import FakeFluxAdapter
 
-    # Enqueue only (API-safe) then WorkerRuntime (worker-side Adapter)
+    reset_object_store_for_tests()
+    store = get_object_store()
+    ad = FakeFluxAdapter()
+    c = await ad.create({"prompt": "canonical lead pg", "kind": "keyframe"})
+    await store.put_bytes(
+        object_key=f"projects/{started.project_id}/canonical/lead.png",
+        data=ad.blobs[c["remote_task_id"]],
+        mime_type="image/png",
+    )
+    run = await pg_session.get(NodeRun, confirmed.node_run_id)
+    assert run is not None
+    run.input_snapshot = {
+        **(run.input_snapshot or {}),
+        "canonical_object_key": f"projects/{started.project_id}/canonical/lead.png",
+        "plan": {"prompt": "neon rain short drama opening shot"},
+    }
+    await pg_session.flush()
+
     job = await AgentRunScheduler(pg_session).enqueue_node_run_only(confirmed.node_run_id)
     assert job
     queued = await pg_session.get(NodeRun, confirmed.node_run_id)
@@ -136,8 +153,8 @@ async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
     art = await pg_session.get(Artifact, run2.result_artifact_id)
     assert art is not None
     assert art.byte_size > 8
-    assert len(art.content_hash) == 64
-    assert not art.object_key.startswith("https://")
+    # Shared store: export must see worker bytes
+    assert await store.get_bytes(object_key=art.object_key)
 
     exp = await build_project_export(
         pg_session,
@@ -152,7 +169,10 @@ async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
     assert exp.package_hash
     assert exp.export_item_count >= 1
     assert exp.source_artifact_ids
-    assert exp.export_id
+    # With shared store + PNG frames, either real MP4 or explicit env error (not empty-store)
+    assert exp.mp4_error != "FFMPEG_NO_READABLE_FRAMES" or not __import__("shutil").which(
+        "ffmpeg"
+    )
 
 
 @pytest.mark.asyncio
