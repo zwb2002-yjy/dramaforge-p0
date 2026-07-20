@@ -1,8 +1,10 @@
 # Task 合同：S1-CONTRACT
 
-**状态：ACTIVE → 完成后标记 COMPLETED 并启动 `S1.1-access-session`**
+**状态：COMPLETED**
 
 **日期：2026-07-20**
+
+**完成说明：** 纵向切片与 `S1.1-access-session` 详细合同已写入本文并提交；检查点「当前唯一执行任务」已指向 `S1.1-access-session`（账本 STARTED）。S1 阶段 Gate 仍未通过。
 
 **前置：`RECOVERY-0.1` COMPLETED；BOOT-0 容器 / Git remote / S0-A fixture 可仍为 PAUSED**
 
@@ -86,6 +88,7 @@ S1 阶段完成仍需全部满足 `agent.md` S1 Gate，包括但不限于：
 
 ## 7. 本 Task 完成定义
 
-- 本文已提交
-- `docs/开发执行检查点.md` 指向 `S1.1-access-session` 为下一实现 Task
-- 账本：`S1-CONTRACT` COMPLETED
+- [x] 本文已提交
+- [x] `docs/开发执行检查点.md` 的**当前唯一执行任务**为 `S1.1-access-session`（非本合同 ID）
+- [x] 账本：`S1-CONTRACT` COMPLETED；`S1.1-access-session` STARTED
+- [x] 文首状态与检查点队列、账本三者一致为 COMPLETED
