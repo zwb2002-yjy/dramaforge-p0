@@ -1,4 +1,7 @@
-"""S4 multi-shot production using Graph nodes + NodeRun cache/stale rules."""
+"""LOCAL-ALGO — not S4 product path.
+
+Five-node mock graph + auto review_passed. Missing shot-p0-v1 full node set
+and real review. Use only for cache/stale algorithm tests."""
 
 from __future__ import annotations
 

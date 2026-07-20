@@ -1,4 +1,7 @@
-"""S5 export package from completed NodeRun artifacts (hashable metadata)."""
+"""LEGACY_SPIKE — not S5 product path.
+
+In-memory timeline/SRT hashes with mp4_placeholder_key. No FFmpeg, no Export
+rows, no MinIO package, no authorized download."""
 
 from __future__ import annotations
 

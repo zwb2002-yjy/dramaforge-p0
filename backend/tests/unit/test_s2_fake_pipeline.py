@@ -92,8 +92,9 @@ async def test_first_frame_writes_graph_node_run_artifact(session: AsyncSession)
             )
         )
     ).scalars().all()
-    assert len(ops) == 2
-    assert {o.actual_provider for o in ops} == {"openai", "flux"}
+    # LEGACY spike records image ProviderOperation only (no forged AgentRun row).
+    assert len(ops) == 1
+    assert ops[0].actual_provider == "flux"
     assert result.face_review.status == "passed"
 
 

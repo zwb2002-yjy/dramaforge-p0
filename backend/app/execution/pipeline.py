@@ -1,4 +1,9 @@
-"""S2 vertical: GraphVersion → NodeRun → fake Adapter → Artifact → face review."""
+"""LEGACY_SPIKE — not product path.
+
+In-process GraphVersion → NodeRun → Adapter → Artifact helper used for early
+adapter/algorithm experiments. Does NOT satisfy S2 Gate (no Outbox/Arq/MinIO
+product chain, no real Brief/AgentRun, face self-compare). Prefer HTTP + Worker.
+"""
 
 from __future__ import annotations
 
@@ -163,24 +168,9 @@ class FirstFramePipeline:
         self._session.add(node_run)
         await self._session.flush()
 
-        # Text/planning ops attach to AgentRun id (no node_run) per 04 XOR check.
-        text_op = ProviderOperation(
-            node_run_id=None,
-            agent_run_id=uuid4(),
-            attempt_no=1,
-            purpose="primary",
-            operation_kind="text.brief_plan",
-            actual_provider="openai",
-            actual_model="fake-openai",
-            provider_operation_id=text_remote,
-            request_fingerprint=hashlib_sha(idea),
-            status="succeeded",
-            request_summary={"kind": "brief"},
-            response_summary={"status": "succeeded"},
-            provider_cost=Decimal(str(text_cost.get("amount", 0.0))),
-            currency=str(text_cost.get("currency", "USD")),
-        )
-        self._session.add(text_op)
+        # LEGACY: real product path must persist AgentRun + ProviderOperation XOR.
+        # Spike only records the image op under NodeRun (no forged agent_run_id).
+        _ = text_remote  # planning call still exercised for cost zero on fake
 
         img_create = await self.flux.create({"prompt": plan, "kind": "keyframe"})
         img_remote = str(img_create.get("remote_task_id") or uuid4())
@@ -241,9 +231,7 @@ class FirstFramePipeline:
 
         node_run.status = "completed"
         node_run.result_artifact_id = artifact.id
-        node_run.provider_cost = (text_op.provider_cost or Decimal("0")) + (
-            img_op.provider_cost or Decimal("0")
-        )
+        node_run.provider_cost = img_op.provider_cost or Decimal("0")
         node_run.output_summary = {"artifact_id": str(artifact.id)}
         node.latest_successful_run_id = node_run.id
 
@@ -258,7 +246,7 @@ class FirstFramePipeline:
             graph_id=graph.id,
             graph_version_id=version.id,
             node_run_id=node_run.id,
-            provider_operation_ids=[text_op.id, img_op.id],
+            provider_operation_ids=[img_op.id],
             artifact_id=artifact.id,
             face_review=review,
             materialization_ops=applied,

@@ -1,10 +1,10 @@
 # Task 合同：S1-CONTRACT
 
-**状态：COMPLETED**
+**状态：SUPERSEDED / S1 阶段 Gate 未通过**
 
-**日期：2026-07-20**
+**日期：2026-07-20（2026-07-21 TRUTH-0.1 更正）**
 
-**完成说明：** 纵向切片与 `S1.1-access-session` 详细合同已写入本文并提交；检查点「当前唯一执行任务」已指向 `S1.1-access-session`（账本 STARTED）。S1 阶段 Gate 仍未通过。
+**完成说明：** 本文仅定义 S1 切片合同与 `S1.1` 启动范围。**不得**将本文状态理解为 S1 阶段完成。S1 Gate（RLS、真 Outbox/Redis、完整 creation Brief、双模式壳等）仍未通过。后续执行以 `docs/开发执行检查点.md` READY 队列为准（`S1-DB-0.1` 起）。
 
 **前置：`RECOVERY-0.1` COMPLETED；BOOT-0 容器 / Git remote / S0-A fixture 可仍为 PAUSED**
 

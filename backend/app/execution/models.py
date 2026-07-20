@@ -1,6 +1,6 @@
-"""Execution-layer models (NodeRun, ProviderOperation, Artifact) for local S2+ paths.
+"""Execution-layer models field-faithful to `04` (graph_nodes/node_runs/artifacts/ops).
 
-Field names/types mirror `04` for columns this slice uses. Full RLS/triggers remain PG-only.
+RLS policies land in S1-RLS-0.1. Product path must use Worker, not request-thread spike.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     DateTime,
     ForeignKey,
     Integer,
@@ -48,6 +49,28 @@ class GraphNode(Base):
     )
 
 
+class GraphEdge(Base):
+    __tablename__ = "graph_edges"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    graph_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("graph_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    upstream_node_id: Mapped[UUID] = mapped_column(
+        ForeignKey("graph_nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    output_port: Mapped[str] = mapped_column(String(80), nullable=False)
+    downstream_node_id: Mapped[UUID] = mapped_column(
+        ForeignKey("graph_nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    input_port: Mapped[str] = mapped_column(String(80), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    required: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Artifact(Base):
     __tablename__ = "artifacts"
     __table_args__ = (
@@ -64,12 +87,18 @@ class Artifact(Base):
         ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False
     )
     artifact_type: Mapped[str] = mapped_column(String(40), nullable=False)
-    storage_state: Mapped[str] = mapped_column(String(32), nullable=False, default="available")
+    storage_state: Mapped[str] = mapped_column(String(32), nullable=False, default="quarantined")
     object_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
-    byte_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_seconds: Mapped[Decimal | None] = mapped_column(Numeric(10, 3), nullable=True)
     produced_by_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delete_reason: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    legal_hold: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -100,6 +129,11 @@ class NodeRun(Base):
     output_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     provider_cost: Mapped[Decimal] = mapped_column(
         Numeric(20, 6), nullable=False, default=Decimal("0")
     )
@@ -129,7 +163,9 @@ class ProviderOperation(Base):
     node_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("node_runs.id", ondelete="CASCADE"), nullable=True
     )
-    agent_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    agent_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=True
+    )
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     purpose: Mapped[str] = mapped_column(String(40), nullable=False, default="primary")
     operation_kind: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -140,8 +176,20 @@ class ProviderOperation(Base):
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="created")
     request_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     response_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    token_usage: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     provider_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

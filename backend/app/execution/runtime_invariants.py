@@ -1,4 +1,9 @@
-"""S3-style NodeRun cache / budget / cancel against shipped NodeRun rows."""
+"""LOCAL-ALGO — cache/budget/cancel helpers for unit tests only.
+
+Not S3 Production Runtime Gate. No Outbox/Arq/Provider inbox integration.
+
+Originally: S3-style NodeRun cache / budget / cancel against shipped NodeRun rows.
+"""
 
 from __future__ import annotations
 
