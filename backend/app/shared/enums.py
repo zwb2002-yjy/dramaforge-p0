@@ -15,3 +15,17 @@ class MemberRole(StrEnum):
     EDITOR = "editor"
     REVIEWER = "reviewer"
     VIEWER = "viewer"
+
+
+class ProjectStage(StrEnum):
+    DRAFT = "draft"
+    PLANNING = "planning"
+    PRODUCTION = "production"
+    REVIEW = "review"
+    DELIVERING = "delivering"
+    ARCHIVED = "archived"
+
+
+class ExperienceMode(StrEnum):
+    QUICK = "quick"
+    WORKBENCH = "workbench"
