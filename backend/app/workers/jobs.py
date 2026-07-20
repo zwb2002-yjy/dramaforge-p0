@@ -1,4 +1,4 @@
-"""Arq job registry — product NodeRun execution."""
+"""Arq job registry — product NodeRun execution (Worker only)."""
 
 from __future__ import annotations
 
@@ -10,21 +10,19 @@ from app.shared.db import get_session_factory, set_rls_context
 
 
 async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
-    """No-op job used to prove worker process can execute tasks."""
     _ = ctx
     return {"status": "ok", "job": "health_ping"}
 
 
 async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, Any]:
-    """Worker job: load NodeRun from PG, execute keyframe product path."""
+    """Worker job: execute media NodeRun via product_path (Adapter OK here)."""
     from app.execution.models import NodeRun
-    from app.execution.product_path import execute_keyframe_node_run
+    from app.execution.product_path import execute_media_node_run
 
     _ = ctx
     factory = get_session_factory()
     run_uuid = UUID(node_run_id)
     async with factory() as session:
-        # Bootstrap without project context to resolve run, then re-set RLS
         run = await session.get(NodeRun, run_uuid)
         if run is None:
             return {"status": "failed", "error": "node_run not found"}
@@ -33,12 +31,11 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             user_id=run.created_by,
             project_id=run.project_id,
         )
-        # Re-load under RLS
         run = await session.get(NodeRun, run_uuid)
         if run is None:
             return {"status": "failed", "error": "node_run not visible under RLS"}
         try:
-            result = await execute_keyframe_node_run(session, node_run_id=run_uuid)
+            result = await execute_media_node_run(session, node_run_id=run_uuid)
             await session.commit()
             return {
                 "status": "completed",
@@ -48,6 +45,7 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                 "content_hash": result.content_hash,
                 "byte_size": result.byte_size,
                 "face_status": result.face_status,
+                "node_type": result.node_type,
             }
         except Exception as exc:  # noqa: BLE001
             await session.commit()
@@ -55,7 +53,7 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
 
 
 async def dispatch_outbox(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Periodic: claim outbox + drain queued node runs."""
+    """Periodic: claim outbox + enqueue Arq jobs (no Adapter)."""
     from app.runtime.scheduler import AgentRunScheduler, RedisStreamPublisher
 
     settings = get_settings()
@@ -65,7 +63,7 @@ async def dispatch_outbox(ctx: dict[str, Any]) -> dict[str, Any]:
         n = await AgentRunScheduler(session, publisher=pub).dispatch_pending(
             worker_id=str(ctx.get("job_id", "worker"))
         )
-        return {"dispatched": n}
+        return {"enqueued": n}
 
 
 JOB_FUNCTIONS = [health_ping, execute_node_run, dispatch_outbox]

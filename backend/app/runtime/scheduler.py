@@ -82,22 +82,30 @@ class AgentRunScheduler:
 
     async def _enqueue_node_run(self, node_run_id: UUID) -> str:
         settings = get_settings()
+        # Prefer fast local enqueue marker; Arq optional when redis responds quickly.
         try:
+            import asyncio
+
             from arq import create_pool
             from arq.connections import RedisSettings
 
-            redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-            try:
-                job = await redis.enqueue_job(
-                    "execute_node_run",
-                    str(node_run_id),
-                    _queue_name=settings.arq_default_queue_name,
+            async def _arq() -> str:
+                redis = await create_pool(
+                    RedisSettings.from_dsn(settings.redis_url, conn_timeout=0.3)
                 )
-                return str(job.job_id if job else node_run_id)
-            finally:
-                await redis.close()
+                try:
+                    job = await redis.enqueue_job(
+                        "execute_node_run",
+                        str(node_run_id),
+                        _queue_name=settings.arq_default_queue_name,
+                    )
+                    return str(job.job_id if job else node_run_id)
+                finally:
+                    await redis.close()
+
+            return await asyncio.wait_for(_arq(), timeout=0.5)
         except Exception:
-            # Offline / no Redis: record intent for WorkerRuntime.poll (tests/dev)
+            # Offline / no Redis: WorkerRuntime / arq worker picks up queued NodeRun
             return f"local:{node_run_id}"
 
 
@@ -108,7 +116,7 @@ class WorkerRuntime:
         self._session = session
 
     async def process_queued(self, *, limit: int = 20) -> int:
-        from app.execution.product_path import execute_keyframe_node_run
+        from app.execution.product_path import execute_media_node_run
 
         result = await self._session.execute(
             select(NodeRun)
@@ -119,7 +127,7 @@ class WorkerRuntime:
         n = 0
         for run in result.scalars().all():
             try:
-                await execute_keyframe_node_run(self._session, node_run_id=run.id)
+                await execute_media_node_run(self._session, node_run_id=run.id)
                 n += 1
             except Exception:
                 n += 1
@@ -127,7 +135,7 @@ class WorkerRuntime:
         return n
 
     async def process_one(self, node_run_id: UUID) -> None:
-        from app.execution.product_path import execute_keyframe_node_run
+        from app.execution.product_path import execute_media_node_run
 
-        await execute_keyframe_node_run(self._session, node_run_id=node_run_id)
+        await execute_media_node_run(self._session, node_run_id=node_run_id)
         await self._session.commit()

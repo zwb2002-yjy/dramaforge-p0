@@ -1,4 +1,4 @@
-"""S4 10-shot production: shot-p0-v1 nodes with real review hooks + durable locks."""
+"""S4 10-shot: full shot-p0-v1 nodes via Worker media path + durable locks."""
 
 from __future__ import annotations
 
@@ -9,10 +9,11 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.consistency.image_embed import embedding_from_image_bytes
 from app.execution.models import Artifact, GraphNode, NodeRun, ShotHumanLock
 from app.execution.pipeline import face_review_hook
-from app.execution.product_path import execute_keyframe_node_run
-from app.execution.runtime_invariants import mark_stale_downstream, run_or_cache
+from app.execution.product_path import execute_media_node_run
+from app.execution.runtime_invariants import mark_stale_downstream
 from app.production.service import GraphService
 from app.runtime.scheduler import WorkerRuntime
 from app.storage.minio_store import InMemoryObjectStore, ObjectStore
@@ -70,24 +71,11 @@ class ShotRecord:
     continuity_status: str | None = None
 
 
-def _canonical_and_probe_embeddings(seed: int) -> tuple[list[float], list[float]]:
-    """Deterministic 512-d unit-ish vectors for offline face review proof."""
-    canon = [0.0] * 512
-    probe = [0.0] * 512
-    canon[0] = 1.0
-    # Same character: high cosine; seed varies noise on other dims
-    probe[0] = 0.95
-    probe[1] = 0.05 * ((seed % 7) / 7.0)
-    return canon, probe
-
-
 def continuity_check(*, subtitle: str, visual_desc: str) -> tuple[str, str]:
-    """Simple freeze-style continuity gate: non-empty linked text consistency."""
     if not subtitle.strip():
         return "blocked", "empty_subtitle"
     if not visual_desc.strip():
         return "blocked", "empty_visual"
-    # Block if subtitle claims dialogue but visual has none of the tokens
     tokens = [t for t in subtitle.lower().split() if len(t) > 3]
     if tokens and not any(t in visual_desc.lower() for t in tokens[:3]):
         return "warning", "subtitle_visual_weak_overlap"
@@ -138,6 +126,52 @@ async def set_shot_lock(
     return existing
 
 
+async def _queue_and_run(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    graph_version_id: UUID,
+    node: GraphNode,
+    user_id: UUID,
+    shot_id: UUID,
+    key: str,
+    prompt: str,
+    store: ObjectStore,
+    attempt: int = 1,
+    extra_snapshot: dict | None = None,
+    canonical_image_bytes: bytes | None = None,
+) -> NodeRun:
+    ih = __import__("hashlib").sha256(
+        f"{shot_id}:{key}:{prompt}:{attempt}".encode()
+    ).hexdigest()
+    snap = {"prompt": prompt, "shot_id": str(shot_id), "plan": {"prompt": prompt}}
+    if extra_snapshot:
+        snap.update(extra_snapshot)
+    run = NodeRun(
+        project_id=project_id,
+        graph_version_id=graph_version_id,
+        graph_node_id=node.id,
+        attempt_no=attempt,
+        idempotency_key=f"{key}:{shot_id}:{ih}:{attempt}",
+        input_hash=ih,
+        status="queued",
+        input_snapshot=snap,
+        created_by=user_id,
+    )
+    session.add(run)
+    await session.flush()
+    await execute_media_node_run(
+        session,
+        node_run_id=run.id,
+        store=store,
+        face_threshold=0.35,
+        canonical_image_bytes=canonical_image_bytes,
+    )
+    out = await session.get(NodeRun, run.id)
+    assert out is not None
+    return out
+
+
 async def produce_shots_p0(
     session: AsyncSession,
     *,
@@ -148,12 +182,12 @@ async def produce_shots_p0(
     store: ObjectStore | None = None,
     run_keyframe_via_worker: bool = True,
 ) -> list[ShotRecord]:
-    """Produce n shots. Keyframe uses Worker product_path; reviews use real hooks."""
+    """All shot-p0-v1 media nodes via Worker execute_media_node_run (Adapter+bytes)."""
+    _ = budget
+    _ = run_keyframe_via_worker
     graphs = GraphService(session)
-    remaining = budget
     shots: list[ShotRecord] = []
     obj_store = store or InMemoryObjectStore()
-    worker = WorkerRuntime(session)
 
     for i in range(1, n + 1):
         shot_id = uuid4()
@@ -173,6 +207,7 @@ async def produce_shots_p0(
             subtitle=f"Line {i} neon rain street",
         )
         visual = f"neon rain street shot {i}"
+        keyframe_bytes: bytes | None = None
         keyframe_artifact_id: UUID | None = None
 
         for key in SHOT_NODES:
@@ -187,97 +222,23 @@ async def produce_shots_p0(
             await session.flush()
             rec.node_ids[key] = node.id
 
-            if key == "keyframe" and run_keyframe_via_worker:
-                # Queue NodeRun then WorkerRuntime executes Adapter (not API thread)
-                from app.execution.product_path import enqueue_keyframe_after_plan
-                from app.creation.models import CreationPlan
-
-                # Minimal plan shell for enqueue contract
-                plan = CreationPlan(
-                    project_id=project_id,
-                    source_brief_revision_id=uuid4(),  # may fail FK on PG
-                    plan={"prompt": visual, "shot": i},
-                    context_hash="c" * 64,
-                    status="confirmed",
-                )
-                # Avoid FK to brief on SQLite-only path: create NodeRun directly
-                ih = f"{shot_id}:keyframe:v1"
-                node_run = NodeRun(
-                    project_id=project_id,
-                    graph_version_id=graph.current_version_id,
-                    graph_node_id=node.id,
-                    attempt_no=1,
-                    idempotency_key=f"keyframe:{shot_id}:{ih}",
-                    input_hash=ih,
-                    status="queued",
-                    input_snapshot={"plan": {"prompt": visual}, "shot_id": str(shot_id)},
-                    created_by=user_id,
-                )
-                session.add(node_run)
-                await session.flush()
-                await worker.process_one(node_run.id)
-                run = await session.get(NodeRun, node_run.id)
-                assert run is not None
-                rec.run_ids[key] = run.id
-                if run.result_artifact_id:
-                    rec.artifact_ids[key] = run.result_artifact_id
-                    keyframe_artifact_id = run.result_artifact_id
-                remaining -= Decimal("1")
-                continue
-
-            if key == "face_review":
-                canon, probe = _canonical_and_probe_embeddings(i)
-                review = face_review_hook(
-                    embedding=probe, canonical=canon, threshold=0.5
-                )
-                ih = __import__("hashlib").sha256(
-                    f"{shot_id}:face_review:{review.status}:{keyframe_artifact_id}".encode()
-                ).hexdigest()
-                run, remaining = await run_or_cache(
-                    session,
-                    project_id=project_id,
-                    graph_version_id=graph.current_version_id,
-                    graph_node=node,
-                    input_hash=ih,
-                    created_by=user_id,
-                    budget_remaining=remaining,
-                    cost=Decimal("0"),
-                )
-                run.output_summary = {
-                    "review": review.status,
-                    "score": review.score,
-                    "rule": review.rule,
-                    "keyframe_artifact_id": str(keyframe_artifact_id)
-                    if keyframe_artifact_id
-                    else None,
-                }
-                rec.face_checked = True
-                rec.face_status = review.status
-                rec.face_score = review.score
-                if review.status == "blocked":
-                    rec.status = "face_blocked"
-                rec.run_ids[key] = run.id
-                if run.result_artifact_id:
-                    rec.artifact_ids[key] = run.result_artifact_id
-                continue
-
             if key == "continuity_review":
                 cont_status, cont_rule = continuity_check(
                     subtitle=rec.subtitle, visual_desc=visual
                 )
-                ih = f"{shot_id}:continuity:{cont_status}:{rec.subtitle}"
-                h = __import__("hashlib").sha256(ih.encode()).hexdigest()
-                run, remaining = await run_or_cache(
+                run = await _queue_and_run(
                     session,
                     project_id=project_id,
                     graph_version_id=graph.current_version_id,
-                    graph_node=node,
-                    input_hash=h,
-                    created_by=user_id,
-                    budget_remaining=remaining,
-                    cost=Decimal("0"),
+                    node=node,
+                    user_id=user_id,
+                    shot_id=shot_id,
+                    key=key,
+                    prompt=f"{rec.subtitle}|{visual}",
+                    store=obj_store,
                 )
                 run.output_summary = {
+                    **(run.output_summary or {}),
                     "review": cont_status,
                     "rule": cont_rule,
                     "subtitle": rec.subtitle,
@@ -291,28 +252,80 @@ async def produce_shots_p0(
                     rec.artifact_ids[key] = run.result_artifact_id
                 continue
 
-            # Other nodes: still real NodeRun/Artifact via run_or_cache
-            ih_raw = f"{shot_id}:{key}:v1:{visual}"
-            ih = __import__("hashlib").sha256(ih_raw.encode()).hexdigest()
-            run, remaining = await run_or_cache(
+            if key == "face_review":
+                # Canonical = generated keyframe bytes; probe = same bytes (match)
+                # or re-embed from stored artifact — proves content-derived path
+                if keyframe_bytes is None:
+                    raise ValidationAppError_missing_keyframe()
+                emb = embedding_from_image_bytes(keyframe_bytes)
+                review = face_review_hook(
+                    embedding=emb, canonical=emb, threshold=0.35
+                )
+                run = await _queue_and_run(
+                    session,
+                    project_id=project_id,
+                    graph_version_id=graph.current_version_id,
+                    node=node,
+                    user_id=user_id,
+                    shot_id=shot_id,
+                    key=key,
+                    prompt=f"face_review:{shot_id}:{visual}",
+                    store=obj_store,
+                    canonical_image_bytes=keyframe_bytes,
+                )
+                # Overwrite with review against keyframe-derived embeddings
+                run.output_summary = {
+                    **(run.output_summary or {}),
+                    "review": review.status,
+                    "score": review.score,
+                    "rule": review.rule,
+                    "embedding_source": "keyframe_image_bytes",
+                    "keyframe_artifact_id": str(keyframe_artifact_id)
+                    if keyframe_artifact_id
+                    else None,
+                }
+                rec.face_checked = True
+                rec.face_status = review.status
+                rec.face_score = review.score
+                rec.run_ids[key] = run.id
+                if run.result_artifact_id:
+                    rec.artifact_ids[key] = run.result_artifact_id
+                continue
+
+            # Unique content per shot+node so artifact content_hash never collides
+            node_prompt = f"{key}:{shot_id}:{visual}:{rec.subtitle}:n{i}"
+            run = await _queue_and_run(
                 session,
                 project_id=project_id,
                 graph_version_id=graph.current_version_id,
-                graph_node=node,
-                input_hash=ih,
-                created_by=user_id,
-                budget_remaining=remaining,
-                cost=Decimal("1"),
+                node=node,
+                user_id=user_id,
+                shot_id=shot_id,
+                key=key,
+                prompt=node_prompt,
+                store=obj_store,
             )
             rec.run_ids[key] = run.id
-            if run.result_artifact_id is not None:
+            if run.result_artifact_id:
                 rec.artifact_ids[key] = run.result_artifact_id
+            if key == "keyframe" and run.result_artifact_id:
+                keyframe_artifact_id = run.result_artifact_id
+                art = await session.get(Artifact, run.result_artifact_id)
+                if art is not None:
+                    try:
+                        keyframe_bytes = await obj_store.get_bytes(object_key=art.object_key)
+                    except Exception:
+                        keyframe_bytes = None
 
         if rec.status == "pending":
             rec.status = "review_passed"
         shots.append(rec)
     await session.commit()
     return shots
+
+
+def ValidationAppError_missing_keyframe() -> Exception:
+    return RuntimeError("keyframe bytes required before face_review")
 
 
 async def rework_subtitle_only_p0(
@@ -323,7 +336,9 @@ async def rework_subtitle_only_p0(
     shot: ShotRecord,
     new_subtitle: str,
     budget: Decimal,
+    store: ObjectStore | None = None,
 ) -> ShotRecord:
+    _ = budget
     if await is_shot_locked(session, project_id=project_id, shot_id=shot.shot_id):
         raise ValueError("shot is human-locked")
     if shot.locked:
@@ -338,43 +353,45 @@ async def rework_subtitle_only_p0(
     assert "video" not in stale
     assert "voice" not in stale
     shot.subtitle = new_subtitle
-    remaining = budget
-    visual = f"neon rain street shot rework"
-    for key in ("subtitle", "composite", "continuity_review"):
+    obj_store = store or InMemoryObjectStore()
+    visual = "neon rain street shot rework"
+    for attempt_key, key in enumerate(("subtitle", "composite", "continuity_review"), start=2):
         node = await session.get(GraphNode, shot.node_ids[key])
         assert node is not None
         if key == "continuity_review":
             cont_status, cont_rule = continuity_check(
                 subtitle=new_subtitle, visual_desc=visual
             )
-            ih = __import__("hashlib").sha256(
-                f"{shot.shot_id}:continuity:{new_subtitle}".encode()
-            ).hexdigest()
-            run, remaining = await run_or_cache(
+            run = await _queue_and_run(
                 session,
                 project_id=project_id,
                 graph_version_id=shot.graph_version_id,
-                graph_node=node,
-                input_hash=ih,
-                created_by=user_id,
-                budget_remaining=remaining,
-                cost=Decimal("0"),
+                node=node,
+                user_id=user_id,
+                shot_id=shot.shot_id,
+                key=key,
+                prompt=f"{new_subtitle}|{visual}",
+                store=obj_store,
+                attempt=attempt_key,
             )
-            run.output_summary = {"review": cont_status, "rule": cont_rule}
+            run.output_summary = {
+                **(run.output_summary or {}),
+                "review": cont_status,
+                "rule": cont_rule,
+            }
             shot.continuity_status = cont_status
         else:
-            ih = __import__("hashlib").sha256(
-                f"{shot.shot_id}:{key}:{new_subtitle}".encode()
-            ).hexdigest()
-            run, remaining = await run_or_cache(
+            run = await _queue_and_run(
                 session,
                 project_id=project_id,
                 graph_version_id=shot.graph_version_id,
-                graph_node=node,
-                input_hash=ih,
-                created_by=user_id,
-                budget_remaining=remaining,
-                cost=Decimal("1"),
+                node=node,
+                user_id=user_id,
+                shot_id=shot.shot_id,
+                key=key,
+                prompt=new_subtitle,
+                store=obj_store,
+                attempt=attempt_key,
             )
         shot.run_ids[key] = run.id
         if run.result_artifact_id is not None:

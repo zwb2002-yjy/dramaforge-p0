@@ -48,7 +48,14 @@ def client() -> Iterator[TestClient]:
 
     import asyncio
 
-    asyncio.get_event_loop().run_until_complete(_prepare())
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(_prepare())
 
     async def override_session() -> AsyncIterator[AsyncSession]:
         async with session_factory() as session:
@@ -59,7 +66,7 @@ def client() -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
-    asyncio.get_event_loop().run_until_complete(engine.dispose())
+    loop.run_until_complete(engine.dispose())
 
 
 @pytest.fixture

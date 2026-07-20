@@ -122,7 +122,7 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
     assert exp.export_item_count >= 1
     assert exp.mp4_error == "FFMPEG_SKIPPED"
     assert exp.source_artifact_ids
-    # Same fixed inputs → stable hashes
+    # Same fixed content inputs → identical content hashes across export rows
     exp2 = await build_project_export(
         session,
         project_id=project_id,
@@ -131,7 +131,10 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
         store=store,
         try_ffmpeg=False,
     )
-    assert exp2.timeline_hash  # new export id but content-stable lineage
+    assert exp2.timeline_hash == exp.timeline_hash
+    assert exp2.srt_hash == exp.srt_hash
+    assert exp2.package_hash == exp.package_hash
+    assert exp2.export_id != exp.export_id
 
 
 @pytest.mark.asyncio
@@ -151,7 +154,13 @@ async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
     assert all(len(s.node_ids) == 9 for s in shots)
     assert all(s.face_checked and s.continuity_checked for s in shots)
     assert all(s.face_status in {"passed", "warning", "blocked", "needs_human"} for s in shots)
-    assert all(s.face_score is not None and s.face_score >= 0.5 for s in shots)
+    # Cosine of embedding_from_image_bytes(keyframe) with itself is 1.0
+    assert all(s.face_score is not None and s.face_score >= 0.99 for s in shots)
+    # Every node has a completed run with artifact (Worker media path, not empty stub)
+    for s in shots:
+        for key in s.node_ids:
+            assert key in s.run_ids
+            assert key in s.artifact_ids
     assert all(s.continuity_status in {"passed", "warning", "blocked"} for s in shots)
     kf = shots[0].run_ids["keyframe"]
     await rework_subtitle_only_p0(

@@ -189,4 +189,4 @@ async def export_project(
         source_artifact_ids=result.source_artifact_ids,
         source_node_run_ids=result.source_node_run_ids,
         export_item_count=result.export_item_count,
-    )
+    )  # export_status available on service result if API extended later

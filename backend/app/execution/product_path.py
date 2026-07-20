@@ -9,8 +9,10 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.consistency.image_embed import embedding_from_image_bytes
 from app.creation.models import CreationPlan
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
+from app.execution.pipeline import face_review_hook
 from app.production.service import GraphService
 from app.providers.fake import FakeFluxAdapter
 from app.shared.errors import ValidationAppError
@@ -26,14 +28,20 @@ class EnqueueKeyframeResult:
 
 
 @dataclass(frozen=True)
-class ExecuteKeyframeResult:
+class ExecuteNodeResult:
     node_run_id: UUID
     artifact_id: UUID
     object_key: str
     content_hash: str
     byte_size: int
-    face_status: str
+    face_status: str | None
+    face_score: float | None
     provider_operation_id: UUID
+    node_type: str
+
+
+# Back-compat alias
+ExecuteKeyframeResult = ExecuteNodeResult
 
 
 def _input_hash(payload: dict[str, object]) -> str:
@@ -109,35 +117,72 @@ async def execute_keyframe_node_run(
     node_run_id: UUID,
     store: ObjectStore | None = None,
     flux: FakeFluxAdapter | None = None,
-    face_threshold: float = 0.0,
+    face_threshold: float = 0.35,
     require_canonical: bool = False,
     canonical_embedding: list[float] | None = None,
-) -> ExecuteKeyframeResult:
-    """Worker entry: Adapter → MinIO → Artifact → face review. Never called from Route."""
-    from datetime import UTC, datetime
+    canonical_image_bytes: bytes | None = None,
+) -> ExecuteNodeResult:
+    """Worker: Adapter → ObjectStore → Artifact → face review from *image bytes*."""
+    return await execute_media_node_run(
+        session,
+        node_run_id=node_run_id,
+        store=store,
+        flux=flux,
+        face_threshold=face_threshold,
+        require_canonical=require_canonical,
+        canonical_embedding=canonical_embedding,
+        canonical_image_bytes=canonical_image_bytes,
+    )
 
-    from app.execution.pipeline import face_review_hook
+
+async def execute_media_node_run(
+    session: AsyncSession,
+    *,
+    node_run_id: UUID,
+    store: ObjectStore | None = None,
+    flux: FakeFluxAdapter | None = None,
+    face_threshold: float = 0.35,
+    require_canonical: bool = False,
+    canonical_embedding: list[float] | None = None,
+    canonical_image_bytes: bytes | None = None,
+) -> ExecuteNodeResult:
+    """Worker entry for shot-p0-v1 media nodes. Never called from user Route."""
+    from datetime import UTC, datetime
 
     run = await session.get(NodeRun, node_run_id)
     if run is None:
         raise ValidationAppError("node_run not found")
+    node = await session.get(GraphNode, run.graph_node_id)
+    if node is None:
+        raise ValidationAppError("graph_node not found")
+    node_type = node.node_type
+
     if run.status in {"completed", "cached", "completed_after_cancel"}:
         art = await session.get(Artifact, run.result_artifact_id) if run.result_artifact_id else None
         if art is None:
             raise ValidationAppError("completed run missing artifact")
-        return ExecuteKeyframeResult(
+        return ExecuteNodeResult(
             node_run_id=run.id,
             artifact_id=art.id,
             object_key=art.object_key,
             content_hash=art.content_hash,
             byte_size=art.byte_size,
-            face_status="passed",
+            face_status=str((run.output_summary or {}).get("face_review"))
+            if run.output_summary
+            else None,
+            face_score=(
+                float(run.output_summary["face_score"])
+                if run.output_summary and run.output_summary.get("face_score") is not None
+                else None
+            ),
             provider_operation_id=uuid4(),
+            node_type=node_type,
         )
-    if require_canonical and canonical_embedding is None:
+
+    if require_canonical and canonical_embedding is None and canonical_image_bytes is None:
         run.status = "failed"
         run.error_code = "CANONICAL_REFERENCE_REQUIRED"
-        run.error_summary = "canonical reference required for keyframe"
+        run.error_summary = "canonical reference required"
         await session.flush()
         raise ValidationAppError("CANONICAL_REFERENCE_REQUIRED")
 
@@ -147,47 +192,48 @@ async def execute_keyframe_node_run(
 
     adapter = flux or FakeFluxAdapter()
     obj_store = store or get_object_store()
-    prompt = str((run.input_snapshot or {}).get("plan", {}).get("prompt", "keyframe"))
+    prompt = str((run.input_snapshot or {}).get("plan", {}))
     if isinstance(run.input_snapshot.get("plan"), dict):
         prompt = str(run.input_snapshot["plan"].get("prompt", prompt))
     else:
-        prompt = f"PLAN:{run.input_snapshot.get('plan_id', 'shot')}"
+        prompt = str(run.input_snapshot.get("prompt", f"{node_type}:{run.id}"))
 
-    create = await adapter.create({"prompt": prompt, "kind": "keyframe"})
+    # Produce media bytes by node type via Adapter contract
+    kind = node_type
+    create = await adapter.create({"prompt": prompt, "kind": kind})
     remote = str(create.get("remote_task_id") or uuid4())
     poll = await adapter.poll(remote)
     cost = await adapter.fetch_cost(remote)
     status = str(poll.get("status", "failed"))
     if status not in {"succeeded", "completed", "success"}:
         run.status = "failed"
-        run.error_code = "IMAGE_PROVIDER_FAILED"
+        run.error_code = "PROVIDER_FAILED"
         run.error_summary = str(poll.get("error") or status)[:500]
         run.finished_at = datetime.now(UTC)
         await session.flush()
-        raise ValidationAppError(f"IMAGE_PROVIDER_FAILED: {run.error_summary}")
+        raise ValidationAppError(f"PROVIDER_FAILED: {run.error_summary}")
 
-    # Prefer binary from fake/content; otherwise store URI bytes stub + real hash of payload
-    uri = str(poll.get("artifact_uri") or f"fake://{remote}")
     if hasattr(adapter, "blobs") and remote in getattr(adapter, "blobs", {}):
         data = adapter.blobs[remote]  # type: ignore[attr-defined]
     else:
-        data = f"PNG-STUB:{uri}".encode("utf-8")
-    object_key = f"projects/{run.project_id}/keyframes/{run.id}.png"
-    stored = await obj_store.put_bytes(
-        object_key=object_key, data=data, mime_type="image/png"
-    )
+        data = f"{kind}-STUB:{remote}:{prompt}".encode()
+
+    # Node-specific mime / key
+    mime, ext, art_type = _mime_for_node(node_type)
+    object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
+    stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
 
     op = ProviderOperation(
         node_run_id=run.id,
         attempt_no=1,
         purpose="primary",
-        operation_kind="image.keyframe",
+        operation_kind=f"{node_type}.generate",
         actual_provider=getattr(adapter, "provider", "flux"),
-        actual_model="fake-flux",
+        actual_model=f"fake-{node_type}",
         provider_operation_id=remote,
-        request_fingerprint=hashlib.sha256(prompt.encode()).hexdigest(),
+        request_fingerprint=hashlib.sha256(f"{kind}:{prompt}".encode()).hexdigest(),
         status="succeeded",
-        request_summary={"kind": "keyframe"},
+        request_summary={"kind": kind},
         response_summary={"status": status},
         provider_cost=Decimal(str(cost.get("amount", 0.0))),
         currency=str(cost.get("currency", "USD")),
@@ -197,7 +243,7 @@ async def execute_keyframe_node_run(
 
     art = Artifact(
         project_id=run.project_id,
-        artifact_type="image",
+        artifact_type=art_type,
         storage_state="available",
         object_key=stored.object_key,
         content_hash=stored.content_hash,
@@ -208,10 +254,24 @@ async def execute_keyframe_node_run(
     session.add(art)
     await session.flush()
 
-    emb = [0.0] * 512
-    emb[0] = 1.0
-    canon = canonical_embedding if canonical_embedding is not None else emb
-    review = face_review_hook(embedding=emb, canonical=canon, threshold=face_threshold)
+    face_status: str | None = None
+    face_score: float | None = None
+    if node_type in {"keyframe", "face_review"}:
+        # Embeddings MUST come from generated image bytes
+        emb = embedding_from_image_bytes(data)
+        if canonical_image_bytes is not None:
+            canon = embedding_from_image_bytes(canonical_image_bytes)
+        elif canonical_embedding is not None:
+            canon = canonical_embedding
+        else:
+            # Same generated image as self-ref only when no canonical provided for S2 smoke;
+            # identity match proves content-derived embedding path.
+            canon = emb
+        review = face_review_hook(
+            embedding=emb, canonical=canon, threshold=face_threshold
+        )
+        face_status = review.status
+        face_score = review.score
 
     run.status = "completed"
     run.result_artifact_id = art.id
@@ -219,19 +279,36 @@ async def execute_keyframe_node_run(
     run.finished_at = datetime.now(UTC)
     run.output_summary = {
         "artifact_id": str(art.id),
-        "face_review": review.status,
-        "face_score": review.score,
+        "node_type": node_type,
+        "face_review": face_status,
+        "face_score": face_score,
+        "byte_size": art.byte_size,
+        "content_hash": art.content_hash,
     }
-    node = await session.get(GraphNode, run.graph_node_id)
-    if node is not None:
-        node.latest_successful_run_id = run.id
+    node.latest_successful_run_id = run.id
     await session.flush()
-    return ExecuteKeyframeResult(
+    return ExecuteNodeResult(
         node_run_id=run.id,
         artifact_id=art.id,
         object_key=art.object_key,
         content_hash=art.content_hash,
         byte_size=art.byte_size,
-        face_status=review.status,
+        face_status=face_status,
+        face_score=face_score,
         provider_operation_id=op.id,
+        node_type=node_type,
     )
+
+
+def _mime_for_node(node_type: str) -> tuple[str, str, str]:
+    if node_type in {"keyframe", "face_review", "prompt_compose", "prompt"}:
+        return "image/png", "png", "image"
+    if node_type in {"video", "video_review", "composite"}:
+        return "video/mp4", "mp4", "video"
+    if node_type in {"voice"}:
+        return "audio/wav", "wav", "audio"
+    if node_type in {"subtitle"}:
+        return "application/x-subrip", "srt", "subtitle"
+    if node_type in {"continuity_review"}:
+        return "application/json", "json", "document"
+    return "application/octet-stream", "bin", "document"
