@@ -41,6 +41,8 @@ frontend/src/types/openapi.json
 # Runtime and local data
 data/
 tmp/
+tmp/pytest-basetemp/
+tmp/pytest-work/
 logs/
 *.log
 *.sqlite

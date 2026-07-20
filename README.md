@@ -4,7 +4,9 @@ DramaForge 是面向 1-6 人短剧制作团队私有化部署的镜头级 AI 生
 
 ## 当前状态
 
-仓库已经实现 `BOOT-0` 应用骨架：FastAPI `/health`、Arq default/heavy Worker 入口、React 工作台壳、Docker Compose（PostgreSQL / Redis / MinIO / API / Workers）、质量入口与目录合规检查均已落地。当前仍处于 BOOT-0 验收恢复阶段：本地可运行检查需要统一复核，容器健康因本机缺少 Docker CLI 尚未验证，因此不能把 BOOT-0 Gate 标为全部通过。
+仓库已经实现 `BOOT-0` 应用骨架：FastAPI `/health`、Arq default/heavy Worker 入口、React 工作台壳、Docker Compose（PostgreSQL / Redis / MinIO / API / Workers）、质量入口与目录合规检查均已落地。
+
+**状态语义：** 本地质量入口（`scripts/run_quality.ps1`，使用 `backend/.venv`）与 Playwright E2E 可在本机跑通，**不等于** BOOT-0 阶段 Gate 全部关闭——容器健康仍依赖 Docker CLI（当前环境可能缺失）。S0-A 数据 Gate 因样本不足为 `BLOCKED_BY_FIXTURE`。下一步工程主线见 `docs/开发执行检查点.md`（S1 切片）。
 
 S0-A 的视觉一致性入口、纯函数和样本采集规范已经提交，但真实 InsightFace/FAR/FRR Gate 因缺少合法样本处于 `BLOCKED_BY_FIXTURE`。当前唯一执行任务、外部暂停项和后续 `READY` 队列以 [`docs/开发执行检查点.md`](docs/开发执行检查点.md) 为准。
 
