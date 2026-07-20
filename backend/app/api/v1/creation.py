@@ -48,9 +48,9 @@ async def start_project(
         experience_mode=body.experience_mode,
     )
     return StartProjectResponse(
-        project_id=result["project_id"],
-        experience_mode=ExperienceMode(result["experience_mode"]),
-        event_id=result["event_id"],
-        outbox_id=result["outbox_id"],
-        text_provider_operations=result["text_provider_operations"],
+        project_id=result.project_id,
+        experience_mode=ExperienceMode(result.experience_mode),
+        event_id=result.event_id,
+        outbox_id=result.outbox_id,
+        text_provider_operations=result.text_provider_operations,
     )

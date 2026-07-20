@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID
 
@@ -11,6 +12,15 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.events.service import EventService
 from app.shared.enums import ExperienceMode
+
+
+@dataclass(frozen=True)
+class StartProjectResult:
+    project_id: UUID
+    experience_mode: str
+    event_id: UUID
+    outbox_id: UUID
+    text_provider_operations: int
 
 
 class CreationService:
@@ -29,7 +39,7 @@ class CreationService:
         aspect_ratio: str,
         actor: User,
         experience_mode: ExperienceMode = ExperienceMode.QUICK,
-    ) -> dict[str, object]:
+    ) -> StartProjectResult:
         project = await self._projects.create_project(
             organization_id=organization_id,
             name=name,
@@ -40,7 +50,6 @@ class CreationService:
         await self._projects.set_experience_mode(
             project_id=project.id, actor=actor, mode=experience_mode
         )
-        # Re-open transactional write for event+outbox after project commits.
         log, outbox = await self._events.append_with_outbox(
             project_id=project.id,
             aggregate_type="project",
@@ -55,10 +64,10 @@ class CreationService:
             actor_id=actor.id,
         )
         await self._session.commit()
-        return {
-            "project_id": project.id,
-            "experience_mode": experience_mode.value,
-            "event_id": log.event_id,
-            "outbox_id": outbox.id,
-            "text_provider_operations": 0,
-        }
+        return StartProjectResult(
+            project_id=project.id,
+            experience_mode=experience_mode.value,
+            event_id=log.event_id,
+            outbox_id=outbox.id,
+            text_provider_operations=0,
+        )
