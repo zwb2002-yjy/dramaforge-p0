@@ -1,0 +1,141 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1419;
+  --panel: #1a2332;
+  --border: #2d3a4f;
+  --text: #e7ecf3;
+  --muted: #9aa8bc;
+  --accent: #5b9fd4;
+  --brand: #7dd3c0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.workstation {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.workstation-topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: #121a24;
+}
+
+.workstation-topbar .brand {
+  font-weight: 700;
+  color: var(--brand);
+  letter-spacing: 0.02em;
+}
+
+.env-badge {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+}
+
+.workstation-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 220px 1fr 260px;
+  min-height: 0;
+}
+
+.nav {
+  border-right: 1px solid var(--border);
+  padding: 1rem;
+  background: #121a24;
+}
+
+.nav nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.inspector {
+  border-left: 1px solid var(--border);
+  padding: 1rem;
+  background: #121a24;
+  color: var(--muted);
+}
+
+.workstation-main {
+  padding: 1.25rem;
+  overflow: auto;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+
+.panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.subnav,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+
+@media (max-width: 960px) {
+  .workstation-body {
+    grid-template-columns: 1fr;
+  }
+
+  .nav,
+  .inspector {
+    display: none;
+  }
+
+  .nav.open {
+    display: block;
+  }
+}

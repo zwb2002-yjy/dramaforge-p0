@@ -1,0 +1,51 @@
+# Local agent and editor state
+.agents/
+.codex/
+.idea/
+.vscode/
+.playwright-mcp/
+
+# Local development-agent progress and parallel worktrees
+.agent-control/PROGRESS.jsonl
+.worktrees/
+
+# Credentials and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Node and frontend
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+frontend/src/types/openapi.json
+
+# Runtime and local data
+data/
+tmp/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+
+# Operating system output
+.DS_Store
+Thumbs.db
+Desktop.ini

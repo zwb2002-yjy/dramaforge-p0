@@ -1,0 +1,18 @@
+# Optional GPU / ComfyUI profile. Not enabled by default.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gpu up -d
+
+services:
+  comfyui:
+    profiles: ["gpu"]
+    image: yanwk/comfyui-boot:cpu
+    # Replace with a CUDA image and device reservations only when GPU is available.
+    ports:
+      - "8188:8188"
+    volumes:
+      - comfyui_data:/root
+    environment:
+      CLI_ARGS: "--listen 0.0.0.0"
+    restart: "no"
+
+volumes:
+  comfyui_data:
