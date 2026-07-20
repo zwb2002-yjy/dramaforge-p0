@@ -1,11 +1,14 @@
-"""Version 1 API router. Business routes land with S1+ stages."""
+"""Version 1 API router."""
 
 from fastapi import APIRouter
 
+from app.api.v1 import auth
+
 api_router = APIRouter()
+api_router.include_router(auth.router)
 
 
 @api_router.get("/status", tags=["system"])
 async def api_status() -> dict[str, str]:
-    """Lightweight authenticated-path placeholder for OpenAPI surface."""
+    """Lightweight API surface probe."""
     return {"status": "ok", "api": "v1"}
