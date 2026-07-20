@@ -36,6 +36,7 @@ coverage/
 playwright-report/
 test-results/
 frontend/src/types/openapi.json
+*.tsbuildinfo
 
 # Runtime and local data
 data/
