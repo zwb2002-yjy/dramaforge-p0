@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-
 from app.shared.security import CSRF_HEADER
+from fastapi.testclient import TestClient
 
 
 def _register(client: TestClient, email: str) -> dict:
