@@ -86,6 +86,57 @@ async def test_outbox_publish_and_dead_letter_then_idempotent_replay_across_inst
 
 
 @pytest.mark.asyncio
+async def test_human_replay_does_not_lease_sibling_pending(engine_factory) -> None:
+    """Replay of e1 dead letter must leave sibling e2 PENDING (not stuck LEASED)."""
+    _engine, factory = engine_factory
+    publisher = StreamPublisher()
+    async with factory() as session:
+        d = OutboxDispatcher(session, publisher, max_attempts=1)
+        e1 = OutboxEvent(
+            event_id=uuid4(),
+            topic="node.completed",
+            schema_version=1,
+            payload={"id": "e1"},
+            status=OutboxStatus.PENDING.value,
+            attempt_count=0,
+        )
+        e2 = OutboxEvent(
+            event_id=uuid4(),
+            topic="node.completed",
+            schema_version=1,
+            payload={"id": "e2"},
+            status=OutboxStatus.PENDING.value,
+            attempt_count=0,
+        )
+        session.add_all([e1, e2])
+        await session.commit()
+        await session.refresh(e1)
+        await session.refresh(e2)
+        e2_id = e2.id
+
+        # Drive e1 only to dead letter (max_attempts=1)
+        claimed = await d.claim_pending(worker_id="w1", limit=1)
+        assert len(claimed) == 1
+        assert claimed[0].event_id == e1.event_id
+        dl = await d.fail_leased(claimed[0], error="boom")
+        assert dl is not None
+        await session.commit()
+
+        # Sibling must still be pending before and after replay
+        await session.refresh(e2)
+        assert e2.status == OutboxStatus.PENDING.value
+
+        await d.human_replay_dead_letter(dl.id, operator="ops")
+        await session.commit()
+
+        e2_after = await session.get(OutboxEvent, e2_id)
+        assert e2_after is not None
+        assert e2_after.status == OutboxStatus.PENDING.value
+        assert e2_after.locked_by is None
+        assert e2_after.leased_until is None
+
+
+@pytest.mark.asyncio
 async def test_sse_last_event_id_resume() -> None:
     hub = SseHub(capacity=100)
     e1 = hub.publish(event="node.progress", data={"n": 1})

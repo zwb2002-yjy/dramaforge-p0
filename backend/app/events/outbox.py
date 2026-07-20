@@ -175,10 +175,11 @@ class OutboxDispatcher:
             OUTBOX_REPLAY_TOTAL.labels(result="idempotent").inc()
             return published
 
-        claimed = await self.claim_pending(worker_id=f"replay:{operator}", limit=50)
-        target = next((c for c in claimed if c.event_id == dl.event_id), None)
+        # Lease and publish ONLY this dead letter's outbox row — never bulk-claim siblings.
+        target = await self._claim_one(
+            event_id=dl.event_id, worker_id=f"replay:{operator}"
+        )
         if target is None:
-            # Maybe already published concurrently
             published = await self._published_by_event_id(dl.event_id)
             if published is not None:
                 OUTBOX_REPLAY_TOTAL.labels(result="idempotent").inc()
@@ -187,6 +188,25 @@ class OutboxDispatcher:
         await self.publish_leased(target)
         OUTBOX_REPLAY_TOTAL.labels(result="applied").inc()
         return target
+
+    async def _claim_one(self, *, event_id: UUID, worker_id: str) -> OutboxEvent | None:
+        """Lease a single pending outbox row by event_id without touching siblings."""
+        now = datetime.now(UTC)
+        result = await self._session.execute(
+            select(OutboxEvent)
+            .where(OutboxEvent.event_id == event_id)
+            .where(OutboxEvent.status == OutboxStatus.PENDING.value)
+            .where(OutboxEvent.next_attempt_at <= now)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        row.status = OutboxStatus.LEASED.value
+        row.locked_by = worker_id
+        row.leased_until = now + timedelta(seconds=self._lease_seconds)
+        row.attempt_count += 1
+        await self._session.flush()
+        return row
 
     async def pending_count(self) -> int:
         result = await self._session.execute(
