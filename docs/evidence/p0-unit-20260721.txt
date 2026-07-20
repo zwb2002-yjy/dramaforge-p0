@@ -1,10 +1,14 @@
-﻿DramaForge P0 unit evidence
+DramaForge P0 unit evidence
 Date: 2026-07-21
 Command: pytest tests/unit -q
-Result: 85 passed in ~21s
-Key suites: test_p0_gate_matrix, test_face_two_source, test_product_path_shipped, test_script_import, test_golden_path
+Result: 91 passed in ~22s
+Key suites: test_p0_gate_matrix, test_face_two_source, test_product_path_shipped,
+  test_script_import, test_golden_path, test_continuity
 Shared ObjectStore: yes
-Two-source face: yes
+Two-source face: yes (mismatch blocks)
+Continuity four-layer: yes
 Golden fixture: fixtures/scripts/p0_10_shots.md (3 scenes, 10 shots, lead Lin Xia)
-PG integration: SKIPPED (Docker engine not ready)
+Frontend build: tsc + vite OK
+PG integration: SKIPPED (Docker com.docker.service Stopped; sc start Access Denied)
 P0 MVP complete stamp: NO
+Commits: 0929cab, 740979f
