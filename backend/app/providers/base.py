@@ -1,8 +1,30 @@
-"""Provider adapter protocol shell (full contract lands with S2 adapters)."""
+"""Provider adapter protocol and shared result shapes."""
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
+
+
+class ProviderCreateResult(TypedDict, total=False):
+    remote_task_id: str
+    status: str
+
+
+class ProviderPollResult(TypedDict, total=False):
+    status: str
+    progress: float
+    artifact_uri: str
+    error: str
+
+
+class ProviderCancelResult(TypedDict, total=False):
+    status: str
+
+
+class ProviderCostResult(TypedDict, total=False):
+    amount: float
+    currency: str
+    units: float
 
 
 class ProviderAdapter(Protocol):

@@ -63,3 +63,21 @@ class OutboxEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class OutboxDeadLetter(Base):
+    __tablename__ = "outbox_dead_letters"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    outbox_event_id: Mapped[UUID] = mapped_column(nullable=False, unique=True)
+    event_id: Mapped[UUID] = mapped_column(nullable=False)
+    project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+    topic: Mapped[str] = mapped_column(String(120), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_error_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    dead_lettered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

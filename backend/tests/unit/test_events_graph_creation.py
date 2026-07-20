@@ -10,7 +10,11 @@ from app.events import models as _event_models  # noqa: F401
 from app.events.models import EventLog, OutboxEvent
 from app.events.service import EventService
 from app.production import models as _prod_models  # noqa: F401
-from app.production.models import GraphVersion, assert_graph_version_mutable
+from app.production.models import (
+    GraphVersion,
+    assert_graph_version_mutable,
+    definition_hash,
+)
 from app.shared.base import Base
 from app.shared.enums import GraphStatus
 from app.shared.errors import ValidationAppError
@@ -51,19 +55,23 @@ async def test_published_graph_version_immutable() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    body: dict[str, object] = {"nodes": []}
     version = GraphVersion(
         graph_id=uuid4(),
-        version=1,
+        version_number=1,
         status=GraphStatus.PUBLISHED.value,
-        definition={"nodes": []},
+        definition_hash=definition_hash(body),
+        definition=body,
     )
     with pytest.raises(ValidationAppError):
         assert_graph_version_mutable(version)
+    draft_body: dict[str, object] = {}
     draft = GraphVersion(
         graph_id=uuid4(),
-        version=1,
+        version_number=1,
         status=GraphStatus.DRAFT.value,
-        definition={},
+        definition_hash=definition_hash(draft_body),
+        definition=draft_body,
     )
     assert_graph_version_mutable(draft)
     await engine.dispose()
