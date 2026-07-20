@@ -10,13 +10,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+# Keep COPY list in sync with tests/unit/test_dockerfile_context.py
+COPY pyproject.toml README.md ./
 COPY app ./app
 COPY alembic.ini ./
 COPY alembic ./alembic
 
 RUN pip install --upgrade pip \
-    && pip install -e ".[dev]"
+    && pip install -e .
 
 EXPOSE 8000
 
