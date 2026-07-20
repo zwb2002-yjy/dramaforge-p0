@@ -87,7 +87,7 @@ class Project(Base):
     stage: Mapped[str] = mapped_column(String(32), nullable=False, default=ProjectStage.DRAFT.value)
     aspect_ratio: Mapped[str] = mapped_column(String(8), nullable=False)
     target_platform: Mapped[str] = mapped_column(String(40), nullable=False, default="general")
-    style_bible: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    style_bible: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     budget_limit: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     budget_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     provider_dispatch_frozen: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

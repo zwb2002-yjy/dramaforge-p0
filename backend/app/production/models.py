@@ -41,7 +41,7 @@ class GraphVersion(Base):
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default=GraphStatus.DRAFT.value
     )
-    definition: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    definition: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

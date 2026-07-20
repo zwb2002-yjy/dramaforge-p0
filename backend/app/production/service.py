@@ -42,7 +42,7 @@ class GraphService:
         return version
 
     async def update_draft_definition(
-        self, *, version_id: UUID, definition: dict
+        self, *, version_id: UUID, definition: dict[str, object]
     ) -> GraphVersion:
         version = await self.get_version(version_id)
         assert_graph_version_mutable(version)

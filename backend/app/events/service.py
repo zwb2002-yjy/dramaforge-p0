@@ -23,7 +23,7 @@ class EventService:
         aggregate_id: UUID,
         event_type: str,
         topic: str,
-        payload: dict,
+        payload: dict[str, object],
         actor_id: UUID | None = None,
         schema_version: int = 1,
     ) -> tuple[EventLog, OutboxEvent]:

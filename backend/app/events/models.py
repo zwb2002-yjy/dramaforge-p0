@@ -28,7 +28,7 @@ class EventLog(Base):
     actor_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -44,7 +44,7 @@ class OutboxEvent(Base):
     )
     topic: Mapped[str] = mapped_column(String(120), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default=OutboxStatus.PENDING.value
     )

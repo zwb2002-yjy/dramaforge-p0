@@ -29,7 +29,7 @@ class CreationService:
         aspect_ratio: str,
         actor: User,
         experience_mode: ExperienceMode = ExperienceMode.QUICK,
-    ) -> dict:
+    ) -> dict[str, object]:
         project = await self._projects.create_project(
             organization_id=organization_id,
             name=name,
