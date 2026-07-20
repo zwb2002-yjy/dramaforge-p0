@@ -208,13 +208,29 @@ async def test_ten_shot_p0_and_subtitle_rework(pg_session: AsyncSession) -> None
     )
     from app.execution.shot_p0 import set_shot_lock
 
+    store = get_object_store()
     shots = await produce_shots_p0(
-        pg_session, project_id=project.id, user_id=user.id, n=10
+        pg_session, project_id=project.id, user_id=user.id, n=10, store=store
     )
     assert len(shots) == 10
     assert all(s.face_checked and s.continuity_checked for s in shots)
     assert all(len(s.node_ids) == 9 for s in shots)
-    assert all(s.face_score is not None and s.face_score >= 0.5 for s in shots)
+    # Two-source review: scores are real comparisons (not identity unit-vector);
+    # generated keyframe vs canonical may score below 0.5 on hash embeddings.
+    assert all(s.face_status is not None for s in shots)
+    assert all(s.face_score is not None for s in shots)
+    # Deliberate mismatch must not look like near-perfect identity
+    bad = await produce_shots_p0(
+        pg_session,
+        project_id=project.id,
+        user_id=user.id,
+        n=1,
+        store=store,
+        mismatch_face_on_shot=1,
+    )
+    assert bad[0].face_status in {"blocked", "needs_human", "warning"} or (
+        bad[0].face_score is not None and bad[0].face_score < 0.95
+    )
     kf_before = shots[0].run_ids["keyframe"]
     await rework_subtitle_only_p0(
         pg_session,
@@ -223,6 +239,7 @@ async def test_ten_shot_p0_and_subtitle_rework(pg_session: AsyncSession) -> None
         shot=shots[0],
         new_subtitle="neon rain street rework",
         budget=__import__("decimal").Decimal("100"),
+        store=store,
     )
     assert shots[0].run_ids["keyframe"] == kf_before
     await set_shot_lock(
@@ -241,6 +258,7 @@ async def test_ten_shot_p0_and_subtitle_rework(pg_session: AsyncSession) -> None
             shot=shots[0],
             new_subtitle="Nope",
             budget=__import__("decimal").Decimal("100"),
+            store=store,
         )
 
 
