@@ -300,11 +300,13 @@ async def produce_shots_p0(
             if key == "face_review":
                 if keyframe_bytes is None:
                     raise RuntimeError("keyframe bytes required before face_review")
-                # Optional deliberate mismatch for tests
+                # TWO-SOURCE ONLY: probe (keyframe or deliberate wrong character)
+                # vs canon_bytes from distinct canonical reference object — never self-match.
                 if mismatch_face_on_shot == i:
                     probe = await _make_canonical_bytes(f"wrong-character-{i}")
                 else:
                     probe = keyframe_bytes
+                assert probe is not canon_bytes or mismatch_face_on_shot == i
                 review = face_review_images(
                     probe_image_bytes=probe,
                     canonical_image_bytes=canon_bytes,

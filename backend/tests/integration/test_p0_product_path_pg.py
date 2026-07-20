@@ -33,11 +33,21 @@ def _url() -> str:
 
 
 def _pg_up() -> bool:
+    """Fast connectivity probe — never hang collection for minutes."""
     try:
+        import socket
+
+        host, port = "127.0.0.1", 5432
+        with socket.create_connection((host, port), timeout=1.0):
+            pass
         from sqlalchemy import create_engine
 
         sync = _url().replace("postgresql+asyncpg://", "postgresql+psycopg://")
-        eng = create_engine(sync, pool_pre_ping=True)
+        eng = create_engine(
+            sync,
+            pool_pre_ping=True,
+            connect_args={"connect_timeout": 2},
+        )
         with eng.connect() as c:
             c.execute(text("SELECT 1"))
         eng.dispose()
@@ -156,12 +166,13 @@ async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
     # Shared store: export must see worker bytes
     assert await store.get_bytes(object_key=art.object_key)
 
+    # store=None forces product default get_object_store() (same singleton Worker used)
     exp = await build_project_export(
         pg_session,
         project_id=started.project_id,
         requested_by=user.id,
         shot_subtitles=[("1", "Opening")],
-        store=store,
+        store=None,
         try_ffmpeg=True,
     )
     assert exp.timeline_hash
