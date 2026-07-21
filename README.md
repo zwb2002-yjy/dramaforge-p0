@@ -24,6 +24,18 @@ D:\调研\dramaforge
 
 ## 本地启动
 
+### 0. Windows + WSL 推荐栈（绕过 Postgres 断连）
+
+本机若 PostgreSQL 在 **WSL**、API 却在 **Windows**，`127.0.0.1:5432` 的 localhost 转发会间歇断开，表现为 `/health` 的 `db=down` 与 503。  
+**默认绕过：API 与 PG 都在 WSL 内**，前端仍在 Windows。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_p0_stack.ps1
+# 等价于 -Mode WslApi
+```
+
+备选与原理见 [`docs/runbooks/local-stack-bypass.md`](docs/runbooks/local-stack-bypass.md)。
+
 ### 1. 环境文件
 
 ```powershell
