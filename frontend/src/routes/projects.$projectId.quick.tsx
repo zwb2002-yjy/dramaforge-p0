@@ -11,6 +11,7 @@ import {
   fetchSnapshot,
   generateBriefAgent,
   generatePlanAgent,
+  registerLeadCharacter,
   updateBrief,
   apiSend,
 } from "../lib/api";
@@ -60,6 +61,8 @@ function QuickModePage() {
   const [briefRev, setBriefRev] = useState<string | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
   const [nodeRunId, setNodeRunId] = useState<string | null>(null);
+  const [leadName, setLeadName] = useState("林夏");
+  const [canonKey, setCanonKey] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -162,10 +165,42 @@ function QuickModePage() {
     onError: (e: Error) => setErr(e.message),
   });
 
+  const registerLead = useMutation({
+    mutationFn: async () => {
+      if (projectId === "demo") throw new Error("请从首页创建真实项目");
+      setErr(null);
+      return registerLeadCharacter(
+        projectId,
+        leadName,
+        `lead character ${leadName}, consistent face, short drama`,
+      );
+    },
+    onSuccess: (r) => {
+      setCanonKey(r.canonical_object_key);
+      setMsg(
+        `主角 canonical 已注册：${r.name} provider=${r.provider} bytes=${r.byte_size} key=${r.canonical_object_key.slice(0, 48)}…`,
+      );
+    },
+    onError: (e: Error) => setErr(e.message),
+  });
+
   const produce = useMutation({
     mutationFn: async () => {
       if (!planId) throw new Error("需要 Plan");
       setErr(null);
+      // Ensure lead exists for consistency path when possible
+      if (!canonKey) {
+        try {
+          const lead = await registerLeadCharacter(
+            projectId,
+            leadName,
+            `lead character ${leadName}, consistent face`,
+          );
+          setCanonKey(lead.canonical_object_key);
+        } catch {
+          // continue — keyframe may still run without hard require_canonical
+        }
+      }
       const mat = await confirmPlan(projectId, planId);
       setNodeRunId(mat.node_run_id);
       const enq = await enqueueNodeRun(projectId, mat.node_run_id);
@@ -188,6 +223,7 @@ function QuickModePage() {
     doConfirmBrief.isPending ||
     agentPlan.isPending ||
     manualPlan.isPending ||
+    registerLead.isPending ||
     produce.isPending;
 
   return (
@@ -317,11 +353,35 @@ function QuickModePage() {
         )}
       </section>
 
+      <section className="panel" data-testid="step-assets">
+        <h3>③.5 主角 canonical（一致性门禁）</h3>
+        <p className="muted">
+          P0 要求主角至少 1 张 canonical 参考图。开发环境会调用图像 Adapter（Agnes 若已配置）生成参考肖像。
+        </p>
+        <label>
+          主角名
+          <input value={leadName} onChange={(e) => setLeadName(e.target.value)} />
+        </label>
+        <button
+          type="button"
+          data-testid="register-lead"
+          disabled={busy}
+          onClick={() => registerLead.mutate()}
+        >
+          {registerLead.isPending ? "注册中…" : "注册主角 + 生成 canonical 参考图"}
+        </button>
+        {canonKey && (
+          <p className="status-ok">
+            canonical: <code>{canonKey}</code>
+          </p>
+        )}
+      </section>
+
       <section className="panel" data-testid="step-produce">
         <h3>④ 确认 Plan → 入队 → Worker 首帧</h3>
         <p className="muted">
-          物化白名单：create_shot_stub + enqueue_keyframe。图像 Adapter 在 Worker 执行（开发环境可用
-          Agnes BYOK，测试环境为 Fake）。
+          物化白名单：create_shot_stub + enqueue_keyframe。图像在 Worker 执行；
+          <strong>development + Agnes Key</strong> 走真实生成，<code>APP_ENV=test</code> 仅测试用 Fake。
         </p>
         <button
           type="button"
@@ -329,7 +389,7 @@ function QuickModePage() {
           disabled={busy || !planId}
           onClick={() => produce.mutate()}
         >
-          {produce.isPending ? "生产中…" : "确认 Plan 并生产首帧"}
+          {produce.isPending ? "生产中（真生成可能需数十秒）…" : "确认 Plan 并生产首帧"}
         </button>
         {nodeRunId && (
           <p>

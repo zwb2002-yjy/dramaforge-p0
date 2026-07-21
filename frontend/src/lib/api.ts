@@ -357,3 +357,23 @@ export async function grantExportDownload(
 export function artifactContentUrl(projectId: string, artifactId: string): string {
   return `/api/v1/projects/${projectId}/artifacts/${artifactId}/content`;
 }
+
+export async function registerLeadCharacter(
+  projectId: string,
+  name: string,
+  lockedPrompt = "",
+): Promise<{
+  character_id: string;
+  name: string;
+  canonical_object_key: string;
+  provider: string;
+  byte_size: number;
+}> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/characters/lead`,
+    { name, locked_prompt: lockedPrompt },
+    csrf,
+  );
+}

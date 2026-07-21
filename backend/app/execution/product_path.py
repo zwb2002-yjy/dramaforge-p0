@@ -83,11 +83,32 @@ async def enqueue_keyframe_after_plan(
     )
     session.add(node)
     await session.flush()
+    # Attach project lead canonical if registered (P0 face gate / consistency).
+    from sqlalchemy import select
+
+    from app.assets.models import Asset, Character, CharacterReference
+
+    canon_key: str | None = None
+    ref = (
+        await session.execute(
+            select(CharacterReference)
+            .join(Character, Character.id == CharacterReference.character_id)
+            .join(Asset, Asset.id == Character.id)
+            .where(Asset.project_id == project_id)
+            .where(CharacterReference.is_canonical.is_(True))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if ref is not None:
+        canon_key = ref.object_key
+
     snapshot: dict[str, object] = {
         "plan_id": str(plan.id),
         "plan": plan.plan,
         "materialization": materialization_ops,
     }
+    if canon_key:
+        snapshot["canonical_object_key"] = canon_key
     ih = _input_hash(snapshot)
     node_run = NodeRun(
         project_id=project_id,
@@ -256,13 +277,27 @@ async def execute_media_node_run(
     object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
     stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
 
+    from app.config import get_settings
+
+    _settings = get_settings()
+    provider_name = str(getattr(adapter, "provider", "flux") or "flux")
+    if type(adapter).__name__.startswith("Agnes") or provider_name in {"agnes", "flux"}:
+        if node_type in {"video", "video_review", "composite"}:
+            model_name = _settings.agnes_video_model
+        else:
+            model_name = _settings.agnes_image_model
+    elif type(adapter).__name__.startswith("Fake"):
+        model_name = f"fake-{node_type}"
+    else:
+        model_name = str(getattr(adapter, "model", None) or provider_name)
+
     op = ProviderOperation(
         node_run_id=run.id,
         attempt_no=1,
         purpose="primary",
         operation_kind=f"{node_type}.generate",
-        actual_provider=getattr(adapter, "provider", "flux"),
-        actual_model=f"fake-{node_type}",
+        actual_provider=provider_name,
+        actual_model=model_name,
         provider_operation_id=remote,
         request_fingerprint=hashlib.sha256(f"{kind}:{prompt}".encode()).hexdigest(),
         status="succeeded",
