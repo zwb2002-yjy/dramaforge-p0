@@ -75,7 +75,35 @@ class AgentRunScheduler:
         return count
 
     async def enqueue_node_run_only(self, node_run_id: UUID) -> str:
-        """Enqueue a single NodeRun for Worker; does not execute Adapter."""
+        """Write Outbox row then enqueue Arq job. Never executes Adapter."""
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from app.events.models import OutboxEvent
+        from app.shared.enums import OutboxStatus
+
+        run = await self._session.get(NodeRun, node_run_id)
+        if run is None:
+            from app.shared.errors import NotFoundError
+
+            raise NotFoundError("node_run not found")
+        # Durable Outbox fact before Arq (NodeRun → Outbox → Arq)
+        self._session.add(
+            OutboxEvent(
+                event_id=uuid4(),
+                project_id=run.project_id,
+                topic="node_run.enqueue",
+                schema_version=1,
+                payload={
+                    "node_run_id": str(node_run_id),
+                    "status": run.status,
+                    "project_id": str(run.project_id),
+                },
+                status=OutboxStatus.PENDING.value,
+                next_attempt_at=datetime.now(UTC),
+            )
+        )
+        await self._session.flush()
         job_id = await self._enqueue_node_run(node_run_id)
         await self._session.commit()
         return job_id

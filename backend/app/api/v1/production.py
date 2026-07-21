@@ -318,8 +318,10 @@ async def download_export_object(
     session: SessionDep,
     token: str,
     object_role: str = "timeline_json",
-) -> dict[str, object]:
-    """Authorized download: membership + HMAC token (no permanent public URL)."""
+):
+    """Authorized download: return raw file bytes (not JSON metadata)."""
+    from fastapi.responses import Response
+
     await ProjectService(session).get_project_for_member(
         project_id=project_id, actor=user
     )
@@ -334,10 +336,23 @@ async def download_export_object(
         user_id=user.id,
     )
     data = await fetch_export_bytes(grant=grant)
-    return {
-        "export_id": str(export_id),
-        "object_key": grant.object_key,
-        "byte_size": len(data),
-        "content_sha256": __import__("hashlib").sha256(data).hexdigest(),
-        "authorized": True,
-    }
+    media = "application/octet-stream"
+    name = grant.object_key.rsplit("/", 1)[-1]
+    if object_role in {"timeline_json", "package_json"} or name.endswith(".json"):
+        media = "application/json"
+    elif object_role == "srt" or name.endswith(".srt"):
+        media = "application/x-subrip"
+    elif object_role in {"package", "package_zip"} or name.endswith(".zip"):
+        media = "application/zip"
+    elif object_role == "mp4" or name.endswith(".mp4"):
+        media = "video/mp4"
+    return Response(
+        content=data,
+        media_type=media,
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "X-Content-SHA256": __import__("hashlib").sha256(data).hexdigest(),
+            "X-Export-Id": str(export_id),
+            "X-Object-Key": grant.object_key,
+        },
+    )

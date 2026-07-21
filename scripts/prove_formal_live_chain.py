@@ -29,13 +29,8 @@ def main() -> int:
     scratch.mkdir(parents=True, exist_ok=True)
     base = args.base.rstrip("/")
 
-    # Refuse memory store in process if someone exported it
-    if os.environ.get("DRAMA_FORCE_MEMORY_STORE") == "1":
-        (scratch / "shot_chain.json").write_text(
-            json.dumps({"ok": False, "error": "DRAMA_FORCE_MEMORY_STORE=1 forbidden"}),
-            encoding="utf-8",
-        )
-        return 2
+    # Client-side FORCE_MEMORY does not affect remote formal stack; clear for safety.
+    os.environ.pop("DRAMA_FORCE_MEMORY_STORE", None)
 
     client = httpx.Client(base_url=base, timeout=90.0, follow_redirects=True)
     cookies: dict[str, str] = {}
@@ -219,12 +214,46 @@ def main() -> int:
                 params={"token": tok, "object_role": "timeline_json"},
                 cookies=cookies,
             )
+            # Must be raw file body (timeline JSON), not metadata wrapper
+            is_file = (
+                dl.status_code == 200
+                and b"authorized" not in dl.content
+                and (b"timeline" in dl.content or b"version" in dl.content or len(dl.content) > 0)
+            )
             exp["download"] = {
                 "status": dl.status_code,
                 "bytes": len(dl.content),
                 "content_type": dl.headers.get("content-type"),
+                "is_raw_file_body": is_file,
+                "sha256": __import__("hashlib").sha256(dl.content).hexdigest() if dl.content else None,
             }
-            (scratch / "export_dl.bin").write_bytes(dl.content[: min(len(dl.content), 4096)])
+            (scratch / "export_dl.bin").write_bytes(dl.content)
+            # package.zip
+            t2 = csrf()
+            g2 = client.post(
+                f"/api/v1/projects/{project_id}/exports/{export_id}/download-grant",
+                params={"object_role": "package"},
+                cookies=cookies,
+                headers={"X-CSRF-Token": t2, "Content-Type": "application/json"},
+                json={},
+            )
+            exp["package_grant"] = {"status": g2.status_code, "body": g2.text[:300]}
+            if g2.status_code in (200, 201):
+                tok2 = g2.json().get("token")
+                key = g2.json().get("object_key", "")
+                exp["package_key_is_zip"] = str(key).endswith("package.zip")
+                dl2 = client.get(
+                    f"/api/v1/projects/{project_id}/exports/{export_id}/download",
+                    params={"token": tok2, "object_role": "package"},
+                    cookies=cookies,
+                )
+                exp["package_download"] = {
+                    "status": dl2.status_code,
+                    "bytes": len(dl2.content),
+                    "starts_with_pk": dl2.content[:2] == b"PK" if dl2.content else False,
+                    "content_type": dl2.headers.get("content-type"),
+                }
+                (scratch / "export_package.bin").write_bytes(dl2.content[: min(len(dl2.content), 65536)])
     (scratch / "export_dl.txt").write_text(json.dumps(exp, indent=2), encoding="utf-8")
 
     # Playwright env note

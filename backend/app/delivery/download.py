@@ -90,7 +90,10 @@ async def authorize_export_download(
     key_map = {
         "timeline_json": f"exports/{exp.project_id}/{exp.id}/timeline.json",
         "srt": f"exports/{exp.project_id}/{exp.id}/subtitles.srt",
-        "package": f"exports/{exp.project_id}/{exp.id}/package.json",
+        # package → zip with real media/; package_json keeps the manifest only
+        "package": f"exports/{exp.project_id}/{exp.id}/package.zip",
+        "package_json": f"exports/{exp.project_id}/{exp.id}/package.json",
+        "package_zip": f"exports/{exp.project_id}/{exp.id}/package.zip",
         "mp4": manifest.get("mp4_object_key")
         or f"exports/{exp.project_id}/{exp.id}/program.mp4",
     }
