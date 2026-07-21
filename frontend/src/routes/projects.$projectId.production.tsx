@@ -142,8 +142,10 @@ function ProductionPage() {
       return grantExportDownload(projectId, lastExportId, "timeline_json");
     },
     onSuccess: (g) => {
-      const url = `/api/v1/projects/${projectId}/exports/${g.export_id}/download?token=${encodeURIComponent(g.token)}&object_key=${encodeURIComponent(g.object_key)}`;
-      setDownloadHint(`下载授权已签发：${g.object_key}（expires ${g.expires_at}）`);
+      const url = `/api/v1/projects/${projectId}/exports/${g.export_id}/download?token=${encodeURIComponent(g.token)}&object_role=timeline_json`;
+      setDownloadHint(
+        `下载授权已签发：${g.object_key}（expires ${g.expires_at}）。将打开 JSON 授权结果页。`,
+      );
       window.open(url, "_blank", "noopener,noreferrer");
     },
     onError: (e: Error) => setMsg(e.message),
