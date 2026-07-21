@@ -45,15 +45,47 @@ class OutboxDispatcher:
         self._max_attempts = max_attempts
         self._lease_seconds = lease_seconds
 
-    async def claim_pending(self, *, worker_id: str, limit: int = 10) -> list[OutboxEvent]:
-        now = datetime.now(UTC)
+    async def reclaim_expired_leases(self, *, now: datetime | None = None) -> int:
+        """Return expired LEASED rows to PENDING for retry."""
+        ts = now or datetime.now(UTC)
         result = await self._session.execute(
+            select(OutboxEvent).where(
+                OutboxEvent.status == OutboxStatus.LEASED.value,
+                OutboxEvent.leased_until.is_not(None),
+                OutboxEvent.leased_until < ts,
+            )
+        )
+        n = 0
+        for row in result.scalars().all():
+            row.status = OutboxStatus.PENDING.value
+            row.locked_by = None
+            row.leased_until = None
+            row.next_attempt_at = ts
+            row.last_error_summary = "lease_expired_reclaimed"
+            n += 1
+        if n:
+            await self._session.flush()
+        return n
+
+    async def claim_pending(self, *, worker_id: str, limit: int = 10) -> list[OutboxEvent]:
+        """Concurrent-safe claim: reclaim expired leases, then FOR UPDATE SKIP LOCKED."""
+        now = datetime.now(UTC)
+        await self.reclaim_expired_leases(now=now)
+
+        # Prefer row-level locking when the dialect supports it (PostgreSQL).
+        stmt = (
             select(OutboxEvent)
             .where(OutboxEvent.status == OutboxStatus.PENDING.value)
             .where(OutboxEvent.next_attempt_at <= now)
             .order_by(OutboxEvent.created_at)
             .limit(limit)
         )
+        bind = self._session.get_bind()
+        dialect = getattr(getattr(bind, "dialect", None), "name", "") or ""
+        if dialect.startswith("postgres"):
+            stmt = stmt.with_for_update(skip_locked=True)
+
+        result = await self._session.execute(stmt)
         rows = list(result.scalars().all())
         leased_until = now + timedelta(seconds=self._lease_seconds)
         for row in rows:

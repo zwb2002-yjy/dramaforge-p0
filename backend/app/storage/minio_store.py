@@ -123,20 +123,29 @@ _minio_singleton: MinioObjectStore | None = None
 def get_object_store(settings: Settings | None = None) -> ObjectStore:
     """Return the process object store.
 
-    - test env: always shared InMemory singleton
-    - otherwise: MinIO if reachable, else same InMemory singleton (not a new instance)
+    - test env or explicit DRAMA_FORCE_MEMORY_STORE=1: shared InMemory singleton
+    - formal development/production: MinIO only — never silent memory fallback
     """
+    import os
+
     global _minio_singleton
     cfg = settings or get_settings()
-    if cfg.app_env == "test":
+    force_mem = os.environ.get("DRAMA_FORCE_MEMORY_STORE", "").strip() == "1"
+    if cfg.app_env == "test" or force_mem:
         return _MEMORY_SINGLETON
     try:
         if _minio_singleton is None:
             _minio_singleton = MinioObjectStore(cfg)
             _minio_singleton._ensure_client()
         return _minio_singleton
-    except Exception:
-        return _MEMORY_SINGLETON
+    except Exception as exc:
+        from app.shared.errors import ValidationAppError
+
+        raise ValidationAppError(
+            f"OBJECT_STORE_UNAVAILABLE: MinIO not reachable ({type(exc).__name__}: {exc}). "
+            "Start formal stack (scripts/start_p0_wsl_stack.sh). "
+            "Memory store is only allowed for APP_ENV=test or DRAMA_FORCE_MEMORY_STORE=1."
+        ) from exc
 
 
 def reset_object_store_for_tests() -> InMemoryObjectStore:

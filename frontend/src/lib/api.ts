@@ -356,6 +356,100 @@ export async function grantExportDownload(
   );
 }
 
+export type ShotStatusResponse = {
+  shot_id: string;
+  status: string;
+  locked: boolean;
+  node_run_count: number;
+  failed_count: number;
+  guidance: { error_code?: string; summary?: string; retry_suggestion?: string } | null;
+  pipeline: string[];
+};
+
+export type ShotActionResponse = {
+  shot_id: string;
+  status: string;
+  locked: boolean;
+  message: string;
+  run_ids?: string[];
+  stale_nodes?: string[];
+  job_ids?: string[];
+};
+
+export function fetchShotStatus(projectId: string, shotId: string): Promise<ShotStatusResponse> {
+  return apiGet(`/api/v1/projects/${projectId}/shots/${shotId}/status`);
+}
+
+export async function startShot(
+  projectId: string,
+  shotId: string,
+  nodeKeys?: string[],
+): Promise<ShotActionResponse> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/start`,
+    { node_keys: nodeKeys ?? null },
+    csrf,
+  );
+}
+
+export async function approveShot(
+  projectId: string,
+  shotId: string,
+  note = "",
+): Promise<ShotActionResponse> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/approve`,
+    { note },
+    csrf,
+  );
+}
+
+export async function rejectShot(
+  projectId: string,
+  shotId: string,
+  reason: string,
+): Promise<ShotActionResponse> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/reject`,
+    { reason },
+    csrf,
+  );
+}
+
+export async function lockShot(
+  projectId: string,
+  shotId: string,
+  locked: boolean,
+): Promise<ShotActionResponse> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/lock`,
+    { locked },
+    csrf,
+  );
+}
+
+export async function rerunShot(
+  projectId: string,
+  shotId: string,
+  changedNodeKey = "subtitle",
+): Promise<ShotActionResponse> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/rerun`,
+    { changed_node_key: changedNodeKey },
+    csrf,
+  );
+}
+
 export function artifactContentUrl(projectId: string, artifactId: string): string {
   return `/api/v1/projects/${projectId}/artifacts/${artifactId}/content`;
 }

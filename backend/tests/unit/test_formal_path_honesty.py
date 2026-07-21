@@ -1,0 +1,125 @@
+"""Regression: no silent fake / no local:* enqueue / outbox lease reclaim."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.events.models import OutboxEvent
+from app.events.outbox import OutboxDispatcher
+from app.providers.flux import ProviderNotConfiguredError, get_flux_adapter
+from app.shared.enums import OutboxStatus
+
+
+def test_get_flux_adapter_fail_closed_outside_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("AGNES_API_KEY", raising=False)
+    monkeypatch.setenv("AGNES_ENABLED", "false")
+    from app.config import clear_settings_cache
+
+    clear_settings_cache()
+    try:
+        with pytest.raises(ProviderNotConfiguredError) as ei:
+            get_flux_adapter(allow_live=True, allow_fake=False)
+        assert ei.value.code == "PROVIDER_NOT_CONFIGURED"
+    finally:
+        monkeypatch.setenv("APP_ENV", "test")
+        clear_settings_cache()
+
+
+def test_get_flux_adapter_fake_only_in_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    from app.config import clear_settings_cache
+
+    clear_settings_cache()
+    ad = get_flux_adapter()
+    assert type(ad).__name__ == "FakeFluxAdapter"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_does_not_return_local_on_redis_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.runtime.scheduler import AgentRunScheduler
+    from app.shared.errors import ValidationAppError
+    from unittest.mock import AsyncMock, MagicMock
+
+    session = MagicMock()
+    session.commit = AsyncMock()
+    sched = AgentRunScheduler(session)
+
+    async def boom(*_a, **_k):
+        raise OSError("redis down")
+
+    monkeypatch.setattr("arq.create_pool", boom)
+    with pytest.raises(ValidationAppError) as ei:
+        await sched._enqueue_node_run(uuid4())
+    assert "QUEUE_UNAVAILABLE" in ei.value.message or "Redis" in ei.value.message
+    assert "local:" not in ei.value.message
+
+
+@pytest.mark.asyncio
+async def test_outbox_reclaim_expired_lease() -> None:
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.shared.base import Base
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db_session:
+        project_id = uuid4()
+        ev = OutboxEvent(
+            event_id=uuid4(),
+            project_id=project_id,
+            topic="node.queued",
+            payload={"x": 1},
+            schema_version=1,
+            status=OutboxStatus.LEASED.value,
+            locked_by="dead-worker",
+            leased_until=datetime.now(UTC) - timedelta(seconds=60),
+            attempt_count=1,
+            next_attempt_at=datetime.now(UTC) - timedelta(seconds=120),
+        )
+        db_session.add(ev)
+        await db_session.flush()
+
+        disp = OutboxDispatcher(db_session)
+        n = await disp.reclaim_expired_leases()
+        assert n >= 1
+        await db_session.refresh(ev)
+        assert ev.status == OutboxStatus.PENDING.value
+        assert ev.locked_by is None
+
+        claimed = await disp.claim_pending(worker_id="w1", limit=5)
+        assert any(c.id == ev.id for c in claimed)
+        assert claimed[0].status == OutboxStatus.LEASED.value
+    await engine.dispose()
+
+
+def test_stack_script_does_not_force_memory_store() -> None:
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    text = (repo / "scripts" / "start_p0_wsl_stack.sh").read_text(encoding="utf-8")
+    # Must never assign formal force-memory (=1); comments may mention the forbidden value.
+    assert 'export DRAMA_FORCE_MEMORY_STORE="1"' not in text
+    assert "DRAMA_FORCE_MEMORY_STORE=1" not in [
+        ln.strip() for ln in text.splitlines() if not ln.strip().startswith("#")
+    ]
+    assert "unset DRAMA_FORCE_MEMORY_STORE" in text or 'DRAMA_FORCE_MEMORY_STORE=""' in text
+    api = (repo / "scripts" / "start_api_wsl_stable.sh").read_text(encoding="utf-8")
+    assert 'export DRAMA_FORCE_MEMORY_STORE="1"' not in api
+
+
+def test_insightface_status_reports_backend() -> None:
+    from app.consistency.image_embed import insightface_status
+
+    st = insightface_status()
+    assert "available" in st
+    assert st["embedding_dim"] == 512
+    assert st["backend"] in {"insightface+onnx", "hash_placeholder"}

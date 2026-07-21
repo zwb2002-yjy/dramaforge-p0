@@ -10,11 +10,8 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep
-from app.assets.characters import register_lead_character
 from app.assets.models import Shot
 from app.assets.script_import import import_script
-from app.providers.fake import FakeFluxAdapter
-from app.storage.minio_store import get_object_store
 
 router = APIRouter(tags=["scripts"])
 
@@ -71,22 +68,11 @@ async def import_project_script(
     )
     character_id = None
     canon_key = None
+    # Never silent-Fake canonical on import. Lead must be registered via
+    # POST .../characters/lead (live Provider) or audited manual upload.
     if body.register_lead and result.lead_character:
-        ad = FakeFluxAdapter()
-        created = await ad.create(
-            {"prompt": f"canonical lead {result.lead_character}", "kind": "keyframe"}
-        )
-        blob = ad.blobs[created["remote_task_id"]]
-        char = await register_lead_character(
-            session,
-            project_id=project_id,
-            name=result.lead_character,
-            locked_prompt=f"lead character {result.lead_character}, consistent face",
-            canonical_image_bytes=blob,
-            store=get_object_store(),
-        )
-        character_id = char.character_id
-        canon_key = char.canonical_object_key
+        # Keep character name only — no Fake image generation
+        pass
     await session.commit()
     return ScriptImportResponse(
         script_document_id=result.script_document_id,

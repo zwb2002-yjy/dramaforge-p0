@@ -48,20 +48,42 @@ async def register_project_lead(
 
     await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
     settings = get_settings()
-    adapter = get_flux_adapter(allow_live=settings.app_env != "test")
     prompt = body.locked_prompt.strip() or (
         f"portrait reference sheet of {body.name}, consistent face, clean background, studio light"
     )
     try:
-        created = await adapter.create({"prompt": prompt, "kind": "keyframe"})
+        import asyncio
+
+        # Formal path: live only when configured; no silent Fake outside test
+        adapter = get_flux_adapter(
+            allow_live=settings.app_env != "test",
+            allow_fake=settings.app_env == "test",
+        )
+        # Bound provider latency so API never hangs (ReadTimeout/502)
+        created = await asyncio.wait_for(
+            adapter.create({"prompt": prompt, "kind": "keyframe"}),
+            timeout=45.0,
+        )
         remote = str(created.get("remote_task_id") or "")
-        poll = await adapter.poll(remote)
+        poll = await asyncio.wait_for(adapter.poll(remote), timeout=30.0)
+        status = str(poll.get("status", created.get("status", "")))
+        if status in {"failed", "error"} or (
+            status and status not in {"succeeded", "completed", "success", "queued", "running", ""}
+        ):
+            err = str(poll.get("error") or status or "provider_failed")
+            raise ValidationAppError(
+                f"provider_not_configured or provider failed: {err}",
+            )
         if hasattr(adapter, "blobs") and remote in getattr(adapter, "blobs", {}):
             blob = adapter.blobs[remote]  # type: ignore[attr-defined]
         else:
             from app.execution.product_path import _resolve_media_bytes
 
             uri = poll.get("artifact_uri") or created.get("artifact_uri")
+            if not uri and status == "failed":
+                raise ValidationAppError(
+                    f"provider_not_configured or provider failed: {poll.get('error')}"
+                )
             blob = await _resolve_media_bytes(
                 kind="keyframe", remote=remote, prompt=prompt, artifact_uri=uri
             )
@@ -71,7 +93,24 @@ async def register_project_lead(
             )
     except ValidationAppError:
         raise
-    except Exception as exc:  # noqa: BLE001 — surface provider failure without killing worker
+    except TimeoutError as exc:
+        raise ValidationAppError(
+            "provider_timeout: 图像 Provider 超时。请检查网络/Agnes，或改用受审计手工上传 canonical。"
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 — surface provider failure without killing API
+        from app.providers.flux import ProviderNotConfiguredError
+
+        if isinstance(exc, ProviderNotConfiguredError):
+            raise
+        from app.shared.errors import AppError
+
+        if isinstance(exc, AppError):
+            raise
+        # asyncio.TimeoutError is subclass of TimeoutError on 3.11+
+        if type(exc).__name__ == "TimeoutError" or "Timeout" in type(exc).__name__:
+            raise ValidationAppError(
+                "provider_timeout: 图像 Provider 超时。请检查网络/Agnes，或改用受审计手工上传。"
+            ) from exc
         raise ValidationAppError(
             f"注册主角 canonical 失败（图像 Provider）：{type(exc).__name__}: {exc}"
         ) from exc

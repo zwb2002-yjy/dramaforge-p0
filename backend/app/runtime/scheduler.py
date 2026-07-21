@@ -81,32 +81,40 @@ class AgentRunScheduler:
         return job_id
 
     async def _enqueue_node_run(self, node_run_id: UUID) -> str:
+        """Enqueue on Redis/Arq. Fail closed — never return local:* as success."""
+        import asyncio
+
+        from arq import create_pool
+        from arq.connections import RedisSettings
+
+        from app.shared.errors import ValidationAppError
+
         settings = get_settings()
-        # Prefer fast local enqueue marker; Arq optional when redis responds quickly.
-        try:
-            import asyncio
+        stable_job_id = f"node-run:{node_run_id}"
 
-            from arq import create_pool
-            from arq.connections import RedisSettings
-
-            async def _arq() -> str:
-                redis = await create_pool(
-                    RedisSettings.from_dsn(settings.redis_url, conn_timeout=0.3)
+        async def _arq() -> str:
+            redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+            try:
+                job = await redis.enqueue_job(
+                    "execute_node_run",
+                    str(node_run_id),
+                    _job_id=stable_job_id,
+                    _queue_name=settings.arq_default_queue_name,
                 )
-                try:
-                    job = await redis.enqueue_job(
-                        "execute_node_run",
-                        str(node_run_id),
-                        _queue_name=settings.arq_default_queue_name,
-                    )
-                    return str(job.job_id if job else node_run_id)
-                finally:
-                    await redis.close()
+                if job is None:
+                    # Already enqueued with same job id — treat as success (idempotent)
+                    return stable_job_id
+                return str(job.job_id)
+            finally:
+                await redis.close()
 
-            return await asyncio.wait_for(_arq(), timeout=0.5)
-        except Exception:
-            # Offline / no Redis: WorkerRuntime / arq worker picks up queued NodeRun
-            return f"local:{node_run_id}"
+        try:
+            return await asyncio.wait_for(_arq(), timeout=8.0)
+        except Exception as exc:
+            raise ValidationAppError(
+                f"QUEUE_UNAVAILABLE: Redis/Arq enqueue failed ({type(exc).__name__}: {exc}). "
+                "NodeRun remains queued; start Redis + workers (start_p0_wsl_stack.sh)."
+            ) from exc
 
 
 class WorkerRuntime:

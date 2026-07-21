@@ -136,12 +136,22 @@ async def set_shot_lock(
 
 
 async def _make_canonical_bytes(label: str) -> bytes:
+    """Test-only Fake image. Formal product path must pass shared_canonical_bytes."""
+    from app.config import get_settings
+
+    if get_settings().app_env != "test":
+        from app.shared.errors import ValidationAppError
+
+        raise ValidationAppError(
+            "provider_not_configured: formal path cannot Fake-generate canonical. "
+            "Register lead via live Provider or audited manual upload first."
+        )
     adapter = FakeFluxAdapter()
     created = await adapter.create({"prompt": f"canonical-ref:{label}", "kind": "keyframe"})
     return adapter.blobs[str(created["remote_task_id"])]
 
 
-async def _queue_and_run(
+async def _queue_node_run(
     session: AsyncSession,
     *,
     project_id: UUID,
@@ -151,11 +161,10 @@ async def _queue_and_run(
     shot_id: UUID,
     key: str,
     prompt: str,
-    store: ObjectStore,
     attempt: int = 1,
     canonical_object_key: str | None = None,
-    canonical_image_bytes: bytes | None = None,
 ) -> NodeRun:
+    """Create queued NodeRun only — execution is Worker-only (or test inline)."""
     ih = __import__("hashlib").sha256(
         f"{shot_id}:{key}:{prompt}:{attempt}".encode()
     ).hexdigest()
@@ -163,6 +172,7 @@ async def _queue_and_run(
         "prompt": prompt,
         "shot_id": str(shot_id),
         "plan": {"prompt": prompt},
+        "node_key": key,
     }
     if canonical_object_key:
         snap["canonical_object_key"] = canonical_object_key
@@ -179,14 +189,51 @@ async def _queue_and_run(
     )
     session.add(run)
     await session.flush()
-    await execute_media_node_run(
+    return run
+
+
+async def _queue_and_run(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    graph_version_id: UUID,
+    node: GraphNode,
+    user_id: UUID,
+    shot_id: UUID,
+    key: str,
+    prompt: str,
+    store: ObjectStore,
+    attempt: int = 1,
+    canonical_object_key: str | None = None,
+    canonical_image_bytes: bytes | None = None,
+    execute_inline: bool | None = None,
+) -> NodeRun:
+    """Queue NodeRun; execute only in Worker or test inline (APP_ENV=test default)."""
+    from app.config import get_settings
+
+    run = await _queue_node_run(
         session,
-        node_run_id=run.id,
-        store=store,
-        face_threshold=0.35,
-        require_canonical=key in {"keyframe", "face_review"},
-        canonical_image_bytes=canonical_image_bytes,
+        project_id=project_id,
+        graph_version_id=graph_version_id,
+        node=node,
+        user_id=user_id,
+        shot_id=shot_id,
+        key=key,
+        prompt=prompt,
+        attempt=attempt,
+        canonical_object_key=canonical_object_key,
     )
+    if execute_inline is None:
+        execute_inline = get_settings().app_env == "test"
+    if execute_inline:
+        await execute_media_node_run(
+            session,
+            node_run_id=run.id,
+            store=store,
+            face_threshold=0.35,
+            require_canonical=key in {"keyframe", "face_review"},
+            canonical_image_bytes=canonical_image_bytes,
+        )
     out = await session.get(NodeRun, run.id)
     assert out is not None
     return out
@@ -205,16 +252,32 @@ async def produce_shots_p0(
     shot_specs: list[tuple[UUID, str, str]] | None = None,
     shared_canonical_object_key: str | None = None,
     shared_canonical_bytes: bytes | None = None,
+    execute_inline: bool | None = None,
 ) -> list[ShotRecord]:
-    """All nodes via Worker media path. Face review uses canonical ref vs keyframe probe.
+    """Produce shot graphs. Formal path: queue NodeRuns only, then Worker executes.
+
+    When execute_inline is None: APP_ENV=test runs adapters inline for pytest;
+    development leaves status=queued for Outbox→Arq→Worker.
 
     shot_specs: optional list of (shot_id, visual_description, dialogue) from script import.
     """
-    _ = budget
+    from app.config import get_settings
+
+    if budget < 0:
+        from app.shared.errors import ValidationAppError
+
+        raise ValidationAppError("budget must be >= 0")
+    # Budget gate: refuse when non-positive formal budget with work remaining
+    if budget == 0 and get_settings().app_env != "test":
+        from app.shared.errors import ValidationAppError
+
+        raise ValidationAppError("budget insufficient: budget=0")
     _ = run_keyframe_via_worker
     graphs = GraphService(session)
     shots: list[ShotRecord] = []
     obj_store = store or get_object_store()
+    if execute_inline is None:
+        execute_inline = get_settings().app_env == "test"
 
     if shot_specs is not None:
         loop_items: list[tuple[int, UUID, str, str]] = [
@@ -283,35 +346,39 @@ async def produce_shots_p0(
                     key=key,
                     prompt=f"{rec.subtitle}|{visual}|{shot_id}",
                     store=obj_store,
+                    execute_inline=execute_inline,
                 )
-                run.output_summary = {
-                    **(run.output_summary or {}),
-                    "review": cont_status,
-                    "rule": cont_rule,
-                    "violations": cont_viols,
-                }
-                rec.continuity_checked = True
-                rec.continuity_status = cont_status
+                if execute_inline:
+                    run.output_summary = {
+                        **(run.output_summary or {}),
+                        "review": cont_status,
+                        "rule": cont_rule,
+                        "violations": cont_viols,
+                    }
+                rec.continuity_checked = execute_inline
+                rec.continuity_status = cont_status if execute_inline else None
                 rec.run_ids[key] = run.id
                 if run.result_artifact_id:
                     rec.artifact_ids[key] = run.result_artifact_id
                 continue
 
             if key == "face_review":
-                if keyframe_bytes is None:
+                if execute_inline and keyframe_bytes is None:
                     raise RuntimeError("keyframe bytes required before face_review")
-                # TWO-SOURCE ONLY: probe (keyframe or deliberate wrong character)
-                # vs canon_bytes from distinct canonical reference object — never self-match.
-                if mismatch_face_on_shot == i:
-                    probe = await _make_canonical_bytes(f"wrong-character-{i}")
+                # TWO-SOURCE ONLY when inline (test); Worker path uses store canonical
+                if execute_inline:
+                    if mismatch_face_on_shot == i:
+                        probe = await _make_canonical_bytes(f"wrong-character-{i}")
+                    else:
+                        probe = keyframe_bytes  # type: ignore[assignment]
+                    assert probe is not canon_bytes or mismatch_face_on_shot == i
+                    review = face_review_images(
+                        probe_image_bytes=probe,
+                        canonical_image_bytes=canon_bytes,
+                        threshold=0.35,
+                    )
                 else:
-                    probe = keyframe_bytes
-                assert probe is not canon_bytes or mismatch_face_on_shot == i
-                review = face_review_images(
-                    probe_image_bytes=probe,
-                    canonical_image_bytes=canon_bytes,
-                    threshold=0.35,
-                )
+                    review = None
                 run = await _queue_and_run(
                     session,
                     project_id=project_id,
@@ -323,23 +390,25 @@ async def produce_shots_p0(
                     prompt=f"face_review:{shot_id}:{visual}",
                     store=obj_store,
                     canonical_object_key=canon_key,
-                    canonical_image_bytes=canon_bytes,
+                    canonical_image_bytes=canon_bytes if execute_inline else None,
+                    execute_inline=execute_inline,
                 )
-                run.output_summary = {
-                    **(run.output_summary or {}),
-                    "review": review.status,
-                    "score": review.score,
-                    "rule": review.rule,
-                    "embedding_source": "probe_vs_canonical_images",
-                    "keyframe_artifact_id": str(keyframe_artifact_id)
-                    if keyframe_artifact_id
-                    else None,
-                }
-                rec.face_checked = True
-                rec.face_status = review.status
-                rec.face_score = review.score
-                if review.status == "blocked":
-                    rec.status = "face_blocked"
+                if review is not None and execute_inline:
+                    run.output_summary = {
+                        **(run.output_summary or {}),
+                        "review": review.status,
+                        "score": review.score,
+                        "rule": review.rule,
+                        "embedding_source": "probe_vs_canonical_images",
+                        "keyframe_artifact_id": str(keyframe_artifact_id)
+                        if keyframe_artifact_id
+                        else None,
+                    }
+                    rec.face_checked = True
+                    rec.face_status = review.status
+                    rec.face_score = review.score
+                    if review.status == "blocked":
+                        rec.status = "face_blocked"
                 rec.run_ids[key] = run.id
                 if run.result_artifact_id:
                     rec.artifact_ids[key] = run.result_artifact_id
@@ -357,7 +426,8 @@ async def produce_shots_p0(
                 prompt=node_prompt,
                 store=obj_store,
                 canonical_object_key=canon_key if key == "keyframe" else None,
-                canonical_image_bytes=canon_bytes if key == "keyframe" else None,
+                canonical_image_bytes=canon_bytes if key == "keyframe" and execute_inline else None,
+                execute_inline=execute_inline,
             )
             rec.run_ids[key] = run.id
             if run.result_artifact_id:
@@ -368,8 +438,9 @@ async def produce_shots_p0(
                 if art is not None:
                     keyframe_bytes = await obj_store.get_bytes(object_key=art.object_key)
 
+        # Never auto-mark pending as review_passed — requires human or explicit review API
         if rec.status == "pending":
-            rec.status = "review_passed"
+            rec.status = "awaiting_review" if execute_inline else "queued"
         shots.append(rec)
     await session.commit()
     return shots
@@ -445,5 +516,6 @@ async def rework_subtitle_only_p0(
         if run.result_artifact_id is not None:
             shot.artifact_ids[key] = run.result_artifact_id
     await session.commit()
-    shot.status = "review_passed"
+    # Subtitle rework leaves shot in awaiting_review — not auto-approved
+    shot.status = "awaiting_review"
     return shot

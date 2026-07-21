@@ -80,7 +80,64 @@ async def build_project_export(
     shot_subtitles: list[tuple[str, str]],
     store: ObjectStore | None = None,
     try_ffmpeg: bool = True,
+    graph_version_id: UUID | None = None,
+    approved_shot_ids: list[UUID] | None = None,
+    require_approved: bool = True,
 ) -> ExportResult:
+    """Export deliverables.
+
+    Formal path: only Artifacts from completed NodeRuns under optional GraphVersion,
+    and only for approved (review_passed) shots when require_approved and shots exist.
+    """
+    from app.assets.models import Shot
+
+    approved_ids: set[UUID] | None = None
+    if approved_shot_ids is not None:
+        approved_ids = set(approved_shot_ids)
+    elif require_approved:
+        approved_rows = list(
+            (
+                await session.execute(
+                    select(Shot).where(
+                        Shot.project_id == project_id,
+                        Shot.status == "review_passed",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if approved_rows:
+            approved_ids = {s.id for s in approved_rows}
+
+    run_q = (
+        select(NodeRun)
+        .where(NodeRun.project_id == project_id)
+        .where(NodeRun.status.in_(("completed", "cached", "completed_after_cancel")))
+    )
+    if graph_version_id is not None:
+        run_q = run_q.where(NodeRun.graph_version_id == graph_version_id)
+    runs = list((await session.execute(run_q)).scalars().all())
+
+    if approved_ids is not None:
+        filtered_runs: list[NodeRun] = []
+        for r in runs:
+            snap = r.input_snapshot or {}
+            sid = snap.get("shot_id")
+            if sid is None:
+                continue
+            try:
+                if UUID(str(sid)) in approved_ids:
+                    filtered_runs.append(r)
+            except Exception:
+                continue
+        runs = filtered_runs
+        if not runs:
+            raise ValidationAppError(
+                "no completed NodeRuns for approved (review_passed) shots"
+            )
+
+    run_ids = {r.id for r in runs}
     arts = list(
         (
             await session.execute(
@@ -93,19 +150,22 @@ async def build_project_export(
         .scalars()
         .all()
     )
-    if not arts:
-        raise ValidationAppError("no available artifacts to export")
-    runs = list(
-        (
-            await session.execute(
-                select(NodeRun)
-                .where(NodeRun.project_id == project_id)
-                .where(NodeRun.status.in_(("completed", "cached", "completed_after_cancel")))
+    if run_ids:
+        arts = [
+            a
+            for a in arts
+            if a.produced_by_run_id in run_ids
+            or (
+                a.artifact_type == "manual_media"
+                and a.delete_reason
+                and "audited_manual_upload" in a.delete_reason
             )
+        ]
+    if not arts:
+        raise ValidationAppError(
+            "no available artifacts to export "
+            "(need completed NodeRuns for approved shots under GraphVersion)"
         )
-        .scalars()
-        .all()
-    )
 
     export = Export(
         project_id=project_id,
@@ -137,16 +197,36 @@ async def build_project_export(
         )
 
     subs = shot_subtitles or [("1", "Shot")]
+    # Prefer real video/voice/composite artifacts for timeline; fall back to images
+    media_arts = [
+        a
+        for a in arts
+        if a.artifact_type in {"video", "composite", "voice", "subtitle", "image", "manual_media"}
+        or a.mime_type.startswith(("video/", "audio/", "image/"))
+    ]
+    if not media_arts:
+        media_arts = arts
+
     timeline_body = content_timeline(
         project_id=project_id,
         shot_subtitles=subs,
-        artifact_hashes=[a.content_hash for a in arts],
+        artifact_hashes=[a.content_hash for a in media_arts],
         node_run_ids=[str(r.id) for r in runs],
     )
+    if graph_version_id is not None:
+        timeline_body["graph_version_id"] = str(graph_version_id)
     timeline_json = json.dumps(timeline_body, sort_keys=True, separators=(",", ":"))
+    # SRT: 2s per line from real dialogue list (not fixed 0.5s stub for all)
     srt_lines: list[str] = []
+    t = 0
     for i, (_sid, text) in enumerate(subs, start=1):
-        srt_lines.append(f"{i}\n00:00:{i:02d},000 --> 00:00:{i:02d},500\n{text}\n")
+        start_s, end_s = t, t + 2
+        srt_lines.append(
+            f"{i}\n"
+            f"00:00:{start_s:02d},000 --> 00:00:{end_s:02d},000\n"
+            f"{text}\n"
+        )
+        t = end_s
     srt = "\n".join(srt_lines)
     package_body = content_package(
         project_id=project_id,
@@ -156,8 +236,9 @@ async def build_project_export(
                 "mime_type": a.mime_type,
                 "byte_size": a.byte_size,
                 "artifact_type": a.artifact_type,
+                "object_key": a.object_key,
             }
-            for a in arts
+            for a in media_arts
         ],
     )
     package_manifest = json.dumps(package_body, sort_keys=True, separators=(",", ":"))
@@ -176,29 +257,58 @@ async def build_project_export(
         data=srt.encode(),
         mime_type="application/x-subrip",
     )
+    # Material package: include real media file bytes under media/ + manifest
+    import zipfile
+    from io import BytesIO
+
+    zip_buf = BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("package.json", package_manifest)
+        zf.writestr("timeline.json", timeline_json)
+        zf.writestr("subtitles.srt", srt)
+        for a in media_arts:
+            try:
+                raw = await obj.get_bytes(object_key=a.object_key)
+            except Exception:
+                continue
+            name = a.object_key.split("/")[-1] or f"{a.content_hash[:12]}.bin"
+            zf.writestr(f"media/{name}", raw)
+    package_zip = zip_buf.getvalue()
+    package_zip_hash = hashlib.sha256(package_zip).hexdigest()
     await obj.put_bytes(
         object_key=f"exports/{project_id}/{export.id}/package.json",
         data=package_manifest.encode(),
         mime_type="application/json",
     )
+    await obj.put_bytes(
+        object_key=f"exports/{project_id}/{export.id}/package.zip",
+        data=package_zip,
+        mime_type="application/zip",
+    )
+    package_hash = package_zip_hash
 
     mp4_key: str | None = None
     mp4_hash: str | None = None
     mp4_error: str | None = None
     export_status = "completed"
 
-    # Collect readable image frames from object store (required for MP4 Gate)
+    # Prefer real video bytes for MP4; else compose from image/composite frames
+    video_blobs: list[bytes] = []
     frames_data: list[bytes] = []
-    for art in arts:
-        if art.artifact_type not in {"image", "export_package"} and not art.mime_type.startswith(
-            "image/"
-        ):
-            continue
+    for art in media_arts:
         try:
             raw = await obj.get_bytes(object_key=art.object_key)
         except Exception:
             continue
-        if raw and (raw[:4] == b"\x89PNG" or art.mime_type.startswith("image/")):
+        if not raw:
+            continue
+        if art.mime_type.startswith("video/") or art.artifact_type in {"video", "composite"}:
+            # composite may be image in fake tests — detect
+            if raw[:4] == b"\x00\x00\x00" or raw[4:8] == b"ftyp" or raw[:3] == b"\x00\x00\x00":
+                video_blobs.append(raw)
+            elif art.mime_type.startswith("video/"):
+                video_blobs.append(raw)
+        if art.mime_type.startswith("image/") or raw[:4] == b"\x89PNG":
             frames_data.append(raw)
 
     if try_ffmpeg:

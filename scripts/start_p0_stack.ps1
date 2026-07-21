@@ -1,169 +1,282 @@
-# DramaForge P0 local stack — bypass flaky Windows↔WSL Postgres localhost forward.
+# DramaForge local stack launcher.
 #
-# Default (recommended): PostgreSQL + API both inside WSL (same loopback).
-# Frontend stays on Windows :5173 and proxies /api + /health → 127.0.0.1:8010.
+# The default keeps PostgreSQL and the API in WSL, so database traffic never
+# crosses the unstable Windows-to-WSL localhost forwarding boundary.
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File scripts/start_p0_stack.ps1
-#   powershell -ExecutionPolicy Bypass -File scripts/start_p0_stack.ps1 -Mode WslApi
-#   powershell -ExecutionPolicy Bypass -File scripts/start_p0_stack.ps1 -Mode WindowsApi
-#   powershell -ExecutionPolicy Bypass -File scripts/start_p0_stack.ps1 -Mode WindowsApi -DbHost WslIp
+#   powershell -ExecutionPolicy Bypass -File scripts\start_p0_stack.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\start_p0_stack.ps1 -Action Status
+#   powershell -ExecutionPolicy Bypass -File scripts\start_p0_stack.ps1 -Action Stop
+#   powershell -ExecutionPolicy Bypass -File scripts\start_p0_stack.ps1 -Mode WindowsApi -DbHost WslIp
 #
-# Why: Windows processes talking to WSL Postgres via 127.0.0.1:5432 break when
-# localhost forwarding / NAT mode drops. Running API in WSL removes that hop.
+# Keep this file ASCII-only. Windows PowerShell 5.1 can misread UTF-8 scripts
+# without a BOM, which previously corrupted a hard-coded path containing
+# non-ASCII characters and prevented the WSL API from starting.
 
 param(
+  [ValidateSet("Start", "Status", "Stop")]
+  [string]$Action = "Start",
   [ValidateSet("WslApi", "WindowsApi")]
   [string]$Mode = "WslApi",
   [ValidateSet("Localhost", "WslIp")]
   [string]$DbHost = "Localhost",
   [string]$WslDistro = "Ubuntu-24.04",
   [int]$ApiPort = 8010,
-  [int]$FePort = 5173
+  [int]$FePort = 5173,
+  [switch]$SkipFrontend
 )
 
-$ErrorActionPreference = "Continue"
-$Repo = Split-Path -Parent $PSScriptRoot
-if (-not (Test-Path "$Repo\backend")) { $Repo = "D:\调研\dramaforge" }
-New-Item -ItemType Directory -Force -Path "$Repo\.run" | Out-Null
+$ErrorActionPreference = "Stop"
+$Repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$RunDir = Join-Path $Repo ".run"
+New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
 
 function Get-WslIp {
-  $raw = (wsl -d $WslDistro -- hostname -I 2>$null)
-  if (-not $raw) { return $null }
+  $raw = (& wsl.exe -d $WslDistro -- hostname -I 2>$null | Select-Object -First 1)
+  if (-not $raw) {
+    return $null
+  }
   return ($raw.ToString().Trim() -split "\s+")[0]
 }
 
-function Test-Tcp([string]$HostName, [int]$Port, [int]$TimeoutMs = 1500) {
+function Invoke-WslStack([string]$WslAction) {
+  Push-Location $Repo
   try {
-    $c = New-Object System.Net.Sockets.TcpClient
-    $iar = $c.BeginConnect($HostName, $Port, $null, $null)
-    if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) {
-      $c.Close()
-      return $false
-    }
-    $c.EndConnect($iar)
-    $c.Close()
-    return $true
-  } catch {
-    return $false
+    # Formal path: full PG+Redis+MinIO+API+Workers+dispatcher (no FORCE_MEMORY).
+    # WSL converts the current Windows directory itself (ASCII-safe).
+    & wsl.exe -d $WslDistro -- bash scripts/start_p0_wsl_stack.sh $WslAction $ApiPort $FePort |
+      ForEach-Object { Write-Host $_ }
+    return [int]$LASTEXITCODE
+  } finally {
+    Pop-Location
   }
 }
 
-function Wait-Health([string]$Url, [int]$Tries = 25) {
+function Get-Health([string]$Url) {
+  try {
+    $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
+    return @{
+      Code = [int]$response.StatusCode
+      Body = $response.Content | ConvertFrom-Json
+    }
+  } catch {
+    return $null
+  }
+}
+
+function Wait-Health([string]$Url, [int]$Tries = 20) {
   for ($i = 0; $i -lt $Tries; $i++) {
-    try {
-      $h = Invoke-RestMethod -Uri $Url -TimeoutSec 2
-      if ($h.status -eq "ok" -and ($h.db -eq "up" -or -not $h.db)) {
-        return $h
-      }
-      Write-Host "  wait health status=$($h.status) db=$($h.db)"
-    } catch {
-      # retry
+    $result = Get-Health $Url
+    if ($result -and $result.Code -eq 200 -and $result.Body.status -eq "ok" -and $result.Body.db -eq "up") {
+      return $result
     }
     Start-Sleep -Seconds 1
   }
   return $null
 }
 
-Write-Host "==> Mode=$Mode DbHost=$DbHost"
-Write-Host "==> Start WSL PostgreSQL ($WslDistro)"
-wsl -d $WslDistro -- bash -lc "sudo pg_ctlcluster 16 main start >/dev/null 2>&1; PGPASSWORD=dramaforge psql -h 127.0.0.1 -U dramaforge -d dramaforge -tAc 'select 1' 2>/dev/null | grep -q 1 && echo PG_OK || echo PG_FAIL"
-
-# Free Windows listeners that would steal :8010 from WSL published port
-foreach ($port in @($ApiPort)) {
-  Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-    ForEach-Object {
-      $p = $_.OwningProcess
-      Write-Host "  free Windows port $port pid=$p"
-      Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
-    }
+function Get-ListeningProcess([int]$Port) {
+  $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+  if (-not $listener) {
+    return $null
+  }
+  return Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)"
 }
-Start-Sleep -Seconds 1
 
-if ($Mode -eq "WslApi") {
-  Write-Host "==> Start API inside WSL (DB via 127.0.0.1 — no cross-boundary hop)"
-  $sh = "/mnt/d/调研/dramaforge/scripts/start_api_wsl_stable.sh"
-  # Prefer path relative to this repo mount if available
-  wsl -d $WslDistro -- bash -lc "if [ -f '$sh' ]; then bash '$sh'; else bash /mnt/d/调研/dramaforge/scripts/start_api_wsl_stable.sh; fi"
-} else {
-  # Windows API — choose a DB host that is actually reachable
+function Test-OwnedVite([object]$Process) {
+  if (-not $Process) {
+    return $false
+  }
+  return $Process.Name -eq "node.exe" -and
+    $Process.CommandLine -match [regex]::Escape((Join-Path $Repo "frontend")) -and
+    $Process.CommandLine -match "vite"
+}
+
+function Test-OwnedWindowsApi([object]$Process) {
+  if (-not $Process) {
+    return $false
+  }
+  return $Process.Name -match "^python(?:\.exe)?$" -and
+    $Process.CommandLine -match [regex]::Escape((Join-Path $Repo "backend")) -and
+    $Process.CommandLine -match "uvicorn"
+}
+
+function Stop-OwnedVite {
+  $process = Get-ListeningProcess $FePort
+  if (-not $process) {
+    return
+  }
+  if (-not (Test-OwnedVite $process)) {
+    throw "Port $FePort is owned by $($process.Name) pid=$($process.ProcessId), not this repository's Vite process."
+  }
+  Stop-Process -Id $process.ProcessId -Force
+  Start-Sleep -Milliseconds 500
+}
+
+function Stop-OwnedWindowsApi {
+  $process = Get-ListeningProcess $ApiPort
+  if (-not $process) {
+    return
+  }
+  if (-not (Test-OwnedWindowsApi $process)) {
+    throw "Port $ApiPort is owned by $($process.Name) pid=$($process.ProcessId), not this repository's Windows API process."
+  }
+  Stop-Process -Id $process.ProcessId -Force
+  Start-Sleep -Milliseconds 500
+}
+
+function Load-ProjectEnv {
+  $envFile = Join-Path $Repo ".env"
+  if (-not (Test-Path $envFile)) {
+    return
+  }
+  Get-Content -LiteralPath $envFile | ForEach-Object {
+    if ($_ -match "^\s*(#|$)") {
+      return
+    }
+    if ($_ -match "^(?<Key>[A-Za-z_][A-Za-z0-9_]*)=(?<Value>.*)$") {
+      Set-Item -Path "Env:$($Matches.Key)" -Value $Matches.Value
+    }
+  }
+}
+
+function Start-Frontend([string]$ApiTarget) {
+  if ($SkipFrontend) {
+    return
+  }
+
+  $existing = Get-ListeningProcess $FePort
+  if ($existing) {
+    $proxyHealth = Get-Health "http://127.0.0.1:$FePort/health"
+    if ($proxyHealth -and $proxyHealth.Code -eq 200 -and $proxyHealth.Body.db -eq "up") {
+      Write-Host "VITE_READY port=$FePort target=existing"
+      return
+    }
+    Stop-OwnedVite
+  }
+
+  $env:DRAMAFORGE_API_URL = $ApiTarget
+  $feOut = Join-Path $RunDir "vite.out.log"
+  $feErr = Join-Path $RunDir "vite.err.log"
+  Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--port", "$FePort", "--strictPort" `
+    -WorkingDirectory (Join-Path $Repo "frontend") -WindowStyle Hidden `
+    -RedirectStandardOutput $feOut -RedirectStandardError $feErr | Out-Null
+
+  $proxyHealth = Wait-Health "http://127.0.0.1:$FePort/health" 15
+  if (-not $proxyHealth) {
+    throw "Vite started but its /health proxy is not ready. See $feOut and $feErr."
+  }
+  Write-Host "VITE_READY port=$FePort target=$ApiTarget"
+}
+
+function Start-WindowsApi {
+  $existing = Get-ListeningProcess $ApiPort
+  if ($existing) {
+    $existingHealth = Get-Health "http://127.0.0.1:$ApiPort/health"
+    if ((Test-OwnedWindowsApi $existing) -and $existingHealth -and $existingHealth.Code -eq 200 -and $existingHealth.Body.db -eq "up") {
+      Write-Host "API_READY port=$ApiPort target=existing"
+      return
+    }
+    Stop-OwnedWindowsApi
+  }
+
+  $code = Invoke-WslStack "prepare"
+  if ($code -ne 0) {
+    throw "WSL PostgreSQL preparation failed. Check the WSL database and migrations before starting the Windows API."
+  }
+
   $dbHostName = "127.0.0.1"
   if ($DbHost -eq "WslIp") {
-    $wslip = Get-WslIp
-    if (-not $wslip) {
-      Write-Host "ERROR: cannot resolve WSL IP"
-      exit 1
-    }
-    $dbHostName = $wslip
-    Write-Host "  DATABASE host = WSL eth IP $dbHostName (bypasses localhost forward)"
-  } else {
-    Write-Host "  DATABASE host = 127.0.0.1 (depends on WSL localhost forward — flaky)"
-  }
-
-  if (-not (Test-Tcp $dbHostName 5432)) {
-    Write-Host "ERROR: cannot TCP-connect ${dbHostName}:5432"
-    Write-Host "  Try: -Mode WslApi   OR   -Mode WindowsApi -DbHost WslIp"
-    exit 1
-  }
-
-  Write-Host "==> Start Windows API :$ApiPort → postgres@$dbHostName"
-  Get-Content "$Repo\.env" -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
-    if ($_ -match '^([^=]+)=(.*)$') {
-      Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim()
+    $dbHostName = Get-WslIp
+    if (-not $dbHostName) {
+      throw "Cannot resolve the WSL IP address."
     }
   }
+
+  Load-ProjectEnv
   $env:APP_ENV = "development"
   $env:DATABASE_URL = "postgresql+asyncpg://dramaforge:dramaforge@${dbHostName}:5432/dramaforge"
   $env:DRAMA_FORCE_MEMORY_STORE = "1"
-  $env:PYTHONPATH = "$Repo\backend"
+  $env:PYTHONPATH = (Join-Path $Repo "backend")
   $env:CORS_ORIGINS = "http://localhost:$FePort,http://127.0.0.1:$FePort"
 
-  $apiOut = "$Repo\.run\api.out.log"
-  $apiErr = "$Repo\.run\api.err.log"
-  $py = "$Repo\backend\.venv\Scripts\python.exe"
-  Start-Process -FilePath $py -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","$ApiPort" `
-    -WorkingDirectory "$Repo\backend" -WindowStyle Hidden `
-    -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr
+  $apiOut = Join-Path $RunDir "api.out.log"
+  $apiErr = Join-Path $RunDir "api.err.log"
+  $python = Join-Path $Repo "backend\.venv\Scripts\python.exe"
+  if (-not (Test-Path $python)) {
+    throw "Missing Windows virtual environment: $python"
+  }
+
+  Start-Process -FilePath $python -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$ApiPort" `
+    -WorkingDirectory (Join-Path $Repo "backend") -WindowStyle Hidden `
+    -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr | Out-Null
 }
 
-$health = Wait-Health "http://127.0.0.1:$ApiPort/health"
-if ($health) {
-  Write-Host "API_OK status=$($health.status) db=$($health.db) env=$($health.env)"
-} else {
-  Write-Host "API_NOT_READY on 127.0.0.1:$ApiPort"
-  # Secondary probe via WSL IP (when localhost forward to WSL is broken but eth works)
-  $wslip = Get-WslIp
-  if ($wslip) {
-    $alt = Wait-Health "http://${wslip}:$ApiPort/health" 5
-    if ($alt) {
-      Write-Host "API_OK via WSL IP $wslip (localhost forward broken)"
-      Write-Host "  Fix Vite proxy target to http://${wslip}:$ApiPort  OR enable WSL mirrored networking"
-      Write-Host "  See docs/runbooks/local-stack-bypass.md"
-    } else {
-      Write-Host "  Also failed via $wslip — check WSL log: ~/.cache/dramaforge-api.log"
+if ($Action -eq "Stop") {
+  if ($Mode -eq "WslApi") {
+    $code = Invoke-WslStack "stop"
+    if ($code -ne 0) {
+      exit $code
     }
+  } else {
+    Stop-OwnedWindowsApi
+  }
+  if (-not $SkipFrontend) {
+    Stop-OwnedVite
+  }
+  Write-Host "STACK_STOPPED"
+  exit 0
+}
+
+if ($Action -eq "Status") {
+  if ($Mode -eq "WslApi") {
+    $code = Invoke-WslStack "status"
+    if ($code -ne 0) {
+      exit $code
+    }
+  }
+  $api = Get-Health "http://127.0.0.1:$ApiPort/health"
+  $fe = if ($SkipFrontend) { $null } else { Get-Health "http://127.0.0.1:$FePort/health" }
+  if (-not $api -or $api.Code -ne 200 -or $api.Body.db -ne "up") {
+    Write-Host "API_NOT_READY"
+    exit 1
+  }
+  if (-not $SkipFrontend -and (-not $fe -or $fe.Code -ne 200 -or $fe.Body.db -ne "up")) {
+    Write-Host "VITE_PROXY_NOT_READY"
+    exit 1
+  }
+  Write-Host "STACK_READY api=$ApiPort frontend=$FePort"
+  exit 0
+}
+
+Write-Host "STACK_START mode=$Mode distro=$WslDistro"
+if ($Mode -eq "WslApi") {
+  $code = Invoke-WslStack "start"
+  if ($code -ne 0) {
+    throw "WSL API start failed. Run with -Action Status or inspect the WSL journal."
+  }
+
+  $apiTarget = "http://127.0.0.1:$ApiPort"
+  $apiHealth = Wait-Health "$apiTarget/health" 10
+  if (-not $apiHealth) {
+    $wslIp = Get-WslIp
+    if ($wslIp) {
+      $apiTarget = "http://${wslIp}:$ApiPort"
+      $apiHealth = Wait-Health "$apiTarget/health" 10
+    }
+  }
+  if (-not $apiHealth) {
+    throw "WSL API is healthy inside WSL but Windows cannot reach it. Check WSL networking and use the WSL IP shown by 'wsl -d $WslDistro -- hostname -I'."
+  }
+} else {
+  Start-WindowsApi
+  $apiTarget = "http://127.0.0.1:$ApiPort"
+  $apiHealth = Wait-Health "$apiTarget/health" 20
+  if (-not $apiHealth) {
+    throw "Windows API did not become ready. See $(Join-Path $RunDir 'api.err.log')."
   }
 }
 
-$feListen = Get-NetTCPConnection -LocalPort $FePort -State Listen -ErrorAction SilentlyContinue
-if (-not $feListen) {
-  Write-Host "==> Start Vite :$FePort"
-  Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev","--","--host","127.0.0.1","--port","$FePort","--strictPort" `
-    -WorkingDirectory "$Repo\frontend" -WindowStyle Hidden
-} else {
-  Write-Host "Vite already listening on :$FePort"
-}
-
-Start-Sleep -Seconds 2
-try {
-  $ph = Invoke-WebRequest "http://127.0.0.1:$FePort/health" -UseBasicParsing -TimeoutSec 3
-  Write-Host "FE_PROXY $($ph.StatusCode) $($ph.Content)"
-} catch {
-  Write-Host "FE_PROXY_FAIL (API may still be up; open FE anyway)"
-}
-
-Write-Host ""
-Write-Host "Open http://127.0.0.1:$FePort/"
-Write-Host "Health http://127.0.0.1:$ApiPort/health  (must status=ok and db=up)"
-Write-Host "Preferred stack: -Mode WslApi  (API+PG same machine)"
+Start-Frontend $apiTarget
+Write-Host "STACK_READY api=$apiTarget frontend=http://127.0.0.1:$FePort"

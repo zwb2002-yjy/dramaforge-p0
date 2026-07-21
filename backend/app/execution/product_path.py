@@ -226,19 +226,35 @@ async def execute_media_node_run(
     else:
         prompt = str(snap.get("prompt", f"{node_type}:{run.id}"))
 
-    # Select Adapter: real Agnes flux/kling when configured; TTS stays fake/off for P0.
+    # Select Adapter: real Agnes when configured. No silent Fake outside test.
     adapter = flux
     if adapter is None:
-        from app.providers.flux import get_flux_adapter
+        from app.providers.flux import ProviderNotConfiguredError, get_flux_adapter
         from app.providers.kling import get_kling_adapter
+        from app.config import get_settings as _gs
 
-        if node_type in {"video", "video_review", "composite"}:
-            adapter = get_kling_adapter()
-        elif node_type == "voice":
-            # User authorized: no TTS for now — deterministic silent payload, zero cost
-            adapter = FakeFluxAdapter()
-        else:
-            adapter = get_flux_adapter()
+        _env = _gs().app_env
+        allow_fake = _env == "test"
+        try:
+            if node_type in {"video", "video_review", "composite"}:
+                adapter = get_kling_adapter(allow_fake=allow_fake)
+            elif node_type == "voice":
+                # TTS off for P0 — only allow deterministic stub under test
+                if not allow_fake:
+                    raise ProviderNotConfiguredError(
+                        "provider_not_configured: TTS disabled (TTS_ENABLED=false). "
+                        "Use audited manual media for voice or enable a voice Provider."
+                    )
+                adapter = FakeFluxAdapter()
+            else:
+                adapter = get_flux_adapter(allow_fake=allow_fake)
+        except ProviderNotConfiguredError as exc:
+            run.status = "failed"
+            run.error_code = "PROVIDER_NOT_CONFIGURED"
+            run.error_summary = exc.message[:500]
+            run.finished_at = datetime.now(UTC)
+            await session.flush()
+            raise
 
     # Produce media bytes by node type via Adapter contract
     kind = node_type

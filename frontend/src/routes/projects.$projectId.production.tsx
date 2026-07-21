@@ -3,13 +3,19 @@ import { Link, createRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import {
+  approveShot,
   artifactContentUrl,
   exportProject,
   fetchProjectShots,
+  fetchShotStatus,
   fetchSnapshot,
   grantExportDownload,
   importScript,
+  lockShot,
   produceGolden,
+  rejectShot,
+  rerunShot,
+  startShot,
 } from "../lib/api";
 import { projectRoute } from "./projects.$projectId";
 
@@ -97,6 +103,7 @@ function ProductionPage() {
   const [lastExportId, setLastExportId] = useState<string | null>(null);
   const [downloadHint, setDownloadHint] = useState<string | null>(null);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const [opBusy, setOpBusy] = useState(false);
 
   const snapshot = useQuery({
     queryKey: ["snapshot", projectId],
@@ -182,6 +189,33 @@ function ProductionPage() {
 
   const selectedShot =
     shots.data?.find((s) => s.id === selectedShotId) ?? shots.data?.[0] ?? null;
+
+  const shotStatus = useQuery({
+    queryKey: ["shot-status", projectId, selectedShot?.id],
+    queryFn: () => fetchShotStatus(projectId, selectedShot!.id),
+    enabled: projectId !== "demo" && !!selectedShot?.id,
+    refetchInterval: 5000,
+  });
+
+  async function runShotOp(
+    label: string,
+    fn: () => Promise<{ status: string; message: string }>,
+  ) {
+    if (!selectedShot) return;
+    setOpBusy(true);
+    setMsg(null);
+    try {
+      const r = await fn();
+      setMsg(`${label}: ${r.status} — ${r.message}`);
+      await qc.invalidateQueries({ queryKey: ["shots", projectId] });
+      await qc.invalidateQueries({ queryKey: ["shot-status", projectId, selectedShot.id] });
+      await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOpBusy(false);
+    }
+  }
 
   // Aggregate node status: snapshot may only expose status + output_summary in P0 API
   const nodeRailClass = useMemo(() => {
@@ -427,9 +461,89 @@ function ProductionPage() {
                   </span>
                 ))}
               </div>
+              {shotStatus.data && (
+                <div className="muted" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }} data-testid="shot-status">
+                  runs={shotStatus.data.node_run_count} failed={shotStatus.data.failed_count}{" "}
+                  locked={String(shotStatus.data.locked)}
+                  {shotStatus.data.guidance ? (
+                    <div className="status-bad">
+                      {shotStatus.data.guidance.error_code}: {shotStatus.data.guidance.retry_suggestion}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+              <div className="toolbar" data-testid="shot-ops">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={opBusy}
+                  data-testid="shot-start"
+                  onClick={() =>
+                    void runShotOp("启动", () => startShot(projectId, selectedShot.id))
+                  }
+                >
+                  启动生产
+                </button>
+                <button
+                  type="button"
+                  className="accent"
+                  disabled={opBusy}
+                  data-testid="shot-approve"
+                  onClick={() =>
+                    void runShotOp("审核通过", () => approveShot(projectId, selectedShot.id))
+                  }
+                >
+                  审核通过
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={opBusy}
+                  data-testid="shot-reject"
+                  onClick={() =>
+                    void runShotOp("驳回", () =>
+                      rejectShot(projectId, selectedShot.id, "needs rework"),
+                    )
+                  }
+                >
+                  驳回
+                </button>
+                <button
+                  type="button"
+                  disabled={opBusy}
+                  data-testid="shot-lock"
+                  onClick={() =>
+                    void runShotOp("人工锁", () => lockShot(projectId, selectedShot.id, true))
+                  }
+                >
+                  人工锁
+                </button>
+                <button
+                  type="button"
+                  disabled={opBusy}
+                  data-testid="shot-unlock"
+                  onClick={() =>
+                    void runShotOp("解锁", () => lockShot(projectId, selectedShot.id, false))
+                  }
+                >
+                  解锁
+                </button>
+                <button
+                  type="button"
+                  disabled={opBusy}
+                  data-testid="shot-rerun-subtitle"
+                  onClick={() =>
+                    void runShotOp("局部重跑字幕", () =>
+                      rerunShot(projectId, selectedShot.id, "subtitle"),
+                    )
+                  }
+                >
+                  字幕局部重跑
+                </button>
+              </div>
               <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }}>
-                P0 局部重跑：修改字幕只失效 Subtitle→Composite 下游；Keyframe/Video/Voice
-                保持缓存。逐 Shot 审核返工 API 继续加厚中。
+                真实路径：NodeRun → Outbox → Arq → Worker → Artifact → 审核。假黄金批处理仅夹具。
+                手工媒体：POST …/manual-media（受审计上传）。
               </p>
             </div>
           )}
