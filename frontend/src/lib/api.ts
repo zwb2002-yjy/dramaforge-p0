@@ -137,9 +137,56 @@ export async function startProject(input: {
 export async function updateBrief(
   projectId: string,
   logline: string,
-): Promise<{ id: string; status: string }> {
+  tone = "",
+  audience = "",
+): Promise<{ id: string; status: string; brief?: Record<string, unknown> }> {
   const csrf = await fetchCsrf();
-  return apiSend("POST", `/api/v1/projects/${projectId}/brief`, { logline }, csrf);
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/brief`,
+    { logline, tone, audience },
+    csrf,
+  );
+}
+
+export async function generateBriefAgent(
+  projectId: string,
+  idea: string,
+  authorize = true,
+): Promise<{
+  id: string;
+  status: string;
+  brief: Record<string, unknown>;
+  content_hash: string;
+  source: string;
+}> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/brief/generate`,
+    { idea, authorize },
+    csrf,
+  );
+}
+
+export async function generatePlanAgent(
+  projectId: string,
+  briefRevisionId: string,
+  authorize = true,
+): Promise<{
+  id: string;
+  status: string;
+  plan: Record<string, unknown>;
+  context_hash: string;
+  source: string;
+}> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/plans/generate`,
+    { brief_revision_id: briefRevisionId, authorize, idea: "" },
+    csrf,
+  );
 }
 
 export async function confirmBrief(

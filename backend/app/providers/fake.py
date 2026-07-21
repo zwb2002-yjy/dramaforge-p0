@@ -16,11 +16,22 @@ class FakeOpenAIAdapter:
     async def create(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append({"op": "create", "request": request})
         task_id = f"fake-openai-{uuid4()}"
-        self._tasks[task_id] = {
-            "status": "succeeded",
-            "text": request.get("prompt", "brief"),
-        }
-        return {"remote_task_id": task_id, "status": "succeeded"}
+        kind = str(request.get("kind") or "brief")
+        prompt = str(request.get("prompt") or "")
+        if kind == "plan":
+            text = (
+                '{"prompt":"Cinematic neon rain keyframe 9:16, lead silhouette",'
+                '"shot_notes":"wide establishing"}'
+            )
+        else:
+            text = (
+                '{"logline":"A heroine faces neon rain and a shadow stalker.",'
+                '"tone":"cinematic","audience":"short-drama"}'
+            )
+        if "Return ONLY" not in prompt and not prompt:
+            text = str(request.get("prompt") or text)
+        self._tasks[task_id] = {"status": "succeeded", "text": text}
+        return {"remote_task_id": task_id, "status": "succeeded", "text": text}
 
     async def poll(self, remote_task_id: str) -> dict[str, Any]:
         task = self._tasks.get(remote_task_id)

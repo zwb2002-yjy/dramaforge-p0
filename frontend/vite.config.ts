@@ -17,8 +17,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:8000",
-      "/health": "http://localhost:8000",
+      // 8010: local DramaForge API (8000 may be occupied by other WSL services)
+      "/api": "http://127.0.0.1:8010",
+      "/health": "http://127.0.0.1:8010",
     },
   },
   test: {

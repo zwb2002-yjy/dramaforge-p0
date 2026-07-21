@@ -69,6 +69,39 @@ class ExportResponse(BaseModel):
     export_item_count: int
 
 
+@router.get(
+    "/projects/{project_id}/artifacts/{artifact_id}/content",
+)
+async def get_artifact_content(
+    project_id: UUID,
+    artifact_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+):
+    """Stream artifact bytes for workstation preview (membership + RLS)."""
+    from fastapi.responses import Response
+
+    from app.storage.minio_store import get_object_store
+
+    await ProjectService(session).get_project_for_member(
+        project_id=project_id, actor=user
+    )
+    art = await session.get(Artifact, artifact_id)
+    if art is None or art.project_id != project_id:
+        from app.shared.errors import NotFoundError
+
+        raise NotFoundError("artifact not found")
+    store = get_object_store()
+    try:
+        data = await store.get_bytes(object_key=art.object_key)
+    except KeyError as exc:
+        from app.shared.errors import NotFoundError
+
+        raise NotFoundError("artifact bytes not in object store") from exc
+    media = art.mime_type or "application/octet-stream"
+    return Response(content=data, media_type=media)
+
+
 @router.get("/projects/{project_id}/snapshot", response_model=ProjectSnapshot)
 async def project_snapshot(
     project_id: UUID,

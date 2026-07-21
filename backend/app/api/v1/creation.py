@@ -200,3 +200,89 @@ async def confirm_plan(
         node_run_id=result.node_run_id,
         materialization_ops=result.materialization_ops,
     )
+
+
+class AgentGenerateRequest(BaseModel):
+    """User fee/planning authorization gate for Agent text calls."""
+
+    idea: str = ""
+    authorize: bool = True
+    brief_revision_id: UUID | None = None
+
+
+class AgentBriefResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    status: str
+    brief: dict[str, Any]
+    content_hash: str
+    source: str = "agent"
+
+
+class AgentPlanResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    status: str
+    plan: dict[str, Any]
+    context_hash: str
+    source: str = "agent"
+
+
+@router.post(
+    "/projects/{project_id}/brief/generate",
+    response_model=AgentBriefResponse,
+)
+async def generate_brief_agent(
+    project_id: UUID,
+    body: AgentGenerateRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> AgentBriefResponse:
+    """Agent Brief draft (BYOK text LLM). Manual path remains POST /brief."""
+    rev = await CreationService(session).generate_brief_agent(
+        project_id=project_id,
+        actor=user,
+        idea=body.idea,
+        authorize=body.authorize,
+    )
+    return AgentBriefResponse(
+        id=rev.id,
+        project_id=rev.project_id,
+        status=rev.status,
+        brief=dict(rev.brief),
+        content_hash=rev.content_hash,
+        source="agent",
+    )
+
+
+@router.post(
+    "/projects/{project_id}/plans/generate",
+    response_model=AgentPlanResponse,
+)
+async def generate_plan_agent(
+    project_id: UUID,
+    body: AgentGenerateRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> AgentPlanResponse:
+    """Agent Plan draft after confirmed Brief. Manual path remains POST /plans."""
+    if body.brief_revision_id is None:
+        from app.shared.errors import ValidationAppError
+
+        raise ValidationAppError("brief_revision_id required")
+    plan = await CreationService(session).generate_plan_agent(
+        project_id=project_id,
+        actor=user,
+        brief_revision_id=body.brief_revision_id,
+        authorize=body.authorize,
+    )
+    return AgentPlanResponse(
+        id=plan.id,
+        project_id=plan.project_id,
+        status=plan.status,
+        plan=dict(plan.plan),
+        context_hash=plan.context_hash,
+        source="agent",
+    )
