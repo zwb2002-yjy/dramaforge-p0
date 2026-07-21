@@ -45,14 +45,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api_router, prefix=cfg.api_prefix)
 
     @app.get("/health", tags=["system"])
-    async def health() -> dict[str, Any]:
-        REQUESTS_TOTAL.labels(method="GET", path="/health", status="200").inc()
-        return {
-            "status": "ok",
+    async def health() -> Any:
+        """Liveness + DB readiness. 503 when PostgreSQL unreachable (UI shows 离线)."""
+        from fastapi.responses import JSONResponse
+        from sqlalchemy import text
+
+        from app.shared.db import get_engine
+
+        db_ok = False
+        db_error: str | None = None
+        try:
+            engine = get_engine(cfg)
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            db_ok = True
+        except Exception as exc:  # noqa: BLE001 — surface readiness only
+            db_error = type(exc).__name__
+
+        body: dict[str, Any] = {
+            "status": "ok" if db_ok else "degraded",
             "service": "api",
             "version": __version__,
             "env": cfg.app_env,
+            "db": "up" if db_ok else "down",
         }
+        if db_error:
+            body["db_error"] = db_error
+        if db_ok:
+            REQUESTS_TOTAL.labels(method="GET", path="/health", status="200").inc()
+            return body
+        REQUESTS_TOTAL.labels(method="GET", path="/health", status="503").inc()
+        return JSONResponse(status_code=503, content=body)
 
     @app.get("/metrics", tags=["system"])
     async def metrics() -> Response:

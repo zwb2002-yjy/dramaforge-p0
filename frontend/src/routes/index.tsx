@@ -64,10 +64,21 @@ function HomePage() {
         <div className="status-card">
           <span className="status-label">API /health</span>
           {health.isLoading && <strong className="status-pending">连接中…</strong>}
-          {health.isError && <strong className="status-bad">离线</strong>}
-          {health.data && (
+          {health.isError && (
+            <strong className="status-bad">
+              离线（API/数据库未就绪，请启动 Postgres 与后端）
+            </strong>
+          )}
+          {health.data && health.data.status === "ok" && (
             <strong className="status-ok">
-              {health.data.status} · v{health.data.version}
+              {health.data.status}
+              {health.data.db ? ` · db ${health.data.db}` : ""} · v{health.data.version}
+            </strong>
+          )}
+          {health.data && health.data.status !== "ok" && (
+            <strong className="status-bad">
+              {health.data.status}
+              {health.data.db ? ` · db ${health.data.db}` : ""} · v{health.data.version}
             </strong>
           )}
         </div>
