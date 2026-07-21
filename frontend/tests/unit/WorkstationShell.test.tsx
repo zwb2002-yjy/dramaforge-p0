@@ -23,15 +23,21 @@ describe("Workstation shell", () => {
     expect(screen.getByTestId("workstation-nav")).toBeInTheDocument();
     expect(screen.getByTestId("workstation-inspector")).toBeInTheDocument();
     expect(screen.getByTestId("home-panel")).toBeInTheDocument();
-    expect(screen.getByText("DramaForge")).toBeInTheDocument();
+    // Brand is split across elements: Drama<span>Forge</span>
+    const brand = screen.getByRole("link", { name: /Drama\s*Forge/i });
+    expect(brand).toBeInTheDocument();
   });
 
   it("opens the production route for a project", async () => {
     renderApp("/projects/demo/production");
     const panel = await screen.findByTestId("production-mode");
     expect(panel).toBeInTheDocument();
-    expect(panel).toHaveTextContent("demo");
-    expect(screen.getByTestId("project-panel")).toHaveTextContent("项目 demo");
+    // Production board title + shared Project layout (id shown truncated, not "项目 demo")
+    expect(panel).toHaveTextContent("专业生产板");
+    const projectPanel = screen.getByTestId("project-panel");
+    expect(projectPanel).toBeInTheDocument();
+    expect(projectPanel).toHaveTextContent("同一 Project");
+    expect(projectPanel).toHaveTextContent("demo");
   });
 });
 
