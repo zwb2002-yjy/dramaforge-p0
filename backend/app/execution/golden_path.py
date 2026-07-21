@@ -90,6 +90,7 @@ async def run_golden_p0_path(
         shared_canonical_bytes=canon_bytes,
     )
     subs = [(str(s.shot_id), s.subtitle) for s in produced]
+    # Unit/golden path: skip formal approve gate (live export API still requires review_passed).
     exp = await build_project_export(
         session,
         project_id=project_id,
@@ -97,6 +98,7 @@ async def run_golden_p0_path(
         shot_subtitles=subs,
         store=obj,
         try_ffmpeg=try_ffmpeg,
+        require_approved=False,
     )
     return GoldenPathResult(
         script_document_id=imp.script_document_id,

@@ -247,37 +247,101 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             add("3.1.5", "Outbox/Arq dispatch", "BLOCKED", str(exc))
 
-        # 3.1.10 / 3.1.12 — require real multi-shot evidence, not produce-golden
+        # 3.1.10 — require 10 shots, full required nodes, zero failed, artifacts + review_passed
+        REQUIRED_NODES = {
+            "keyframe",
+            "face_review",
+            "video",
+            "voice",
+            "subtitle",
+            "composite",
+            "continuity_review",
+        }
         try:
             r = client.get(f"/api/v1/projects/{project_id}/snapshot", cookies=cookies)
-            if r.status_code == 200:
+            shots_r = client.get(f"/api/v1/projects/{project_id}/shots", cookies=cookies)
+            if r.status_code == 200 and shots_r.status_code == 200:
                 snap = r.json()
-                n_runs = len(snap.get("node_runs") or [])
-                n_arts = len(snap.get("artifacts") or [])
-                if n_runs >= 10 and n_arts >= 1:
-                    add(
-                        "3.1.10",
-                        "10 Shot 经 Graph 可审计结果",
-                        "PASS",
-                        f"runs={n_runs} artifacts={n_arts}",
-                    )
+                shots = shots_r.json() if isinstance(shots_r.json(), list) else []
+                runs = snap.get("node_runs") or []
+                arts = snap.get("artifacts") or []
+                n_shots = len(shots)
+                approved = [s for s in shots if s.get("status") == "review_passed"]
+                failed_runs = [x for x in runs if x.get("status") == "failed"]
+                done = {"completed", "cached", "completed_after_cancel"}
+                # Per-shot: every required node has a done run
+                per_shot_ok = 0
+                for s in shots:
+                    sid = str(s.get("id"))
+                    shot_runs = [
+                        x
+                        for x in runs
+                        if (x.get("input_snapshot") or {}).get("shot_id") == sid
+                        or sid in str(x.get("idempotency_key") or "")
+                    ]
+                    keys_done = {
+                        (x.get("input_snapshot") or {}).get("node_key")
+                        for x in shot_runs
+                        if x.get("status") in done
+                    }
+                    if REQUIRED_NODES.issubset(keys_done):
+                        per_shot_ok += 1
+                tight_ok = (
+                    n_shots >= 10
+                    and per_shot_ok >= 10
+                    and len(failed_runs) == 0
+                    and len(arts) >= 10
+                    and len(approved) >= 10
+                )
+                detail = (
+                    f"shots={n_shots} full_pipeline={per_shot_ok} "
+                    f"failed_runs={len(failed_runs)} arts={len(arts)} "
+                    f"review_passed={len(approved)}"
+                )
+                if tight_ok:
+                    add("3.1.10", "10 Shot 全必需节点+审核+产物", "PASS", detail)
                 else:
                     add(
                         "3.1.10",
-                        "10 Shot 经 Graph 全节点可审计结果",
+                        "10 Shot 全必需节点+零失败+逐 Shot 审核/产物",
                         "BLOCKED",
-                        f"insufficient evidence runs={n_runs} arts={n_arts} (no produce-golden)",
+                        detail + " (not runs>=10&&arts>=1 weak gate)",
                     )
             else:
-                add("3.1.10", "10 Shot 快照", "FAIL", f"{r.status_code}")
+                add(
+                    "3.1.10",
+                    "10 Shot 快照",
+                    "FAIL",
+                    f"snap={r.status_code} shots={shots_r.status_code}",
+                )
         except Exception as exc:  # noqa: BLE001
             add("3.1.10", "10 Shot 快照", "BLOCKED", str(exc))
 
-        # 3.1.18 export attempt
+        # 3.1.18 export — formal path requires review_passed; refuse unapproved export
         try:
             r = post(f"/api/v1/projects/{project_id}/exports", {})
             if r.status_code in (200, 201):
-                add("3.1.18", "导出 timeline/SRT/package", "PASS", r.text[:240])
+                body = r.json() if r.content else {}
+                pkg = body.get("package_hash") or ""
+                mp4 = body.get("mp4_object_key") or body.get("mp4_hash")
+                if pkg and mp4:
+                    add("3.1.18", "导出 timeline/SRT/package+MP4", "PASS", r.text[:240])
+                elif pkg:
+                    add(
+                        "3.1.18",
+                        "MP4/SRT/素材包/timeline 可追溯导出",
+                        "BLOCKED",
+                        f"package ok but no real MP4: {r.text[:200]}",
+                    )
+                else:
+                    add("3.1.18", "导出响应不完整", "FAIL", r.text[:240])
+            elif r.status_code == 422 and "EXPORT_GATE" in r.text:
+                add(
+                    "3.1.18",
+                    "导出拒绝未审核 Shot（fail-closed）",
+                    "BLOCKED",
+                    "no review_passed yet — gate honest",
+                )
             else:
                 add(
                     "3.1.18",

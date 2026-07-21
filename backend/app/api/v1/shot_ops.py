@@ -7,10 +7,15 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel, Field
 
-from app.access.projects import ProjectService
+from app.access.projects import (
+    ROLES_PRODUCE,
+    ROLES_REVIEW,
+    ProjectService,
+)
 from app.api.deps import CsrfDep, CurrentUser, SessionDep
 from app.execution import shot_review
 from app.runtime.scheduler import AgentRunScheduler
+from app.shared.errors import ValidationAppError
 
 router = APIRouter(tags=["shot-ops"])
 
@@ -49,6 +54,31 @@ class ManualUploadResponse(BaseModel):
     content_hash: str
     byte_size: int
     node_key: str
+    delete_reason: str | None = None
+
+
+async def _enqueue_all(session: SessionDep, run_ids: list[UUID]) -> list[str]:
+    """Commit-then-enqueue each run; raise if any fail (no silent 200+queued)."""
+    jobs: list[str] = []
+    errors: list[str] = []
+    sched = AgentRunScheduler(session)
+    for rid in run_ids:
+        try:
+            jid = await sched.enqueue_node_run_only(rid)
+            if jid.startswith("local:"):
+                errors.append(f"{rid}:local_forbidden")
+                jobs.append(f"error:local_forbidden")
+            else:
+                jobs.append(jid)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{rid}:{type(exc).__name__}:{exc}")
+            jobs.append(f"error:{type(exc).__name__}")
+    if errors:
+        raise ValidationAppError(
+            "QUEUE_UNAVAILABLE: one or more NodeRuns failed Arq enqueue after commit; "
+            f"failures={len(errors)}; jobs={jobs[:20]}"
+        )
+    return jobs
 
 
 @router.get(
@@ -80,7 +110,12 @@ async def start_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).require_project_role(
+        project_id=project_id,
+        actor=user,
+        allowed=ROLES_PRODUCE,
+        action="start shot production",
+    )
     run_ids = await shot_review.start_shot_nodes(
         session,
         project_id=project_id,
@@ -88,20 +123,12 @@ async def start_shot(
         user_id=user.id,
         node_keys=body.node_keys,
     )
-    jobs: list[str] = []
-    sched = AgentRunScheduler(session)
-    for rid in run_ids:
-        try:
-            jid = await sched.enqueue_node_run_only(rid)
-            jobs.append(jid)
-        except Exception as exc:  # noqa: BLE001
-            jobs.append(f"error:{type(exc).__name__}")
-    await session.commit()
+    jobs = await _enqueue_all(session, run_ids)
     return ShotActionResponse(
         shot_id=shot_id,
         status="queued",
         locked=False,
-        message="NodeRuns queued for Worker",
+        message="NodeRuns committed and enqueued for Worker",
         run_ids=run_ids,
         job_ids=jobs,
     )
@@ -119,7 +146,12 @@ async def approve_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).require_project_role(
+        project_id=project_id,
+        actor=user,
+        allowed=ROLES_REVIEW,
+        action="approve shot",
+    )
     r = await shot_review.approve_shot(
         session,
         project_id=project_id,
@@ -145,7 +177,12 @@ async def reject_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).require_project_role(
+        project_id=project_id,
+        actor=user,
+        allowed=ROLES_REVIEW,
+        action="reject shot",
+    )
     r = await shot_review.reject_shot(
         session,
         project_id=project_id,
@@ -171,7 +208,12 @@ async def lock_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).require_project_role(
+        project_id=project_id,
+        actor=user,
+        allowed=ROLES_PRODUCE,
+        action="lock shot",
+    )
     r = await shot_review.lock_shot(
         session,
         project_id=project_id,
@@ -197,21 +239,28 @@ async def rerun_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
-    stale = await shot_review.local_rerun_from_node(
+    await ProjectService(session).require_project_role(
+        project_id=project_id,
+        actor=user,
+        allowed=ROLES_PRODUCE,
+        action="rerun shot nodes",
+    )
+    stale, run_ids = await shot_review.local_rerun_from_node(
         session,
         project_id=project_id,
         shot_id=shot_id,
         user_id=user.id,
         changed_node_key=body.changed_node_key,
     )
-    await session.commit()
+    jobs = await _enqueue_all(session, run_ids)
     return ShotActionResponse(
         shot_id=shot_id,
         status="queued",
         locked=False,
         message=f"local re-run from {body.changed_node_key}",
+        run_ids=run_ids,
         stale_nodes=stale,
+        job_ids=jobs,
     )
 
 
@@ -229,7 +278,12 @@ async def manual_media(
     note: str = Form(""),
     file: UploadFile = File(...),
 ) -> ManualUploadResponse:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).require_project_role(
+        project_id=project_id,
+        actor=user,
+        allowed=ROLES_PRODUCE,
+        action="upload manual media",
+    )
     data = await file.read()
     mime = file.content_type or "application/octet-stream"
     art = await shot_review.upload_manual_media(
@@ -249,4 +303,5 @@ async def manual_media(
         content_hash=art.content_hash,
         byte_size=art.byte_size,
         node_key=node_key,
+        delete_reason=art.delete_reason,
     )

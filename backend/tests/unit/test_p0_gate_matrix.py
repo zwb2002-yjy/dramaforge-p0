@@ -122,7 +122,16 @@ async def test_matrix_async_enqueue_then_worker_shared_store(session: AsyncSessi
     mat = await CreationService(session).confirm_plan_and_materialize(
         project_id=started.project_id, plan_id=plan.id, actor=user
     )
-    await AgentRunScheduler(session).enqueue_node_run_only(mat.node_run_id)
+
+    async def _fake_arq(self, node_run_id):  # type: ignore[no-untyped-def]
+        return f"test-job:{node_run_id}"
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(AgentRunScheduler, "_enqueue_node_run", _fake_arq)
+    try:
+        await AgentRunScheduler(session).enqueue_node_run_only(mat.node_run_id)
+    finally:
+        monkeypatch.undo()
     run = await session.get(NodeRun, mat.node_run_id)
     assert run is not None and run.status == "queued"
     await WorkerRuntime(session).process_one(mat.node_run_id)
@@ -319,6 +328,7 @@ async def test_matrix_export_hash_equality_shared_store(session: AsyncSession) -
         shot_subtitles=[("1", "Hi")],
         store=store,
         try_ffmpeg=False,
+        require_approved=False,
     )
     e2 = await build_project_export(
         session,
@@ -327,6 +337,7 @@ async def test_matrix_export_hash_equality_shared_store(session: AsyncSession) -
         shot_subtitles=[("1", "Hi")],
         store=store,
         try_ffmpeg=False,
+        require_approved=False,
     )
     assert e1.timeline_hash == e2.timeline_hash
     assert e1.srt_hash == e2.srt_hash
@@ -560,6 +571,7 @@ async def test_matrix_authorized_export_download(session: AsyncSession) -> None:
         shot_subtitles=[("1", "Hi")],
         store=store,
         try_ffmpeg=False,
+        require_approved=False,
     )
     grant = await authorize_export_download(
         session, export_id=exp.export_id, actor=user, object_role="timeline_json"

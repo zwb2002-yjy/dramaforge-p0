@@ -10,10 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.events.outbox import OutboxDispatcher, StreamPublisher
 from app.execution.models import NodeRun
+from app.shared.errors import NotFoundError, ValidationAppError
 
 
 class RedisStreamPublisher(StreamPublisher):
-    """Publish to Redis Streams when redis client is available."""
+    """Publish to Redis Streams. Formal path is fail-closed (no silent in-memory fallback)."""
 
     def __init__(self, redis_url: str) -> None:
         super().__init__()
@@ -34,8 +35,15 @@ class RedisStreamPublisher(StreamPublisher):
             msg_id = await client.xadd(f"dramaforge:stream:{topic}", fields)
             self.messages.append((topic, {**payload, "_stream_id": msg_id}))
             return str(msg_id)
-        except Exception:
-            return await super().publish(topic, payload)
+        except Exception as exc:
+            # APP_ENV=test only: allow in-memory publisher for unit tests without Redis.
+            settings = get_settings()
+            if settings.app_env == "test":
+                return await super().publish(topic, payload)
+            raise ValidationAppError(
+                f"OUTBOX_PUBLISH_FAILED: Redis Stream write failed "
+                f"({type(exc).__name__}: {exc}). Outbox must not be marked published."
+            ) from exc
 
 
 class AgentRunScheduler:
@@ -67,15 +75,25 @@ class AgentRunScheduler:
             .order_by(NodeRun.created_at)
             .limit(50)
         )
-        for run in result.scalars().all():
-            job_id = await self._enqueue_node_run(run.id)
-            self.enqueued_job_ids.append(job_id)
-            count += 1
+        # Commit Outbox publish state before any Arq enqueue (Worker must see DB).
         await self._session.commit()
+
+        for run in result.scalars().all():
+            try:
+                job_id = await self._enqueue_node_run(run.id)
+                self.enqueued_job_ids.append(job_id)
+                count += 1
+            except Exception as exc:  # noqa: BLE001
+                await self._mark_queue_failed(run.id, error=str(exc))
         return count
 
     async def enqueue_node_run_only(self, node_run_id: UUID) -> str:
-        """Write Outbox row then enqueue Arq job. Never executes Adapter."""
+        """Write Outbox, COMMIT, then enqueue Arq. Never executes Adapter.
+
+        Order is intentional: Worker must never observe a Redis job before the
+        NodeRun/Outbox rows are durable. On enqueue failure, NodeRun is marked
+        failed with QUEUE_UNAVAILABLE (no silent 200+queued).
+        """
         from datetime import UTC, datetime
         from uuid import uuid4
 
@@ -84,10 +102,8 @@ class AgentRunScheduler:
 
         run = await self._session.get(NodeRun, node_run_id)
         if run is None:
-            from app.shared.errors import NotFoundError
-
             raise NotFoundError("node_run not found")
-        # Durable Outbox fact before Arq (NodeRun → Outbox → Arq)
+        # Durable Outbox fact before Arq (NodeRun → Outbox → commit → Arq)
         self._session.add(
             OutboxEvent(
                 event_id=uuid4(),
@@ -104,9 +120,27 @@ class AgentRunScheduler:
             )
         )
         await self._session.flush()
-        job_id = await self._enqueue_node_run(node_run_id)
+        # COMMIT first — eliminate flush-then-Redis race
         await self._session.commit()
+        try:
+            job_id = await self._enqueue_node_run(node_run_id)
+        except Exception as exc:
+            await self._mark_queue_failed(node_run_id, error=str(exc))
+            raise
         return job_id
+
+    async def _mark_queue_failed(self, node_run_id: UUID, *, error: str) -> None:
+        run = await self._session.get(NodeRun, node_run_id)
+        if run is None:
+            return
+        if run.status == "queued":
+            run.status = "failed"
+            run.error_code = "QUEUE_UNAVAILABLE"
+            run.error_summary = error[:500]
+            from datetime import UTC, datetime
+
+            run.finished_at = datetime.now(UTC)
+            await self._session.commit()
 
     async def _enqueue_node_run(self, node_run_id: UUID) -> str:
         """Enqueue on Redis/Arq. Fail closed — never return local:* as success."""
@@ -114,8 +148,6 @@ class AgentRunScheduler:
 
         from arq import create_pool
         from arq.connections import RedisSettings
-
-        from app.shared.errors import ValidationAppError
 
         settings = get_settings()
         stable_job_id = f"node-run:{node_run_id}"
@@ -141,7 +173,7 @@ class AgentRunScheduler:
         except Exception as exc:
             raise ValidationAppError(
                 f"QUEUE_UNAVAILABLE: Redis/Arq enqueue failed ({type(exc).__name__}: {exc}). "
-                "NodeRun remains queued; start Redis + workers (start_p0_wsl_stack.sh)."
+                "NodeRun marked failed; start Redis + workers (start_p0_wsl_stack.sh)."
             ) from exc
 
 

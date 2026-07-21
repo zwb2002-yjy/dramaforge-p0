@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Prove multi-shot formal path: import N shots → start keyframe NodeRuns →
-Outbox + Arq enqueue → Worker → Artifacts → review_passed.
+"""Prove multi-shot formal path: import N shots → start full required nodes →
+Outbox + Arq enqueue → Worker → Artifacts → quality-gated review_passed.
 
+Success requires zero failed NodeRuns and per-shot artifacts (not mere enqueue).
 Writes multi_shot_chain.json under --scratch.
 """
 
@@ -17,17 +18,34 @@ import httpx
 
 REPO = Path(__file__).resolve().parents[1]
 
+# Align with approve gate required set (shot_review.REQUIRED_APPROVE_NODES)
+REQUIRED_NODES = [
+    "keyframe",
+    "face_review",
+    "video",
+    "voice",
+    "subtitle",
+    "composite",
+    "continuity_review",
+]
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8010")
     ap.add_argument("--scratch", type=Path, required=True)
     ap.add_argument("--n", type=int, default=3, help="number of shots to run (≤10)")
+    ap.add_argument(
+        "--nodes",
+        default=",".join(REQUIRED_NODES),
+        help="comma-separated node keys (default: full required approve set)",
+    )
     args = ap.parse_args()
     scratch = args.scratch
     scratch.mkdir(parents=True, exist_ok=True)
     base = args.base.rstrip("/")
     n = max(1, min(args.n, 10))
+    node_keys = [x.strip() for x in args.nodes.split(",") if x.strip()]
 
     client = httpx.Client(base_url=base, timeout=120.0, follow_redirects=True)
     cookies: dict[str, str] = {}
@@ -49,7 +67,7 @@ def main() -> int:
         cookies.update(r.cookies)
         return r
 
-    out: dict = {"n_requested": n, "steps": []}
+    out: dict = {"n_requested": n, "node_keys": node_keys, "steps": []}
     h = client.get("/health").json()
     out["health"] = h
     if h.get("db") != "up":
@@ -88,24 +106,26 @@ def main() -> int:
 
     job_ids: list[str] = []
     run_ids: list[str] = []
+    start_failures = 0
     for s in shots:
         sid = s["id"]
-        # start only keyframe node for multi-shot media proof
         rr = post(
             f"/api/v1/projects/{project_id}/shots/{sid}/start",
-            {"node_keys": ["keyframe"]},
+            {"node_keys": node_keys},
         )
         body = rr.json() if rr.content else {}
         out["steps"].append({"start": sid, "status": rr.status_code, "body": str(body)[:240]})
+        if rr.status_code not in (200, 201):
+            start_failures += 1
+            continue
         for rid in body.get("run_ids") or []:
             run_ids.append(str(rid))
-            er = post(f"/api/v1/projects/{project_id}/node-runs/{rid}/enqueue", {})
-            ej = er.json() if er.content else {}
-            jid = str(ej.get("job_id") or "")
-            job_ids.append(jid)
-            if jid.startswith("local:"):
+        for jid in body.get("job_ids") or []:
+            jid_s = str(jid)
+            job_ids.append(jid_s)
+            if jid_s.startswith("local:") or jid_s.startswith("error:"):
                 out["ok"] = False
-                out["error"] = f"local:* job {jid}"
+                out["error"] = f"bad job id {jid_s}"
                 (scratch / "multi_shot_chain.json").write_text(
                     json.dumps(out, indent=2), encoding="utf-8"
                 )
@@ -113,11 +133,12 @@ def main() -> int:
 
     out["job_ids"] = job_ids
     out["run_ids"] = run_ids
+    out["start_failures"] = start_failures
 
-    # Wait for workers
+    # Wait for workers — all run_ids must leave queued; any failed → not ok
     completed = 0
     failed = 0
-    for _ in range(90):
+    for _ in range(120):
         snap = client.get(f"/api/v1/projects/{project_id}/snapshot", cookies=cookies).json()
         runs = snap.get("node_runs") or []
         arts = snap.get("artifacts") or []
@@ -134,49 +155,62 @@ def main() -> int:
             "artifacts": len(arts),
             "statuses": statuses,
         }
-        if completed + failed >= len(run_ids) and len(run_ids) > 0:
+        if len(statuses) >= len(run_ids) and completed + failed >= len(run_ids) and len(run_ids) > 0:
             break
         time.sleep(2)
 
-    # Review: approve each shot that has a completed run or always for evidence
+    # Attempt approve only when pipeline looks complete for that shot
+    approve_ok = 0
+    approve_fail = 0
     for s in shots:
         sid = s["id"]
         ar = post(f"/api/v1/projects/{project_id}/shots/{sid}/approve", {"note": "multi-shot"})
-        out["steps"].append({"approve": sid, "status": ar.status_code})
+        out["steps"].append({"approve": sid, "status": ar.status_code, "body": ar.text[:200]})
+        if ar.status_code in (200, 201):
+            approve_ok += 1
+        else:
+            approve_fail += 1
 
     snap = client.get(f"/api/v1/projects/{project_id}/snapshot", cookies=cookies).json()
+    arts = snap.get("artifacts") or []
     out["final"] = {
         "node_runs": len(snap.get("node_runs") or []),
-        "artifacts": len(snap.get("artifacts") or []),
+        "artifacts": len(arts),
         "completed": completed,
         "failed": failed,
         "n_shots": len(shots),
         "n_jobs": len(job_ids),
+        "approve_ok": approve_ok,
+        "approve_fail": approve_fail,
+        "start_failures": start_failures,
     }
-    # Success criteria: multi-shot (>=2) enqueued without local:*, worker progressed all,
-    # and either completed artifacts or honest failed (provider) — not stuck queued
+    # Strict success: multi-shot enqueued, all workers done with zero failures,
+    # at least one artifact per shot, and no silent local:* / fake queued starts.
     ok = (
-        len(shots) >= 2
-        and len(job_ids) >= 2
-        and all(not j.startswith("local:") for j in job_ids)
-        and completed + failed >= len(run_ids)
-        and (completed >= 1 or failed >= 1)
+        start_failures == 0
+        and len(shots) >= 2
+        and len(job_ids) >= len(shots) * len(node_keys)
+        and all(not j.startswith("local:") and not j.startswith("error:") for j in job_ids)
+        and len(run_ids) > 0
+        and completed >= len(run_ids)
+        and failed == 0
+        and len(arts) >= len(shots)
     )
     out["ok"] = ok
-    out["chain"] = "import→start keyframe NodeRuns→Outbox+Arq enqueue→Worker→Review"
+    out["chain"] = "import→start required nodes→Outbox+Arq commit-then-enqueue→Worker→ApproveGate"
     (scratch / "multi_shot_chain.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
-    # Also update shot_chain for gate consumers
     (scratch / "shot_chain.json").write_text(
         json.dumps(
             {
                 "ok": ok,
                 "multi": True,
-                "final_status": "mixed" if failed and completed else ("completed" if completed else "failed"),
+                "final_status": "completed" if ok else ("failed" if failed else "incomplete"),
                 "node_runs": out["final"]["node_runs"],
                 "artifacts": out["final"]["artifacts"],
                 "job_ids": job_ids[:10],
                 "completed": completed,
                 "failed": failed,
+                "approve_ok": approve_ok,
             },
             indent=2,
         ),

@@ -94,6 +94,10 @@ async def build_project_export(
     approved_ids: set[UUID] | None = None
     if approved_shot_ids is not None:
         approved_ids = set(approved_shot_ids)
+        if require_approved and not approved_ids:
+            raise ValidationAppError(
+                "EXPORT_GATE: approved_shot_ids is empty; refuse export of unreviewed work"
+            )
     elif require_approved:
         approved_rows = list(
             (
@@ -107,8 +111,13 @@ async def build_project_export(
             .scalars()
             .all()
         )
-        if approved_rows:
-            approved_ids = {s.id for s in approved_rows}
+        # Fail closed: zero review_passed must NOT export all completed artifacts.
+        if not approved_rows:
+            raise ValidationAppError(
+                "EXPORT_GATE: no shot with status=review_passed; "
+                "approve shots before formal export"
+            )
+        approved_ids = {s.id for s in approved_rows}
 
     run_q = (
         select(NodeRun)
@@ -463,6 +472,8 @@ async def build_project_export(
             .where(Artifact.content_hash == package_hash)
         )
     ).scalar_one_or_none()
+    # Artifact metadata must match the ZIP body (hash/mime/size/object_key), not package.json.
+    package_zip_key = f"exports/{project_id}/{export.id}/package.zip"
     if existing_pkg is not None:
         package_art = existing_pkg
     else:
@@ -470,10 +481,10 @@ async def build_project_export(
             project_id=project_id,
             artifact_type="export_package",
             storage_state="available",
-            object_key=f"exports/{project_id}/{export.id}/package.json",
-            content_hash=package_hash,
-            mime_type="application/json",
-            byte_size=len(package_manifest.encode()),
+            object_key=package_zip_key,
+            content_hash=package_zip_hash,
+            mime_type="application/zip",
+            byte_size=len(package_zip),
         )
         session.add(package_art)
         await session.flush()

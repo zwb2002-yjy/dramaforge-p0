@@ -106,8 +106,19 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
         "plan": {"prompt": "keyframe neon"},
     }
     await session.flush()
-    job_id = await AgentRunScheduler(session).enqueue_node_run_only(mat.node_run_id)
-    assert job_id
+    # Unit tests: mock Arq (commit-then-enqueue still runs; no live Redis required)
+    async def _fake_arq(self, node_run_id):  # type: ignore[no-untyped-def]
+        return f"test-job:{node_run_id}"
+
+    import app.runtime.scheduler as sched_mod
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(AgentRunScheduler, "_enqueue_node_run", _fake_arq)
+    try:
+        job_id = await AgentRunScheduler(session).enqueue_node_run_only(mat.node_run_id)
+    finally:
+        monkeypatch.undo()
+    assert job_id and not str(job_id).startswith("local:")
     run_still = await session.get(NodeRun, mat.node_run_id)
     assert run_still is not None and run_still.status == "queued"
     await WorkerRuntime(session).process_one(mat.node_run_id)
@@ -127,6 +138,7 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
         shot_subtitles=[("1", "Hi")],
         store=store,
         try_ffmpeg=False,
+        require_approved=False,
     )
     assert exp.timeline_hash == (
         await build_project_export(
@@ -136,6 +148,7 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
             shot_subtitles=[("1", "Hi")],
             store=store,
             try_ffmpeg=False,
+            require_approved=False,
         )
     ).timeline_hash
 
@@ -197,7 +210,7 @@ async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduler_drains_queued(session: AsyncSession) -> None:
+async def test_scheduler_drains_queued(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     user, org_id = await _seed_user_org(session)
     started = await CreationService(session).start_project(
         organization_id=org_id,
@@ -222,6 +235,11 @@ async def test_scheduler_drains_queued(session: AsyncSession) -> None:
     mat = await CreationService(session).confirm_plan_and_materialize(
         project_id=project_id, plan_id=plan.id, actor=user
     )
+
+    async def _fake_arq(self, node_run_id):  # type: ignore[no-untyped-def]
+        return f"test-job:{node_run_id}"
+
+    monkeypatch.setattr(AgentRunScheduler, "_enqueue_node_run", _fake_arq)
     n = await AgentRunScheduler(session).dispatch_pending(worker_id="test")
     assert n >= 1
     run = await session.get(NodeRun, mat.node_run_id)

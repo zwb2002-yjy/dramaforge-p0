@@ -205,13 +205,21 @@ async def export_project(
     session: SessionDep,
     _: CsrfDep,
 ) -> ExportResponse:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    from app.access.projects import ROLES_EXPORT
+
+    await ProjectService(session).require_project_role(
+        project_id=project_id,
+        actor=user,
+        allowed=ROLES_EXPORT,
+        action="export deliverables",
+    )
     result = await build_project_export(
         session,
         project_id=project_id,
         requested_by=user.id,
         shot_subtitles=[(str(i), f"Line {i}") for i in range(1, 11)],
         try_ffmpeg=True,
+        require_approved=True,
     )
     return ExportResponse(
         export_id=result.export_id,

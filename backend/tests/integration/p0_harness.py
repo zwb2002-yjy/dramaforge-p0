@@ -118,4 +118,5 @@ async def export_project(h: HarnessProject, *, try_ffmpeg: bool = False):
         shot_subtitles=[("1", "Opening")],
         store=get_object_store(),
         try_ffmpeg=try_ffmpeg,
+        require_approved=False,
     )

@@ -89,6 +89,7 @@ async def test_export_default_store_sees_worker_png_frames(session: AsyncSession
         shot_subtitles=[("1", "Hi")],
         store=None,  # force default get_object_store()
         try_ffmpeg=True,
+        require_approved=False,
     )
     assert exp.timeline_hash and exp.package_hash
     # Must not fail with empty-store no-frames when PNG exists in singleton

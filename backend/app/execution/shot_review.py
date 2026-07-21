@@ -4,18 +4,35 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.models import Shot
-from app.execution.models import Artifact, GraphNode, NodeRun, ShotHumanLock
+from app.execution.models import Artifact, GraphNode, NodeRun
 from app.execution.runtime_invariants import mark_stale_downstream
 from app.execution.shot_p0 import SHOT_EDGES, SHOT_NODES, is_shot_locked, set_shot_lock
 from app.shared.errors import NotFoundError, ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
+
+# Nodes that must be completed (with artifact for media) before human approve.
+# Review nodes need completed status; face/continuity must not be blocked.
+REQUIRED_APPROVE_NODES: tuple[str, ...] = (
+    "keyframe",
+    "face_review",
+    "video",
+    "voice",
+    "subtitle",
+    "composite",
+    "continuity_review",
+)
+MEDIA_ARTIFACT_NODES: frozenset[str] = frozenset(
+    {"keyframe", "video", "voice", "subtitle", "composite"}
+)
+DONE_STATUSES: frozenset[str] = frozenset(
+    {"completed", "cached", "completed_after_cancel"}
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +52,115 @@ async def get_shot_or_404(
     return shot
 
 
+def _shot_runs(runs: list[NodeRun], shot_id: UUID) -> list[NodeRun]:
+    sid = str(shot_id)
+    return [
+        r
+        for r in runs
+        if (r.input_snapshot or {}).get("shot_id") == sid or sid in str(r.idempotency_key)
+    ]
+
+
+def _latest_by_node_key(runs: list[NodeRun]) -> dict[str, NodeRun]:
+    """Map node_key → latest NodeRun (by attempt_no then created_at)."""
+    by_key: dict[str, NodeRun] = {}
+    for r in runs:
+        key = str((r.input_snapshot or {}).get("node_key") or "")
+        if not key:
+            continue
+        prev = by_key.get(key)
+        if prev is None:
+            by_key[key] = r
+            continue
+        if int(r.attempt_no or 0) >= int(prev.attempt_no or 0):
+            by_key[key] = r
+    return by_key
+
+
+async def assert_shot_approvable(
+    session: AsyncSession, *, project_id: UUID, shot_id: UUID
+) -> None:
+    """Fail closed: empty shots or incomplete/blocked pipelines cannot review_passed."""
+    runs = list(
+        (
+            await session.execute(
+                select(NodeRun).where(NodeRun.project_id == project_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    shot_runs = _shot_runs(runs, shot_id)
+    if not shot_runs:
+        raise ValidationAppError(
+            "APPROVE_GATE: shot has no NodeRuns; produce pipeline before approve"
+        )
+    by_key = _latest_by_node_key(shot_runs)
+    missing: list[str] = []
+    incomplete: list[str] = []
+    blocked: list[str] = []
+    no_artifact: list[str] = []
+
+    for key in REQUIRED_APPROVE_NODES:
+        run = by_key.get(key)
+        if run is None:
+            missing.append(key)
+            continue
+        if run.status not in DONE_STATUSES:
+            incomplete.append(f"{key}:{run.status}")
+            continue
+        if key in MEDIA_ARTIFACT_NODES and run.result_artifact_id is None:
+            # Allow audited manual media linked by delete_reason for this shot/node
+            manual = await _has_manual_artifact(
+                session, project_id=project_id, shot_id=shot_id, node_key=key
+            )
+            if not manual:
+                no_artifact.append(key)
+        if key in {"face_review", "continuity_review"}:
+            summary = run.output_summary or {}
+            status = str(summary.get("status") or summary.get("review_status") or "")
+            if status in {"blocked", "fail", "failed", "reject"}:
+                blocked.append(f"{key}:{status}")
+
+    if missing or incomplete or blocked or no_artifact:
+        parts = []
+        if missing:
+            parts.append(f"missing_nodes={missing}")
+        if incomplete:
+            parts.append(f"incomplete={incomplete}")
+        if no_artifact:
+            parts.append(f"no_artifact={no_artifact}")
+        if blocked:
+            parts.append(f"blocked_review={blocked}")
+        raise ValidationAppError("APPROVE_GATE: " + "; ".join(parts))
+
+
+async def _has_manual_artifact(
+    session: AsyncSession, *, project_id: UUID, shot_id: UUID, node_key: str
+) -> bool:
+    arts = list(
+        (
+            await session.execute(
+                select(Artifact).where(
+                    Artifact.project_id == project_id,
+                    Artifact.storage_state == "available",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    needle = f"shot={shot_id}"
+    node_needle = f"node={node_key}"
+    for a in arts:
+        reason = a.delete_reason or ""
+        if "audited_manual_upload" in reason and needle in reason and node_needle in reason:
+            return True
+        if str(shot_id) in a.object_key and node_key in a.object_key:
+            return True
+    return False
+
+
 async def approve_shot(
     session: AsyncSession,
     *,
@@ -46,14 +172,18 @@ async def approve_shot(
     shot = await get_shot_or_404(session, project_id=project_id, shot_id=shot_id)
     if await is_shot_locked(session, project_id=project_id, shot_id=shot_id):
         raise ValidationAppError("shot is human-locked; unlock before approve")
+    await assert_shot_approvable(session, project_id=project_id, shot_id=shot_id)
     shot.status = "review_passed"
     shot.version = int(getattr(shot, "version", 1) or 1) + 1
     await session.flush()
+    audit = f"approved by={user_id}"
+    if note.strip():
+        audit = f"{audit} note={note.strip()[:120]}"
     return ShotReviewResult(
         shot_id=shot_id,
         status=shot.status,
         locked=False,
-        message=note or "approved",
+        message=audit,
     )
 
 
@@ -76,7 +206,7 @@ async def reject_shot(
         shot_id=shot_id,
         status=shot.status,
         locked=False,
-        message=reason[:500],
+        message=f"rejected by={user_id} reason={reason[:200]}",
     )
 
 
@@ -213,8 +343,8 @@ async def local_rerun_from_node(
     shot_id: UUID,
     user_id: UUID,
     changed_node_key: str,
-) -> list[str]:
-    """Mark correct downstream stale and return keys that must re-run."""
+) -> tuple[list[str], list[UUID]]:
+    """Mark correct downstream stale and return (keys, run_ids) that must re-run."""
     if await is_shot_locked(session, project_id=project_id, shot_id=shot_id):
         raise ValidationAppError("shot is human-locked")
     if changed_node_key not in SHOT_NODES:
@@ -226,14 +356,14 @@ async def local_rerun_from_node(
     )
     # Include the changed node itself
     to_run = [changed_node_key] + [k for k in stale if k != changed_node_key]
-    await start_shot_nodes(
+    run_ids = await start_shot_nodes(
         session,
         project_id=project_id,
         shot_id=shot_id,
         user_id=user_id,
         node_keys=to_run,
     )
-    return to_run
+    return to_run, run_ids
 
 
 async def upload_manual_media(
@@ -253,14 +383,11 @@ async def upload_manual_media(
         raise ValidationAppError("empty media bytes")
     if node_key not in SHOT_NODES:
         raise ValidationAppError(f"unknown node: {node_key}")
+    await get_shot_or_404(session, project_id=project_id, shot_id=shot_id)
     obj = store or get_object_store()
     content_hash = hashlib.sha256(data).hexdigest()
     object_key = f"projects/{project_id}/manual/{shot_id}/{node_key}/{content_hash[:16]}"
     stored = await obj.put_bytes(object_key=object_key, data=data, mime_type=mime_type)
-    # Encode audit trail in object_key path (Artifact has no free-form metadata column).
-    # object_key already contains project/shot/node/hash.
-    _ = note
-    _ = user_id
     # Map to frozen artifact_type enum (image/video/audio/document/…)
     if mime_type.startswith("video/"):
         art_type = "video"
@@ -270,6 +397,11 @@ async def upload_manual_media(
         art_type = "image"
     else:
         art_type = "document"
+    note_safe = (note or "").strip().replace("\n", " ")[:80]
+    audit = (
+        f"audited_manual_upload shot={shot_id} node={node_key} "
+        f"by={user_id} note={note_safe}"
+    )[:240]
     art = Artifact(
         project_id=project_id,
         artifact_type=art_type,
@@ -279,7 +411,7 @@ async def upload_manual_media(
         mime_type=mime_type,
         storage_state="available",
         produced_by_run_id=None,
-        delete_reason=f"audited_manual_upload shot={shot_id} node={node_key}"[:240],
+        delete_reason=audit,
     )
     session.add(art)
     await session.flush()
@@ -297,18 +429,13 @@ async def shot_status_summary(
                 select(NodeRun)
                 .where(NodeRun.project_id == project_id)
                 .order_by(NodeRun.created_at.desc())
-                .limit(50)
+                .limit(200)
             )
         )
         .scalars()
         .all()
     )
-    shot_runs = [
-        r
-        for r in runs
-        if (r.input_snapshot or {}).get("shot_id") == str(shot_id)
-        or str(shot_id) in str(r.idempotency_key)
-    ]
+    shot_runs = _shot_runs(runs, shot_id)
     failed = [r for r in shot_runs if r.status == "failed"]
     guidance = None
     if failed:
@@ -337,5 +464,6 @@ def _retry_suggestion(code: str) -> str:
         "CANONICAL_REFERENCE_REQUIRED": "先注册主角 canonical Reference",
         "PROVIDER_FAILED": "检查 Provider 状态后重试该节点及正确下游",
         "QUEUE_UNAVAILABLE": "启动 Redis 与 Arq Worker 后 dispatch/enqueue",
+        "APPROVE_GATE": "先完成必需节点与 face/continuity 审核",
     }
     return mapping.get(code, "查看 NodeRun error_summary 后局部重跑失败节点")

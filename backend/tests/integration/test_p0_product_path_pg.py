@@ -174,6 +174,7 @@ async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
         shot_subtitles=[("1", "Opening")],
         store=None,
         try_ffmpeg=True,
+        require_approved=False,
     )
     assert exp.timeline_hash
     assert exp.srt_hash

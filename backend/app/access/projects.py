@@ -19,6 +19,17 @@ from app.shared.db import set_rls_context
 from app.shared.enums import ExperienceMode, MemberRole, ProjectStage
 from app.shared.errors import ForbiddenError, NotFoundError, ValidationAppError
 
+# Role gates for shot production APIs (viewer is read-only).
+ROLES_PRODUCE = frozenset(
+    {MemberRole.OWNER, MemberRole.ADMIN, MemberRole.EDITOR}
+)
+ROLES_REVIEW = frozenset(
+    {MemberRole.OWNER, MemberRole.ADMIN, MemberRole.EDITOR, MemberRole.REVIEWER}
+)
+ROLES_EXPORT = frozenset(
+    {MemberRole.OWNER, MemberRole.ADMIN, MemberRole.EDITOR, MemberRole.REVIEWER}
+)
+
 
 class ProjectService:
     def __init__(self, session: AsyncSession) -> None:
@@ -82,17 +93,22 @@ class ProjectService:
         await self._session.refresh(project)
         return project
 
-    async def get_project_for_member(self, *, project_id: UUID, actor: User) -> Project:
-        # Membership check first without relying solely on RLS (defense in depth).
+    async def get_member_role(self, *, project_id: UUID, actor: User) -> MemberRole:
         member = await self._session.execute(
             select(ProjectMember).where(
                 ProjectMember.project_id == project_id,
                 ProjectMember.user_id == actor.id,
             )
         )
-        if member.scalar_one_or_none() is None:
-            # May also be invisible under RLS
+        row = member.scalar_one_or_none()
+        if row is None:
             raise ForbiddenError("not a member of this project")
+        role = row.role if isinstance(row.role, MemberRole) else MemberRole(str(row.role))
+        return role
+
+    async def get_project_for_member(self, *, project_id: UUID, actor: User) -> Project:
+        # Membership check first without relying solely on RLS (defense in depth).
+        await self.get_member_role(project_id=project_id, actor=actor)
         result = await self._session.execute(select(Project).where(Project.id == project_id))
         project = result.scalar_one_or_none()
         if project is None:
@@ -104,6 +120,23 @@ class ProjectService:
             project_id=project.id,
         )
         return project
+
+    async def require_project_role(
+        self,
+        *,
+        project_id: UUID,
+        actor: User,
+        allowed: set[MemberRole] | frozenset[MemberRole],
+        action: str = "perform this action",
+    ) -> Project:
+        """Membership + role gate. Viewers cannot start/approve/lock/upload."""
+        role = await self.get_member_role(project_id=project_id, actor=actor)
+        if role not in allowed:
+            raise ForbiddenError(
+                f"role '{role.value}' cannot {action}; requires one of "
+                f"{sorted(r.value for r in allowed)}"
+            )
+        return await self.get_project_for_member(project_id=project_id, actor=actor)
 
     async def set_experience_mode(
         self, *, project_id: UUID, actor: User, mode: ExperienceMode
