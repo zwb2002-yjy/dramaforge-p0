@@ -68,7 +68,10 @@ class Settings(BaseSettings):
         default="",
         description="Anthropic-compatible base, e.g. https://host/api/anthropic",
     )
-    text_llm_model: str = Field(default="dsv4flash")
+    text_llm_model: str = Field(
+        default="deepseek-v4-flash",
+        description="Catalog id (baizhi dsv4flash → deepseek-v4-flash)",
+    )
     text_llm_api_style: Literal["anthropic", "openai"] = "anthropic"
 
     # P0: TTS may be disabled; voice node stays manual/fake until enabled.
