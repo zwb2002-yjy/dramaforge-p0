@@ -178,7 +178,6 @@ async def execute_media_node_run(
             node_type=node_type,
         )
 
-    adapter = flux or FakeFluxAdapter()
     obj_store = store or get_object_store()
     snap = run.input_snapshot or {}
     # Resolve canonical from snapshot object key before enforce (Worker path).
@@ -206,11 +205,34 @@ async def execute_media_node_run(
     else:
         prompt = str(snap.get("prompt", f"{node_type}:{run.id}"))
 
+    # Select Adapter: real Agnes flux/kling when configured; TTS stays fake/off for P0.
+    adapter = flux
+    if adapter is None:
+        from app.providers.flux import get_flux_adapter
+        from app.providers.kling import get_kling_adapter
+
+        if node_type in {"video", "video_review", "composite"}:
+            adapter = get_kling_adapter()
+        elif node_type == "voice":
+            # User authorized: no TTS for now — deterministic silent payload, zero cost
+            adapter = FakeFluxAdapter()
+        else:
+            adapter = get_flux_adapter()
+
     # Produce media bytes by node type via Adapter contract
     kind = node_type
     create = await adapter.create({"prompt": prompt, "kind": kind})
     remote = str(create.get("remote_task_id") or uuid4())
+    # Video may stay queued — poll a few times when not immediate
     poll = await adapter.poll(remote)
+    for _ in range(40):
+        status = str(poll.get("status", "failed"))
+        if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
+            break
+        import asyncio
+
+        await asyncio.sleep(3.0)
+        poll = await adapter.poll(remote)
     cost = await adapter.fetch_cost(remote)
     status = str(poll.get("status", "failed"))
     if status not in {"succeeded", "completed", "success"}:
@@ -224,7 +246,10 @@ async def execute_media_node_run(
     if hasattr(adapter, "blobs") and remote in getattr(adapter, "blobs", {}):
         data = adapter.blobs[remote]  # type: ignore[attr-defined]
     else:
-        data = f"{kind}-STUB:{remote}:{prompt}".encode()
+        uri = poll.get("artifact_uri") or create.get("artifact_uri")
+        data = await _resolve_media_bytes(
+            kind=kind, remote=remote, prompt=prompt, artifact_uri=uri
+        )
 
     # Node-specific mime / key
     mime, ext, art_type = _mime_for_node(node_type)
@@ -317,3 +342,30 @@ def _mime_for_node(node_type: str) -> tuple[str, str, str]:
     if node_type in {"continuity_review"}:
         return "application/json", "json", "document"
     return "application/octet-stream", "bin", "document"
+
+
+async def _resolve_media_bytes(
+    *,
+    kind: str,
+    remote: str,
+    prompt: str,
+    artifact_uri: object,
+) -> bytes:
+    """Load bytes from fake blobs already handled; else HTTP(S) URL or data URI."""
+    if isinstance(artifact_uri, str) and artifact_uri:
+        if artifact_uri.startswith("data:") and "," in artifact_uri:
+            import base64
+
+            _, b64 = artifact_uri.split(",", 1)
+            return base64.b64decode(b64)
+        if artifact_uri.startswith("http://") or artifact_uri.startswith("https://"):
+            import httpx
+
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+                resp = await client.get(artifact_uri)
+                resp.raise_for_status()
+                return resp.content
+        # Non-URL string payload
+        return artifact_uri.encode() if not isinstance(artifact_uri, bytes) else artifact_uri
+    # No remote media: deterministic stub (tests / missing adapter bytes)
+    return f"{kind}-STUB:{remote}:{prompt}".encode()

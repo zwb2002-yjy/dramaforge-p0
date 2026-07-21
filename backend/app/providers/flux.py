@@ -13,8 +13,11 @@ from app.providers.agnes import AgnesImageAdapter
 from app.providers.fake import FakeFluxAdapter
 
 
-def get_flux_adapter() -> Any:
+def get_flux_adapter(*, allow_live: bool = False) -> Any:
+    """Return image adapter. Live Agnes only outside test env (or allow_live=True)."""
     settings = get_settings()
+    if settings.app_env == "test" and not allow_live:
+        return FakeFluxAdapter()
     if settings.agnes_configured():
         return AgnesImageAdapter(settings)
     return FakeFluxAdapter()

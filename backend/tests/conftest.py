@@ -9,10 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-# Ensure test-safe defaults before importing the app.
-os.environ.setdefault("APP_ENV", "test")
+# Force test-safe defaults before importing the app (never live BYOK in unit tests).
+os.environ["APP_ENV"] = "test"
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-32chars-min")
 os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
+# Keep live keys out of accidental adapter selection if present in parent env.
+os.environ.setdefault("AGNES_ENABLED", "false")
+os.environ.setdefault("TEXT_LLM_ENABLED", "false")
 
 from app.access import models as _access_models  # noqa: E402,F401
 from app.config import clear_settings_cache, get_settings  # noqa: E402

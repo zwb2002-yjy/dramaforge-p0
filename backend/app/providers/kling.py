@@ -35,8 +35,12 @@ class FakeKlingAdapter:
         return {"amount": 0.0, "currency": "USD", "units": 0.0}
 
 
-def get_kling_adapter() -> Any:
+def get_kling_adapter(*, allow_live: bool = False) -> Any:
     settings = get_settings()
+    if settings.app_env == "test" and not allow_live:
+        from app.providers.fake import FakeFluxAdapter
+
+        return FakeFluxAdapter()
     if settings.agnes_configured():
         return AgnesVideoAdapter(settings)
     return FakeKlingAdapter()

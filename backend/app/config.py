@@ -61,6 +61,19 @@ class Settings(BaseSettings):
     agnes_image_model: str = Field(default="agnes-image-2.1-flash")
     agnes_video_model: str = Field(default="agnes-video-v2.0")
 
+    # Text LLM BYOK (Anthropic-compatible Messages API, e.g. baizhi / DeepSeek).
+    text_llm_enabled: bool = False
+    text_llm_api_key: str = Field(default="", description="User BYOK for text LLM")
+    text_llm_base_url: str = Field(
+        default="",
+        description="Anthropic-compatible base, e.g. https://host/api/anthropic",
+    )
+    text_llm_model: str = Field(default="dsv4flash")
+    text_llm_api_style: Literal["anthropic", "openai"] = "anthropic"
+
+    # P0: TTS may be disabled; voice node stays manual/fake until enabled.
+    tts_enabled: bool = False
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_cors(cls, value: object) -> object:
@@ -72,6 +85,13 @@ class Settings(BaseSettings):
     def agnes_configured(self) -> bool:
         """True when BYOK is present and hub is enabled."""
         return bool(self.agnes_enabled and self.agnes_api_key.strip())
+
+    def text_llm_configured(self) -> bool:
+        return bool(
+            self.text_llm_enabled
+            and self.text_llm_api_key.strip()
+            and self.text_llm_base_url.strip()
+        )
 
 
 @lru_cache
