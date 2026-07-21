@@ -226,6 +226,34 @@ async def execute_media_node_run(
     else:
         prompt = str(snap.get("prompt", f"{node_type}:{run.id}"))
 
+    # Pure review / compose nodes: no Provider, zero cost, document/image result.
+    PURE_NODES = {
+        "face_review",
+        "video_review",
+        "continuity_review",
+        "prompt_compose",
+        "prompt",
+        "subtitle",
+    }
+    if node_type in PURE_NODES or node.node_key in {
+        "face_review",
+        "video_drift_review",
+        "continuity_review",
+        "prompt",
+        "subtitle",
+    }:
+        return await _complete_pure_node(
+            session,
+            run=run,
+            node=node,
+            node_type=node_type,
+            snap=snap,
+            obj_store=obj_store,
+            canonical_image_bytes=canonical_image_bytes,
+            face_threshold=face_threshold,
+            prompt=prompt,
+        )
+
     # Select Adapter: real Agnes when configured. No silent Fake outside test.
     adapter = flux
     if adapter is None:
@@ -325,18 +353,16 @@ async def execute_media_node_run(
     session.add(op)
     await session.flush()
 
-    art = Artifact(
+    art = await _get_or_create_artifact(
+        session,
         project_id=run.project_id,
         artifact_type=art_type,
-        storage_state="available",
         object_key=stored.object_key,
         content_hash=stored.content_hash,
         mime_type=stored.mime_type,
         byte_size=stored.byte_size,
         produced_by_run_id=run.id,
     )
-    session.add(art)
-    await session.flush()
 
     face_status: str | None = None
     face_score: float | None = None
@@ -393,6 +419,224 @@ def _mime_for_node(node_type: str) -> tuple[str, str, str]:
     if node_type in {"continuity_review"}:
         return "application/json", "json", "document"
     return "application/octet-stream", "bin", "document"
+
+
+async def _complete_pure_node(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    node: GraphNode,
+    node_type: str,
+    snap: dict[str, object],
+    obj_store: ObjectStore,
+    canonical_image_bytes: bytes | None,
+    face_threshold: float,
+    prompt: str,
+) -> ExecuteNodeResult:
+    """Complete review/subtitle/prompt nodes without Provider (zero cost)."""
+    import json
+    from datetime import UTC, datetime
+
+    from app.consistency.continuity import continuity_four_layers
+    from app.consistency.image_embed import insightface_status
+
+    face_status: str | None = None
+    face_score: float | None = None
+    review_status = "passed"
+    payload: dict[str, object] = {
+        "node_type": node_type,
+        "node_key": node.node_key,
+        "zero_provider_cost": True,
+    }
+
+    key = node.node_key
+    if key in {"face_review", "video_drift_review"} or node_type in {
+        "face_review",
+        "video_review",
+    }:
+        # Compare probe (prior keyframe bytes if present) vs canonical.
+        probe = None
+        probe_key = snap.get("probe_object_key") or snap.get("keyframe_object_key")
+        if isinstance(probe_key, str) and probe_key:
+            try:
+                probe = await obj_store.get_bytes(object_key=probe_key)
+            except Exception:
+                probe = None
+        if probe is None and isinstance(snap.get("probe_bytes_b64"), str):
+            import base64
+
+            try:
+                probe = base64.b64decode(str(snap["probe_bytes_b64"]))
+            except Exception:
+                probe = None
+        # Fall back: find latest keyframe artifact for this shot via snapshot shot_id
+        if probe is None:
+            from sqlalchemy import select
+
+            shot_id = str(snap.get("shot_id") or "")
+            arts = list(
+                (
+                    await session.execute(
+                        select(Artifact)
+                        .where(Artifact.project_id == run.project_id)
+                        .where(Artifact.storage_state == "available")
+                        .where(Artifact.artifact_type == "image")
+                        .order_by(Artifact.created_at.desc())
+                        .limit(20)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for a in arts:
+                if shot_id and shot_id in (a.object_key or ""):
+                    try:
+                        probe = await obj_store.get_bytes(object_key=a.object_key)
+                        break
+                    except Exception:
+                        continue
+            if probe is None and arts:
+                try:
+                    probe = await obj_store.get_bytes(object_key=arts[0].object_key)
+                except Exception:
+                    probe = None
+
+        if probe is not None and canonical_image_bytes is not None:
+            review = face_review_images(
+                probe_image_bytes=probe,
+                canonical_image_bytes=canonical_image_bytes,
+                threshold=face_threshold,
+            )
+            face_status = review.status
+            face_score = review.score
+            review_status = review.status
+        elif probe is not None:
+            face_status = "needs_human"
+            review_status = "needs_human"
+        else:
+            face_status = "needs_human"
+            review_status = "needs_human"
+        st = insightface_status()
+        payload.update(
+            {
+                "status": review_status,
+                "face_review": face_status,
+                "face_score": face_score,
+                "insightface_backend": st.get("backend"),
+                "insightface_available": st.get("available"),
+            }
+        )
+        data = json.dumps(payload, sort_keys=True).encode()
+        mime, ext, art_type = "application/json", "json", "document"
+    elif key == "continuity_review" or node_type == "continuity_review":
+        subtitle = str(snap.get("subtitle") or snap.get("dialogue") or prompt or "")
+        visual = str(snap.get("visual") or snap.get("visual_description") or prompt or "")
+        lead = snap.get("lead_name")
+        cont = continuity_four_layers(
+            subtitle=subtitle,
+            visual_desc=visual,
+            lead_name=str(lead) if lead else None,
+            shot_id=str(snap.get("shot_id") or "") or None,
+        )
+        review_status = cont.status
+        payload.update(cont.to_dict())
+        data = json.dumps(payload, sort_keys=True).encode()
+        mime, ext, art_type = "application/json", "json", "document"
+    elif key == "subtitle" or node_type == "subtitle":
+        text = str(snap.get("subtitle") or snap.get("dialogue") or prompt or "Shot")
+        data = f"1\n00:00:00,000 --> 00:00:02,000\n{text}\n".encode()
+        mime, ext, art_type = "application/x-subrip", "srt", "subtitle"
+        payload["status"] = "passed"
+    else:
+        # prompt_compose
+        data = json.dumps({"prompt": prompt, "status": "passed"}, sort_keys=True).encode()
+        mime, ext, art_type = "application/json", "json", "document"
+        payload["status"] = "passed"
+
+    object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
+    stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
+    art = await _get_or_create_artifact(
+        session,
+        project_id=run.project_id,
+        artifact_type=art_type,
+        object_key=stored.object_key,
+        content_hash=stored.content_hash,
+        mime_type=stored.mime_type,
+        byte_size=stored.byte_size,
+        produced_by_run_id=run.id,
+    )
+
+    run.status = "completed"
+    run.result_artifact_id = art.id
+    run.provider_cost = Decimal("0")
+    run.finished_at = datetime.now(UTC)
+    run.output_summary = {
+        **payload,
+        "artifact_id": str(art.id),
+        "status": review_status if key in {"face_review", "video_drift_review", "continuity_review"} or node_type in {"face_review", "video_review", "continuity_review"} else "passed",
+        "face_review": face_status,
+        "face_score": face_score,
+        "byte_size": art.byte_size,
+        "content_hash": art.content_hash,
+    }
+    node.latest_successful_run_id = run.id
+    await session.flush()
+    return ExecuteNodeResult(
+        node_run_id=run.id,
+        artifact_id=art.id,
+        object_key=art.object_key,
+        content_hash=art.content_hash,
+        byte_size=art.byte_size,
+        face_status=face_status,
+        face_score=face_score,
+        provider_operation_id=uuid4(),
+        node_type=node_type,
+    )
+
+
+async def _get_or_create_artifact(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    artifact_type: str,
+    object_key: str,
+    content_hash: str,
+    mime_type: str,
+    byte_size: int,
+    produced_by_run_id: UUID | None,
+) -> Artifact:
+    """Honor uq_artifacts_project_hash_type: reuse identical content within project."""
+    from sqlalchemy import select
+
+    existing = (
+        await session.execute(
+            select(Artifact).where(
+                Artifact.project_id == project_id,
+                Artifact.content_hash == content_hash,
+                Artifact.artifact_type == artifact_type,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        if existing.storage_state != "available":
+            existing.storage_state = "available"
+        if produced_by_run_id and existing.produced_by_run_id is None:
+            existing.produced_by_run_id = produced_by_run_id
+        await session.flush()
+        return existing
+    art = Artifact(
+        project_id=project_id,
+        artifact_type=artifact_type,
+        storage_state="available",
+        object_key=object_key,
+        content_hash=content_hash,
+        mime_type=mime_type,
+        byte_size=byte_size,
+        produced_by_run_id=produced_by_run_id,
+    )
+    session.add(art)
+    await session.flush()
+    return art
 
 
 async def _resolve_media_bytes(

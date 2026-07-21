@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -118,7 +119,13 @@ async def assert_shot_approvable(
                 no_artifact.append(key)
         if key in {"face_review", "continuity_review"}:
             summary = run.output_summary or {}
-            status = str(summary.get("status") or summary.get("review_status") or "")
+            status = str(
+                summary.get("status")
+                or summary.get("review_status")
+                or summary.get("face_review")
+                or ""
+            )
+            # Manual audited completion stores status=passed
             if status in {"blocked", "fail", "failed", "reject"}:
                 blocked.append(f"{key}:{status}")
 
@@ -378,11 +385,23 @@ async def upload_manual_media(
     note: str = "",
     store: ObjectStore | None = None,
 ) -> Artifact:
-    """Audited manual media as immutable Artifact for a shot node (zero Provider cost)."""
+    """Audited manual media as immutable Artifact + completed NodeRun (zero Provider cost).
+
+    Completes the registered shot-p0-v1 node so approve/export gates see real
+    Graph lineage without BYOK Provider calls.
+    """
+    from datetime import UTC, datetime
+
+    from app.execution.shot_p0 import _NODE_TYPE
+    from app.production.models import ProductionGraph
+    from app.production.service import GraphService
+
     if not data:
         raise ValidationAppError("empty media bytes")
     if node_key not in SHOT_NODES:
         raise ValidationAppError(f"unknown node: {node_key}")
+    if await is_shot_locked(session, project_id=project_id, shot_id=shot_id):
+        raise ValidationAppError("shot is human-locked")
     await get_shot_or_404(session, project_id=project_id, shot_id=shot_id)
     obj = store or get_object_store()
     content_hash = hashlib.sha256(data).hexdigest()
@@ -402,18 +421,131 @@ async def upload_manual_media(
         f"audited_manual_upload shot={shot_id} node={node_key} "
         f"by={user_id} note={note_safe}"
     )[:240]
-    art = Artifact(
-        project_id=project_id,
-        artifact_type=art_type,
-        object_key=stored.object_key,
-        content_hash=stored.content_hash,
-        byte_size=stored.byte_size,
-        mime_type=mime_type,
-        storage_state="available",
-        produced_by_run_id=None,
-        delete_reason=audit,
+
+    # Ensure shot graph + node exist, then complete a NodeRun linked to Artifact.
+    graphs = GraphService(session)
+    existing = (
+        await session.execute(
+            select(ProductionGraph).where(
+                ProductionGraph.project_id == project_id,
+                ProductionGraph.scope_type == "shot",
+                ProductionGraph.scope_entity_id == shot_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None or existing.current_version_id is None:
+        graph = await graphs.create_graph(
+            project_id=project_id,
+            scope_type="shot",
+            scope_entity_id=shot_id,
+            template_key="shot-p0-v1",
+            created_by=user_id,
+            definition={"nodes": list(SHOT_NODES), "edges": SHOT_EDGES},
+        )
+    else:
+        graph = existing
+    assert graph.current_version_id is not None
+    version_id = graph.current_version_id
+    node = (
+        await session.execute(
+            select(GraphNode).where(
+                GraphNode.graph_version_id == version_id,
+                GraphNode.node_key == node_key,
+            )
+        )
+    ).scalar_one_or_none()
+    if node is None:
+        node = GraphNode(
+            graph_version_id=version_id,
+            node_key=node_key,
+            node_type=_NODE_TYPE.get(node_key, node_key),
+            display_name=node_key,
+            cacheable=True,
+        )
+        session.add(node)
+        await session.flush()
+    prior = list(
+        (
+            await session.execute(
+                select(NodeRun).where(
+                    NodeRun.project_id == project_id,
+                    NodeRun.graph_node_id == node.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    session.add(art)
+    # Artifact first — completed NodeRun requires result_artifact_id (node_runs_check1).
+    # Reuse same content_hash + type if already present (uq_artifacts_project_hash_type).
+    existing_art = (
+        await session.execute(
+            select(Artifact).where(
+                Artifact.project_id == project_id,
+                Artifact.content_hash == stored.content_hash,
+                Artifact.artifact_type == art_type,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing_art is not None:
+        art = existing_art
+        if art.storage_state != "available":
+            art.storage_state = "available"
+        if not art.delete_reason:
+            art.delete_reason = audit
+    else:
+        art = Artifact(
+            project_id=project_id,
+            artifact_type=art_type,
+            object_key=stored.object_key,
+            content_hash=stored.content_hash,
+            byte_size=stored.byte_size,
+            mime_type=mime_type,
+            storage_state="available",
+            produced_by_run_id=None,
+            delete_reason=audit,
+        )
+        session.add(art)
+        await session.flush()
+
+    now = datetime.now(UTC)
+    ih = hashlib.sha256(f"manual:{shot_id}:{node_key}:{content_hash}".encode()).hexdigest()
+    run = NodeRun(
+        project_id=project_id,
+        graph_version_id=version_id,
+        graph_node_id=node.id,
+        attempt_no=len(prior) + 1,
+        idempotency_key=f"manual:{node_key}:{shot_id}:{content_hash[:16]}",
+        input_hash=ih,
+        status="completed",
+        input_snapshot={
+            "shot_id": str(shot_id),
+            "node_key": node_key,
+            "manual": True,
+            "prompt": f"manual:{node_key}:{shot_id}",
+        },
+        output_summary={
+            "status": "passed",
+            "manual": True,
+            "audit": audit,
+            "zero_provider_cost": True,
+            "artifact_id": str(art.id),
+            "content_hash": art.content_hash,
+            "byte_size": art.byte_size,
+        },
+        provider_cost=Decimal("0"),
+        started_at=now,
+        finished_at=now,
+        result_artifact_id=art.id,
+        created_by=user_id,
+    )
+    session.add(run)
+    await session.flush()
+    art.produced_by_run_id = run.id
+    node.latest_successful_run_id = run.id
+    shot = await get_shot_or_404(session, project_id=project_id, shot_id=shot_id)
+    if shot.status in {"draft", "pending", "review_rejected"}:
+        shot.status = "in_production"
     await session.flush()
     return art
 

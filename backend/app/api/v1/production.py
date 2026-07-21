@@ -26,6 +26,8 @@ class NodeRunRead(BaseModel):
     result_artifact_id: UUID | None
     provider_cost: str
     output_summary: dict
+    input_snapshot: dict = {}
+    idempotency_key: str = ""
 
 
 class ArtifactRead(BaseModel):
@@ -140,6 +142,8 @@ async def project_snapshot(
                 result_artifact_id=r.result_artifact_id,
                 provider_cost=str(r.provider_cost),
                 output_summary=dict(r.output_summary or {}),
+                input_snapshot=dict(r.input_snapshot or {}),
+                idempotency_key=str(r.idempotency_key or ""),
             )
             for r in runs
         ],

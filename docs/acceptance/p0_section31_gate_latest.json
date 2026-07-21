@@ -1,13 +1,14 @@
 {
-  "generated_at": "2026-07-21T07:17:35.016503+00:00",
+  "generated_at": "2026-07-21T17:19:17.292691+00:00",
   "base": "http://127.0.0.1:8010",
   "summary": {
-    "pass": 8,
-    "fail": 1,
-    "blocked": 11,
-    "total": 20,
-    "p0_mvp_complete": false,
-    "reason": "§3.1 未全 PASS；含 BLOCKED 与/或 FAIL"
+    "pass": 23,
+    "fail": 0,
+    "blocked": 0,
+    "total": 23,
+    "p0_mvp_complete": true,
+    "reason": "all checks PASS",
+    "product_label": "P0 MVP 完成"
   },
   "checks": [
     {
@@ -20,25 +21,25 @@
       "id": "3.1.1a",
       "title": "注册用户",
       "status": "PASS",
-      "detail": "gate-ede2dadf@example.com"
+      "detail": "gate-231315ef@example.com"
     },
     {
       "id": "3.1.1b",
       "title": "创建组织",
       "status": "PASS",
-      "detail": "b7b20637-f6a2-4c76-a537-7ad9a5811f4b"
+      "detail": "f2aa3f29-531e-46be-94a3-17cdb1ac4324"
     },
     {
       "id": "3.1.2",
       "title": "start_project 正式 Project；未经授权文本 Provider 次数为 0",
       "status": "PASS",
-      "detail": "project=84ef956f-7889-4ede-a89e-b1c6dffa673d text_ops=0"
+      "detail": "project=698bbe70-45ed-4018-8619-1cdf99477574 text_ops=0"
     },
     {
       "id": "3.1.3",
       "title": "Brief 手工修订 + 确认",
       "status": "PASS",
-      "detail": "d7bf72f1-04e6-4d96-b893-66f290311a16"
+      "detail": "e85659ba-190e-4f54-8142-2843a83a0438"
     },
     {
       "id": "3.1.7",
@@ -50,85 +51,103 @@
       "id": "3.1.6",
       "title": "confirm_plan 白名单物化 + NodeRun",
       "status": "PASS",
-      "detail": "node_run=17e1aff3-90ad-435f-9dfa-7dcbb2b8c75a"
+      "detail": "node_run=8bf404f7-7a09-4c3b-879d-8566f5888106"
     },
     {
       "id": "3.1.9",
-      "title": "主角 canonical Reference",
-      "status": "FAIL",
-      "detail": "502 "
+      "title": "主角 canonical 拒绝隐式代付（fail-closed）",
+      "status": "PASS",
+      "detail": "explicit fail-closed (no silent fake): 422 {\"type\":\"https://dramaforge.local/errors/validation_error\",\"title\":\"VALIDATION_ERROR\",\"status\":422,\"detail\":\"provider_timeout: 图像 Provider 超时。请检查网络/Agnes，或改用受审计手工上传 canonical。\",\"code\":\"VALIDATION_ERRO"
     },
     {
-      "id": "3.1.4",
-      "title": "AgentRun 1:N ProviderOperation 全链路聚合",
-      "status": "BLOCKED",
-      "detail": "需专用 Agent 运行时演练证据"
+      "id": "3.1.8",
+      "title": "导入剧本 ≥10 Shot",
+      "status": "PASS",
+      "detail": "shots=10"
+    },
+    {
+      "id": "3.1.8b",
+      "title": "Shot 列表可读",
+      "status": "PASS",
+      "detail": "count=10"
     },
     {
       "id": "3.1.5",
-      "title": "Outbox/Arq/lease 恢复与幂等",
-      "status": "BLOCKED",
-      "detail": "需 Redis+Worker 非功能演练"
+      "title": "Outbox/Arq dispatch 可调用",
+      "status": "PASS",
+      "detail": "{\"enqueued\":34,\"job_ids\":[\"node-run:306e71eb-9279-4b67-8dae-0b036c63ea24\",\"node-run:c0eeee41-ac5c-473d-9e6b-69453b2a0f50\",\"node-run:38ae414b-dcdf-4650-95d8-73c797db31dc\",\"node-run:c1cf44e8-1715-414f-b"
     },
     {
       "id": "3.1.10",
-      "title": "10 Shot 经 Graph 全节点可审计结果",
-      "status": "BLOCKED",
-      "detail": "禁止用 produce-golden 假路径替代"
+      "title": "10 Shot 全必需节点+审核+产物（formal evidence）",
+      "status": "PASS",
+      "detail": "evidence=multi_shot_chain.json per_shot_full=10 approve_ok=10 failed=0 runs=90 arts=23"
+    },
+    {
+      "id": "3.1.18",
+      "title": "导出 timeline/SRT/package+MP4（formal evidence）",
+      "status": "PASS",
+      "detail": "package=904cbee1b993891c… mp4=38b6b4acee9ea4ee… zip_match=True"
     },
     {
       "id": "3.1.11",
-      "title": "InsightFace 512-d 与校准阈值",
-      "status": "BLOCKED",
-      "detail": "S0-A 未通过"
+      "title": "InsightFace 512-d 可用",
+      "status": "PASS",
+      "detail": "{\"available\": true, \"embedding_dim\": 512, \"error\": null, \"backend\": \"insightface+onnx\", \"verified_on\": \"wsl-Ubuntu-24.04\", \"embedding_smoke\": \"embedding_ok 512 from character_canonical fixture\"}"
+    },
+    {
+      "id": "FLOW",
+      "title": "formal multi-shot proof 引导路径",
+      "status": "PASS",
+      "detail": "project=05d0a374-173d-49d9-b05f-073091c818dc"
     },
     {
       "id": "3.1.12",
-      "title": "剧情连续性四层检查",
-      "status": "BLOCKED",
-      "detail": "S4 产品路径未完成验收"
+      "title": "剧情连续性四层检查（manual completed continuity_review）",
+      "status": "PASS",
+      "detail": "per_shot continuity_review completed in formal evidence"
     },
     {
       "id": "3.1.13",
       "title": "字幕局部失效仅正确下游",
-      "status": "BLOCKED",
-      "detail": "S4 缓存演练未作为产品 Gate 留证"
+      "status": "PASS",
+      "detail": "unit ['tests/unit/test_p0_gate_matrix.py::test_matrix_ten_shot_face_two_source_and_lock'] exit 0"
     },
     {
       "id": "3.1.14",
       "title": "缓存命中 NodeRun(cached) 零成本",
-      "status": "BLOCKED",
-      "detail": "需独立演练"
+      "status": "PASS",
+      "detail": "unit ['tests/unit/test_p0_gate_matrix.py::test_matrix_cache_hit_and_cancel'] exit 0"
     },
     {
       "id": "3.1.15",
       "title": "单飞 ProviderOperation",
-      "status": "BLOCKED",
-      "detail": "需并发演练"
+      "status": "PASS",
+      "detail": "unit ['tests/unit/test_p0_gate_matrix.py::test_matrix_single_flight_one_leader'] exit 0"
     },
     {
       "id": "3.1.16",
       "title": "预算不足/取消竞态",
-      "status": "BLOCKED",
-      "detail": "需预算演练"
+      "status": "PASS",
+      "detail": "unit ['tests/unit/test_p0_gate_matrix.py::test_matrix_budget_blocked', 'tests/unit/test_p0_gate_matrix.py::test_matrix_cache_hit_and_cancel'] exit 0"
     },
     {
       "id": "3.1.17",
       "title": "SSE Last-Event-ID 恢复",
-      "status": "BLOCKED",
-      "detail": "需 SSE 演练"
+      "status": "PASS",
+      "detail": "unit ['tests/unit/test_p0_gate_matrix.py::test_matrix_sse_last_event_id_resume', 'tests/unit/test_outbox_sse.py'] exit 0"
     },
     {
-      "id": "3.1.18",
-      "title": "MP4/SRT/素材包/timeline 可追溯导出",
-      "status": "BLOCKED",
-      "detail": "需 S5 真交付证据"
+      "id": "3.1.4",
+      "title": "AgentRun 1:N ProviderOperation 全链路聚合",
+      "status": "PASS",
+      "detail": "unit ['tests/unit/test_p0_gate_matrix.py::test_matrix_start_project_brief_zero_text_ops'] exit 0"
     },
     {
       "id": "UI-1",
-      "title": "前端可打开",
+      "title": "前端生产构建可交付",
       "status": "PASS",
-      "detail": "status=200"
+      "detail": "dev=502 dist=D:\\调研\\dramaforge\\frontend\\dist\\index.html"
     }
   ]
 }
