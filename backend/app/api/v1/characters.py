@@ -44,24 +44,38 @@ async def register_project_lead(
     _: CsrfDep,
 ) -> RegisterLeadResponse:
     """Register lead + canonical reference image (required for consistent keyframes)."""
+    from app.shared.errors import ValidationAppError
+
     await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
     settings = get_settings()
     adapter = get_flux_adapter(allow_live=settings.app_env != "test")
     prompt = body.locked_prompt.strip() or (
         f"portrait reference sheet of {body.name}, consistent face, clean background, studio light"
     )
-    created = await adapter.create({"prompt": prompt, "kind": "keyframe"})
-    remote = str(created.get("remote_task_id") or "")
-    poll = await adapter.poll(remote)
-    if hasattr(adapter, "blobs") and remote in getattr(adapter, "blobs", {}):
-        blob = adapter.blobs[remote]  # type: ignore[attr-defined]
-    else:
-        from app.execution.product_path import _resolve_media_bytes
+    try:
+        created = await adapter.create({"prompt": prompt, "kind": "keyframe"})
+        remote = str(created.get("remote_task_id") or "")
+        poll = await adapter.poll(remote)
+        if hasattr(adapter, "blobs") and remote in getattr(adapter, "blobs", {}):
+            blob = adapter.blobs[remote]  # type: ignore[attr-defined]
+        else:
+            from app.execution.product_path import _resolve_media_bytes
 
-        uri = poll.get("artifact_uri") or created.get("artifact_uri")
-        blob = await _resolve_media_bytes(
-            kind="keyframe", remote=remote, prompt=prompt, artifact_uri=uri
-        )
+            uri = poll.get("artifact_uri") or created.get("artifact_uri")
+            blob = await _resolve_media_bytes(
+                kind="keyframe", remote=remote, prompt=prompt, artifact_uri=uri
+            )
+        if not blob:
+            raise ValidationAppError(
+                "canonical 图像为空：图像 Provider 未返回字节。请检查 Agnes/图像 BYOK 配置。"
+            )
+    except ValidationAppError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — surface provider failure without killing worker
+        raise ValidationAppError(
+            f"注册主角 canonical 失败（图像 Provider）：{type(exc).__name__}: {exc}"
+        ) from exc
+
     char = await register_lead_character(
         session,
         project_id=project_id,

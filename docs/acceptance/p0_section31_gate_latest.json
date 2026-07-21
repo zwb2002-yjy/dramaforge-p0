@@ -1,0 +1,134 @@
+{
+  "generated_at": "2026-07-21T07:17:35.016503+00:00",
+  "base": "http://127.0.0.1:8010",
+  "summary": {
+    "pass": 8,
+    "fail": 1,
+    "blocked": 11,
+    "total": 20,
+    "p0_mvp_complete": false,
+    "reason": "§3.1 未全 PASS；含 BLOCKED 与/或 FAIL"
+  },
+  "checks": [
+    {
+      "id": "INFRA-1",
+      "title": "API /health + DB up",
+      "status": "PASS",
+      "detail": "{\"status\": \"ok\", \"service\": \"api\", \"version\": \"0.1.0\", \"env\": \"development\", \"db\": \"up\"}"
+    },
+    {
+      "id": "3.1.1a",
+      "title": "注册用户",
+      "status": "PASS",
+      "detail": "gate-ede2dadf@example.com"
+    },
+    {
+      "id": "3.1.1b",
+      "title": "创建组织",
+      "status": "PASS",
+      "detail": "b7b20637-f6a2-4c76-a537-7ad9a5811f4b"
+    },
+    {
+      "id": "3.1.2",
+      "title": "start_project 正式 Project；未经授权文本 Provider 次数为 0",
+      "status": "PASS",
+      "detail": "project=84ef956f-7889-4ede-a89e-b1c6dffa673d text_ops=0"
+    },
+    {
+      "id": "3.1.3",
+      "title": "Brief 手工修订 + 确认",
+      "status": "PASS",
+      "detail": "d7bf72f1-04e6-4d96-b893-66f290311a16"
+    },
+    {
+      "id": "3.1.7",
+      "title": "无平台 Key 时可手工 Brief/Plan 路径存在",
+      "status": "PASS",
+      "detail": "manual brief ok"
+    },
+    {
+      "id": "3.1.6",
+      "title": "confirm_plan 白名单物化 + NodeRun",
+      "status": "PASS",
+      "detail": "node_run=17e1aff3-90ad-435f-9dfa-7dcbb2b8c75a"
+    },
+    {
+      "id": "3.1.9",
+      "title": "主角 canonical Reference",
+      "status": "FAIL",
+      "detail": "502 "
+    },
+    {
+      "id": "3.1.4",
+      "title": "AgentRun 1:N ProviderOperation 全链路聚合",
+      "status": "BLOCKED",
+      "detail": "需专用 Agent 运行时演练证据"
+    },
+    {
+      "id": "3.1.5",
+      "title": "Outbox/Arq/lease 恢复与幂等",
+      "status": "BLOCKED",
+      "detail": "需 Redis+Worker 非功能演练"
+    },
+    {
+      "id": "3.1.10",
+      "title": "10 Shot 经 Graph 全节点可审计结果",
+      "status": "BLOCKED",
+      "detail": "禁止用 produce-golden 假路径替代"
+    },
+    {
+      "id": "3.1.11",
+      "title": "InsightFace 512-d 与校准阈值",
+      "status": "BLOCKED",
+      "detail": "S0-A 未通过"
+    },
+    {
+      "id": "3.1.12",
+      "title": "剧情连续性四层检查",
+      "status": "BLOCKED",
+      "detail": "S4 产品路径未完成验收"
+    },
+    {
+      "id": "3.1.13",
+      "title": "字幕局部失效仅正确下游",
+      "status": "BLOCKED",
+      "detail": "S4 缓存演练未作为产品 Gate 留证"
+    },
+    {
+      "id": "3.1.14",
+      "title": "缓存命中 NodeRun(cached) 零成本",
+      "status": "BLOCKED",
+      "detail": "需独立演练"
+    },
+    {
+      "id": "3.1.15",
+      "title": "单飞 ProviderOperation",
+      "status": "BLOCKED",
+      "detail": "需并发演练"
+    },
+    {
+      "id": "3.1.16",
+      "title": "预算不足/取消竞态",
+      "status": "BLOCKED",
+      "detail": "需预算演练"
+    },
+    {
+      "id": "3.1.17",
+      "title": "SSE Last-Event-ID 恢复",
+      "status": "BLOCKED",
+      "detail": "需 SSE 演练"
+    },
+    {
+      "id": "3.1.18",
+      "title": "MP4/SRT/素材包/timeline 可追溯导出",
+      "status": "BLOCKED",
+      "detail": "需 S5 真交付证据"
+    },
+    {
+      "id": "UI-1",
+      "title": "前端可打开",
+      "status": "PASS",
+      "detail": "status=200"
+    }
+  ]
+}
