@@ -402,7 +402,9 @@ async def _resolve_media_bytes(
     prompt: str,
     artifact_uri: object,
 ) -> bytes:
-    """Load bytes from fake blobs already handled; else HTTP(S) URL or data URI."""
+    """Load media bytes from URI. Never invent STUB success media on formal path."""
+    from app.config import get_settings
+
     if isinstance(artifact_uri, str) and artifact_uri:
         if artifact_uri.startswith("data:") and "," in artifact_uri:
             import base64
@@ -416,7 +418,16 @@ async def _resolve_media_bytes(
                 resp = await client.get(artifact_uri)
                 resp.raise_for_status()
                 return resp.content
-        # Non-URL string payload
-        return artifact_uri.encode() if not isinstance(artifact_uri, bytes) else artifact_uri
-    # No remote media: deterministic stub (tests / missing adapter bytes)
-    return f"{kind}-STUB:{remote}:{prompt}".encode()
+        if artifact_uri.startswith("fake://") and get_settings().app_env == "test":
+            # Explicit test-only fake URI → synthetic bytes for contract tests
+            return f"{kind}-TESTFAKE:{remote}:{prompt}".encode()
+        # Non-URL string payload only if it looks like raw content (not a stub label)
+        if not artifact_uri.startswith(("fake://", "stub://")):
+            return artifact_uri.encode() if not isinstance(artifact_uri, bytes) else artifact_uri
+    if get_settings().app_env == "test":
+        # Test adapters without blobs: deterministic bytes for unit tests only
+        return f"{kind}-TESTFAKE:{remote}:{prompt}".encode()
+    raise ValidationAppError(
+        f"PROVIDER_MEDIA_MISSING: adapter succeeded but no artifact_uri bytes "
+        f"(kind={kind} remote={remote}). Refusing STUB media on formal path."
+    )

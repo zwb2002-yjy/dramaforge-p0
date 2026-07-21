@@ -116,48 +116,79 @@ async def start_shot_nodes(
         if k not in SHOT_NODES:
             raise ValidationAppError(f"unknown node key: {k}")
 
+    from app.execution.shot_p0 import _NODE_TYPE
+    from app.production.models import ProductionGraph
     from app.production.service import GraphService
 
     graphs = GraphService(session)
-    graph = await graphs.create_graph(
-        project_id=project_id,
-        scope_type="shot",
-        scope_entity_id=shot_id,
-        template_key="shot-p0-v1",
-        created_by=user_id,
-        definition={"nodes": list(SHOT_NODES), "edges": SHOT_EDGES},
-    )
+    existing = (
+        await session.execute(
+            select(ProductionGraph).where(
+                ProductionGraph.project_id == project_id,
+                ProductionGraph.scope_type == "shot",
+                ProductionGraph.scope_entity_id == shot_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        graph = existing
+        if graph.current_version_id is None:
+            graph = await graphs.create_graph(
+                project_id=project_id,
+                scope_type="shot",
+                scope_entity_id=shot_id,
+                template_key="shot-p0-v1",
+                created_by=user_id,
+                definition={"nodes": list(SHOT_NODES), "edges": SHOT_EDGES},
+            )
+    else:
+        graph = await graphs.create_graph(
+            project_id=project_id,
+            scope_type="shot",
+            scope_entity_id=shot_id,
+            template_key="shot-p0-v1",
+            created_by=user_id,
+            definition={"nodes": list(SHOT_NODES), "edges": SHOT_EDGES},
+        )
     assert graph.current_version_id is not None
+    version_id = graph.current_version_id
     run_ids: list[UUID] = []
     for key in keys:
-        node = GraphNode(
-            graph_version_id=graph.current_version_id,
-            node_key=key,
-            node_type=key if key not in {
-                "face_review",
-                "video_drift_review",
-                "continuity_review",
-            }
-            else {
-                "face_review": "face_review",
-                "video_drift_review": "video_review",
-                "continuity_review": "continuity_review",
-            }.get(key, key),
-            display_name=key,
-            cacheable=True,
-        )
-        # fix node_type mapping
-        from app.execution.shot_p0 import _NODE_TYPE
-
-        node.node_type = _NODE_TYPE.get(key, key)
-        session.add(node)
-        await session.flush()
+        # Reuse graph node if already present for this version
+        node = (
+            await session.execute(
+                select(GraphNode).where(
+                    GraphNode.graph_version_id == version_id,
+                    GraphNode.node_key == key,
+                )
+            )
+        ).scalar_one_or_none()
+        if node is None:
+            node = GraphNode(
+                graph_version_id=version_id,
+                node_key=key,
+                node_type=_NODE_TYPE.get(key, key),
+                display_name=key,
+                cacheable=True,
+            )
+            session.add(node)
+            await session.flush()
         ih = hashlib.sha256(f"{shot_id}:{key}:{uuid4()}".encode()).hexdigest()
+        # attempt_no: count prior runs for this node
+        prior = (
+            await session.execute(
+                select(NodeRun).where(
+                    NodeRun.project_id == project_id,
+                    NodeRun.graph_node_id == node.id,
+                )
+            )
+        ).scalars().all()
+        attempt = len(list(prior)) + 1
         run = NodeRun(
             project_id=project_id,
-            graph_version_id=graph.current_version_id,
+            graph_version_id=version_id,
             graph_node_id=node.id,
-            attempt_no=1,
+            attempt_no=attempt,
             idempotency_key=f"start:{key}:{shot_id}:{ih}",
             input_hash=ih,
             status="queued",
@@ -168,7 +199,9 @@ async def start_shot_nodes(
         await session.flush()
         run_ids.append(run.id)
     shot = await get_shot_or_404(session, project_id=project_id, shot_id=shot_id)
-    shot.status = "queued"
+    # Keep shot.status within product vocabulary used by UI/import (avoid unknown enums)
+    if shot.status in {"draft", "pending", "review_rejected", "review_passed"}:
+        shot.status = "in_production"
     await session.flush()
     return run_ids
 
@@ -228,9 +261,18 @@ async def upload_manual_media(
     # object_key already contains project/shot/node/hash.
     _ = note
     _ = user_id
+    # Map to frozen artifact_type enum (image/video/audio/document/…)
+    if mime_type.startswith("video/"):
+        art_type = "video"
+    elif mime_type.startswith("audio/"):
+        art_type = "audio"
+    elif mime_type.startswith("image/") or mime_type == "application/octet-stream":
+        art_type = "image"
+    else:
+        art_type = "document"
     art = Artifact(
         project_id=project_id,
-        artifact_type="manual_media",
+        artifact_type=art_type,
         object_key=stored.object_key,
         content_hash=stored.content_hash,
         byte_size=stored.byte_size,

@@ -8,6 +8,16 @@ from uuid import UUID
 from app.config import get_settings
 from app.shared.db import get_session_factory, set_rls_context
 
+# Ensure full MetaData / FK graph is registered in worker process (SQLAlchemy
+# needs all related tables present when compiling FLUSH).
+from app.access import models as _access_models  # noqa: F401
+from app.assets import models as _assets_models  # noqa: F401
+from app.creation import models as _creation_models  # noqa: F401
+from app.delivery import models as _delivery_models  # noqa: F401
+from app.events import models as _event_models  # noqa: F401
+from app.execution import models as _execution_models  # noqa: F401
+from app.production import models as _production_models  # noqa: F401
+
 
 async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
     _ = ctx
@@ -23,18 +33,18 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
     factory = get_session_factory()
     run_uuid = UUID(node_run_id)
     async with factory() as session:
-        run = await session.get(NodeRun, run_uuid)
-        if run is None:
-            return {"status": "failed", "error": "node_run not found"}
-        await set_rls_context(
-            session,
-            user_id=run.created_by,
-            project_id=run.project_id,
-        )
-        run = await session.get(NodeRun, run_uuid)
-        if run is None:
-            return {"status": "failed", "error": "node_run not visible under RLS"}
         try:
+            run = await session.get(NodeRun, run_uuid)
+            if run is None:
+                return {"status": "failed", "error": "node_run not found"}
+            await set_rls_context(
+                session,
+                user_id=run.created_by,
+                project_id=run.project_id,
+            )
+            run = await session.get(NodeRun, run_uuid)
+            if run is None:
+                return {"status": "failed", "error": "node_run not visible under RLS"}
             result = await execute_media_node_run(session, node_run_id=run_uuid)
             await session.commit()
             return {
@@ -48,7 +58,18 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                 "node_type": result.node_type,
             }
         except Exception as exc:  # noqa: BLE001
-            await session.commit()
+            await session.rollback()
+            # Best-effort: mark failed if still queued/running
+            try:
+                async with factory() as s2:
+                    run2 = await s2.get(NodeRun, run_uuid)
+                    if run2 is not None and run2.status in {"queued", "running"}:
+                        run2.status = "failed"
+                        run2.error_code = "WORKER_ERROR"
+                        run2.error_summary = str(exc)[:500]
+                        await s2.commit()
+            except Exception:
+                pass
             return {"status": "failed", "error": str(exc)[:300]}
 
 

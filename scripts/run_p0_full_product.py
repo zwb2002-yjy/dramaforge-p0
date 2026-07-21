@@ -36,8 +36,10 @@ os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge",
 )
-# Prefer process-wide memory store so product path is not blocked by flaky MinIO.
-os.environ.setdefault("DRAMA_FORCE_MEMORY_STORE", "1")
+# Formal product path: real MinIO only — never force in-memory object store.
+os.environ.pop("DRAMA_FORCE_MEMORY_STORE", None)
+if os.environ.get("DRAMA_FORCE_MEMORY_STORE") == "1":
+    raise SystemExit("refusing DRAMA_FORCE_MEMORY_STORE=1 on formal product path")
 
 
 async def main() -> int:
@@ -54,11 +56,11 @@ async def main() -> int:
     from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0, set_shot_lock
     from app.providers.flux import get_flux_adapter
     from app.providers.openai import get_openai_adapter
-    from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
+    from app.runtime.scheduler import AgentRunScheduler
     from app.shared.db import set_rls_context
     from app.shared.enums import MemberRole
     from app.shared.security import hash_password
-    from app.storage.minio_store import get_object_store, reset_object_store_for_tests
+    from app.storage.minio_store import get_object_store
     from decimal import Decimal
     from sqlalchemy import select
 
@@ -97,8 +99,13 @@ async def main() -> int:
 
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    reset_object_store_for_tests()
+    # Real MinIO (or fail) — no memory store on formal path
     store = get_object_store()
+    lines.append(f"object_store={type(store).__name__}")
+    if type(store).__name__ == "InMemoryObjectStore":
+        lines.append("FATAL: InMemoryObjectStore on formal path")
+        (scratch / "p0_full_product.log").write_text("\n".join(lines), encoding="utf-8")
+        return 2
 
     async with factory() as session:
         suffix = uuid4().hex[:8]
@@ -167,52 +174,50 @@ async def main() -> int:
         await session.commit()
         lines.append(f"materialize node_run={confirmed.node_run_id}")
 
-        # Canonical ref for face path
-        if not args.skip_live_image and settings.agnes_configured():
-            try:
-                flux = get_flux_adapter(allow_live=True)
-                created = await flux.create(
+        # Canonical: live Provider only — never FakeFlux silent fallback
+        if args.skip_live_image or not settings.agnes_configured():
+            lines.append(
+                "FATAL: provider_not_configured — need AGNES for live canonical "
+                "or supply audited manual media (do not use Fake)"
+            )
+            (scratch / "p0_full_product.log").write_text("\n".join(lines), encoding="utf-8")
+            return 2
+        try:
+            flux = get_flux_adapter(allow_live=True, allow_fake=False)
+            created = await asyncio.wait_for(
+                flux.create(
                     {
                         "prompt": "canonical lead portrait, consistent face, soft light",
                         "kind": "keyframe",
                     }
-                )
-                remote = str(created.get("remote_task_id"))
-                poll = await flux.poll(remote)
-                uri = poll.get("artifact_uri") or created.get("artifact_uri")
-                if isinstance(uri, str) and uri.startswith("http"):
-                    import httpx
+                ),
+                timeout=60.0,
+            )
+            remote = str(created.get("remote_task_id"))
+            poll = await asyncio.wait_for(flux.poll(remote), timeout=30.0)
+            uri = poll.get("artifact_uri") or created.get("artifact_uri")
+            if not (isinstance(uri, str) and uri.startswith("http")):
+                lines.append(f"FATAL: no artifact_uri from provider poll={poll}")
+                (scratch / "p0_full_product.log").write_text("\n".join(lines), encoding="utf-8")
+                return 2
+            import httpx
 
-                    async with httpx.AsyncClient(
-                        timeout=120.0, follow_redirects=True
-                    ) as client:
-                        resp = await client.get(uri)
-                        resp.raise_for_status()
-                        canon_bytes = resp.content
-                else:
-                    from app.providers.fake import FakeFluxAdapter
-
-                    fad = FakeFluxAdapter()
-                    c = await fad.create({"prompt": "canon fallback", "kind": "keyframe"})
-                    canon_bytes = fad.blobs[c["remote_task_id"]]
-                lines.append(
-                    f"canonical_image live={True} nbytes={len(canon_bytes)} "
-                    f"status={poll.get('status') if isinstance(poll, dict) else 'n/a'}"
-                )
-            except Exception as exc:  # noqa: BLE001
-                from app.providers.fake import FakeFluxAdapter
-
-                fad = FakeFluxAdapter()
-                c = await fad.create({"prompt": "canon fallback", "kind": "keyframe"})
-                canon_bytes = fad.blobs[c["remote_task_id"]]
-                lines.append(f"canonical_image live_failed={type(exc).__name__}:{str(exc)[:80]}")
-        else:
-            from app.providers.fake import FakeFluxAdapter
-
-            fad = FakeFluxAdapter()
-            c = await fad.create({"prompt": "canon lead", "kind": "keyframe"})
-            canon_bytes = fad.blobs[c["remote_task_id"]]
-            lines.append(f"canonical_image live={False} nbytes={len(canon_bytes)}")
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+                resp = await client.get(uri)
+                resp.raise_for_status()
+                canon_bytes = resp.content
+            if not canon_bytes or canon_bytes.startswith(b"keyframe-STUB") or canon_bytes.startswith(
+                b"keyframe-TESTFAKE"
+            ):
+                lines.append("FATAL: refused STUB/empty canonical bytes")
+                return 2
+            lines.append(
+                f"canonical_image live=True nbytes={len(canon_bytes)} status={poll.get('status')}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"FATAL: canonical provider {type(exc).__name__}:{str(exc)[:120]}")
+            (scratch / "p0_full_product.log").write_text("\n".join(lines), encoding="utf-8")
+            return 2
 
         canon_key = f"projects/{started.project_id}/canonical/lead.png"
         await store.put_bytes(
@@ -228,11 +233,25 @@ async def main() -> int:
             },
         }
         await session.flush()
-        await AgentRunScheduler(session).enqueue_node_run_only(confirmed.node_run_id)
-        run = await session.get(NodeRun, confirmed.node_run_id)
-        lines.append(f"after_enqueue status={run.status if run else None}")
-        await WorkerRuntime(session).process_one(confirmed.node_run_id)
-        run2 = await session.get(NodeRun, confirmed.node_run_id)
+        job_id = await AgentRunScheduler(session).enqueue_node_run_only(confirmed.node_run_id)
+        lines.append(f"after_enqueue job_id={job_id} (must not be local:*)")
+        if str(job_id).startswith("local:"):
+            lines.append("FATAL: local:* enqueue is forbidden")
+            return 2
+        # Wait for real Arq worker — do NOT call WorkerRuntime in-process
+        run2 = None
+        for _ in range(60):
+            await session.refresh(run) if run else None
+            run2 = await session.get(NodeRun, confirmed.node_run_id)
+            if run2 and run2.status in {
+                "completed",
+                "cached",
+                "completed_after_cancel",
+                "failed",
+            }:
+                break
+            await asyncio.sleep(2.0)
+            await session.commit()
         art = (
             await session.get(Artifact, run2.result_artifact_id)
             if run2 and run2.result_artifact_id
@@ -288,9 +307,8 @@ async def main() -> int:
             (r.id, r.visual_description, r.dialogue or f"Line {r.sort_order}")
             for r in rows
         ][: args.n_shots]
-        # Formal path: queue NodeRuns only (Worker executes). Never flip APP_ENV=test
-        # for bulk acceptance — that forced Fake Adapters.
-        lines.append("bulk_shots_mode=queue_only_worker_path")
+        # Formal path: queue NodeRuns only; resident Arq workers execute.
+        lines.append("bulk_shots_mode=queue_only_arq_workers")
         shots = await produce_shots_p0(
             session,
             project_id=started.project_id,
@@ -302,12 +320,26 @@ async def main() -> int:
             shared_canonical_bytes=canon_bytes,
             execute_inline=False,
         )
-        # Drain via WorkerRuntime (same entry as Arq job) when Redis/Arq may be local
-        from app.runtime.scheduler import WorkerRuntime
-
-        wr = WorkerRuntime(session)
-        processed = await wr.process_queued(limit=max(50, len(specs) * 12))
-        lines.append(f"worker_processed={processed}")
+        # Enqueue all queued NodeRuns via Arq (stable job ids)
+        sched = AgentRunScheduler(session)
+        n_disp = await sched.dispatch_pending(worker_id="p0-full-product")
+        lines.append(f"dispatch_pending enqueued={n_disp} job_ids={sched.enqueued_job_ids[:5]}")
+        if any(str(j).startswith("local:") for j in sched.enqueued_job_ids):
+            lines.append("FATAL: local:* job ids returned")
+            (scratch / "p0_full_product.log").write_text("\n".join(lines), encoding="utf-8")
+            return 2
+        # Poll until workers progress (no in-process WorkerRuntime drain)
+        for _ in range(90):
+            q = await session.execute(
+                select(NodeRun)
+                .where(NodeRun.project_id == started.project_id)
+                .where(NodeRun.status == "queued")
+            )
+            remaining = len(list(q.scalars().all()))
+            if remaining == 0:
+                break
+            await asyncio.sleep(2.0)
+            await session.commit()
         lines.append(
             f"produce_shots n={len(shots)} face_checked={sum(1 for s in shots if s.face_checked)} "
             f"continuity={sum(1 for s in shots if s.continuity_checked)} "

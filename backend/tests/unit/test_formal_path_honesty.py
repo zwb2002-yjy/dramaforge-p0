@@ -123,3 +123,34 @@ def test_insightface_status_reports_backend() -> None:
     assert "available" in st
     assert st["embedding_dim"] == 512
     assert st["backend"] in {"insightface+onnx", "hash_placeholder"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_media_bytes_no_stub_outside_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import clear_settings_cache
+    from app.execution.product_path import _resolve_media_bytes
+    from app.shared.errors import ValidationAppError
+
+    monkeypatch.setenv("APP_ENV", "development")
+    clear_settings_cache()
+    try:
+        with pytest.raises(ValidationAppError) as ei:
+            await _resolve_media_bytes(
+                kind="keyframe", remote="r1", prompt="p", artifact_uri=None
+            )
+        assert "PROVIDER_MEDIA_MISSING" in ei.value.message or "STUB" in ei.value.message
+    finally:
+        monkeypatch.setenv("APP_ENV", "test")
+        clear_settings_cache()
+
+
+def test_full_product_script_refuses_force_memory() -> None:
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    text = (repo / "scripts" / "run_p0_full_product.py").read_text(encoding="utf-8")
+    assert 'setdefault("DRAMA_FORCE_MEMORY_STORE"' not in text
+    assert "DRAMA_FORCE_MEMORY_STORE\", \"1\")" not in text
+    assert "WorkerRuntime" not in text or "do NOT call WorkerRuntime" in text
+    # must not silent FakeFlux for canonical
+    assert "canon fallback" not in text

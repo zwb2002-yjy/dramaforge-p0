@@ -132,10 +132,6 @@ async def build_project_export(
             except Exception:
                 continue
         runs = filtered_runs
-        if not runs:
-            raise ValidationAppError(
-                "no completed NodeRuns for approved (review_passed) shots"
-            )
 
     run_ids = {r.id for r in runs}
     arts = list(
@@ -150,21 +146,25 @@ async def build_project_export(
         .scalars()
         .all()
     )
-    if run_ids:
-        arts = [
-            a
-            for a in arts
-            if a.produced_by_run_id in run_ids
-            or (
-                a.artifact_type == "manual_media"
-                and a.delete_reason
-                and "audited_manual_upload" in a.delete_reason
-            )
-        ]
+    if approved_ids is not None:
+        # Keep artifacts from approved-shot NodeRuns + audited manual uploads for those shots
+        kept: list[Artifact] = []
+        for a in arts:
+            if a.produced_by_run_id is not None and a.produced_by_run_id in run_ids:
+                kept.append(a)
+                continue
+            reason = a.delete_reason or ""
+            if "audited_manual_upload" in reason:
+                # object_key / reason includes shot id
+                if any(str(sid) in reason or str(sid) in a.object_key for sid in approved_ids):
+                    kept.append(a)
+        arts = kept
+    elif run_ids:
+        arts = [a for a in arts if a.produced_by_run_id in run_ids]
     if not arts:
         raise ValidationAppError(
             "no available artifacts to export "
-            "(need completed NodeRuns for approved shots under GraphVersion)"
+            "(need completed NodeRuns or audited manual media for approved shots)"
         )
 
     export = Export(
@@ -315,26 +315,102 @@ async def build_project_export(
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             mp4_error = "FFMPEG_NOT_FOUND"
-            # Deliverable package still completed without MP4; MP4 itself not claimed
-        elif not frames_data:
-            # Fail-closed: do NOT write synthetic black MP4 as success
-            mp4_error = "FFMPEG_NO_READABLE_FRAMES"
-            export_status = "failed"
-            export.error_code = "FFMPEG_NO_READABLE_FRAMES"
-            export.error_summary = "no readable image frames for MP4 composition"
-        else:
+        elif video_blobs:
+            # Prefer concatenating real video segment bytes (composite/video artifacts)
+            try:
+                with tempfile.TemporaryDirectory() as tmp:
+                    tmp_path = Path(tmp)
+                    parts: list[Path] = []
+                    for idx, raw in enumerate(video_blobs[:20]):
+                        # Detect ftyp/mp4 vs treat as copyable segment
+                        is_mp4 = raw[4:8] == b"ftyp" or raw[:4] == b"\x00\x00\x00\x18" or b"ftyp" in raw[:64]
+                        ext = "mp4" if is_mp4 else "bin"
+                        p = tmp_path / f"seg_{idx:03d}.{ext}"
+                        p.write_bytes(raw)
+                        parts.append(p)
+                    out = tmp_path / "program.mp4"
+                    if len(parts) == 1 and parts[0].suffix == ".mp4":
+                        # Single real video segment — copy as deliverable
+                        out.write_bytes(parts[0].read_bytes())
+                    else:
+                        list_file = tmp_path / "videos.txt"
+                        list_file.write_text(
+                            "\n".join(f"file '{p.as_posix()}'" for p in parts) + "\n",
+                            encoding="utf-8",
+                        )
+                        # Try stream copy first; re-encode if needed
+                        r = subprocess.run(
+                            [
+                                ffmpeg,
+                                "-y",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                str(list_file),
+                                "-c",
+                                "copy",
+                                str(out),
+                            ],
+                            capture_output=True,
+                        )
+                        if r.returncode != 0 or not out.exists() or out.stat().st_size < 32:
+                            subprocess.run(
+                                [
+                                    ffmpeg,
+                                    "-y",
+                                    "-f",
+                                    "concat",
+                                    "-safe",
+                                    "0",
+                                    "-i",
+                                    str(list_file),
+                                    "-c:v",
+                                    "libx264",
+                                    "-pix_fmt",
+                                    "yuv420p",
+                                    "-c:a",
+                                    "aac",
+                                    str(out),
+                                ],
+                                check=True,
+                                capture_output=True,
+                            )
+                    data = out.read_bytes()
+                    if len(data) < 32:
+                        raise RuntimeError("mp4 output too small")
+                    mp4_key = f"exports/{project_id}/{export.id}/program.mp4"
+                    stored = await obj.put_bytes(
+                        object_key=mp4_key, data=data, mime_type="video/mp4"
+                    )
+                    mp4_hash = stored.content_hash
+            except Exception as exc:  # noqa: BLE001
+                mp4_error = f"FFMPEG_VIDEO_FAILED: {exc}"[:300]
+                export_status = "failed"
+                export.error_code = "FFMPEG_VIDEO_FAILED"
+                export.error_summary = mp4_error
+        elif frames_data:
+            # Image-only composition is allowed only as last resort when no video
+            # artifacts exist; duration uses 2s per frame (not 0.5s stub slideshow).
             try:
                 with tempfile.TemporaryDirectory() as tmp:
                     tmp_path = Path(tmp)
                     frame_paths: list[Path] = []
                     for idx, raw in enumerate(frames_data[:20]):
                         fp = tmp_path / f"frame_{idx:03d}.png"
-                        fp.write_bytes(raw if raw[:4] == b"\x89PNG" else b"\x89PNG\r\n\x1a\n" + raw)
+                        if raw[:4] == b"\x89PNG":
+                            fp.write_bytes(raw)
+                        else:
+                            # require real PNG; skip non-image garbage
+                            continue
                         frame_paths.append(fp)
+                    if not frame_paths:
+                        raise RuntimeError("no valid PNG frames")
                     out = tmp_path / "program.mp4"
                     list_file = tmp_path / "frames.txt"
                     list_file.write_text(
-                        "\n".join(f"file '{f.as_posix()}'\nduration 0.5" for f in frame_paths)
+                        "\n".join(f"file '{f.as_posix()}'\nduration 2.0" for f in frame_paths)
                         + f"\nfile '{frame_paths[-1].as_posix()}'\n",
                         encoding="utf-8",
                     )
@@ -363,11 +439,18 @@ async def build_project_export(
                         object_key=mp4_key, data=data, mime_type="video/mp4"
                     )
                     mp4_hash = stored.content_hash
+                    # Annotate that this is image-derived when no video nodes
+                    export.error_summary = "mp4_from_image_frames_no_video_artifacts"
             except Exception as exc:  # noqa: BLE001
                 mp4_error = f"FFMPEG_FAILED: {exc}"[:300]
                 export_status = "failed"
                 export.error_code = "FFMPEG_FAILED"
                 export.error_summary = mp4_error
+        else:
+            mp4_error = "FFMPEG_NO_MEDIA"
+            export_status = "failed"
+            export.error_code = "FFMPEG_NO_MEDIA"
+            export.error_summary = "no video or image artifacts for MP4"
     else:
         mp4_error = "FFMPEG_SKIPPED"
 
