@@ -3,9 +3,11 @@ import { createRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import {
+  artifactContentUrl,
   exportProject,
   fetchProjectShots,
   fetchSnapshot,
+  grantExportDownload,
   importScript,
   produceGolden,
 } from "../lib/api";
@@ -85,6 +87,8 @@ function ProductionPage() {
   const { projectId } = projectProductionRoute.useParams();
   const qc = useQueryClient();
   const [msg, setMsg] = useState<string | null>(null);
+  const [lastExportId, setLastExportId] = useState<string | null>(null);
+  const [downloadHint, setDownloadHint] = useState<string | null>(null);
 
   const snapshot = useQuery({
     queryKey: ["snapshot", projectId],
@@ -118,9 +122,29 @@ function ProductionPage() {
       return exportProject(projectId);
     },
     onSuccess: (r) => {
+      setLastExportId(r.export_id);
       setMsg(
         `export timeline=${r.timeline_hash.slice(0, 12)}… srt=${r.srt_hash.slice(0, 12)}… items=${r.export_item_count} mp4_err=${r.mp4_error ?? "none"}`,
       );
+      setDownloadHint(
+        r.mp4_error
+          ? `MP4 未生成（${r.mp4_error}）。仍可下载 timeline/SRT 授权包。`
+          : "导出完成，可申请 timeline 下载授权。",
+      );
+    },
+    onError: (e: Error) => setMsg(e.message),
+  });
+
+  const downloadMut = useMutation({
+    mutationFn: async () => {
+      if (projectId === "demo") throw new Error("请从首页创建真实项目");
+      if (!lastExportId) throw new Error("请先执行导出");
+      return grantExportDownload(projectId, lastExportId, "timeline_json");
+    },
+    onSuccess: (g) => {
+      const url = `/api/v1/projects/${projectId}/exports/${g.export_id}/download?token=${encodeURIComponent(g.token)}&object_key=${encodeURIComponent(g.object_key)}`;
+      setDownloadHint(`下载授权已签发：${g.object_key}（expires ${g.expires_at}）`);
+      window.open(url, "_blank", "noopener,noreferrer");
     },
     onError: (e: Error) => setMsg(e.message),
   });
@@ -193,12 +217,25 @@ function ProductionPage() {
           onClick={() => exportMut.mutate()}
           disabled={exportMut.isPending || goldenMut.isPending}
         >
-          {exportMut.isPending ? "导出中…" : "③ 仅导出 timeline/SRT/素材包"}
+          {exportMut.isPending ? "导出中…" : "③ 导出 timeline/SRT/素材包"}
+        </button>
+        <button
+          type="button"
+          data-testid="download-export"
+          onClick={() => downloadMut.mutate()}
+          disabled={!lastExportId || downloadMut.isPending}
+        >
+          {downloadMut.isPending ? "签发中…" : "④ 授权下载 timeline"}
         </button>
       </div>
       {msg && (
         <p data-testid="production-msg" className="status-ok">
           {msg}
+        </p>
+      )}
+      {downloadHint && (
+        <p data-testid="download-hint" className="muted">
+          {downloadHint}
         </p>
       )}
       {(importMut.isPending || goldenMut.isPending || exportMut.isPending) && (
@@ -297,7 +334,10 @@ function ProductionPage() {
           <ul>
             {snapshot.data.artifacts.slice(0, 30).map((a) => (
               <li key={a.id}>
-                {a.object_key} · {a.byte_size}B · {a.content_hash.slice(0, 12)}…
+                <a href={artifactContentUrl(projectId, a.id)} target="_blank" rel="noreferrer">
+                  {a.object_key}
+                </a>{" "}
+                · {a.byte_size}B · {a.content_hash.slice(0, 12)}…
               </li>
             ))}
           </ul>

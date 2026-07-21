@@ -339,3 +339,21 @@ export async function produceGolden(projectId: string): Promise<GoldenProduceRes
   const csrf = await fetchCsrf();
   return apiSend("POST", `/api/v1/projects/${projectId}/produce-golden`, {}, csrf);
 }
+
+export async function grantExportDownload(
+  projectId: string,
+  exportId: string,
+  objectRole = "timeline_json",
+): Promise<{ export_id: string; object_key: string; token: string; expires_at: number }> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/exports/${exportId}/download-grant?object_role=${encodeURIComponent(objectRole)}`,
+    {},
+    csrf,
+  );
+}
+
+export function artifactContentUrl(projectId: string, artifactId: string): string {
+  return `/api/v1/projects/${projectId}/artifacts/${artifactId}/content`;
+}
