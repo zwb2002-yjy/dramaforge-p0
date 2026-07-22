@@ -32,6 +32,8 @@ def _git(root: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return proc.stdout.strip()
 
@@ -468,6 +470,28 @@ def test_completed_accepts_clean_owned_committed_diff(tmp_path: Path) -> None:
     )
     assert completed["commit"] == commit
     assert completed["changed_files"] == ["backend/change.py"]
+
+
+def test_completed_accepts_utf8_owned_path(tmp_path: Path) -> None:
+    _root, worktree = _make_task_worktree(tmp_path, "guard-test")
+    progress = tmp_path / "PROGRESS.jsonl"
+    _write_started_event(
+        progress,
+        task_id="guard-test",
+        owned_paths=["docs"],
+    )
+    commit = _commit_file(worktree, "docs/开发执行检查点.md")
+
+    completed = validate_event(
+        repo_root=worktree,
+        progress_path=progress,
+        candidate={
+            "task_id": "guard-test",
+            "status": "COMPLETED",
+            "commit": commit,
+        },
+    )
+    assert completed["changed_files"] == ["docs/开发执行检查点.md"]
 
 
 def test_merged_rejects_approval_text_without_positive_pr_number(

@@ -172,7 +172,7 @@ def find_ownership_conflicts(
 
 def _git(repo_root: Path, *args: str) -> str:
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
+        ["git", "-c", "core.quotePath=false", "-C", str(repo_root), *args],
         check=False,
         capture_output=True,
         text=True,
@@ -186,7 +186,7 @@ def _git(repo_root: Path, *args: str) -> str:
 
 def _git_succeeds(repo_root: Path, *args: str) -> bool:
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
+        ["git", "-c", "core.quotePath=false", "-C", str(repo_root), *args],
         check=False,
         capture_output=True,
         text=True,
