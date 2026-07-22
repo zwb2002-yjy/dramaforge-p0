@@ -107,7 +107,13 @@ function Append-ValidatedEvent(
                 [IO.FileAccess]::ReadWrite,
                 [IO.FileShare]::None
             )
-            $snapshotPath = "$ProgressPath.$PID.$([guid]::NewGuid().ToString('N')).snapshot"
+            $snapshotDirectory = Join-Path $RepoRoot 'tmp\agent-control'
+            if (-not (Test-Path -LiteralPath $snapshotDirectory -PathType Container)) {
+                New-Item -ItemType Directory -Path $snapshotDirectory -Force | Out-Null
+            }
+            $snapshotPath = Join-Path (
+                $snapshotDirectory
+            ) "progress-$PID-$([guid]::NewGuid().ToString('N')).snapshot"
             $snapshot = [IO.File]::Open(
                 $snapshotPath,
                 [IO.FileMode]::CreateNew,
