@@ -244,8 +244,14 @@ async def start_shot_nodes(
     shot_id: UUID,
     user_id: UUID,
     node_keys: list[str] | None = None,
+    force: bool = False,
 ) -> list[UUID]:
-    """Create queued NodeRuns for requested shot-p0-v1 nodes (enqueue-only)."""
+    """Queue missing shot-pipeline nodes with persisted Plan and Shot context.
+
+    A normal start is idempotent: already queued or successful nodes are left
+    alone. Local re-runs set ``force`` so they create a new attempt only for
+    the invalidated nodes.
+    """
     if await is_shot_locked(session, project_id=project_id, shot_id=shot_id):
         raise ValidationAppError("shot is human-locked")
     keys = node_keys or list(SHOT_NODES)
@@ -254,9 +260,10 @@ async def start_shot_nodes(
             raise ValidationAppError(f"unknown node key: {k}")
 
     from app.execution.shot_p0 import _NODE_TYPE
-    from app.production.models import ProductionGraph
+    from app.production.models import GraphVersion, ProductionGraph
     from app.production.service import GraphService
 
+    shot = await get_shot_or_404(session, project_id=project_id, shot_id=shot_id)
     graphs = GraphService(session)
     existing = (
         await session.execute(
@@ -289,6 +296,48 @@ async def start_shot_nodes(
         )
     assert graph.current_version_id is not None
     version_id = graph.current_version_id
+    version = await session.get(GraphVersion, version_id)
+    definition = dict(version.definition or {}) if version is not None else {}
+    shot_plan = definition.get("shot")
+    if not isinstance(shot_plan, dict):
+        shot_plan = {}
+    visual = str(
+        shot_plan.get("visual_description")
+        or shot.visual_description
+        or f"Shot {shot.shot_number}"
+    ).strip()
+    dialogue = str(shot_plan.get("dialogue") or shot.dialogue or "").strip()
+    keyframe_prompt = str(
+        shot_plan.get("keyframe_prompt")
+        or shot_plan.get("prompt")
+        or visual
+    ).strip()
+
+    existing_runs = list(
+        (
+            await session.execute(
+                select(NodeRun).where(
+                    NodeRun.project_id == project_id,
+                    NodeRun.graph_version_id == version_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    latest_by_key = _latest_by_node_key(_shot_runs(existing_runs, shot_id))
+    canonical_object_key = ""
+    prior_keyframe = latest_by_key.get("keyframe")
+    if prior_keyframe is not None:
+        candidate = (prior_keyframe.input_snapshot or {}).get("canonical_object_key")
+        if isinstance(candidate, str):
+            canonical_object_key = candidate
+    probe_object_key = ""
+    if prior_keyframe is not None and prior_keyframe.result_artifact_id is not None:
+        artifact = await session.get(Artifact, prior_keyframe.result_artifact_id)
+        if artifact is not None:
+            probe_object_key = artifact.object_key
+
     run_ids: list[UUID] = []
     for key in keys:
         # Reuse graph node if already present for this version
@@ -310,17 +359,43 @@ async def start_shot_nodes(
             )
             session.add(node)
             await session.flush()
+        prior_for_node = [
+            run
+            for run in existing_runs
+            if run.graph_node_id == node.id
+        ]
+        latest = latest_by_key.get(key)
+        if (
+            not force
+            and latest is not None
+            and latest.status in {*DONE_STATUSES, "queued", "running"}
+        ):
+            continue
         ih = hashlib.sha256(f"{shot_id}:{key}:{uuid4()}".encode()).hexdigest()
-        # attempt_no: count prior runs for this node
-        prior = (
-            await session.execute(
-                select(NodeRun).where(
-                    NodeRun.project_id == project_id,
-                    NodeRun.graph_node_id == node.id,
-                )
-            )
-        ).scalars().all()
-        attempt = len(list(prior)) + 1
+        attempt = len(prior_for_node) + 1
+        prompt = (
+            keyframe_prompt
+            if key == "keyframe"
+            else f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}"
+        )
+        snapshot: dict[str, object] = {
+            "shot_id": str(shot_id),
+            "node_key": key,
+            "plan_id": definition.get("plan_id"),
+            "prompt": prompt,
+            "plan": {
+                "prompt": keyframe_prompt,
+                "shot": shot_plan,
+            },
+            "visual_description": visual,
+            "visual": visual,
+            "dialogue": dialogue,
+            "subtitle": dialogue,
+        }
+        if canonical_object_key:
+            snapshot["canonical_object_key"] = canonical_object_key
+        if key in {"face_review", "video_drift_review"} and probe_object_key:
+            snapshot["probe_object_key"] = probe_object_key
         run = NodeRun(
             project_id=project_id,
             graph_version_id=version_id,
@@ -329,13 +404,12 @@ async def start_shot_nodes(
             idempotency_key=f"start:{key}:{shot_id}:{ih}",
             input_hash=ih,
             status="queued",
-            input_snapshot={"shot_id": str(shot_id), "node_key": key, "prompt": f"{key}:{shot_id}"},
+            input_snapshot=snapshot,
             created_by=user_id,
         )
         session.add(run)
         await session.flush()
         run_ids.append(run.id)
-    shot = await get_shot_or_404(session, project_id=project_id, shot_id=shot_id)
     # Keep shot.status within product vocabulary used by UI/import (avoid unknown enums)
     if shot.status in {"draft", "pending", "review_rejected", "review_passed"}:
         shot.status = "in_production"
@@ -369,6 +443,7 @@ async def local_rerun_from_node(
         shot_id=shot_id,
         user_id=user_id,
         node_keys=to_run,
+        force=True,
     )
     return to_run, run_ids
 

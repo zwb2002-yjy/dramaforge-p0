@@ -34,6 +34,7 @@ from app.consistency.face import (  # noqa: E402
     fixture_sufficiency,
     latency_summary,
     pair_score,
+    recommend_threshold,
     threshold_candidates,
 )
 
@@ -242,22 +243,26 @@ def render_metrics_report(
     env: dict[str, Any],
     face_probe: dict[str, Any],
     candidates: list[dict[str, float | int]],
+    recommendation: dict[str, float | int],
+    final_threshold: float | None,
+    approval_id: str | None,
     anomaly_counts: dict[str, int],
     latency: dict[str, float],
     label_note: str,
 ) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    status = "COMPLETE_WITH_METRICS" if final_threshold is not None else "METRICS_AWAITING_THRESHOLD_STAMP"
     lines = [
         "# S0-A 视觉一致性 Spike 报告",
         "",
-        "**状态：`COMPLETE_WITH_METRICS`**",
+        f"**状态：`{status}`**",
         "",
         f"**生成时间（UTC）：{now}**",
         "",
         "## 结论",
         "",
         "样本数量已满足 Gate 下限。下表为 **脱敏** 统计；不含原图路径与 Embedding 向量。",
-        "是否将某阈值固化为 P0 执行门，仍需人工审阅后写入后续 ADR / 配置。",
+        "阈值建议由 FAR/FRR 候选表确定；只有携带审批标识的显式盖章运行才可作为 P0 执行门。",
         "",
         "## 样本盘点",
         "",
@@ -277,6 +282,20 @@ def render_metrics_report(
         )
     lines.extend(
         [
+            "",
+            "## 阈值选择与盖章",
+            "",
+            (
+                f"- recommendation_threshold: `{float(recommendation['threshold']):.2f}` "
+                "(closest FAR/FRR operating point)"
+            ),
+            f"- recommendation_far: `{float(recommendation['far']):.4f}`",
+            f"- recommendation_frr: `{float(recommendation['frr']):.4f}`",
+            (
+                f"- final_threshold: `{final_threshold:.2f}` (approval_id={approval_id})"
+                if final_threshold is not None
+                else "- final_threshold: `NOT_STAMPED`"
+            ),
             "",
             "## 异常分类计数（按检测标签）",
             "",
@@ -330,7 +349,14 @@ def collect_missing_sample_ids(manifest: Manifest, fixture_dir: Path) -> list[st
     return missing
 
 
-def run_metrics(manifest: Manifest, fixture_dir: Path, app: Any) -> tuple[str, int]:
+def run_metrics(
+    manifest: Manifest,
+    fixture_dir: Path,
+    app: Any,
+    *,
+    stamped_threshold: float | None = None,
+    approval_id: str | None = None,
+) -> tuple[str, int]:
     same_scores: list[float] = []
     diff_scores: list[float] = []
     latencies: list[float] = []
@@ -380,6 +406,25 @@ def run_metrics(manifest: Manifest, fixture_dir: Path, app: Any) -> tuple[str, i
         )
 
     candidates = threshold_candidates(same_scores, diff_scores)
+    recommendation = recommend_threshold(candidates)
+    final_threshold: float | None = None
+    if stamped_threshold is not None:
+        candidate_thresholds = {round(float(row["threshold"]), 6) for row in candidates}
+        if round(stamped_threshold, 6) not in candidate_thresholds:
+            return (
+                "# S0-A 视觉一致性 Spike 报告\n\n"
+                "**状态：`BLOCKED_BY_INVALID_THRESHOLD_STAMP`**\n\n"
+                "盖章阈值不在本次计算出的候选阈值中；未编造最终阈值。\n",
+                5,
+            )
+        if not approval_id:
+            return (
+                "# S0-A 视觉一致性 Spike 报告\n\n"
+                "**状态：`BLOCKED_BY_INVALID_THRESHOLD_STAMP`**\n\n"
+                "盖章阈值缺少审批标识；未编造最终阈值。\n",
+                5,
+            )
+        final_threshold = stamped_threshold
     latency = latency_summary(latencies) if latencies else {
         "count": 0.0,
         "mean_ms": float("nan"),
@@ -403,6 +448,9 @@ def run_metrics(manifest: Manifest, fixture_dir: Path, app: Any) -> tuple[str, i
         env=env,
         face_probe=face_probe,
         candidates=candidates,
+        recommendation=recommendation,
+        final_threshold=final_threshold,
+        approval_id=approval_id,
         anomaly_counts=anomaly_counts,
         latency=latency,
         label_note=(
@@ -425,6 +473,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--skip-model",
         action="store_true",
         help="Do not prepare InsightFace (inventory / blocked path only)",
+    )
+    parser.add_argument(
+        "--stamp-threshold",
+        type=float,
+        default=None,
+        help="Explicitly stamp one threshold from this run's candidate table.",
+    )
+    parser.add_argument(
+        "--approval-id",
+        default=None,
+        help="Required with --stamp-threshold; change or review identifier for the final decision.",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -493,11 +552,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("BLOCKED_BY_ENV")
         return 3
 
-    body, code = run_metrics(manifest, FIXTURE_DIR, app)
+    if args.approval_id and args.stamp_threshold is None:
+        parser.error("--approval-id requires --stamp-threshold")
+    body, code = run_metrics(
+        manifest,
+        FIXTURE_DIR,
+        app,
+        stamped_threshold=args.stamp_threshold,
+        approval_id=args.approval_id,
+    )
     write_report(args.report, body)
     print(f"wrote report: {args.report}")
     if code == 0:
-        print("COMPLETE_WITH_METRICS")
+        if args.stamp_threshold is None:
+            print("METRICS_AWAITING_THRESHOLD_STAMP")
+        else:
+            print("COMPLETE_WITH_METRICS")
+    elif code == 5:
+        print("BLOCKED_BY_INVALID_THRESHOLD_STAMP")
     else:
         print("BLOCKED_BY_FIXTURE")
     return code

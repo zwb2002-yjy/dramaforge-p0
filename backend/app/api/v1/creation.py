@@ -47,6 +47,25 @@ class BriefRevisionResponse(BaseModel):
     content_hash: str
 
 
+class CreationStateBriefResponse(BriefRevisionResponse):
+    source: str
+
+
+class CreationStatePlanResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    status: str
+    plan: dict[str, Any]
+    context_hash: str
+    source: str
+    materialized: bool
+
+
+class CreationStateResponse(BaseModel):
+    brief: CreationStateBriefResponse | None
+    plan: CreationStatePlanResponse | None
+
+
 class PlanRequest(BaseModel):
     brief_revision_id: UUID
     plan: dict[str, Any] = Field(default_factory=dict)
@@ -70,6 +89,10 @@ class ConfirmPlanResponse(BaseModel):
     graph_id: UUID
     graph_version_id: UUID
     node_run_id: UUID
+    graph_ids: list[UUID]
+    graph_version_ids: list[UUID]
+    node_run_ids: list[UUID]
+    shot_ids: list[UUID]
     materialization_ops: list[str]
 
 
@@ -100,6 +123,50 @@ async def start_project(
         event_id=result.event_id,
         outbox_id=result.outbox_id,
         text_provider_operations=result.text_provider_operations,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/creation-state",
+    response_model=CreationStateResponse,
+)
+async def get_creation_state(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> CreationStateResponse:
+    result = await CreationService(session).get_creation_state(
+        project_id=project_id,
+        actor=user,
+    )
+    revision = result.brief_revision
+    plan = result.plan
+    return CreationStateResponse(
+        brief=(
+            CreationStateBriefResponse(
+                id=revision.id,
+                project_id=revision.project_id,
+                status=revision.status,
+                brief=dict(revision.brief),
+                content_hash=revision.content_hash,
+                source=revision.source_kind,
+            )
+            if revision is not None
+            else None
+        ),
+        plan=(
+            CreationStatePlanResponse(
+                id=plan.id,
+                project_id=plan.project_id,
+                status=plan.status,
+                plan=dict(plan.plan),
+                context_hash=plan.context_hash,
+                source="agent" if plan.source_agent_run_id is not None else "manual",
+                materialized=plan.materialized_at is not None,
+            )
+            if plan is not None
+            else None
+        ),
     )
 
 
@@ -198,6 +265,10 @@ async def confirm_plan(
         graph_id=result.graph_id,
         graph_version_id=result.graph_version_id,
         node_run_id=result.node_run_id,
+        graph_ids=result.graph_ids,
+        graph_version_ids=result.graph_version_ids,
+        node_run_ids=result.node_run_ids,
+        shot_ids=result.shot_ids,
         materialization_ops=result.materialization_ops,
     )
 

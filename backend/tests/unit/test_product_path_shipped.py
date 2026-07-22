@@ -6,8 +6,6 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
 from app.access.models import Organization, OrganizationMember, User
 from app.access.projects import ProjectService
 from app.creation import models as _cm  # noqa: F401
@@ -15,6 +13,7 @@ from app.creation.service import CreationService
 from app.delivery import models as _dm  # noqa: F401
 from app.delivery.export_service import build_project_export
 from app.events import models as _em  # noqa: F401
+from app.events.models import OutboxEvent
 from app.execution import models as _xm  # noqa: F401
 from app.execution.models import Artifact, NodeRun
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0, set_shot_lock
@@ -25,6 +24,8 @@ from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from app.workers.jobs import health_ping
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
 @pytest.fixture
@@ -110,7 +111,6 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
     async def _fake_arq(self, node_run_id):  # type: ignore[no-untyped-def]
         return f"test-job:{node_run_id}"
 
-    import app.runtime.scheduler as sched_mod
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(AgentRunScheduler, "_enqueue_node_run", _fake_arq)
@@ -210,7 +210,10 @@ async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduler_drains_queued(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_scheduler_drains_queued(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     user, org_id = await _seed_user_org(session)
     started = await CreationService(session).start_project(
         organization_id=org_id,
@@ -249,6 +252,53 @@ async def test_scheduler_drains_queued(session: AsyncSession, monkeypatch: pytes
     run = await session.get(NodeRun, mat.node_run_id)
     assert run is not None
     assert run.status in {"completed", "failed", "needs_human"} or run.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_explicit_enqueue_reuses_materialization_outbox(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user, org_id = await _seed_user_org(session)
+    started = await CreationService(session).start_project(
+        organization_id=org_id,
+        name=f"Outbox-{uuid4().hex[:6]}",
+        aspect_ratio="9:16",
+        actor=user,
+        idea="opening",
+    )
+    rev = await CreationService(session).update_brief_manual(
+        project_id=started.project_id, actor=user, logline="Neon rain"
+    )
+    await CreationService(session).confirm_brief(
+        project_id=started.project_id, revision_id=rev.id, actor=user
+    )
+    plan = await CreationService(session).create_or_update_plan_manual(
+        project_id=started.project_id,
+        actor=user,
+        brief_revision_id=rev.id,
+        plan_body={"prompt": "keyframe neon"},
+    )
+    mat = await CreationService(session).confirm_plan_and_materialize(
+        project_id=started.project_id, plan_id=plan.id, actor=user
+    )
+
+    async def _fake_arq(self, node_run_id):  # type: ignore[no-untyped-def]
+        return f"test-job:{node_run_id}"
+
+    monkeypatch.setattr(AgentRunScheduler, "_enqueue_node_run", _fake_arq)
+    await AgentRunScheduler(session).enqueue_node_run_only(mat.node_run_id)
+
+    outbox_rows = (
+        await session.execute(
+            select(OutboxEvent).where(OutboxEvent.topic == "node_run.enqueue")
+        )
+    ).scalars().all()
+    matching = [
+        row
+        for row in outbox_rows
+        if str((row.payload or {}).get("node_run_id")) == str(mat.node_run_id)
+    ]
+    assert len(matching) == 1
 
 
 @pytest.mark.asyncio

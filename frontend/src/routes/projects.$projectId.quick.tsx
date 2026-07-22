@@ -1,20 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   ApiError,
+  artifactContentUrl,
   confirmBrief,
-  confirmPlan,
   createPlan,
-  fetchCsrf,
+  fetchCreationState,
   fetchSnapshot,
   generateBriefAgent,
-  generatePlanAgent,
+  generatePlanFromBrief,
   registerLeadCharacter,
   updateBrief,
-  apiSend,
 } from "../lib/api";
+import { imageArtifacts, latestImageArtifact } from "../lib/projectMedia";
+import {
+  manualPlanSaveState,
+  normalizeCreationState,
+  prepareAndEnqueueKeyframe,
+  requiresAgentBriefRegeneration,
+  requiresAgentPlanRegeneration,
+} from "../lib/quickWorkflow";
 import { projectRoute } from "./projects.$projectId";
 
 export const projectQuickRoute = createRoute({
@@ -23,30 +30,33 @@ export const projectQuickRoute = createRoute({
   component: QuickModePage,
 });
 
-async function enqueueNodeRun(projectId: string, nodeRunId: string) {
-  const csrf = await fetchCsrf();
-  return apiSend<{ node_run_id: string; status: string; job_id: string }>(
-    "POST",
-    `/api/v1/projects/${projectId}/node-runs/${nodeRunId}/enqueue`,
-    {},
-    csrf,
+type Step = 1 | 2 | 3 | 4 | 5;
+type JsonObject = Record<string, unknown>;
+
+function asObject(value: unknown): JsonObject | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : null;
+}
+
+function asText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asObjectList(value: unknown): JsonObject[] {
+  return Array.isArray(value)
+    ? value.map(asObject).filter((item): item is JsonObject => item !== null)
+    : [];
+}
+
+function SummaryField({ label, value }: { label: string; value: unknown }) {
+  const text = asText(value);
+  if (!text) return null;
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd>{text}</dd>
+    </>
   );
 }
-
-async function workerTick() {
-  const res = await fetch("/api/v1/worker/tick", {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "X-Worker-Token": "dev-worker-token",
-    },
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as { processed: number };
-}
-
-type Step = 1 | 2 | 3 | 4 | 5;
 
 function QuickModePage() {
   const { projectId } = projectQuickRoute.useParams();
@@ -58,13 +68,25 @@ function QuickModePage() {
   const [audience, setAudience] = useState("");
   const [prompt, setPrompt] = useState("");
   const [shotNotes, setShotNotes] = useState("");
+  const [briefBody, setBriefBody] = useState<JsonObject | null>(null);
+  const [planBody, setPlanBody] = useState<JsonObject | null>(null);
   const [briefRev, setBriefRev] = useState<string | null>(null);
+  const [briefStatus, setBriefStatus] = useState<string | null>(null);
+  const [briefSource, setBriefSource] = useState<string | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
+  const [planSource, setPlanSource] = useState<string | null>(null);
   const [nodeRunId, setNodeRunId] = useState<string | null>(null);
   const [leadName, setLeadName] = useState("林夏");
   const [canonKey, setCanonKey] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [hydratedProjectId, setHydratedProjectId] = useState<string | null>(null);
+
+  const creationState = useQuery({
+    queryKey: ["creation-state", projectId],
+    queryFn: () => fetchCreationState(projectId),
+    enabled: projectId !== "demo",
+  });
 
   const snapshot = useQuery({
     queryKey: ["snapshot", projectId],
@@ -75,11 +97,51 @@ function QuickModePage() {
 
   const runs = snapshot.data?.node_runs ?? [];
   const arts = snapshot.data?.artifacts ?? [];
-  const latestArt = arts[0];
+  const previewArts = imageArtifacts(arts);
+  const latestArt = latestImageArtifact(arts);
   const previewUrl =
-    latestArt && projectId !== "demo"
-      ? `/api/v1/projects/${projectId}/artifacts/${latestArt.id}/content`
-      : null;
+    latestArt && projectId !== "demo" ? artifactContentUrl(projectId, latestArt.id) : null;
+  const protagonist = asObject(briefBody?.protagonist);
+  const protagonistSummary = [
+    asText(protagonist?.name),
+    asText(protagonist?.profile),
+    asText(protagonist?.goal),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const planShots = asObjectList(planBody?.shots);
+  const visualBible = asObject(planBody?.visual_bible);
+  const agentBriefNeedsRegeneration = requiresAgentBriefRegeneration(briefSource, briefBody);
+  const agentPlanNeedsRegeneration = requiresAgentPlanRegeneration(planSource, planBody);
+  const manualPlanControl = manualPlanSaveState(planSource, briefStatus);
+
+  useEffect(() => {
+    if (!creationState.data || hydratedProjectId === projectId) return;
+    const restored = normalizeCreationState(creationState.data);
+    setStep(restored.step);
+    setBriefRev(restored.briefRev);
+    setBriefStatus(restored.briefStatus);
+    setBriefSource(restored.briefSource);
+    setBriefBody(restored.briefBody);
+    setLogline(restored.logline);
+    setTone(restored.tone);
+    setAudience(restored.audience);
+    if (restored.logline) setIdea(restored.logline);
+    if (restored.leadName) setLeadName(restored.leadName);
+    setPlanId(restored.planId);
+    setPlanSource(restored.planSource);
+    setPlanBody(restored.planBody);
+    setPrompt(restored.prompt);
+    setShotNotes(restored.shotNotes);
+    if (restored.agentBriefNeedsRegeneration && restored.agentPlanNeedsRegeneration) {
+      setErr("检测到旧版 Agent Brief 和 Plan。请重新生成 Brief、确认后再生成 10 Shot Plan。");
+    } else if (restored.agentBriefNeedsRegeneration) {
+      setErr("检测到旧版 Agent Brief，内容不完整。请重新生成 Brief 后再规划。");
+    } else if (restored.agentPlanNeedsRegeneration) {
+      setErr("检测到旧版 Agent Plan，不含完整 10 Shot。请重新点击「Agent 生成 Plan」。");
+    }
+    setHydratedProjectId(projectId);
+  }, [creationState.data, hydratedProjectId, projectId]);
 
   const agentBrief = useMutation({
     mutationFn: async () => {
@@ -89,9 +151,19 @@ function QuickModePage() {
     },
     onSuccess: (r) => {
       setBriefRev(r.id);
+      setBriefStatus(r.status);
+      setBriefSource("agent");
+      setBriefBody(r.brief);
       setLogline(String(r.brief.logline ?? ""));
       setTone(String(r.brief.tone ?? ""));
       setAudience(String(r.brief.audience ?? ""));
+      const generatedLeadName = asText(asObject(r.brief.protagonist)?.name);
+      if (generatedLeadName) setLeadName(generatedLeadName);
+      setPlanId(null);
+      setPlanSource(null);
+      setPlanBody(null);
+      setPrompt("");
+      setShotNotes("");
       setMsg(`Agent Brief 已生成 · revision ${r.id.slice(0, 8)}…（请确认）`);
       setStep(2);
     },
@@ -112,7 +184,13 @@ function QuickModePage() {
     },
     onSuccess: (r) => {
       setBriefRev(r.id);
-      setMsg(`手工 Brief 已保存 · revision ${r.id.slice(0, 8)}…`);
+      setBriefStatus(r.status);
+      setBriefSource("user");
+      setBriefBody(r.brief ?? { logline: logline || idea, tone, audience });
+      setPlanId(null);
+      setPlanSource(null);
+      setPlanBody(null);
+      setMsg(`Brief 草稿已保存 · revision ${r.id.slice(0, 8)}…（请确认）`);
       setStep(2);
     },
     onError: (e: Error) => setErr(e.message),
@@ -123,7 +201,8 @@ function QuickModePage() {
       if (!briefRev) throw new Error("请先生成或保存 Brief");
       return confirmBrief(projectId, briefRev);
     },
-    onSuccess: () => {
+    onSuccess: (r) => {
+      setBriefStatus(r.status);
       setMsg("Brief 已确认 → 可生成 Plan");
       setStep(3);
     },
@@ -133,14 +212,22 @@ function QuickModePage() {
   const agentPlan = useMutation({
     mutationFn: async () => {
       if (!briefRev) throw new Error("需要已确认的 Brief revision");
+      if (agentBriefNeedsRegeneration) {
+        throw new Error("旧版 Agent Brief 内容不完整，请先重新生成并确认 Brief");
+      }
       setErr(null);
-      return generatePlanAgent(projectId, briefRev, true);
+      return generatePlanFromBrief(projectId, briefRev, briefStatus, true);
     },
     onSuccess: (r) => {
+      setBriefStatus("confirmed");
       setPlanId(r.id);
+      setPlanSource("agent");
+      setPlanBody(r.plan);
       setPrompt(String(r.plan.prompt ?? ""));
       setShotNotes(String(r.plan.shot_notes ?? ""));
-      setMsg(`Agent Plan 已生成 · plan ${r.id.slice(0, 8)}…`);
+      setMsg(
+        `Agent Plan 已生成 · ${asObjectList(r.plan.shots).length} Shot · plan ${r.id.slice(0, 8)}…`,
+      );
       setStep(4);
     },
     onError: (e: Error) => {
@@ -155,10 +242,16 @@ function QuickModePage() {
   const manualPlan = useMutation({
     mutationFn: async () => {
       if (!briefRev) throw new Error("需要 Brief");
+      if (briefStatus !== "confirmed") {
+        await confirmBrief(projectId, briefRev);
+      }
       return createPlan(projectId, briefRev, prompt || `Keyframe: ${logline || idea}`);
     },
     onSuccess: (r) => {
+      setBriefStatus("confirmed");
       setPlanId(r.id);
+      setPlanSource("manual");
+      setPlanBody({ prompt: prompt || `Keyframe: ${logline || idea}`, shot_notes: shotNotes });
       setMsg(`手工 Plan 已保存 · plan ${r.id.slice(0, 8)}…`);
       setStep(4);
     },
@@ -185,28 +278,25 @@ function QuickModePage() {
   const produce = useMutation({
     mutationFn: async () => {
       if (!planId) throw new Error("需要 Plan");
-      setErr(null);
-      if (!canonKey) {
-        try {
-          const lead = await registerLeadCharacter(
-            projectId,
-            leadName,
-            `lead character ${leadName}, consistent face`,
-          );
-          setCanonKey(lead.canonical_object_key);
-        } catch {
-          // keyframe may still run
-        }
+      if (agentPlanNeedsRegeneration) {
+        throw new Error("旧版 Agent Plan 不含完整 10 Shot，请重新生成 Plan");
       }
-      const mat = await confirmPlan(projectId, planId);
-      setNodeRunId(mat.node_run_id);
-      const enq = await enqueueNodeRun(projectId, mat.node_run_id);
-      const tick = await workerTick();
-      return { mat, enq, tick };
+      setErr(null);
+      const result = await prepareAndEnqueueKeyframe({
+        projectId,
+        planId,
+        canonKey,
+        leadName,
+      });
+      if (result.canonicalObjectKey && result.canonicalObjectKey !== canonKey) {
+        setCanonKey(result.canonicalObjectKey);
+      }
+      setNodeRunId(result.mat.node_run_id);
+      return result;
     },
     onSuccess: async (r) => {
       setMsg(
-        `已物化并执行 Worker · node_run ${r.mat.node_run_id.slice(0, 8)}… · processed=${r.tick.processed}`,
+        `已物化并入队 ${r.enqueues.length} 个 Shot · 首个 node_run ${r.mat.node_run_id.slice(0, 8)}… · 等待 Worker`,
       );
       setStep(5);
       await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
@@ -227,14 +317,14 @@ function QuickModePage() {
     <div data-testid="quick-mode">
       <div className="page-title-row">
         <div>
-          <h2 style={{ margin: 0 }}>快速创作 · 首帧竖切</h2>
+          <h2 style={{ margin: 0 }}>快速创作 · 10 Shot 分镜</h2>
           <p className="muted" style={{ margin: "0.25rem 0 0" }}>
-            Brief → Plan → 主角 → Keyframe。完成后进入
+            Brief → 10 Shot Plan → 主角 → 全部分镜首帧。完成后进入
             <Link to="/projects/$projectId/production" params={{ projectId }}>
               {" "}
               专业生产板
             </Link>
-            继续 10 Shot。
+            继续审核与合成。
           </p>
         </div>
       </div>
@@ -283,7 +373,7 @@ function QuickModePage() {
                 onClick={() => {
                   if (!logline) setLogline(idea);
                   setStep(2);
-                  setMsg("已切换手工 Brief：编辑字段后点「保存手工 Brief」");
+                  setMsg("已切换手工 Brief：编辑字段后点「保存 Brief 草稿」");
                 }}
               >
                 改用手工 Brief
@@ -300,11 +390,19 @@ function QuickModePage() {
             <div className="split-2">
               <label>
                 Tone
-                <input value={tone} onChange={(e) => setTone(e.target.value)} placeholder="悬疑 / 霓虹 / 雨夜" />
+                <input
+                  value={tone}
+                  onChange={(e) => setTone(e.target.value)}
+                  placeholder="悬疑 / 霓虹 / 雨夜"
+                />
               </label>
               <label>
                 Audience
-                <input value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="短视频 · 18-35" />
+                <input
+                  value={audience}
+                  onChange={(e) => setAudience(e.target.value)}
+                  placeholder="短视频 · 18-35"
+                />
               </label>
             </div>
             <div className="toolbar">
@@ -314,7 +412,7 @@ function QuickModePage() {
                 disabled={busy}
                 onClick={() => manualBrief.mutate()}
               >
-                保存手工 Brief
+                保存 Brief 草稿
               </button>
               <button
                 type="button"
@@ -326,6 +424,18 @@ function QuickModePage() {
                 确认 Brief
               </button>
             </div>
+            {briefBody && (
+              <dl className="creative-summary" data-testid="agent-brief-summary">
+                <SummaryField label="标题" value={briefBody.title} />
+                <SummaryField label="梗概" value={briefBody.synopsis} />
+                <SummaryField label="主角" value={protagonistSummary} />
+                <SummaryField label="冲突" value={briefBody.conflict} />
+                <SummaryField label="代价" value={briefBody.stakes} />
+                <SummaryField label="世界" value={briefBody.world} />
+                <SummaryField label="视觉" value={briefBody.visual_style} />
+                <SummaryField label="钩子" value={briefBody.episode_hook} />
+              </dl>
+            )}
             {briefRev && (
               <p className="muted">
                 revision <code>{briefRev.slice(0, 12)}…</code>
@@ -334,42 +444,97 @@ function QuickModePage() {
           </section>
 
           <section className="panel" data-testid="step-plan">
-            <h3>③ Plan · 首帧提示词</h3>
+            <h3>③ Plan · 分镜与视觉规范</h3>
             <div className="toolbar">
               <button
                 type="button"
                 className="primary"
                 data-testid="agent-plan"
-                disabled={busy || !briefRev}
+                disabled={busy || !briefRev || agentBriefNeedsRegeneration}
                 onClick={() => agentPlan.mutate()}
               >
-                {agentPlan.isPending ? "Agent 规划中…" : "Agent 生成 Plan"}
+                {agentPlan.isPending
+                  ? "Agent 规划中…"
+                  : briefStatus === "confirmed"
+                    ? "Agent 生成 Plan"
+                    : "确认 Brief 并生成 Plan"}
               </button>
               <button
                 type="button"
                 data-testid="save-manual-plan"
-                disabled={busy || !briefRev}
+                disabled={busy || !briefRev || manualPlanControl.disabled}
                 onClick={() => manualPlan.mutate()}
               >
-                保存手工 Plan
+                {manualPlanControl.label}
               </button>
             </div>
+            {agentBriefNeedsRegeneration && (
+              <p className="status-bad" data-testid="legacy-agent-brief-warning">
+                当前是旧版简略 Agent Brief。请重新生成并确认 Brief，之后才能生成新版 Plan。
+              </p>
+            )}
             <label>
-              Keyframe prompt
+              首镜 Keyframe prompt
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                readOnly={planSource === "agent"}
                 rows={3}
                 placeholder="cinematic keyframe, neon rain alley, lead character medium shot…"
               />
             </label>
             <label>
-              Shot notes
-              <textarea value={shotNotes} onChange={(e) => setShotNotes(e.target.value)} rows={2} />
+              Plan notes
+              <textarea
+                value={shotNotes}
+                onChange={(e) => setShotNotes(e.target.value)}
+                readOnly={planSource === "agent"}
+                rows={2}
+              />
             </label>
+            {visualBible && (
+              <dl className="creative-summary" data-testid="visual-bible">
+                <SummaryField label="风格" value={visualBible.style} />
+                <SummaryField label="色彩" value={visualBible.color_palette} />
+                <SummaryField label="光线" value={visualBible.lighting} />
+                <SummaryField label="角色连续性" value={visualBible.character_continuity} />
+                <SummaryField label="负向词" value={visualBible.negative_prompt} />
+              </dl>
+            )}
+            {planShots.length > 0 && (
+              <div className="plan-shot-list" data-testid="agent-plan-shots">
+                {planShots.map((shot, index) => (
+                  <article className="plan-shot-row" key={`${asText(shot.shot_number)}-${index}`}>
+                    <div className="plan-shot-heading">
+                      <strong>Shot {asText(shot.shot_number) || index + 1}</strong>
+                      <span>
+                        {[
+                          asText(shot.location),
+                          asText(shot.shot_type),
+                          asText(shot.camera_move),
+                          asText(shot.duration_seconds) ? `${asText(shot.duration_seconds)}s` : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </div>
+                    <p>{asText(shot.visual_description)}</p>
+                    {asText(shot.dialogue) && (
+                      <p className="muted">对白：{asText(shot.dialogue)}</p>
+                    )}
+                    <code>{asText(shot.keyframe_prompt)}</code>
+                  </article>
+                ))}
+              </div>
+            )}
             {planId && (
               <p className="muted">
                 plan <code>{planId.slice(0, 12)}…</code>
+              </p>
+            )}
+            {agentPlanNeedsRegeneration && (
+              <p className="status-bad" data-testid="legacy-agent-plan-warning">
+                当前 Agent Plan 不是完整 10 Shot，已禁止生产。请重新生成 Plan。
               </p>
             )}
           </section>
@@ -401,19 +566,22 @@ function QuickModePage() {
           </section>
 
           <section className="panel" data-testid="step-produce">
-            <h3>④ 生产首帧</h3>
+            <h3>④ 生产全部 Shot 首帧</h3>
             <p className="muted">
-              物化白名单：create_shot_stub + enqueue_keyframe。Worker 内执行图像 Adapter；
-              development + Agnes Key 走真生成。
+              Plan 会物化为真实 Shot，每个 Shot 创建独立 keyframe NodeRun 并交给 Worker。
             </p>
             <button
               type="button"
               className="accent"
               data-testid="produce-keyframe"
-              disabled={busy || !planId}
+              disabled={busy || !planId || agentPlanNeedsRegeneration}
               onClick={() => produce.mutate()}
             >
-              {produce.isPending ? "生产中（真生成可能数十秒）…" : "确认 Plan 并生产首帧"}
+              {produce.isPending
+                ? "批量入队中…"
+                : agentPlanNeedsRegeneration
+                  ? "请先重新生成 10 Shot Plan"
+                  : `确认 Plan 并生产${planShots.length ? ` ${planShots.length} 个` : "全部"} Shot`}
             </button>
             {nodeRunId && (
               <p className="muted" style={{ marginTop: "0.5rem" }}>
@@ -466,11 +634,7 @@ function QuickModePage() {
               {previewUrl ? (
                 <>
                   <span className="stage-badge">9:16 · artifact</span>
-                  <img
-                    src={previewUrl}
-                    alt="latest keyframe"
-                    data-testid="artifact-preview-img"
-                  />
+                  <img src={previewUrl} alt="latest keyframe" data-testid="artifact-preview-img" />
                 </>
               ) : (
                 <div className="stage-empty">
@@ -500,19 +664,19 @@ function QuickModePage() {
               )}
             </div>
             <div className="ref-strip" style={{ marginTop: "0.75rem" }}>
-              {arts.slice(0, 6).map((a) => (
+              {previewArts.slice(0, 6).map((a) => (
                 <a
                   key={a.id}
                   className="ref-chip"
-                  href={`/api/v1/projects/${projectId}/artifacts/${a.id}/content`}
+                  href={artifactContentUrl(projectId, a.id)}
                   target="_blank"
                   rel="noreferrer"
                   title={a.object_key}
                 >
-                  <img src={`/api/v1/projects/${projectId}/artifacts/${a.id}/content`} alt="" />
+                  <img src={artifactContentUrl(projectId, a.id)} alt="" />
                 </a>
               ))}
-              {arts.length === 0 && <div className="ref-chip">空</div>}
+              {previewArts.length === 0 && <div className="ref-chip">空</div>}
             </div>
             <div className="toolbar" style={{ marginTop: "0.75rem" }}>
               <Link to="/projects/$projectId/production" params={{ projectId }}>

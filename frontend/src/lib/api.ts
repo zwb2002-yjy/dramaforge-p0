@@ -143,12 +143,31 @@ export async function updateBrief(
   audience = "",
 ): Promise<{ id: string; status: string; brief?: Record<string, unknown> }> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/brief`,
-    { logline, tone, audience },
-    csrf,
-  );
+  return apiSend("POST", `/api/v1/projects/${projectId}/brief`, { logline, tone, audience }, csrf);
+}
+
+export type CreationStateResponse = {
+  brief: {
+    id: string;
+    project_id?: string;
+    status: string;
+    brief: Record<string, unknown>;
+    content_hash?: string;
+    source: string;
+  } | null;
+  plan: {
+    id: string;
+    project_id?: string;
+    status: string;
+    plan: Record<string, unknown>;
+    context_hash?: string;
+    source: string;
+    materialized: boolean;
+  } | null;
+};
+
+export function fetchCreationState(projectId: string): Promise<CreationStateResponse> {
+  return apiGet(`/api/v1/projects/${projectId}/creation-state`);
 }
 
 export async function generateBriefAgent(
@@ -163,25 +182,14 @@ export async function generateBriefAgent(
   source: string;
 }> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/brief/generate`,
-    { idea, authorize },
-    csrf,
-  );
+  return apiSend("POST", `/api/v1/projects/${projectId}/brief/generate`, { idea, authorize }, csrf);
 }
 
 export async function generatePlanAgent(
   projectId: string,
   briefRevisionId: string,
   authorize = true,
-): Promise<{
-  id: string;
-  status: string;
-  plan: Record<string, unknown>;
-  context_hash: string;
-  source: string;
-}> {
+): Promise<AgentPlanResponse> {
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
@@ -191,17 +199,33 @@ export async function generatePlanAgent(
   );
 }
 
+export type AgentPlanResponse = {
+  id: string;
+  project_id: string;
+  status: string;
+  plan: Record<string, unknown>;
+  context_hash: string;
+  source: string;
+};
+
 export async function confirmBrief(
   projectId: string,
   revisionId: string,
 ): Promise<{ id: string; status: string }> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/brief/${revisionId}/confirm`,
-    {},
-    csrf,
-  );
+  return apiSend("POST", `/api/v1/projects/${projectId}/brief/${revisionId}/confirm`, {}, csrf);
+}
+
+export async function generatePlanFromBrief(
+  projectId: string,
+  briefRevisionId: string,
+  briefStatus: string | null,
+  authorize = true,
+): Promise<AgentPlanResponse> {
+  if (briefStatus !== "confirmed") {
+    await confirmBrief(projectId, briefRevisionId);
+  }
+  return generatePlanAgent(projectId, briefRevisionId, authorize);
 }
 
 export async function createPlan(
@@ -218,10 +242,7 @@ export async function createPlan(
   );
 }
 
-export async function confirmPlan(
-  projectId: string,
-  planId: string,
-): Promise<{ node_run_id: string; graph_id: string }> {
+export async function confirmPlan(projectId: string, planId: string): Promise<ConfirmPlanResponse> {
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
@@ -231,17 +252,31 @@ export async function confirmPlan(
   );
 }
 
+export type ConfirmPlanResponse = {
+  node_run_id: string;
+  graph_id: string;
+  graph_version_id?: string;
+  node_run_ids?: string[];
+  graph_ids?: string[];
+  graph_version_ids?: string[];
+  shot_ids?: string[];
+  materialization_ops?: string[];
+};
+
+export async function enqueueNodeRun(
+  projectId: string,
+  nodeRunId: string,
+): Promise<{ node_run_id: string; status: string; job_id: string }> {
+  const csrf = await fetchCsrf();
+  return apiSend("POST", `/api/v1/projects/${projectId}/node-runs/${nodeRunId}/enqueue`, {}, csrf);
+}
+
 export async function executeNodeRun(
   projectId: string,
   nodeRunId: string,
 ): Promise<{ status: string; result_artifact_id?: string }> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/node-runs/${nodeRunId}/execute`,
-    {},
-    csrf,
-  );
+  return apiSend("POST", `/api/v1/projects/${projectId}/node-runs/${nodeRunId}/execute`, {}, csrf);
 }
 
 export type ProjectSnapshot = {
@@ -252,12 +287,17 @@ export type ProjectSnapshot = {
     status: string;
     result_artifact_id: string | null;
     output_summary: Record<string, unknown>;
+    input_snapshot: Record<string, unknown>;
+    idempotency_key: string;
   }>;
   artifacts: Array<{
     id: string;
     object_key: string;
     content_hash: string;
     byte_size: number;
+    mime_type: string;
+    storage_state: string;
+    produced_by_run_id: string | null;
   }>;
 };
 
@@ -400,12 +440,7 @@ export async function approveShot(
   note = "",
 ): Promise<ShotActionResponse> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/shots/${shotId}/approve`,
-    { note },
-    csrf,
-  );
+  return apiSend("POST", `/api/v1/projects/${projectId}/shots/${shotId}/approve`, { note }, csrf);
 }
 
 export async function rejectShot(
@@ -414,12 +449,7 @@ export async function rejectShot(
   reason: string,
 ): Promise<ShotActionResponse> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/shots/${shotId}/reject`,
-    { reason },
-    csrf,
-  );
+  return apiSend("POST", `/api/v1/projects/${projectId}/shots/${shotId}/reject`, { reason }, csrf);
 }
 
 export async function lockShot(
@@ -428,12 +458,7 @@ export async function lockShot(
   locked: boolean,
 ): Promise<ShotActionResponse> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/shots/${shotId}/lock`,
-    { locked },
-    csrf,
-  );
+  return apiSend("POST", `/api/v1/projects/${projectId}/shots/${shotId}/lock`, { locked }, csrf);
 }
 
 export async function rerunShot(

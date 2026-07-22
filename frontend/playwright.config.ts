@@ -1,8 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * E2E config: always start a dedicated Vite server and let Playwright tear it down.
- * reuseExistingServer:false avoids orphaned/hung runs when a stray dev server is open.
+ * E2E config: start Vite when free; reuse existing dev server locally (CI always starts fresh).
  */
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -21,7 +20,7 @@ export default defineConfig({
   webServer: {
     command: "npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort",
     url: "http://127.0.0.1:5173",
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     stdout: "pipe",
     stderr: "pipe",

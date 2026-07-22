@@ -19,14 +19,18 @@ class FakeOpenAIAdapter:
         kind = str(request.get("kind") or "brief")
         prompt = str(request.get("prompt") or "")
         if kind == "plan":
-            text = (
-                '{"prompt":"Cinematic neon rain keyframe 9:16, lead silhouette",'
-                '"shot_notes":"wide establishing"}'
+            from app.creation.service import _fake_plan
+
+            text = __import__("json").dumps(
+                _fake_plan("A heroine faces neon rain and a shadow stalker."),
+                ensure_ascii=False,
             )
         else:
-            text = (
-                '{"logline":"A heroine faces neon rain and a shadow stalker.",'
-                '"tone":"cinematic","audience":"short-drama"}'
+            from app.creation.service import _fake_brief
+
+            text = __import__("json").dumps(
+                _fake_brief("a heroine faces neon rain and a shadow stalker"),
+                ensure_ascii=False,
             )
         if "Return ONLY" not in prompt and not prompt:
             text = str(request.get("prompt") or text)
@@ -100,7 +104,10 @@ class FakeFluxAdapter:
                 draw.rectangle([4, 4, 60, 60], outline=(digest[3], digest[4], digest[5]), width=2)
                 # Scatter unique pixels from digest
                 for i in range(16):
-                    img.putpixel((8 + (i % 8) * 6, 8 + (i // 8) * 24), (digest[i], digest[i], 255 - digest[i]))
+                    img.putpixel(
+                        (8 + (i % 8) * 6, 8 + (i // 8) * 24),
+                        (digest[i], digest[i], 255 - digest[i]),
+                    )
                 buf = BytesIO()
                 img.save(buf, format="PNG")
                 return buf.getvalue()
@@ -110,8 +117,11 @@ class FakeFluxAdapter:
             # Fake MP4-ish payload (not a real container; FFmpeg may fail → fail-closed)
             return b"\x00\x00\x00\x18ftypmp42" + prompt.encode() + b"\x00" * 64
         if kind in {"voice"}:
-            # Minimal RIFF/WAV header + silence payload
-            return b"RIFF$\x00\x00\x00WAVEfmt " + prompt.encode()[:16].ljust(16, b"\0")
+            # Keep the test-only WAV-shaped bytes prompt-specific. Truncating
+            # the common "9:16 cinematic..." prefix caused every shot's
+            # synthetic voice to hash identically and masked artifact reuse.
+            digest = __import__("hashlib").sha256(prompt.encode()).digest()
+            return b"RIFF$\x00\x00\x00WAVEfmt " + digest
         if kind in {"subtitle"}:
             return f"1\n00:00:00,000 --> 00:00:01,000\n{prompt}\n".encode()
         if kind in {"continuity_review"}:

@@ -44,6 +44,28 @@ _creative_revision_source = Enum(
     native_enum=True,
     validate_strings=True,
 )
+_agent_operation = Enum(
+    "draft_brief",
+    "refine_brief",
+    "draft_plan",
+    name="agent_operation",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
+_agent_run_status = Enum(
+    "queued",
+    "running",
+    "cancel_requested",
+    "succeeded",
+    "failed",
+    "stale",
+    "cancelled",
+    name="agent_run_status",
+    create_constraint=False,
+    native_enum=True,
+    validate_strings=True,
+)
 
 
 class CreativeBrief(Base):
@@ -152,9 +174,8 @@ class PlanningAuthorization(Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     pricing_snapshot_id: Mapped[str] = mapped_column(String(120), nullable=False)
-    # ARRAY only on PostgreSQL; SQLite unit tests do not use this model path.
     authorized_operations: Mapped[list[str]] = mapped_column(
-        ARRAY(String(40)).with_variant(JSON(), "sqlite"), nullable=False
+        ARRAY(_agent_operation).with_variant(JSON(), "sqlite"), nullable=False
     )
     estimated_max_amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
@@ -181,8 +202,14 @@ class AgentRun(Base):
         nullable=False,
         unique=True,
     )
-    operation: Mapped[str] = mapped_column(String(40), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    operation: Mapped[str] = mapped_column(
+        _agent_operation.with_variant(String(40), "sqlite"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        _agent_run_status.with_variant(String(32), "sqlite"),
+        nullable=False,
+        default="queued",
+    )
     target_brief_revision_id: Mapped[UUID | None] = mapped_column(nullable=True)
     target_plan_id: Mapped[UUID | None] = mapped_column(nullable=True)
     requested_capability: Mapped[str] = mapped_column(String(120), nullable=False)

@@ -39,11 +39,14 @@ frontend/src/types/openapi.json
 *.tsbuildinfo
 
 # Runtime and local data
+.run/
 data/
 tmp/
 tmp/pytest-basetemp/
 tmp/pytest-work/
 logs/
+dump.rdb
+production-ui-demo.png
 *.log
 *.sqlite
 *.sqlite3
@@ -52,3 +55,18 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Temporary screenshots and scratch files
+image*.png
+image*.jpg
+image*.jpeg
+scripts/_tmp_check.sql
+
+# Local-only fixture imports (large/temporary image sets)
+fixtures/images/character_canonical/*.jpg
+fixtures/images/character_canonical/*.jpeg
+fixtures/images/character_canonical/*.png
+!fixtures/images/character_canonical/.gitkeep
+
+# Acceptance gate evidence with timestamps (generated artifacts)
+docs/acceptance/p0_section31_gate_*.json

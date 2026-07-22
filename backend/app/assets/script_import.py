@@ -15,7 +15,6 @@ from app.access.projects import ProjectService
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.shared.errors import ValidationAppError
 
-
 _SCENE_RE = re.compile(
     r"^##\s*Scene\s+(\d+)\s*[—\-–:]\s*(.+?)(?:\s*/\s*(.+))?\s*$",
     re.IGNORECASE,
@@ -206,6 +205,90 @@ async def import_script(
         await ProjectService(session).get_project_for_member(project_id=project_id, actor=actor)
     parsed = parse_script_markdown(text)
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    existing_doc = (
+        await session.execute(
+            select(ScriptDocument)
+            .where(ScriptDocument.project_id == project_id)
+            .where(ScriptDocument.content_hash == content_hash)
+            .order_by(ScriptDocument.created_at, ScriptDocument.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if existing_doc is not None:
+        existing_episode = (
+            await session.execute(
+                select(Episode).where(
+                    Episode.project_id == project_id,
+                    Episode.episode_number == parsed.episode_number,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_episode is None:
+            raise ValidationAppError(
+                "existing script import is incomplete",
+                details={"code": "SCRIPT_IMPORT_INCOMPLETE"},
+            )
+        existing_scenes = list(
+            (
+                await session.execute(
+                    select(Scene)
+                    .where(Scene.episode_id == existing_episode.id)
+                    .order_by(Scene.scene_number, Scene.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        scenes_by_number = {scene.scene_number: scene for scene in existing_scenes}
+        existing_shots = list(
+            (
+                await session.execute(
+                    select(Shot)
+                    .where(Shot.project_id == project_id)
+                    .where(Shot.scene_id.in_([scene.id for scene in existing_scenes]))
+                    .order_by(Shot.sort_order, Shot.shot_number, Shot.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        shots_by_scene_number = {
+            (shot.scene_id, shot.shot_number): shot for shot in existing_shots
+        }
+        expected_shot_count = sum(len(scene.shots) for scene in parsed.scenes)
+        ordered_shots: list[Shot] = []
+        for parsed_scene in parsed.scenes:
+            scene = scenes_by_number.get(parsed_scene.scene_number)
+            if scene is None:
+                continue
+            for parsed_shot in parsed_scene.shots:
+                shot = shots_by_scene_number.get((scene.id, parsed_shot.shot_number))
+                if shot is not None:
+                    ordered_shots.append(shot)
+        if (
+            len(ordered_shots) != expected_shot_count
+            or len({shot.id for shot in ordered_shots}) != expected_shot_count
+        ):
+            raise ValidationAppError(
+                "existing script import is incomplete",
+                details={
+                    "code": "SCRIPT_IMPORT_INCOMPLETE",
+                    "expected_scene_count": len(parsed.scenes),
+                    "actual_scene_count": len(existing_scenes),
+                    "expected_shot_count": expected_shot_count,
+                    "actual_shot_count": len(ordered_shots),
+                },
+            )
+        return ImportResult(
+            script_document_id=existing_doc.id,
+            episode_id=existing_episode.id,
+            scene_count=len(parsed.scenes),
+            shot_count=len(ordered_shots),
+            shot_ids=[shot.id for shot in ordered_shots],
+            lead_character=parsed.lead_character,
+            content_hash=content_hash,
+        )
+
     fmt = "md" if filename.lower().endswith(".md") else "txt"
     doc = ScriptDocument(
         project_id=project_id,
@@ -243,34 +326,94 @@ async def import_script(
         ep.version += 1
         await session.flush()
 
+    existing_scenes = list(
+        (
+            await session.execute(
+                select(Scene)
+                .where(Scene.episode_id == ep.id)
+                .order_by(Scene.scene_number, Scene.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    scenes_by_number = {scene.scene_number: scene for scene in existing_scenes}
+    existing_shots = list(
+        (
+            await session.execute(
+                select(Shot)
+                .where(Shot.project_id == project_id)
+                .where(Shot.scene_id.in_([scene.id for scene in existing_scenes]))
+                .order_by(Shot.sort_order, Shot.shot_number, Shot.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    shots_by_scene_number = {
+        (shot.scene_id, shot.shot_number): shot for shot in existing_shots
+    }
+    shots_by_number: dict[int, Shot | None] = {}
+    for shot in existing_shots:
+        if shot.shot_number in shots_by_number:
+            shots_by_number[shot.shot_number] = None
+        else:
+            shots_by_number[shot.shot_number] = shot
+
     shot_ids: list[UUID] = []
+    assigned_shot_ids: set[UUID] = set()
     global_order = 0
     for sc in parsed.scenes:
-        scene = Scene(
-            episode_id=ep.id,
-            scene_number=sc.scene_number,
-            location_name=sc.location_name,
-            time_of_day=sc.time_of_day,
-            synopsis=sc.synopsis,
-        )
-        session.add(scene)
-        await session.flush()
+        scene = scenes_by_number.get(sc.scene_number)
+        if scene is None:
+            scene = Scene(
+                episode_id=ep.id,
+                scene_number=sc.scene_number,
+                location_name=sc.location_name,
+                time_of_day=sc.time_of_day,
+                synopsis=sc.synopsis,
+            )
+            session.add(scene)
+            await session.flush()
+            scenes_by_number[sc.scene_number] = scene
+        else:
+            scene.location_name = sc.location_name
+            scene.time_of_day = sc.time_of_day
+            scene.synopsis = sc.synopsis
+            scene.version += 1
         for sh in sc.shots:
             global_order += 1
-            shot = Shot(
-                project_id=project_id,
-                scene_id=scene.id,
-                shot_number=sh.shot_number,
-                shot_type=sh.shot_type,
-                camera_move=sh.camera_move,
-                visual_description=sh.visual,
-                dialogue=sh.dialogue,
-                duration_seconds=sh.duration_seconds,
-                status="draft",
-                sort_order=global_order,
-            )
-            session.add(shot)
-            await session.flush()
+            shot = shots_by_scene_number.get((scene.id, sh.shot_number))
+            if shot is None or shot.id in assigned_shot_ids:
+                by_number = shots_by_number.get(sh.shot_number)
+                if by_number is not None and by_number.id not in assigned_shot_ids:
+                    shot = by_number
+            if shot is None or shot.id in assigned_shot_ids:
+                shot = Shot(
+                    project_id=project_id,
+                    scene_id=scene.id,
+                    shot_number=sh.shot_number,
+                    shot_type=sh.shot_type,
+                    camera_move=sh.camera_move,
+                    visual_description=sh.visual,
+                    dialogue=sh.dialogue,
+                    duration_seconds=sh.duration_seconds,
+                    status="draft",
+                    sort_order=global_order,
+                )
+                session.add(shot)
+                await session.flush()
+            else:
+                shot.scene_id = scene.id
+                shot.shot_number = sh.shot_number
+                shot.shot_type = sh.shot_type
+                shot.camera_move = sh.camera_move
+                shot.visual_description = sh.visual
+                shot.dialogue = sh.dialogue
+                shot.duration_seconds = sh.duration_seconds
+                shot.sort_order = global_order
+                shot.version += 1
+            assigned_shot_ids.add(shot.id)
             shot_ids.append(shot.id)
 
     await session.flush()

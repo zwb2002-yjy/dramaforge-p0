@@ -43,6 +43,17 @@ def main() -> int:
     ap.add_argument("--base", default="http://127.0.0.1:8010")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument(
+        "--probe-idea",
+        default="A protagonist follows a dangerous clue through one night.",
+        help="Creative input for the Agent and manual-fallback workflow probes.",
+    )
+    ap.add_argument(
+        "--script-fixture",
+        type=Path,
+        default=REPO / "fixtures" / "scripts" / "p0_10_shots.md",
+        help="Script file to import for the P0 ten-shot probe.",
+    )
+    ap.add_argument(
         "--evidence",
         type=Path,
         default=None,
@@ -50,6 +61,12 @@ def main() -> int:
     )
     args = ap.parse_args()
     base = args.base.rstrip("/")
+    probe_idea = args.probe_idea.strip()
+    if not probe_idea:
+        ap.error("--probe-idea must not be empty")
+    script_fixture = args.script_fixture
+    if not script_fixture.is_absolute():
+        script_fixture = (Path.cwd() / script_fixture).resolve()
     checks: list[Check] = []
     evidence_path = args.evidence
     if evidence_path is None:
@@ -141,7 +158,7 @@ def main() -> int:
                 "name": f"GateProj-{uuid4().hex[:6]}",
                 "aspect_ratio": "9:16",
                 "experience_mode": "quick",
-                "idea": "霓虹雨夜短剧验收",
+                "idea": probe_idea,
             },
         )
         if r.status_code not in (200, 201):
@@ -165,42 +182,214 @@ def main() -> int:
                 f"text_provider_operations={text_ops}",
             )
 
-        # Manual brief (no platform key abuse)
-        r = post(
-            f"/api/v1/projects/{project_id}/brief",
-            {"logline": "女主在霓虹雨夜发现跟踪者", "tone": "cinematic", "audience": "short-drama"},
+        # Agent workflow is the primary P0 evidence. Manual is only the explicit
+        # no-key fallback, never a substitute for a successful Agent probe.
+        agent_ready = False
+        manual_fallback_allowed = False
+        agent_brief = post(
+            f"/api/v1/projects/{project_id}/brief/generate",
+            {"idea": probe_idea, "authorize": True},
         )
-        if r.status_code not in (200, 201):
-            add("3.1.7", "无 Key 手工 Brief", "FAIL", f"{r.status_code} {r.text[:200]}")
-            raise RuntimeError("manual brief failed")
-        rev_id = r.json()["id"]
-        r = post(f"/api/v1/projects/{project_id}/brief/{rev_id}/confirm", {})
-        if r.status_code != 200 or r.json().get("status") != "confirmed":
-            add("3.1.3", "Brief 确认", "FAIL", r.text[:200])
-            raise RuntimeError("confirm brief failed")
-        add("3.1.3", "Brief 手工修订 + 确认", "PASS", rev_id)
-        add("3.1.7", "无平台 Key 时可手工 Brief/Plan 路径存在", "PASS", "manual brief ok")
-
-        r = post(
-            f"/api/v1/projects/{project_id}/plans",
-            {
-                "brief_revision_id": rev_id,
-                "plan": {"prompt": "cinematic neon rain keyframe 9:16, lead silhouette"},
-            },
-        )
-        if r.status_code not in (200, 201):
-            add("3.1.6", "手工 Plan", "FAIL", f"{r.status_code} {r.text[:200]}")
-            raise RuntimeError("plan failed")
-        plan_id = r.json()["id"]
-        r = post(
-            f"/api/v1/projects/{project_id}/plans/{plan_id}/confirm",
-            {"materialization_ops": ["create_shot_stub", "enqueue_keyframe"]},
-        )
-        if r.status_code not in (200, 201):
-            add("3.1.6", "confirm_plan 白名单物化", "FAIL", f"{r.status_code} {r.text[:300]}")
+        if (
+            agent_brief.status_code == 422
+            and "TEXT_LLM_NOT_CONFIGURED" in agent_brief.text
+        ):
+            manual_fallback_allowed = True
+            add(
+                "P0-1-AGENT",
+                "Agent Brief -> Plan -> 10 Shot materialization",
+                "BLOCKED",
+                "TEXT_LLM_NOT_CONFIGURED; manual fallback is not Agent evidence",
+            )
+        elif agent_brief.status_code not in (200, 201):
+            add(
+                "P0-1-AGENT",
+                "Agent Brief -> Plan -> 10 Shot materialization",
+                "FAIL",
+                f"brief/generate {agent_brief.status_code} {agent_brief.text[:300]}",
+            )
         else:
-            node_run_id = r.json().get("node_run_id")
-            add("3.1.6", "confirm_plan 白名单物化 + NodeRun", "PASS", f"node_run={node_run_id}")
+            agent_brief_body = agent_brief.json()
+            agent_rev_id = agent_brief_body.get("id")
+            if (
+                not agent_rev_id
+                or agent_brief_body.get("status") != "draft"
+                or agent_brief_body.get("source") != "agent"
+            ):
+                add(
+                    "P0-1-AGENT",
+                    "Agent Brief -> Plan -> 10 Shot materialization",
+                    "FAIL",
+                    f"invalid Agent Brief response: {agent_brief.text[:300]}",
+                )
+            else:
+                confirmed = post(
+                    f"/api/v1/projects/{project_id}/brief/{agent_rev_id}/confirm", {}
+                )
+                if (
+                    confirmed.status_code != 200
+                    or confirmed.json().get("status") != "confirmed"
+                ):
+                    add(
+                        "P0-1-AGENT",
+                        "Agent Brief -> Plan -> 10 Shot materialization",
+                        "FAIL",
+                        f"brief confirm {confirmed.status_code} {confirmed.text[:300]}",
+                    )
+                else:
+                    add("3.1.3", "Agent Brief 确认", "PASS", str(agent_rev_id))
+                    agent_plan = post(
+                        f"/api/v1/projects/{project_id}/plans/generate",
+                        {"brief_revision_id": agent_rev_id, "authorize": True},
+                    )
+                    if (
+                        agent_plan.status_code == 422
+                        and "TEXT_LLM_NOT_CONFIGURED" in agent_plan.text
+                    ):
+                        manual_fallback_allowed = True
+                        add(
+                            "P0-1-AGENT",
+                            "Agent Brief -> Plan -> 10 Shot materialization",
+                            "BLOCKED",
+                            "TEXT_LLM_NOT_CONFIGURED during Plan generation",
+                        )
+                    elif agent_plan.status_code not in (200, 201):
+                        add(
+                            "P0-1-AGENT",
+                            "Agent Brief -> Plan -> 10 Shot materialization",
+                            "FAIL",
+                            f"plans/generate {agent_plan.status_code} {agent_plan.text[:300]}",
+                        )
+                    else:
+                        agent_plan_body = agent_plan.json()
+                        agent_plan_id = agent_plan_body.get("id")
+                        agent_shots = agent_plan_body.get("plan", {}).get("shots", [])
+                        if (
+                            not agent_plan_id
+                            or agent_plan_body.get("status") != "draft"
+                            or agent_plan_body.get("source") != "agent"
+                            or not isinstance(agent_shots, list)
+                            or len(agent_shots) != 10
+                        ):
+                            add(
+                                "P0-1-AGENT",
+                                "Agent Brief -> Plan -> 10 Shot materialization",
+                                "FAIL",
+                                f"invalid Agent Plan response: {agent_plan.text[:400]}",
+                            )
+                        else:
+                            state = client.get(
+                                f"/api/v1/projects/{project_id}/creation-state",
+                                cookies=cookies,
+                            )
+                            state_body = state.json() if state.status_code == 200 else {}
+                            state_brief = state_body.get("brief") or {}
+                            state_plan = state_body.get("plan") or {}
+                            state_ok = (
+                                state.status_code == 200
+                                and str(state_brief.get("id")) == str(agent_rev_id)
+                                and state_brief.get("source") == "agent"
+                                and str(state_plan.get("id")) == str(agent_plan_id)
+                                and state_plan.get("source") == "agent"
+                                and state_plan.get("materialized") is False
+                                and len(state_plan.get("plan", {}).get("shots", [])) == 10
+                            )
+                            if not state_ok:
+                                add(
+                                    "P0-1-AGENT",
+                                    "Agent Brief -> Plan -> 10 Shot materialization",
+                                    "FAIL",
+                                    f"creation-state does not preserve Agent workflow: {state.text[:400]}",
+                                )
+                            else:
+                                materialized = post(
+                                    f"/api/v1/projects/{project_id}/plans/{agent_plan_id}/confirm",
+                                    {
+                                        "materialization_ops": [
+                                            "create_shot_stub",
+                                            "enqueue_keyframe",
+                                        ]
+                                    },
+                                )
+                                materialized_body = (
+                                    materialized.json()
+                                    if materialized.status_code in (200, 201)
+                                    else {}
+                                )
+                                shot_ids = materialized_body.get("shot_ids", [])
+                                node_run_ids = materialized_body.get("node_run_ids", [])
+                                if (
+                                    materialized.status_code not in (200, 201)
+                                    or len(shot_ids) != 10
+                                    or len(node_run_ids) != 10
+                                ):
+                                    add(
+                                        "P0-1-AGENT",
+                                        "Agent Brief -> Plan -> 10 Shot materialization",
+                                        "FAIL",
+                                        f"plan confirm {materialized.status_code} "
+                                        f"shot_ids={len(shot_ids)} node_run_ids={len(node_run_ids)} "
+                                        f"{materialized.text[:300]}",
+                                    )
+                                else:
+                                    agent_ready = True
+                                    add(
+                                        "P0-1-AGENT",
+                                        "Agent Brief -> Plan -> 10 Shot materialization",
+                                        "PASS",
+                                        f"brief={agent_rev_id} plan={agent_plan_id} "
+                                        f"shot_ids={len(shot_ids)} node_run_ids={len(node_run_ids)}",
+                                    )
+                                    add(
+                                        "3.1.6",
+                                        "Agent Plan 白名单物化 + NodeRun",
+                                        "PASS",
+                                        f"shots={len(shot_ids)} node_runs={len(node_run_ids)}",
+                                    )
+
+        if manual_fallback_allowed and not agent_ready:
+            # Manual brief (no platform key abuse)
+            r = post(
+                f"/api/v1/projects/{project_id}/brief",
+                {
+                    "logline": probe_idea,
+                    "tone": "cinematic",
+                    "audience": "short-drama",
+                },
+            )
+            if r.status_code not in (200, 201):
+                add("3.1.7", "无 Key 手工 Brief", "FAIL", f"{r.status_code} {r.text[:200]}")
+                raise RuntimeError("manual brief failed")
+            rev_id = r.json()["id"]
+            r = post(f"/api/v1/projects/{project_id}/brief/{rev_id}/confirm", {})
+            if r.status_code != 200 or r.json().get("status") != "confirmed":
+                add("3.1.3", "Brief 确认", "FAIL", r.text[:200])
+                raise RuntimeError("confirm brief failed")
+            add("3.1.3", "Brief 手工修订 + 确认", "PASS", rev_id)
+            add("3.1.7", "无平台 Key 时可手工 Brief/Plan 路径存在", "PASS", "manual brief ok")
+
+            r = post(
+                f"/api/v1/projects/{project_id}/plans",
+                {
+                    "brief_revision_id": rev_id,
+                    "plan": {
+                        "prompt": "cinematic neon rain keyframe 9:16, lead silhouette"
+                    },
+                },
+            )
+            if r.status_code not in (200, 201):
+                add("3.1.6", "手工 Plan", "FAIL", f"{r.status_code} {r.text[:200]}")
+                raise RuntimeError("plan failed")
+            plan_id = r.json()["id"]
+            r = post(
+                f"/api/v1/projects/{project_id}/plans/{plan_id}/confirm",
+                {"materialization_ops": ["create_shot_stub", "enqueue_keyframe"]},
+            )
+            if r.status_code not in (200, 201):
+                add("3.1.6", "confirm_plan 白名单物化", "FAIL", f"{r.status_code} {r.text[:300]}")
+            else:
+                node_run_id = r.json().get("node_run_id")
+                add("3.1.6", "confirm_plan 白名单物化 + NodeRun", "PASS", f"node_run={node_run_id}")
 
         # Lead character
         r = post(
@@ -227,12 +416,15 @@ def main() -> int:
             add("3.1.9", "主角 canonical Reference", "FAIL", f"{r.status_code} {r.text[:240]}")
 
         # Script import 10 shots
-        fixture = REPO / "fixtures" / "scripts" / "p0_10_shots.md"
-        if fixture.is_file():
-            text = fixture.read_text(encoding="utf-8")
+        if script_fixture.is_file():
+            text = script_fixture.read_text(encoding="utf-8")
             r = post(
                 f"/api/v1/projects/{project_id}/scripts/import",
-                {"filename": "p0_10_shots.md", "text": text, "register_lead": True},
+                {
+                    "filename": script_fixture.name,
+                    "text": text,
+                    "register_lead": True,
+                },
             )
             if r.status_code in (200, 201) and r.json().get("shot_count", 0) >= 10:
                 add(
@@ -244,7 +436,12 @@ def main() -> int:
             else:
                 add("3.1.8", "导入剧本 ≥10 Shot", "FAIL", f"{r.status_code} {r.text[:240]}")
         else:
-            add("3.1.8", "导入剧本 ≥10 Shot", "FAIL", f"missing fixture {fixture}")
+            add(
+                "3.1.8",
+                "导入剧本 ≥10 Shot",
+                "FAIL",
+                f"missing script fixture {script_fixture}",
+            )
 
         # Snapshot / shots list
         r = client.get(f"/api/v1/projects/{project_id}/shots", cookies=cookies)
@@ -377,7 +574,9 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             add("3.1.18", "导出", "BLOCKED", str(exc))
 
-    # 3.1.11 InsightFace — WSL formal venv first; never trigger Windows re-download
+    # 3.1.11 InsightFace calibration: a 512-d smoke test is necessary but not
+    # sufficient. P0 needs the current 20/20/10 FAR/FRR report and a stamped
+    # threshold before the face gate may pass.
     try:
         import subprocess as _sp
 
@@ -413,19 +612,47 @@ def main() -> int:
                     st = json.loads(text[i : j + 1])
             except Exception as exc:
                 st = {"available": False, "error": str(exc), "backend": "unknown"}
-        if st.get("available") and st.get("backend") == "insightface+onnx":
-            add("3.1.11", "InsightFace 512-d 可用", "PASS", json.dumps(st, ensure_ascii=False))
+        calibration_report = REPO / "docs" / "spikes" / "s0a-face-consistency.md"
+        report_text = (
+            calibration_report.read_text(encoding="utf-8")
+            if calibration_report.is_file()
+            else ""
+        )
+        calibrated = (
+            "COMPLETE_WITH_METRICS" in report_text
+            and "| FAR |" in report_text
+            and "| FRR |" in report_text
+            and "final_threshold" in report_text
+        )
+        if (
+            st.get("available")
+            and st.get("backend") == "insightface+onnx"
+            and calibrated
+        ):
+            add(
+                "3.1.11",
+                "InsightFace 512-d + 20/20/10 FAR/FRR calibrated threshold",
+                "PASS",
+                json.dumps(st, ensure_ascii=False),
+            )
             try:
                 outp = REPO / "docs" / "acceptance" / "insightface_status_latest.json"
                 outp.write_text(json.dumps(st, indent=2), encoding="utf-8")
             except Exception:
                 pass
         else:
+            missing = []
+            if not (st.get("available") and st.get("backend") == "insightface+onnx"):
+                missing.append(f"insightface smoke unavailable: {st}")
+            if not calibrated:
+                missing.append(
+                    "calibration report must be COMPLETE_WITH_METRICS with FAR/FRR and final_threshold"
+                )
             add(
                 "3.1.11",
-                "InsightFace 512-d 与校准阈值",
+                "InsightFace 512-d + calibrated threshold",
                 "BLOCKED",
-                f"not InsightFace acceptance: {st}",
+                "; ".join(missing),
             )
     except Exception as exc:  # noqa: BLE001
         add("3.1.11", "InsightFace 512-d", "BLOCKED", str(exc))
@@ -434,15 +661,31 @@ def main() -> int:
     if evidence_path and evidence_path.is_file():
         try:
             ev = json.loads(evidence_path.read_text(encoding="utf-8"))
-            if ev.get("ok") is True:
-                fin = ev.get("final") or {}
+            fin = ev.get("final") or {}
+            lineage = ev.get("lineage") or {}
+            valid_agent_evidence = (
+                ev.get("ok") is True
+                and ev.get("agent_workflow") is True
+                and ev.get("manual_media_count") == 0
+                and lineage.get("manual_runs") == 0
+                and lineage.get("missing_or_incomplete") == []
+                and lineage.get("bad_lineage") == []
+                and lineage.get("required_run_count") == 90
+                and lineage.get("unique_artifact_ids") == 90
+                and lineage.get("unique_object_keys") == 90
+                and fin.get("per_shot_full") == 10
+                and fin.get("failed_runs") == 0
+                and fin.get("approve_ok") == 10
+            )
+            if valid_agent_evidence:
                 add(
                     "3.1.10",
                     "10 Shot 全必需节点+审核+产物（formal evidence）",
                     "PASS",
                     f"evidence={evidence_path.name} per_shot_full={fin.get('per_shot_full')} "
                     f"approve_ok={fin.get('approve_ok')} failed={fin.get('failed_runs')} "
-                    f"runs={fin.get('node_runs')} arts={fin.get('artifacts')}",
+                    f"runs={fin.get('node_runs')} arts={fin.get('artifacts')} "
+                    f"unique_artifacts={lineage.get('unique_artifact_ids')}",
                 )
                 if fin.get("package_hash") and fin.get("mp4_hash") and fin.get("mp4_object_key"):
                     add(
@@ -459,19 +702,26 @@ def main() -> int:
                         "PASS",
                         f"project={ev.get('project_id')}",
                     )
-                # Continuity/face nodes present in full pipeline evidence
                 add(
                     "3.1.12",
-                    "剧情连续性四层检查（manual completed continuity_review）",
+                    "剧情连续性四层检查（Worker continuity_review）",
                     "PASS",
-                    "per_shot continuity_review completed in formal evidence",
+                    "per-shot Worker continuity_review has independent artifact lineage",
                 )
             else:
                 add(
                     "3.1.10",
-                    "10 Shot formal evidence present but ok=false",
+                    "10 Shot formal evidence is not independent Agent workflow proof",
                     "BLOCKED",
-                    str(ev.get("error") or ev.get("final"))[:240],
+                    (
+                        f"agent_workflow={ev.get('agent_workflow')} "
+                        f"manual_media_count={ev.get('manual_media_count')} "
+                        f"manual_runs={lineage.get('manual_runs')} "
+                        f"unique_artifact_ids={lineage.get('unique_artifact_ids')} "
+                        f"missing={lineage.get('missing_or_incomplete')} "
+                        f"bad_lineage={lineage.get('bad_lineage')} "
+                        f"error={ev.get('error')}"
+                    )[:500],
                 )
         except Exception as exc:  # noqa: BLE001
             add("3.1.10", "formal evidence load", "BLOCKED", str(exc))
@@ -650,7 +900,13 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     latest = REPO / "docs" / "acceptance" / "p0_section31_gate_latest.json"
-    latest.write_text(text, encoding="utf-8")
+    try:
+        latest.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        print(
+            f"WARNING could not refresh {latest}: {exc}; retained report at {out}",
+            file=sys.stderr,
+        )
     print(f"\nWROTE {out}", file=sys.stderr)
     print(
         f"SUMMARY pass={passed} fail={failed} blocked={blocked_n} p0_mvp_complete={p0_mvp}",

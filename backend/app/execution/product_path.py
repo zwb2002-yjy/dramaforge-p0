@@ -17,6 +17,29 @@ from app.providers.fake import FakeFluxAdapter
 from app.shared.errors import ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
 
+SHOT_PIPELINE_NODES: tuple[tuple[str, str, str], ...] = (
+    ("prompt", "prompt_compose", "Prompt"),
+    ("keyframe", "keyframe", "Keyframe"),
+    ("face_review", "face_review", "Face review"),
+    ("video", "video", "Video"),
+    ("video_drift_review", "video_review", "Video drift review"),
+    ("voice", "voice", "Voice"),
+    ("subtitle", "subtitle", "Subtitle"),
+    ("composite", "composite", "Composite"),
+    ("continuity_review", "continuity_review", "Continuity review"),
+)
+
+SHOT_PIPELINE_EDGES: tuple[tuple[str, str], ...] = (
+    ("prompt", "keyframe"),
+    ("keyframe", "face_review"),
+    ("face_review", "video"),
+    ("video", "video_drift_review"),
+    ("video_drift_review", "composite"),
+    ("voice", "composite"),
+    ("subtitle", "composite"),
+    ("composite", "continuity_review"),
+)
+
 
 @dataclass(frozen=True)
 class EnqueueKeyframeResult:
@@ -55,10 +78,24 @@ async def enqueue_keyframe_after_plan(
     user_id: UUID,
     plan: CreationPlan,
     materialization_ops: list[str],
+    shot_id: UUID | None = None,
+    shot_plan: dict[str, object] | None = None,
 ) -> EnqueueKeyframeResult:
-    """Publish graph version and queue keyframe NodeRun — Worker executes Adapter."""
+    """Publish the full Shot graph and queue its first keyframe NodeRun.
+
+    The remaining nodes are intentionally started through the per-shot API once
+    the operator is ready to advance that shot. This keeps provider work
+    explicit while giving every run the same persisted Plan context.
+    """
     graphs = GraphService(session)
-    shot_id = uuid4()
+    shot_id = shot_id or uuid4()
+    shot_body = dict(shot_plan or {})
+    prompt = str(
+        shot_body.get("keyframe_prompt")
+        or shot_body.get("prompt")
+        or plan.plan.get("prompt")
+        or "Cinematic keyframe, 9:16"
+    )
     graph = await graphs.create_graph(
         project_id=project_id,
         scope_type="shot",
@@ -66,23 +103,32 @@ async def enqueue_keyframe_after_plan(
         template_key="shot-p0-v1",
         created_by=user_id,
         definition={
-            "nodes": [{"key": "keyframe.generate", "type": "keyframe"}],
-            "edges": [],
+            "nodes": [
+                {"key": key, "type": node_type}
+                for key, node_type, _display_name in SHOT_PIPELINE_NODES
+            ],
+            "edges": list(SHOT_PIPELINE_EDGES),
             "materialization": materialization_ops,
             "plan_id": str(plan.id),
+            "shot_id": str(shot_id),
+            "shot": shot_body,
         },
     )
     assert graph.current_version_id is not None
     version = await graphs.get_version(graph.current_version_id)
-    node = GraphNode(
-        graph_version_id=version.id,
-        node_key="keyframe.generate",
-        node_type="keyframe",
-        display_name="Keyframe",
-        cacheable=True,
-    )
-    session.add(node)
+    nodes: dict[str, GraphNode] = {}
+    for key, node_type, display_name in SHOT_PIPELINE_NODES:
+        node = GraphNode(
+            graph_version_id=version.id,
+            node_key=key,
+            node_type=node_type,
+            display_name=display_name,
+            cacheable=True,
+        )
+        session.add(node)
+        nodes[key] = node
     await session.flush()
+    node = nodes["keyframe"]
     # Attach project lead canonical if registered (P0 face gate / consistency).
     from sqlalchemy import select
 
@@ -104,7 +150,14 @@ async def enqueue_keyframe_after_plan(
 
     snapshot: dict[str, object] = {
         "plan_id": str(plan.id),
-        "plan": plan.plan,
+        "shot_id": str(shot_id),
+        "node_key": "keyframe",
+        "plan": {
+            "prompt": prompt,
+            "shot": shot_body,
+            "visual_bible": plan.plan.get("visual_bible", {}),
+        },
+        "prompt": prompt,
         "materialization": materialization_ops,
     }
     if canon_key:
@@ -178,7 +231,11 @@ async def execute_media_node_run(
     node_type = node.node_type
 
     if run.status in {"completed", "cached", "completed_after_cancel"}:
-        art = await session.get(Artifact, run.result_artifact_id) if run.result_artifact_id else None
+        art = (
+            await session.get(Artifact, run.result_artifact_id)
+            if run.result_artifact_id
+            else None
+        )
         if art is None:
             raise ValidationAppError("completed run missing artifact")
         return ExecuteNodeResult(
@@ -257,9 +314,9 @@ async def execute_media_node_run(
     # Select Adapter: real Agnes when configured. No silent Fake outside test.
     adapter = flux
     if adapter is None:
+        from app.config import get_settings as _gs
         from app.providers.flux import ProviderNotConfiguredError, get_flux_adapter
         from app.providers.kling import get_kling_adapter
-        from app.config import get_settings as _gs
 
         _env = _gs().app_env
         allow_fake = _env == "test"
@@ -444,6 +501,8 @@ async def _complete_pure_node(
     face_score: float | None = None
     review_status = "passed"
     payload: dict[str, object] = {
+        "run_id": str(run.id),
+        "shot_id": str(snap.get("shot_id") or ""),
         "node_type": node_type,
         "node_key": node.node_key,
         "zero_provider_cost": True,
@@ -573,7 +632,12 @@ async def _complete_pure_node(
     run.output_summary = {
         **payload,
         "artifact_id": str(art.id),
-        "status": review_status if key in {"face_review", "video_drift_review", "continuity_review"} or node_type in {"face_review", "video_review", "continuity_review"} else "passed",
+        "status": (
+            review_status
+            if key in {"face_review", "video_drift_review", "continuity_review"}
+            or node_type in {"face_review", "video_review", "continuity_review"}
+            else "passed"
+        ),
         "face_review": face_status,
         "face_score": face_score,
         "byte_size": art.byte_size,
@@ -605,7 +669,14 @@ async def _get_or_create_artifact(
     byte_size: int,
     produced_by_run_id: UUID | None,
 ) -> Artifact:
-    """Honor uq_artifacts_project_hash_type: reuse identical content within project."""
+    """Create an Artifact without silently sharing a Shot result between runs.
+
+    The project-wide content-hash uniqueness constraint is still useful for
+    non-shot cache artifacts. A production Shot run, however, must retain
+    one-to-one lineage to the NodeRun that produced it. Reattaching an
+    existing Artifact to a different Shot run would make a ten-shot result
+    look complete while reusing another shot's media.
+    """
     from sqlalchemy import select
 
     existing = (
@@ -618,6 +689,32 @@ async def _get_or_create_artifact(
         )
     ).scalar_one_or_none()
     if existing is not None:
+        if (
+            produced_by_run_id is not None
+            and existing.produced_by_run_id is not None
+            and existing.produced_by_run_id != produced_by_run_id
+        ):
+            current_run = await session.get(NodeRun, produced_by_run_id)
+            source_run = await session.get(NodeRun, existing.produced_by_run_id)
+            current_shot_id = str(
+                (current_run.input_snapshot or {}).get("shot_id") if current_run else ""
+            )
+            source_shot_id = str(
+                (source_run.input_snapshot or {}).get("shot_id") if source_run else ""
+            )
+            if current_shot_id:
+                raise ValidationAppError(
+                    "ARTIFACT_NOT_INDEPENDENT: Shot NodeRun produced bytes already "
+                    "claimed by a different NodeRun",
+                    details={
+                        "code": "ARTIFACT_NOT_INDEPENDENT",
+                        "current_run_id": str(produced_by_run_id),
+                        "source_run_id": str(existing.produced_by_run_id),
+                        "current_shot_id": current_shot_id,
+                        "source_shot_id": source_shot_id,
+                        "artifact_id": str(existing.id),
+                    },
+                )
         if existing.storage_state != "available":
             existing.storage_state = "available"
         if produced_by_run_id and existing.produced_by_run_id is None:

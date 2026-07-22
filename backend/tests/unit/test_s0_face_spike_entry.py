@@ -31,8 +31,8 @@ def test_spike_script_exists_on_freeze_path() -> None:
     assert (REPO_ROOT / "docs" / "spikes").is_dir()
 
 
-def test_spike_entry_blocked_by_fixture_writes_report(tmp_path: Path) -> None:
-    """Real entry point must exit non-zero and write BLOCKED_BY_FIXTURE when empty."""
+def test_spike_entry_skip_model_writes_blocked_by_env_report(tmp_path: Path) -> None:
+    """Sufficient fixtures plus --skip-model must report an honest environment block."""
     report = tmp_path / "s0a-report.md"
     result = subprocess.run(
         [
@@ -48,14 +48,12 @@ def test_spike_entry_blocked_by_fixture_writes_report(tmp_path: Path) -> None:
         cwd=str(REPO_ROOT),
     )
     combined = (result.stdout or "") + (result.stderr or "")
-    assert result.returncode == 2, combined
-    assert "BLOCKED_BY_FIXTURE" in combined
+    assert result.returncode == 4, combined
+    assert "samples sufficient but --skip-model set" in combined
     assert report.is_file()
     text = report.read_text(encoding="utf-8")
-    assert "BLOCKED_BY_FIXTURE" in text
-    assert "FAR" in text
-    assert "未计算" in text or "BLOCKED_BY_FIXTURE" in text
-    assert "ACQUISITION.md" in text
+    assert "BLOCKED_BY_ENV" in text
+    assert "skip-model" in text
     # No raw embedding dumps (long float sequences)
     assert re.search(r"\b0\.\d{3,},\s*0\.\d{3,},\s*0\.\d{3,}", text) is None
 
@@ -63,11 +61,12 @@ def test_spike_entry_blocked_by_fixture_writes_report(tmp_path: Path) -> None:
 def test_spike_module_fixture_inventory_uses_manifest() -> None:
     mod = _load_spike_module()
     manifest = mod.Manifest.load(mod.MANIFEST_PATH)
-    assert manifest.pairs_same == []
-    assert manifest.pairs_diff == []
-    assert manifest.anomalies == []
+    assert manifest.pairs_same
+    assert manifest.pairs_diff
+    assert manifest.anomalies
     ids = mod.list_image_sample_ids(mod.FIXTURE_DIR)
-    assert ids == []
+    assert ids
+    assert mod.collect_missing_sample_ids(manifest, mod.FIXTURE_DIR) == []
 
 
 def test_pair_score_via_spike_import_path() -> None:

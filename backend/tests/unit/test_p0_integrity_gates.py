@@ -6,9 +6,6 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
 from app.access import models as _am  # noqa: F401
 from app.access.models import Organization, OrganizationMember, Project, ProjectMember, User
 from app.access.projects import ROLES_PRODUCE, ROLES_REVIEW, ProjectService
@@ -27,6 +24,8 @@ from app.shared.enums import GraphStatus, MemberRole
 from app.shared.errors import ForbiddenError, ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import InMemoryObjectStore
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
 @pytest.fixture
@@ -338,6 +337,9 @@ async def test_enqueue_commits_before_arq(monkeypatch: pytest.MonkeyPatch) -> No
         )
     )
     session.add = MagicMock()
+    existing = MagicMock()
+    existing.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=existing)
     session.flush = AsyncMock()
 
     order: list[str] = []

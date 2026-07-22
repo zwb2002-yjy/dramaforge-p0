@@ -6,24 +6,24 @@ Requires Docker postgres. Captures evidence for Gate (async path, not request-th
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
 from app.access.models import Organization, OrganizationMember, User
-from app.access.service import AccessService
+from app.config import Settings
+from app.creation.models import AgentRun, PlanningAuthorization
 from app.creation.service import CreationService
 from app.delivery.export_service import build_project_export
-from app.execution.models import Artifact, NodeRun
+from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0
-from app.runtime.scheduler import AgentRunScheduler
+from app.providers.fake import FakeOpenAIAdapter
+from app.runtime.scheduler import WorkerRuntime
 from app.shared.db import set_rls_context
 from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 DEFAULT_URL = "postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
 
@@ -69,7 +69,7 @@ async def pg_session() -> AsyncSession:
 
 
 @pytest.mark.asyncio
-async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
+async def test_agent_ten_shot_async_product_path(pg_session: AsyncSession) -> None:
     suffix = uuid4().hex[:8]
     user = User(
         email=f"p0-{suffix}@example.com",
@@ -107,71 +107,117 @@ async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
         organization_id=org.id,
         project_id=started.project_id,
     )
-    rev = await CreationService(pg_session).update_brief_manual(
+    service = CreationService(pg_session)
+    brief = await service.generate_brief_agent(
         project_id=started.project_id,
         actor=user,
-        logline="A hero walks into neon rain",
+        idea="A hero walks into neon rain and follows a dangerous clue.",
+        authorize=True,
     )
-    rev = await CreationService(pg_session).confirm_brief(
-        project_id=started.project_id, revision_id=rev.id, actor=user
+    rev = await service.confirm_brief(
+        project_id=started.project_id, revision_id=brief.id, actor=user
     )
     assert rev.status == "confirmed"
-    plan = await CreationService(pg_session).create_or_update_plan_manual(
+    plan = await service.generate_plan_agent(
         project_id=started.project_id,
         actor=user,
         brief_revision_id=rev.id,
-        plan_body={"prompt": "cinematic keyframe neon rain", "shots": 1},
+        authorize=True,
     )
-    confirmed = await CreationService(pg_session).confirm_plan_and_materialize(
+    assert plan.source_agent_run_id is not None
+    assert len(plan.plan["shots"]) == 10
+    confirmed = await service.confirm_plan_and_materialize(
         project_id=started.project_id,
         plan_id=plan.id,
         actor=user,
-        materialization_ops=["create_shot_stub", "enqueue_keyframe"],
     )
-    run = await pg_session.get(NodeRun, confirmed.node_run_id)
-    assert run is not None
-    assert run.status == "queued"
+    assert len(confirmed.shot_ids) == 10
+    assert len(confirmed.graph_version_ids) == 10
+    assert len(confirmed.node_run_ids) == 10
 
-    from app.runtime.scheduler import WorkerRuntime
-    from app.providers.fake import FakeFluxAdapter
+    from app.execution.shot_p0 import SHOT_NODES
+    from app.execution.shot_review import start_shot_nodes
+    from app.production.models import GraphVersion
+
+    versions = [
+        await pg_session.get(GraphVersion, graph_version_id)
+        for graph_version_id in confirmed.graph_version_ids
+    ]
+    assert all(version is not None for version in versions)
+    for version in versions:
+        assert version is not None
+        graph_nodes = (
+            await pg_session.execute(
+                select(GraphNode).where(GraphNode.graph_version_id == version.id)
+            )
+        ).scalars().all()
+        assert {node.node_key for node in graph_nodes} == set(SHOT_NODES)
 
     reset_object_store_for_tests()
     store = get_object_store()
-    ad = FakeFluxAdapter()
-    c = await ad.create({"prompt": "canonical lead pg", "kind": "keyframe"})
-    await store.put_bytes(
-        object_key=f"projects/{started.project_id}/canonical/lead.png",
-        data=ad.blobs[c["remote_task_id"]],
-        mime_type="image/png",
-    )
-    run = await pg_session.get(NodeRun, confirmed.node_run_id)
-    assert run is not None
-    run.input_snapshot = {
-        **(run.input_snapshot or {}),
-        "canonical_object_key": f"projects/{started.project_id}/canonical/lead.png",
-        "plan": {"prompt": "neon rain short drama opening shot"},
-    }
-    await pg_session.flush()
+    worker = WorkerRuntime(pg_session)
+    await worker.process_queued(limit=20)
+    for shot_id in confirmed.shot_ids:
+        queued = await start_shot_nodes(
+            pg_session,
+            project_id=started.project_id,
+            shot_id=shot_id,
+            user_id=user.id,
+        )
+        assert len(queued) == len(SHOT_NODES) - 1
+    await pg_session.commit()
+    await worker.process_queued(limit=100)
 
-    job = await AgentRunScheduler(pg_session).enqueue_node_run_only(confirmed.node_run_id)
-    assert job
-    queued = await pg_session.get(NodeRun, confirmed.node_run_id)
-    assert queued is not None and queued.status == "queued"
-    await WorkerRuntime(pg_session).process_one(confirmed.node_run_id)
-    run2 = await pg_session.get(NodeRun, confirmed.node_run_id)
-    assert run2 is not None and run2.status == "completed"
-    art = await pg_session.get(Artifact, run2.result_artifact_id)
-    assert art is not None
-    assert art.byte_size > 8
-    # Shared store: export must see worker bytes
-    assert await store.get_bytes(object_key=art.object_key)
+    runs = (
+        await pg_session.execute(
+            select(NodeRun).where(NodeRun.project_id == started.project_id)
+        )
+    ).scalars().all()
+    artifacts = {
+        artifact.id: artifact
+        for artifact in (
+            await pg_session.execute(
+                select(Artifact).where(Artifact.project_id == started.project_id)
+            )
+        ).scalars().all()
+    }
+    done = {"completed", "cached", "completed_after_cancel"}
+    artifact_ids: set[object] = set()
+    object_keys: set[str] = set()
+    for shot_id in confirmed.shot_ids:
+        latest_by_key: dict[str, NodeRun] = {}
+        for run in runs:
+            snapshot = run.input_snapshot or {}
+            if str(snapshot.get("shot_id")) != str(shot_id):
+                continue
+            key = str(snapshot.get("node_key") or "")
+            if key and (
+                key not in latest_by_key
+                or run.attempt_no >= latest_by_key[key].attempt_no
+            ):
+                latest_by_key[key] = run
+        assert set(latest_by_key) == set(SHOT_NODES)
+        for key in SHOT_NODES:
+            run = latest_by_key[key]
+            assert run.status in done, (
+                f"shot={shot_id} node={key} status={run.status} "
+                f"error={run.error_code}:{run.error_summary}"
+            )
+            assert run.result_artifact_id is not None
+            artifact = artifacts[run.result_artifact_id]
+            assert artifact.produced_by_run_id == run.id
+            assert await store.get_bytes(object_key=artifact.object_key)
+            artifact_ids.add(artifact.id)
+            object_keys.add(artifact.object_key)
+    assert len(artifact_ids) == 10 * len(SHOT_NODES)
+    assert len(object_keys) == 10 * len(SHOT_NODES)
 
     # store=None forces product default get_object_store() (same singleton Worker used)
     exp = await build_project_export(
         pg_session,
         project_id=started.project_id,
         requested_by=user.id,
-        shot_subtitles=[("1", "Opening")],
+        shot_subtitles=[(str(number), f"Shot {number}") for number in range(1, 11)],
         store=None,
         try_ffmpeg=True,
         require_approved=False,
@@ -179,12 +225,113 @@ async def test_async_keyframe_product_path(pg_session: AsyncSession) -> None:
     assert exp.timeline_hash
     assert exp.srt_hash
     assert exp.package_hash
-    assert exp.export_item_count >= 1
+    assert exp.export_item_count >= 10
     assert exp.source_artifact_ids
     # With shared store + PNG frames, either real MP4 or explicit env error (not empty-store)
     assert exp.mp4_error != "FFMPEG_NO_READABLE_FRAMES" or not __import__("shutil").which(
         "ffmpeg"
     )
+
+
+@pytest.mark.asyncio
+async def test_agent_brief_plan_postgres_enum_contract(
+    pg_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.config as config_module
+    import app.creation.service as creation_service_module
+
+    settings = Settings(app_env="test", database_url=_url())
+    monkeypatch.setattr(config_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        creation_service_module,
+        "get_openai_adapter",
+        lambda *, allow_live=False: FakeOpenAIAdapter(),
+    )
+
+    suffix = uuid4().hex[:8]
+    user = User(
+        email=f"agent-pg-{suffix}@example.com",
+        display_name="Agent PG",
+        password_hash=hash_password("password123"),
+    )
+    pg_session.add(user)
+    await pg_session.flush()
+    org = Organization(name=f"AgentPgOrg-{suffix}")
+    pg_session.add(org)
+    await pg_session.flush()
+    pg_session.add(
+        OrganizationMember(
+            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
+        )
+    )
+    await pg_session.commit()
+
+    await set_rls_context(pg_session, user_id=user.id, organization_id=org.id)
+    service = CreationService(pg_session)
+    started = await service.start_project(
+        organization_id=org.id,
+        name=f"AgentPg-{suffix}",
+        aspect_ratio="9:16",
+        actor=user,
+        idea="rainy night reunion",
+    )
+    await set_rls_context(
+        pg_session,
+        user_id=user.id,
+        organization_id=org.id,
+        project_id=started.project_id,
+    )
+
+    brief = await service.generate_brief_agent(
+        project_id=started.project_id,
+        actor=user,
+        idea="rainy night reunion",
+        authorize=True,
+    )
+    confirmed = await service.confirm_brief(
+        project_id=started.project_id,
+        revision_id=brief.id,
+        actor=user,
+    )
+    plan = await service.generate_plan_agent(
+        project_id=started.project_id,
+        actor=user,
+        brief_revision_id=confirmed.id,
+        authorize=True,
+    )
+
+    authorizations = (
+        await pg_session.execute(
+            select(PlanningAuthorization)
+            .where(PlanningAuthorization.project_id == started.project_id)
+            .order_by(PlanningAuthorization.created_at)
+        )
+    ).scalars().all()
+    runs = (
+        await pg_session.execute(
+            select(AgentRun)
+            .where(AgentRun.project_id == started.project_id)
+            .order_by(AgentRun.created_at)
+        )
+    ).scalars().all()
+    operations = (
+        await pg_session.execute(
+            select(ProviderOperation).where(
+                ProviderOperation.agent_run_id.in_([run.id for run in runs])
+            )
+        )
+    ).scalars().all()
+
+    assert brief.source_kind == "agent"
+    assert plan.source_agent_run_id is not None
+    assert [row.authorized_operations for row in authorizations] == [
+        ["draft_brief"],
+        ["draft_plan"],
+    ]
+    assert [run.operation for run in runs] == ["draft_brief", "draft_plan"]
+    assert all(run.status == "succeeded" for run in runs)
+    assert len(operations) == 2
+    assert all(operation.status == "succeeded" for operation in operations)
 
 
 @pytest.mark.asyncio
@@ -290,7 +437,8 @@ async def test_rls_cross_project_denied_as_app_role() -> None:
                   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='dramaforge_app') THEN
                     CREATE ROLE dramaforge_app NOINHERIT LOGIN PASSWORD 'dramaforge_app';
                     GRANT USAGE ON SCHEMA public TO dramaforge_app;
-                    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dramaforge_app;
+                    GRANT SELECT, INSERT, UPDATE, DELETE
+                    ON ALL TABLES IN SCHEMA public TO dramaforge_app;
                   END IF;
                 END $$
                 """
@@ -326,13 +474,15 @@ async def test_rls_cross_project_denied_as_app_role() -> None:
         ).scalar_one()
         conn.execute(
             text(
-                "INSERT INTO organization_members (organization_id, user_id, role) VALUES (:o,:u,'owner')"
+                "INSERT INTO organization_members (organization_id, user_id, role) "
+                "VALUES (:o,:u,'owner')"
             ),
             {"o": o1, "u": u1},
         )
         conn.execute(
             text(
-                "INSERT INTO organization_members (organization_id, user_id, role) VALUES (:o,:u,'owner')"
+                "INSERT INTO organization_members (organization_id, user_id, role) "
+                "VALUES (:o,:u,'owner')"
             ),
             {"o": o2, "u": u2},
         )

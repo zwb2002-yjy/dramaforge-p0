@@ -227,6 +227,10 @@ import time
 REPO = os.environ.get("PYTHONPATH", "")
 sys.path.insert(0, REPO.split(os.pathsep)[0] if REPO else ".")
 
+from app.shared.model_registry import load_all_models
+
+load_all_models()
+
 async def once() -> int:
     from app.config import get_settings
     from app.runtime.scheduler import AgentRunScheduler, RedisStreamPublisher

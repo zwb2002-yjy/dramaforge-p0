@@ -6,14 +6,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, Response
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
 from app.api.errors import register_exception_handlers
 from app.api.v1.router import api_router
 from app.config import Settings, get_settings
+from app.shared.db import get_session
 from app.shared.observability import REQUESTS_TOTAL, metrics_payload
 
 
@@ -45,19 +48,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api_router, prefix=cfg.api_prefix)
 
     @app.get("/health", tags=["system"])
-    async def health() -> Any:
+    async def health(session: AsyncSession = Depends(get_session)) -> Any:
         """Liveness + DB readiness. 503 when PostgreSQL unreachable (UI shows 离线)."""
         from fastapi.responses import JSONResponse
-        from sqlalchemy import text
-
-        from app.shared.db import get_engine
 
         db_ok = False
         db_error: str | None = None
         try:
-            engine = get_engine(cfg)
-            async with engine.connect() as conn:
-                await conn.execute(text("SELECT 1"))
+            await session.execute(text("SELECT 1"))
             db_ok = True
         except Exception as exc:  # noqa: BLE001 — surface readiness only
             db_error = type(exc).__name__

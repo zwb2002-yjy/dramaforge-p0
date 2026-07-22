@@ -6,6 +6,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
+const apiTarget = process.env.DRAMAFORGE_API_URL ?? "http://127.0.0.1:8010";
 
 export default defineConfig({
   plugins: [react()],
@@ -17,9 +18,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // 8010: local DramaForge API (8000 may be occupied by other WSL services)
-      "/api": "http://127.0.0.1:8010",
-      "/health": "http://127.0.0.1:8010",
+      // The local-stack launcher supplies the WSL IP when localhost forwarding fails.
+      "/api": apiTarget,
+      "/health": apiTarget,
     },
   },
   test: {

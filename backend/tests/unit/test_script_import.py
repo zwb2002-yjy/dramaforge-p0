@@ -6,15 +6,14 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
 from app.access.models import Organization, OrganizationMember, User
 from app.access.projects import ProjectService
 from app.assets import models as _am  # noqa: F401
 from app.assets.characters import register_lead_character, require_canonical_for_shot
-from app.assets.models import Shot
+from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.assets.script_import import import_script, parse_script_markdown
 from app.creation import models as _cm  # noqa: F401
+from app.creation.service import CreationService
 from app.delivery import models as _dm  # noqa: F401
 from app.events import models as _em  # noqa: F401
 from app.execution import models as _xm  # noqa: F401
@@ -26,6 +25,7 @@ from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 REPO = Path(__file__).resolve().parents[3]
 GOLDEN = REPO / "fixtures" / "scripts" / "p0_10_shots.md"
@@ -109,6 +109,121 @@ async def test_import_golden_creates_10_shots(session: AsyncSession) -> None:
     assert rows[0].sort_order == 1
     assert rows[9].sort_order == 10
     assert "neon" in rows[0].visual_description.lower() or "Lin" in rows[0].visual_description
+
+
+@pytest.mark.asyncio
+async def test_import_same_script_twice_is_idempotent(session: AsyncSession) -> None:
+    user, project = await _project(session)
+    text = GOLDEN.read_text(encoding="utf-8")
+
+    first = await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=text,
+        actor=user,
+    )
+    await session.commit()
+    second = await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=text,
+        actor=user,
+    )
+    await session.commit()
+
+    assert second.script_document_id == first.script_document_id
+    assert second.episode_id == first.episode_id
+    assert second.shot_ids == first.shot_ids
+    documents = (
+        await session.execute(
+            select(ScriptDocument).where(ScriptDocument.project_id == project.id)
+        )
+    ).scalars().all()
+    shots = (
+        await session.execute(select(Shot).where(Shot.project_id == project.id))
+    ).scalars().all()
+    assert len(documents) == 1
+    assert len(shots) == 10
+
+
+@pytest.mark.asyncio
+async def test_import_reconciles_materialized_agent_plan_shots(session: AsyncSession) -> None:
+    user, base_project = await _project(session)
+    service = CreationService(session)
+    started = await service.start_project(
+        organization_id=base_project.organization_id,
+        name="Agent plan script reconciliation",
+        aspect_ratio="9:16",
+        actor=user,
+        idea="A detective follows a neon-rain clue through one dangerous night.",
+    )
+    project_id = started.project_id
+    brief = await service.generate_brief_agent(
+        project_id=project_id,
+        actor=user,
+        idea="A detective follows a neon-rain clue through one dangerous night.",
+        authorize=True,
+    )
+    confirmed = await service.confirm_brief(
+        project_id=project_id,
+        revision_id=brief.id,
+        actor=user,
+    )
+    plan = await service.generate_plan_agent(
+        project_id=project_id,
+        actor=user,
+        brief_revision_id=confirmed.id,
+        authorize=True,
+    )
+    materialized = await service.confirm_plan_and_materialize(
+        project_id=project_id,
+        plan_id=plan.id,
+        actor=user,
+    )
+    materialized_ids = set(materialized.shot_ids)
+
+    result = await import_script(
+        session,
+        project_id=project_id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=GOLDEN.read_text(encoding="utf-8"),
+        actor=user,
+    )
+    await session.commit()
+
+    assert result.scene_count == 3
+    assert result.shot_count == 10
+    assert set(result.shot_ids) == materialized_ids
+
+    scenes = {
+        scene.id: scene.scene_number
+        for scene in (
+            await session.execute(
+                select(Scene).join(Episode, Scene.episode_id == Episode.id).where(
+                    Episode.project_id == project_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
+    shots = (
+        await session.execute(
+            select(Shot)
+            .where(Shot.project_id == project_id)
+            .order_by(Shot.shot_number)
+        )
+    ).scalars().all()
+    assert len(shots) == 10
+    assert scenes[next(shot.scene_id for shot in shots if shot.shot_number == 4)] == 2
+    assert "tracking Lin Xia through underpass" in next(
+        shot.visual_description for shot in shots if shot.shot_number == 4
+    )
 
 
 @pytest.mark.asyncio

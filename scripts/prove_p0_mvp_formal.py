@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Formal-stack P0 MVP proof without paid BYOK:
+"""Formal P0 evidence through the real Agent and Worker product APIs.
 
-import ≥10 shots → audited manual media for media nodes →
-pure review nodes via Worker → approve gate → export ZIP (MP4/SRT/timeline).
-
-Writes report JSON under --scratch. Exit 0 only when all success criteria hold.
+This script intentionally never calls script import, produce-golden, or
+manual-media. A missing text, image, video, voice, queue, or worker provider
+is a failed proof, not a reason to create substitute evidence.
 """
 
 from __future__ import annotations
@@ -12,33 +11,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import struct
-import subprocess
 import sys
 import time
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import httpx
 
-REPO = Path(__file__).resolve().parents[1]
-REQUIRED_NODES = [
-    "prompt",
-    "keyframe",
-    "face_review",
-    "video",
-    "video_drift_review",
-    "voice",
-    "subtitle",
-    "composite",
-    "continuity_review",
-]
-# All required nodes completed via audited manual path (zero Provider cost).
-# Pure review nodes use JSON/SRT bytes so formal proof does not wait on Worker
-# InsightFace model download for offline gate.
-MEDIA_MANUAL = (
+REQUIRED_NODES = (
     "prompt",
     "keyframe",
     "face_review",
@@ -49,406 +32,417 @@ MEDIA_MANUAL = (
     "composite",
     "continuity_review",
 )
+DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
 
 
-def _minimal_png(w: int = 64, h: int = 64, rgb: tuple[int, int, int] = (40, 120, 200)) -> bytes:
-    """Valid PNG via PIL if available, else tiny hand-built IHDR+IDAT-ish fallback."""
+def _write_report(scratch: Path, report: dict[str, Any]) -> None:
+    (scratch / "multi_shot_chain.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _problem(response: httpx.Response) -> str:
     try:
-        from PIL import Image
-
-        img = Image.new("RGB", (w, h), rgb)
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
-    except Exception:
-        # 1x1 PNG
-        return bytes.fromhex(
-            "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
-            "de0000000c4944415408d763f8ffff3f0005fe02fe a75b4f190000000049454e44ae426082"
-            .replace(" ", "")
-        )
-
-
-def _make_mp4(path: Path) -> bytes:
-    """Produce a real tiny MP4 with FFmpeg when available."""
-    ffmpeg = None
-    for cand in ("ffmpeg", "ffmpeg.exe"):
-        try:
-            subprocess.run([cand, "-version"], capture_output=True, check=True)
-            ffmpeg = cand
-            break
-        except Exception:
-            continue
-    if ffmpeg is None:
-        # Windows winget path often on PATH as ffmpeg.exe already checked
-        return b""
-    out = path / "seg.mp4"
-    subprocess.run(
-        [
-            ffmpeg,
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=blue:s=320x240:d=1",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-t",
-            "1",
-            str(out),
-        ],
-        check=True,
-        capture_output=True,
-    )
-    return out.read_bytes()
-
-
-def _make_wav() -> bytes:
-    # Minimal PCM WAV 0.1s silence
-    rate = 8000
-    n = int(rate * 0.1)
-    data = b"\x00\x00" * n
-    header = struct.pack(
-        "<4sI4s4sIHHIIHH4sI",
-        b"RIFF",
-        36 + len(data),
-        b"WAVE",
-        b"fmt ",
-        16,
-        1,
-        1,
-        rate,
-        rate * 2,
-        2,
-        16,
-        b"data",
-        len(data),
-    )
-    return header + data
+        body = response.json()
+    except ValueError:
+        return response.text[:500]
+    return json.dumps(body, ensure_ascii=False)[:500]
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:8010")
-    ap.add_argument("--scratch", type=Path, required=True)
-    ap.add_argument("--n", type=int, default=10)
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base", default="http://127.0.0.1:8010")
+    parser.add_argument("--scratch", type=Path, required=True)
+    parser.add_argument(
+        "--worker-tick",
+        action="store_true",
+        help="Use the explicitly enabled local Worker tick endpoint while polling.",
+    )
+    parser.add_argument("--worker-token", default="dev-worker-token")
+    parser.add_argument("--timeout-seconds", type=int, default=900)
+    args = parser.parse_args()
+
     scratch = args.scratch
     scratch.mkdir(parents=True, exist_ok=True)
+    report: dict[str, Any] = {
+        "schema_version": 2,
+        "agent_workflow": True,
+        "manual_media_count": 0,
+        "required_nodes": list(REQUIRED_NODES),
+        "worker_tick": bool(args.worker_tick),
+        "steps": [],
+        "ok": False,
+    }
     base = args.base.rstrip("/")
-    n = max(1, min(args.n, 10))
-
     client = httpx.Client(base_url=base, timeout=180.0, follow_redirects=True)
     cookies: dict[str, str] = {}
-    out: dict = {"n": n, "steps": [], "ok": False}
+
+    def finish(error: str) -> int:
+        report["error"] = error
+        _write_report(scratch, report)
+        print(json.dumps({"ok": False, "error": error}, ensure_ascii=False, indent=2))
+        client.close()
+        return 2
 
     def csrf() -> str:
-        r = client.get("/api/v1/auth/csrf", cookies=cookies)
-        r.raise_for_status()
-        cookies.update(r.cookies)
-        return r.json()["csrf_token"]
+        response = client.get("/api/v1/auth/csrf", cookies=cookies)
+        response.raise_for_status()
+        cookies.update(response.cookies)
+        return str(response.json()["csrf_token"])
 
-    def post(path: str, body: dict | None = None) -> httpx.Response:
-        t = csrf()
-        r = client.post(
+    def post(
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        response = client.post(
             path,
             json=body or {},
+            params=params,
             cookies=cookies,
-            headers={"X-CSRF-Token": t, "Content-Type": "application/json"},
+            headers={"X-CSRF-Token": csrf(), "Content-Type": "application/json"},
         )
-        cookies.update(r.cookies)
-        return r
+        cookies.update(response.cookies)
+        return response
 
-    def post_multipart(path: str, files: dict, data: dict) -> httpx.Response:
-        t = csrf()
-        r = client.post(
-            path,
-            data=data,
-            files=files,
-            cookies=cookies,
-            headers={"X-CSRF-Token": t},
+    def snapshot(project_id: str) -> dict[str, Any]:
+        response = client.get(f"/api/v1/projects/{project_id}/snapshot", cookies=cookies)
+        response.raise_for_status()
+        return response.json()
+
+    def tick() -> None:
+        if not args.worker_tick:
+            return
+        response = client.post(
+            "/api/v1/worker/tick",
+            headers={"X-Worker-Token": args.worker_token},
         )
-        cookies.update(r.cookies)
-        return r
+        if response.status_code != 200:
+            raise RuntimeError(f"worker tick failed {response.status_code}: {_problem(response)}")
 
-    h = client.get("/health").json()
-    out["health"] = h
-    (scratch / "health.json").write_text(json.dumps(h, indent=2), encoding="utf-8")
-    if h.get("status") != "ok" or h.get("db") != "up":
-        out["error"] = "health not ok/db not up"
-        (scratch / "multi_shot_chain.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
-        return 2
-
-    email = f"mvp-{uuid4().hex[:8]}@example.com"
-    post("/api/v1/auth/register", {"email": email, "password": "password123", "display_name": "MVP"})
-    org = post("/api/v1/organizations", {"name": f"MVP-{uuid4().hex[:6]}"}).json()["id"]
-    project_id = post(
-        "/api/v1/creation/start-project",
-        {
-            "organization_id": org,
-            "name": "P0-MVP-10Shot",
-            "aspect_ratio": "9:16",
-            "experience_mode": "workbench",
-            "idea": "formal mvp proof",
-        },
-    ).json()["project_id"]
-    out["project_id"] = project_id
-
-    fixture = REPO / "fixtures" / "scripts" / "p0_10_shots.md"
-    text = (
-        fixture.read_text(encoding="utf-8")
-        if fixture.is_file()
-        else "\n".join(
-            f"### Shot {i} — medium\nVisual: neon rain lead hero shot {i}\nDialogue: line {i}\n"
-            for i in range(1, 11)
-        )
-    )
-    r = post(
-        f"/api/v1/projects/{project_id}/scripts/import",
-        {"filename": "p0.md", "text": text, "register_lead": True},
-    )
-    out["steps"].append({"import": r.status_code, "body": r.text[:300]})
-    shots = client.get(f"/api/v1/projects/{project_id}/shots", cookies=cookies).json()
-    if not isinstance(shots, list) or len(shots) < n:
-        out["error"] = f"need >= {n} shots, got {len(shots) if isinstance(shots, list) else shots}"
-        (scratch / "multi_shot_chain.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
-        return 2
-    shots = shots[:n]
-    out["shot_ids"] = [s["id"] for s in shots]
-
-    # Media bytes
-    tmp = scratch / "media"
-    tmp.mkdir(exist_ok=True)
-    png = _minimal_png()
-    # Prefer fixture face image for keyframe so InsightFace can detect
-    face_path = next(
-        (
-            p
-            for p in (REPO / "fixtures" / "images" / "character_canonical").glob("*.jpg")
-            if "crop" not in p.name and "flip" not in p.name
-        ),
-        None,
-    )
-    if face_path and face_path.is_file():
-        png = face_path.read_bytes()
-        # also set canonical if API supports
-        try:
-            cr = post_multipart(
-                f"/api/v1/projects/{project_id}/characters/lead/canonical",
-                files={"file": ("canon.jpg", png, "image/jpeg")},
-                data={"note": "mvp proof lead"},
-            )
-            out["steps"].append({"canonical": cr.status_code, "body": cr.text[:200]})
-        except Exception as exc:  # noqa: BLE001
-            out["steps"].append({"canonical_skip": str(exc)})
-
-    mp4 = _make_mp4(tmp)
-    if not mp4:
-        out["error"] = "ffmpeg missing; cannot produce real MP4 segment for export"
-        (scratch / "multi_shot_chain.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
-        return 2
-    wav = _make_wav()
-
-    # Per shot: audited manual complete for every required node (no Worker wait).
-    review_json = json.dumps(
-        {"status": "passed", "manual": True, "zero_provider_cost": True}
-    ).encode()
-    for i, s in enumerate(shots):
-        sid = s["id"]
-        dialogue = str(s.get("dialogue") or f"line {i+1}")
-        srt = f"1\n00:00:00,000 --> 00:00:02,000\n{dialogue}\n".encode()
-        # Unique composite bytes per shot to avoid confusing reuse
-        composite_bytes = mp4 + struct.pack(">I", i + 1)
-        uploads = [
-            ("prompt", review_json, "application/json", f"prompt_{i}.json"),
-            ("keyframe", png, "image/jpeg" if face_path else "image/png", f"kf_{i}.jpg"),
-            ("face_review", review_json, "application/json", f"face_{i}.json"),
-            ("video", mp4, "video/mp4", f"v_{i}.mp4"),
-            ("video_drift_review", review_json, "application/json", f"drift_{i}.json"),
-            ("voice", wav, "audio/wav", f"a_{i}.wav"),
-            ("subtitle", srt, "application/x-subrip", f"sub_{i}.srt"),
-            ("composite", composite_bytes, "video/mp4", f"c_{i}.mp4"),
-            ("continuity_review", review_json, "application/json", f"cont_{i}.json"),
-        ]
-        for node_key, blob, mime, name in uploads:
-            rr = post_multipart(
-                f"/api/v1/projects/{project_id}/shots/{sid}/manual-media",
-                files={"file": (name, blob, mime)},
-                data={"node_key": node_key, "note": f"mvp {node_key}"},
-            )
-            out["steps"].append(
-                {"manual": node_key, "shot": sid, "status": rr.status_code, "body": rr.text[:160]}
-            )
-            if rr.status_code not in (200, 201):
-                out["error"] = f"manual {node_key} failed {rr.status_code} {rr.text[:200]}"
-                (scratch / "multi_shot_chain.json").write_text(
-                    json.dumps(out, indent=2), encoding="utf-8"
-                )
-                return 2
-
-    # Approve each shot
-    approve_ok = 0
-    for s in shots:
-        sid = s["id"]
-        ar = post(
-            f"/api/v1/projects/{project_id}/shots/{sid}/approve",
-            {"note": "mvp formal"},
-        )
-        out["steps"].append({"approve": sid, "status": ar.status_code, "body": ar.text[:200]})
-        if ar.status_code in (200, 201):
-            approve_ok += 1
-
-    # Export
-    er = post(f"/api/v1/projects/{project_id}/exports", {})
-    out["export_status"] = er.status_code
-    out["export_body"] = er.text[:500]
-    if er.status_code not in (200, 201):
-        out["error"] = f"export failed {er.status_code}"
-        (scratch / "multi_shot_chain.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
-        return 2
-    exp = er.json()
-    export_id = exp.get("export_id")
-    package_hash = exp.get("package_hash")
-    mp4_key = exp.get("mp4_object_key")
-    mp4_hash = exp.get("mp4_hash")
-
-    # Download package (grant + token query; object_role is query param)
-    t = csrf()
-    gr = client.post(
-        f"/api/v1/projects/{project_id}/exports/{export_id}/download-grant",
-        params={"object_role": "package"},
-        cookies=cookies,
-        headers={"X-CSRF-Token": t},
-    )
-    cookies.update(gr.cookies)
-    out["grant"] = {"status": gr.status_code, "body": gr.text[:300]}
-    token = ""
-    if gr.status_code in (200, 201) and gr.content:
-        gbody = gr.json()
-        token = str(gbody.get("token") or "")
-    dl = client.get(
-        f"/api/v1/projects/{project_id}/exports/{export_id}/download",
-        cookies=cookies,
-        params={"token": token, "object_role": "package"},
-    )
-    out["download_status"] = dl.status_code
-    out["download_bytes"] = len(dl.content) if dl.content else 0
-    zip_path = scratch / "package.zip"
-    if dl.status_code == 200 and dl.content:
-        zip_path.write_bytes(dl.content)
-        zip_hash = hashlib.sha256(dl.content).hexdigest()
-        out["zip_sha256"] = zip_hash
-        out["package_hash_api"] = package_hash
-        out["zip_matches_api"] = zip_hash == package_hash
-        names: list[str] = []
-        try:
-            with zipfile.ZipFile(BytesIO(dl.content)) as zf:
-                names = zf.namelist()
-        except Exception as exc:  # noqa: BLE001
-            out["zip_error"] = str(exc)
-        out["zip_names"] = names
-        has_srt = any(n.endswith(".srt") or "subtitle" in n for n in names)
-        has_timeline = any("timeline" in n for n in names)
-        has_pkg = any("package.json" in n for n in names)
-        has_media = any(n.startswith("media/") for n in names)
-        out["zip_checks"] = {
-            "srt": has_srt,
-            "timeline": has_timeline,
-            "package_json": has_pkg,
-            "media": has_media,
-        }
-    else:
-        out["zip_error"] = f"download failed {dl.status_code}"
-
-    # Snapshot final evidence
-    snap = client.get(f"/api/v1/projects/{project_id}/snapshot", cookies=cookies).json()
-    runs = snap.get("node_runs") or []
-    arts = snap.get("artifacts") or []
-    failed_runs = [r for r in runs if r.get("status") == "failed"]
-    per_shot_full = 0
-    need = {
-        "keyframe",
-        "face_review",
-        "video",
-        "voice",
-        "subtitle",
-        "composite",
-        "continuity_review",
-    }
-    for s in shots:
-        sid = str(s["id"])
-        keys_done: set[str] = set()
-        for r in runs:
-            if r.get("status") not in {"completed", "cached", "completed_after_cancel"}:
-                continue
-            snap = r.get("input_snapshot") or {}
-            key = snap.get("node_key")
-            if not key:
-                # Fall back: parse from idempotency_key manual:node:shot:...
-                ik = str(r.get("idempotency_key") or "")
-                if ik.startswith("manual:") and sid in ik:
-                    parts = ik.split(":")
-                    if len(parts) >= 2:
-                        key = parts[1]
-            if key and (
-                snap.get("shot_id") == sid
-                or sid in str(r.get("idempotency_key") or "")
-            ):
-                keys_done.add(str(key))
-        if need.issubset(keys_done):
-            per_shot_full += 1
-
-    shots_after = client.get(f"/api/v1/projects/{project_id}/shots", cookies=cookies).json()
-    approved = [s for s in shots_after if s.get("status") == "review_passed"]
-
-    out["final"] = {
-        "shots": len(shots),
-        "node_runs": len(runs),
-        "artifacts": len(arts),
-        "failed_runs": len(failed_runs),
-        "per_shot_full": per_shot_full,
-        "approve_ok": approve_ok,
-        "approved_status": len(approved),
-        "mp4_object_key": mp4_key,
-        "mp4_hash": mp4_hash,
-        "package_hash": package_hash,
-    }
-
-    ok = (
-        len(shots) >= 10
-        and per_shot_full >= 10
-        and len(failed_runs) == 0
-        and approve_ok >= 10
-        and len(approved) >= 10
-        and package_hash
-        and mp4_key
-        and mp4_hash
-        and out.get("zip_matches_api") is True
-        and out.get("zip_checks", {}).get("srt")
-        and out.get("zip_checks", {}).get("timeline")
-        and out.get("zip_checks", {}).get("media")
-    )
-    out["ok"] = ok
-    # Hash report
-    (scratch / "export_hashes.txt").write_text(
-        "\n".join(
-            [
-                f"package_hash={package_hash}",
-                f"zip_sha256={out.get('zip_sha256')}",
-                f"mp4_hash={mp4_hash}",
-                f"mp4_object_key={mp4_key}",
-                f"timeline_hash={exp.get('timeline_hash')}",
-                f"srt_hash={exp.get('srt_hash')}",
-                f"ok={ok}",
+    def wait_for_runs(project_id: str, run_ids: list[str]) -> dict[str, Any]:
+        deadline = time.monotonic() + max(1, args.timeout_seconds)
+        expected = set(run_ids)
+        while time.monotonic() < deadline:
+            tick()
+            state = snapshot(project_id)
+            runs = {str(run["id"]): run for run in state.get("node_runs", [])}
+            observed = [runs.get(run_id) for run_id in expected]
+            if all(run is not None and run.get("status") in DONE_STATUSES for run in observed):
+                return state
+            failed = [
+                run
+                for run in observed
+                if run is not None and run.get("status") == "failed"
             ]
-        ),
-        encoding="utf-8",
-    )
-    (scratch / "multi_shot_chain.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
-    print(json.dumps(out["final"] | {"ok": ok}, indent=2))
-    return 0 if ok else 2
+            if failed:
+                raise RuntimeError(
+                    "NodeRun failed: "
+                    + json.dumps(
+                        [
+                            {
+                                "id": run["id"],
+                                "error_code": run.get("error_code"),
+                                "output": run.get("output_summary"),
+                            }
+                            for run in failed
+                        ],
+                        ensure_ascii=False,
+                    )
+                )
+            time.sleep(1)
+        raise RuntimeError(
+            "Timed out waiting for worker artifacts. Start Arq workers or pass "
+            "--worker-tick only for a local stack that intentionally exposes it."
+        )
+
+    try:
+        health = client.get("/health")
+        report["health"] = health.json() if health.status_code == 200 else {"status": health.status_code}
+        if health.status_code != 200 or report["health"].get("db") != "up":
+            return finish(f"health/db unavailable: {_problem(health)}")
+
+        email = f"formal-{uuid4().hex[:10]}@example.com"
+        registered = post(
+            "/api/v1/auth/register",
+            {"email": email, "password": "password123", "display_name": "Formal Proof"},
+        )
+        if registered.status_code not in {200, 201}:
+            return finish(f"register failed {registered.status_code}: {_problem(registered)}")
+        org = post("/api/v1/organizations", {"name": f"Formal-{uuid4().hex[:8]}"})
+        if org.status_code not in {200, 201}:
+            return finish(f"organization failed {org.status_code}: {_problem(org)}")
+
+        created = post(
+            "/api/v1/creation/start-project",
+            {
+                "organization_id": org.json()["id"],
+                "name": "P0 Agent Formal Ten Shot",
+                "aspect_ratio": "9:16",
+                "experience_mode": "workbench",
+                "idea": "A detective follows a neon-rain clue through one dangerous night.",
+            },
+        )
+        if created.status_code not in {200, 201}:
+            return finish(f"start project failed {created.status_code}: {_problem(created)}")
+        project_id = str(created.json()["project_id"])
+        report["project_id"] = project_id
+
+        brief = post(
+            f"/api/v1/projects/{project_id}/brief/generate",
+            {
+                "idea": "A detective follows a neon-rain clue through one dangerous night.",
+                "authorize": True,
+            },
+        )
+        report["steps"].append({"agent_brief": brief.status_code, "body": _problem(brief)})
+        if brief.status_code != 200:
+            return finish(
+                "Agent Brief unavailable. TEXT_LLM must be configured; "
+                f"response={brief.status_code}: {_problem(brief)}"
+            )
+        brief_body = brief.json()
+        if brief_body.get("source") != "agent":
+            return finish("Agent Brief endpoint did not report agent provenance")
+
+        confirmed = post(
+            f"/api/v1/projects/{project_id}/brief/{brief_body['id']}/confirm",
+            {},
+        )
+        if confirmed.status_code != 200 or confirmed.json().get("status") != "confirmed":
+            return finish(f"confirm brief failed {confirmed.status_code}: {_problem(confirmed)}")
+
+        plan = post(
+            f"/api/v1/projects/{project_id}/plans/generate",
+            {"brief_revision_id": brief_body["id"], "authorize": True},
+        )
+        report["steps"].append({"agent_plan": plan.status_code, "body": _problem(plan)})
+        if plan.status_code != 200:
+            return finish(
+                "Agent Plan unavailable. TEXT_LLM must be configured; "
+                f"response={plan.status_code}: {_problem(plan)}"
+            )
+        plan_body = plan.json()
+        shots = plan_body.get("plan", {}).get("shots", [])
+        if plan_body.get("source") != "agent" or not isinstance(shots, list) or len(shots) != 10:
+            return finish("Agent Plan must have agent provenance and exactly ten structured shots")
+        report["plan_id"] = plan_body["id"]
+
+        canonical = post(
+            f"/api/v1/projects/{project_id}/characters/lead",
+            {
+                "name": "Lin Xia",
+                "locked_prompt": "Lin Xia, black raincoat, front portrait reference, consistent face",
+            },
+        )
+        report["steps"].append({"canonical": canonical.status_code, "body": _problem(canonical)})
+        if canonical.status_code not in {200, 201}:
+            return finish(
+                "Canonical reference unavailable. A live image Provider is required for "
+                f"formal face-review evidence: {_problem(canonical)}"
+            )
+
+        materialized = post(
+            f"/api/v1/projects/{project_id}/plans/{plan_body['id']}/confirm",
+            {"materialization_ops": ["create_shot_stub", "enqueue_keyframe"]},
+        )
+        if materialized.status_code not in {200, 201}:
+            return finish(
+                f"confirm Agent Plan failed {materialized.status_code}: {_problem(materialized)}"
+            )
+        materialization = materialized.json()
+        shot_ids = [str(value) for value in materialization.get("shot_ids", [])]
+        initial_run_ids = [str(value) for value in materialization.get("node_run_ids", [])]
+        if len(shot_ids) != 10 or len(initial_run_ids) != 10:
+            return finish("Agent Plan confirmation did not materialize ten shots and keyframe runs")
+        report["shot_ids"] = shot_ids
+
+        for node_run_id in initial_run_ids:
+            enqueued = post(
+                f"/api/v1/projects/{project_id}/node-runs/{node_run_id}/enqueue",
+                {},
+            )
+            if enqueued.status_code not in {200, 201}:
+                return finish(
+                    f"initial keyframe enqueue failed {enqueued.status_code}: {_problem(enqueued)}"
+                )
+        state = wait_for_runs(project_id, initial_run_ids)
+
+        remaining_run_ids: list[str] = []
+        for shot_id in shot_ids:
+            started = post(f"/api/v1/projects/{project_id}/shots/{shot_id}/start", {})
+            report["steps"].append({"start_shot": shot_id, "status": started.status_code})
+            if started.status_code not in {200, 201}:
+                return finish(
+                    f"shot start failed {started.status_code}: {_problem(started)}"
+                )
+            remaining_run_ids.extend(str(value) for value in started.json().get("run_ids", []))
+        if len(remaining_run_ids) != 80:
+            return finish(
+                f"expected 80 non-keyframe NodeRuns from ten starts, got {len(remaining_run_ids)}"
+            )
+        state = wait_for_runs(project_id, remaining_run_ids)
+
+        rejected_shot_id = shot_ids[0]
+        rejected = post(
+            f"/api/v1/projects/{project_id}/shots/{rejected_shot_id}/reject",
+            {"reason": "Formal rerun exercise: revise subtitle timing."},
+        )
+        if rejected.status_code != 200:
+            return finish(f"review reject failed {rejected.status_code}: {_problem(rejected)}")
+        rerun = post(
+            f"/api/v1/projects/{project_id}/shots/{rejected_shot_id}/rerun",
+            {"changed_node_key": "subtitle"},
+        )
+        if rerun.status_code not in {200, 201}:
+            return finish(f"rerun failed {rerun.status_code}: {_problem(rerun)}")
+        rerun_ids = [str(value) for value in rerun.json().get("run_ids", [])]
+        if not rerun_ids:
+            return finish("rerun returned no replacement NodeRuns")
+        state = wait_for_runs(project_id, rerun_ids)
+
+        for shot_id in shot_ids:
+            approved = post(
+                f"/api/v1/projects/{project_id}/shots/{shot_id}/approve",
+                {"note": "formal evidence approval"},
+            )
+            if approved.status_code != 200:
+                return finish(
+                    f"shot approval failed {approved.status_code}: {_problem(approved)}"
+                )
+
+        exported = post(f"/api/v1/projects/{project_id}/exports", {})
+        if exported.status_code not in {200, 201}:
+            return finish(f"export failed {exported.status_code}: {_problem(exported)}")
+        export = exported.json()
+
+        granted = post(
+            f"/api/v1/projects/{project_id}/exports/{export['export_id']}/download-grant",
+            {},
+            params={"object_role": "package"},
+        )
+        if granted.status_code not in {200, 201}:
+            return finish(f"export grant failed {granted.status_code}: {_problem(granted)}")
+        package = client.get(
+            f"/api/v1/projects/{project_id}/exports/{export['export_id']}/download",
+            cookies=cookies,
+            params={"token": granted.json()["token"], "object_role": "package"},
+        )
+        if package.status_code != 200 or not package.content:
+            return finish(f"package download failed {package.status_code}: {_problem(package)}")
+        package_hash = hashlib.sha256(package.content).hexdigest()
+        zip_names: list[str] = []
+        try:
+            with zipfile.ZipFile(BytesIO(package.content)) as archive:
+                zip_names = archive.namelist()
+        except zipfile.BadZipFile as exc:
+            return finish(f"export package is not a ZIP: {exc}")
+
+        final_state = snapshot(project_id)
+        all_runs = final_state.get("node_runs", [])
+        artifacts = {
+            str(artifact["id"]): artifact
+            for artifact in final_state.get("artifacts", [])
+        }
+        latest: dict[tuple[str, str], dict[str, Any]] = {}
+        manual_runs = 0
+        for run in all_runs:
+            run_snapshot = run.get("input_snapshot") or {}
+            if run_snapshot.get("manual") is True or str(run.get("idempotency_key", "")).startswith("manual:"):
+                manual_runs += 1
+            shot_id = str(run_snapshot.get("shot_id") or "")
+            node_key = str(run_snapshot.get("node_key") or "")
+            if shot_id in shot_ids and node_key in REQUIRED_NODES:
+                key = (shot_id, node_key)
+                if key not in latest or int(run.get("attempt_no", 0)) > int(latest[key].get("attempt_no", 0)):
+                    latest[key] = run
+
+        missing: list[str] = []
+        bad_lineage: list[str] = []
+        final_artifact_ids: set[str] = set()
+        final_object_keys: set[str] = set()
+        for shot_id in shot_ids:
+            for node_key in REQUIRED_NODES:
+                run = latest.get((shot_id, node_key))
+                if run is None or run.get("status") not in DONE_STATUSES:
+                    missing.append(f"{shot_id}:{node_key}")
+                    continue
+                artifact_id = str(run.get("result_artifact_id") or "")
+                artifact = artifacts.get(artifact_id)
+                if not artifact or str(artifact.get("produced_by_run_id") or "") != str(run["id"]):
+                    bad_lineage.append(f"{shot_id}:{node_key}")
+                    continue
+                final_artifact_ids.add(artifact_id)
+                final_object_keys.add(str(artifact["object_key"]))
+
+        report["lineage"] = {
+            "required_run_count": len(shot_ids) * len(REQUIRED_NODES),
+            "resolved_latest_runs": len(latest),
+            "missing_or_incomplete": missing,
+            "bad_lineage": bad_lineage,
+            "unique_artifact_ids": len(final_artifact_ids),
+            "unique_object_keys": len(final_object_keys),
+            "manual_runs": manual_runs,
+        }
+        report["export"] = {
+            "package_hash": export.get("package_hash"),
+            "download_hash": package_hash,
+            "mp4_object_key": export.get("mp4_object_key"),
+            "mp4_hash": export.get("mp4_hash"),
+            "timeline_hash": export.get("timeline_hash"),
+            "srt_hash": export.get("srt_hash"),
+            "zip_names": zip_names,
+        }
+        report["final"] = {
+            "shots": len(shot_ids),
+            "node_runs": len(all_runs),
+            "artifacts": len(artifacts),
+            "failed_runs": len([run for run in all_runs if run.get("status") == "failed"]),
+            "per_shot_full": sum(
+                all((shot_id, node_key) in latest for node_key in REQUIRED_NODES)
+                for shot_id in shot_ids
+            ),
+            "approve_ok": len(shot_ids),
+            "package_hash": export.get("package_hash"),
+            "mp4_hash": export.get("mp4_hash"),
+            "mp4_object_key": export.get("mp4_object_key"),
+        }
+        report["manual_media_count"] = manual_runs
+        report["ok"] = bool(
+            len(shot_ids) == 10
+            and manual_runs == 0
+            and not missing
+            and not bad_lineage
+            and len(final_artifact_ids) == 90
+            and len(final_object_keys) == 90
+            and report["final"]["failed_runs"] == 0
+            and package_hash == export.get("package_hash")
+            and export.get("mp4_object_key")
+            and export.get("mp4_hash")
+            and any(name.endswith(".srt") for name in zip_names)
+            and any("timeline" in name for name in zip_names)
+            and any(name.startswith("media/") for name in zip_names)
+        )
+        _write_report(scratch, report)
+        (scratch / "export_hashes.txt").write_text(
+            "\n".join(
+                [
+                    f"package_hash={export.get('package_hash')}",
+                    f"download_hash={package_hash}",
+                    f"mp4_hash={export.get('mp4_hash')}",
+                    f"mp4_object_key={export.get('mp4_object_key')}",
+                    f"ok={report['ok']}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        print(json.dumps(report["final"] | {"ok": report["ok"]}, ensure_ascii=False, indent=2))
+        client.close()
+        return 0 if report["ok"] else 2
+    except Exception as exc:  # noqa: BLE001
+        return finish(f"{type(exc).__name__}: {exc}")
 
 
 if __name__ == "__main__":

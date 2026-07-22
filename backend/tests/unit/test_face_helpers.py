@@ -17,6 +17,7 @@ from app.consistency.face import (
     latency_summary,
     pair_score,
     percentile,
+    recommend_threshold,
     threshold_candidates,
 )
 
@@ -89,6 +90,25 @@ def test_threshold_candidates_grid_length() -> None:
     rows = threshold_candidates([0.9, 0.2], [0.1, 0.8], grid=[0.3, 0.5])
     assert len(rows) == 2
     assert rows[0]["threshold"] == 0.3
+
+
+def test_recommend_threshold_prefers_closest_far_frr_then_conservative_tie() -> None:
+    row = recommend_threshold(
+        [
+            {"threshold": 0.30, "far": 0.10, "frr": 0.10},
+            {"threshold": 0.50, "far": 0.20, "frr": 0.20},
+            {"threshold": 0.70, "far": 0.00, "frr": 0.10},
+        ]
+    )
+    assert row["threshold"] == 0.30
+
+    tie = recommend_threshold(
+        [
+            {"threshold": 0.30, "far": 0.10, "frr": 0.10},
+            {"threshold": 0.50, "far": 0.10, "frr": 0.10},
+        ]
+    )
+    assert tie["threshold"] == 0.50
 
 
 def test_percentile_and_latency_summary() -> None:

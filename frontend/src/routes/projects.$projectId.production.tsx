@@ -17,6 +17,12 @@ import {
   rerunShot,
   startShot,
 } from "../lib/api";
+import type { ProjectSnapshot } from "../lib/api";
+import {
+  imageArtifacts,
+  latestImageArtifact,
+  shotKeyframeArtifact,
+} from "../lib/projectMedia";
 import { projectRoute } from "./projects.$projectId";
 
 export const projectProductionRoute = createRoute({
@@ -94,6 +100,52 @@ function statusClass(status: string): string {
   if (status === "failed") return "fail";
   if (["queued", "running", "leased"].includes(status)) return "run";
   return "";
+}
+
+function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, string> {
+  const map: Record<string, string> = {};
+  const completed = runs.filter((run) =>
+    ["completed", "cached", "completed_after_cancel"].includes(run.status),
+  ).length;
+  for (const node of NODES) {
+    const matching = runs.filter((run) => {
+      const input = run.input_snapshot ?? {};
+      const summary = run.output_summary ?? {};
+      const key = String(
+        input.node_key ??
+          summary.node_key ??
+          summary.node_type ??
+          summary.node_name ??
+          summary.kind ??
+          "",
+      );
+      return key === node || key.includes(node);
+    });
+    if (matching.some((run) => run.status === "failed")) map[node] = "fail";
+    else if (matching.some((run) => ["queued", "running", "leased"].includes(run.status)))
+      map[node] = "run";
+    else if (
+      matching.some((run) =>
+        ["completed", "cached", "completed_after_cancel"].includes(run.status),
+      )
+    )
+      map[node] = "done";
+    else map[node] = "";
+  }
+
+  if (!Object.values(map).some(Boolean) && runs.length > 0) {
+    const ratio = completed / runs.length;
+    NODES.forEach((node, index) => {
+      if (index / NODES.length < ratio) map[node] = "done";
+    });
+    if (runs.some((run) => run.status === "failed")) {
+      map[NODES[Math.min(NODES.length - 1, Math.floor(ratio * NODES.length))]] = "fail";
+    }
+    if (runs.some((run) => ["queued", "running", "leased"].includes(run.status))) {
+      map[NODES[Math.min(NODES.length - 1, Math.ceil(ratio * NODES.length))]] = "run";
+    }
+  }
+  return map;
 }
 
 function ProductionPage() {
@@ -181,6 +233,7 @@ function ProductionPage() {
 
   const runs = snapshot.data?.node_runs ?? [];
   const arts = snapshot.data?.artifacts ?? [];
+  const previewArts = imageArtifacts(arts);
   const completedRuns = runs.filter((r) =>
     ["completed", "cached", "completed_after_cancel"].includes(r.status),
   ).length;
@@ -217,46 +270,13 @@ function ProductionPage() {
     }
   }
 
-  // Aggregate node status: snapshot may only expose status + output_summary in P0 API
-  const nodeRailClass = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const n of NODES) {
-      const matching = runs.filter((r) => {
-        const summary = r.output_summary ?? {};
-        const key = String(
-          summary.node_key ?? summary.node_type ?? summary.node_name ?? summary.kind ?? "",
-        );
-        return key === n || key.includes(n);
-      });
-      if (matching.some((r) => r.status === "failed")) map[n] = "fail";
-      else if (matching.some((r) => ["queued", "running", "leased"].includes(r.status)))
-        map[n] = "run";
-      else if (
-        matching.some((r) =>
-          ["completed", "cached", "completed_after_cancel"].includes(r.status),
-        )
-      )
-        map[n] = "done";
-      else map[n] = "";
-    }
-    // Fallback: tint rail by completion ratio when runs lack node keys
-    const hasKeys = Object.values(map).some(Boolean);
-    if (!hasKeys && runs.length > 0) {
-      const ratio = completedRuns / Math.max(runs.length, 1);
-      NODES.forEach((n, i) => {
-        if (i / NODES.length < ratio) map[n] = "done";
-      });
-      if (failedRuns) {
-        map[NODES[Math.min(NODES.length - 1, Math.floor(ratio * NODES.length))]] = "fail";
-      }
-      if (queuedRuns) {
-        map[NODES[Math.min(NODES.length - 1, Math.ceil(ratio * NODES.length))]] = "run";
-      }
-    }
-    return map;
-  }, [runs, completedRuns, failedRuns, queuedRuns]);
+  const nodeRailClass = useMemo(() => nodeRailForRuns(runs), [runs]);
 
-  const stageArt = arts[0];
+  const selectedShotArt =
+    selectedShot && snapshot.data
+      ? shotKeyframeArtifact(snapshot.data, selectedShot.id)
+      : null;
+  const stageArt = selectedShot ? selectedShotArt : latestImageArtifact(arts);
   const stageUrl =
     stageArt && projectId !== "demo" ? artifactContentUrl(projectId, stageArt.id) : null;
 
@@ -391,8 +411,14 @@ function ProductionPage() {
             <h3>分镜板 Storyboard</h3>
             {shots.data && shots.data.length > 0 ? (
               <div className="shot-board" data-testid="shot-list">
-                {shots.data.map((s, idx) => {
-                  const art = arts[idx] ?? arts[0];
+                {shots.data.map((s) => {
+                  const art = snapshot.data
+                    ? shotKeyframeArtifact(snapshot.data, s.id)
+                    : null;
+                  const shotRuns = runs.filter(
+                    (run) => String(run.input_snapshot?.shot_id ?? "") === s.id,
+                  );
+                  const shotNodeRailClass = nodeRailForRuns(shotRuns);
                   const thumbUrl =
                     art && projectId !== "demo"
                       ? artifactContentUrl(projectId, art.id)
@@ -422,7 +448,7 @@ function ProductionPage() {
                           {NODES.map((n) => (
                             <span
                               key={n}
-                              className={`dot ${nodeRailClass[n] || ""}`}
+                              className={`dot ${shotNodeRailClass[n] || ""}`}
                               title={n}
                             />
                           ))}
@@ -599,7 +625,11 @@ function ProductionPage() {
             <div className="stage-phone">
               {stageUrl ? (
                 <>
-                  <span className="stage-badge">最新 Artifact</span>
+                  <span className="stage-badge">
+                    {selectedShot
+                      ? `Shot ${selectedShot.shot_number || selectedShot.sort_order}`
+                      : "最新分镜图"}
+                  </span>
                   <img src={stageUrl} alt="preview" />
                 </>
               ) : (
@@ -625,7 +655,7 @@ function ProductionPage() {
               )}
             </div>
             <div className="ref-strip" style={{ marginTop: "0.65rem" }}>
-              {arts.slice(0, 8).map((a) => (
+              {previewArts.slice(0, 8).map((a) => (
                 <a
                   key={a.id}
                   className="ref-chip"

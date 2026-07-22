@@ -10,7 +10,11 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep
-from app.delivery.download import authorize_export_download, fetch_export_bytes, verify_download_token
+from app.delivery.download import (
+    authorize_export_download,
+    fetch_export_bytes,
+    verify_download_token,
+)
 from app.delivery.export_service import build_project_export
 from app.execution.models import Artifact, NodeRun
 from app.runtime.scheduler import AgentRunScheduler
@@ -21,6 +25,7 @@ router = APIRouter(tags=["production"])
 
 class NodeRunRead(BaseModel):
     id: UUID
+    attempt_no: int
     status: str
     input_hash: str
     result_artifact_id: UUID | None
@@ -126,7 +131,11 @@ async def project_snapshot(
     )
     arts = list(
         (
-            await session.execute(select(Artifact).where(Artifact.project_id == project_id))
+            await session.execute(
+                select(Artifact)
+                .where(Artifact.project_id == project_id)
+                .order_by(Artifact.created_at.desc())
+            )
         )
         .scalars()
         .all()
@@ -137,6 +146,7 @@ async def project_snapshot(
         node_runs=[
             NodeRunRead(
                 id=r.id,
+                attempt_no=r.attempt_no,
                 status=r.status,
                 input_hash=r.input_hash,
                 result_artifact_id=r.result_artifact_id,

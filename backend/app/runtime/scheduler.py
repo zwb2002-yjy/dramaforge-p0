@@ -104,21 +104,33 @@ class AgentRunScheduler:
         if run is None:
             raise NotFoundError("node_run not found")
         # Durable Outbox fact before Arq (NodeRun → Outbox → commit → Arq)
-        self._session.add(
-            OutboxEvent(
-                event_id=uuid4(),
-                project_id=run.project_id,
-                topic="node_run.enqueue",
-                schema_version=1,
-                payload={
-                    "node_run_id": str(node_run_id),
-                    "status": run.status,
-                    "project_id": str(run.project_id),
-                },
-                status=OutboxStatus.PENDING.value,
-                next_attempt_at=datetime.now(UTC),
+        existing = await self._session.execute(
+            select(OutboxEvent).where(
+                OutboxEvent.project_id == run.project_id,
+                OutboxEvent.topic == "node_run.enqueue",
             )
         )
+        has_enqueue_event = any(
+            str((event.payload or {}).get("node_run_id")) == str(node_run_id)
+            for event in existing.scalars().all()
+        )
+        if not has_enqueue_event:
+            self._session.add(
+                OutboxEvent(
+                    event_id=uuid4(),
+                    project_id=run.project_id,
+                    topic="node_run.enqueue",
+                    schema_version=1,
+                    payload={
+                        "node_run_id": str(node_run_id),
+                        "status": run.status,
+                        "project_id": str(run.project_id),
+                    },
+                    status=OutboxStatus.PENDING.value,
+                    attempt_count=0,
+                    next_attempt_at=datetime.now(UTC),
+                )
+            )
         await self._session.flush()
         # COMMIT first — eliminate flush-then-Redis race
         await self._session.commit()
@@ -196,9 +208,19 @@ class WorkerRuntime:
         for run in result.scalars().all():
             try:
                 await execute_media_node_run(self._session, node_run_id=run.id)
-                n += 1
-            except Exception:
-                n += 1
+            except Exception as exc:  # noqa: BLE001
+                # A Worker must never leave a claimed run in "running" after an
+                # unexpected adapter/review failure. Product code may already
+                # have recorded a specific terminal failure; preserve it.
+                if run.status in {"queued", "running"}:
+                    run.status = "failed"
+                    run.error_code = getattr(exc, "code", None) or "NODE_EXECUTION_FAILED"
+                    run.error_summary = str(exc)[:500]
+                    from datetime import UTC, datetime
+
+                    run.finished_at = datetime.now(UTC)
+                    await self._session.flush()
+            n += 1
         await self._session.commit()
         return n
 

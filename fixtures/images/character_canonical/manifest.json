@@ -1,7 +1,270 @@
 {
   "version": 1,
-  "notes": "Empty inventory placeholder. Add desensitized sample image files named <sample_id>.jpg|.png and list pairs here. Do not commit real-user biometrics without review.",
-  "pairs_same": [],
-  "pairs_diff": [],
-  "anomalies": []
+  "notes": "Public sample faces + augmentations for S0-A spike. Desensitized IDs only.",
+  "pairs_same": [
+    {
+      "a": "biden_v00",
+      "b": "biden_v00_flip",
+      "character_id": "biden"
+    },
+    {
+      "a": "biden_v00",
+      "b": "biden_v00_crop",
+      "character_id": "biden"
+    },
+    {
+      "a": "men_1_v00",
+      "b": "men_1_v00_flip",
+      "character_id": "men_1"
+    },
+    {
+      "a": "men_1_v00",
+      "b": "men_1_v00_crop",
+      "character_id": "men_1"
+    },
+    {
+      "a": "men_10_v00",
+      "b": "men_10_v00_flip",
+      "character_id": "men_10"
+    },
+    {
+      "a": "men_10_v00",
+      "b": "men_10_v00_crop",
+      "character_id": "men_10"
+    },
+    {
+      "a": "men_11_v00",
+      "b": "men_11_v00_flip",
+      "character_id": "men_11"
+    },
+    {
+      "a": "men_11_v00",
+      "b": "men_11_v00_crop",
+      "character_id": "men_11"
+    },
+    {
+      "a": "men_13_v00",
+      "b": "men_13_v00_flip",
+      "character_id": "men_13"
+    },
+    {
+      "a": "men_13_v00",
+      "b": "men_13_v00_crop",
+      "character_id": "men_13"
+    },
+    {
+      "a": "men_14_v00",
+      "b": "men_14_v00_flip",
+      "character_id": "men_14"
+    },
+    {
+      "a": "men_14_v00",
+      "b": "men_14_v00_crop",
+      "character_id": "men_14"
+    },
+    {
+      "a": "men_15_v00",
+      "b": "men_15_v00_flip",
+      "character_id": "men_15"
+    },
+    {
+      "a": "men_15_v00",
+      "b": "men_15_v00_crop",
+      "character_id": "men_15"
+    },
+    {
+      "a": "men_16_v00",
+      "b": "men_16_v00_flip",
+      "character_id": "men_16"
+    },
+    {
+      "a": "men_16_v00",
+      "b": "men_16_v00_crop",
+      "character_id": "men_16"
+    },
+    {
+      "a": "men_17_v00",
+      "b": "men_17_v00_flip",
+      "character_id": "men_17"
+    },
+    {
+      "a": "men_17_v00",
+      "b": "men_17_v00_crop",
+      "character_id": "men_17"
+    },
+    {
+      "a": "men_18_v00",
+      "b": "men_18_v00_flip",
+      "character_id": "men_18"
+    },
+    {
+      "a": "men_18_v00",
+      "b": "men_18_v00_crop",
+      "character_id": "men_18"
+    }
+  ],
+  "pairs_diff": [
+    {
+      "a": "biden_v00",
+      "b": "men_10_v00_crop",
+      "character_id_a": "biden",
+      "character_id_b": "men_10"
+    },
+    {
+      "a": "biden_v00",
+      "b": "men_11_v00_flip",
+      "character_id_a": "biden",
+      "character_id_b": "men_11"
+    },
+    {
+      "a": "men_1_v00",
+      "b": "men_11_v00_crop",
+      "character_id_a": "men_1",
+      "character_id_b": "men_11"
+    },
+    {
+      "a": "men_1_v00",
+      "b": "men_13_v00_flip",
+      "character_id_a": "men_1",
+      "character_id_b": "men_13"
+    },
+    {
+      "a": "men_10_v00",
+      "b": "men_13_v00_crop",
+      "character_id_a": "men_10",
+      "character_id_b": "men_13"
+    },
+    {
+      "a": "men_10_v00",
+      "b": "men_14_v00_flip",
+      "character_id_a": "men_10",
+      "character_id_b": "men_14"
+    },
+    {
+      "a": "men_11_v00",
+      "b": "men_14_v00_crop",
+      "character_id_a": "men_11",
+      "character_id_b": "men_14"
+    },
+    {
+      "a": "men_11_v00",
+      "b": "men_15_v00_flip",
+      "character_id_a": "men_11",
+      "character_id_b": "men_15"
+    },
+    {
+      "a": "men_13_v00",
+      "b": "men_15_v00_crop",
+      "character_id_a": "men_13",
+      "character_id_b": "men_15"
+    },
+    {
+      "a": "men_13_v00",
+      "b": "men_16_v00_flip",
+      "character_id_a": "men_13",
+      "character_id_b": "men_16"
+    },
+    {
+      "a": "men_14_v00",
+      "b": "men_16_v00_crop",
+      "character_id_a": "men_14",
+      "character_id_b": "men_16"
+    },
+    {
+      "a": "men_14_v00",
+      "b": "men_17_v00_flip",
+      "character_id_a": "men_14",
+      "character_id_b": "men_17"
+    },
+    {
+      "a": "men_15_v00",
+      "b": "men_17_v00_crop",
+      "character_id_a": "men_15",
+      "character_id_b": "men_17"
+    },
+    {
+      "a": "men_15_v00",
+      "b": "men_18_v00_flip",
+      "character_id_a": "men_15",
+      "character_id_b": "men_18"
+    },
+    {
+      "a": "men_16_v00",
+      "b": "men_18_v00_crop",
+      "character_id_a": "men_16",
+      "character_id_b": "men_18"
+    },
+    {
+      "a": "men_16_v00",
+      "b": "men_19_v00_flip",
+      "character_id_a": "men_16",
+      "character_id_b": "men_19"
+    },
+    {
+      "a": "men_17_v00",
+      "b": "men_19_v00_crop",
+      "character_id_a": "men_17",
+      "character_id_b": "men_19"
+    },
+    {
+      "a": "men_17_v00",
+      "b": "men_2_v00_flip",
+      "character_id_a": "men_17",
+      "character_id_b": "men_2"
+    },
+    {
+      "a": "men_18_v00",
+      "b": "men_2_v00_crop",
+      "character_id_a": "men_18",
+      "character_id_b": "men_2"
+    },
+    {
+      "a": "men_18_v00",
+      "b": "men_20_v00_flip",
+      "character_id_a": "men_18",
+      "character_id_b": "men_20"
+    }
+  ],
+  "anomalies": [
+    {
+      "id": "anom_noface_00",
+      "label": "no_face"
+    },
+    {
+      "id": "anom_noface_01",
+      "label": "no_face"
+    },
+    {
+      "id": "anom_noface_02",
+      "label": "no_face"
+    },
+    {
+      "id": "anom_noface_03",
+      "label": "no_face"
+    },
+    {
+      "id": "anom_noface_04",
+      "label": "no_face"
+    },
+    {
+      "id": "anom_lowq_00",
+      "label": "low_quality"
+    },
+    {
+      "id": "anom_lowq_01",
+      "label": "low_quality"
+    },
+    {
+      "id": "anom_lowq_02",
+      "label": "low_quality"
+    },
+    {
+      "id": "anom_lowq_03",
+      "label": "low_quality"
+    },
+    {
+      "id": "anom_lowq_04",
+      "label": "low_quality"
+    }
+  ]
 }

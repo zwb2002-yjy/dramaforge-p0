@@ -56,9 +56,12 @@ LOCAL_ONLY_ROOT = {
     ".ruff_cache",
     ".mypy_cache",
     ".pytest_cache",
+    ".run",
     "data",
     "tmp",
     "logs",
+    "dump.rdb",
+    "production-ui-demo.png",
     "node_modules",
     "dist",
     "coverage",
@@ -125,7 +128,8 @@ def check_sensitive_on_disk(root: Path) -> list[str]:
         if name in FORBIDDEN_FILE_NAMES or (
             name.startswith(".env.") and name != ".env.example"
         ):
-            errors.append(f"forbidden env/credential file on disk: {path.relative_to(root).as_posix()}")
+            rel = path.relative_to(root).as_posix()
+            errors.append(f"forbidden env/credential file on disk: {rel}")
         if path.suffix.lower() in FORBIDDEN_SUFFIXES:
             errors.append(f"forbidden sensitive file on disk: {path.relative_to(root).as_posix()}")
     return errors
@@ -171,7 +175,11 @@ def check_git_index(root: Path) -> list[str]:
 def check_demo_rejects(demo_unregistered: Path | None, demo_sensitive: Path | None) -> list[str]:
     errors: list[str] = []
     if demo_unregistered is not None:
-        name = demo_unregistered.name if demo_unregistered.suffix or demo_unregistered.parent != Path() else str(demo_unregistered)
+        name = (
+            demo_unregistered.name
+            if demo_unregistered.suffix or demo_unregistered.parent != Path()
+            else str(demo_unregistered)
+        )
         # Accept bare names like "utils2"
         label = str(demo_unregistered)
         if label in ALLOWED_ROOT or label in LOCAL_ONLY_ROOT:

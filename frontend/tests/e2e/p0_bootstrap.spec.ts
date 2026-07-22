@@ -35,3 +35,33 @@ test("production mode shows golden import controls", async ({ page }) => {
   await expect(page.getByTestId("import-golden")).toBeVisible();
   await expect(page.getByTestId("produce-golden")).toBeVisible();
 });
+
+test("Agent Brief draft is confirmed automatically before Agent Plan", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (err) => errors.push(String(err)));
+
+  await page.goto("/");
+  await page.locator("form.auth-form button[type='submit']").click();
+  await expect(page.getByTestId("quick-mode")).toBeVisible({ timeout: 45_000 });
+
+  await page.getByTestId("agent-brief").click();
+  await expect(page.getByTestId("flow-msg")).toContainText("Agent Brief", {
+    timeout: 45_000,
+  });
+  await expect(page.getByTestId("flow-err")).toHaveCount(0);
+
+  await page.getByTestId("agent-plan").click();
+  await expect(page.getByTestId("flow-msg")).toContainText("Agent Plan", {
+    timeout: 45_000,
+  });
+  await expect(page.getByTestId("flow-err")).toHaveCount(0);
+  await expect(page.getByTestId("step-plan").locator("code")).toBeVisible();
+  await expect(page.getByTestId("agent-plan-shots").locator("article")).toHaveCount(10);
+
+  // The plan is persisted server-side, not held only in Quick mode component state.
+  await page.reload();
+  await expect(page.getByTestId("quick-mode")).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByTestId("agent-plan-shots").locator("article")).toHaveCount(10);
+  await expect(page.getByTestId("save-manual-plan")).toBeDisabled();
+  expect(errors).toEqual([]);
+});

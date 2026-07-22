@@ -136,6 +136,29 @@ def threshold_candidates(
     ]
 
 
+def recommend_threshold(
+    candidates: Sequence[dict[str, float | int]],
+) -> dict[str, float | int]:
+    """Choose the closest equal-error candidate without silently stamping it.
+
+    This is a review recommendation, not a production policy decision. The
+    calibration runner requires an explicit approval stamp before exposing the
+    value as the final P0 threshold.
+    """
+    if not candidates:
+        raise ValueError("threshold recommendation requires at least one candidate")
+
+    def rank(row: dict[str, float | int]) -> tuple[float, float, float, float]:
+        far = float(row["far"])
+        frr = float(row["frr"])
+        threshold = float(row["threshold"])
+        # Prefer the closest FAR/FRR operating point, then the lowest total
+        # error. On an exact tie, retain the more conservative higher threshold.
+        return (abs(far - frr), far + frr, far, -threshold)
+
+    return min(candidates, key=rank)
+
+
 def percentile(values: Sequence[float], p: float) -> float:
     """Nearest-rank percentile for p in [0, 100]."""
     if not values:

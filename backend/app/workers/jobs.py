@@ -7,16 +7,11 @@ from uuid import UUID
 
 from app.config import get_settings
 from app.shared.db import get_session_factory, set_rls_context
+from app.shared.model_registry import load_all_models
 
 # Ensure full MetaData / FK graph is registered in worker process (SQLAlchemy
 # needs all related tables present when compiling FLUSH).
-from app.access import models as _access_models  # noqa: F401
-from app.assets import models as _assets_models  # noqa: F401
-from app.creation import models as _creation_models  # noqa: F401
-from app.delivery import models as _delivery_models  # noqa: F401
-from app.events import models as _event_models  # noqa: F401
-from app.execution import models as _execution_models  # noqa: F401
-from app.production import models as _production_models  # noqa: F401
+load_all_models()
 
 
 async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
