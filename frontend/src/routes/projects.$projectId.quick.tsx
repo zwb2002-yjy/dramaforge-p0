@@ -529,7 +529,7 @@ function QuickModePage() {
             )}
             {planId && (
               <p className="muted">
-                plan <code>{planId.slice(0, 12)}…</code>
+                plan <code data-testid="agent-plan-id">{planId.slice(0, 12)}…</code>
               </p>
             )}
             {agentPlanNeedsRegeneration && (

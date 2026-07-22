@@ -13,6 +13,7 @@ def test_health_returns_200_with_expected_shape(client: TestClient) -> None:
     assert body["service"] == "api"
     assert "version" in body and body["version"]
     assert "env" in body and body["env"]
+    assert body["source_commit"] == "test-source-commit"
 
 
 def test_health_is_stable_across_calls(client: TestClient) -> None:

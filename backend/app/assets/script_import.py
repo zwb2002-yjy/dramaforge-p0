@@ -6,11 +6,13 @@ import hashlib
 import re
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.shared.errors import ValidationAppError
@@ -86,8 +88,8 @@ def parse_script_markdown(text: str) -> ParsedScript:
     synopsis_parts: list[str] = []
     lead: str | None = None
     scenes: list[ParsedScene] = []
-    cur_scene: dict | None = None
-    cur_shot: dict | None = None
+    cur_scene: dict[str, Any] | None = None
+    cur_shot: dict[str, Any] | None = None
 
     def flush_shot() -> None:
         nonlocal cur_shot, cur_scene
@@ -198,7 +200,7 @@ async def import_script(
     actor_id: UUID,
     filename: str,
     text: str,
-    actor=None,
+    actor: User | None = None,
 ) -> ImportResult:
     """Persist ScriptDocument + Episode + Scenes + Shots under project membership."""
     if actor is not None:

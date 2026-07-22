@@ -85,7 +85,11 @@ class AgnesHubClient:
                     if resp.status_code in {408, 429, 500, 502, 503, 504}:
                         await asyncio.sleep(2.0 * attempt)
                         continue
-                except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+                except (
+                    httpx.TimeoutException,
+                    httpx.NetworkError,
+                    httpx.RemoteProtocolError,
+                ) as exc:
                     last_err = f"{type(exc).__name__}: {exc}"
                     await asyncio.sleep(2.0 * attempt)
                     continue
@@ -149,9 +153,10 @@ class AgnesHubClient:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(url, headers=self._headers())
             try:
-                data = resp.json()
+                raw_data = resp.json()
             except Exception:
-                data = {"raw_status": resp.status_code}
+                raw_data = {"raw_status": resp.status_code}
+            data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
             if resp.status_code >= 400:
                 return {"status": "failed", "error": f"poll http {resp.status_code}"}
             status = str(data.get("status", "unknown"))
@@ -162,36 +167,40 @@ class AgnesHubClient:
                 status = "failed"
             elif status in {"queued", "pending", "processing", "running", "in_progress"}:
                 status = "running" if status != "queued" else "queued"
-            uri = None
-            if isinstance(data, dict):
-                meta = data.get("metadata")
-                if isinstance(meta, dict):
-                    uri = meta.get("url") or meta.get("video_url")
-                out = data.get("output")
-                if isinstance(out, dict):
-                    uri = uri or out.get("url")
-                elif isinstance(out, str):
-                    uri = uri or out
-                uri = uri or data.get("url") or data.get("video_url")
-                if isinstance(data.get("data"), dict):
-                    uri = uri or data["data"].get("url")
+            uri: object | None = None
+            meta = data.get("metadata")
+            if isinstance(meta, dict):
+                uri = meta.get("url") or meta.get("video_url")
+            output = data.get("output")
+            if isinstance(output, dict):
+                uri = uri or output.get("url")
+            elif isinstance(output, str):
+                uri = uri or output
+            uri = uri or data.get("url") or data.get("video_url")
+            nested_data = data.get("data")
+            if isinstance(nested_data, dict):
+                uri = uri or nested_data.get("url")
             self._tasks[remote_task_id] = {
                 "kind": "video",
                 "status": status,
                 "artifact_uri": uri,
-                "error": data.get("error") if isinstance(data, dict) else None,
+                "error": data.get("error"),
             }
-            out: dict[str, Any] = {
+            raw_progress = data.get("progress", 0)
+            progress = (
+                float(raw_progress) / 100.0
+                if isinstance(raw_progress, int | float) and raw_progress > 1
+                else float(raw_progress or 0)
+            )
+            result: dict[str, Any] = {
                 "status": status,
-                "progress": float(data.get("progress", 0) or 0) / 100.0
-                if isinstance(data.get("progress"), (int, float)) and data.get("progress", 0) > 1
-                else float(data.get("progress", 0) or 0),
+                "progress": progress,
             }
             if uri:
-                out["artifact_uri"] = uri
+                result["artifact_uri"] = uri
             if status == "failed":
-                out["error"] = str(data.get("error", data))[:300]
-            return out
+                result["error"] = str(data.get("error", data))[:300]
+            return result
 
     async def poll(self, remote_task_id: str) -> dict[str, Any]:
         task = self._tasks.get(remote_task_id)

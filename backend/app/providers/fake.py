@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 from uuid import uuid4
 
@@ -94,7 +95,7 @@ class FakeFluxAdapter:
 
                 # Prompt-dependent color so embeddings differ by content
                 # Full prompt hash drives RGB so unique prompts ⇒ unique PNG bytes
-                digest = __import__("hashlib").sha256(prompt.encode()).digest()
+                digest = hashlib.sha256(prompt.encode()).digest()
                 img = Image.new(
                     "RGB",
                     (64, 64),
@@ -120,7 +121,7 @@ class FakeFluxAdapter:
             # Keep the test-only WAV-shaped bytes prompt-specific. Truncating
             # the common "9:16 cinematic..." prefix caused every shot's
             # synthetic voice to hash identically and masked artifact reuse.
-            digest = __import__("hashlib").sha256(prompt.encode()).digest()
+            digest = hashlib.sha256(prompt.encode()).digest()
             return b"RIFF$\x00\x00\x00WAVEfmt " + digest
         if kind in {"subtitle"}:
             return f"1\n00:00:00,000 --> 00:00:01,000\n{prompt}\n".encode()

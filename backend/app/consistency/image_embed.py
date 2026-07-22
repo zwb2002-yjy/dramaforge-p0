@@ -11,6 +11,7 @@ import struct
 from io import BytesIO
 from typing import Any
 
+from app.config import get_settings
 from app.consistency.face import EMBEDDING_DIM, cosine_similarity, l2_normalize
 
 _INSIGHT_APP: Any | None = None
@@ -21,6 +22,9 @@ _INSIGHT_ERROR: str | None = None
 def insightface_available() -> bool:
     """True when InsightFace FaceAnalysis can be constructed."""
     global _INSIGHT_APP, _INSIGHT_TRIED, _INSIGHT_ERROR
+    if not get_settings().insightface_enabled:
+        _INSIGHT_ERROR = "disabled by INSIGHTFACE_ENABLED=false"
+        return False
     if _INSIGHT_APP is not None:
         return True
     if _INSIGHT_TRIED:

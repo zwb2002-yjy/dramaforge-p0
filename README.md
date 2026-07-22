@@ -151,9 +151,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1
 git status --short
 git worktree list
 git branch --all
+git remote -v
 ```
 
-每个任务开始、完成、失败、暂停或合并时，通过 `.agent-control/control.ps1 -Operation log` 追加事实记录。私有 `origin` 和认证核验前只允许一个写入 Agent 本地串行提交；远端可用后，写入 subagent 使用独立 `agent/<task-id>` 分支、`.worktrees/<task-id>` 和 PR。
+每个任务开始、完成、失败或暂停时，通过 `.agent-control/control.ps1 -Operation log` 追加事实记录。所有写入任务使用独立 `agent/<task-id>` 分支、`.worktrees/<task-id>`、非重叠 `owned_paths` 和 PR；仓库根 worktree 保持在 `main`。远端不可用时提交停留在任务分支并记录 `PAUSED`，不存在本地 main 提交例外。Agent 不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以在批准并合并 PR 后记录该状态。GitHub Ruleset 配置见 [`docs/runbooks/github-ruleset.md`](docs/runbooks/github-ruleset.md)。
+
+发布或 P0 tag 前，从候选 commit 的干净 worktree 运行 formal proof 和 §3.1 Gate。默认报告写入 `tmp/p0-evidence/<sha>/`，并携带 commit、dirty、UTC 起止时间、脱敏命令、环境摘要和 source 一致性；任何 `FAIL`、`BLOCKED`、dirty 或 source mismatch 都不能标记 P0 MVP 完成。
 
 Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在开发检查点定义可观察效果和验收证据；完成并合并后重算当前阶段 Gate，继续最高优先级的 `READY` Task。某个外部条件暂停时，只暂停依赖它的路径；P0 完成后按 `P1.1 -> P1.2 -> P1.3 -> P2` 自动建立阶段合同并继续开发，除非遇到需要用户账号、付费、受限数据、不可逆操作或会改变产品路线的真实阻塞。
 

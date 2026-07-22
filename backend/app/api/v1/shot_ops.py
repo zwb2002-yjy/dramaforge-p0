@@ -34,7 +34,7 @@ class ShotStatusResponse(BaseModel):
     locked: bool
     node_run_count: int
     failed_count: int
-    guidance: dict | None
+    guidance: dict[str, object] | None
     pipeline: list[str]
 
 
@@ -67,7 +67,7 @@ async def _enqueue_all(session: SessionDep, run_ids: list[UUID]) -> list[str]:
             jid = await sched.enqueue_node_run_only(rid)
             if jid.startswith("local:"):
                 errors.append(f"{rid}:local_forbidden")
-                jobs.append(f"error:local_forbidden")
+                jobs.append("error:local_forbidden")
             else:
                 jobs.append(jid)
         except Exception as exc:  # noqa: BLE001
@@ -95,7 +95,7 @@ async def shot_status(
     data = await shot_review.shot_status_summary(
         session, project_id=project_id, shot_id=shot_id
     )
-    return ShotStatusResponse(**data)  # type: ignore[arg-type]
+    return ShotStatusResponse.model_validate(data)
 
 
 @router.post(
@@ -276,7 +276,7 @@ async def manual_media(
     _: CsrfDep,
     node_key: str = Form(...),
     note: str = Form(""),
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
 ) -> ManualUploadResponse:
     await ProjectService(session).require_project_role(
         project_id=project_id,

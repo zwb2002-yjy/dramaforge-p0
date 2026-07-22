@@ -4,7 +4,7 @@
 
 **适用仓库：`D:\调研\dramaforge`**
 
-**执行记录：遵守 `AGENT_EXECUTION_PROTOCOL.md` v3.1。每个 Agent/subagent 在任务开始、完成、失败、暂停或合并时，通过 `.agent-control/control.ps1` 追加本地事实；并行写入由 Git 分支、GitHub PR 和独立 worktree 隔离。没有观察器、Session、Token、心跳或进程门禁。**
+**执行记录：遵守 `AGENT_EXECUTION_PROTOCOL.md` v3.2。每个 Agent/subagent 在任务开始、完成、失败或暂停时，通过 `.agent-control/control.ps1` 追加本地事实；写入任务由 Git 分支、GitHub PR、路径所有权和独立 worktree 隔离。只有用户可以在批准并合并 PR 后记录 `MERGED`。没有观察器、Session、Token、心跳或进程门禁。**
 
 **目标执行者：Grok 4.5 或其他编码 Agent**
 
@@ -22,7 +22,7 @@
 先执行 `.agent-control/control.ps1 -Operation open` 和 `tail -Tail 20`，再核验 `git status --short`、`git worktree list`、`git branch --all` 和 GitHub 远端状态。不要依赖聊天记忆，不要覆盖已有未提交改动。
 从 `docs/开发执行检查点.md` 的“当前唯一执行任务”恢复，不要重复已经有证据的工作。持续执行本文的“开发控制循环”：当前 Task 通过后立即选择下一 Task，当前阶段 Gate 通过后立即进入下一阶段，直到 P0、P1.1、P1.2、P1.3、P2 依次完成，或遇到本文定义的真实人工阻塞。不要只完成一个 Task 就等待新的“继续”指令。
 开始 Task 或 subtask 前写 STARTED；完成、失败或暂停时立即写 COMPLETED、FAILED 或 PAUSED。记录摘要、分支、worktree、改动文件、测试、commit、证据和下一步。
-允许主 Agent 使用多个 subagent：只读调查可以并行。私有 `origin` 和认证核验前只允许一个写入 Agent 在本地串行工作并提交，不得假装 GitHub PR 流程已经启用；远端可用后，每个写入 subagent 必须使用独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`，推送同名远端分支并通过 PR 合并。主 Agent复核 diff、测试和合同后记录 MERGED。每个 subagent 必须自行记录开始和结束状态。
+允许主 Agent 使用多个 subagent：只读调查可以并行。每个写入任务必须使用独立 `agent/<task-id>` 分支、`.worktrees/<task-id>` 和不重叠的 `owned_paths`；仓库根 worktree 保持在 `main`。远端不可用时提交保留在任务分支并记录 `PAUSED`，不存在本地 main 提交例外。Agent 复核 diff、测试和合同后创建或更新 PR，但不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以完成这些动作。每个 subagent 必须自行记录开始和结束状态。
 遇到真实 Provider 费用、外部账号、不可逆操作或冻结合同冲突时先停止对应动作并说明；其他本地开发自主完成。
 ```
 
@@ -119,8 +119,8 @@ BOOT-0 仓库启动
 → 选择一个 READY Task
 → 写 Task 完成效果和验收合同
 → 实现、测试、自审、修复
-→ 分支提交、复核、合并
-→ 更新检查点和本地账本
+→ 分支提交、复核、PR
+→ 用户批准并合并后更新检查点和本地账本
 → Gate 未通过：选择同阶段下一 Task
 → Gate 已通过：关闭阶段并启动下一阶段合同任务
 → 全部路线完成或遇到真实人工阻塞时停止
@@ -158,8 +158,8 @@ Task ID：唯一且稳定
 3. 先运行最窄的受影响检查，再运行 Task 合同要求的集成检查和仓库级回归。
 4. 测试失败时进入 5.4 自修复循环；不得在第一次失败后直接把普通工程问题交给用户。
 5. 检查 `git diff`、合同镜像、迁移、OpenAPI 类型、权限、幂等、日志脱敏、临时文件和目录合规。
-6. 私有远端已核验时在独立分支提交并走 PR；远端不可用时由当前唯一写入 Agent 本地串行提交。主 Agent 或独立只读审查 subagent 按 diff、测试和合同复核，发现问题就回到步骤 1，不以自然语言汇报代替修复。
-7. Task 的全部完成定义通过后才能写 `COMPLETED`；进入 `main` 后写 `MERGED`，并立即回到 5.3 选择下一 Task。
+6. 在独立 `agent/<task-id>` 分支提交并走 PR。远端不可用时保留分支提交并记录 `PAUSED`，不得改写本地 `main`。主 Agent 或独立只读审查 subagent 按 diff、测试和合同复核，发现问题就回到步骤 1，不以自然语言汇报代替修复。
+7. Task 的全部完成定义通过后 Agent 才能写 `COMPLETED`。只有用户批准并合并 PR 后，用户才能写带 `ApprovedBy @zwb2002-yjy` 的 `MERGED`，然后主 Agent回到 5.3 选择下一 Task。
 
 ### 5.3 Task 选择与阶段自动推进
 
@@ -207,13 +207,13 @@ P0 完成后无需等待新的开发指令。主 Agent 依次启动 `P1.1-CONTRA
 
 ### 5.6 多 subagent 默认策略
 
-- 主 Agent 为每个委派分配唯一 task_id；派出前记录任务、目标分支、worktree、文件范围和验收命令。
+- 主 Agent 为每个委派分配唯一 task_id；派出前记录任务、目标分支、worktree、非空 `owned_paths` 和验收命令。
 - 只读 subagent 可以并行，不需要 worktree；它仍须自行记录 STARTED 和结束状态。
-- 只读 subagent 始终可以并行。私有 `origin` 和认证核验前，只允许一个写入 Agent 在本地串行工作并提交；不得派出多个并行写入 subagent，也不得伪造远端分支或 PR 证据。
-- 远端可用后，每个写入 subagent 使用独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`，不得共用主工作区；它在自己的分支提交并推送同名远端分支，不直接推送业务改动到 `main`。
-- 主 Agent检查 diff、测试和合同后创建或复核 PR，再按依赖顺序合并。远端暂时不可用时，单个写入 Agent 的本地串行提交仍须经过同样的 diff、测试和合同复核。
-- 尽量按文件所有权拆分。多个分支修改同一文件时，分支不会自动消除冲突，主 Agent必须负责解决冲突和合并后联合测试。
-- subagent 的汇报不是完成证据。至少记录 changed_files、tests 和 commit；主 Agent合并后记录 MERGED。
+- 每个写入 subagent 使用独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`，不得共用根工作区；活动写入任务的 `owned_paths` 不得重叠。
+- 写入 subagent 在自己的分支提交并推送同名远端分支，不直接提交或推送业务改动到 `main`。远端暂时不可用时提交停留在任务分支，并记录 `PAUSED`。
+- 主 Agent检查 diff、测试和合同后创建或复核 PR。Agent 不得批准或合并；只在用户合并后继续依赖该结果的任务。
+- 尽量按文件所有权拆分。多个分支修改同一文件时，分支不会自动消除冲突，主 Agent必须负责解决冲突，并在用户合并后运行联合测试。
+- subagent 的汇报不是完成证据。至少记录 `owned_paths`、changed_files、tests 和 commit；用户批准并合并后记录 `MERGED`。
 - 中断后通过 `open`、Git 分支、worktree、commit 和未提交 diff 找到断点，不依赖进程状态或聊天记忆。
 - 主 Agent 不把所有任务一次性派出。只并行无依赖且文件所有权不重叠的 Task；每轮合并后重新计算下一批 `READY` Task。
 - 完成一个 subagent 批次后，主 Agent继续阶段控制循环，不因 subagent 返回而停止等待用户。
@@ -248,15 +248,16 @@ P0 完成后无需等待新的开发指令。主 Agent 依次启动 `P1.1-CONTRA
 - `COMPLETED`：Task 合同中的完成效果和全部验收证据已满足。不能表示“代码写完但没验收”。
 - `PAUSED`：Task 尚未完成，准确外部继续条件已经记录；`open` 必须能恢复它。
 - `FAILED`：当前方案经证据证明不可行；必须有替代 Task、回滚或明确终止原因。
-- `MERGED`：已复核并进入 `main`；不自动代表所属阶段 Gate 通过。
+- `MERGED`：用户已批准并确认进入 `main`；不自动代表所属阶段 Gate 通过。
 - 阶段只有在全部 Gate 和阶段级回归通过后才是完成。Task 状态不能代替阶段状态。
 
 ### 6.3 提交纪律
 
 - 一个提交只对应一个可验证 Task；不要把整个阶段塞入一个提交。
 - 提交前查看 `git diff`，只暂存本 Task 文件，不包含既有用户改动。
-- GitHub 私有远端核验前只允许一个写入 Agent 本地串行提交；核验后，每个写入 subagent 必须推送自己的 `agent/<task-id>` 分支并通过 PR 合并，不得直接推送业务改动到 `main`。
-- 合并由主 Agent在审查 diff、测试和合同后执行；远端可用时必须通过 PR，远端不可用时只能进行单 Agent 的明确本地串行提交。禁止 force push、历史重写或未审查自动合并。
+- 每个写入 Task 必须在独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>` 中提交，并通过 PR 进入 `main`；根 worktree 不承载业务修改。
+- 远端不可用时，提交停留在任务分支并记录 `PAUSED`，不得提交或合并到本地 `main`。Agent 不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以执行。禁止 force push、历史重写或未审查自动合并。
+- 正式 P0 证据只能从干净候选 commit 生成到 `tmp/p0-evidence/<sha>/` 或仓库外路径；dirty、source mismatch、任何 `FAIL` 或 `BLOCKED` 都禁止完成标签。
 - 不使用 `git reset --hard`、`git clean -fd`、`git checkout -- <file>` 清理工作区。
 
 ## 7. 开发阶段和 Gate

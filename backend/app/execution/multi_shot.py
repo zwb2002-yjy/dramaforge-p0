@@ -1,6 +1,6 @@
 """LOCAL-ALGO — not S4 product path.
 
-Five-node mock graph + auto review_passed. Missing shot-p0-v1 full node set
+Five-node mock graph + auto review_passed. Missing the formal nine-node pipeline
 and real review. Use only for cache/stale algorithm tests."""
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.execution.models import GraphNode
 from app.execution.runtime_invariants import mark_stale_downstream, run_or_cache
 from app.production.service import GraphService
+
+LOCAL_ALGO_TEMPLATE_KEY = "local-algo-five-node-v1"
 
 SHOT_NODES = ("keyframe", "video", "voice", "subtitle", "composite")
 SHOT_EDGES = [
@@ -54,7 +56,7 @@ async def produce_shots(
             project_id=project_id,
             scope_type="shot",
             scope_entity_id=shot_id,
-            template_key="shot-p0-v1",
+            template_key=LOCAL_ALGO_TEMPLATE_KEY,
             created_by=user_id,
             definition={"nodes": list(SHOT_NODES), "edges": SHOT_EDGES},
         )

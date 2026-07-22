@@ -127,7 +127,9 @@ class Asset(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
-    metadata_json: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(
+        "metadata", JSON, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -163,8 +165,12 @@ class CharacterReference(Base):
     reference_kind: Mapped[str] = mapped_column(String(40), nullable=False, default="canonical")
     is_canonical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Cross-db: JSON list of 512 floats (PG real[] lands later if needed)
-    face_embedding: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    embedding_model_version: Mapped[str] = mapped_column(String(80), nullable=False, default="hash-v1")
+    face_embedding: Mapped[list[float]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    embedding_model_version: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="hash-v1"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

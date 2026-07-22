@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -405,7 +406,7 @@ class CreationService:
         if plan.materialized_at is not None and existing_runs:
             graph_ids: list[UUID] = []
             graph_version_ids: list[UUID] = []
-            shot_ids: list[UUID] = []
+            materialized_shot_ids: list[UUID] = []
             for run in existing_runs:
                 version = await self._session.get(GraphVersion, run.graph_version_id)
                 graph = (
@@ -419,7 +420,7 @@ class CreationService:
                 graph_version_ids.append(run.graph_version_id)
                 raw_shot_id = str((run.input_snapshot or {}).get("shot_id") or "")
                 if raw_shot_id:
-                    shot_ids.append(UUID(raw_shot_id))
+                    materialized_shot_ids.append(UUID(raw_shot_id))
             return ConfirmPlanResult(
                 plan_id=plan.id,
                 graph_id=graph_ids[0],
@@ -428,7 +429,7 @@ class CreationService:
                 graph_ids=graph_ids,
                 graph_version_ids=graph_version_ids,
                 node_run_ids=[run.id for run in existing_runs],
-                shot_ids=shot_ids,
+                shot_ids=materialized_shot_ids,
                 materialization_ops=ops,
             )
         if plan.status != "confirmed":
@@ -457,7 +458,7 @@ class CreationService:
 
         scene_map: dict[int, Scene] = {}
         results = []
-        shot_ids: list[UUID] = []
+        created_shot_ids: list[UUID] = []
         for sort_order, shot_plan in enumerate(shot_plans, start=1):
             scene_number = _positive_int(shot_plan.get("scene_number"), default=1)
             scene = scene_map.get(scene_number)
@@ -491,7 +492,7 @@ class CreationService:
             )
             self._session.add(shot)
             await self._session.flush()
-            shot_ids.append(shot.id)
+            created_shot_ids.append(shot.id)
             results.append(
                 await enqueue_keyframe_after_plan(
                     self._session,
@@ -505,7 +506,7 @@ class CreationService:
             )
 
         plan.materialized_at = datetime.now(UTC)
-        for shot_id, result in zip(shot_ids, results, strict=True):
+        for shot_id, result in zip(created_shot_ids, results, strict=True):
             await self._events.append_with_outbox(
                 project_id=project_id,
                 aggregate_type="creation_plan",
@@ -529,7 +530,7 @@ class CreationService:
             graph_ids=[result.graph_id for result in results],
             graph_version_ids=[result.graph_version_id for result in results],
             node_run_ids=[result.node_run_id for result in results],
-            shot_ids=shot_ids,
+            shot_ids=created_shot_ids,
             materialization_ops=ops,
         )
 
@@ -1044,7 +1045,7 @@ def _text(value: object) -> str:
 
 def _positive_int(value: object, *, default: int) -> int:
     try:
-        parsed = int(value)  # type: ignore[arg-type]
+        parsed = int(cast(Any, value))
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
@@ -1127,7 +1128,7 @@ def _extract_json_object(text: str) -> dict[str, object]:
     try:
         val = json.loads(raw)
         if isinstance(val, dict):
-            return val  # type: ignore[return-value]
+            return {str(key): value for key, value in val.items()}
     except json.JSONDecodeError:
         pass
     start = raw.find("{")
@@ -1136,7 +1137,7 @@ def _extract_json_object(text: str) -> dict[str, object]:
         try:
             val = json.loads(raw[start : end + 1])
             if isinstance(val, dict):
-                return val  # type: ignore[return-value]
+                return {str(key): value for key, value in val.items()}
         except json.JSONDecodeError:
             return {}
     return {}

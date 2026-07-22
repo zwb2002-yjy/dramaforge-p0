@@ -51,9 +51,7 @@ async def _seed(session: AsyncSession) -> tuple[User, Project, Shot]:
     session.add(org)
     await session.flush()
     session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
+        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
     )
     project = Project(
         organization_id=org.id,
@@ -63,11 +61,7 @@ async def _seed(session: AsyncSession) -> tuple[User, Project, Shot]:
     )
     session.add(project)
     await session.flush()
-    session.add(
-        ProjectMember(
-            project_id=project.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
+    session.add(ProjectMember(project_id=project.id, user_id=user.id, role=MemberRole.OWNER.value))
     ep = Episode(project_id=project.id, episode_number=1, title="E1")
     session.add(ep)
     await session.flush()
@@ -259,6 +253,51 @@ async def test_manual_media_retains_operator_and_note(session: AsyncSession) -> 
 
 
 @pytest.mark.asyncio
+async def test_manual_media_does_not_reassign_existing_artifact_lineage(
+    session: AsyncSession,
+) -> None:
+    user, project, first_shot = await _seed(session)
+    second_shot = Shot(
+        project_id=project.id,
+        scene_id=first_shot.scene_id,
+        shot_number=first_shot.shot_number + 1,
+        visual_description="second shot",
+        dialogue="",
+        status="draft",
+    )
+    session.add(second_shot)
+    await session.flush()
+    store = InMemoryObjectStore()
+    data = b"\x89PNG" + b"same" * 8
+
+    first = await upload_manual_media(
+        session,
+        project_id=project.id,
+        shot_id=first_shot.id,
+        user_id=user.id,
+        node_key="keyframe",
+        data=data,
+        mime_type="image/png",
+        store=store,
+    )
+    first_run_id = first.produced_by_run_id
+
+    with pytest.raises(ValidationAppError, match="ARTIFACT_NOT_INDEPENDENT"):
+        await upload_manual_media(
+            session,
+            project_id=project.id,
+            shot_id=second_shot.id,
+            user_id=user.id,
+            node_key="keyframe",
+            data=data,
+            mime_type="image/png",
+            store=store,
+        )
+
+    assert first.produced_by_run_id == first_run_id
+
+
+@pytest.mark.asyncio
 async def test_viewer_cannot_start_or_approve(session: AsyncSession) -> None:
     owner, project, _shot = await _seed(session)
     viewer = User(
@@ -269,9 +308,7 @@ async def test_viewer_cannot_start_or_approve(session: AsyncSession) -> None:
     session.add(viewer)
     await session.flush()
     session.add(
-        ProjectMember(
-            project_id=project.id, user_id=viewer.id, role=MemberRole.VIEWER.value
-        )
+        ProjectMember(project_id=project.id, user_id=viewer.id, role=MemberRole.VIEWER.value)
     )
     await session.flush()
     svc = ProjectService(session)

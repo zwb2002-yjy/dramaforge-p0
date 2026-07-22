@@ -1,10 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const e2ePort = Number.parseInt(process.env.DRAMAFORGE_E2E_PORT ?? "4173", 10);
+
 /**
- * E2E config: start Vite when free; reuse existing dev server locally (CI always starts fresh).
+ * E2E config: global setup owns the in-process Vite server lifecycle so Windows
+ * does not need to tear down a shell process tree after the tests complete.
  */
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
@@ -13,16 +17,8 @@ export default defineConfig({
   globalTimeout: 180_000,
   reporter: [["list"]],
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: `http://127.0.0.1:${e2ePort}`,
     trace: "on-first-retry",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    stdout: "pipe",
-    stderr: "pipe",
-  },
 });

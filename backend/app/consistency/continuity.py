@@ -56,19 +56,22 @@ def continuity_four_layers(
     viols: list[ContinuityViolation] = []
 
     # Layer 1: character presence in deliverable shot
-    if lead_name:
-        if lead_name.lower() not in visual_desc.lower() and lead_name.split()[0].lower() not in visual_desc.lower():
-            viols.append(
-                ContinuityViolation(
-                    rule_key="character.lead_in_frame",
-                    layer="character",
-                    severity="warning",
-                    message=f"lead '{lead_name}' not mentioned in visual",
-                    remediation="regenerate keyframe with locked lead prompt",
-                    shot_id=shot_id,
-                    asset_id=character_asset_id,
-                )
+    if (
+        lead_name
+        and lead_name.lower() not in visual_desc.lower()
+        and lead_name.split()[0].lower() not in visual_desc.lower()
+    ):
+        viols.append(
+            ContinuityViolation(
+                rule_key="character.lead_in_frame",
+                layer="character",
+                severity="warning",
+                message=f"lead '{lead_name}' not mentioned in visual",
+                remediation="regenerate keyframe with locked lead prompt",
+                shot_id=shot_id,
+                asset_id=character_asset_id,
             )
+        )
 
     # Layer 2: prop continuity
     if prop_mentioned and prop_in_visual is False:
@@ -84,19 +87,25 @@ def continuity_four_layers(
         )
 
     # Layer 3: costume continuity
-    if costume_locked and costume_in_visual:
-        if costume_locked.lower() not in costume_in_visual.lower():
-            viols.append(
-                ContinuityViolation(
-                    rule_key="costume.locked_match",
-                    layer="costume",
-                    severity="block",
-                    message=f"costume mismatch: locked='{costume_locked}' visual='{costume_in_visual}'",
-                    remediation="restore locked wardrobe reference and re-run face/keyframe",
-                    shot_id=shot_id,
-                    asset_id=character_asset_id,
-                )
+    if (
+        costume_locked
+        and costume_in_visual
+        and costume_locked.lower() not in costume_in_visual.lower()
+    ):
+        viols.append(
+            ContinuityViolation(
+                rule_key="costume.locked_match",
+                layer="costume",
+                severity="block",
+                message=(
+                    f"costume mismatch: locked='{costume_locked}' "
+                    f"visual='{costume_in_visual}'"
+                ),
+                remediation="restore locked wardrobe reference and re-run face/keyframe",
+                shot_id=shot_id,
+                asset_id=character_asset_id,
             )
+        )
 
     # Layer 4: subtitle ↔ visual narrative overlap
     if not subtitle.strip():
@@ -122,7 +131,11 @@ def continuity_four_layers(
             )
         )
     else:
-        tokens = [t for t in subtitle.lower().replace("(", " ").replace(")", " ").split() if len(t) > 3]
+        tokens = [
+            token
+            for token in subtitle.lower().replace("(", " ").replace(")", " ").split()
+            if len(token) > 3
+        ]
         # skip pure stage directions like "(none)"
         meaningful = [t for t in tokens if t not in {"none", "whisper"}]
         if meaningful and not any(t in visual_desc.lower() for t in meaningful[:4]):
@@ -138,18 +151,17 @@ def continuity_four_layers(
             )
 
     # Cross-shot soft check
-    if prior_visual and visual_desc:
-        if prior_visual.strip() == visual_desc.strip():
-            viols.append(
-                ContinuityViolation(
-                    rule_key="shot.duplicate_visual",
-                    layer="character",
-                    severity="warning",
-                    message="visual identical to prior shot",
-                    remediation="vary camera or action for adjacent shots",
-                    shot_id=shot_id,
-                )
+    if prior_visual and visual_desc and prior_visual.strip() == visual_desc.strip():
+        viols.append(
+            ContinuityViolation(
+                rule_key="shot.duplicate_visual",
+                layer="character",
+                severity="warning",
+                message="visual identical to prior shot",
+                remediation="vary camera or action for adjacent shots",
+                shot_id=shot_id,
             )
+        )
 
     if any(v.severity == "block" for v in viols):
         status = "blocked"

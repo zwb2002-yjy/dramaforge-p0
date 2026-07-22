@@ -33,6 +33,15 @@ class ValidationAppError(AppError):
         super().__init__(code="VALIDATION_ERROR", message=message, status_code=422, **kwargs)
 
 
+class NodeRunAlreadyClaimedError(AppError):
+    def __init__(self, message: str = "NodeRun is already claimed by another worker") -> None:
+        super().__init__(
+            code="NODE_RUN_ALREADY_CLAIMED",
+            message=message,
+            status_code=409,
+        )
+
+
 class UnauthorizedError(AppError):
     def __init__(self, message: str = "Unauthorized", **kwargs: Any) -> None:
         super().__init__(code="UNAUTHORIZED", message=message, status_code=401, **kwargs)

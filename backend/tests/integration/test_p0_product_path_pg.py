@@ -5,6 +5,7 @@ Requires Docker postgres. Captures evidence for Gate (async path, not request-th
 
 from __future__ import annotations
 
+import asyncio
 import os
 from uuid import uuid4
 
@@ -332,6 +333,154 @@ async def test_agent_brief_plan_postgres_enum_contract(
     assert all(run.status == "succeeded" for run in runs)
     assert len(operations) == 2
     assert all(operation.status == "succeeded" for operation in operations)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_worker_keeps_durable_claim_and_blocks_duplicate_provider_call(
+    pg_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.access.projects import ProjectService
+    from app.production.service import GraphService
+    from app.providers.fake import FakeFluxAdapter
+
+    class BlockingFluxAdapter(FakeFluxAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.create_attempts = 0
+            self.never_returns = asyncio.Event()
+
+        async def create(self, request: dict[str, object]) -> dict[str, object]:
+            self.create_attempts += 1
+            self.started.set()
+            await self.never_returns.wait()
+            return await super().create(request)
+
+    suffix = uuid4().hex[:8]
+    user = User(
+        email=f"claim-{suffix}@example.com",
+        display_name="Claim",
+        password_hash=hash_password("password123"),
+    )
+    pg_session.add(user)
+    await pg_session.flush()
+    org = Organization(name=f"ClaimOrg-{suffix}")
+    pg_session.add(org)
+    await pg_session.flush()
+    pg_session.add(
+        OrganizationMember(
+            organization_id=org.id,
+            user_id=user.id,
+            role=MemberRole.OWNER.value,
+        )
+    )
+    await set_rls_context(pg_session, user_id=user.id, organization_id=org.id)
+    project = await ProjectService(pg_session).create_project(
+        organization_id=org.id,
+        name=f"ClaimProj-{suffix}",
+        aspect_ratio="9:16",
+        actor=user,
+    )
+    graph = await GraphService(pg_session).create_graph(
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=uuid4(),
+        template_key="shot-p0-v1",
+        created_by=user.id,
+        definition={},
+    )
+    node = GraphNode(
+        graph_version_id=graph.current_version_id,
+        node_key="keyframe",
+        node_type="keyframe",
+        display_name="Keyframe",
+        cacheable=True,
+    )
+    pg_session.add(node)
+    await pg_session.flush()
+    run = NodeRun(
+        project_id=project.id,
+        graph_version_id=graph.current_version_id,
+        graph_node_id=node.id,
+        attempt_no=1,
+        idempotency_key=f"claim:{suffix}",
+        input_hash="c" * 64,
+        status="queued",
+        input_snapshot={"prompt": "atomic claim keyframe"},
+        created_by=user.id,
+    )
+    pg_session.add(run)
+    await pg_session.commit()
+
+    adapter = BlockingFluxAdapter()
+    monkeypatch.setattr(
+        "app.providers.flux.get_flux_adapter",
+        lambda *, allow_fake=False: adapter,
+    )
+    engine = create_async_engine(_url(), pool_pre_ping=True)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def consume() -> bool:
+        async with factory() as session:
+            await set_rls_context(
+                session,
+                user_id=user.id,
+                organization_id=org.id,
+                project_id=project.id,
+            )
+            return await WorkerRuntime(session).process_one(run.id)
+
+    first = asyncio.create_task(consume())
+    try:
+        await asyncio.wait_for(adapter.started.wait(), timeout=5)
+
+        async with factory() as observer:
+            await set_rls_context(
+                observer,
+                user_id=user.id,
+                organization_id=org.id,
+                project_id=project.id,
+            )
+            observed = await observer.get(NodeRun, run.id)
+            assert observed is not None
+            assert observed.status == "running"
+
+        assert await asyncio.wait_for(consume(), timeout=2) is False
+        assert adapter.create_attempts == 1
+
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+    finally:
+        if not first.done():
+            first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+        await engine.dispose()
+
+    await pg_session.rollback()
+    await set_rls_context(
+        pg_session,
+        user_id=user.id,
+        organization_id=org.id,
+        project_id=project.id,
+    )
+    await pg_session.refresh(run)
+    assert run.status == "running"
+    artifacts = (
+        await pg_session.execute(
+            select(Artifact).where(Artifact.produced_by_run_id == run.id)
+        )
+    ).scalars().all()
+    operations = (
+        await pg_session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalars().all()
+    assert adapter.create_attempts == 1
+    assert len(adapter.calls) == 0
+    assert artifacts == []
+    assert operations == []
 
 
 @pytest.mark.asyncio

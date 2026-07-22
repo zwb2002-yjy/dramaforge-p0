@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
+from redis.asyncio import Redis, from_url
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.events.outbox import OutboxDispatcher, StreamPublisher
 from app.execution.models import NodeRun
-from app.shared.errors import NotFoundError, ValidationAppError
+from app.shared.db import set_rls_context
+from app.shared.errors import (
+    NodeRunAlreadyClaimedError,
+    NotFoundError,
+    ValidationAppError,
+)
 
 
 class RedisStreamPublisher(StreamPublisher):
@@ -19,12 +26,10 @@ class RedisStreamPublisher(StreamPublisher):
     def __init__(self, redis_url: str) -> None:
         super().__init__()
         self._redis_url = redis_url
-        self._redis = None
+        self._redis: Redis[Any] | None = None
 
-    def _client(self):  # type: ignore[no-untyped-def]
+    def _client(self) -> Redis[Any]:
         if self._redis is None:
-            from redis.asyncio import from_url
-
             self._redis = from_url(self._redis_url, decode_responses=True)
         return self._redis
 
@@ -196,7 +201,10 @@ class WorkerRuntime:
         self._session = session
 
     async def process_queued(self, *, limit: int = 20) -> int:
-        from app.execution.product_path import execute_media_node_run
+        from app.execution.product_path import (
+            claim_media_node_run,
+            execute_media_node_run,
+        )
 
         result = await self._session.execute(
             select(NodeRun)
@@ -204,28 +212,64 @@ class WorkerRuntime:
             .order_by(NodeRun.created_at)
             .limit(limit)
         )
+        candidates = [
+            (run.id, run.created_by, run.project_id) for run in result.scalars().all()
+        ]
         n = 0
-        for run in result.scalars().all():
+        for run_id, user_id, project_id in candidates:
             try:
-                await execute_media_node_run(self._session, node_run_id=run.id)
+                await set_rls_context(
+                    self._session,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                await claim_media_node_run(self._session, node_run_id=run_id)
+                await execute_media_node_run(
+                    self._session,
+                    node_run_id=run_id,
+                    already_claimed=True,
+                )
+                await self._session.commit()
+            except NodeRunAlreadyClaimedError:
+                await self._session.rollback()
+                continue
             except Exception as exc:  # noqa: BLE001
-                # A Worker must never leave a claimed run in "running" after an
-                # unexpected adapter/review failure. Product code may already
-                # have recorded a specific terminal failure; preserve it.
-                if run.status in {"queued", "running"}:
-                    run.status = "failed"
-                    run.error_code = getattr(exc, "code", None) or "NODE_EXECUTION_FAILED"
-                    run.error_summary = str(exc)[:500]
+                await self._session.rollback()
+                await set_rls_context(
+                    self._session,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                current = await self._session.get(NodeRun, run_id)
+                if current is not None and current.status in {"queued", "running"}:
+                    current.status = "failed"
+                    current.error_code = (
+                        getattr(exc, "code", None) or "NODE_EXECUTION_FAILED"
+                    )
+                    current.error_summary = str(exc)[:500]
                     from datetime import UTC, datetime
 
-                    run.finished_at = datetime.now(UTC)
+                    current.finished_at = datetime.now(UTC)
                     await self._session.flush()
+                    await self._session.commit()
             n += 1
-        await self._session.commit()
         return n
 
-    async def process_one(self, node_run_id: UUID) -> None:
-        from app.execution.product_path import execute_media_node_run
+    async def process_one(self, node_run_id: UUID) -> bool:
+        from app.execution.product_path import (
+            claim_media_node_run,
+            execute_media_node_run,
+        )
 
-        await execute_media_node_run(self._session, node_run_id=node_run_id)
+        try:
+            await claim_media_node_run(self._session, node_run_id=node_run_id)
+        except NodeRunAlreadyClaimedError:
+            await self._session.rollback()
+            return False
+        await execute_media_node_run(
+            self._session,
+            node_run_id=node_run_id,
+            already_claimed=True,
+        )
         await self._session.commit()
+        return True

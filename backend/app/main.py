@@ -48,7 +48,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api_router, prefix=cfg.api_prefix)
 
     @app.get("/health", tags=["system"])
-    async def health(session: AsyncSession = Depends(get_session)) -> Any:
+    async def health(
+        session: AsyncSession = Depends(get_session),  # noqa: B008
+    ) -> Any:
         """Liveness + DB readiness. 503 when PostgreSQL unreachable (UI shows 离线)."""
         from fastapi.responses import JSONResponse
 
@@ -66,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "version": __version__,
             "env": cfg.app_env,
             "db": "up" if db_ok else "down",
+            "source_commit": cfg.source_commit,
         }
         if db_error:
             body["db_error"] = db_error

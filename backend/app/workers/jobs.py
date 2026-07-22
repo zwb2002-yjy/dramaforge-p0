@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import UUID
 
 from app.config import get_settings
 from app.shared.db import get_session_factory, set_rls_context
+from app.shared.errors import NodeRunAlreadyClaimedError
 from app.shared.model_registry import load_all_models
 
 # Ensure full MetaData / FK graph is registered in worker process (SQLAlchemy
@@ -22,25 +24,34 @@ async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
 async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, Any]:
     """Worker job: execute media NodeRun via product_path (Adapter OK here)."""
     from app.execution.models import NodeRun
-    from app.execution.product_path import execute_media_node_run
+    from app.execution.product_path import claim_media_node_run, execute_media_node_run
 
     _ = ctx
     factory = get_session_factory()
     run_uuid = UUID(node_run_id)
+    worker_user_id = None
+    worker_project_id = None
     async with factory() as session:
         try:
             run = await session.get(NodeRun, run_uuid)
             if run is None:
                 return {"status": "failed", "error": "node_run not found"}
+            worker_user_id = run.created_by
+            worker_project_id = run.project_id
             await set_rls_context(
                 session,
-                user_id=run.created_by,
-                project_id=run.project_id,
+                user_id=worker_user_id,
+                project_id=worker_project_id,
             )
             run = await session.get(NodeRun, run_uuid)
             if run is None:
                 return {"status": "failed", "error": "node_run not visible under RLS"}
-            result = await execute_media_node_run(session, node_run_id=run_uuid)
+            await claim_media_node_run(session, node_run_id=run_uuid)
+            result = await execute_media_node_run(
+                session,
+                node_run_id=run_uuid,
+                already_claimed=True,
+            )
             await session.commit()
             return {
                 "status": "completed",
@@ -52,11 +63,24 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                 "face_status": result.face_status,
                 "node_type": result.node_type,
             }
+        except NodeRunAlreadyClaimedError:
+            await session.rollback()
+            return {"status": "already_claimed", "node_run_id": node_run_id}
+        except asyncio.CancelledError:
+            await session.rollback()
+            raise
         except Exception as exc:  # noqa: BLE001
             await session.rollback()
-            # Best-effort: mark failed if still queued/running
+            # Fail-stop after a claimed Provider attempt. Failed runs are not
+            # automatically requeued, so an ambiguous remote outcome cannot
+            # trigger a duplicate submission.
             try:
                 async with factory() as s2:
+                    await set_rls_context(
+                        s2,
+                        user_id=worker_user_id,
+                        project_id=worker_project_id,
+                    )
                     run2 = await s2.get(NodeRun, run_uuid)
                     if run2 is not None and run2.status in {"queued", "running"}:
                         run2.status = "failed"

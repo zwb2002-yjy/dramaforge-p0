@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -14,43 +15,16 @@ from app.consistency.face_review import face_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ShotHumanLock
 from app.execution.product_path import execute_media_node_run
 from app.execution.runtime_invariants import mark_stale_downstream
+from app.execution.shot_pipeline import (
+    SHOT_EDGES,
+    SHOT_NODE_BY_KEY,
+    SHOT_NODES,
+    SHOT_PIPELINE_TEMPLATE_KEY,
+    shot_pipeline_definition,
+)
 from app.production.service import GraphService
 from app.providers.fake import FakeFluxAdapter
 from app.storage.minio_store import ObjectStore, get_object_store
-
-SHOT_NODES = (
-    "prompt",
-    "keyframe",
-    "face_review",
-    "video",
-    "video_drift_review",
-    "voice",
-    "subtitle",
-    "composite",
-    "continuity_review",
-)
-SHOT_EDGES = [
-    ("prompt", "keyframe"),
-    ("keyframe", "face_review"),
-    ("face_review", "video"),
-    ("video", "video_drift_review"),
-    ("video_drift_review", "composite"),
-    ("voice", "composite"),
-    ("subtitle", "composite"),
-    ("composite", "continuity_review"),
-]
-
-_NODE_TYPE = {
-    "prompt": "prompt_compose",
-    "keyframe": "keyframe",
-    "face_review": "face_review",
-    "video": "video",
-    "video_drift_review": "video_review",
-    "voice": "voice",
-    "subtitle": "subtitle",
-    "composite": "composite",
-    "continuity_review": "continuity_review",
-}
 
 
 @dataclass
@@ -88,7 +62,8 @@ def continuity_check(
         shot_id=shot_id,
     )
     rule = report.violations[0].rule_key if report.violations else "ok"
-    return report.status, rule, list(report.to_dict()["violations"])  # type: ignore[arg-type]
+    violations = cast(list[dict[str, object]], report.to_dict()["violations"])
+    return report.status, rule, list(violations)
 
 
 async def is_shot_locked(session: AsyncSession, *, project_id: UUID, shot_id: UUID) -> bool:
@@ -165,9 +140,7 @@ async def _queue_node_run(
     canonical_object_key: str | None = None,
 ) -> NodeRun:
     """Create queued NodeRun only — execution is Worker-only (or test inline)."""
-    ih = __import__("hashlib").sha256(
-        f"{shot_id}:{key}:{prompt}:{attempt}".encode()
-    ).hexdigest()
+    ih = __import__("hashlib").sha256(f"{shot_id}:{key}:{prompt}:{attempt}".encode()).hexdigest()
     snap: dict[str, object] = {
         "prompt": prompt,
         "shot_id": str(shot_id),
@@ -284,7 +257,15 @@ async def produce_shots_p0(
             (i + 1, sid, vis, dlg) for i, (sid, vis, dlg) in enumerate(shot_specs[:n])
         ]
     else:
-        loop_items = [(i, uuid4(), f"neon rain street shot {i}", f"Line {i} neon rain street") for i in range(1, n + 1)]
+        loop_items = [
+            (
+                i,
+                uuid4(),
+                f"neon rain street shot {i}",
+                f"Line {i} neon rain street",
+            )
+            for i in range(1, n + 1)
+        ]
 
     for i, shot_id, visual, dialogue in loop_items:
         # Canonical reference image (character) — shared lead or per-shot
@@ -294,17 +275,15 @@ async def produce_shots_p0(
         else:
             canon_bytes = await _make_canonical_bytes(f"lead-character-shot-{i}")
             canon_key = f"projects/{project_id}/canonical/{shot_id}.png"
-            await obj_store.put_bytes(
-                object_key=canon_key, data=canon_bytes, mime_type="image/png"
-            )
+            await obj_store.put_bytes(object_key=canon_key, data=canon_bytes, mime_type="image/png")
 
         graph = await graphs.create_graph(
             project_id=project_id,
             scope_type="shot",
             scope_entity_id=shot_id,
-            template_key="shot-p0-v1",
+            template_key=SHOT_PIPELINE_TEMPLATE_KEY,
             created_by=user_id,
-            definition={"nodes": list(SHOT_NODES), "edges": SHOT_EDGES},
+            definition=shot_pipeline_definition(),
         )
         assert graph.current_version_id is not None
         rec = ShotRecord(
@@ -318,11 +297,12 @@ async def produce_shots_p0(
         keyframe_artifact_id: UUID | None = None
 
         for key in SHOT_NODES:
+            spec = SHOT_NODE_BY_KEY[key]
             node = GraphNode(
                 graph_version_id=graph.current_version_id,
                 node_key=key,
-                node_type=_NODE_TYPE[key],
-                display_name=key,
+                node_type=spec.node_type,
+                display_name=spec.display_name,
                 cacheable=True,
             )
             session.add(node)
@@ -370,7 +350,8 @@ async def produce_shots_p0(
                     if mismatch_face_on_shot == i:
                         probe = await _make_canonical_bytes(f"wrong-character-{i}")
                     else:
-                        probe = keyframe_bytes  # type: ignore[assignment]
+                        assert keyframe_bytes is not None
+                        probe = keyframe_bytes
                     assert probe is not canon_bytes or mismatch_face_on_shot == i
                     review = face_review_images(
                         probe_image_bytes=probe,

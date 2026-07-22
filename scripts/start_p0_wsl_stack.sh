@@ -31,6 +31,22 @@ mkdir -p "${LOG_DIR}" "${PID_DIR}" "${MINIO_DATA}"
 
 log() { echo "[stack] $*"; }
 
+bind_source_commit() {
+  local status
+  status="$(git -C "${REPO}" status --porcelain=v1 --untracked-files=normal)"
+  if [[ -n "${status}" ]]; then
+    echo "Formal stack requires a clean worktree; commit or remove local changes first." >&2
+    git -C "${REPO}" status --short >&2
+    exit 1
+  fi
+  SOURCE_COMMIT="$(git -C "${REPO}" rev-parse HEAD)"
+  if [[ -z "${SOURCE_COMMIT}" ]]; then
+    echo "Could not resolve source commit for ${REPO}" >&2
+    exit 1
+  fi
+  export DRAMAFORGE_SOURCE_COMMIT="${SOURCE_COMMIT}"
+}
+
 load_formal_env() {
   if [[ -f "${REPO}/.env" ]]; then
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -269,17 +285,30 @@ PY
 stop_pidfile() {
   local name="$1"
   if [[ -f "${PID_DIR}/${name}.pid" ]]; then
-    kill "$(cat "${PID_DIR}/${name}.pid")" 2>/dev/null || true
+    local pid
+    pid="$(cat "${PID_DIR}/${name}.pid")"
+    kill "${pid}" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      kill -0 "${pid}" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "${pid}" 2>/dev/null; then
+      kill -9 "${pid}" 2>/dev/null || true
+    fi
     rm -f "${PID_DIR}/${name}.pid"
     log "stopped ${name}"
   fi
 }
 
-do_stop() {
+stop_application_processes() {
   stop_pidfile dispatcher
   stop_pidfile worker-heavy
   stop_pidfile worker-default
   stop_pidfile api
+}
+
+do_stop() {
+  stop_application_processes
   stop_pidfile minio
   log "STACK_STOPPED (PG/Redis left running as system services)"
 }
@@ -304,12 +333,16 @@ do_status() {
 
 do_start() {
   load_formal_env
+  bind_source_commit
   log "formal stack start REPO=${REPO}"
+  log "SOURCE_COMMIT=${SOURCE_COMMIT}"
   log "DRAMA_FORCE_MEMORY_STORE=${DRAMA_FORCE_MEMORY_STORE:-<unset>} (must be empty)"
   ensure_postgres
   ensure_redis
   ensure_minio
   ensure_venv
+  # Formal evidence cannot reuse API/Worker processes from an older checkout.
+  stop_application_processes
   run_migrations
   start_api
   start_arq_worker default

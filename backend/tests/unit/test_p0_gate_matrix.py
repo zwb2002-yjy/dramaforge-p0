@@ -7,48 +7,43 @@ are documented as skip reasons, not marked passed.
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
 from app.access.models import Organization, OrganizationMember, User
 from app.access.projects import ProjectService
-from app.creation import models as _cm  # noqa: F401
-from app.creation.service import CreationService
-from app.delivery import models as _dm  # noqa: F401
-from app.delivery.export_service import build_project_export
-from app.events import models as _em  # noqa: F401
-from app.execution import models as _xm  # noqa: F401
-from app.execution.models import Artifact, GraphNode, NodeRun
-from app.execution.product_path import execute_media_node_run
-from app.execution.runtime_invariants import run_or_cache
-from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0, set_shot_lock
-from app.production import models as _pm  # noqa: F401
-from app.production.service import GraphService
-from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
-from app.shared.base import Base
-from app.shared.enums import MemberRole
-from app.shared.errors import ForbiddenError, ValidationAppError
-from app.shared.security import hash_password
-from app.storage.minio_store import get_object_store, reset_object_store_for_tests
-from app.providers.fake import FakeFluxAdapter
 from app.assets import models as _am  # noqa: F401
 from app.assets.characters import register_lead_character, require_canonical_for_shot
 from app.assets.script_import import import_script
-from app.execution.runtime_invariants import cancel_run, single_flight_claim
+from app.creation import models as _cm  # noqa: F401
+from app.creation.service import CreationService
+from app.delivery import models as _dm  # noqa: F401
 from app.delivery.download import (
     authorize_export_download,
     fetch_export_bytes,
-    mint_download_token,
     verify_download_token,
 )
-from app.events.sse import SseHub, format_sse
+from app.delivery.export_service import build_project_export
+from app.events import models as _em  # noqa: F401
 from app.events.models import OutboxEvent
 from app.events.outbox import OutboxDispatcher, StreamPublisher
-from app.shared.enums import OutboxStatus
-from pathlib import Path
-
+from app.events.sse import SseHub, format_sse
+from app.execution import models as _xm  # noqa: F401
+from app.execution.models import Artifact, GraphNode, NodeRun
+from app.execution.product_path import execute_media_node_run
+from app.execution.runtime_invariants import cancel_run, run_or_cache, single_flight_claim
+from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0, set_shot_lock
+from app.production import models as _pm  # noqa: F401
+from app.production.service import GraphService
+from app.providers.fake import FakeFluxAdapter
+from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
+from app.shared.base import Base
+from app.shared.enums import MemberRole, OutboxStatus
+from app.shared.errors import ForbiddenError, ValidationAppError
+from app.shared.security import hash_password
+from app.storage.minio_store import get_object_store, reset_object_store_for_tests
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 GOLDEN = Path(__file__).resolve().parents[3] / "fixtures" / "scripts" / "p0_10_shots.md"
 
@@ -317,7 +312,9 @@ async def test_matrix_export_hash_equality_shared_store(session: AsyncSession) -
     }
     await session.flush()
     await WorkerRuntime(session).process_one(mat.node_run_id)
-    art = await session.get(Artifact, (await session.get(NodeRun, mat.node_run_id)).result_artifact_id)
+    run = await session.get(NodeRun, mat.node_run_id)
+    assert run is not None
+    art = await session.get(Artifact, run.result_artifact_id)
     assert art is not None
     # Export uses SAME process store — must see worker bytes
     assert await store.get_bytes(object_key=art.object_key)

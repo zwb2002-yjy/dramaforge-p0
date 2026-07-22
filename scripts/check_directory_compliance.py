@@ -42,6 +42,8 @@ ALLOWED_ROOT = {
     "fixtures",
     "docs",
     ".agent-control",
+    ".github",
+    ".githooks",
 }
 
 # Local-only root names (gitignored or tooling); not product code.

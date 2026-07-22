@@ -11,7 +11,11 @@ from app.access.projects import ProjectService
 from app.events import models as _e  # noqa: F401
 from app.execution import models as _x  # noqa: F401
 from app.execution.models import Artifact, NodeRun, ProviderOperation
-from app.execution.pipeline import FirstFramePipeline, face_review_hook
+from app.execution.pipeline import (
+    LEGACY_FIRST_FRAME_TEMPLATE_KEY,
+    FirstFramePipeline,
+    face_review_hook,
+)
 from app.production import models as _p  # noqa: F401
 from app.production.models import GraphVersion, ProductionGraph
 from app.shared.base import Base
@@ -46,9 +50,7 @@ async def _seed_project(session: AsyncSession) -> tuple[User, UUID]:
     from app.shared.enums import MemberRole
 
     session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
+        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
     )
     project = await ProjectService(session).create_project(
         organization_id=org.id,
@@ -75,7 +77,7 @@ async def test_first_frame_writes_graph_node_run_artifact(session: AsyncSession)
     assert result.brief_text.startswith("BRIEF:")
     graph = await session.get(ProductionGraph, result.graph_id)
     assert graph is not None
-    assert graph.template_key == "shot-p0-v1"
+    assert graph.template_key == LEGACY_FIRST_FRAME_TEMPLATE_KEY
     version = await session.get(GraphVersion, result.graph_version_id)
     assert version is not None
     run = await session.get(NodeRun, result.node_run_id)
@@ -88,12 +90,16 @@ async def test_first_frame_writes_graph_node_run_artifact(session: AsyncSession)
     assert art.byte_size > 8
     assert art.object_key.startswith("projects/")
     ops = (
-        await session.execute(
-            __import__("sqlalchemy").select(ProviderOperation).where(
-                ProviderOperation.id.in_(result.provider_operation_ids)
+        (
+            await session.execute(
+                __import__("sqlalchemy")
+                .select(ProviderOperation)
+                .where(ProviderOperation.id.in_(result.provider_operation_ids))
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     # LEGACY spike records image ProviderOperation only (no forged AgentRun row).
     assert len(ops) == 1
     assert ops[0].actual_provider == "flux"

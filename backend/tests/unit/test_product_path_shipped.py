@@ -124,6 +124,7 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
     await WorkerRuntime(session).process_one(mat.node_run_id)
     run = await session.get(NodeRun, mat.node_run_id)
     assert run is not None and run.status == "completed"
+    assert (run.output_summary or {}).get("source_commit") == "test-source-commit"
     art = await session.get(Artifact, run.result_artifact_id)
     assert art is not None
     assert art.byte_size > 8

@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.models import User
 from app.access.projects import ProjectService
 from app.config import get_settings
 from app.delivery.models import Export
@@ -76,7 +77,7 @@ async def authorize_export_download(
     session: AsyncSession,
     *,
     export_id: UUID,
-    actor,
+    actor: User,
     object_role: str = "timeline_json",
 ) -> DownloadGrant:
     """Member-only grant for one export object key."""

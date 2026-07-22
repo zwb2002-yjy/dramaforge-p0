@@ -231,8 +231,8 @@ function ProductionPage() {
     onError: (e: Error) => setMsg(e.message),
   });
 
-  const runs = snapshot.data?.node_runs ?? [];
-  const arts = snapshot.data?.artifacts ?? [];
+  const runs = useMemo(() => snapshot.data?.node_runs ?? [], [snapshot.data?.node_runs]);
+  const arts = useMemo(() => snapshot.data?.artifacts ?? [], [snapshot.data?.artifacts]);
   const previewArts = imageArtifacts(arts);
   const completedRuns = runs.filter((r) =>
     ["completed", "cached", "completed_after_cancel"].includes(r.status),

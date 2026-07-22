@@ -7,6 +7,7 @@ Originally: S3-style NodeRun cache / budget / cancel against shipped NodeRun row
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -144,8 +145,8 @@ async def run_or_cache(
 def mark_stale_downstream(
     *,
     changed_node_key: str,
-    node_keys: list[str],
-    edges: list[tuple[str, str]],
+    node_keys: Sequence[str],
+    edges: Sequence[tuple[str, str]],
 ) -> list[str]:
     """Return node keys that must re-run when changed_node_key invalidates."""
     stale = {changed_node_key}
