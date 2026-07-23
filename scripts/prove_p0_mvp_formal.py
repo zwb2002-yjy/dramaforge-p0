@@ -97,7 +97,32 @@ def main() -> int:
     )
     parser.add_argument("--worker-token", default="dev-worker-token")
     parser.add_argument("--timeout-seconds", type=int, default=900)
+    parser.add_argument(
+        "--project-name",
+        default="P0 Formal Agent Evidence",
+        help="Project name recorded in the proof; it is not a script fixture.",
+    )
+    parser.add_argument(
+        "--idea",
+        required=True,
+        help="Creative idea sent to the configured text Agent provider.",
+    )
+    parser.add_argument(
+        "--lead-name",
+        required=True,
+        help="Lead character name used for the canonical reference request.",
+    )
+    parser.add_argument(
+        "--lead-prompt",
+        required=True,
+        help="Canonical reference prompt; secrets are not written to the report.",
+    )
     args = parser.parse_args()
+    idea = args.idea.strip()
+    lead_name = args.lead_name.strip()
+    lead_prompt = args.lead_prompt.strip()
+    if not idea or not lead_name or not lead_prompt:
+        parser.error("--idea, --lead-name and --lead-prompt must not be empty")
 
     source_context = begin_evidence_context(REPO)
     scratch = args.scratch or default_evidence_dir(
@@ -114,6 +139,13 @@ def main() -> int:
         "manual_media_count": 0,
         "required_nodes": list(REQUIRED_NODES),
         "worker_tick": bool(args.worker_tick),
+        "inputs": {
+            "project_name": args.project_name.strip(),
+            "idea": idea,
+            "lead_name": lead_name,
+            "lead_prompt_sha256": hashlib.sha256(lead_prompt.encode("utf-8")).hexdigest(),
+            "lead_prompt_length": len(lead_prompt),
+        },
         "steps": [],
         "ok": False,
     }
@@ -249,10 +281,10 @@ def main() -> int:
             "/api/v1/creation/start-project",
             {
                 "organization_id": org.json()["id"],
-                "name": "P0 Agent Formal Ten Shot",
+                "name": args.project_name.strip(),
                 "aspect_ratio": "9:16",
                 "experience_mode": "workbench",
-                "idea": "A detective follows a neon-rain clue through one dangerous night.",
+                "idea": idea,
             },
         )
         if created.status_code not in {200, 201}:
@@ -263,7 +295,7 @@ def main() -> int:
         brief = post(
             f"/api/v1/projects/{project_id}/brief/generate",
             {
-                "idea": "A detective follows a neon-rain clue through one dangerous night.",
+                "idea": idea,
                 "authorize": True,
             },
         )
@@ -303,8 +335,8 @@ def main() -> int:
         canonical = post(
             f"/api/v1/projects/{project_id}/characters/lead",
             {
-                "name": "Lin Xia",
-                "locked_prompt": "Lin Xia, black raincoat, front portrait reference, consistent face",
+                "name": lead_name,
+                "locked_prompt": lead_prompt,
             },
         )
         report["steps"].append({"canonical": canonical.status_code, "body": _problem(canonical)})

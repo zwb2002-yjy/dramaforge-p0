@@ -35,7 +35,9 @@ class ShotRecord:
     node_ids: dict[str, UUID] = field(default_factory=dict)
     run_ids: dict[str, UUID] = field(default_factory=dict)
     artifact_ids: dict[str, UUID] = field(default_factory=dict)
+    visual_description: str = ""
     subtitle: str = ""
+    lead_name: str | None = None
     locked: bool = False
     status: str = "pending"
     face_checked: bool = False
@@ -223,6 +225,7 @@ async def produce_shots_p0(
     run_keyframe_via_worker: bool = True,
     mismatch_face_on_shot: int | None = None,
     shot_specs: list[tuple[UUID, str, str]] | None = None,
+    lead_name: str | None = None,
     shared_canonical_object_key: str | None = None,
     shared_canonical_bytes: bytes | None = None,
     execute_inline: bool | None = None,
@@ -261,8 +264,8 @@ async def produce_shots_p0(
             (
                 i,
                 uuid4(),
-                f"neon rain street shot {i}",
-                f"Line {i} neon rain street",
+                f"shot {i} visual description",
+                f"Line {i}",
             )
             for i in range(1, n + 1)
         ]
@@ -290,7 +293,9 @@ async def produce_shots_p0(
             shot_id=shot_id,
             graph_id=graph.id,
             graph_version_id=graph.current_version_id,
-            subtitle=dialogue or f"Line {i} neon rain street",
+            visual_description=visual,
+            subtitle=dialogue or f"Line {i}",
+            lead_name=lead_name,
             canonical_object_key=canon_key,
         )
         keyframe_bytes: bytes | None = None
@@ -313,7 +318,7 @@ async def produce_shots_p0(
                 cont_status, cont_rule, cont_viols = continuity_check(
                     subtitle=rec.subtitle,
                     visual_desc=visual,
-                    lead_name="Lin Xia" if "lin xia" in visual.lower() else None,
+                    lead_name=lead_name,
                     shot_id=str(shot_id),
                 )
                 run = await _queue_and_run(
@@ -451,7 +456,7 @@ async def rework_subtitle_only_p0(
     assert "keyframe" not in stale
     shot.subtitle = new_subtitle
     obj_store = store or get_object_store()
-    visual = "neon rain street shot rework"
+    visual = shot.visual_description or "shot visual description"
     for attempt_key, key in enumerate(("subtitle", "composite", "continuity_review"), start=2):
         node = await session.get(GraphNode, shot.node_ids[key])
         assert node is not None
@@ -459,6 +464,7 @@ async def rework_subtitle_only_p0(
             cont_status, cont_rule, cont_viols = continuity_check(
                 subtitle=new_subtitle,
                 visual_desc=visual,
+                lead_name=shot.lead_name,
                 shot_id=str(shot.shot_id),
             )
             run = await _queue_and_run(

@@ -450,6 +450,21 @@ textarea:focus {
   margin: 0.65rem 0;
 }
 
+.script-import-panel {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.9rem 0;
+  padding: 0.8rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.script-import-panel textarea {
+  min-height: 12rem;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 button {
   background: linear-gradient(180deg, #2a364c 0%, #1f2838 100%);
   border: 1px solid var(--border-strong);

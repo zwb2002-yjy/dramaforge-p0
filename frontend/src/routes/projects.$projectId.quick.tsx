@@ -467,7 +467,7 @@ function QuickModePage() {
                 onChange={(e) => setPrompt(e.target.value)}
                 readOnly={planSource === "agent"}
                 rows={3}
-                placeholder="cinematic keyframe, neon rain alley, lead character medium shot…"
+                placeholder="cinematic keyframe, subject, action, and composition"
               />
             </label>
             <label>

@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -24,10 +23,23 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8010")
     ap.add_argument("--scratch", type=Path, required=True)
+    ap.add_argument("--idea", required=True)
+    ap.add_argument(
+        "--script-file",
+        type=Path,
+        required=True,
+        help="Explicit script file to import; this probe has no implicit example script.",
+    )
     args = ap.parse_args()
     scratch: Path = args.scratch
     scratch.mkdir(parents=True, exist_ok=True)
     base = args.base.rstrip("/")
+    idea = args.idea.strip()
+    script_file = args.script_file.resolve()
+    if not idea:
+        ap.error("--idea must not be empty")
+    if not script_file.is_file():
+        ap.error(f"--script-file does not exist: {script_file}")
 
     # Client-side FORCE_MEMORY does not affect remote formal stack; clear for safety.
     os.environ.pop("DRAMA_FORCE_MEMORY_STORE", None)
@@ -52,7 +64,11 @@ def main() -> int:
         cookies.update(r.cookies)
         return r
 
-    out: dict = {"steps": []}
+    out: dict = {
+        "scope": "single-shot live scheduler probe; not P0 completion evidence",
+        "inputs": {"idea": idea, "script_file": script_file.name},
+        "steps": [],
+    }
 
     h = client.get("/health")
     hb = h.json()
@@ -75,10 +91,10 @@ def main() -> int:
         "/api/v1/creation/start-project",
         {
             "organization_id": org_id,
-            "name": "ProveChain",
+            "name": "Formal Live Chain Probe",
             "aspect_ratio": "9:16",
             "experience_mode": "quick",
-            "idea": "neon rain",
+            "idea": idea,
         },
     )
     project_id = r.json()["project_id"]
@@ -87,7 +103,7 @@ def main() -> int:
     # Brief + plan + materialize keyframe NodeRun
     r = post(
         f"/api/v1/projects/{project_id}/brief",
-        {"logline": "lead in neon rain", "tone": "noir", "audience": "short"},
+        {"logline": idea, "tone": "cinematic", "audience": "short"},
     )
     brief_id = r.json()["id"]
     post(f"/api/v1/projects/{project_id}/brief/{brief_id}/confirm", {})
@@ -95,7 +111,7 @@ def main() -> int:
         f"/api/v1/projects/{project_id}/plans",
         {
             "brief_revision_id": brief_id,
-            "prompt": "cinematic neon rain keyframe",
+            "prompt": f"{idea}, cinematic keyframe",
             "shot_notes": "S1",
         },
     )
@@ -156,11 +172,10 @@ def main() -> int:
     (scratch / "shot_chain.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
 
     # Script import + shot ops
-    fixture = REPO / "fixtures" / "scripts" / "p0_10_shots.md"
-    script = fixture.read_text(encoding="utf-8") if fixture.is_file() else "# Shot 1\nvisual: x\n"
+    script = script_file.read_text(encoding="utf-8")
     r = post(
         f"/api/v1/projects/{project_id}/scripts/import",
-        {"filename": "p0.md", "text": script, "register_lead": False},
+        {"filename": script_file.name, "text": script, "register_lead": False},
     )
     shots = client.get(f"/api/v1/projects/{project_id}/shots", cookies=cookies).json()
     review: dict = {"import": r.status_code, "shot_count": len(shots), "ops": []}

@@ -86,6 +86,7 @@ async def run_golden_p0_path(
         n=len(specs),
         store=obj,
         shot_specs=specs,
+        lead_name=lead,
         shared_canonical_object_key=char.canonical_object_key,
         shared_canonical_bytes=canon_bytes,
     )

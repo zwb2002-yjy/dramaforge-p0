@@ -70,7 +70,17 @@ async def pg_session() -> AsyncSession:
 
 
 @pytest.mark.asyncio
-async def test_agent_ten_shot_async_product_path(pg_session: AsyncSession) -> None:
+async def test_agent_ten_shot_async_product_path(
+    pg_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This test drives its own WorkerRuntime. Keep all rows uncommitted so a
+    # resident Arq worker sharing the local PostgreSQL instance cannot claim
+    # these NodeRuns between the direct worker calls below.
+    async def _flush_instead_of_commit() -> None:
+        await pg_session.flush()
+
+    monkeypatch.setattr(pg_session, "commit", _flush_instead_of_commit)
+
     suffix = uuid4().hex[:8]
     user = User(
         email=f"p0-{suffix}@example.com",

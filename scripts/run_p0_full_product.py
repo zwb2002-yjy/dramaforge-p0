@@ -68,7 +68,33 @@ async def main() -> int:
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--skip-live-image", action="store_true")
     parser.add_argument("--n-shots", type=int, default=10)
+    parser.add_argument("--project-name", default="P0 Full Product Evidence")
+    parser.add_argument(
+        "--idea",
+        required=True,
+        help="Creative input used for the project, manual brief, and plan.",
+    )
+    parser.add_argument(
+        "--script-file",
+        type=Path,
+        required=True,
+        help="Explicit UTF-8 script file to import; no sample script is implied.",
+    )
+    parser.add_argument("--lead-name", required=True)
+    parser.add_argument(
+        "--lead-prompt",
+        required=True,
+        help="Canonical-reference prompt; it is used only in the provider request.",
+    )
     args = parser.parse_args()
+    idea = args.idea.strip()
+    lead_name = args.lead_name.strip()
+    lead_prompt = args.lead_prompt.strip()
+    script_path = args.script_file.resolve()
+    if not idea or not lead_name or not lead_prompt:
+        parser.error("--idea, --lead-name and --lead-prompt must not be empty")
+    if not script_path.is_file():
+        parser.error(f"--script-file does not exist: {script_path}")
     scratch: Path = args.scratch
     scratch.mkdir(parents=True, exist_ok=True)
     lines: list[str] = [
@@ -131,10 +157,10 @@ async def main() -> int:
         await set_rls_context(session, user_id=user.id, organization_id=org.id)
         started = await CreationService(session).start_project(
             organization_id=org.id,
-            name=f"P0Full-{suffix}",
+            name=f"{args.project_name.strip() or 'P0 Full Product Evidence'}-{suffix}",
             aspect_ratio="9:16",
             actor=user,
-            idea="neon rain short drama full p0",
+            idea=idea,
         )
         await session.commit()
         lines.append(
@@ -151,7 +177,7 @@ async def main() -> int:
         rev = await CreationService(session).update_brief_manual(
             project_id=started.project_id,
             actor=user,
-            logline="A hero walks into neon rain; full P0 acceptance path",
+            logline=idea,
         )
         rev = await CreationService(session).confirm_brief(
             project_id=started.project_id, revision_id=rev.id, actor=user
@@ -161,7 +187,7 @@ async def main() -> int:
             actor=user,
             brief_revision_id=rev.id,
             plan_body={
-                "prompt": "cinematic neon rain opening keyframe 9:16, lead character",
+                "prompt": f"{idea}, lead character, cinematic keyframe, 9:16",
                 "shots": args.n_shots,
             },
         )
@@ -187,7 +213,7 @@ async def main() -> int:
             created = await asyncio.wait_for(
                 flux.create(
                     {
-                        "prompt": "canonical lead portrait, consistent face, soft light",
+                        "prompt": lead_prompt,
                         "kind": "keyframe",
                     }
                 ),
@@ -229,7 +255,7 @@ async def main() -> int:
             **(run.input_snapshot or {}),
             "canonical_object_key": canon_key,
             "plan": {
-                "prompt": "cinematic neon rain opening keyframe 9:16, lead character"
+                "prompt": f"{idea}, lead character, cinematic keyframe, 9:16"
             },
         }
         await session.flush()
@@ -270,25 +296,30 @@ async def main() -> int:
                 lines.append(f"store_read_keyframe_error={type(exc).__name__}")
 
         # Script import + 10-shot production
-        script = (REPO / "fixtures" / "scripts" / "p0_10_shots.md").read_text(
-            encoding="utf-8"
-        )
+        script = script_path.read_text(encoding="utf-8")
         imp = await import_script(
             session,
             project_id=started.project_id,
             actor_id=user.id,
-            filename="p0_10_shots.md",
+            filename=script_path.name,
             text=script,
             actor=user,
         )
         lines.append(
             f"script_import scenes={imp.scene_count} shots={imp.shot_count} lead={imp.lead_character}"
         )
+        if imp.lead_character and imp.lead_character != lead_name:
+            lines.append(
+                "FATAL: --lead-name must match the script Lead declaration "
+                f"(script={imp.lead_character!r})"
+            )
+            (scratch / "p0_full_product.log").write_text("\n".join(lines), encoding="utf-8")
+            return 2
         char = await register_lead_character(
             session,
             project_id=started.project_id,
-            name=imp.lead_character or "Lin Xia",
-            locked_prompt=f"{imp.lead_character or 'Lin Xia'} locked prompt",
+            name=imp.lead_character or lead_name,
+            locked_prompt=lead_prompt,
             canonical_image_bytes=canon_bytes,
             store=store,
         )
@@ -316,6 +347,7 @@ async def main() -> int:
             n=len(specs),
             store=store,
             shot_specs=specs,
+            lead_name=imp.lead_character or lead_name,
             shared_canonical_object_key=char.canonical_object_key,
             shared_canonical_bytes=canon_bytes,
             execute_inline=False,
@@ -352,7 +384,7 @@ async def main() -> int:
             project_id=started.project_id,
             user_id=user.id,
             shot=shots[0],
-            new_subtitle="neon rain street rework line for p0 full",
+            new_subtitle=f"{shots[0].subtitle} (timing revised)",
             budget=Decimal("100"),
             store=store,
         )
