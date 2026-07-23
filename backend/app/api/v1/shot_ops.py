@@ -81,6 +81,81 @@ async def _enqueue_all(session: SessionDep, run_ids: list[UUID]) -> list[str]:
     return jobs
 
 
+async def _run_shot_action(
+    session: SessionDep,
+    *,
+    project_id: UUID,
+    shot_id: UUID,
+    user: CurrentUser,
+    allowed: set[str],
+    action: str,
+    handler: callable,
+    enqueue: bool = False,
+) -> ShotActionResponse:
+    """Authorize, run a shot-review handler, commit, and build the response."""
+    await ProjectService(session).require_project_role(
+        project_id=project_id,
+        actor=user,
+        allowed=allowed,
+        action=action,
+    )
+    r = await handler(session, project_id=project_id, shot_id=shot_id, user_id=user.id)
+    await session.commit()
+    return ShotActionResponse(
+        shot_id=r.shot_id,
+        status=r.status,
+        locked=r.locked,
+        message=r.message,
+    )
+
+
+async def _run_shot_action_with_enqueue(
+    session: SessionDep,
+    *,
+    project_id: UUID,
+    shot_id: UUID,
+    user: CurrentUser,
+    allowed: set[str],
+    action: str,
+    handler: callable,
+    changed_node_key: str | None = None,
+) -> ShotActionResponse:
+    """Authorize, run a handler that returns new run_ids, enqueue them."""
+    await ProjectService(session).require_project_role(
+        project_id=project_id,
+        actor=user,
+        allowed=allowed,
+        action=action,
+    )
+    stale: list[str] = []
+    run_ids: list[UUID] = []
+    if changed_node_key:
+        stale, run_ids = await handler(
+            session,
+            project_id=project_id,
+            shot_id=shot_id,
+            user_id=user.id,
+            changed_node_key=changed_node_key,
+        )
+    else:
+        run_ids = await handler(
+            session,
+            project_id=project_id,
+            shot_id=shot_id,
+            user_id=user.id,
+        )
+    jobs = await _enqueue_all(session, run_ids)
+    return ShotActionResponse(
+        shot_id=shot_id,
+        status="queued",
+        locked=False,
+        message=action,
+        run_ids=run_ids,
+        stale_nodes=stale,
+        job_ids=jobs,
+    )
+
+
 @router.get(
     "/projects/{project_id}/shots/{shot_id}/status",
     response_model=ShotStatusResponse,
@@ -110,27 +185,16 @@ async def start_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).require_project_role(
-        project_id=project_id,
-        actor=user,
-        allowed=ROLES_PRODUCE,
-        action="start shot production",
-    )
-    run_ids = await shot_review.start_shot_nodes(
+    return await _run_shot_action_with_enqueue(
         session,
         project_id=project_id,
         shot_id=shot_id,
-        user_id=user.id,
-        node_keys=body.node_keys,
-    )
-    jobs = await _enqueue_all(session, run_ids)
-    return ShotActionResponse(
-        shot_id=shot_id,
-        status="queued",
-        locked=False,
-        message="NodeRuns committed and enqueued for Worker",
-        run_ids=run_ids,
-        job_ids=jobs,
+        user=user,
+        allowed=ROLES_PRODUCE,
+        action="start shot production",
+        handler=lambda s, **kw: shot_review.start_shot_nodes(
+            s, node_keys=body.node_keys, **kw
+        ),
     )
 
 
@@ -146,22 +210,14 @@ async def approve_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).require_project_role(
-        project_id=project_id,
-        actor=user,
-        allowed=ROLES_REVIEW,
-        action="approve shot",
-    )
-    r = await shot_review.approve_shot(
+    return await _run_shot_action(
         session,
         project_id=project_id,
         shot_id=shot_id,
-        user_id=user.id,
-        note=body.note,
-    )
-    await session.commit()
-    return ShotActionResponse(
-        shot_id=r.shot_id, status=r.status, locked=r.locked, message=r.message
+        user=user,
+        allowed=ROLES_REVIEW,
+        action="approve shot",
+        handler=lambda s, **kw: shot_review.approve_shot(s, note=body.note, **kw),
     )
 
 
@@ -177,22 +233,16 @@ async def reject_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).require_project_role(
-        project_id=project_id,
-        actor=user,
-        allowed=ROLES_REVIEW,
-        action="reject shot",
-    )
-    r = await shot_review.reject_shot(
+    return await _run_shot_action(
         session,
         project_id=project_id,
         shot_id=shot_id,
-        user_id=user.id,
-        reason=body.reason or body.note or "rejected",
-    )
-    await session.commit()
-    return ShotActionResponse(
-        shot_id=r.shot_id, status=r.status, locked=r.locked, message=r.message
+        user=user,
+        allowed=ROLES_REVIEW,
+        action="reject shot",
+        handler=lambda s, **kw: shot_review.reject_shot(
+            s, reason=body.reason or body.note or "rejected", **kw
+        ),
     )
 
 
@@ -208,22 +258,14 @@ async def lock_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).require_project_role(
-        project_id=project_id,
-        actor=user,
-        allowed=ROLES_PRODUCE,
-        action="lock shot",
-    )
-    r = await shot_review.lock_shot(
+    return await _run_shot_action(
         session,
         project_id=project_id,
         shot_id=shot_id,
-        user_id=user.id,
-        locked=body.locked,
-    )
-    await session.commit()
-    return ShotActionResponse(
-        shot_id=r.shot_id, status=r.status, locked=r.locked, message=r.message
+        user=user,
+        allowed=ROLES_PRODUCE,
+        action="lock shot",
+        handler=lambda s, **kw: shot_review.lock_shot(s, locked=body.locked, **kw),
     )
 
 
@@ -239,28 +281,15 @@ async def rerun_shot(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotActionResponse:
-    await ProjectService(session).require_project_role(
-        project_id=project_id,
-        actor=user,
-        allowed=ROLES_PRODUCE,
-        action="rerun shot nodes",
-    )
-    stale, run_ids = await shot_review.local_rerun_from_node(
+    return await _run_shot_action_with_enqueue(
         session,
         project_id=project_id,
         shot_id=shot_id,
-        user_id=user.id,
+        user=user,
+        allowed=ROLES_PRODUCE,
+        action="rerun shot nodes",
+        handler=shot_review.local_rerun_from_node,
         changed_node_key=body.changed_node_key,
-    )
-    jobs = await _enqueue_all(session, run_ids)
-    return ShotActionResponse(
-        shot_id=shot_id,
-        status="queued",
-        locked=False,
-        message=f"local re-run from {body.changed_node_key}",
-        run_ids=run_ids,
-        stale_nodes=stale,
-        job_ids=jobs,
     )
 
 

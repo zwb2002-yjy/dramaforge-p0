@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { ArtifactStage } from "../lib/artifactStage";
 import {
   ApiError,
-  artifactContentUrl,
   confirmBrief,
   createPlan,
   fetchCreationState,
@@ -16,12 +16,16 @@ import {
 } from "../lib/api";
 import { imageArtifacts, latestImageArtifact } from "../lib/projectMedia";
 import {
+  asObject,
+  asObjectList,
+  asText,
   manualPlanSaveState,
   normalizeCreationState,
   prepareAndEnqueueKeyframe,
   requiresAgentBriefRegeneration,
   requiresAgentPlanRegeneration,
 } from "../lib/quickWorkflow";
+import type { JsonObject } from "../lib/quickWorkflow";
 import { projectRoute } from "./projects.$projectId";
 
 export const projectQuickRoute = createRoute({
@@ -31,21 +35,6 @@ export const projectQuickRoute = createRoute({
 });
 
 type Step = 1 | 2 | 3 | 4 | 5;
-type JsonObject = Record<string, unknown>;
-
-function asObject(value: unknown): JsonObject | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : null;
-}
-
-function asText(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function asObjectList(value: unknown): JsonObject[] {
-  return Array.isArray(value)
-    ? value.map(asObject).filter((item): item is JsonObject => item !== null)
-    : [];
-}
 
 function SummaryField({ label, value }: { label: string; value: unknown }) {
   const text = asText(value);
@@ -99,8 +88,6 @@ function QuickModePage() {
   const arts = snapshot.data?.artifacts ?? [];
   const previewArts = imageArtifacts(arts);
   const latestArt = latestImageArtifact(arts);
-  const previewUrl =
-    latestArt && projectId !== "demo" ? artifactContentUrl(projectId, latestArt.id) : null;
   const protagonist = asObject(briefBody?.protagonist);
   const protagonistSummary = [
     asText(protagonist?.name),
@@ -628,63 +615,21 @@ function QuickModePage() {
         </div>
 
         <aside className="studio-stage" data-testid="studio-stage">
-          <div className="panel" style={{ padding: "0.85rem" }}>
-            <h3 style={{ marginBottom: "0.65rem" }}>竖屏预览台</h3>
-            <div className="stage-phone">
-              {previewUrl ? (
-                <>
-                  <span className="stage-badge">9:16 · artifact</span>
-                  <img src={previewUrl} alt="latest keyframe" data-testid="artifact-preview-img" />
-                </>
-              ) : (
-                <div className="stage-empty">
-                  尚无首帧产物
-                  <br />
-                  完成 Brief → Plan → 生产后
-                  <br />
-                  在此回看 keyframe
-                </div>
-              )}
-            </div>
-            <div className="stage-meta" data-testid="artifact-preview">
-              {latestArt ? (
-                <>
-                  <div>
-                    key <code>{latestArt.object_key.split("/").slice(-1)[0]}</code>
-                  </div>
-                  <div>
-                    {latestArt.byte_size}B ·{" "}
-                    <a href={previewUrl!} target="_blank" rel="noreferrer">
-                      打开原图
-                    </a>
-                  </div>
-                </>
-              ) : (
-                <span>等待 Worker 写入 Artifact…</span>
-              )}
-            </div>
-            <div className="ref-strip" style={{ marginTop: "0.75rem" }}>
-              {previewArts.slice(0, 6).map((a) => (
-                <a
-                  key={a.id}
-                  className="ref-chip"
-                  href={artifactContentUrl(projectId, a.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={a.object_key}
-                >
-                  <img src={artifactContentUrl(projectId, a.id)} alt="" />
-                </a>
-              ))}
-              {previewArts.length === 0 && <div className="ref-chip">空</div>}
-            </div>
-            <div className="toolbar" style={{ marginTop: "0.75rem" }}>
-              <Link to="/projects/$projectId/production" params={{ projectId }}>
-                <button type="button" className="primary">
-                  去专业生产板 →
-                </button>
-              </Link>
-            </div>
+          <ArtifactStage
+            projectId={projectId}
+            stageArt={latestArt}
+            stageLabel="竖屏预览"
+            previewArts={previewArts}
+            previewLimit={6}
+            emptyLines={["尚无首帧产物", "完成 Brief → Plan → 生产后", "在此回看 keyframe"]}
+            testId="artifact-preview"
+          />
+          <div className="toolbar" style={{ marginTop: "0.75rem" }}>
+            <Link to="/projects/$projectId/production" params={{ projectId }}>
+              <button type="button" className="primary">
+                去专业生产板 →
+              </button>
+            </Link>
           </div>
         </aside>
       </div>

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
+import { ArtifactStage } from "../lib/artifactStage";
 import {
   approveShot,
   artifactContentUrl,
@@ -277,8 +278,6 @@ function ProductionPage() {
       ? shotKeyframeArtifact(snapshot.data, selectedShot.id)
       : null;
   const stageArt = selectedShot ? selectedShotArt : latestImageArtifact(arts);
-  const stageUrl =
-    stageArt && projectId !== "demo" ? artifactContentUrl(projectId, stageArt.id) : null;
 
   return (
     <div data-testid="production-mode">
@@ -620,54 +619,16 @@ function ProductionPage() {
         </div>
 
         <aside className="studio-stage">
-          <div className="panel" style={{ padding: "0.85rem" }}>
-            <h3 style={{ marginBottom: "0.65rem" }}>预览 / 交付</h3>
-            <div className="stage-phone">
-              {stageUrl ? (
-                <>
-                  <span className="stage-badge">
-                    {selectedShot
-                      ? `Shot ${selectedShot.shot_number || selectedShot.sort_order}`
-                      : "最新分镜图"}
-                  </span>
-                  <img src={stageUrl} alt="preview" />
-                </>
-              ) : (
-                <div className="stage-empty">
-                  分镜板产物预览
-                  <br />
-                  导入剧本并生产后
-                  <br />
-                  在此回看画面
-                </div>
-              )}
-            </div>
-            <div className="stage-meta">
-              {stageArt ? (
-                <>
-                  <div>
-                    <code>{stageArt.object_key.split("/").slice(-1)[0]}</code>
-                  </div>
-                  <div>{stageArt.byte_size}B</div>
-                </>
-              ) : (
-                "等待产物…"
-              )}
-            </div>
-            <div className="ref-strip" style={{ marginTop: "0.65rem" }}>
-              {previewArts.slice(0, 8).map((a) => (
-                <a
-                  key={a.id}
-                  className="ref-chip"
-                  href={artifactContentUrl(projectId, a.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <img src={artifactContentUrl(projectId, a.id)} alt="" />
-                </a>
-              ))}
-            </div>
-          </div>
+          <ArtifactStage
+            projectId={projectId}
+            stageArt={stageArt}
+            stageLabel={
+              selectedShot
+                ? `Shot ${selectedShot.shot_number || selectedShot.sort_order}`
+                : "最新分镜图"
+            }
+            previewArts={previewArts}
+          />
         </aside>
       </div>
     </div>

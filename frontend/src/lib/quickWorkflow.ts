@@ -5,18 +5,18 @@ import {
   registerLeadCharacter,
 } from "./api";
 
-type JsonObject = Record<string, unknown>;
+export type JsonObject = Record<string, unknown>;
 type QuickStep = 1 | 2 | 3 | 4 | 5;
 
-function asObject(value: unknown): JsonObject | null {
+export function asObject(value: unknown): JsonObject | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : null;
 }
 
-function asText(value: unknown): string {
+export function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function objectList(value: unknown): JsonObject[] {
+export function asObjectList(value: unknown): JsonObject[] {
   return Array.isArray(value)
     ? value.map(asObject).filter((item): item is JsonObject => item !== null)
     : [];
@@ -50,7 +50,7 @@ export function requiresAgentPlanRegeneration(
   source: string | null,
   plan: JsonObject | null,
 ): boolean {
-  return source === "agent" && objectList(plan?.shots).length !== 10;
+  return source === "agent" && asObjectList(plan?.shots).length !== 10;
 }
 
 export function manualPlanSaveState(

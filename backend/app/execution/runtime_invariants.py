@@ -47,6 +47,39 @@ async def _next_attempt_no(session: AsyncSession, graph_node_id: UUID) -> int:
     return 1 if current is None else int(current) + 1
 
 
+def _build_node_run(
+    *,
+    project_id: UUID,
+    graph_version_id: UUID,
+    graph_node: GraphNode,
+    attempt_no: int,
+    idempotency_key: str,
+    input_hash: str,
+    status: str,
+    created_by: UUID,
+    result_artifact_id: UUID | None = None,
+    reused_from_run_id: UUID | None = None,
+    provider_cost: Decimal = Decimal("0"),
+    platform_cost: Decimal = Decimal("0"),
+) -> NodeRun:
+    """Create a NodeRun row with the common field set."""
+    return NodeRun(
+        project_id=project_id,
+        graph_version_id=graph_version_id,
+        graph_node_id=graph_node.id,
+        attempt_no=attempt_no,
+        idempotency_key=idempotency_key,
+        input_hash=input_hash,
+        status=status,
+        input_snapshot={},
+        result_artifact_id=result_artifact_id,
+        reused_from_run_id=reused_from_run_id,
+        provider_cost=provider_cost,
+        platform_cost=platform_cost,
+        created_by=created_by,
+    )
+
+
 async def run_or_cache(
     session: AsyncSession,
     *,
@@ -68,36 +101,31 @@ async def run_or_cache(
         input_hash=input_hash,
     )
     if cached is not None and cached.result_artifact_id is not None:
-        run = NodeRun(
+        run = _build_node_run(
             project_id=project_id,
             graph_version_id=graph_version_id,
-            graph_node_id=graph_node.id,
+            graph_node=graph_node,
             attempt_no=attempt,
             idempotency_key=f"{graph_node.node_key}:{input_hash}:cache:{uuid4()}",
             input_hash=input_hash,
             status="cached",
-            input_snapshot={},
+            created_by=created_by,
             result_artifact_id=cached.result_artifact_id,
             reused_from_run_id=cached.id,
-            provider_cost=Decimal("0"),
-            platform_cost=Decimal("0"),
-            created_by=created_by,
         )
         session.add(run)
         await session.flush()
         return run, budget_remaining
 
     if budget_remaining < cost:
-        run = NodeRun(
+        run = _build_node_run(
             project_id=project_id,
             graph_version_id=graph_version_id,
-            graph_node_id=graph_node.id,
+            graph_node=graph_node,
             attempt_no=attempt,
             idempotency_key=f"{graph_node.node_key}:{input_hash}:budget:{uuid4()}",
             input_hash=input_hash,
             status="blocked_budget",
-            input_snapshot={},
-            provider_cost=Decimal("0"),
             created_by=created_by,
         )
         session.add(run)
@@ -123,18 +151,17 @@ async def run_or_cache(
         await session.flush()
         art_id = art.id
 
-    run = NodeRun(
+    run = _build_node_run(
         project_id=project_id,
         graph_version_id=graph_version_id,
-        graph_node_id=graph_node.id,
+        graph_node=graph_node,
         attempt_no=attempt,
         idempotency_key=f"{graph_node.node_key}:{input_hash}:{uuid4()}",
         input_hash=input_hash,
         status="completed",
-        input_snapshot={},
+        created_by=created_by,
         result_artifact_id=art_id,
         provider_cost=cost,
-        created_by=created_by,
     )
     session.add(run)
     await session.flush()
@@ -202,15 +229,14 @@ async def single_flight_claim(
     attempt = await _next_attempt_no(session, graph_node.id)
     # Stable idempotency key for concurrent inserts (unique constraint)
     idem = f"sf:{graph_node.id}:{input_hash}"
-    run = NodeRun(
+    run = _build_node_run(
         project_id=project_id,
         graph_version_id=graph_version_id,
-        graph_node_id=graph_node.id,
+        graph_node=graph_node,
         attempt_no=attempt,
         idempotency_key=idem,
         input_hash=input_hash,
         status="queued",
-        input_snapshot={},
         created_by=created_by,
     )
     session.add(run)
