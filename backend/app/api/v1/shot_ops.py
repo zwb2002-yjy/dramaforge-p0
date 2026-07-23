@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from fastapi import APIRouter, File, Form, UploadFile
@@ -15,9 +16,15 @@ from app.access.projects import (
 from app.api.deps import CsrfDep, CurrentUser, SessionDep
 from app.execution import shot_review
 from app.runtime.scheduler import AgentRunScheduler
+from app.shared.enums import MemberRole
 from app.shared.errors import ValidationAppError
 
 router = APIRouter(tags=["shot-ops"])
+
+RoleSet = set[MemberRole] | frozenset[MemberRole]
+ShotActionHandler = Callable[..., Awaitable[shot_review.ShotReviewResult]]
+EnqueueActionResult = list[UUID] | tuple[list[str], list[UUID]]
+EnqueueActionHandler = Callable[..., Awaitable[EnqueueActionResult]]
 
 
 class ShotActionBody(BaseModel):
@@ -87,10 +94,9 @@ async def _run_shot_action(
     project_id: UUID,
     shot_id: UUID,
     user: CurrentUser,
-    allowed: set[str],
+    allowed: RoleSet,
     action: str,
-    handler: callable,
-    enqueue: bool = False,
+    handler: ShotActionHandler,
 ) -> ShotActionResponse:
     """Authorize, run a shot-review handler, commit, and build the response."""
     await ProjectService(session).require_project_role(
@@ -115,9 +121,10 @@ async def _run_shot_action_with_enqueue(
     project_id: UUID,
     shot_id: UUID,
     user: CurrentUser,
-    allowed: set[str],
+    allowed: RoleSet,
     action: str,
-    handler: callable,
+    message: str,
+    handler: EnqueueActionHandler,
     changed_node_key: str | None = None,
 ) -> ShotActionResponse:
     """Authorize, run a handler that returns new run_ids, enqueue them."""
@@ -127,10 +134,8 @@ async def _run_shot_action_with_enqueue(
         allowed=allowed,
         action=action,
     )
-    stale: list[str] = []
-    run_ids: list[UUID] = []
     if changed_node_key:
-        stale, run_ids = await handler(
+        result = await handler(
             session,
             project_id=project_id,
             shot_id=shot_id,
@@ -138,18 +143,22 @@ async def _run_shot_action_with_enqueue(
             changed_node_key=changed_node_key,
         )
     else:
-        run_ids = await handler(
+        result = await handler(
             session,
             project_id=project_id,
             shot_id=shot_id,
             user_id=user.id,
         )
+    if isinstance(result, tuple):
+        stale, run_ids = result
+    else:
+        stale, run_ids = [], result
     jobs = await _enqueue_all(session, run_ids)
     return ShotActionResponse(
         shot_id=shot_id,
         status="queued",
         locked=False,
-        message=action,
+        message=message,
         run_ids=run_ids,
         stale_nodes=stale,
         job_ids=jobs,
@@ -192,6 +201,7 @@ async def start_shot(
         user=user,
         allowed=ROLES_PRODUCE,
         action="start shot production",
+        message="NodeRuns committed and enqueued for Worker",
         handler=lambda s, **kw: shot_review.start_shot_nodes(
             s, node_keys=body.node_keys, **kw
         ),
@@ -288,6 +298,7 @@ async def rerun_shot(
         user=user,
         allowed=ROLES_PRODUCE,
         action="rerun shot nodes",
+        message=f"local re-run from {body.changed_node_key}",
         handler=shot_review.local_rerun_from_node,
         changed_node_key=body.changed_node_key,
     )
