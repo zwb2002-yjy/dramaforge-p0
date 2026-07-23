@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
+from importlib import import_module
 from io import BytesIO
 from typing import Any
 
@@ -31,7 +32,7 @@ def insightface_available() -> bool:
         return False
     _INSIGHT_TRIED = True
     try:
-        from insightface.app import FaceAnalysis  # type: ignore[import-untyped]
+        FaceAnalysis = import_module("insightface.app").FaceAnalysis
 
         app = FaceAnalysis(
             name="buffalo_l",
@@ -70,9 +71,9 @@ def embedding_from_image_bytes(data: bytes, *, prefer_insightface: bool = True) 
 def _insightface_embed(data: bytes) -> list[float] | None:
     assert _INSIGHT_APP is not None
     try:
-        import numpy as np
         from PIL import Image
 
+        np = import_module("numpy")
         img = Image.open(BytesIO(data)).convert("RGB")
         arr = np.asarray(img)[:, :, ::-1]  # RGB -> BGR for insightface
         faces = _INSIGHT_APP.get(arr)
