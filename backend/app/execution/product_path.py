@@ -335,7 +335,11 @@ async def execute_media_node_run(
         _env = _gs().app_env
         allow_fake = _env == "test"
         try:
-            if node_type in {"video", "video_review", "composite"}:
+            if node_type == "voice" and not allow_fake:
+                from app.providers.local_tts import get_local_tts_adapter
+
+                adapter = get_local_tts_adapter()
+            elif node_type in {"video", "video_review", "composite"}:
                 adapter = get_kling_adapter(allow_fake=allow_fake)
             elif node_type == "voice":
                 # TTS off for P0 — only allow deterministic stub under test
