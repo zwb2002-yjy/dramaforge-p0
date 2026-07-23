@@ -78,6 +78,36 @@ async def test_enqueue_does_not_return_local_on_redis_failure(
 
 
 @pytest.mark.asyncio
+async def test_media_node_enqueues_on_heavy_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.config import get_settings
+    from app.runtime.scheduler import AgentRunScheduler
+
+    session = MagicMock()
+    session.get = AsyncMock(
+        side_effect=[
+            SimpleNamespace(graph_node_id=uuid4()),
+            SimpleNamespace(node_type="keyframe"),
+        ]
+    )
+    redis = MagicMock()
+    redis.enqueue_job = AsyncMock(return_value=SimpleNamespace(job_id="heavy-job"))
+    redis.close = AsyncMock()
+
+    async def create_pool(*_args, **_kwargs):
+        return redis
+
+    monkeypatch.setattr("arq.create_pool", create_pool)
+
+    job_id = await AgentRunScheduler(session)._enqueue_node_run(uuid4())
+
+    assert job_id == "heavy-job"
+    assert redis.enqueue_job.await_args.kwargs["_queue_name"] == get_settings().arq_heavy_queue_name
+
+
+@pytest.mark.asyncio
 async def test_outbox_reclaim_expired_lease() -> None:
     from app.shared.base import Base
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.events.outbox import OutboxDispatcher, StreamPublisher
-from app.execution.models import NodeRun
+from app.execution.models import GraphNode, NodeRun
 from app.shared.db import set_rls_context
 from app.shared.errors import (
     NodeRunAlreadyClaimedError,
@@ -168,6 +168,15 @@ class AgentRunScheduler:
 
         settings = get_settings()
         stable_job_id = f"node-run:{node_run_id}"
+        run = await self._session.get(NodeRun, node_run_id)
+        node = await self._session.get(GraphNode, run.graph_node_id) if run else None
+        # Real media Providers are capacity-limited and must not be submitted as
+        # a burst from the general I/O queue.
+        queue_name = (
+            settings.arq_heavy_queue_name
+            if node and node.node_type in {"keyframe", "video", "voice", "composite"}
+            else settings.arq_default_queue_name
+        )
 
         async def _arq() -> str:
             redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
@@ -176,7 +185,7 @@ class AgentRunScheduler:
                     "execute_node_run",
                     str(node_run_id),
                     _job_id=stable_job_id,
-                    _queue_name=settings.arq_default_queue_name,
+                    _queue_name=queue_name,
                 )
                 if job is None:
                     # Already enqueued with same job id — treat as success (idempotent)
