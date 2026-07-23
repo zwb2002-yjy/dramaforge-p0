@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
+import httpx
 import pytest
 from app.access.models import Organization, OrganizationMember, User
 from app.assets.models import Shot
+from app.config import Settings
 from app.creation import models as _cm  # noqa: F401
 from app.creation.models import AgentRun
 from app.creation.service import CreationService, _parse_brief_json, _parse_plan_json
@@ -16,6 +19,8 @@ from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.execution.shot_p0 import SHOT_NODES
 from app.execution.shot_review import start_shot_nodes
 from app.production.models import GraphVersion
+from app.providers.fake import FakeOpenAIAdapter
+from app.providers.openai import AnthropicCompatibleTextAdapter
 from app.runtime.scheduler import WorkerRuntime
 from app.shared.base import Base
 from app.shared.enums import MemberRole
@@ -35,6 +40,115 @@ async def session() -> AsyncSession:
     async with factory() as s:
         yield s
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "api_style",
+        "base_url",
+        "expected_path",
+        "response_payload",
+        "expected_text",
+    ),
+    [
+        (
+            "anthropic",
+            "https://text.example/api",
+            "/api/v1/messages",
+            {"content": [{"type": "text", "text": '{"title":"Anthropic"}'}]},
+            '{"title":"Anthropic"}',
+        ),
+        (
+            "openai",
+            "https://text.example/v1",
+            "/v1/chat/completions",
+            {"choices": [{"message": {"content": '{"title":"OpenAI"}'}}]},
+            '{"title":"OpenAI"}',
+        ),
+    ],
+)
+async def test_text_adapter_uses_configured_provider_contract(
+    api_style: str,
+    base_url: str,
+    expected_path: str,
+    response_payload: dict[str, object],
+    expected_text: str,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=response_payload)
+
+    adapter = AnthropicCompatibleTextAdapter(
+        Settings(
+            app_env="development",
+            text_llm_enabled=True,
+            text_llm_api_key="test-provider-key",
+            text_llm_base_url=base_url,
+            text_llm_model="test-model",
+            text_llm_api_style=api_style,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await adapter.create(
+        {"kind": "brief", "prompt": "Turn this idea into a structured brief.", "max_tokens": 321}
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["text"] == expected_text
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.url.path == expected_path
+    assert json.loads(request.content) == {
+        "model": "test-model",
+        "max_tokens": 321,
+        "messages": [
+            {"role": "user", "content": "Turn this idea into a structured brief."}
+        ],
+    }
+    if api_style == "anthropic":
+        assert request.headers["x-api-key"] == "test-provider-key"
+        assert request.headers["anthropic-version"] == "2023-06-01"
+        assert "authorization" not in request.headers
+    else:
+        assert request.headers["authorization"] == "Bearer test-provider-key"
+        assert "x-api-key" not in request.headers
+        assert "anthropic-version" not in request.headers
+
+
+@pytest.mark.asyncio
+async def test_fake_agent_results_are_input_derived_without_story_specific_fixture() -> None:
+    adapter = FakeOpenAIAdapter()
+    clockmaker = await adapter.create(
+        {
+            "kind": "brief",
+            "idea": "A clockmaker must repair a public tower before a festival begins.",
+        }
+    )
+    gardener = await adapter.create(
+        {
+            "kind": "brief",
+            "idea": "A gardener discovers a hidden map beneath an old orchard.",
+        }
+    )
+    clockmaker_brief = json.loads(str(clockmaker["text"]))
+    gardener_brief = json.loads(str(gardener["text"]))
+
+    assert clockmaker_brief["logline"] != gardener_brief["logline"]
+    assert "clockmaker" in clockmaker_brief["logline"].lower()
+    assert "orchard" in gardener_brief["logline"].lower()
+
+    plan_result = await adapter.create({"kind": "plan", "brief": clockmaker_brief})
+    plan = json.loads(str(plan_result["text"]))
+    rendered = json.dumps(plan).lower()
+    assert len(plan["shots"]) == 10
+    assert "clockmaker" in rendered
+    assert "lin xia" not in rendered
+    assert "neon rain witness" not in rendered
+    assert len({shot["keyframe_prompt"] for shot in plan["shots"]}) == 10
 
 
 @pytest.mark.asyncio

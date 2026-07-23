@@ -553,8 +553,6 @@ class CreationService:
         if not idea:
             raise ValidationAppError("idea required for Agent Brief")
         from app.config import get_settings
-        from app.providers.fake import FakeOpenAIAdapter
-
         settings = get_settings()
         adapter = get_openai_adapter(allow_live=True)
         # Product path: require live TEXT_LLM unless unit tests force Fake.
@@ -563,16 +561,6 @@ class CreationService:
                 "TEXT_LLM not configured; use manual Brief path",
                 details={"code": "TEXT_LLM_NOT_CONFIGURED", "manual_ok": True},
             )
-        if (
-            settings.app_env != "test"
-            and isinstance(adapter, FakeOpenAIAdapter)
-            and not settings.text_llm_configured()
-        ):
-            raise ValidationAppError(
-                "TEXT_LLM not configured; use manual Brief path",
-                details={"code": "TEXT_LLM_NOT_CONFIGURED", "manual_ok": True},
-            )
-
         brief_row = (
             await self._session.execute(
                 select(CreativeBrief).where(CreativeBrief.project_id == project_id)
@@ -643,7 +631,12 @@ class CreationService:
 
         try:
             created = await adapter.create(
-                {"prompt": prompt, "kind": "brief", "max_tokens": 1600}
+                {
+                    "prompt": prompt,
+                    "kind": "brief",
+                    "idea": idea,
+                    "max_tokens": 1600,
+                }
             )
             remote_id = str(created.get("remote_task_id") or "")
             op.provider_operation_id = remote_id or None
@@ -653,8 +646,6 @@ class CreationService:
             if not text_out and hasattr(adapter, "poll"):
                 polled = await adapter.poll(remote_id)
                 text_out = str(polled.get("text") or "")
-            if not text_out and type(adapter).__name__ == "FakeOpenAIAdapter":
-                text_out = json.dumps(_fake_brief(idea), ensure_ascii=False)
             parsed = _parse_brief_json(text_out, idea)
             op.status = "succeeded"
             op.completed_at = datetime.now(UTC)
@@ -819,15 +810,18 @@ class CreationService:
 
         try:
             created = await adapter.create(
-                {"prompt": prompt, "kind": "plan", "max_tokens": 4200}
+                {
+                    "prompt": prompt,
+                    "kind": "plan",
+                    "brief": brief_body,
+                    "max_tokens": 4200,
+                }
             )
             remote_id = str(created.get("remote_task_id") or "")
             op.provider_operation_id = remote_id or None
             if created.get("status") == "failed":
                 raise RuntimeError(str(created.get("error") or "text llm failed"))
             text_out = str(created.get("text") or "")
-            if not text_out and type(adapter).__name__ == "FakeOpenAIAdapter":
-                text_out = json.dumps(_fake_plan(logline), ensure_ascii=False)
             plan_body = _parse_plan_json(text_out, logline)
             op.status = "succeeded"
             op.completed_at = datetime.now(UTC)
@@ -1057,68 +1051,6 @@ def _duration(value: object) -> Decimal:
     except (InvalidOperation, ValueError):
         duration = Decimal("3")
     return min(max(duration, Decimal("0.5")), Decimal("30"))
-
-
-def _fake_brief(idea: str) -> dict[str, object]:
-    return {
-        "title": "Neon Rain Witness",
-        "logline": f"A determined heroine follows a dangerous clue hidden in: {idea[:100]}",
-        "synopsis": (
-            "The heroine spots a watcher in a rain-soaked neon district, follows a chain "
-            "of visual clues, and learns the pursuit is tied to someone she thought was lost."
-        ),
-        "protagonist": {
-            "name": "Lin Xia",
-            "profile": "A controlled investigative reporter who hides deep personal grief.",
-            "goal": "Identify the watcher and recover the missing evidence.",
-        },
-        "conflict": "The watcher anticipates every move and closes off each escape route.",
-        "stakes": "Failure costs the heroine both the evidence and her last chance at the truth.",
-        "world": "A near-future southern city under constant neon rain.",
-        "tone": "cinematic suspense, restrained emotion, escalating urgency",
-        "audience": "18-35 vertical short-drama viewers",
-        "visual_style": "wet neon reflections, high contrast practical light, intimate handheld",
-        "episode_hook": "The watcher reveals the face of the heroine's missing sister.",
-    }
-
-
-def _fake_plan(logline: str) -> dict[str, object]:
-    shots = []
-    for number in range(1, 11):
-        location = "neon alley" if number <= 5 else "abandoned platform"
-        shots.append(
-            {
-                "shot_number": number,
-                "scene_number": 1 if number <= 5 else 2,
-                "location": location,
-                "time_of_day": "night",
-                "shot_type": "wide" if number in {1, 6, 10} else "medium",
-                "camera_move": "push_in" if number % 2 else "tracking",
-                "visual_description": (
-                    f"Story beat {number}: Lin Xia advances the pursuit through {location}, "
-                    "with a clear action and escalating threat."
-                ),
-                "dialogue": "" if number % 2 else f"Line {number}",
-                "keyframe_prompt": (
-                    f"9:16 cinematic thriller, shot {number}, Lin Xia in black raincoat, "
-                    f"{location}, precise story action, wet neon lighting, consistent face"
-                ),
-                "duration_seconds": 3.0,
-            }
-        )
-    return {
-        "title": "Neon Rain Witness - Episode 1",
-        "episode_summary": logline or "A heroine follows a watcher through the neon rain.",
-        "visual_bible": {
-            "aspect_ratio": "9:16",
-            "style": "cinematic urban thriller",
-            "color_palette": "cyan, magenta, deep black",
-            "lighting": "wet practical neon with controlled skin tones",
-            "character_continuity": "Lin Xia keeps the same black raincoat and hairstyle",
-            "negative_prompt": "deformed face, extra fingers, text, watermark",
-        },
-        "shots": shots,
-    }
 
 
 def _extract_json_object(text: str) -> dict[str, object]:
