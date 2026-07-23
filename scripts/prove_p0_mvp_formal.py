@@ -98,6 +98,14 @@ def main() -> int:
     parser.add_argument("--worker-token", default="dev-worker-token")
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument(
+        "--resume-project-id",
+        help="Resume a timed-out formal proof from this existing project; never creates media.",
+    )
+    parser.add_argument(
+        "--resume-email",
+        help="Email of the formal-proof account that owns --resume-project-id.",
+    )
+    parser.add_argument(
         "--project-name",
         default="P0 Formal Agent Evidence",
         help="Project name recorded in the proof; it is not a script fixture.",
@@ -123,6 +131,8 @@ def main() -> int:
     lead_prompt = args.lead_prompt.strip()
     if not idea or not lead_name or not lead_prompt:
         parser.error("--idea, --lead-name and --lead-prompt must not be empty")
+    if bool(args.resume_project_id) != bool(args.resume_email):
+        parser.error("--resume-project-id and --resume-email must be supplied together")
 
     source_context = begin_evidence_context(REPO)
     scratch = args.scratch or default_evidence_dir(
@@ -139,6 +149,7 @@ def main() -> int:
         "manual_media_count": 0,
         "required_nodes": list(REQUIRED_NODES),
         "worker_tick": bool(args.worker_tick),
+        "resumed": bool(args.resume_project_id),
         "inputs": {
             "project_name": args.project_name.strip(),
             "idea": idea,
@@ -266,125 +277,191 @@ def main() -> int:
             }
             return finish("; ".join(api_source_errors))
 
-        email = f"formal-{uuid4().hex[:10]}@example.com"
-        registered = post(
-            "/api/v1/auth/register",
-            {"email": email, "password": "password123", "display_name": "Formal Proof"},
-        )
-        if registered.status_code not in {200, 201}:
-            return finish(f"register failed {registered.status_code}: {_problem(registered)}")
-        org = post("/api/v1/organizations", {"name": f"Formal-{uuid4().hex[:8]}"})
-        if org.status_code not in {200, 201}:
-            return finish(f"organization failed {org.status_code}: {_problem(org)}")
-
-        created = post(
-            "/api/v1/creation/start-project",
-            {
-                "organization_id": org.json()["id"],
-                "name": args.project_name.strip(),
-                "aspect_ratio": "9:16",
-                "experience_mode": "workbench",
-                "idea": idea,
-            },
-        )
-        if created.status_code not in {200, 201}:
-            return finish(f"start project failed {created.status_code}: {_problem(created)}")
-        project_id = str(created.json()["project_id"])
-        report["project_id"] = project_id
-
-        brief = post(
-            f"/api/v1/projects/{project_id}/brief/generate",
-            {
-                "idea": idea,
-                "authorize": True,
-            },
-        )
-        report["steps"].append({"agent_brief": brief.status_code, "body": _problem(brief)})
-        if brief.status_code != 200:
-            return finish(
-                "Agent Brief unavailable. TEXT_LLM must be configured; "
-                f"response={brief.status_code}: {_problem(brief)}"
+        if args.resume_project_id:
+            login = client.post(
+                "/api/v1/auth/login",
+                json={"email": args.resume_email, "password": "password123"},
             )
-        brief_body = brief.json()
-        if brief_body.get("source") != "agent":
-            return finish("Agent Brief endpoint did not report agent provenance")
-
-        confirmed = post(
-            f"/api/v1/projects/{project_id}/brief/{brief_body['id']}/confirm",
-            {},
-        )
-        if confirmed.status_code != 200 or confirmed.json().get("status") != "confirmed":
-            return finish(f"confirm brief failed {confirmed.status_code}: {_problem(confirmed)}")
-
-        plan = post(
-            f"/api/v1/projects/{project_id}/plans/generate",
-            {"brief_revision_id": brief_body["id"], "authorize": True},
-        )
-        report["steps"].append({"agent_plan": plan.status_code, "body": _problem(plan)})
-        if plan.status_code != 200:
-            return finish(
-                "Agent Plan unavailable. TEXT_LLM must be configured; "
-                f"response={plan.status_code}: {_problem(plan)}"
+            cookies.update(login.cookies)
+            if login.status_code != 200:
+                return finish(f"resume login failed {login.status_code}: {_problem(login)}")
+            project_id = args.resume_project_id
+            shot_response = client.get(
+                f"/api/v1/projects/{project_id}/shots",
+                cookies=cookies,
             )
-        plan_body = plan.json()
-        shots = plan_body.get("plan", {}).get("shots", [])
-        if plan_body.get("source") != "agent" or not isinstance(shots, list) or len(shots) != 10:
-            return finish("Agent Plan must have agent provenance and exactly ten structured shots")
-        report["plan_id"] = plan_body["id"]
-
-        canonical = post(
-            f"/api/v1/projects/{project_id}/characters/lead",
-            {
-                "name": lead_name,
-                "locked_prompt": lead_prompt,
-            },
-        )
-        report["steps"].append({"canonical": canonical.status_code, "body": _problem(canonical)})
-        if canonical.status_code not in {200, 201}:
-            return finish(
-                "Canonical reference unavailable. A live image Provider is required for "
-                f"formal face-review evidence: {_problem(canonical)}"
+            if shot_response.status_code != 200:
+                return finish(
+                    f"resume shot list failed {shot_response.status_code}: "
+                    f"{_problem(shot_response)}"
+                )
+            shot_ids = [str(shot.get("id") or "") for shot in shot_response.json()]
+            if len(shot_ids) != 10 or not all(shot_ids):
+                return finish(
+                    f"resume project must expose exactly ten shots, got {len(shot_ids)}"
+                )
+            state = snapshot(project_id)
+            remaining_run_ids = [
+                str(run["id"])
+                for run in state.get("node_runs", [])
+                if str((run.get("input_snapshot") or {}).get("shot_id") or "") in shot_ids
+                and str((run.get("input_snapshot") or {}).get("node_key") or "")
+                in set(REQUIRED_NODES) - {"keyframe"}
+            ]
+            if len(remaining_run_ids) != 80:
+                return finish(
+                    "resume project must contain exactly 80 initial non-keyframe NodeRuns, "
+                    f"got {len(remaining_run_ids)}"
+                )
+            report["project_id"] = project_id
+            report["shot_ids"] = shot_ids
+            report["steps"].append(
+                {
+                    "resume": True,
+                    "project_id": project_id,
+                    "shot_count": len(shot_ids),
+                    "downstream_run_count": len(remaining_run_ids),
+                }
             )
-
-        materialized = post(
-            f"/api/v1/projects/{project_id}/plans/{plan_body['id']}/confirm",
-            {"materialization_ops": ["create_shot_stub", "enqueue_keyframe"]},
-        )
-        if materialized.status_code not in {200, 201}:
-            return finish(
-                f"confirm Agent Plan failed {materialized.status_code}: {_problem(materialized)}"
+        else:
+            email = f"formal-{uuid4().hex[:10]}@example.com"
+            registered = post(
+                "/api/v1/auth/register",
+                {"email": email, "password": "password123", "display_name": "Formal Proof"},
             )
-        materialization = materialized.json()
-        shot_ids = [str(value) for value in materialization.get("shot_ids", [])]
-        initial_run_ids = [str(value) for value in materialization.get("node_run_ids", [])]
-        if len(shot_ids) != 10 or len(initial_run_ids) != 10:
-            return finish("Agent Plan confirmation did not materialize ten shots and keyframe runs")
-        report["shot_ids"] = shot_ids
+            if registered.status_code not in {200, 201}:
+                return finish(f"register failed {registered.status_code}: {_problem(registered)}")
+            org = post("/api/v1/organizations", {"name": f"Formal-{uuid4().hex[:8]}"})
+            if org.status_code not in {200, 201}:
+                return finish(f"organization failed {org.status_code}: {_problem(org)}")
 
-        for node_run_id in initial_run_ids:
-            enqueued = post(
-                f"/api/v1/projects/{project_id}/node-runs/{node_run_id}/enqueue",
+            created = post(
+                "/api/v1/creation/start-project",
+                {
+                    "organization_id": org.json()["id"],
+                    "name": args.project_name.strip(),
+                    "aspect_ratio": "9:16",
+                    "experience_mode": "workbench",
+                    "idea": idea,
+                },
+            )
+            if created.status_code not in {200, 201}:
+                return finish(f"start project failed {created.status_code}: {_problem(created)}")
+            project_id = str(created.json()["project_id"])
+            report["project_id"] = project_id
+
+            brief = post(
+                f"/api/v1/projects/{project_id}/brief/generate",
+                {
+                    "idea": idea,
+                    "authorize": True,
+                },
+            )
+            report["steps"].append({"agent_brief": brief.status_code, "body": _problem(brief)})
+            if brief.status_code != 200:
+                return finish(
+                    "Agent Brief unavailable. TEXT_LLM must be configured; "
+                    f"response={brief.status_code}: {_problem(brief)}"
+                )
+            brief_body = brief.json()
+            if brief_body.get("source") != "agent":
+                return finish("Agent Brief endpoint did not report agent provenance")
+
+            confirmed = post(
+                f"/api/v1/projects/{project_id}/brief/{brief_body['id']}/confirm",
                 {},
             )
-            if enqueued.status_code not in {200, 201}:
-                return finish(
-                    f"initial keyframe enqueue failed {enqueued.status_code}: {_problem(enqueued)}"
-                )
-        wait_for_runs(project_id, initial_run_ids)
+            if confirmed.status_code != 200 or confirmed.json().get("status") != "confirmed":
+                return finish(f"confirm brief failed {confirmed.status_code}: {_problem(confirmed)}")
 
-        remaining_run_ids: list[str] = []
-        for shot_id in shot_ids:
-            started = post(f"/api/v1/projects/{project_id}/shots/{shot_id}/start", {})
-            report["steps"].append({"start_shot": shot_id, "status": started.status_code})
-            if started.status_code not in {200, 201}:
-                return finish(
-                    f"shot start failed {started.status_code}: {_problem(started)}"
-                )
-            remaining_run_ids.extend(str(value) for value in started.json().get("run_ids", []))
-        if len(remaining_run_ids) != 80:
-            return finish(
-                f"expected 80 non-keyframe NodeRuns from ten starts, got {len(remaining_run_ids)}"
+            plan = post(
+                f"/api/v1/projects/{project_id}/plans/generate",
+                {"brief_revision_id": brief_body["id"], "authorize": True},
             )
+            report["steps"].append({"agent_plan": plan.status_code, "body": _problem(plan)})
+            if plan.status_code != 200:
+                return finish(
+                    "Agent Plan unavailable. TEXT_LLM must be configured; "
+                    f"response={plan.status_code}: {_problem(plan)}"
+                )
+            plan_body = plan.json()
+            shots = plan_body.get("plan", {}).get("shots", [])
+            if (
+                plan_body.get("source") != "agent"
+                or not isinstance(shots, list)
+                or len(shots) != 10
+            ):
+                return finish(
+                    "Agent Plan must have agent provenance and exactly ten structured shots"
+                )
+            report["plan_id"] = plan_body["id"]
+
+            canonical = post(
+                f"/api/v1/projects/{project_id}/characters/lead",
+                {
+                    "name": lead_name,
+                    "locked_prompt": lead_prompt,
+                },
+            )
+            report["steps"].append(
+                {"canonical": canonical.status_code, "body": _problem(canonical)}
+            )
+            if canonical.status_code not in {200, 201}:
+                return finish(
+                    "Canonical reference unavailable. A live image Provider is required for "
+                    f"formal face-review evidence: {_problem(canonical)}"
+                )
+
+            materialized = post(
+                f"/api/v1/projects/{project_id}/plans/{plan_body['id']}/confirm",
+                {"materialization_ops": ["create_shot_stub", "enqueue_keyframe"]},
+            )
+            if materialized.status_code not in {200, 201}:
+                return finish(
+                    f"confirm Agent Plan failed {materialized.status_code}: "
+                    f"{_problem(materialized)}"
+                )
+            materialization = materialized.json()
+            shot_ids = [str(value) for value in materialization.get("shot_ids", [])]
+            initial_run_ids = [
+                str(value) for value in materialization.get("node_run_ids", [])
+            ]
+            if len(shot_ids) != 10 or len(initial_run_ids) != 10:
+                return finish(
+                    "Agent Plan confirmation did not materialize ten shots and keyframe runs"
+                )
+            report["shot_ids"] = shot_ids
+
+            for node_run_id in initial_run_ids:
+                enqueued = post(
+                    f"/api/v1/projects/{project_id}/node-runs/{node_run_id}/enqueue",
+                    {},
+                )
+                if enqueued.status_code not in {200, 201}:
+                    return finish(
+                        "initial keyframe enqueue failed "
+                        f"{enqueued.status_code}: {_problem(enqueued)}"
+                    )
+            wait_for_runs(project_id, initial_run_ids)
+
+            remaining_run_ids = []
+            for shot_id in shot_ids:
+                started = post(f"/api/v1/projects/{project_id}/shots/{shot_id}/start", {})
+                report["steps"].append(
+                    {"start_shot": shot_id, "status": started.status_code}
+                )
+                if started.status_code not in {200, 201}:
+                    return finish(
+                        f"shot start failed {started.status_code}: {_problem(started)}"
+                    )
+                remaining_run_ids.extend(
+                    str(value) for value in started.json().get("run_ids", [])
+                )
+            if len(remaining_run_ids) != 80:
+                return finish(
+                    "expected 80 non-keyframe NodeRuns from ten starts, "
+                    f"got {len(remaining_run_ids)}"
+                )
         wait_for_runs(project_id, remaining_run_ids)
 
         rejected_shot_id = shot_ids[0]
