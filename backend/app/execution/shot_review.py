@@ -11,9 +11,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.models import Shot
+from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.execution.runtime_invariants import mark_stale_downstream
-from app.execution.shot_p0 import SHOT_EDGES, SHOT_NODES, is_shot_locked, set_shot_lock
+from app.execution.shot_p0 import is_shot_locked, set_shot_lock
+from app.execution.shot_pipeline import (
+    SHOT_EDGES,
+    SHOT_NODE_BY_KEY,
+    SHOT_NODES,
+    SHOT_PIPELINE_TEMPLATE_KEY,
+    shot_pipeline_definition,
+)
 from app.shared.errors import NotFoundError, ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
 
@@ -31,9 +39,7 @@ REQUIRED_APPROVE_NODES: tuple[str, ...] = (
 MEDIA_ARTIFACT_NODES: frozenset[str] = frozenset(
     {"keyframe", "video", "voice", "subtitle", "composite"}
 )
-DONE_STATUSES: frozenset[str] = frozenset(
-    {"completed", "cached", "completed_after_cancel"}
-)
+DONE_STATUSES: frozenset[str] = frozenset({"completed", "cached", "completed_after_cancel"})
 
 
 @dataclass(frozen=True)
@@ -44,9 +50,7 @@ class ShotReviewResult:
     message: str
 
 
-async def get_shot_or_404(
-    session: AsyncSession, *, project_id: UUID, shot_id: UUID
-) -> Shot:
+async def get_shot_or_404(session: AsyncSession, *, project_id: UUID, shot_id: UUID) -> Shot:
     shot = await session.get(Shot, shot_id)
     if shot is None or shot.project_id != project_id:
         raise NotFoundError("shot not found")
@@ -78,16 +82,10 @@ def _latest_by_node_key(runs: list[NodeRun]) -> dict[str, NodeRun]:
     return by_key
 
 
-async def assert_shot_approvable(
-    session: AsyncSession, *, project_id: UUID, shot_id: UUID
-) -> None:
+async def assert_shot_approvable(session: AsyncSession, *, project_id: UUID, shot_id: UUID) -> None:
     """Fail closed: empty shots or incomplete/blocked pipelines cannot review_passed."""
     runs = list(
-        (
-            await session.execute(
-                select(NodeRun).where(NodeRun.project_id == project_id)
-            )
-        )
+        (await session.execute(select(NodeRun).where(NodeRun.project_id == project_id)))
         .scalars()
         .all()
     )
@@ -259,7 +257,6 @@ async def start_shot_nodes(
         if k not in SHOT_NODES:
             raise ValidationAppError(f"unknown node key: {k}")
 
-    from app.execution.shot_p0 import _NODE_TYPE
     from app.production.models import GraphVersion, ProductionGraph
     from app.production.service import GraphService
 
@@ -281,18 +278,18 @@ async def start_shot_nodes(
                 project_id=project_id,
                 scope_type="shot",
                 scope_entity_id=shot_id,
-                template_key="shot-p0-v1",
+                template_key=SHOT_PIPELINE_TEMPLATE_KEY,
                 created_by=user_id,
-                definition={"nodes": list(SHOT_NODES), "edges": SHOT_EDGES},
+                definition=shot_pipeline_definition(),
             )
     else:
         graph = await graphs.create_graph(
             project_id=project_id,
             scope_type="shot",
             scope_entity_id=shot_id,
-            template_key="shot-p0-v1",
+            template_key=SHOT_PIPELINE_TEMPLATE_KEY,
             created_by=user_id,
-            definition={"nodes": list(SHOT_NODES), "edges": SHOT_EDGES},
+            definition=shot_pipeline_definition(),
         )
     assert graph.current_version_id is not None
     version_id = graph.current_version_id
@@ -302,15 +299,11 @@ async def start_shot_nodes(
     if not isinstance(shot_plan, dict):
         shot_plan = {}
     visual = str(
-        shot_plan.get("visual_description")
-        or shot.visual_description
-        or f"Shot {shot.shot_number}"
+        shot_plan.get("visual_description") or shot.visual_description or f"Shot {shot.shot_number}"
     ).strip()
     dialogue = str(shot_plan.get("dialogue") or shot.dialogue or "").strip()
     keyframe_prompt = str(
-        shot_plan.get("keyframe_prompt")
-        or shot_plan.get("prompt")
-        or visual
+        shot_plan.get("keyframe_prompt") or shot_plan.get("prompt") or visual
     ).strip()
 
     existing_runs = list(
@@ -350,20 +343,17 @@ async def start_shot_nodes(
             )
         ).scalar_one_or_none()
         if node is None:
+            spec = SHOT_NODE_BY_KEY[key]
             node = GraphNode(
                 graph_version_id=version_id,
                 node_key=key,
-                node_type=_NODE_TYPE.get(key, key),
-                display_name=key,
+                node_type=spec.node_type,
+                display_name=spec.display_name,
                 cacheable=True,
             )
             session.add(node)
             await session.flush()
-        prior_for_node = [
-            run
-            for run in existing_runs
-            if run.graph_node_id == node.id
-        ]
+        prior_for_node = [run for run in existing_runs if run.graph_node_id == node.id]
         latest = latest_by_key.get(key)
         if (
             not force
@@ -467,7 +457,6 @@ async def upload_manual_media(
     """
     from datetime import UTC, datetime
 
-    from app.execution.shot_p0 import _NODE_TYPE
     from app.production.models import ProductionGraph
     from app.production.service import GraphService
 
@@ -492,10 +481,9 @@ async def upload_manual_media(
     else:
         art_type = "document"
     note_safe = (note or "").strip().replace("\n", " ")[:80]
-    audit = (
-        f"audited_manual_upload shot={shot_id} node={node_key} "
-        f"by={user_id} note={note_safe}"
-    )[:240]
+    audit = (f"audited_manual_upload shot={shot_id} node={node_key} by={user_id} note={note_safe}")[
+        :240
+    ]
 
     # Ensure shot graph + node exist, then complete a NodeRun linked to Artifact.
     graphs = GraphService(session)
@@ -513,9 +501,9 @@ async def upload_manual_media(
             project_id=project_id,
             scope_type="shot",
             scope_entity_id=shot_id,
-            template_key="shot-p0-v1",
+            template_key=SHOT_PIPELINE_TEMPLATE_KEY,
             created_by=user_id,
-            definition={"nodes": list(SHOT_NODES), "edges": SHOT_EDGES},
+            definition=shot_pipeline_definition(),
         )
     else:
         graph = existing
@@ -530,11 +518,12 @@ async def upload_manual_media(
         )
     ).scalar_one_or_none()
     if node is None:
+        spec = SHOT_NODE_BY_KEY[node_key]
         node = GraphNode(
             graph_version_id=version_id,
             node_key=node_key,
-            node_type=_NODE_TYPE.get(node_key, node_key),
-            display_name=node_key,
+            node_type=spec.node_type,
+            display_name=spec.display_name,
             cacheable=True,
         )
         session.add(node)
@@ -551,38 +540,6 @@ async def upload_manual_media(
         .scalars()
         .all()
     )
-    # Artifact first — completed NodeRun requires result_artifact_id (node_runs_check1).
-    # Reuse same content_hash + type if already present (uq_artifacts_project_hash_type).
-    existing_art = (
-        await session.execute(
-            select(Artifact).where(
-                Artifact.project_id == project_id,
-                Artifact.content_hash == stored.content_hash,
-                Artifact.artifact_type == art_type,
-            )
-        )
-    ).scalar_one_or_none()
-    if existing_art is not None:
-        art = existing_art
-        if art.storage_state != "available":
-            art.storage_state = "available"
-        if not art.delete_reason:
-            art.delete_reason = audit
-    else:
-        art = Artifact(
-            project_id=project_id,
-            artifact_type=art_type,
-            object_key=stored.object_key,
-            content_hash=stored.content_hash,
-            byte_size=stored.byte_size,
-            mime_type=mime_type,
-            storage_state="available",
-            produced_by_run_id=None,
-            delete_reason=audit,
-        )
-        session.add(art)
-        await session.flush()
-
     now = datetime.now(UTC)
     ih = hashlib.sha256(f"manual:{shot_id}:{node_key}:{content_hash}".encode()).hexdigest()
     run = NodeRun(
@@ -592,31 +549,43 @@ async def upload_manual_media(
         attempt_no=len(prior) + 1,
         idempotency_key=f"manual:{node_key}:{shot_id}:{content_hash[:16]}",
         input_hash=ih,
-        status="completed",
+        status="queued",
         input_snapshot={
             "shot_id": str(shot_id),
             "node_key": node_key,
             "manual": True,
             "prompt": f"manual:{node_key}:{shot_id}",
         },
-        output_summary={
-            "status": "passed",
-            "manual": True,
-            "audit": audit,
-            "zero_provider_cost": True,
-            "artifact_id": str(art.id),
-            "content_hash": art.content_hash,
-            "byte_size": art.byte_size,
-        },
         provider_cost=Decimal("0"),
         started_at=now,
-        finished_at=now,
-        result_artifact_id=art.id,
         created_by=user_id,
     )
     session.add(run)
     await session.flush()
-    art.produced_by_run_id = run.id
+    art = await get_or_create_artifact(
+        session,
+        project_id=project_id,
+        artifact_type=art_type,
+        object_key=stored.object_key,
+        content_hash=stored.content_hash,
+        mime_type=mime_type,
+        byte_size=stored.byte_size,
+        produced_by_run_id=run.id,
+    )
+    if not art.delete_reason:
+        art.delete_reason = audit
+    run.status = "completed"
+    run.finished_at = now
+    run.result_artifact_id = art.id
+    run.output_summary = {
+        "status": "passed",
+        "manual": True,
+        "audit": audit,
+        "zero_provider_cost": True,
+        "artifact_id": str(art.id),
+        "content_hash": art.content_hash,
+        "byte_size": art.byte_size,
+    }
     node.latest_successful_run_id = run.id
     shot = await get_shot_or_404(session, project_id=project_id, shot_id=shot_id)
     if shot.status in {"draft", "pending", "review_rejected"}:

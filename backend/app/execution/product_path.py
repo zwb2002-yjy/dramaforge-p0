@@ -7,38 +7,23 @@ from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.consistency.face_review import face_review_images
 from app.creation.models import CreationPlan
+from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
+from app.execution.shot_pipeline import (
+    SHOT_PIPELINE_NODES,
+    SHOT_PIPELINE_TEMPLATE_KEY,
+    shot_pipeline_definition,
+)
 from app.production.service import GraphService
 from app.providers.fake import FakeFluxAdapter
-from app.shared.errors import ValidationAppError
+from app.shared.db import set_rls_context
+from app.shared.errors import NodeRunAlreadyClaimedError, ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
-
-SHOT_PIPELINE_NODES: tuple[tuple[str, str, str], ...] = (
-    ("prompt", "prompt_compose", "Prompt"),
-    ("keyframe", "keyframe", "Keyframe"),
-    ("face_review", "face_review", "Face review"),
-    ("video", "video", "Video"),
-    ("video_drift_review", "video_review", "Video drift review"),
-    ("voice", "voice", "Voice"),
-    ("subtitle", "subtitle", "Subtitle"),
-    ("composite", "composite", "Composite"),
-    ("continuity_review", "continuity_review", "Continuity review"),
-)
-
-SHOT_PIPELINE_EDGES: tuple[tuple[str, str], ...] = (
-    ("prompt", "keyframe"),
-    ("keyframe", "face_review"),
-    ("face_review", "video"),
-    ("video", "video_drift_review"),
-    ("video_drift_review", "composite"),
-    ("voice", "composite"),
-    ("subtitle", "composite"),
-    ("composite", "continuity_review"),
-)
 
 
 @dataclass(frozen=True)
@@ -71,6 +56,46 @@ def _input_hash(payload: dict[str, object]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+async def claim_media_node_run(
+    session: AsyncSession,
+    *,
+    node_run_id: UUID,
+) -> NodeRun:
+    """Durably claim a queued NodeRun before any Provider side effect."""
+    from datetime import UTC, datetime
+
+    run = await session.get(NodeRun, node_run_id)
+    if run is None:
+        raise ValidationAppError("node_run not found")
+    if run.status in {"completed", "cached", "completed_after_cancel"}:
+        return run
+
+    claimed = await session.execute(
+        update(NodeRun)
+        .where(NodeRun.id == node_run_id, NodeRun.status == "queued")
+        .values(status="running", started_at=datetime.now(UTC))
+        .returning(NodeRun.id)
+    )
+    if claimed.scalar_one_or_none() is None:
+        await session.refresh(run)
+        if run.status in {"completed", "cached", "completed_after_cancel"}:
+            return run
+        if run.status == "running":
+            raise NodeRunAlreadyClaimedError()
+        raise ValidationAppError(f"node_run cannot execute from status={run.status}")
+
+    user_id = run.created_by
+    project_id = run.project_id
+    await session.commit()
+    await set_rls_context(
+        session,
+        user_id=user_id,
+        project_id=project_id,
+    )
+    await session.refresh(run)
+    return run
+
+
 async def enqueue_keyframe_after_plan(
     session: AsyncSession,
     *,
@@ -100,33 +125,28 @@ async def enqueue_keyframe_after_plan(
         project_id=project_id,
         scope_type="shot",
         scope_entity_id=shot_id,
-        template_key="shot-p0-v1",
+        template_key=SHOT_PIPELINE_TEMPLATE_KEY,
         created_by=user_id,
-        definition={
-            "nodes": [
-                {"key": key, "type": node_type}
-                for key, node_type, _display_name in SHOT_PIPELINE_NODES
-            ],
-            "edges": list(SHOT_PIPELINE_EDGES),
-            "materialization": materialization_ops,
-            "plan_id": str(plan.id),
-            "shot_id": str(shot_id),
-            "shot": shot_body,
-        },
+        definition=shot_pipeline_definition(
+            materialization=materialization_ops,
+            plan_id=str(plan.id),
+            shot_id=str(shot_id),
+            shot=shot_body,
+        ),
     )
     assert graph.current_version_id is not None
     version = await graphs.get_version(graph.current_version_id)
     nodes: dict[str, GraphNode] = {}
-    for key, node_type, display_name in SHOT_PIPELINE_NODES:
+    for spec in SHOT_PIPELINE_NODES:
         node = GraphNode(
             graph_version_id=version.id,
-            node_key=key,
-            node_type=node_type,
-            display_name=display_name,
+            node_key=spec.key,
+            node_type=spec.node_type,
+            display_name=spec.display_name,
             cacheable=True,
         )
         session.add(node)
-        nodes[key] = node
+        nodes[spec.key] = node
     await session.flush()
     node = nodes["keyframe"]
     # Attach project lead canonical if registered (P0 face gate / consistency).
@@ -218,6 +238,7 @@ async def execute_media_node_run(
     require_canonical: bool = False,
     canonical_embedding: list[float] | None = None,
     canonical_image_bytes: bytes | None = None,
+    already_claimed: bool = False,
 ) -> ExecuteNodeResult:
     """Worker entry for shot-p0-v1 media nodes. Never called from user Route."""
     from datetime import UTC, datetime
@@ -231,30 +252,26 @@ async def execute_media_node_run(
     node_type = node.node_type
 
     if run.status in {"completed", "cached", "completed_after_cancel"}:
-        art = (
-            await session.get(Artifact, run.result_artifact_id)
-            if run.result_artifact_id
-            else None
+        return await _completed_result(session, run=run, node_type=node_type)
+
+    if already_claimed:
+        if run.status != "running":
+            raise ValidationAppError(f"claimed node_run cannot execute from status={run.status}")
+    else:
+        now = datetime.now(UTC)
+        claimed = await session.execute(
+            update(NodeRun)
+            .where(NodeRun.id == node_run_id, NodeRun.status == "queued")
+            .values(status="running", started_at=now)
+            .returning(NodeRun.id)
         )
-        if art is None:
-            raise ValidationAppError("completed run missing artifact")
-        return ExecuteNodeResult(
-            node_run_id=run.id,
-            artifact_id=art.id,
-            object_key=art.object_key,
-            content_hash=art.content_hash,
-            byte_size=art.byte_size,
-            face_status=str((run.output_summary or {}).get("face_review"))
-            if run.output_summary
-            else None,
-            face_score=(
-                float(run.output_summary["face_score"])
-                if run.output_summary and run.output_summary.get("face_score") is not None
-                else None
-            ),
-            provider_operation_id=uuid4(),
-            node_type=node_type,
-        )
+        if claimed.scalar_one_or_none() is None:
+            await session.refresh(run)
+            if run.status in {"completed", "cached", "completed_after_cancel"}:
+                return await _completed_result(session, run=run, node_type=node_type)
+            if run.status == "running":
+                raise NodeRunAlreadyClaimedError()
+            raise ValidationAppError(f"node_run cannot execute from status={run.status}")
 
     obj_store = store or get_object_store()
     snap = run.input_snapshot or {}
@@ -273,13 +290,10 @@ async def execute_media_node_run(
         await session.flush()
         raise ValidationAppError("CANONICAL_REFERENCE_REQUIRED")
 
-    run.status = "running"
-    run.started_at = datetime.now(UTC)
-    await session.flush()
-
-    prompt = str(snap.get("plan", {}))
-    if isinstance(snap.get("plan"), dict):
-        prompt = str(snap["plan"].get("prompt", prompt))
+    plan_snapshot = snap.get("plan")
+    prompt = str(plan_snapshot or {})
+    if isinstance(plan_snapshot, dict):
+        prompt = str(plan_snapshot.get("prompt", prompt))
     else:
         prompt = str(snap.get("prompt", f"{node_type}:{run.id}"))
 
@@ -365,13 +379,12 @@ async def execute_media_node_run(
         await session.flush()
         raise ValidationAppError(f"PROVIDER_FAILED: {run.error_summary}")
 
-    if hasattr(adapter, "blobs") and remote in getattr(adapter, "blobs", {}):
-        data = adapter.blobs[remote]  # type: ignore[attr-defined]
+    adapter_blobs = getattr(adapter, "blobs", {})
+    if remote in adapter_blobs:
+        data = adapter_blobs[remote]
     else:
         uri = poll.get("artifact_uri") or create.get("artifact_uri")
-        data = await _resolve_media_bytes(
-            kind=kind, remote=remote, prompt=prompt, artifact_uri=uri
-        )
+        data = await _resolve_media_bytes(kind=kind, remote=remote, prompt=prompt, artifact_uri=uri)
 
     # Node-specific mime / key
     mime, ext, art_type = _mime_for_node(node_type)
@@ -410,7 +423,7 @@ async def execute_media_node_run(
     session.add(op)
     await session.flush()
 
-    art = await _get_or_create_artifact(
+    art = await get_or_create_artifact(
         session,
         project_id=run.project_id,
         artifact_type=art_type,
@@ -448,6 +461,7 @@ async def execute_media_node_run(
         "face_score": face_score,
         "byte_size": art.byte_size,
         "content_hash": art.content_hash,
+        "source_commit": _settings.source_commit,
     }
     node.latest_successful_run_id = run.id
     await session.flush()
@@ -460,6 +474,33 @@ async def execute_media_node_run(
         face_status=face_status,
         face_score=face_score,
         provider_operation_id=op.id,
+        node_type=node_type,
+    )
+
+
+async def _completed_result(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    node_type: str,
+) -> ExecuteNodeResult:
+    art = await session.get(Artifact, run.result_artifact_id) if run.result_artifact_id else None
+    if art is None:
+        raise ValidationAppError("completed run missing artifact")
+    output = run.output_summary or {}
+    return ExecuteNodeResult(
+        node_run_id=run.id,
+        artifact_id=art.id,
+        object_key=art.object_key,
+        content_hash=art.content_hash,
+        byte_size=art.byte_size,
+        face_status=(
+            str(output.get("face_review")) if output.get("face_review") is not None else None
+        ),
+        face_score=(
+            float(str(output["face_score"])) if output.get("face_score") is not None else None
+        ),
+        provider_operation_id=uuid4(),
         node_type=node_type,
     )
 
@@ -494,6 +535,7 @@ async def _complete_pure_node(
     import json
     from datetime import UTC, datetime
 
+    from app.config import get_settings
     from app.consistency.continuity import continuity_four_layers
     from app.consistency.image_embed import insightface_status
 
@@ -614,7 +656,7 @@ async def _complete_pure_node(
 
     object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
     stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
-    art = await _get_or_create_artifact(
+    art = await get_or_create_artifact(
         session,
         project_id=run.project_id,
         artifact_type=art_type,
@@ -642,6 +684,7 @@ async def _complete_pure_node(
         "face_score": face_score,
         "byte_size": art.byte_size,
         "content_hash": art.content_hash,
+        "source_commit": get_settings().source_commit,
     }
     node.latest_successful_run_id = run.id
     await session.flush()
@@ -656,84 +699,6 @@ async def _complete_pure_node(
         provider_operation_id=uuid4(),
         node_type=node_type,
     )
-
-
-async def _get_or_create_artifact(
-    session: AsyncSession,
-    *,
-    project_id: UUID,
-    artifact_type: str,
-    object_key: str,
-    content_hash: str,
-    mime_type: str,
-    byte_size: int,
-    produced_by_run_id: UUID | None,
-) -> Artifact:
-    """Create an Artifact without silently sharing a Shot result between runs.
-
-    The project-wide content-hash uniqueness constraint is still useful for
-    non-shot cache artifacts. A production Shot run, however, must retain
-    one-to-one lineage to the NodeRun that produced it. Reattaching an
-    existing Artifact to a different Shot run would make a ten-shot result
-    look complete while reusing another shot's media.
-    """
-    from sqlalchemy import select
-
-    existing = (
-        await session.execute(
-            select(Artifact).where(
-                Artifact.project_id == project_id,
-                Artifact.content_hash == content_hash,
-                Artifact.artifact_type == artifact_type,
-            )
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        if (
-            produced_by_run_id is not None
-            and existing.produced_by_run_id is not None
-            and existing.produced_by_run_id != produced_by_run_id
-        ):
-            current_run = await session.get(NodeRun, produced_by_run_id)
-            source_run = await session.get(NodeRun, existing.produced_by_run_id)
-            current_shot_id = str(
-                (current_run.input_snapshot or {}).get("shot_id") if current_run else ""
-            )
-            source_shot_id = str(
-                (source_run.input_snapshot or {}).get("shot_id") if source_run else ""
-            )
-            if current_shot_id:
-                raise ValidationAppError(
-                    "ARTIFACT_NOT_INDEPENDENT: Shot NodeRun produced bytes already "
-                    "claimed by a different NodeRun",
-                    details={
-                        "code": "ARTIFACT_NOT_INDEPENDENT",
-                        "current_run_id": str(produced_by_run_id),
-                        "source_run_id": str(existing.produced_by_run_id),
-                        "current_shot_id": current_shot_id,
-                        "source_shot_id": source_shot_id,
-                        "artifact_id": str(existing.id),
-                    },
-                )
-        if existing.storage_state != "available":
-            existing.storage_state = "available"
-        if produced_by_run_id and existing.produced_by_run_id is None:
-            existing.produced_by_run_id = produced_by_run_id
-        await session.flush()
-        return existing
-    art = Artifact(
-        project_id=project_id,
-        artifact_type=artifact_type,
-        storage_state="available",
-        object_key=object_key,
-        content_hash=content_hash,
-        mime_type=mime_type,
-        byte_size=byte_size,
-        produced_by_run_id=produced_by_run_id,
-    )
-    session.add(art)
-    await session.flush()
-    return art
 
 
 async def _resolve_media_bytes(

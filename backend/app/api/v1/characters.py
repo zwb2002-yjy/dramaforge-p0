@@ -74,8 +74,9 @@ async def register_project_lead(
             raise ValidationAppError(
                 f"provider_not_configured or provider failed: {err}",
             )
-        if hasattr(adapter, "blobs") and remote in getattr(adapter, "blobs", {}):
-            blob = adapter.blobs[remote]  # type: ignore[attr-defined]
+        adapter_blobs = getattr(adapter, "blobs", {})
+        if remote in adapter_blobs:
+            blob = adapter_blobs[remote]
         else:
             from app.execution.product_path import _resolve_media_bytes
 
@@ -95,7 +96,8 @@ async def register_project_lead(
         raise
     except TimeoutError as exc:
         raise ValidationAppError(
-            "provider_timeout: 图像 Provider 超时。请检查网络/Agnes，或改用受审计手工上传 canonical。"
+            "provider_timeout: 图像 Provider 超时。请检查网络/Agnes，"
+            "或改用受审计手工上传 canonical。"
         ) from exc
     except Exception as exc:  # noqa: BLE001 — surface provider failure without killing API
         from app.providers.flux import ProviderNotConfiguredError

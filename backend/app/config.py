@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -14,12 +14,21 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     app_name: str = "DramaForge"
     app_env: Literal["development", "test", "production"] = "development"
     debug: bool = False
     api_prefix: str = "/api/v1"
+    source_commit: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "DRAMAFORGE_SOURCE_COMMIT",
+            "SOURCE_COMMIT",
+        ),
+        description="Exact Git commit loaded by the API and Worker processes",
+    )
     # NoDecode: accept comma-separated env values instead of JSON arrays.
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:5173"]
@@ -76,6 +85,7 @@ class Settings(BaseSettings):
 
     # P0: TTS may be disabled; voice node stays manual/fake until enabled.
     tts_enabled: bool = False
+    insightface_enabled: bool = True
 
     @field_validator("cors_origins", mode="before")
     @classmethod

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.consistency.image_embed import embedding_from_image_bytes, pair_score_from_images
 from app.providers.fake import FakeFluxAdapter
 

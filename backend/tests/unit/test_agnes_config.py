@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from app.config import Settings, clear_settings_cache
 from app.providers.flux import get_flux_adapter
 from app.providers.kling import get_kling_adapter

@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import struct
+from importlib import import_module
 from io import BytesIO
 from typing import Any
 
+from app.config import get_settings
 from app.consistency.face import EMBEDDING_DIM, cosine_similarity, l2_normalize
 
 _INSIGHT_APP: Any | None = None
@@ -21,13 +23,16 @@ _INSIGHT_ERROR: str | None = None
 def insightface_available() -> bool:
     """True when InsightFace FaceAnalysis can be constructed."""
     global _INSIGHT_APP, _INSIGHT_TRIED, _INSIGHT_ERROR
+    if not get_settings().insightface_enabled:
+        _INSIGHT_ERROR = "disabled by INSIGHTFACE_ENABLED=false"
+        return False
     if _INSIGHT_APP is not None:
         return True
     if _INSIGHT_TRIED:
         return False
     _INSIGHT_TRIED = True
     try:
-        from insightface.app import FaceAnalysis  # type: ignore[import-untyped]
+        FaceAnalysis = import_module("insightface.app").FaceAnalysis
 
         app = FaceAnalysis(
             name="buffalo_l",
@@ -66,9 +71,9 @@ def embedding_from_image_bytes(data: bytes, *, prefer_insightface: bool = True) 
 def _insightface_embed(data: bytes) -> list[float] | None:
     assert _INSIGHT_APP is not None
     try:
-        import numpy as np
         from PIL import Image
 
+        np = import_module("numpy")
         img = Image.open(BytesIO(data)).convert("RGB")
         arr = np.asarray(img)[:, :, ::-1]  # RGB -> BGR for insightface
         faces = _INSIGHT_APP.get(arr)

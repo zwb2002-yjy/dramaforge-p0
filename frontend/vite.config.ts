@@ -9,6 +9,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const apiTarget = process.env.DRAMAFORGE_API_URL ?? "http://127.0.0.1:8010";
 
 export default defineConfig({
+  cacheDir: "./tmp/vite-cache",
   plugins: [react()],
   resolve: {
     alias: {

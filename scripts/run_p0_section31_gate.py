@@ -14,14 +14,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import httpx
+
+from evidence_context import (
+    begin_evidence_context,
+    default_evidence_dir,
+    evidence_source_errors,
+    finish_evidence_context,
+    require_ignored_evidence_path,
+    utc_now,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -35,7 +42,24 @@ class Check:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return utc_now()
+
+
+CHECK_STATUS_PRIORITY = {"SKIP": 0, "PASS": 1, "BLOCKED": 2, "FAIL": 3}
+
+
+def record_check(checks: list[Check], candidate: Check) -> None:
+    if candidate.status not in CHECK_STATUS_PRIORITY:
+        raise ValueError(f"unsupported gate status: {candidate.status}")
+    for index, existing in enumerate(checks):
+        if existing.id != candidate.id:
+            continue
+        if CHECK_STATUS_PRIORITY[candidate.status] > CHECK_STATUS_PRIORITY.get(
+            existing.status, -1
+        ):
+            checks[index] = candidate
+        return
+    checks.append(candidate)
 
 
 def main() -> int:
@@ -60,6 +84,13 @@ def main() -> int:
         help="Path to multi_shot_chain.json from prove_p0_mvp_formal.py",
     )
     args = ap.parse_args()
+    source_context = begin_evidence_context(REPO)
+    source_commit = str(source_context["source_commit"])
+    out = args.out or (
+        default_evidence_dir(REPO, source_commit, "gate")
+        / "p0_section31_gate.json"
+    )
+    out = require_ignored_evidence_path(REPO, out)
     base = args.base.rstrip("/")
     probe_idea = args.probe_idea.strip()
     if not probe_idea:
@@ -68,25 +99,13 @@ def main() -> int:
     if not script_fixture.is_absolute():
         script_fixture = (Path.cwd() / script_fixture).resolve()
     checks: list[Check] = []
-    evidence_path = args.evidence
-    if evidence_path is None:
-        for cand in (
-            Path.cwd() / "multi_shot_chain.json",
-            REPO / "docs" / "acceptance" / "multi_shot_chain_latest.json",
-        ):
-            if cand.is_file():
-                evidence_path = cand
-                break
+    evidence_path = args.evidence or (
+        default_evidence_dir(REPO, source_commit, "formal")
+        / "multi_shot_chain.json"
+    )
 
     def add(cid: str, title: str, status: str, detail: str) -> None:
-        # Do not overwrite a stronger status (PASS > FAIL > BLOCKED)
-        for i, existing in enumerate(checks):
-            if existing.id == cid:
-                rank = {"PASS": 3, "FAIL": 2, "BLOCKED": 1, "SKIP": 0}
-                if rank.get(status, 0) >= rank.get(existing.status, 0):
-                    checks[i] = Check(cid, title, status, detail)
-                return
-        checks.append(Check(cid, title, status, detail))
+        record_check(checks, Check(cid, title, status, detail))
 
     client = httpx.Client(base_url=base, timeout=60.0, follow_redirects=True)
     cookies: dict[str, str] = {}
@@ -116,14 +135,21 @@ def main() -> int:
         h = client.get("/health")
         body = h.json() if h.content else {}
         db = body.get("db")
-        if h.status_code == 200 and body.get("status") == "ok" and db == "up":
+        api_commit = str(body.get("source_commit") or "")
+        if (
+            h.status_code == 200
+            and body.get("status") == "ok"
+            and db == "up"
+            and api_commit == source_commit
+        ):
             add("INFRA-1", "API /health + DB up", "PASS", json.dumps(body, ensure_ascii=False))
         else:
             add(
                 "INFRA-1",
-                "API /health + DB up",
+                "API /health + DB up + source commit",
                 "FAIL",
-                f"require status=ok and db=up; got status={h.status_code} body={body}",
+                f"require status=ok db=up source_commit={source_commit}; "
+                f"got status={h.status_code} body={body}",
             )
     except Exception as exc:  # noqa: BLE001
         add("INFRA-1", "API /health + DB up", "FAIL", str(exc))
@@ -635,11 +661,6 @@ def main() -> int:
                 "PASS",
                 json.dumps(st, ensure_ascii=False),
             )
-            try:
-                outp = REPO / "docs" / "acceptance" / "insightface_status_latest.json"
-                outp.write_text(json.dumps(st, indent=2), encoding="utf-8")
-            except Exception:
-                pass
         else:
             missing = []
             if not (st.get("available") and st.get("backend") == "insightface+onnx"):
@@ -663,8 +684,21 @@ def main() -> int:
             ev = json.loads(evidence_path.read_text(encoding="utf-8"))
             fin = ev.get("final") or {}
             lineage = ev.get("lineage") or {}
+            source_errors = evidence_source_errors(
+                ev,
+                expected_commit=source_commit,
+            )
+            add(
+                "EVIDENCE-SOURCE",
+                "Formal evidence source binding",
+                "FAIL" if source_errors else "PASS",
+                "; ".join(source_errors)
+                if source_errors
+                else f"commit={source_commit} dirty=false source_consistent=true",
+            )
             valid_agent_evidence = (
-                ev.get("ok") is True
+                not source_errors
+                and ev.get("ok") is True
                 and ev.get("agent_workflow") is True
                 and ev.get("manual_media_count") == 0
                 and lineage.get("manual_runs") == 0
@@ -720,11 +754,20 @@ def main() -> int:
                         f"unique_artifact_ids={lineage.get('unique_artifact_ids')} "
                         f"missing={lineage.get('missing_or_incomplete')} "
                         f"bad_lineage={lineage.get('bad_lineage')} "
+                        f"source_errors={source_errors} "
                         f"error={ev.get('error')}"
                     )[:500],
                 )
         except Exception as exc:  # noqa: BLE001
+            add("EVIDENCE-SOURCE", "Formal evidence source binding", "FAIL", str(exc))
             add("3.1.10", "formal evidence load", "BLOCKED", str(exc))
+    else:
+        add(
+            "EVIDENCE-SOURCE",
+            "Formal evidence source binding",
+            "BLOCKED",
+            f"missing evidence for commit {source_commit}: {evidence_path}",
+        )
 
     # Unit-backed §3.1 proofs (shipped code paths, not Fake-only product label)
     import subprocess
@@ -866,6 +909,20 @@ def main() -> int:
         else:
             add("UI-1", "前端可打开", "FAIL", str(exc))
 
+    source_context = finish_evidence_context(source_context, REPO)
+    source_errors = evidence_source_errors(
+        source_context,
+        expected_commit=source_commit,
+    )
+    add(
+        "SOURCE",
+        "Gate source binding",
+        "FAIL" if source_errors else "PASS",
+        "; ".join(source_errors)
+        if source_errors
+        else f"commit={source_commit} dirty=false source_consistent=true",
+    )
+
     passed = sum(1 for c in checks if c.status == "PASS")
     failed = sum(1 for c in checks if c.status == "FAIL")
     blocked_n = sum(1 for c in checks if c.status == "BLOCKED")
@@ -878,6 +935,7 @@ def main() -> int:
         else f"§3.1 incomplete: pass={passed} fail={failed} blocked={blocked_n} (功能候选版 only until Docker/S5)"
     )
     report = {
+        **source_context,
         "generated_at": _now(),
         "base": base,
         "summary": {
@@ -894,19 +952,8 @@ def main() -> int:
 
     text = json.dumps(report, ensure_ascii=False, indent=2)
     print(text)
-    out = args.out
-    if out is None:
-        out = REPO / "docs" / "acceptance" / f"p0_section31_gate_{int(time.time())}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
-    latest = REPO / "docs" / "acceptance" / "p0_section31_gate_latest.json"
-    try:
-        latest.write_text(text, encoding="utf-8")
-    except OSError as exc:
-        print(
-            f"WARNING could not refresh {latest}: {exc}; retained report at {out}",
-            file=sys.stderr,
-        )
     print(f"\nWROTE {out}", file=sys.stderr)
     print(
         f"SUMMARY pass={passed} fail={failed} blocked={blocked_n} p0_mvp_complete={p0_mvp}",

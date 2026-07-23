@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import Enum, String
+from sqlalchemy.types import TypeEngine
 
 from app.shared.enums import ExperienceMode, GraphStatus, MemberRole, OutboxStatus, ProjectStage
 
@@ -28,7 +31,7 @@ def pg_py_enum(enum_cls: type, name: str) -> Enum:
     )
 
 
-def col_enum(pg: Enum, sqlite_len: int = 32) -> object:
+def col_enum(pg: Enum, sqlite_len: int = 32) -> TypeEngine[Any]:
     return pg.with_variant(String(sqlite_len), "sqlite")
 
 

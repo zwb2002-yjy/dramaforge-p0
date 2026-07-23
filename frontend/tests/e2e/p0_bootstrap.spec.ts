@@ -55,7 +55,7 @@ test("Agent Brief draft is confirmed automatically before Agent Plan", async ({ 
     timeout: 45_000,
   });
   await expect(page.getByTestId("flow-err")).toHaveCount(0);
-  await expect(page.getByTestId("step-plan").locator("code")).toBeVisible();
+  await expect(page.getByTestId("agent-plan-id")).toBeVisible();
   await expect(page.getByTestId("agent-plan-shots").locator("article")).toHaveCount(10);
 
   // The plan is persisted server-side, not held only in Quick mode component state.

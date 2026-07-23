@@ -15,6 +15,10 @@ param(
     [string]$Commit,
     [string]$Evidence,
     [string]$NextStep,
+    [string]$OwnedPaths,
+    [switch]$ReadOnly,
+    [string]$ApprovedBy,
+    [int]$PrNumber = 0,
     [int]$Tail = 20
 )
 
@@ -61,32 +65,105 @@ function Convert-ToList([string]$Value) {
 }
 
 function Ensure-ProgressFile {
-    if (-not (Test-Path -LiteralPath $PSScriptRoot -PathType Container)) {
-        New-Item -ItemType Directory -Path $PSScriptRoot -Force | Out-Null
+    $progressDirectory = Split-Path -Parent $ProgressPath
+    if (-not (Test-Path -LiteralPath $progressDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $progressDirectory -Force | Out-Null
     }
     if (-not (Test-Path -LiteralPath $ProgressPath -PathType Leaf)) {
         [IO.File]::WriteAllText($ProgressPath, '', $Utf8NoBom)
     }
 }
 
-function Append-Line([string]$Line) {
+function Append-ValidatedEvent(
+    [Collections.IDictionary]$Candidate,
+    [string]$EventAgent,
+    [string]$EventSummary,
+    [string]$EventChangedFiles,
+    [string]$EventTests,
+    [string]$EventCommit,
+    [string]$EventEvidence,
+    [string]$EventNextStep
+) {
     Ensure-ProgressFile
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $validator = Join-Path $RepoRoot 'scripts\repo_guardrails.py'
+    if (-not (Test-Path -LiteralPath $validator -PathType Leaf)) {
+        throw "Repository validator not found: $validator"
+    }
+    $candidateJson = $Candidate | ConvertTo-Json -Compress -Depth 5
+    $candidateBase64 = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes($candidateJson)
+    )
+    $python = Get-PythonExecutable
 
     while ([DateTime]::UtcNow -lt $deadline) {
         $stream = $null
         $writer = $null
+        $snapshotPath = $null
         try {
             $stream = [IO.File]::Open(
                 $ProgressPath,
                 [IO.FileMode]::OpenOrCreate,
-                [IO.FileAccess]::Write,
-                [IO.FileShare]::Read
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::None
             )
+            $snapshotDirectory = Join-Path $RepoRoot 'tmp\agent-control'
+            if (-not (Test-Path -LiteralPath $snapshotDirectory -PathType Container)) {
+                New-Item -ItemType Directory -Path $snapshotDirectory -Force | Out-Null
+            }
+            $snapshotPath = Join-Path (
+                $snapshotDirectory
+            ) "progress-$PID-$([guid]::NewGuid().ToString('N')).snapshot"
+            $snapshot = [IO.File]::Open(
+                $snapshotPath,
+                [IO.FileMode]::CreateNew,
+                [IO.FileAccess]::Write,
+                [IO.FileShare]::None
+            )
+            try {
+                $stream.Position = 0
+                $stream.CopyTo($snapshot)
+                $snapshot.Flush($true)
+            }
+            finally {
+                $snapshot.Dispose()
+            }
+
+            $validatedJson = & $python $validator validate-event `
+                --repo-root $RepoRoot `
+                --progress-path $snapshotPath `
+                --event-base64 $candidateBase64
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Repository workflow event rejected.'
+            }
+            $validated = $validatedJson | ConvertFrom-Json
+            $event = [ordered]@{
+                schema_version = 2
+                timestamp = Get-Now
+                task_id = [string]$validated.task_id
+                agent = Redact-Text $EventAgent
+                status = [string]$validated.status
+                summary = Redact-Text $EventSummary
+                branch = [string]$validated.branch
+                worktree = [string]$validated.worktree
+                owned_paths = @($validated.owned_paths)
+                read_only = [bool]$validated.read_only
+                approved_by = [string]$validated.approved_by
+                pr_number = [int]$validated.pr_number
+                changed_files = @($validated.changed_files)
+                tests = Redact-Text $EventTests
+                commit = Redact-Text ([string]$validated.commit)
+                merge_commit = Redact-Text ([string]$validated.merge_commit)
+                evidence = @(Convert-ToList $EventEvidence)
+                next_step = Redact-Text $EventNextStep
+            }
+            $line = $event | ConvertTo-Json -Compress -Depth 5
             $null = $stream.Seek(0, [IO.SeekOrigin]::End)
-            $writer = New-Object IO.StreamWriter($stream, $Utf8NoBom)
-            $writer.WriteLine($Line)
+            $writer = [IO.StreamWriter]::new($stream, $Utf8NoBom, 1024, $true)
+            $writer.WriteLine($line)
             $writer.Flush()
+            $stream.Flush($true)
+            Write-Output $line
             return
         }
         catch [IO.IOException] {
@@ -94,11 +171,17 @@ function Append-Line([string]$Line) {
         }
         finally {
             if ($null -ne $writer) { $writer.Dispose() }
-            elseif ($null -ne $stream) { $stream.Dispose() }
+            if ($null -ne $stream) { $stream.Dispose() }
+            if (
+                $null -ne $snapshotPath -and
+                (Test-Path -LiteralPath $snapshotPath -PathType Leaf)
+            ) {
+                Remove-Item -LiteralPath $snapshotPath -Force
+            }
         }
     }
 
-    throw "Could not append to local progress ledger within 10 seconds: $ProgressPath"
+    throw "Could not lock and append to local progress ledger within 10 seconds: $ProgressPath"
 }
 
 function Read-Events {
@@ -118,6 +201,18 @@ function Read-Events {
     return @($events)
 }
 
+function Get-PythonExecutable {
+    $rootVenv = Join-Path $primaryRepoRoot 'backend\.venv\Scripts\python.exe'
+    if (Test-Path -LiteralPath $rootVenv -PathType Leaf) {
+        return $rootVenv
+    }
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -ne $python) {
+        return $python.Source
+    }
+    throw 'Python 3.12 is required to validate repository workflow events.'
+}
+
 switch ($Operation) {
     'log' {
         if ([string]::IsNullOrWhiteSpace($Status)) { throw 'Status is required for log.' }
@@ -125,24 +220,32 @@ switch ($Operation) {
         if ([string]::IsNullOrWhiteSpace($Agent)) { throw 'Agent is required for log.' }
         if ([string]::IsNullOrWhiteSpace($Summary)) { throw 'Summary is required for log.' }
 
-        $event = [ordered]@{
-            schema_version = 1
-            timestamp = Get-Now
+        $candidate = [ordered]@{
             task_id = Redact-Text $TaskId
-            agent = Redact-Text $Agent
             status = $Status
-            summary = Redact-Text $Summary
             branch = Redact-Text $Branch
             worktree = Redact-Text $Worktree
+            owned_paths = @(Convert-ToList $OwnedPaths)
+            read_only = if ($PSBoundParameters.ContainsKey('ReadOnly')) {
+                [bool]$ReadOnly.IsPresent
+            }
+            else {
+                $null
+            }
+            approved_by = Redact-Text $ApprovedBy
+            pr_number = $PrNumber
             changed_files = @(Convert-ToList $ChangedFiles)
-            tests = Redact-Text $Tests
             commit = Redact-Text $Commit
-            evidence = @(Convert-ToList $Evidence)
-            next_step = Redact-Text $NextStep
         }
-        $line = $event | ConvertTo-Json -Compress -Depth 5
-        Append-Line $line
-        Write-Output $line
+        Append-ValidatedEvent `
+            -Candidate $candidate `
+            -EventAgent $Agent `
+            -EventSummary $Summary `
+            -EventChangedFiles $ChangedFiles `
+            -EventTests $Tests `
+            -EventCommit $Commit `
+            -EventEvidence $Evidence `
+            -EventNextStep $NextStep
     }
 
     'tail' {

@@ -99,7 +99,8 @@ class AnthropicCompatibleTextAdapter:
 
     async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
         task = self._tasks.get(remote_task_id) or {}
-        usage = task.get("usage") if isinstance(task.get("usage"), dict) else {}
+        raw_usage = task.get("usage")
+        usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
         in_tok = float(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
         out_tok = float(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
         return {

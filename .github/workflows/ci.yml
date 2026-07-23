@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require agent task branch
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          case "$HEAD_REF" in
+            agent/*) ;;
+            *)
+              echo "Pull requests must originate from an agent/<task-id> branch."
+              exit 1
+              ;;
+          esac
+      - run: python scripts/check_directory_compliance.py
+      - run: python scripts/repo_guardrails.py policy --repo-root .
+
+  backend-static:
+    name: backend-static
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check app tests
+      - run: uv run mypy app
+
+  backend-unit:
+    name: backend-unit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --extra dev
+      - run: uv run pytest tests/unit -q
+
+  postgres-integration:
+    name: postgres-integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: dramaforge
+          POSTGRES_USER: dramaforge
+          POSTGRES_PASSWORD: dramaforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dramaforge -d dramaforge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge
+      SESSION_SECRET: ci-session-secret-32-characters-minimum
+      BYOK_FERNET_KEY: test-byok-fernet-key-replace==
+      AGNES_ENABLED: "false"
+      TEXT_LLM_ENABLED: "false"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --extra dev
+      - run: uv run alembic upgrade head
+      - run: uv run pytest tests/integration -q -rs --fail-on-skip
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+
+  frontend-smoke:
+    name: frontend-smoke
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e -- tests/e2e/smoke.spec.ts
+
+  frontend-smoke-windows:
+    name: frontend-smoke-windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run test:e2e -- tests/e2e/smoke.spec.ts

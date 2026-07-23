@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -163,10 +163,12 @@ async def build_project_export(
                 kept.append(a)
                 continue
             reason = a.delete_reason or ""
-            if "audited_manual_upload" in reason:
+            if "audited_manual_upload" in reason and any(
+                str(sid) in reason or str(sid) in a.object_key
+                for sid in approved_ids
+            ):
                 # object_key / reason includes shot id
-                if any(str(sid) in reason or str(sid) in a.object_key for sid in approved_ids):
-                    kept.append(a)
+                kept.append(a)
         arts = kept
     elif run_ids:
         arts = [a for a in arts if a.produced_by_run_id in run_ids]
@@ -311,12 +313,19 @@ async def build_project_export(
             continue
         if not raw:
             continue
-        if art.mime_type.startswith("video/") or art.artifact_type in {"video", "composite"}:
+        video_candidate = art.mime_type.startswith("video/") or art.artifact_type in {
+            "video",
+            "composite",
+        }
+        has_video_signature = (
+            raw[:4] == b"\x00\x00\x00"
+            or raw[4:8] == b"ftyp"
+            or raw[:3] == b"\x00\x00\x00"
+            or art.mime_type.startswith("video/")
+        )
+        if video_candidate and has_video_signature:
             # composite may be image in fake tests — detect
-            if raw[:4] == b"\x00\x00\x00" or raw[4:8] == b"ftyp" or raw[:3] == b"\x00\x00\x00":
-                video_blobs.append(raw)
-            elif art.mime_type.startswith("video/"):
-                video_blobs.append(raw)
+            video_blobs.append(raw)
         if art.mime_type.startswith("image/") or raw[:4] == b"\x89PNG":
             frames_data.append(raw)
 
@@ -332,7 +341,11 @@ async def build_project_export(
                     parts: list[Path] = []
                     for idx, raw in enumerate(video_blobs[:20]):
                         # Detect ftyp/mp4 vs treat as copyable segment
-                        is_mp4 = raw[4:8] == b"ftyp" or raw[:4] == b"\x00\x00\x00\x18" or b"ftyp" in raw[:64]
+                        is_mp4 = (
+                            raw[4:8] == b"ftyp"
+                            or raw[:4] == b"\x00\x00\x00\x18"
+                            or b"ftyp" in raw[:64]
+                        )
                         ext = "mp4" if is_mp4 else "bin"
                         p = tmp_path / f"seg_{idx:03d}.{ext}"
                         p.write_bytes(raw)
@@ -348,7 +361,7 @@ async def build_project_export(
                             encoding="utf-8",
                         )
                         # Try stream copy first; re-encode if needed
-                        r = subprocess.run(
+                        concat_process = subprocess.run(
                             [
                                 ffmpeg,
                                 "-y",
@@ -364,7 +377,11 @@ async def build_project_export(
                             ],
                             capture_output=True,
                         )
-                        if r.returncode != 0 or not out.exists() or out.stat().st_size < 32:
+                        if (
+                            concat_process.returncode != 0
+                            or not out.exists()
+                            or out.stat().st_size < 32
+                        ):
                             subprocess.run(
                                 [
                                     ffmpeg,

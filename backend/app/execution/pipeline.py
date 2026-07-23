@@ -21,6 +21,8 @@ from app.providers.fake import FakeFluxAdapter, FakeOpenAIAdapter
 from app.shared.errors import ValidationAppError
 from app.storage.minio_store import get_object_store
 
+LEGACY_FIRST_FRAME_TEMPLATE_KEY = "legacy-first-frame-v1"
+
 # Re-export for existing tests/imports
 __all__ = [
     "FaceReviewResult",
@@ -107,7 +109,7 @@ class FirstFramePipeline:
         # Text provider op (planning) — counted; zero cost on fake
         text_create = await self.openai.create({"prompt": idea, "kind": "brief"})
         text_remote = str(text_create["remote_task_id"])
-        text_cost = await self.openai.fetch_cost(text_remote)
+        await self.openai.fetch_cost(text_remote)
         brief = f"BRIEF:{idea}"
         plan = f"PLAN:{idea}"
 
@@ -115,7 +117,7 @@ class FirstFramePipeline:
             project_id=project_id,
             scope_type="shot",
             scope_entity_id=shot_id,
-            template_key="shot-p0-v1",
+            template_key=LEGACY_FIRST_FRAME_TEMPLATE_KEY,
             created_by=user_id,
             definition={
                 "nodes": [{"key": "keyframe.generate", "type": "keyframe"}],
@@ -179,12 +181,14 @@ class FirstFramePipeline:
             node_run.status = "failed"
             node_run.output_summary = {"error": poll.get("error") or "image poll failed"}
             await self._session.flush()
-            raise ValidationAppError(
-                f"IMAGE_PROVIDER_FAILED: {poll.get('error') or poll_status}"
-            )
+            raise ValidationAppError(f"IMAGE_PROVIDER_FAILED: {poll.get('error') or poll_status}")
 
         provider_name = getattr(self.flux, "provider", "flux")
-        model_name = "agnes-image" if provider_name == "flux" and type(self.flux).__name__.startswith("Agnes") else "fake-flux"
+        model_name = (
+            "agnes-image"
+            if provider_name == "flux" and type(self.flux).__name__.startswith("Agnes")
+            else "fake-flux"
+        )
         img_op = ProviderOperation(
             node_run_id=node_run.id,
             attempt_no=1,
@@ -205,8 +209,9 @@ class FirstFramePipeline:
 
         # Persist real media bytes to shared store (same singleton as Worker/export)
         store = get_object_store()
-        if hasattr(self.flux, "blobs") and img_remote in getattr(self.flux, "blobs", {}):
-            probe_bytes = self.flux.blobs[img_remote]  # type: ignore[attr-defined]
+        flux_blobs = getattr(self.flux, "blobs", {})
+        if img_remote in flux_blobs:
+            probe_bytes = flux_blobs[img_remote]
         else:
             probe_bytes = f"keyframe:{img_remote}:{plan}".encode()
         # Canonical is a distinct reference image (not the probe) — two-source review
@@ -214,8 +219,8 @@ class FirstFramePipeline:
             {"prompt": f"canonical-ref:{idea}", "kind": "keyframe"}
         )
         canon_remote = str(canon_create.get("remote_task_id") or uuid4())
-        if hasattr(self.flux, "blobs") and canon_remote in getattr(self.flux, "blobs", {}):
-            canon_bytes = self.flux.blobs[canon_remote]  # type: ignore[attr-defined]
+        if canon_remote in flux_blobs:
+            canon_bytes = flux_blobs[canon_remote]
         else:
             canon_bytes = f"canonical:{canon_remote}".encode()
         object_key = f"projects/{project_id}/nodes/keyframe/{node_run.id}.png"
@@ -223,9 +228,7 @@ class FirstFramePipeline:
             object_key=object_key, data=probe_bytes, mime_type="image/png"
         )
         canon_key = f"projects/{project_id}/canonical/{node_run.id}.png"
-        await store.put_bytes(
-            object_key=canon_key, data=canon_bytes, mime_type="image/png"
-        )
+        await store.put_bytes(object_key=canon_key, data=canon_bytes, mime_type="image/png")
 
         artifact = Artifact(
             project_id=project_id,
@@ -247,9 +250,7 @@ class FirstFramePipeline:
             canonical_image_bytes=canon_bytes,
             threshold=thr,
         )
-        review = FaceReviewResult(
-            status=face_out.status, score=face_out.score, rule=face_out.rule
-        )
+        review = FaceReviewResult(status=face_out.status, score=face_out.score, rule=face_out.rule)
 
         node_run.status = "completed"
         node_run.result_artifact_id = artifact.id

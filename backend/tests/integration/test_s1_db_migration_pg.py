@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError
 
 REPO = Path(__file__).resolve().parents[3]
 DEFAULT_URL = "postgresql+psycopg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"

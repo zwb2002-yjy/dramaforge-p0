@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -31,42 +30,53 @@ def test_spike_script_exists_on_freeze_path() -> None:
     assert (REPO_ROOT / "docs" / "spikes").is_dir()
 
 
-def test_spike_entry_skip_model_writes_blocked_by_env_report(tmp_path: Path) -> None:
-    """Sufficient fixtures plus --skip-model must report an honest environment block."""
+def test_spike_entry_without_private_images_writes_blocked_by_fixture_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A clean checkout must report the intentionally untracked images as missing."""
+    mod = _load_spike_module()
+    fixture_dir = tmp_path / "character_canonical"
+    fixture_dir.mkdir()
+    manifest_path = fixture_dir / "manifest.json"
+    manifest_path.write_text(mod.MANIFEST_PATH.read_text(encoding="utf-8"), encoding="utf-8")
     report = tmp_path / "s0a-report.md"
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(SPIKE),
-            "--report",
-            str(report),
-            "--skip-model",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        cwd=str(REPO_ROOT),
-    )
-    combined = (result.stdout or "") + (result.stderr or "")
-    assert result.returncode == 4, combined
-    assert "samples sufficient but --skip-model set" in combined
+
+    monkeypatch.setattr(mod, "FIXTURE_DIR", fixture_dir)
+    monkeypatch.setattr(mod, "MANIFEST_PATH", manifest_path)
+
+    result = mod.main(["--report", str(report), "--skip-model"])
+    output = capsys.readouterr().out
+
+    assert result == 2
+    assert "BLOCKED_BY_FIXTURE: missing image files for sample_ids:" in output
     assert report.is_file()
     text = report.read_text(encoding="utf-8")
-    assert "BLOCKED_BY_ENV" in text
-    assert "skip-model" in text
+    assert "BLOCKED_BY_FIXTURE" in text
+    assert "BLOCKED_BY_ENV" not in text
     # No raw embedding dumps (long float sequences)
     assert re.search(r"\b0\.\d{3,},\s*0\.\d{3,},\s*0\.\d{3,}", text) is None
 
 
-def test_spike_module_fixture_inventory_uses_manifest() -> None:
+def test_spike_module_fixture_inventory_uses_manifest(tmp_path: Path) -> None:
     mod = _load_spike_module()
     manifest = mod.Manifest.load(mod.MANIFEST_PATH)
     assert manifest.pairs_same
     assert manifest.pairs_diff
     assert manifest.anomalies
-    ids = mod.list_image_sample_ids(mod.FIXTURE_DIR)
-    assert ids
-    assert mod.collect_missing_sample_ids(manifest, mod.FIXTURE_DIR) == []
+
+    expected_ids = mod.collect_missing_sample_ids(manifest, tmp_path)
+    assert expected_ids
+    for sample_id in expected_ids:
+        (tmp_path / f"{sample_id}.jpg").touch()
+
+    assert mod.list_image_sample_ids(tmp_path) == expected_ids
+    assert mod.collect_missing_sample_ids(manifest, tmp_path) == []
+
+    missing_id = expected_ids[0]
+    (tmp_path / f"{missing_id}.jpg").unlink()
+    assert mod.collect_missing_sample_ids(manifest, tmp_path) == [missing_id]
 
 
 def test_pair_score_via_spike_import_path() -> None:

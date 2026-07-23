@@ -5,7 +5,8 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
@@ -30,8 +31,8 @@ class NodeRunRead(BaseModel):
     input_hash: str
     result_artifact_id: UUID | None
     provider_cost: str
-    output_summary: dict
-    input_snapshot: dict = {}
+    output_summary: dict[str, object]
+    input_snapshot: dict[str, object] = Field(default_factory=dict)
     idempotency_key: str = ""
 
 
@@ -84,10 +85,8 @@ async def get_artifact_content(
     artifact_id: UUID,
     user: CurrentUser,
     session: SessionDep,
-):
+) -> Response:
     """Stream artifact bytes for workstation preview (membership + RLS)."""
-    from fastapi.responses import Response
-
     from app.storage.minio_store import get_object_store
 
     await ProjectService(session).get_project_for_member(
@@ -340,10 +339,8 @@ async def download_export_object(
     session: SessionDep,
     token: str,
     object_role: str = "timeline_json",
-):
+) -> Response:
     """Authorized download: return raw file bytes (not JSON metadata)."""
-    from fastapi.responses import Response
-
     await ProjectService(session).get_project_for_member(
         project_id=project_id, actor=user
     )

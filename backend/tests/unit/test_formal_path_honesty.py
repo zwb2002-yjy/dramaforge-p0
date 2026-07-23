@@ -6,12 +6,11 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.events.models import OutboxEvent
 from app.events.outbox import OutboxDispatcher
 from app.providers.flux import ProviderNotConfiguredError, get_flux_adapter
 from app.shared.enums import OutboxStatus
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def test_get_flux_adapter_fail_closed_outside_test(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,9 +42,10 @@ def test_get_flux_adapter_fake_only_in_test(monkeypatch: pytest.MonkeyPatch) -> 
 async def test_enqueue_does_not_return_local_on_redis_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
     from app.runtime.scheduler import AgentRunScheduler
     from app.shared.errors import ValidationAppError
-    from unittest.mock import AsyncMock, MagicMock
 
     session = MagicMock()
     session.commit = AsyncMock()
@@ -63,9 +63,8 @@ async def test_enqueue_does_not_return_local_on_redis_failure(
 
 @pytest.mark.asyncio
 async def test_outbox_reclaim_expired_lease() -> None:
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
     from app.shared.base import Base
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:

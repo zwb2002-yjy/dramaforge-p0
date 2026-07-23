@@ -16,6 +16,8 @@ os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
 # Keep live keys out of accidental adapter selection if present in parent env.
 os.environ.setdefault("AGNES_ENABLED", "false")
 os.environ.setdefault("TEXT_LLM_ENABLED", "false")
+os.environ.setdefault("DRAMAFORGE_SOURCE_COMMIT", "test-source-commit")
+os.environ.setdefault("INSIGHTFACE_ENABLED", "false")
 
 from app.access import models as _access_models  # noqa: E402,F401
 from app.config import clear_settings_cache, get_settings  # noqa: E402
@@ -27,6 +29,24 @@ from app.main import create_app  # noqa: E402
 from app.production import models as _production_models  # noqa: E402,F401
 from app.shared.base import Base  # noqa: E402
 from app.shared.db import get_session  # noqa: E402
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--fail-on-skip",
+        action="store_true",
+        default=False,
+        help="Return a failing exit code when any test is skipped.",
+    )
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if not session.config.getoption("--fail-on-skip"):
+        return
+    reporter = session.config.pluginmanager.getplugin("terminalreporter")
+    skipped = len(reporter.stats.get("skipped", [])) if reporter is not None else 0
+    if skipped:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 @pytest.fixture(autouse=True)

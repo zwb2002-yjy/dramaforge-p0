@@ -5,8 +5,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
 from app.access.models import Organization, OrganizationMember, User
 from app.access.projects import ProjectService
 from app.assets import models as _am  # noqa: F401
@@ -20,6 +18,7 @@ from app.shared.base import Base
 from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Protocol
+from typing import Protocol, cast
 
 from app.config import Settings, get_settings
 
@@ -26,6 +26,31 @@ class ObjectStore(Protocol):
     async def get_bytes(self, *, object_key: str) -> bytes: ...
 
     def clear(self) -> None: ...
+
+
+class _MinioResponse(Protocol):
+    def read(self) -> bytes: ...
+
+    def close(self) -> None: ...
+
+    def release_conn(self) -> None: ...
+
+
+class _MinioClient(Protocol):
+    def bucket_exists(self, bucket_name: str) -> bool: ...
+
+    def make_bucket(self, bucket_name: str) -> None: ...
+
+    def put_object(
+        self,
+        bucket_name: str,
+        object_name: str,
+        data: BytesIO,
+        length: int,
+        content_type: str,
+    ) -> object: ...
+
+    def get_object(self, bucket_name: str, object_name: str) -> _MinioResponse: ...
 
 
 class InMemoryObjectStore:
@@ -60,26 +85,29 @@ class InMemoryObjectStore:
 class MinioObjectStore:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
-        self._client = None
+        self._client: _MinioClient | None = None
 
     def clear(self) -> None:
         return None
 
-    def _ensure_client(self):  # type: ignore[no-untyped-def]
+    def _ensure_client(self) -> _MinioClient:
         if self._client is not None:
             return self._client
-        from minio import Minio  # type: ignore[import-untyped]
+        from minio import Minio
 
         endpoint = self._settings.minio_endpoint.replace("http://", "").replace(
             "https://", ""
         )
         secure = self._settings.minio_endpoint.startswith("https://")
-        self._client = Minio(
-            endpoint,
-            access_key=self._settings.minio_access_key,
-            secret_key=self._settings.minio_secret_key,
-            secure=secure,
-            region=self._settings.minio_region,
+        self._client = cast(
+            _MinioClient,
+            Minio(
+                endpoint,
+                access_key=self._settings.minio_access_key,
+                secret_key=self._settings.minio_secret_key,
+                secure=secure,
+                region=self._settings.minio_region,
+            ),
         )
         bucket = self._settings.minio_bucket
         if not self._client.bucket_exists(bucket):

@@ -11,8 +11,8 @@ from app.creation import models as _cm  # noqa: F401
 from app.creation.models import AgentRun
 from app.creation.service import CreationService, _parse_brief_json, _parse_plan_json
 from app.execution import models as _xm  # noqa: F401
+from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
-from app.execution.product_path import _get_or_create_artifact
 from app.execution.shot_p0 import SHOT_NODES
 from app.execution.shot_review import start_shot_nodes
 from app.production.models import GraphVersion
@@ -51,9 +51,7 @@ async def test_generate_brief_and_plan_agent_records_ops(session: AsyncSession) 
     session.add(org)
     await session.flush()
     session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
+        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
     )
     await session.commit()
 
@@ -93,25 +91,29 @@ async def test_generate_brief_and_plan_agent_records_ops(session: AsyncSession) 
     assert plan.plan.get("prompt")
     assert len(plan.plan.get("shots", [])) == 10
     assert all(
-        shot.get("keyframe_prompt")
-        for shot in plan.plan.get("shots", [])
-        if isinstance(shot, dict)
+        shot.get("keyframe_prompt") for shot in plan.plan.get("shots", []) if isinstance(shot, dict)
     )
     assert plan.source_agent_run_id is not None
 
     runs = (
-        await session.execute(select(AgentRun).where(AgentRun.project_id == started.project_id))
-    ).scalars().all()
+        (await session.execute(select(AgentRun).where(AgentRun.project_id == started.project_id)))
+        .scalars()
+        .all()
+    )
     assert len(runs) >= 2
     assert all(r.status == "succeeded" for r in runs)
 
     ops = (
-        await session.execute(
-            select(ProviderOperation).where(
-                ProviderOperation.agent_run_id.in_([r.id for r in runs])
+        (
+            await session.execute(
+                select(ProviderOperation).where(
+                    ProviderOperation.agent_run_id.in_([r.id for r in runs])
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(ops) >= 2
     assert all(o.status == "succeeded" for o in ops)
 
@@ -291,9 +293,7 @@ async def test_confirm_plan_materializes_real_shots_and_keyframe_runs(
     session.add(org)
     await session.flush()
     session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
+        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
     )
     await session.commit()
 
@@ -348,24 +348,24 @@ async def test_confirm_plan_materializes_real_shots_and_keyframe_runs(
     )
 
     shots = (
-        await session.execute(
-            select(Shot)
-            .where(Shot.project_id == started.project_id)
-            .order_by(Shot.sort_order)
+        (
+            await session.execute(
+                select(Shot).where(Shot.project_id == started.project_id).order_by(Shot.sort_order)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     runs = (
-        await session.execute(
-            select(NodeRun).where(NodeRun.project_id == started.project_id)
-        )
-    ).scalars().all()
+        (await session.execute(select(NodeRun).where(NodeRun.project_id == started.project_id)))
+        .scalars()
+        .all()
+    )
 
     assert len(shots) == 3
     assert len(result.node_run_ids) == 3
     assert result.node_run_id == result.node_run_ids[0]
-    assert {str(run.input_snapshot["shot_id"]) for run in runs} == {
-        str(shot.id) for shot in shots
-    }
+    assert {str(run.input_snapshot["shot_id"]) for run in runs} == {str(shot.id) for shot in shots}
     assert all(run.input_snapshot["node_key"] == "keyframe" for run in runs)
 
 
@@ -389,9 +389,7 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
     session.add(org)
     await session.flush()
     session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
+        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
     )
     await session.commit()
 
@@ -438,10 +436,14 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
     for version in versions:
         assert version is not None
         nodes = (
-            await session.execute(
-                select(GraphNode).where(GraphNode.graph_version_id == version.id)
+            (
+                await session.execute(
+                    select(GraphNode).where(GraphNode.graph_version_id == version.id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert {node.node_key for node in nodes} == set(SHOT_NODES)
 
     worker = WorkerRuntime(session)
@@ -457,31 +459,26 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
     await worker.process_queued(limit=100)
 
     runs = (
-        await session.execute(
-            select(NodeRun).where(NodeRun.project_id == started.project_id)
-        )
-    ).scalars().all()
+        (await session.execute(select(NodeRun).where(NodeRun.project_id == started.project_id)))
+        .scalars()
+        .all()
+    )
     done = {"completed", "cached", "completed_after_cancel"}
     artifacts_by_id = {
         artifact.id: artifact
         for artifact in (
-            await session.execute(
-                select(Artifact).where(Artifact.project_id == started.project_id)
-            )
-        ).scalars().all()
+            await session.execute(select(Artifact).where(Artifact.project_id == started.project_id))
+        )
+        .scalars()
+        .all()
     }
     artifact_ids: set[object] = set()
     artifact_object_keys: set[str] = set()
     for shot_id in materialized.shot_ids:
         shot_runs = [
-            run
-            for run in runs
-            if str((run.input_snapshot or {}).get("shot_id")) == str(shot_id)
+            run for run in runs if str((run.input_snapshot or {}).get("shot_id")) == str(shot_id)
         ]
-        by_key = {
-            str((run.input_snapshot or {}).get("node_key")): run
-            for run in shot_runs
-        }
+        by_key = {str((run.input_snapshot or {}).get("node_key")): run for run in shot_runs}
         assert set(SHOT_NODES).issubset(by_key)
         for key in SHOT_NODES:
             run = by_key[key]
@@ -525,7 +522,7 @@ async def test_shot_artifact_content_reuse_is_rejected_across_node_runs(
     session.add_all([first, second])
     await session.flush()
 
-    artifact = await _get_or_create_artifact(
+    artifact = await get_or_create_artifact(
         session,
         project_id=project_id,
         artifact_type="image",
@@ -538,7 +535,7 @@ async def test_shot_artifact_content_reuse_is_rejected_across_node_runs(
     assert artifact.produced_by_run_id == first.id
 
     with pytest.raises(ValidationAppError, match="ARTIFACT_NOT_INDEPENDENT") as error:
-        await _get_or_create_artifact(
+        await get_or_create_artifact(
             session,
             project_id=project_id,
             artifact_type="image",
@@ -567,9 +564,7 @@ async def test_legacy_agent_plan_requires_regeneration_before_materialization(
     session.add(org)
     await session.flush()
     session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
+        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
     )
     await session.commit()
 
@@ -609,11 +604,15 @@ async def test_legacy_agent_plan_requires_regeneration_before_materialization(
 
     assert error.value.details["code"] == "AGENT_PLAN_REGENERATION_REQUIRED"
     shots = (
-        await session.execute(select(Shot).where(Shot.project_id == started.project_id))
-    ).scalars().all()
+        (await session.execute(select(Shot).where(Shot.project_id == started.project_id)))
+        .scalars()
+        .all()
+    )
     runs = (
-        await session.execute(select(NodeRun).where(NodeRun.project_id == started.project_id))
-    ).scalars().all()
+        (await session.execute(select(NodeRun).where(NodeRun.project_id == started.project_id)))
+        .scalars()
+        .all()
+    )
     assert shots == []
     assert runs == []
 
@@ -634,9 +633,7 @@ async def test_manual_plan_save_cannot_overwrite_agent_plan(
     session.add(org)
     await session.flush()
     session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
+        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
     )
     await session.commit()
 

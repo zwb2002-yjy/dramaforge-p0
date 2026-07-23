@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.consistency.face_review import face_review_images
 from app.providers.fake import FakeFluxAdapter
 

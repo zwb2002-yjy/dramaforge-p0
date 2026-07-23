@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
 import time
 import zipfile
 from io import BytesIO
@@ -21,6 +20,14 @@ from uuid import uuid4
 
 import httpx
 
+from evidence_context import (
+    begin_evidence_context,
+    default_evidence_dir,
+    finish_evidence_context,
+    require_ignored_evidence_path,
+)
+
+REPO = Path(__file__).resolve().parents[1]
 REQUIRED_NODES = (
     "prompt",
     "keyframe",
@@ -33,6 +40,30 @@ REQUIRED_NODES = (
     "continuity_review",
 )
 DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
+
+
+def runtime_source_errors(
+    *,
+    expected_commit: str,
+    health: dict[str, Any],
+    runs: list[dict[str, Any]],
+) -> list[str]:
+    """Require the proof client, API, and every final Worker result to share one commit."""
+    errors: list[str] = []
+    api_commit = str(health.get("source_commit") or "")
+    if api_commit != expected_commit:
+        errors.append(
+            f"api source_commit={api_commit or '<missing>'} expected={expected_commit}"
+        )
+    for run in runs:
+        output = run.get("output_summary") or {}
+        worker_commit = str(output.get("source_commit") or "")
+        if worker_commit != expected_commit:
+            errors.append(
+                f"worker run={run.get('id') or '<missing>'} "
+                f"source_commit={worker_commit or '<missing>'} expected={expected_commit}"
+            )
+    return errors
 
 
 def _write_report(scratch: Path, report: dict[str, Any]) -> None:
@@ -53,7 +84,12 @@ def _problem(response: httpx.Response) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://127.0.0.1:8010")
-    parser.add_argument("--scratch", type=Path, required=True)
+    parser.add_argument(
+        "--scratch",
+        type=Path,
+        default=None,
+        help="Ignored or external evidence directory; defaults to tmp/p0-evidence/<sha>/formal.",
+    )
     parser.add_argument(
         "--worker-tick",
         action="store_true",
@@ -63,10 +99,17 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=int, default=900)
     args = parser.parse_args()
 
-    scratch = args.scratch
+    source_context = begin_evidence_context(REPO)
+    scratch = args.scratch or default_evidence_dir(
+        REPO,
+        str(source_context["source_commit"]),
+        "formal",
+    )
+    scratch = require_ignored_evidence_path(REPO, scratch)
     scratch.mkdir(parents=True, exist_ok=True)
     report: dict[str, Any] = {
         "schema_version": 2,
+        **source_context,
         "agent_workflow": True,
         "manual_media_count": 0,
         "required_nodes": list(REQUIRED_NODES),
@@ -75,17 +118,28 @@ def main() -> int:
         "ok": False,
     }
     base = args.base.rstrip("/")
-    client = httpx.Client(base_url=base, timeout=180.0, follow_redirects=True)
+    client: httpx.Client | None = None
     cookies: dict[str, str] = {}
 
     def finish(error: str) -> int:
         report["error"] = error
+        report["ok"] = False
+        report.update(finish_evidence_context(source_context, REPO))
         _write_report(scratch, report)
         print(json.dumps({"ok": False, "error": error}, ensure_ascii=False, indent=2))
-        client.close()
+        if client is not None:
+            client.close()
         return 2
 
+    if report["dirty"]:
+        return finish(
+            "formal evidence requires a clean worktree at the exact source commit"
+        )
+
+    client = httpx.Client(base_url=base, timeout=180.0, follow_redirects=True)
+
     def csrf() -> str:
+        assert client is not None
         response = client.get("/api/v1/auth/csrf", cookies=cookies)
         response.raise_for_status()
         cookies.update(response.cookies)
@@ -97,6 +151,7 @@ def main() -> int:
         *,
         params: dict[str, str] | None = None,
     ) -> httpx.Response:
+        assert client is not None
         response = client.post(
             path,
             json=body or {},
@@ -108,6 +163,7 @@ def main() -> int:
         return response
 
     def snapshot(project_id: str) -> dict[str, Any]:
+        assert client is not None
         response = client.get(f"/api/v1/projects/{project_id}/snapshot", cookies=cookies)
         response.raise_for_status()
         return response.json()
@@ -115,6 +171,7 @@ def main() -> int:
     def tick() -> None:
         if not args.worker_tick:
             return
+        assert client is not None
         response = client.post(
             "/api/v1/worker/tick",
             headers={"X-Worker-Token": args.worker_token},
@@ -159,10 +216,23 @@ def main() -> int:
         )
 
     try:
+        assert client is not None
         health = client.get("/health")
         report["health"] = health.json() if health.status_code == 200 else {"status": health.status_code}
         if health.status_code != 200 or report["health"].get("db") != "up":
             return finish(f"health/db unavailable: {_problem(health)}")
+        api_source_errors = runtime_source_errors(
+            expected_commit=str(source_context["source_commit"]),
+            health=report["health"],
+            runs=[],
+        )
+        if api_source_errors:
+            report["runtime_source"] = {
+                "expected_commit": source_context["source_commit"],
+                "api_source_commit": report["health"].get("source_commit"),
+                "errors": api_source_errors,
+            }
+            return finish("; ".join(api_source_errors))
 
         email = f"formal-{uuid4().hex[:10]}@example.com"
         registered = post(
@@ -268,7 +338,7 @@ def main() -> int:
                 return finish(
                     f"initial keyframe enqueue failed {enqueued.status_code}: {_problem(enqueued)}"
                 )
-        state = wait_for_runs(project_id, initial_run_ids)
+        wait_for_runs(project_id, initial_run_ids)
 
         remaining_run_ids: list[str] = []
         for shot_id in shot_ids:
@@ -283,7 +353,7 @@ def main() -> int:
             return finish(
                 f"expected 80 non-keyframe NodeRuns from ten starts, got {len(remaining_run_ids)}"
             )
-        state = wait_for_runs(project_id, remaining_run_ids)
+        wait_for_runs(project_id, remaining_run_ids)
 
         rejected_shot_id = shot_ids[0]
         rejected = post(
@@ -301,7 +371,7 @@ def main() -> int:
         rerun_ids = [str(value) for value in rerun.json().get("run_ids", [])]
         if not rerun_ids:
             return finish("rerun returned no replacement NodeRuns")
-        state = wait_for_runs(project_id, rerun_ids)
+        wait_for_runs(project_id, rerun_ids)
 
         for shot_id in shot_ids:
             approved = post(
@@ -377,6 +447,24 @@ def main() -> int:
                 final_artifact_ids.add(artifact_id)
                 final_object_keys.add(str(artifact["object_key"]))
 
+        runtime_errors = runtime_source_errors(
+            expected_commit=str(source_context["source_commit"]),
+            health=report["health"],
+            runs=list(latest.values()),
+        )
+        worker_commits = sorted(
+            {
+                str((run.get("output_summary") or {}).get("source_commit") or "<missing>")
+                for run in latest.values()
+            }
+        )
+        report["runtime_source"] = {
+            "expected_commit": source_context["source_commit"],
+            "api_source_commit": report["health"].get("source_commit"),
+            "worker_source_commits": worker_commits,
+            "checked_worker_runs": len(latest),
+            "errors": runtime_errors,
+        }
         report["lineage"] = {
             "required_run_count": len(shot_ids) * len(REQUIRED_NODES),
             "resolved_latest_runs": len(latest),
@@ -415,6 +503,7 @@ def main() -> int:
             and manual_runs == 0
             and not missing
             and not bad_lineage
+            and not runtime_errors
             and len(final_artifact_ids) == 90
             and len(final_object_keys) == 90
             and report["final"]["failed_runs"] == 0
@@ -425,6 +514,12 @@ def main() -> int:
             and any("timeline" in name for name in zip_names)
             and any(name.startswith("media/") for name in zip_names)
         )
+        report.update(finish_evidence_context(source_context, REPO))
+        if not report["source_consistent"]:
+            report["ok"] = False
+            report["error"] = (
+                "source commit or worktree cleanliness changed during formal proof"
+            )
         _write_report(scratch, report)
         (scratch / "export_hashes.txt").write_text(
             "\n".join(

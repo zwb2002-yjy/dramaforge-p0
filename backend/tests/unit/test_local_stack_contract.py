@@ -71,3 +71,16 @@ def test_standalone_dispatcher_registers_complete_model_graph() -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "projects"
+
+
+def test_formal_wsl_stack_binds_clean_source_and_restarts_application_processes() -> None:
+    launcher = (REPO_ROOT / "scripts" / "start_p0_wsl_stack.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'git -C "${REPO}" status --porcelain=v1 --untracked-files=normal' in launcher
+    assert 'SOURCE_COMMIT="$(git -C "${REPO}" rev-parse HEAD)"' in launcher
+    assert 'export DRAMAFORGE_SOURCE_COMMIT="${SOURCE_COMMIT}"' in launcher
+    assert "bind_source_commit" in launcher
+    assert "stop_application_processes" in launcher
+    assert launcher.index("bind_source_commit") < launcher.index("start_api")
