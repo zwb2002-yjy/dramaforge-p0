@@ -3,8 +3,104 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any
 from uuid import uuid4
+
+
+def _fixture_text(value: object, *, fallback: str) -> str:
+    text = " ".join(str(value or "").split())
+    return text[:240] or fallback
+
+
+def build_fake_brief(idea: object) -> dict[str, object]:
+    """Produce an input-derived valid Brief for APP_ENV=test only."""
+    premise = _fixture_text(idea, fallback="A protagonist confronts a difficult choice.")
+    return {
+        "title": f"Draft: {premise[:72]}",
+        "logline": f"A protagonist acts on the central premise: {premise}",
+        "synopsis": (
+            f"Starting from the premise '{premise}', the protagonist identifies an urgent "
+            "problem, makes an imperfect plan, and faces escalating resistance. Each choice "
+            "reveals a new consequence until the final beat forces a decisive next step."
+        ),
+        "protagonist": {
+            "name": "The lead",
+            "profile": "A capable person whose perspective shapes the story.",
+            "goal": "Resolve the central problem before its consequences become irreversible.",
+        },
+        "conflict": "Opposition and incomplete information make every next action costly.",
+        "stakes": "Failure changes the lead's future and leaves the central problem unresolved.",
+        "world": f"A grounded story world shaped by this premise: {premise}",
+        "tone": "focused dramatic tension with emotional clarity",
+        "audience": "vertical short-drama viewers",
+        "visual_style": "cinematic contrast, motivated practical light, readable 9:16 composition",
+        "episode_hook": "The final discovery reframes the lead's next decision.",
+    }
+
+
+def build_fake_plan(brief: object) -> dict[str, object]:
+    """Produce ten input-derived structured Shots for APP_ENV=test only."""
+    brief_body = brief if isinstance(brief, dict) else {}
+    logline = _fixture_text(
+        brief_body.get("logline"),
+        fallback=_fixture_text(brief, fallback="A protagonist confronts a difficult choice."),
+    )
+    title = _fixture_text(brief_body.get("title"), fallback="Generated episode")
+    world = _fixture_text(brief_body.get("world"), fallback="the story setting")
+    protagonist_raw = brief_body.get("protagonist")
+    protagonist = protagonist_raw if isinstance(protagonist_raw, dict) else {}
+    lead = _fixture_text(protagonist.get("name"), fallback="the lead")
+    shots: list[dict[str, object]] = []
+    shot_types = ("wide", "medium", "close", "over_shoulder", "insert")
+    camera_moves = ("static", "push_in", "tracking", "pan", "handheld")
+    for number in range(1, 11):
+        scene_number = 1 if number <= 5 else 2
+        location = "the initial setting" if scene_number == 1 else "the pressure point"
+        story_beat = (
+            "establishes the situation"
+            if number == 1
+            else "ends on the unresolved turn"
+            if number == 10
+            else "advances the consequence of the previous choice"
+        )
+        shots.append(
+            {
+                "shot_number": number,
+                "scene_number": scene_number,
+                "location": location,
+                "time_of_day": "story time",
+                "shot_type": shot_types[(number - 1) % len(shot_types)],
+                "camera_move": camera_moves[(number - 1) % len(camera_moves)],
+                "visual_description": (
+                    f"Shot {number}: {lead} {story_beat} in {location}; composition makes "
+                    f"the premise '{logline}' readable."
+                ),
+                "dialogue": "" if number % 2 else f"Beat {number} clarifies the next choice.",
+                "keyframe_prompt": (
+                    f"9:16 cinematic short drama, shot {number}, {lead}, {location}, "
+                    f"story premise: {logline}, setting: {world}, clear action, "
+                    "consistent appearance, motivated lighting"
+                ),
+                "duration_seconds": 3.0,
+            }
+        )
+    return {
+        "title": f"{title} - Episode 1",
+        "episode_summary": logline,
+        "visual_bible": {
+            "aspect_ratio": "9:16",
+            "style": _fixture_text(
+                brief_body.get("visual_style"),
+                fallback="cinematic vertical drama",
+            ),
+            "color_palette": "story-appropriate contrast with readable skin tones",
+            "lighting": "motivated practical light that supports the story beat",
+            "character_continuity": f"{lead} retains a consistent appearance across all shots",
+            "negative_prompt": "deformed face, extra fingers, text, watermark",
+        },
+        "shots": shots,
+    }
 
 
 class FakeOpenAIAdapter:
@@ -20,21 +116,15 @@ class FakeOpenAIAdapter:
         kind = str(request.get("kind") or "brief")
         prompt = str(request.get("prompt") or "")
         if kind == "plan":
-            from app.creation.service import _fake_plan
-
-            text = __import__("json").dumps(
-                _fake_plan("A heroine faces neon rain and a shadow stalker."),
+            text = json.dumps(
+                build_fake_plan(request.get("brief") or request.get("idea") or prompt),
                 ensure_ascii=False,
             )
         else:
-            from app.creation.service import _fake_brief
-
-            text = __import__("json").dumps(
-                _fake_brief("a heroine faces neon rain and a shadow stalker"),
+            text = json.dumps(
+                build_fake_brief(request.get("idea") or prompt),
                 ensure_ascii=False,
             )
-        if "Return ONLY" not in prompt and not prompt:
-            text = str(request.get("prompt") or text)
         self._tasks[task_id] = {"status": "succeeded", "text": text}
         return {"remote_task_id": task_id, "status": "succeeded", "text": text}
 

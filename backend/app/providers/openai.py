@@ -1,4 +1,4 @@
-"""Text LLM adapter: Anthropic Messages or OpenAI Chat Completions BYOK.
+"""Text LLM adapter for Anthropic Messages and OpenAI Chat Completions BYOK.
 
 Default export remains FakeOpenAIAdapter for unit tests without keys.
 Never logs full API keys or full prompt/response bodies.
@@ -16,12 +16,18 @@ from app.providers.fake import FakeOpenAIAdapter
 
 
 class AnthropicCompatibleTextAdapter:
-    """Anthropic-style POST {base}/v1/messages (or {base}/messages)."""
+    """POST to the configured text LLM API style without exposing request contents."""
 
     provider = "openai"
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._settings = settings or get_settings()
+        self._transport = transport
         self.calls: list[dict[str, Any]] = []
         self._tasks: dict[str, dict[str, Any]] = {}
 
@@ -30,15 +36,25 @@ class AnthropicCompatibleTextAdapter:
 
     def _headers(self) -> dict[str, str]:
         key = self._settings.text_llm_api_key.strip()
+        if self._settings.text_llm_api_style == "openai":
+            return {
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            }
         return {
             "x-api-key": key,
-            "Authorization": f"Bearer {key}",
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
 
     def _messages_url(self) -> str:
         base = self._settings.text_llm_base_url.rstrip("/")
+        if self._settings.text_llm_api_style == "openai":
+            if base.endswith("/chat/completions"):
+                return base
+            if base.endswith("/v1"):
+                return f"{base}/chat/completions"
+            return f"{base}/v1/chat/completions"
         if base.endswith("/messages"):
             return base
         if base.endswith("/v1"):
@@ -59,7 +75,10 @@ class AnthropicCompatibleTextAdapter:
             "messages": [{"role": "user", "content": prompt}],
         }
         url = self._messages_url()
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(
+            timeout=120.0,
+            transport=self._transport,
+        ) as client:
             resp = await client.post(url, headers=self._headers(), json=body)
             try:
                 data = resp.json()
@@ -69,7 +88,7 @@ class AnthropicCompatibleTextAdapter:
                 err = f"text_llm http {resp.status_code}: {str(data)[:160]}"
                 self._tasks[task_id] = {"status": "failed", "error": err, "text": ""}
                 return {"remote_task_id": task_id, "status": "failed", "error": err}
-            text_out = _extract_anthropic_text(data)
+            text_out = _extract_text(data)
             self._tasks[task_id] = {
                 "status": "succeeded",
                 "text": text_out,
@@ -112,7 +131,7 @@ class AnthropicCompatibleTextAdapter:
         }
 
 
-def _extract_anthropic_text(data: object) -> str:
+def _extract_text(data: object) -> str:
     if not isinstance(data, dict):
         return str(data)[:2000]
     content = data.get("content")
