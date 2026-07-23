@@ -44,56 +44,17 @@ const NODES = [
   "continuity_review",
 ] as const;
 
-const GOLDEN_SCRIPT = `# Episode 1 — Neon Rain Lead
+const SCRIPT_TEMPLATE = `# Episode 1 - Untitled
 
-Lead: Lin Xia
+Lead: Lead Name
 
-## Scene 1 — Neon alley / night
-Opening rain.
+## Scene 1 - Location / day
+Story beat.
 
-### Shot 1 — wide
-Visual: neon rain street wide establishing, Lin Xia silhouette
-Dialogue: (none)
-
-### Shot 2 — medium
-Visual: Lin Xia medium shot, wet jacket, neon rain street
-Dialogue: The city never sleeps.
-
-### Shot 3 — close
-Visual: close-up Lin Xia eyes, rain drops
-Dialogue: I know what I saw.
-
-## Scene 2 — Underpass market / night
-
-### Shot 4 — tracking
-Visual: tracking Lin Xia through underpass market
-Dialogue: Don't look back.
-
-### Shot 5 — over_shoulder
-Visual: over shoulder stranger watching Lin Xia
-Dialogue: Found you.
-
-### Shot 6 — insert
-Visual: insert phone map pin neon rain street
-Dialogue: (none)
-
-### Shot 7 — medium
-Visual: Lin Xia confronts stranger under tube light
-Dialogue: Who sent you?
-
-## Scene 3 — Rooftop / dawn
-
-### Shot 8 — wide
-Visual: rooftop wide dawn skyline face off
-Dialogue: It ends here.
-
-### Shot 9 — close
-Visual: close Lin Xia face determined
-Dialogue: Tell them I refuse.
-
-### Shot 10 — wide
-Visual: final wide neon rain street far below
-Dialogue: (none)
+### Shot 1 - medium
+Visual: describe the subject, action, composition, and story beat
+Dialogue:
+Camera: static
 `;
 
 function statusClass(status: string): string {
@@ -157,6 +118,8 @@ function ProductionPage() {
   const [downloadHint, setDownloadHint] = useState<string | null>(null);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [opBusy, setOpBusy] = useState(false);
+  const [scriptFilename, setScriptFilename] = useState("script.md");
+  const [scriptText, setScriptText] = useState(SCRIPT_TEMPLATE);
 
   const snapshot = useQuery({
     queryKey: ["snapshot", projectId],
@@ -173,7 +136,9 @@ function ProductionPage() {
   const importMut = useMutation({
     mutationFn: async () => {
       if (projectId === "demo") throw new Error("请从大厅创建真实项目");
-      return importScript(projectId, "p0_10_shots.md", GOLDEN_SCRIPT, true);
+      const text = scriptText.trim();
+      if (!text) throw new Error("请输入或上传剧本文本");
+      return importScript(projectId, scriptFilename.trim() || "script.md", text, true);
     },
     onSuccess: async (r) => {
       setMsg(
@@ -309,6 +274,41 @@ function ProductionPage() {
         ))}
       </div>
 
+      <div className="script-import-panel">
+        <label>
+          Script file
+          <input
+            type="file"
+            accept=".md,.txt,text/markdown,text/plain"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              void file.text().then((text) => {
+                setScriptFilename(file.name);
+                setScriptText(text);
+              });
+            }}
+          />
+        </label>
+        <label>
+          Filename
+          <input
+            value={scriptFilename}
+            onChange={(event) => setScriptFilename(event.target.value)}
+            maxLength={260}
+          />
+        </label>
+        <label>
+          Script
+          <textarea
+            value={scriptText}
+            onChange={(event) => setScriptText(event.target.value)}
+            rows={10}
+            spellCheck={false}
+          />
+        </label>
+      </div>
+
       <div className="toolbar">
         <button
           type="button"
@@ -317,7 +317,7 @@ function ProductionPage() {
           onClick={() => importMut.mutate()}
           disabled={importMut.isPending}
         >
-          {importMut.isPending ? "导入中…" : "① 导入 10 Shot 冻结剧本"}
+          {importMut.isPending ? "导入中…" : "① 导入剧本"}
         </button>
         <button
           type="button"

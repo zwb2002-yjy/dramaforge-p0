@@ -28,6 +28,7 @@ function HomePage() {
   const [email, setEmail] = useState(`creator-${Date.now()}@example.com`);
   const [password, setPassword] = useState("password123");
   const [name, setName] = useState("霓虹雨夜 · 试产项目");
+  const [idea, setIdea] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const bootstrap = useMutation({
@@ -43,7 +44,7 @@ function HomePage() {
         organization_id: org.id,
         name,
         aspect_ratio: "9:16",
-        idea: "neon rain short drama",
+        idea,
       });
       return project;
     },
@@ -133,6 +134,15 @@ function HomePage() {
           <label>
             项目名称
             <input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label>
+            创意
+            <textarea
+              value={idea}
+              onChange={(e) => setIdea(e.target.value)}
+              rows={3}
+              placeholder="输入本次短剧的创意"
+            />
           </label>
           <div className="toolbar">
             <button className="primary" type="submit" disabled={bootstrap.isPending || !apiLive}>

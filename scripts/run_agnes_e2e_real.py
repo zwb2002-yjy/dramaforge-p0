@@ -13,6 +13,7 @@ Flow:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
@@ -52,6 +53,35 @@ def short_uri(uri: object, n: int = 140) -> object:
 
 
 async def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Real Agnes provider smoke. This is not P0 completion evidence."
+    )
+    parser.add_argument(
+        "--idea",
+        required=True,
+        help="Creative input for the real provider and local pipeline probes.",
+    )
+    parser.add_argument(
+        "--image-prompt",
+        default=None,
+        help="Optional keyframe prompt; defaults to a neutral prompt derived from --idea.",
+    )
+    parser.add_argument(
+        "--video-prompt",
+        default=None,
+        help="Optional video prompt; defaults to a neutral prompt derived from --idea.",
+    )
+    args = parser.parse_args()
+    idea = args.idea.strip()
+    if not idea:
+        parser.error("--idea must not be empty")
+    image_prompt = (args.image_prompt or f"Cinematic short-drama keyframe: {idea}").strip()
+    video_prompt = (
+        args.video_prompt or f"Cinematic short-drama video, slow camera movement: {idea}"
+    ).strip()
+    if not image_prompt or not video_prompt:
+        parser.error("--image-prompt and --video-prompt must not be empty when provided")
+
     clear_settings_cache()
     settings = Settings(_env_file=str(env_path) if env_path.is_file() else None)
     key = settings.agnes_api_key
@@ -62,6 +92,12 @@ async def main() -> int:
         "video_model": settings.agnes_video_model,
         "configured": settings.agnes_configured(),
         "key_prefix": (key[:7] + "...") if key else "",
+        "inputs": {
+            "idea": idea,
+            "image_prompt_length": len(image_prompt),
+            "video_prompt_length": len(video_prompt),
+        },
+        "scope": "provider smoke; not P0 completion evidence",
         "steps": {},
     }
     if not settings.agnes_configured():
@@ -95,12 +131,8 @@ async def main() -> int:
         print("models failed", report["steps"]["models"])
 
     # 1) Image via Adapter
-    prompt = (
-        "Cinematic short-drama keyframe: young woman under neon rain at night, "
-        "wet streets reflections, 9:16 vertical, photorealistic"
-    )
     print("=== 1) Real image via get_flux_adapter() ===")
-    img_create = await img_adapter.create({"prompt": prompt, "kind": "keyframe"})
+    img_create = await img_adapter.create({"prompt": image_prompt, "kind": "keyframe"})
     report["steps"]["image_create"] = {
         "status": img_create.get("status"),
         "remote_task_id": img_create.get("remote_task_id"),
@@ -122,9 +154,7 @@ async def main() -> int:
     print("=== 2) Real video via get_kling_adapter() ===")
     v_create = await vid_adapter.create(
         {
-            "prompt": (
-                "Slow push-in on neon rain street scene, cinematic short drama, 2-3 seconds"
-            ),
+            "prompt": video_prompt,
             "kind": "video",
         }
     )
@@ -203,7 +233,7 @@ async def main() -> int:
             result = await pipeline.run(
                 project_id=project.id,
                 user_id=user.id,
-                idea="neon rain short drama opening shot",
+                idea=idea,
                 authorized_text=True,
                 authorized_image=True,
                 materialization_ops=["create_shot_stub", "enqueue_keyframe"],

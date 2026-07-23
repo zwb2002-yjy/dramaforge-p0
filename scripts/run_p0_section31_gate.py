@@ -31,6 +31,18 @@ from evidence_context import (
 )
 
 REPO = Path(__file__).resolve().parents[1]
+REQUIRED_NODES = (
+    "prompt",
+    "keyframe",
+    "face_review",
+    "video",
+    "video_drift_review",
+    "voice",
+    "subtitle",
+    "composite",
+    "continuity_review",
+)
+DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
 
 
 @dataclass
@@ -62,6 +74,97 @@ def record_check(checks: list[Check], candidate: Check) -> None:
     checks.append(candidate)
 
 
+def evaluate_multishot_snapshot(
+    *,
+    shots: list[dict[str, Any]],
+    runs: list[dict[str, Any]],
+    artifacts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Evaluate ten independent final shot pipelines and their Artifact lineage."""
+    artifact_by_id = {str(artifact.get("id")): artifact for artifact in artifacts}
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    for run in runs:
+        snapshot = run.get("input_snapshot") or {}
+        shot_id = str(snapshot.get("shot_id") or "")
+        node_key = str(snapshot.get("node_key") or "")
+        if not shot_id or node_key not in REQUIRED_NODES:
+            continue
+        key = (shot_id, node_key)
+        previous = latest.get(key)
+        if previous is None or int(run.get("attempt_no", 0)) > int(
+            previous.get("attempt_no", 0)
+        ):
+            latest[key] = run
+
+    qualifying_shots: list[str] = []
+    missing: list[str] = []
+    bad_lineage: list[str] = []
+    lineage_by_shot: dict[str, tuple[list[str], list[str]]] = {}
+    for shot in shots:
+        shot_id = str(shot.get("id") or "")
+        shot_missing = False
+        shot_artifact_ids: list[str] = []
+        shot_object_keys: list[str] = []
+        for node_key in REQUIRED_NODES:
+            run = latest.get((shot_id, node_key))
+            if run is None or run.get("status") not in DONE_STATUSES:
+                missing.append(f"{shot_id}:{node_key}")
+                shot_missing = True
+                continue
+            artifact_id = str(run.get("result_artifact_id") or "")
+            artifact = artifact_by_id.get(artifact_id)
+            object_key = str(artifact.get("object_key") or "") if artifact else ""
+            if (
+                not artifact
+                or str(artifact.get("produced_by_run_id") or "") != str(run.get("id"))
+                or not object_key
+            ):
+                bad_lineage.append(f"{shot_id}:{node_key}")
+                shot_missing = True
+                continue
+            shot_artifact_ids.append(artifact_id)
+            shot_object_keys.append(object_key)
+        if not shot_missing and len(shot_artifact_ids) == len(REQUIRED_NODES):
+            qualifying_shots.append(shot_id)
+            lineage_by_shot[shot_id] = (shot_artifact_ids, shot_object_keys)
+
+    reviewed_shot_ids = {
+        str(shot.get("id") or "")
+        for shot in shots
+        if shot.get("status") == "review_passed"
+    }
+    reviewed_qualifying_shots = [
+        shot_id for shot_id in qualifying_shots if shot_id in reviewed_shot_ids
+    ]
+    selected_artifact_ids: set[str] = set()
+    selected_object_keys: set[str] = set()
+    for shot_id in reviewed_qualifying_shots:
+        artifact_ids, object_keys = lineage_by_shot[shot_id]
+        selected_artifact_ids.update(artifact_ids)
+        selected_object_keys.update(object_keys)
+    expected_unique_outputs = len(reviewed_qualifying_shots) * len(REQUIRED_NODES)
+
+    return {
+        "shot_count": len(shots),
+        "qualifying_shots": len(qualifying_shots),
+        "qualifying_shot_ids": qualifying_shots,
+        "reviewed_qualifying_shots": len(reviewed_qualifying_shots),
+        "required_nodes": len(REQUIRED_NODES),
+        "required_run_count": len(qualifying_shots) * len(REQUIRED_NODES),
+        "missing_or_incomplete": missing,
+        "bad_lineage": bad_lineage,
+        "unique_artifact_ids": len(selected_artifact_ids),
+        "unique_object_keys": len(selected_object_keys),
+        "expected_unique_outputs": expected_unique_outputs,
+        "failed_runs": len([run for run in runs if run.get("status") == "failed"]),
+        "independent_90_ok": (
+            len(reviewed_qualifying_shots) >= 10
+            and len(selected_artifact_ids) == expected_unique_outputs
+            and len(selected_object_keys) == expected_unique_outputs
+        ),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8010")
@@ -74,8 +177,8 @@ def main() -> int:
     ap.add_argument(
         "--script-fixture",
         type=Path,
-        default=REPO / "fixtures" / "scripts" / "p0_10_shots.md",
-        help="Script file to import for the P0 ten-shot probe.",
+        default=None,
+        help="Explicit script file to import for the P0 ten-shot probe; omitted input is BLOCKED.",
     )
     ap.add_argument(
         "--evidence",
@@ -96,7 +199,7 @@ def main() -> int:
     if not probe_idea:
         ap.error("--probe-idea must not be empty")
     script_fixture = args.script_fixture
-    if not script_fixture.is_absolute():
+    if script_fixture is not None and not script_fixture.is_absolute():
         script_fixture = (Path.cwd() / script_fixture).resolve()
     checks: list[Check] = []
     evidence_path = args.evidence or (
@@ -399,7 +502,7 @@ def main() -> int:
                 {
                     "brief_revision_id": rev_id,
                     "plan": {
-                        "prompt": "cinematic neon rain keyframe 9:16, lead silhouette"
+                        "prompt": f"{probe_idea} keyframe, lead subject, 9:16 composition"
                     },
                 },
             )
@@ -420,7 +523,10 @@ def main() -> int:
         # Lead character
         r = post(
             f"/api/v1/projects/{project_id}/characters/lead",
-            {"name": "林夏", "locked_prompt": "consistent face lead portrait"},
+            {
+                "name": "Gate Lead",
+                "locked_prompt": f"consistent face portrait reference for {probe_idea}",
+            },
         )
         if r.status_code in (200, 201):
             add("3.1.9", "主角 canonical Reference", "PASS", r.json().get("canonical_object_key", "")[:80])
@@ -442,7 +548,7 @@ def main() -> int:
             add("3.1.9", "主角 canonical Reference", "FAIL", f"{r.status_code} {r.text[:240]}")
 
         # Script import 10 shots
-        if script_fixture.is_file():
+        if script_fixture is not None and script_fixture.is_file():
             text = script_fixture.read_text(encoding="utf-8")
             r = post(
                 f"/api/v1/projects/{project_id}/scripts/import",
@@ -465,8 +571,8 @@ def main() -> int:
             add(
                 "3.1.8",
                 "导入剧本 ≥10 Shot",
-                "FAIL",
-                f"missing script fixture {script_fixture}",
+                "BLOCKED",
+                "explicit --script-fixture is required; no implicit sample script is used",
             )
 
         # Snapshot / shots list
@@ -496,15 +602,6 @@ def main() -> int:
             add("3.1.5", "Outbox/Arq dispatch", "BLOCKED", str(exc))
 
         # 3.1.10 — require 10 shots, full required nodes, zero failed, artifacts + review_passed
-        REQUIRED_NODES = {
-            "keyframe",
-            "face_review",
-            "video",
-            "voice",
-            "subtitle",
-            "composite",
-            "continuity_review",
-        }
         try:
             r = client.get(f"/api/v1/projects/{project_id}/snapshot", cookies=cookies)
             shots_r = client.get(f"/api/v1/projects/{project_id}/shots", cookies=cookies)
@@ -513,38 +610,27 @@ def main() -> int:
                 shots = shots_r.json() if isinstance(shots_r.json(), list) else []
                 runs = snap.get("node_runs") or []
                 arts = snap.get("artifacts") or []
-                n_shots = len(shots)
-                approved = [s for s in shots if s.get("status") == "review_passed"]
-                failed_runs = [x for x in runs if x.get("status") == "failed"]
-                done = {"completed", "cached", "completed_after_cancel"}
-                # Per-shot: every required node has a done run
-                per_shot_ok = 0
-                for s in shots:
-                    sid = str(s.get("id"))
-                    shot_runs = [
-                        x
-                        for x in runs
-                        if (x.get("input_snapshot") or {}).get("shot_id") == sid
-                        or sid in str(x.get("idempotency_key") or "")
-                    ]
-                    keys_done = {
-                        (x.get("input_snapshot") or {}).get("node_key")
-                        for x in shot_runs
-                        if x.get("status") in done
-                    }
-                    if REQUIRED_NODES.issubset(keys_done):
-                        per_shot_ok += 1
+                integrity = evaluate_multishot_snapshot(
+                    shots=shots,
+                    runs=runs,
+                    artifacts=arts,
+                )
                 tight_ok = (
-                    n_shots >= 10
-                    and per_shot_ok >= 10
-                    and len(failed_runs) == 0
-                    and len(arts) >= 10
-                    and len(approved) >= 10
+                    integrity["shot_count"] >= 10
+                    and integrity["qualifying_shots"] >= 10
+                    and integrity["reviewed_qualifying_shots"] >= 10
+                    and integrity["failed_runs"] == 0
+                    and integrity["independent_90_ok"]
                 )
                 detail = (
-                    f"shots={n_shots} full_pipeline={per_shot_ok} "
-                    f"failed_runs={len(failed_runs)} arts={len(arts)} "
-                    f"review_passed={len(approved)}"
+                    f"shots={integrity['shot_count']} "
+                    f"full_pipeline={integrity['qualifying_shots']} "
+                    f"reviewed_full_pipeline={integrity['reviewed_qualifying_shots']} "
+                    f"failed_runs={integrity['failed_runs']} "
+                    f"unique_artifacts={integrity['unique_artifact_ids']} "
+                    f"unique_object_keys={integrity['unique_object_keys']} "
+                    f"bad_lineage={len(integrity['bad_lineage'])} "
+                    f"missing={len(integrity['missing_or_incomplete'])}"
                 )
                 if tight_ok:
                     add("3.1.10", "10 Shot 全必需节点+审核+产物", "PASS", detail)
@@ -553,7 +639,7 @@ def main() -> int:
                         "3.1.10",
                         "10 Shot 全必需节点+零失败+逐 Shot 审核/产物",
                         "BLOCKED",
-                        detail + " (not runs>=10&&arts>=1 weak gate)",
+                        detail + " (requires 10 Shot x 9 independent final Artifacts)",
                     )
             else:
                 add(
@@ -684,6 +770,7 @@ def main() -> int:
             ev = json.loads(evidence_path.read_text(encoding="utf-8"))
             fin = ev.get("final") or {}
             lineage = ev.get("lineage") or {}
+            inputs = ev.get("inputs") or {}
             source_errors = evidence_source_errors(
                 ev,
                 expected_commit=source_commit,
@@ -701,6 +788,10 @@ def main() -> int:
                 and ev.get("ok") is True
                 and ev.get("agent_workflow") is True
                 and ev.get("manual_media_count") == 0
+                and tuple(ev.get("required_nodes") or []) == REQUIRED_NODES
+                and bool(str(inputs.get("idea") or "").strip())
+                and bool(str(inputs.get("lead_name") or "").strip())
+                and bool(str(inputs.get("lead_prompt_sha256") or "").strip())
                 and lineage.get("manual_runs") == 0
                 and lineage.get("missing_or_incomplete") == []
                 and lineage.get("bad_lineage") == []
@@ -749,6 +840,8 @@ def main() -> int:
                     "BLOCKED",
                     (
                         f"agent_workflow={ev.get('agent_workflow')} "
+                        f"required_nodes={ev.get('required_nodes')} "
+                        f"inputs_present={bool(inputs)} "
                         f"manual_media_count={ev.get('manual_media_count')} "
                         f"manual_runs={lineage.get('manual_runs')} "
                         f"unique_artifact_ids={lineage.get('unique_artifact_ids')} "
