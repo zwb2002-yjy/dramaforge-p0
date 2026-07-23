@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.access.models import Organization, OrganizationMember, User
@@ -157,7 +157,18 @@ async def test_agent_ten_shot_async_product_path(pg_session: AsyncSession) -> No
     reset_object_store_for_tests()
     store = get_object_store()
     worker = WorkerRuntime(pg_session)
-    await worker.process_queued(limit=20)
+    async def run_current_project_nodes(node_run_ids: list[UUID]) -> None:
+        """Keep this evidence run isolated from historical queued database work."""
+        for node_run_id in node_run_ids:
+            await set_rls_context(
+                pg_session,
+                user_id=user.id,
+                project_id=started.project_id,
+            )
+            assert await worker.process_one(node_run_id)
+
+    await run_current_project_nodes(confirmed.node_run_ids)
+    queued_node_run_ids: list[UUID] = []
     for shot_id in confirmed.shot_ids:
         queued = await start_shot_nodes(
             pg_session,
@@ -166,8 +177,9 @@ async def test_agent_ten_shot_async_product_path(pg_session: AsyncSession) -> No
             user_id=user.id,
         )
         assert len(queued) == len(SHOT_NODES) - 1
+        queued_node_run_ids.extend(queued)
     await pg_session.commit()
-    await worker.process_queued(limit=100)
+    await run_current_project_nodes(queued_node_run_ids)
 
     runs = (
         await pg_session.execute(
