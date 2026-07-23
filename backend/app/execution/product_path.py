@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import dataclass
 from decimal import Decimal
@@ -363,38 +364,6 @@ async def execute_media_node_run(
     kind = node_type
     create = await adapter.create({"prompt": prompt, "kind": kind})
     remote = str(create.get("remote_task_id") or uuid4())
-    # Video may stay queued — poll a few times when not immediate
-    poll = await adapter.poll(remote)
-    for _ in range(40):
-        status = str(poll.get("status", "failed"))
-        if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
-            break
-        import asyncio
-
-        await asyncio.sleep(3.0)
-        poll = await adapter.poll(remote)
-    cost = await adapter.fetch_cost(remote)
-    status = str(poll.get("status", "failed"))
-    if status not in {"succeeded", "completed", "success"}:
-        run.status = "failed"
-        run.error_code = "PROVIDER_FAILED"
-        run.error_summary = str(poll.get("error") or status)[:500]
-        run.finished_at = datetime.now(UTC)
-        await session.flush()
-        raise ValidationAppError(f"PROVIDER_FAILED: {run.error_summary}")
-
-    adapter_blobs = getattr(adapter, "blobs", {})
-    if remote in adapter_blobs:
-        data = adapter_blobs[remote]
-    else:
-        uri = poll.get("artifact_uri") or create.get("artifact_uri")
-        data = await _resolve_media_bytes(kind=kind, remote=remote, prompt=prompt, artifact_uri=uri)
-
-    # Node-specific mime / key
-    mime, ext, art_type = _mime_for_node(node_type)
-    object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
-    stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
-
     from app.config import get_settings
 
     _settings = get_settings()
@@ -418,14 +387,74 @@ async def execute_media_node_run(
         actual_model=model_name,
         provider_operation_id=remote,
         request_fingerprint=hashlib.sha256(f"{kind}:{prompt}".encode()).hexdigest(),
-        status="succeeded",
+        status="submitted",
         request_summary={"kind": kind},
-        response_summary={"status": status},
-        provider_cost=Decimal(str(cost.get("amount", 0.0))),
-        currency=str(cost.get("currency", "USD")),
+        response_summary={"create_status": str(create.get("status", "unknown"))},
+        submitted_at=datetime.now(UTC),
     )
     session.add(op)
     await session.flush()
+
+    # Provider video tasks can stay running for several minutes. Keep polling
+    # inside the heavy worker's 30-minute job budget; never submit a second task.
+    poll_timeout_s = 1_620.0 if node_type in {"video", "video_review", "composite"} else 120.0
+    poll_interval_s = 5.0 if node_type in {"video", "video_review", "composite"} else 3.0
+    deadline = asyncio.get_running_loop().time() + poll_timeout_s
+    poll: dict[str, object] = {"status": str(create.get("status", "queued"))}
+    poll_count = 0
+    while True:
+        poll = await adapter.poll(remote)
+        poll_count += 1
+        status = str(poll.get("status", "failed"))
+        op.last_polled_at = datetime.now(UTC)
+        if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
+            break
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            status = "failed"
+            poll = {
+                **poll,
+                "status": status,
+                "error": f"timeout waiting for provider task after {poll_timeout_s:.0f}s",
+            }
+            break
+        await asyncio.sleep(min(poll_interval_s, remaining))
+
+    cost = await adapter.fetch_cost(remote)
+    status = str(poll.get("status", "failed"))
+    op.provider_cost = Decimal(str(cost.get("amount", 0.0)))
+    op.currency = str(cost.get("currency", "USD"))
+    op.response_summary = {
+        "create_status": str(create.get("status", "unknown")),
+        "final_status": status,
+        "poll_count": poll_count,
+    }
+    if status not in {"succeeded", "completed", "success"}:
+        error_summary = str(poll.get("error") or status)[:500]
+        op.status = "failed"
+        op.error_code = "PROVIDER_FAILED"
+        op.error_summary = error_summary
+        op.completed_at = datetime.now(UTC)
+        run.status = "failed"
+        run.error_code = "PROVIDER_FAILED"
+        run.error_summary = error_summary
+        run.finished_at = datetime.now(UTC)
+        await session.flush()
+        raise ValidationAppError(f"PROVIDER_FAILED: {error_summary}")
+
+    op.status = "succeeded"
+    op.completed_at = datetime.now(UTC)
+    adapter_blobs = getattr(adapter, "blobs", {})
+    if remote in adapter_blobs:
+        data = adapter_blobs[remote]
+    else:
+        uri = poll.get("artifact_uri") or create.get("artifact_uri")
+        data = await _resolve_media_bytes(kind=kind, remote=remote, prompt=prompt, artifact_uri=uri)
+
+    # Node-specific mime / key
+    mime, ext, art_type = _mime_for_node(node_type)
+    object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
+    stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
 
     art = await get_or_create_artifact(
         session,
