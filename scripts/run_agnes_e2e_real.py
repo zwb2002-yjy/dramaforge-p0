@@ -195,8 +195,10 @@ async def main() -> int:
         from app.providers.fake import FakeOpenAIAdapter
         from app.shared.base import Base
         from app.shared.enums import MemberRole
+        from app.shared.model_registry import load_all_models
         from app.shared.security import hash_password
 
+        load_all_models()
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with engine.begin() as conn:
