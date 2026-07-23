@@ -19,6 +19,21 @@ import httpx
 REPO = Path(__file__).resolve().parents[1]
 
 
+def summarize_download_grant(response: httpx.Response) -> dict[str, object]:
+    """Keep an auditable authorization result without persisting its bearer token."""
+    summary: dict[str, object] = {"status": response.status_code}
+    if response.status_code not in (200, 201):
+        return summary
+    try:
+        body = response.json()
+    except ValueError:
+        return summary
+    summary["granted"] = bool(body.get("token"))
+    if body.get("expires_at") is not None:
+        summary["expires_at"] = body["expires_at"]
+    return summary
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8010")
@@ -66,7 +81,7 @@ def main() -> int:
 
     out: dict = {
         "scope": "single-shot live scheduler probe; not P0 completion evidence",
-        "inputs": {"idea": idea, "script_file": script_file.name},
+        "inputs": {"idea_length": len(idea), "script_file": script_file.name},
         "steps": [],
     }
 
@@ -221,7 +236,7 @@ def main() -> int:
             f"/api/v1/projects/{project_id}/exports/{export_id}/download-grant?object_role=timeline_json",
             {},
         )
-        exp["grant"] = {"status": g.status_code, "body": g.text[:300]}
+        exp["grant"] = summarize_download_grant(g)
         if g.status_code in (200, 201):
             tok = g.json().get("token")
             dl = client.get(
@@ -252,7 +267,7 @@ def main() -> int:
                 headers={"X-CSRF-Token": t2, "Content-Type": "application/json"},
                 json={},
             )
-            exp["package_grant"] = {"status": g2.status_code, "body": g2.text[:300]}
+            exp["package_grant"] = summarize_download_grant(g2)
             if g2.status_code in (200, 201):
                 tok2 = g2.json().get("token")
                 key = g2.json().get("object_key", "")

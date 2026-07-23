@@ -70,7 +70,7 @@ def main() -> int:
         "scope": "ten-shot Worker evidence; not a substitute for Agent evidence",
         "inputs": {
             "project_name": project_name,
-            "idea": idea,
+            "idea_length": len(idea),
             "script_file": script_file.name,
         },
         "n_requested": shot_count,

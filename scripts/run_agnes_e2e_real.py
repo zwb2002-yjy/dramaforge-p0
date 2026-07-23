@@ -91,9 +91,8 @@ async def main() -> int:
         "image_model": settings.agnes_image_model,
         "video_model": settings.agnes_video_model,
         "configured": settings.agnes_configured(),
-        "key_prefix": (key[:7] + "...") if key else "",
         "inputs": {
-            "idea": idea,
+            "idea_length": len(idea),
             "image_prompt_length": len(image_prompt),
             "video_prompt_length": len(video_prompt),
         },
@@ -317,7 +316,8 @@ async def main() -> int:
             "Not P0 Gate complete (no Docker PG/RLS, live FFmpeg MP4, or 01§3.1)."
         ),
     }
-    out = REPO / "docs" / "acceptance" / "agnes_e2e_real_latest.json"
+    out = REPO / "tmp" / "provider-smoke" / "agnes_e2e_real.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(report, indent=2, ensure_ascii=False)
     text = redact(text, key)
     out.write_text(text + "\n", encoding="utf-8")

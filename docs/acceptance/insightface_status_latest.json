@@ -1,8 +1,0 @@
-{
-  "available": true,
-  "embedding_dim": 512,
-  "error": null,
-  "backend": "insightface+onnx",
-  "verified_on": "wsl-Ubuntu-24.04",
-  "embedding_smoke": "embedding_ok 512 from character_canonical fixture"
-}
