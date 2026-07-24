@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from app.execution.models import NodeRun
 from app.config import clear_settings_cache
+from app.execution.models import NodeRun
 from app.shared.errors import ValidationAppError
 from app.workers.jobs import execute_node_run
 from app.workers.main import describe_worker, main
