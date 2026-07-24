@@ -393,6 +393,8 @@ async def execute_media_node_run(
     # Produce media bytes by node type via Adapter contract
     kind = node_type
     create = await adapter.create({"prompt": prompt, "kind": kind})
+    create_status = str(create.get("status", "unknown"))
+    create_failed = create_status in {"failed", "error", "cancelled"}
     remote = str(create.get("remote_task_id") or uuid4())
     from app.config import get_settings
 
@@ -415,15 +417,33 @@ async def execute_media_node_run(
         operation_kind=f"{node_type}.generate",
         actual_provider=provider_name,
         actual_model=model_name,
-        provider_operation_id=remote,
+        provider_operation_id=None if create_failed else remote,
         request_fingerprint=hashlib.sha256(f"{kind}:{prompt}".encode()).hexdigest(),
         status="submitted",
         request_summary={"kind": kind},
-        response_summary={"create_status": str(create.get("status", "unknown"))},
+        response_summary={"create_status": create_status},
         submitted_at=datetime.now(UTC),
     )
     session.add(op)
     await session.flush()
+
+    if create_failed:
+        create_error = str(create.get("error") or "provider rejected task creation")[:500]
+        op.status = "failed"
+        op.error_code = "PROVIDER_CREATE_FAILED"
+        op.error_summary = create_error
+        op.response_summary = {
+            "create_status": create_status,
+            "create_error": create_error[:300],
+        }
+        op.completed_at = datetime.now(UTC)
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="PROVIDER_CREATE_FAILED",
+            error_summary=create_error,
+        )
+        raise ValidationAppError(f"PROVIDER_CREATE_FAILED: {create_error}")
 
     # Provider video tasks can stay running for several minutes. Keep polling
     # inside the heavy worker's 30-minute job budget; never submit a second task.
