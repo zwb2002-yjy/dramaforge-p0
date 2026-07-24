@@ -7,10 +7,14 @@ Otherwise falls back to a no-op shell (S4 real path still needs freeze Gate).
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
-from app.config import get_settings
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import Settings, get_settings
 from app.providers.agnes import AgnesVideoAdapter
 from app.providers.fake import FakeFluxAdapter
+from app.providers.organization_credentials import settings_for_organization_provider
 
 
 class FakeKlingAdapter:
@@ -35,11 +39,16 @@ class FakeKlingAdapter:
         return {"amount": 0.0, "currency": "USD", "units": 0.0}
 
 
-def get_kling_adapter(*, allow_live: bool = False, allow_fake: bool = False) -> Any:
+def get_kling_adapter(
+    *,
+    allow_live: bool = False,
+    allow_fake: bool = False,
+    settings: Settings | None = None,
+) -> Any:
     """Video adapter. Formal path fails closed without Agnes; Fake only in test/allow_fake."""
     from app.providers.flux import ProviderNotConfiguredError
 
-    settings = get_settings()
+    settings = settings or get_settings()
     if settings.app_env == "test" and not allow_live:
         return FakeKlingAdapter()
     if settings.agnes_configured():
@@ -49,6 +58,28 @@ def get_kling_adapter(*, allow_live: bool = False, allow_fake: bool = False) -> 
     raise ProviderNotConfiguredError(
         "provider_not_configured: video Provider (Agnes/Kling) not configured. "
         "Set AGNES_ENABLED + AGNES_API_KEY, or use audited manual media upload."
+    )
+
+
+async def get_kling_adapter_for_organization(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    allow_live: bool = False,
+    allow_fake: bool = False,
+) -> Any:
+    """Resolve the project organization credential before creating a video adapter."""
+    if get_settings().app_env == "test":
+        return get_kling_adapter(allow_fake=allow_fake)
+    settings = await settings_for_organization_provider(
+        session,
+        organization_id=organization_id,
+        provider="agnes",
+    )
+    return get_kling_adapter(
+        allow_live=allow_live,
+        allow_fake=allow_fake,
+        settings=settings,
     )
 
 

@@ -8,9 +8,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.models import Project
 from app.consistency.face_review import face_review_images
 from app.creation.models import CreationPlan
 from app.execution.artifact_lineage import get_or_create_artifact
@@ -24,7 +25,7 @@ from app.production.service import GraphService
 from app.providers.base import ProviderAdapter
 from app.providers.fake import FakeFluxAdapter
 from app.shared.db import set_rls_context
-from app.shared.errors import NodeRunAlreadyClaimedError, ValidationAppError
+from app.shared.errors import AppError, NodeRunAlreadyClaimedError, ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
 
 
@@ -372,12 +373,25 @@ async def execute_media_node_run(
             prompt=prompt,
         )
 
+    project = await session.scalar(select(Project).where(Project.id == run.project_id))
+    if project is None:
+        raise ValidationAppError("project not found for node run")
+    await set_rls_context(
+        session,
+        user_id=run.created_by,
+        organization_id=project.organization_id,
+        project_id=run.project_id,
+    )
+
     # Select Adapter: real Agnes when configured. No silent Fake outside test.
     adapter = flux
     if adapter is None:
         from app.config import get_settings as _gs
-        from app.providers.flux import ProviderNotConfiguredError, get_flux_adapter
-        from app.providers.kling import get_kling_adapter
+        from app.providers.flux import (
+            ProviderNotConfiguredError,
+            get_flux_adapter_for_organization,
+        )
+        from app.providers.kling import get_kling_adapter_for_organization
 
         _env = _gs().app_env
         allow_fake = _env == "test"
@@ -387,7 +401,11 @@ async def execute_media_node_run(
 
                 adapter = get_local_tts_adapter()
             elif node_type in {"video", "video_review"}:
-                adapter = get_kling_adapter(allow_fake=allow_fake)
+                adapter = await get_kling_adapter_for_organization(
+                    session,
+                    organization_id=project.organization_id,
+                    allow_fake=allow_fake,
+                )
             elif node_type == "voice":
                 # TTS off for P0 — only allow deterministic stub under test
                 if not allow_fake:
@@ -397,12 +415,16 @@ async def execute_media_node_run(
                     )
                 adapter = FakeFluxAdapter()
             else:
-                adapter = get_flux_adapter(allow_fake=allow_fake)
-        except ProviderNotConfiguredError as exc:
+                adapter = await get_flux_adapter_for_organization(
+                    session,
+                    organization_id=project.organization_id,
+                    allow_fake=allow_fake,
+                )
+        except AppError as exc:
             await _commit_terminal_failure(
                 session,
                 run=run,
-                error_code="PROVIDER_NOT_CONFIGURED",
+                error_code=exc.code,
                 error_summary=exc.message,
             )
             raise

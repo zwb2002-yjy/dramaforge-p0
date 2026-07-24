@@ -65,6 +65,28 @@ class AccessService:
             raise ForbiddenError("not a member of this organization")
         return org
 
+    async def require_organization_role(
+        self,
+        *,
+        org_id: UUID,
+        actor: User,
+        allowed: set[MemberRole] | frozenset[MemberRole],
+        action: str,
+    ) -> Organization:
+        org = await self.get_organization_for_member(org_id=org_id, user=actor)
+        membership = await self._repo.get_membership(
+            organization_id=org_id,
+            user_id=actor.id,
+        )
+        assert membership is not None
+        role = MemberRole(str(membership.role))
+        if role not in allowed:
+            raise ForbiddenError(
+                f"role '{role.value}' cannot {action}; requires one of "
+                f"{sorted(item.value for item in allowed)}"
+            )
+        return org
+
     async def add_member(
         self,
         *,
