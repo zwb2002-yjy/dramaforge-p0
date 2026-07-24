@@ -64,6 +64,7 @@ async def test_enqueue_does_not_return_local_on_redis_failure(
     from app.shared.errors import ValidationAppError
 
     session = MagicMock()
+    session.get = AsyncMock(return_value=None)
     session.commit = AsyncMock()
     sched = AgentRunScheduler(session)
 
