@@ -38,8 +38,11 @@ export BYOK_KEYRING="v1:${BYOK_V1_FERNET_KEY},v2:${BYOK_V2_FERNET_KEY}"
 The credential store must contain at least one real, organization-scoped BYOK
 credential before this drill can demonstrate re-encryption. A result with
 `scanned: 0` is a configuration check only and does not close the rotation
-evidence gate. Current provider adapters still use environment-scoped keys;
-do not claim that rotating this store changes those global environment keys.
+evidence gate. Organization-scoped `text` and `agnes` credentials are used by
+the Agent Brief/Plan, canonical image, and Worker image/video adapters. When
+an organization has no stored credential, the existing process environment key
+remains a local-development fallback. Do not claim that rotating the stored
+credential changes an unrelated global environment key.
 The drill fails before writing `ops_drill.json` when `reencrypted` is zero, so
 an empty credential store cannot produce a successful operations report.
 
