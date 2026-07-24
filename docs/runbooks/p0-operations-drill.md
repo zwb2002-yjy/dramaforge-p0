@@ -40,6 +40,8 @@ credential before this drill can demonstrate re-encryption. A result with
 `scanned: 0` is a configuration check only and does not close the rotation
 evidence gate. Current provider adapters still use environment-scoped keys;
 do not claim that rotating this store changes those global environment keys.
+The drill fails before writing `ops_drill.json` when `reencrypted` is zero, so
+an empty credential store cannot produce a successful operations report.
 
 ## Execute
 

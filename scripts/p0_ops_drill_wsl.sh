@@ -90,6 +90,22 @@ create_restore_database() {
   createdb --maintenance-db="$admin_url" "$RESTORE_DB_NAME"
 }
 
+require_real_rotation() {
+  local rotation_report="$1"
+  local reencrypted
+  reencrypted="$(printf '%s' "$rotation_report" | "$PYTHON" -c '
+import json
+import sys
+
+report = json.load(sys.stdin)
+value = report.get("reencrypted")
+if type(value) is not int:
+    raise SystemExit("rotation report is missing an integer reencrypted count")
+print(value)
+')" || fail "rotation report is invalid"
+  (( reencrypted > 0 )) || fail "BYOK rotation drill requires at least one real credential re-encryption"
+}
+
 write_report() {
   local backup_report="$1"
   local restore_report="$2"
@@ -135,6 +151,7 @@ main() {
     --restore-bucket "$RESTORE_BUCKET")"
   rotation_report="$(cd "$REPO" && "$PYTHON" scripts/rotate_byok_keys.py \
     --actor-label "p0-wsl-rotation-drill")"
+  require_real_rotation "$rotation_report"
   write_report "$backup_report" "$restore_report" "$rotation_report"
   log "completed evidence=$EVIDENCE_DIR/ops_drill.json"
   log "isolated restore database=$RESTORE_DB_NAME bucket=$RESTORE_BUCKET (not deleted)"
