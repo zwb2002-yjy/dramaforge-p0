@@ -66,3 +66,27 @@ Only after the report and application reads have been reviewed can the old
 version be removed from `BYOK_KEYRING`. Retain the old key until that review is
 complete. Cleanup of the isolated restore database and bucket is an explicit
 separate operational action.
+
+## Real Browser Exercise
+
+The browser exercise is intentionally disabled unless `P0_REAL_UI=1`. It has
+no request routes or mocked Provider calls. It drives the production UI through
+Agent Brief, an explicit Brief confirmation, Agent Plan, canonical reference,
+10 Shot production, refresh recovery, review approval, and export. It writes a
+sanitized browser report and screenshot beside the operations evidence.
+
+Run it only after explicit Provider-cost approval and after starting the WSL
+stack from the same clean commit:
+
+```powershell
+$env:P0_REAL_UI = "1"
+$env:DRAMAFORGE_API_URL = "http://127.0.0.1:8010"
+cd frontend
+npm run test:e2e -- --grep "P0 real 10 Shot browser proof"
+```
+
+The proof rejects an API `source_commit` that differs from the local clean
+worktree. Its report intentionally excludes prompts, Provider responses,
+credentials, and download grants. Run the Section 3.1 gate only after this
+browser report, the formal API proof, the face calibration report, and the
+operations drill all bind to the same candidate commit.

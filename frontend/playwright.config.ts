@@ -14,7 +14,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 30_000,
-  globalTimeout: 180_000,
+  globalTimeout: process.env.P0_REAL_UI === "1" ? 2_800_000 : 180_000,
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${e2ePort}`,
