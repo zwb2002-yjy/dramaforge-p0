@@ -825,6 +825,8 @@ class CreationService:
             "when the canonical lead must be visibly identifiable in the generated frame; set "
             "it false for inserts, empty environments, screens, back-of-head shots, or shots "
             "of other characters where a lead-face comparison is not applicable. "
+            "Keep each visual_description and keyframe_prompt concise so the complete JSON "
+            "fits in one response. The shots array must contain items 1 through 10 exactly. "
             + (
                 "A canonical lead is registered. Use this exact identity whenever "
                 "lead_identity_required is true. Include the locked identity description "
@@ -838,7 +840,15 @@ class CreationService:
         )
         plan_body: dict[str, object] | None = None
         last_error = None
-        for attempt_no in range(1, 3):
+        for attempt_no in range(1, 4):
+            attempt_prompt = prompt
+            if last_error is not None:
+                attempt_prompt += (
+                    "\n\nYour previous response failed validation: "
+                    f"{str(last_error)[:180]}. Return a complete replacement JSON object "
+                    "only. Do not explain the correction. Verify that shots is an array of "
+                    "exactly 10 objects before responding."
+                )
             op = ProviderOperation(
                 agent_run_id=agent.id,
                 attempt_no=attempt_no,
@@ -846,9 +856,15 @@ class CreationService:
                 operation_kind="text.plan.generate",
                 actual_provider="openai",
                 actual_model="text-llm",
-                request_fingerprint=_content_hash({"prompt_chars": len(prompt)}),
+                request_fingerprint=_content_hash(
+                    {"prompt_chars": len(attempt_prompt), "attempt": attempt_no}
+                ),
                 status="submitted",
-                request_summary={"kind": "plan", "chars": len(prompt)},
+                request_summary={
+                    "kind": "plan",
+                    "chars": len(attempt_prompt),
+                    "retry": attempt_no > 1,
+                },
                 response_summary={},
                 token_usage={},
                 submitted_at=datetime.now(UTC),
@@ -860,10 +876,10 @@ class CreationService:
             try:
                 created = await adapter.create(
                     {
-                        "prompt": prompt,
+                        "prompt": attempt_prompt,
                         "kind": "plan",
                         "brief": brief_body,
-                        "max_tokens": 4200,
+                        "max_tokens": 6000,
                     }
                 )
                 remote_id = str(created.get("remote_task_id") or "")
