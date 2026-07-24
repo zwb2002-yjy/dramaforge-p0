@@ -21,6 +21,7 @@ from app.execution.shot_pipeline import (
     shot_pipeline_definition,
 )
 from app.production.service import GraphService
+from app.providers.base import ProviderAdapter
 from app.providers.fake import FakeFluxAdapter
 from app.shared.db import set_rls_context
 from app.shared.errors import NodeRunAlreadyClaimedError, ValidationAppError
@@ -44,7 +45,7 @@ class ExecuteNodeResult:
     byte_size: int
     face_status: str | None
     face_score: float | None
-    provider_operation_id: UUID
+    provider_operation_id: UUID | None
     node_type: str
 
 
@@ -245,7 +246,7 @@ async def execute_keyframe_node_run(
     *,
     node_run_id: UUID,
     store: ObjectStore | None = None,
-    flux: FakeFluxAdapter | None = None,
+    flux: ProviderAdapter | None = None,
     face_threshold: float = 0.35,
     require_canonical: bool = False,
     canonical_embedding: list[float] | None = None,
@@ -269,7 +270,7 @@ async def execute_media_node_run(
     *,
     node_run_id: UUID,
     store: ObjectStore | None = None,
-    flux: FakeFluxAdapter | None = None,
+    flux: ProviderAdapter | None = None,
     face_threshold: float = 0.35,
     require_canonical: bool = False,
     canonical_embedding: list[float] | None = None,
@@ -310,6 +311,14 @@ async def execute_media_node_run(
             raise ValidationAppError(f"node_run cannot execute from status={run.status}")
 
     obj_store = store or get_object_store()
+    if node_type == "composite":
+        return await _complete_composite_node(
+            session,
+            run=run,
+            node=node,
+            obj_store=obj_store,
+        )
+
     snap = run.input_snapshot or {}
     # Resolve canonical from snapshot object key before enforce (Worker path).
     if canonical_image_bytes is None:
@@ -377,7 +386,7 @@ async def execute_media_node_run(
                 from app.providers.local_tts import get_local_tts_adapter
 
                 adapter = get_local_tts_adapter()
-            elif node_type in {"video", "video_review", "composite"}:
+            elif node_type in {"video", "video_review"}:
                 adapter = get_kling_adapter(allow_fake=allow_fake)
             elif node_type == "voice":
                 # TTS off for P0 — only allow deterministic stub under test
@@ -409,7 +418,7 @@ async def execute_media_node_run(
     _settings = get_settings()
     provider_name = str(getattr(adapter, "provider", "flux") or "flux")
     if type(adapter).__name__.startswith("Agnes") or provider_name in {"agnes", "flux"}:
-        if node_type in {"video", "video_review", "composite"}:
+        if node_type in {"video", "video_review"}:
             model_name = _settings.agnes_video_model
         else:
             model_name = _settings.agnes_image_model
@@ -455,8 +464,8 @@ async def execute_media_node_run(
 
     # Provider video tasks can stay running for several minutes. Keep polling
     # inside the heavy worker's 30-minute job budget; never submit a second task.
-    poll_timeout_s = 1_620.0 if node_type in {"video", "video_review", "composite"} else 120.0
-    poll_interval_s = 5.0 if node_type in {"video", "video_review", "composite"} else 3.0
+    poll_timeout_s = 1_620.0 if node_type in {"video", "video_review"} else 120.0
+    poll_interval_s = 5.0 if node_type in {"video", "video_review"} else 3.0
     deadline = asyncio.get_running_loop().time() + poll_timeout_s
     poll: dict[str, object] = {"status": str(create.get("status", "queued"))}
     poll_count = 0
@@ -595,7 +604,7 @@ async def _completed_result(
         face_score=(
             float(str(output["face_score"])) if output.get("face_score") is not None else None
         ),
-        provider_operation_id=uuid4(),
+        provider_operation_id=None,
         node_type=node_type,
     )
 
@@ -612,6 +621,108 @@ def _mime_for_node(node_type: str) -> tuple[str, str, str]:
     if node_type in {"continuity_review"}:
         return "application/json", "json", "document"
     return "application/octet-stream", "bin", "document"
+
+
+async def _complete_composite_node(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    node: GraphNode,
+    obj_store: ObjectStore,
+) -> ExecuteNodeResult:
+    """Compose local video, voice, and subtitles without a Provider operation."""
+    from datetime import UTC, datetime
+
+    from app.config import get_settings
+    from app.execution.composite_media import (
+        CompositeInputMissingError,
+        render_composite_bytes,
+        resolve_composite_inputs,
+    )
+
+    try:
+        inputs = await resolve_composite_inputs(session, run=run, store=obj_store)
+    except CompositeInputMissingError as exc:
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="COMPOSITE_INPUT_MISSING",
+            error_summary=str(exc),
+        )
+        raise ValidationAppError(f"COMPOSITE_INPUT_MISSING: {exc}") from exc
+
+    # Persist the source lineage before rendering so a terminal render failure
+    # remains auditable.
+    run.input_snapshot = {
+        **(run.input_snapshot or {}),
+        "media_inputs": inputs.media_inputs,
+    }
+
+    try:
+        data = await render_composite_bytes(inputs)
+    except Exception as exc:  # noqa: BLE001 - local render must fail closed
+        detail = str(exc) or type(exc).__name__
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="COMPOSITE_RENDER_FAILED",
+            error_summary=detail,
+        )
+        raise ValidationAppError(f"COMPOSITE_RENDER_FAILED: {detail}") from exc
+
+    try:
+        object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.mp4"
+        stored = await obj_store.put_bytes(
+            object_key=object_key,
+            data=data,
+            mime_type="video/mp4",
+        )
+        art = await get_or_create_artifact(
+            session,
+            project_id=run.project_id,
+            artifact_type="video",
+            object_key=stored.object_key,
+            content_hash=stored.content_hash,
+            mime_type=stored.mime_type,
+            byte_size=stored.byte_size,
+            produced_by_run_id=run.id,
+        )
+    except Exception as exc:  # noqa: BLE001 - local composite output must fail closed
+        detail = str(exc) or type(exc).__name__
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="COMPOSITE_RENDER_FAILED",
+            error_summary=detail,
+        )
+        raise ValidationAppError(f"COMPOSITE_RENDER_FAILED: {type(exc).__name__}") from exc
+
+    run.status = "completed"
+    run.result_artifact_id = art.id
+    run.provider_cost = Decimal("0")
+    run.platform_cost = Decimal("0")
+    run.finished_at = datetime.now(UTC)
+    run.output_summary = {
+        "artifact_id": str(art.id),
+        "node_type": "composite",
+        "byte_size": art.byte_size,
+        "content_hash": art.content_hash,
+        "media_inputs": inputs.media_inputs,
+        "source_commit": get_settings().source_commit,
+    }
+    node.latest_successful_run_id = run.id
+    await session.flush()
+    return ExecuteNodeResult(
+        node_run_id=run.id,
+        artifact_id=art.id,
+        object_key=art.object_key,
+        content_hash=art.content_hash,
+        byte_size=art.byte_size,
+        face_status=None,
+        face_score=None,
+        provider_operation_id=None,
+        node_type="composite",
+    )
 
 
 async def _complete_pure_node(
