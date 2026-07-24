@@ -8,7 +8,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from prove_p0_mvp_formal import runtime_source_errors  # noqa: E402
+from prove_p0_mvp_formal import (  # noqa: E402
+    SYNC_PROVIDER_TIMEOUT_SECONDS,
+    runtime_source_errors,
+)
 
 
 def test_runtime_source_accepts_one_commit() -> None:
@@ -40,3 +43,7 @@ def test_runtime_source_rejects_old_api_and_worker() -> None:
         "worker run=run-old source_commit=old123 expected=new123",
         "worker run=run-missing source_commit=<missing> expected=new123",
     ]
+
+
+def test_formal_proof_allows_canonical_provider_budget() -> None:
+    assert SYNC_PROVIDER_TIMEOUT_SECONDS >= 330.0

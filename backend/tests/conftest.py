@@ -27,6 +27,7 @@ from app.events import models as _event_models  # noqa: E402,F401
 from app.execution import models as _execution_models  # noqa: E402,F401
 from app.main import create_app  # noqa: E402
 from app.production import models as _production_models  # noqa: E402,F401
+from app.security import models as _security_models  # noqa: E402,F401
 from app.shared.base import Base  # noqa: E402
 from app.shared.db import get_session  # noqa: E402
 

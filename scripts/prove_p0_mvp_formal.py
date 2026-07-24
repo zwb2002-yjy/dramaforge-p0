@@ -40,6 +40,10 @@ REQUIRED_NODES = (
     "continuity_review",
 )
 DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
+# The canonical-reference API deliberately permits 330 seconds for a live image
+# provider to recover from transient hub failures. The proof client must not
+# turn that valid server-side budget into a false negative.
+SYNC_PROVIDER_TIMEOUT_SECONDS = 360.0
 
 
 def runtime_source_errors(
@@ -179,7 +183,11 @@ def main() -> int:
             "formal evidence requires a clean worktree at the exact source commit"
         )
 
-    client = httpx.Client(base_url=base, timeout=180.0, follow_redirects=True)
+    client = httpx.Client(
+        base_url=base,
+        timeout=SYNC_PROVIDER_TIMEOUT_SECONDS,
+        follow_redirects=True,
+    )
 
     def csrf() -> str:
         assert client is not None

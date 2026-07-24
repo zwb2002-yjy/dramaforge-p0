@@ -54,6 +54,16 @@ class Settings(BaseSettings):
         min_length=16,
         description="Fernet key material for encrypting user BYOK; replace in production",
     )
+    byok_primary_key_version: str = Field(
+        default="legacy",
+        min_length=1,
+        max_length=80,
+        description="Primary version used to encrypt persisted BYOK credentials",
+    )
+    byok_keyring: str = Field(
+        default="",
+        description="Comma-separated retained BYOK Fernet keys in version:key form",
+    )
 
     arq_default_queue_name: str = "dramaforge:default"
     arq_heavy_queue_name: str = "dramaforge:heavy"
