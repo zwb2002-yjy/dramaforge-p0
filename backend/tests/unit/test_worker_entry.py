@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from app.execution.models import NodeRun
+from app.config import clear_settings_cache
 from app.shared.errors import ValidationAppError
 from app.workers.jobs import execute_node_run
 from app.workers.main import describe_worker, main
@@ -23,6 +24,17 @@ def test_describe_worker_heavy() -> None:
     line = describe_worker("heavy")
     assert "kind=heavy" in line
     assert "status=ready" in line
+
+
+def test_heavy_worker_reads_concurrency_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARQ_HEAVY_MAX_JOBS", "4")
+    clear_settings_cache()
+    from app.workers import heavy
+
+    assert heavy.WorkerSettings.max_jobs == 4
+    clear_settings_cache()
 
 
 def test_main_unknown_kind() -> None:

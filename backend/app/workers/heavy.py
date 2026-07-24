@@ -19,7 +19,6 @@ class WorkerSettings:
     functions = JOB_FUNCTIONS
     redis_settings = _redis_settings()
     queue_name = get_settings().arq_heavy_queue_name
-    # Serialize paid media submissions to respect Provider capacity limits.
-    max_jobs = 1
+    max_jobs = get_settings().arq_heavy_max_jobs
     job_timeout = 1800
     keep_result = 60

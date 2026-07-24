@@ -67,6 +67,7 @@ load_formal_env() {
   export APP_ENV="development"
   export DATABASE_URL="postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
   export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379/0}"
+  export ARQ_HEAVY_MAX_JOBS="${ARQ_HEAVY_MAX_JOBS:-4}"
   export MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://127.0.0.1:9000}"
   export MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
   export MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}"
