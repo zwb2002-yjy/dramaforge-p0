@@ -374,6 +374,22 @@ def main() -> int:
             if confirmed.status_code != 200 or confirmed.json().get("status") != "confirmed":
                 return finish(f"confirm brief failed {confirmed.status_code}: {_problem(confirmed)}")
 
+            canonical = post(
+                f"/api/v1/projects/{project_id}/characters/lead",
+                {
+                    "name": lead_name,
+                    "locked_prompt": lead_prompt,
+                },
+            )
+            report["steps"].append(
+                {"canonical": canonical.status_code, "body": _problem(canonical)}
+            )
+            if canonical.status_code not in {200, 201}:
+                return finish(
+                    "Canonical reference unavailable. A live image Provider is required for "
+                    f"formal face-review evidence: {_problem(canonical)}"
+                )
+
             plan = post(
                 f"/api/v1/projects/{project_id}/plans/generate",
                 {"brief_revision_id": brief_body["id"], "authorize": True},
@@ -394,23 +410,18 @@ def main() -> int:
                 return finish(
                     "Agent Plan must have agent provenance and exactly ten structured shots"
                 )
-            report["plan_id"] = plan_body["id"]
-
-            canonical = post(
-                f"/api/v1/projects/{project_id}/characters/lead",
-                {
-                    "name": lead_name,
-                    "locked_prompt": lead_prompt,
-                },
-            )
-            report["steps"].append(
-                {"canonical": canonical.status_code, "body": _problem(canonical)}
-            )
-            if canonical.status_code not in {200, 201}:
+            invalid_identity_flags = [
+                shot.get("shot_number")
+                for shot in shots
+                if not isinstance(shot, dict)
+                or not isinstance(shot.get("lead_identity_required"), bool)
+            ]
+            if invalid_identity_flags:
                 return finish(
-                    "Canonical reference unavailable. A live image Provider is required for "
-                    f"formal face-review evidence: {_problem(canonical)}"
+                    "Agent Plan must set lead_identity_required for every Shot; invalid "
+                    f"shots={invalid_identity_flags}"
                 )
+            report["plan_id"] = plan_body["id"]
 
             materialized = post(
                 f"/api/v1/projects/{project_id}/plans/{plan_body['id']}/confirm",

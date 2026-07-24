@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
-from app.assets.models import Episode, Scene, Shot
+from app.assets.models import Asset, Character, CharacterReference, Episode, Scene, Shot
 from app.creation.models import (
     AgentRun,
     CreationPlan,
@@ -753,6 +753,18 @@ class CreationService:
                     },
                 )
         logline = str(brief_body.get("logline") or "")
+        canonical_lead = (
+            await self._session.execute(
+                select(Asset.name, Character.locked_prompt)
+                .join(Character, Character.id == Asset.id)
+                .join(CharacterReference, CharacterReference.character_id == Character.id)
+                .where(Asset.project_id == project_id)
+                .where(CharacterReference.is_canonical.is_(True))
+                .limit(1)
+            )
+        ).one_or_none()
+        canonical_lead_name = str(canonical_lead[0]).strip() if canonical_lead else ""
+        canonical_lead_prompt = str(canonical_lead[1]).strip() if canonical_lead else ""
         from app.config import get_settings
 
         settings = get_settings()
@@ -806,8 +818,22 @@ class CreationService:
             '"visual_description":"specific subject action, composition and story beat",'
             '"dialogue":"","keyframe_prompt":"standalone image-generation prompt including '
             'character, action, location, composition, lens, lighting, palette, 9:16",'
+            '"lead_identity_required":true,'
             '"duration_seconds":3.0}]}. Each shot must advance the story, preserve character '
-            "wardrobe/appearance, vary shot scale, and end shot 10 on the episode hook. Brief:\n"
+            "wardrobe/appearance, vary shot scale, and end shot 10 on the episode hook. "
+            "For every shot, lead_identity_required must be a JSON boolean. Set it true only "
+            "when the canonical lead must be visibly identifiable in the generated frame; set "
+            "it false for inserts, empty environments, screens, back-of-head shots, or shots "
+            "of other characters where a lead-face comparison is not applicable. "
+            + (
+                "A canonical lead is registered. Use this exact identity whenever "
+                "lead_identity_required is true. Include the locked identity description "
+                f"verbatim in each matching keyframe_prompt. Name: {canonical_lead_name}. "
+                f"Locked identity: {canonical_lead_prompt}. "
+                if canonical_lead_name and canonical_lead_prompt
+                else ""
+            )
+            + "Brief:\n"
             f"{json.dumps(brief_body, ensure_ascii=False)}"
         )
         plan_body: dict[str, object] | None = None
@@ -1001,6 +1027,11 @@ def _normalize_plan_shot(raw: object, index: int) -> dict[str, object]:
         raise ValueError(f"Agent Plan shot {index} is missing visual_description")
     if not keyframe_prompt:
         raise ValueError(f"Agent Plan shot {index} is missing keyframe_prompt")
+    lead_identity_required = raw.get("lead_identity_required")
+    if not isinstance(lead_identity_required, bool):
+        raise ValueError(
+            f"Agent Plan shot {index} must set lead_identity_required to a JSON boolean"
+        )
     return {
         "shot_number": _positive_int(raw.get("shot_number"), default=index),
         "scene_number": _positive_int(raw.get("scene_number"), default=1),
@@ -1011,6 +1042,7 @@ def _normalize_plan_shot(raw: object, index: int) -> dict[str, object]:
         "visual_description": visual,
         "dialogue": _text(raw.get("dialogue")),
         "keyframe_prompt": keyframe_prompt,
+        "lead_identity_required": lead_identity_required,
         "duration_seconds": float(_duration(raw.get("duration_seconds"))),
     }
 
@@ -1077,6 +1109,12 @@ def _normalize_materialization_shot(raw: object, index: int) -> dict[str, object
         "scene_number": _positive_int(raw.get("scene_number"), default=1),
         "visual_description": visual,
         "keyframe_prompt": prompt,
+        # Manual plans predate this field. Omitted values remain fail-closed.
+        "lead_identity_required": (
+            raw["lead_identity_required"]
+            if isinstance(raw.get("lead_identity_required"), bool)
+            else True
+        ),
     }
 
 

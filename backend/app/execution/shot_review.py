@@ -123,6 +123,11 @@ async def assert_shot_approvable(session: AsyncSession, *, project_id: UUID, sho
                 or summary.get("face_review")
                 or ""
             )
+            if key == "face_review" and status == "not_applicable":
+                applicable = (run.input_snapshot or {}).get("lead_identity_required")
+                if applicable is not False:
+                    blocked.append("face_review:invalid_not_applicable")
+                continue
             # Manual audited completion stores status=passed
             if status in {"blocked", "fail", "failed", "reject"}:
                 blocked.append(f"{key}:{status}")
@@ -320,11 +325,16 @@ async def start_shot_nodes(
     )
     latest_by_key = _latest_by_node_key(_shot_runs(existing_runs, shot_id))
     canonical_object_key = ""
+    canonical_locked_prompt = ""
     prior_keyframe = latest_by_key.get("keyframe")
     if prior_keyframe is not None:
-        candidate = (prior_keyframe.input_snapshot or {}).get("canonical_object_key")
+        keyframe_snapshot = prior_keyframe.input_snapshot or {}
+        candidate = keyframe_snapshot.get("canonical_object_key")
         if isinstance(candidate, str):
             canonical_object_key = candidate
+        candidate_prompt = keyframe_snapshot.get("canonical_locked_prompt")
+        if isinstance(candidate_prompt, str):
+            canonical_locked_prompt = candidate_prompt
     probe_object_key = ""
     if prior_keyframe is not None and prior_keyframe.result_artifact_id is not None:
         artifact = await session.get(Artifact, prior_keyframe.result_artifact_id)
@@ -368,6 +378,9 @@ async def start_shot_nodes(
             if key == "keyframe"
             else f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}"
         )
+        lead_identity_required = shot_plan.get("lead_identity_required") is True
+        if key == "keyframe" and lead_identity_required and canonical_locked_prompt:
+            prompt = f"{prompt}\nCanonical lead identity: {canonical_locked_prompt}"
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),
             "node_key": key,
@@ -381,9 +394,12 @@ async def start_shot_nodes(
             "visual": visual,
             "dialogue": dialogue,
             "subtitle": dialogue,
+            "lead_identity_required": lead_identity_required,
         }
         if canonical_object_key:
             snapshot["canonical_object_key"] = canonical_object_key
+        if canonical_locked_prompt:
+            snapshot["canonical_locked_prompt"] = canonical_locked_prompt
         if key in {"face_review", "video_drift_review"} and probe_object_key:
             snapshot["probe_object_key"] = probe_object_key
         run = NodeRun(

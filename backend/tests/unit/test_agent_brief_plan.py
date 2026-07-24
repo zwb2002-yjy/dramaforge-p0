@@ -149,6 +149,7 @@ async def test_fake_agent_results_are_input_derived_without_story_specific_fixtu
     assert "lin xia" not in rendered
     assert "neon rain witness" not in rendered
     assert len({shot["keyframe_prompt"] for shot in plan["shots"]}) == 10
+    assert all(isinstance(shot["lead_identity_required"], bool) for shot in plan["shots"])
 
 
 @pytest.mark.asyncio
@@ -395,6 +396,7 @@ def test_plan_parser_preserves_ten_structured_shots() -> None:
             "visual_description": f"镜头 {number} 的明确动作与构图",
             "dialogue": "" if number % 2 else f"台词 {number}",
             "keyframe_prompt": f"9:16 cinematic shot {number}, consistent Lin Xia",
+            "lead_identity_required": number not in {4, 8},
             "duration_seconds": 3.5,
         }
         for number in range(1, 11)
@@ -425,6 +427,10 @@ def test_plan_parser_preserves_ten_structured_shots() -> None:
     assert len(parsed["shots"]) == 10
     assert parsed["shots"][9]["shot_number"] == 10
     assert parsed["shots"][9]["location"] == "废弃车站"
+    invalid = __import__("json").loads(__import__("json").dumps({"shots": shots}))
+    invalid["shots"][0].pop("lead_identity_required")
+    with pytest.raises(ValueError, match="lead_identity_required"):
+        _parse_plan_json(__import__("json").dumps(invalid), "林夏在雨夜发现跟踪者")
 
 
 @pytest.mark.asyncio
@@ -476,6 +482,7 @@ async def test_confirm_plan_materializes_real_shots_and_keyframe_runs(
             "visual_description": f"林夏执行动作 {number}",
             "dialogue": "",
             "keyframe_prompt": f"cinematic rain shot {number}",
+            "lead_identity_required": True,
             "duration_seconds": 3,
         }
         for number in range(1, 4)
@@ -811,6 +818,7 @@ async def test_manual_plan_save_cannot_overwrite_agent_plan(
             "scene_number": 1,
             "visual_description": f"Story beat {number}",
             "keyframe_prompt": f"9:16 shot {number}",
+            "lead_identity_required": True,
         }
         for number in range(1, 11)
     ]
