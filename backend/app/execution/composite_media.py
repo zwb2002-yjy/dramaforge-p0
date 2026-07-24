@@ -17,6 +17,7 @@ from app.execution.models import Artifact, GraphNode, NodeRun
 from app.storage.minio_store import ObjectStore
 
 _SUCCESS_STATUSES = frozenset({"completed", "cached", "completed_after_cancel"})
+_PENDING_STATUSES = frozenset({"queued", "running"})
 _MEDIA_REQUIREMENTS = {
     "video": ("video", "video/"),
     "voice": ("audio", "audio/"),
@@ -40,6 +41,61 @@ class CompositeInputs:
     video: bytes
     voice: bytes
     subtitle: bytes
+
+
+async def composite_inputs_pending(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+) -> bool:
+    """Return whether this composite is waiting for a newer source attempt.
+
+    The shot start endpoint queues the whole pipeline together. A composite
+    must remain unclaimed while the latest video, voice, or subtitle attempt
+    for its shot is queued or running. Absent, failed, or unreadable media is
+    intentionally left for the terminal fail-closed resolution path.
+    """
+    node = await session.get(GraphNode, run.graph_node_id)
+    if node is None or node.node_key != "composite":
+        return False
+
+    shot_id = str((run.input_snapshot or {}).get("shot_id") or "").strip()
+    if not shot_id:
+        return False
+
+    rows = list(
+        (
+            await session.execute(
+                select(NodeRun, GraphNode)
+                .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                .where(NodeRun.project_id == run.project_id)
+                .where(NodeRun.graph_version_id == run.graph_version_id)
+                .where(GraphNode.graph_version_id == run.graph_version_id)
+                .where(GraphNode.node_key.in_(tuple(_MEDIA_REQUIREMENTS)))
+            )
+        )
+        .tuples()
+        .all()
+    )
+
+    latest_by_key: dict[str, NodeRun] = {}
+    for source_run, source_node in rows:
+        if str((source_run.input_snapshot or {}).get("shot_id") or "") != shot_id:
+            continue
+        key = source_node.node_key
+        current = latest_by_key.get(key)
+        if current is None or (
+            source_run.attempt_no,
+            source_run.created_at,
+            str(source_run.id),
+        ) > (
+            current.attempt_no,
+            current.created_at,
+            str(current.id),
+        ):
+            latest_by_key[key] = source_run
+
+    return any(source.status in _PENDING_STATUSES for source in latest_by_key.values())
 
 
 async def resolve_composite_inputs(

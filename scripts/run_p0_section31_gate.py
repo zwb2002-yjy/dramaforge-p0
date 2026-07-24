@@ -789,8 +789,8 @@ def main() -> int:
                 and ev.get("agent_workflow") is True
                 and ev.get("manual_media_count") == 0
                 and tuple(ev.get("required_nodes") or []) == REQUIRED_NODES
-                and bool(str(inputs.get("idea") or "").strip())
-                and bool(str(inputs.get("lead_name") or "").strip())
+                and bool(str(inputs.get("idea_sha256") or "").strip())
+                and bool(str(inputs.get("lead_name_sha256") or "").strip())
                 and bool(str(inputs.get("lead_prompt_sha256") or "").strip())
                 and lineage.get("manual_runs") == 0
                 and lineage.get("missing_or_incomplete") == []

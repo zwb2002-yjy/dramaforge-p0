@@ -7,6 +7,8 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from arq import Retry
+
 from app.config import get_settings
 from app.shared.db import get_session_factory, set_rls_context
 from app.shared.errors import AppError, NodeRunAlreadyClaimedError
@@ -39,6 +41,7 @@ async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
 
 async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, Any]:
     """Worker job: execute media NodeRun via product_path (Adapter OK here)."""
+    from app.execution.composite_media import composite_inputs_pending
     from app.execution.models import NodeRun
     from app.execution.product_path import claim_media_node_run, execute_media_node_run
 
@@ -62,6 +65,8 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             run = await session.get(NodeRun, run_uuid)
             if run is None:
                 return {"status": "failed", "error": "node_run not visible under RLS"}
+            if await composite_inputs_pending(session, run=run):
+                raise Retry(defer=5)
             await claim_media_node_run(session, node_run_id=run_uuid)
             result = await execute_media_node_run(
                 session,
@@ -83,6 +88,9 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             await session.rollback()
             return {"status": "already_claimed", "node_run_id": node_run_id}
         except asyncio.CancelledError:
+            await session.rollback()
+            raise
+        except Retry:
             await session.rollback()
             raise
         except Exception as exc:  # noqa: BLE001

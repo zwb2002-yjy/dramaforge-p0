@@ -117,6 +117,83 @@ async def test_agnes_image_retries_transient_503_before_success(
     assert result["artifact_uri"] == "https://media.example/image.png"
 
 
+@pytest.mark.asyncio
+async def test_agnes_video_retries_transient_503_before_task_acceptance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        assert request.url.path == "/v1/videos"
+        if attempts < 3:
+            return httpx.Response(503, json={"error": "hub overloaded"})
+        return httpx.Response(200, json={"task_id": "video-task-123", "status": "queued"})
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.providers.agnes.asyncio.sleep", no_sleep)
+    client = AgnesHubClient(
+        Settings(
+            app_env="development",
+            agnes_enabled=True,
+            agnes_api_key="test-provider-key",
+            agnes_base_url="https://agnes.example/v1",
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.create_video(prompt="cinematic rain-soaked harbor")
+
+    assert attempts == 3
+    assert result == {"remote_task_id": "video-task-123", "status": "queued"}
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_honors_retry_after_for_rate_limited_create(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        assert request.url.path == "/v1/videos"
+        if attempts == 1:
+            return httpx.Response(
+                429,
+                headers={"Retry-After": "17"},
+                json={"error": "rate limited"},
+            )
+        return httpx.Response(
+            200,
+            json={"task_id": "video-task-456", "status": "queued"},
+        )
+
+    async def record_sleep(seconds: float) -> None:
+        delays.append(seconds)
+
+    monkeypatch.setattr("app.providers.agnes.asyncio.sleep", record_sleep)
+    client = AgnesHubClient(
+        Settings(
+            app_env="development",
+            agnes_enabled=True,
+            agnes_api_key="test-provider-key",
+            agnes_base_url="https://agnes.example/v1",
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.create_video(prompt="cinematic rain-soaked harbor")
+
+    assert attempts == 2
+    assert delays == [17.0]
+    assert result == {"remote_task_id": "video-task-456", "status": "queued"}
+
+
 async def _video_run(session: AsyncSession) -> NodeRun:
     user = User(
         email=f"poll-{uuid4().hex[:8]}@example.com",

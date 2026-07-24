@@ -16,6 +16,7 @@ from app.execution import models as _xm  # noqa: F401
 from app.execution.composite_media import (
     CompositeInputs,
     CompositeRenderError,
+    composite_inputs_pending,
     deterministic_composite_test_bytes,
 )
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
@@ -306,6 +307,29 @@ async def test_composite_runs_locally_with_complete_media_lineage(
     assert artifact.mime_type == "video/mp4"
     assert await fixture.store.get_bytes(object_key=artifact.object_key) == expected_bytes
     assert result.provider_operation_id is None
+
+
+@pytest.mark.asyncio
+async def test_composite_waits_for_latest_pending_source_attempt(
+    session: AsyncSession,
+) -> None:
+    fixture = await _make_composite_fixture(session)
+    fixture.sources["video"].run.status = "queued"
+    await session.flush()
+
+    assert await composite_inputs_pending(session, run=fixture.composite_run) is True
+
+
+@pytest.mark.asyncio
+async def test_composite_does_not_wait_when_source_is_absent(
+    session: AsyncSession,
+) -> None:
+    fixture = await _make_composite_fixture(
+        session,
+        source_keys=set(_SOURCE_BYTES) - {"video"},
+    )
+
+    assert await composite_inputs_pending(session, run=fixture.composite_run) is False
 
 
 @pytest.mark.asyncio

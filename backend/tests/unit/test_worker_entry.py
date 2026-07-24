@@ -12,6 +12,7 @@ from app.execution.models import NodeRun
 from app.shared.errors import ValidationAppError
 from app.workers.jobs import execute_node_run
 from app.workers.main import describe_worker, main
+from arq import Retry
 
 
 def test_describe_worker_default() -> None:
@@ -34,6 +35,7 @@ def test_heavy_worker_reads_concurrency_from_settings(
     from app.workers import heavy
 
     assert heavy.WorkerSettings.max_jobs == 4
+    assert heavy.WorkerSettings.max_tries == 400
     clear_settings_cache()
 
 
@@ -127,3 +129,46 @@ async def test_worker_persists_unhandled_provider_failure(
         "error_code": "PROVIDER_FAILED",
         "worker_boundary": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_worker_retries_composite_while_source_media_is_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = NodeRun(
+        id=uuid4(),
+        project_id=uuid4(),
+        graph_version_id=uuid4(),
+        graph_node_id=uuid4(),
+        idempotency_key=f"worker:{uuid4()}",
+        input_hash="a" * 64,
+        status="queued",
+        input_snapshot={"shot_id": str(uuid4()), "node_key": "composite"},
+        created_by=uuid4(),
+    )
+    first = _FakeSession(run)
+
+    def factory() -> _SessionContext:
+        return _SessionContext(first)
+
+    async def no_rls(*args: object, **kwargs: object) -> None:
+        _ = args, kwargs
+
+    async def pending(*args: object, **kwargs: object) -> bool:
+        _ = args, kwargs
+        return True
+
+    async def claim(*args: object, **kwargs: object) -> NodeRun:
+        raise AssertionError("pending composite must not be claimed")
+
+    monkeypatch.setattr("app.workers.jobs.get_session_factory", lambda: factory)
+    monkeypatch.setattr("app.workers.jobs.set_rls_context", no_rls)
+    monkeypatch.setattr("app.execution.composite_media.composite_inputs_pending", pending)
+    monkeypatch.setattr("app.execution.product_path.claim_media_node_run", claim)
+
+    with pytest.raises(Retry):
+        await execute_node_run({}, str(run.id))
+
+    assert first.rollbacks == 1
+    assert first.commits == 0
+    assert run.status == "queued"

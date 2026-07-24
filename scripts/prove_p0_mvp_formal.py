@@ -78,11 +78,11 @@ def _write_report(scratch: Path, report: dict[str, Any]) -> None:
 
 
 def _problem(response: httpx.Response) -> str:
-    try:
-        body = response.json()
-    except ValueError:
-        return response.text[:500]
-    return json.dumps(body, ensure_ascii=False)[:500]
+    body = response.content
+    return (
+        f"response_status={response.status_code} "
+        f"body_sha256={hashlib.sha256(body).hexdigest()} body_length={len(body)}"
+    )
 
 
 def main() -> int:
@@ -139,6 +139,19 @@ def main() -> int:
         parser.error("--resume-project-id and --resume-email must be supplied together")
 
     source_context = begin_evidence_context(REPO)
+    source_context["command_summary"] = [
+        Path(__file__).name,
+        "--base",
+        args.base.rstrip("/"),
+        "--timeout-seconds",
+        str(args.timeout_seconds),
+        "--idea-sha256",
+        hashlib.sha256(idea.encode("utf-8")).hexdigest(),
+        "--lead-name-sha256",
+        hashlib.sha256(lead_name.encode("utf-8")).hexdigest(),
+        "--lead-prompt-sha256",
+        hashlib.sha256(lead_prompt.encode("utf-8")).hexdigest(),
+    ]
     scratch = args.scratch or default_evidence_dir(
         REPO,
         str(source_context["source_commit"]),
@@ -155,9 +168,13 @@ def main() -> int:
         "worker_tick": bool(args.worker_tick),
         "resumed": bool(args.resume_project_id),
         "inputs": {
-            "project_name": args.project_name.strip(),
-            "idea": idea,
-            "lead_name": lead_name,
+            "project_name_sha256": hashlib.sha256(
+                args.project_name.strip().encode("utf-8")
+            ).hexdigest(),
+            "idea_sha256": hashlib.sha256(idea.encode("utf-8")).hexdigest(),
+            "idea_length": len(idea),
+            "lead_name_sha256": hashlib.sha256(lead_name.encode("utf-8")).hexdigest(),
+            "lead_name_length": len(lead_name),
             "lead_prompt_sha256": hashlib.sha256(lead_prompt.encode("utf-8")).hexdigest(),
             "lead_prompt_length": len(lead_prompt),
         },
@@ -365,7 +382,7 @@ def main() -> int:
                     "authorize": True,
                 },
             )
-            report["steps"].append({"agent_brief": brief.status_code, "body": _problem(brief)})
+            report["steps"].append({"agent_brief": brief.status_code})
             if brief.status_code != 200:
                 return finish(
                     "Agent Brief unavailable. TEXT_LLM must be configured; "
@@ -389,9 +406,7 @@ def main() -> int:
                     "locked_prompt": lead_prompt,
                 },
             )
-            report["steps"].append(
-                {"canonical": canonical.status_code, "body": _problem(canonical)}
-            )
+            report["steps"].append({"canonical": canonical.status_code})
             if canonical.status_code not in {200, 201}:
                 return finish(
                     "Canonical reference unavailable. A live image Provider is required for "
@@ -402,7 +417,7 @@ def main() -> int:
                 f"/api/v1/projects/{project_id}/plans/generate",
                 {"brief_revision_id": brief_body["id"], "authorize": True},
             )
-            report["steps"].append({"agent_plan": plan.status_code, "body": _problem(plan)})
+            report["steps"].append({"agent_plan": plan.status_code})
             if plan.status_code != 200:
                 return finish(
                     "Agent Plan unavailable. TEXT_LLM must be configured; "

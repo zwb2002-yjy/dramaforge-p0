@@ -20,5 +20,8 @@ class WorkerSettings:
     redis_settings = _redis_settings()
     queue_name = get_settings().arq_heavy_queue_name
     max_jobs = get_settings().arq_heavy_max_jobs
+    # Composite jobs defer while their video source is still in progress.
+    # At five seconds each, this covers the 30-minute video polling budget.
+    max_tries = 400
     job_timeout = 1800
     keep_result = 60
