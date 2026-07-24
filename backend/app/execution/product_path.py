@@ -155,18 +155,23 @@ async def enqueue_keyframe_after_plan(
     from app.assets.models import Asset, Character, CharacterReference
 
     canon_key: str | None = None
+    canonical_locked_prompt = ""
     ref = (
         await session.execute(
-            select(CharacterReference)
+            select(CharacterReference, Character.locked_prompt)
             .join(Character, Character.id == CharacterReference.character_id)
             .join(Asset, Asset.id == Character.id)
             .where(Asset.project_id == project_id)
             .where(CharacterReference.is_canonical.is_(True))
             .limit(1)
         )
-    ).scalar_one_or_none()
+    ).one_or_none()
     if ref is not None:
-        canon_key = ref.object_key
+        canon_key = ref[0].object_key
+        canonical_locked_prompt = ref[1]
+    lead_identity_required = shot_body.get("lead_identity_required") is True
+    if lead_identity_required and canonical_locked_prompt:
+        prompt = f"{prompt}\nCanonical lead identity: {canonical_locked_prompt}"
 
     snapshot: dict[str, object] = {
         "plan_id": str(plan.id),
@@ -179,9 +184,12 @@ async def enqueue_keyframe_after_plan(
         },
         "prompt": prompt,
         "materialization": materialization_ops,
+        "lead_identity_required": lead_identity_required,
     }
     if canon_key:
         snapshot["canonical_object_key"] = canon_key
+    if canonical_locked_prompt:
+        snapshot["canonical_locked_prompt"] = canonical_locked_prompt
     ih = _input_hash(snapshot)
     node_run = NodeRun(
         project_id=project_id,
@@ -438,7 +446,10 @@ async def execute_media_node_run(
     face_score: float | None = None
     if node_type in {"keyframe", "face_review"}:
         # Two-source review only. Never self-match probe to itself.
-        if canonical_image_bytes is not None:
+        lead_identity_required = snap.get("lead_identity_required") is True
+        if not lead_identity_required:
+            face_status = "not_applicable"
+        elif canonical_image_bytes is not None:
             review = face_review_images(
                 probe_image_bytes=data,
                 canonical_image_bytes=canonical_image_bytes,
@@ -617,6 +628,11 @@ async def _complete_pure_node(
         else:
             face_status = "needs_human"
             review_status = "needs_human"
+        if snap.get("lead_identity_required") is not True:
+            face_status = "not_applicable"
+            face_score = None
+            review_status = "not_applicable"
+            payload["review_rule"] = "lead_identity_not_required"
         st = insightface_status()
         payload.update(
             {
