@@ -3,17 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 from uuid import UUID
 
 from app.config import get_settings
 from app.shared.db import get_session_factory, set_rls_context
-from app.shared.errors import NodeRunAlreadyClaimedError
+from app.shared.errors import AppError, NodeRunAlreadyClaimedError
 from app.shared.model_registry import load_all_models
 
 # Ensure full MetaData / FK graph is registered in worker process (SQLAlchemy
 # needs all related tables present when compiling FLUSH).
 load_all_models()
+logger = logging.getLogger(__name__)
+
+
+def _worker_failure_code(exc: Exception) -> str:
+    message = str(exc).strip()
+    prefix = message.partition(":")[0].strip()
+    if prefix in {
+        "CANONICAL_REFERENCE_REQUIRED",
+        "PROVIDER_FAILED",
+        "PROVIDER_NOT_CONFIGURED",
+    }:
+        return prefix
+    if isinstance(exc, AppError) and exc.code != "VALIDATION_ERROR":
+        return exc.code
+    return "WORKER_ERROR"
 
 
 async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
@@ -84,11 +100,22 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                     run2 = await s2.get(NodeRun, run_uuid)
                     if run2 is not None and run2.status in {"queued", "running"}:
                         run2.status = "failed"
-                        run2.error_code = "WORKER_ERROR"
+                        run2.error_code = _worker_failure_code(exc)
                         run2.error_summary = str(exc)[:500]
+                        from datetime import UTC, datetime
+
+                        run2.finished_at = datetime.now(UTC)
+                        run2.output_summary = {
+                            "status": "failed",
+                            "error_code": run2.error_code,
+                            "worker_boundary": True,
+                        }
                         await s2.commit()
             except Exception:
-                pass
+                logger.exception(
+                    "Unable to persist failed NodeRun %s after worker exception",
+                    node_run_id,
+                )
             return {"status": "failed", "error": str(exc)[:300]}
 
 

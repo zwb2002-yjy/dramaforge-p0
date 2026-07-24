@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import httpx
 import pytest
 from app.access.models import Organization, OrganizationMember, User
 from app.access.projects import ProjectService
+from app.config import Settings
 from app.creation import models as _cm  # noqa: F401
 from app.execution import models as _xm  # noqa: F401
 from app.execution.models import GraphNode, NodeRun, ProviderOperation
 from app.execution.product_path import execute_media_node_run
 from app.production import models as _pm  # noqa: F401
 from app.production.service import GraphService
+from app.providers.agnes import AgnesHubClient
 from app.shared.base import Base
 from app.shared.enums import MemberRole
 from app.shared.errors import ValidationAppError
@@ -55,6 +58,41 @@ class DelayedVideoAdapter:
     async def fetch_cost(self, remote_task_id: str) -> dict[str, object]:
         assert remote_task_id == "provider-video-1"
         return {"amount": 1.25, "currency": "USD"}
+
+
+@pytest.mark.asyncio
+async def test_agnes_image_retries_transient_503_before_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        assert request.url.path == "/v1/images/generations"
+        if attempts < 3:
+            return httpx.Response(503, json={"error": "hub overloaded"})
+        return httpx.Response(200, json={"data": [{"url": "https://media.example/image.png"}]})
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.providers.agnes.asyncio.sleep", no_sleep)
+    client = AgnesHubClient(
+        Settings(
+            app_env="development",
+            agnes_enabled=True,
+            agnes_api_key="test-provider-key",
+            agnes_base_url="https://agnes.example/v1",
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.create_image(prompt="cinematic archive room")
+
+    assert attempts == 3
+    assert result["status"] == "succeeded"
+    assert result["artifact_uri"] == "https://media.example/image.png"
 
 
 async def _video_run(session: AsyncSession) -> NodeRun:
@@ -153,3 +191,9 @@ async def test_video_provider_failure_keeps_remote_operation_lineage(
     assert op.provider_operation_id == "provider-video-1"
     assert op.status == "failed"
     assert op.error_code == "PROVIDER_FAILED"
+    failed_run = await session.get(NodeRun, run.id)
+    assert failed_run is not None
+    assert failed_run.status == "failed"
+    assert failed_run.error_code == "PROVIDER_FAILED"
+    assert failed_run.finished_at is not None
+    assert failed_run.output_summary["status"] == "failed"
