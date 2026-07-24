@@ -152,7 +152,31 @@ async def test_fake_agent_results_are_input_derived_without_story_specific_fixtu
 
 
 @pytest.mark.asyncio
-async def test_generate_brief_and_plan_agent_records_ops(session: AsyncSession) -> None:
+async def test_generate_brief_and_plan_agent_retries_invalid_structured_output(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MalformedBriefThenFakeAdapter(FakeOpenAIAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self._brief_attempts = 0
+
+        async def create(self, request: dict[str, object]) -> dict[str, object]:
+            if request.get("kind") == "brief":
+                self._brief_attempts += 1
+                if self._brief_attempts == 1:
+                    return {
+                        "remote_task_id": "malformed-brief",
+                        "status": "succeeded",
+                        "text": '{"logline":"incomplete"}',
+                    }
+            return await super().create(request)
+
+    adapter = MalformedBriefThenFakeAdapter()
+    monkeypatch.setattr(
+        "app.creation.service.get_openai_adapter",
+        lambda *, allow_live=False: adapter,
+    )
     suffix = uuid4().hex[:8]
     user = User(
         email=f"agent-{suffix}@example.com",
@@ -228,8 +252,20 @@ async def test_generate_brief_and_plan_agent_records_ops(session: AsyncSession) 
         .scalars()
         .all()
     )
-    assert len(ops) >= 2
-    assert all(o.status == "succeeded" for o in ops)
+    assert len(ops) == 3
+    failed_brief = [
+        op
+        for op in ops
+        if op.operation_kind == "text.brief.generate" and op.status == "failed"
+    ]
+    successful_brief = [
+        op for op in ops if op.operation_kind == "text.brief.generate" and op.status == "succeeded"
+    ]
+    assert len(failed_brief) == 1
+    assert failed_brief[0].attempt_no == 1
+    assert failed_brief[0].response_summary["response_chars"] > 0
+    assert len(successful_brief) == 1
+    assert successful_brief[0].attempt_no == 2
 
 
 def test_agent_brief_confirm_plan_api_flow(client: TestClient) -> None:
