@@ -162,11 +162,13 @@ async def test_generate_brief_and_plan_agent_retries_invalid_structured_output(
             super().__init__()
             self._brief_attempts = 0
             self._plan_attempts = 0
+            self.brief_prompts: list[str] = []
             self.plan_prompts: list[str] = []
 
         async def create(self, request: dict[str, object]) -> dict[str, object]:
             if request.get("kind") == "brief":
                 self._brief_attempts += 1
+                self.brief_prompts.append(str(request.get("prompt") or ""))
                 if self._brief_attempts == 1:
                     return {
                         "remote_task_id": "malformed-brief",
@@ -278,6 +280,8 @@ async def test_generate_brief_and_plan_agent_retries_invalid_structured_output(
     assert failed_brief[0].response_summary["response_chars"] > 0
     assert len(successful_brief) == 1
     assert successful_brief[0].attempt_no == 2
+    assert len(adapter.brief_prompts) == 2
+    assert "previous response failed validation" in adapter.brief_prompts[1]
     failed_plan = [
         op
         for op in ops
