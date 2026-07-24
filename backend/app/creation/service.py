@@ -612,41 +612,60 @@ class CreationService:
             "Make every field concrete and internally consistent. Idea:\n"
             f"{idea.strip()}"
         )
-        op = ProviderOperation(
-            agent_run_id=agent.id,
-            attempt_no=1,
-            purpose="primary",
-            operation_kind="text.brief.generate",
-            actual_provider="openai",
-            actual_model="text-llm",
-            request_fingerprint=_content_hash({"prompt_chars": len(prompt)}),
-            status="submitted",
-            request_summary={"kind": "brief", "chars": len(prompt)},
-            response_summary={},
-            token_usage={},
-            submitted_at=datetime.now(UTC),
-        )
-        self._session.add(op)
-        await self._session.flush()
-
-        try:
-            created = await adapter.create(
-                {
-                    "prompt": prompt,
-                    "kind": "brief",
-                    "idea": idea,
-                    "max_tokens": 1600,
-                }
+        parsed: dict[str, object] | None = None
+        last_error: Exception | None = None
+        for attempt_no in range(1, 3):
+            op = ProviderOperation(
+                agent_run_id=agent.id,
+                attempt_no=attempt_no,
+                purpose="primary",
+                operation_kind="text.brief.generate",
+                actual_provider="openai",
+                actual_model="text-llm",
+                request_fingerprint=_content_hash({"prompt_chars": len(prompt)}),
+                status="submitted",
+                request_summary={"kind": "brief", "chars": len(prompt)},
+                response_summary={},
+                token_usage={},
+                submitted_at=datetime.now(UTC),
             )
-            remote_id = str(created.get("remote_task_id") or "")
-            op.provider_operation_id = remote_id or None
-            if created.get("status") == "failed":
-                raise RuntimeError(str(created.get("error") or "text llm failed"))
-            text_out = str(created.get("text") or "")
-            if not text_out and hasattr(adapter, "poll"):
-                polled = await adapter.poll(remote_id)
-                text_out = str(polled.get("text") or "")
-            parsed = _parse_brief_json(text_out, idea)
+            self._session.add(op)
+            await self._session.flush()
+            remote_id = ""
+            text_out = ""
+            try:
+                created = await adapter.create(
+                    {
+                        "prompt": prompt,
+                        "kind": "brief",
+                        "idea": idea,
+                        "max_tokens": 1600,
+                    }
+                )
+                remote_id = str(created.get("remote_task_id") or "")
+                op.provider_operation_id = remote_id or None
+                if created.get("status") == "failed":
+                    raise RuntimeError(str(created.get("error") or "text llm failed"))
+                text_out = str(created.get("text") or "")
+                if not text_out and hasattr(adapter, "poll"):
+                    polled = await adapter.poll(remote_id)
+                    text_out = str(polled.get("text") or "")
+                parsed = _parse_brief_json(text_out, idea)
+            except Exception as exc:  # noqa: BLE001 - provider/schema boundary
+                last_error = exc
+                op.status = "failed"
+                op.completed_at = datetime.now(UTC)
+                op.response_summary = {
+                    "error": str(exc)[:160],
+                    "response_chars": len(text_out),
+                }
+                cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
+                op.provider_cost = Decimal(str(cost.get("amount") or 0))
+                op.token_usage = {
+                    "input_tokens": cost.get("input_tokens"),
+                    "output_tokens": cost.get("output_tokens"),
+                }
+                continue
             op.status = "succeeded"
             op.completed_at = datetime.now(UTC)
             op.response_summary = {"logline_chars": len(str(parsed.get("logline", "")))}
@@ -656,21 +675,21 @@ class CreationService:
                 "input_tokens": cost.get("input_tokens"),
                 "output_tokens": cost.get("output_tokens"),
             }
-            agent.status = "succeeded"
-            agent.finished_at = datetime.now(UTC)
-        except Exception as exc:  # noqa: BLE001 — map to agent failure
-            op.status = "failed"
-            op.completed_at = datetime.now(UTC)
-            op.response_summary = {"error": str(exc)[:160]}
+            break
+
+        if parsed is None:
+            assert last_error is not None
             agent.status = "failed"
             agent.stable_error_code = "TEXT_LLM_FAILED"
-            agent.error_summary = str(exc)[:200]
+            agent.error_summary = str(last_error)[:200]
             agent.finished_at = datetime.now(UTC)
             await self._session.commit()
             raise ValidationAppError(
-                f"Agent Brief failed: {exc}",
+                f"Agent Brief failed: {last_error}",
                 details={"code": "AGENT_BRIEF_FAILED", "manual_ok": True},
-            ) from exc
+            ) from last_error
+        agent.status = "succeeded"
+        agent.finished_at = datetime.now(UTC)
 
         rev = CreativeBriefRevision(
             creative_brief_id=brief_row.id,
@@ -806,6 +825,8 @@ class CreationService:
             "when the canonical lead must be visibly identifiable in the generated frame; set "
             "it false for inserts, empty environments, screens, back-of-head shots, or shots "
             "of other characters where a lead-face comparison is not applicable. "
+            "Keep each visual_description and keyframe_prompt concise so the complete JSON "
+            "fits in one response. The shots array must contain items 1 through 10 exactly. "
             + (
                 "A canonical lead is registered. Use this exact identity whenever "
                 "lead_identity_required is true. Include the locked identity description "
@@ -817,56 +838,98 @@ class CreationService:
             + "Brief:\n"
             f"{json.dumps(brief_body, ensure_ascii=False)}"
         )
-        op = ProviderOperation(
-            agent_run_id=agent.id,
-            attempt_no=1,
-            purpose="primary",
-            operation_kind="text.plan.generate",
-            actual_provider="openai",
-            actual_model="text-llm",
-            request_fingerprint=_content_hash({"prompt_chars": len(prompt)}),
-            status="submitted",
-            request_summary={"kind": "plan", "chars": len(prompt)},
-            response_summary={},
-            token_usage={},
-            submitted_at=datetime.now(UTC),
-        )
-        self._session.add(op)
-        await self._session.flush()
-
-        try:
-            created = await adapter.create(
-                {
-                    "prompt": prompt,
+        plan_body: dict[str, object] | None = None
+        last_error = None
+        for attempt_no in range(1, 4):
+            attempt_prompt = prompt
+            if last_error is not None:
+                attempt_prompt += (
+                    "\n\nYour previous response failed validation: "
+                    f"{str(last_error)[:180]}. Return a complete replacement JSON object "
+                    "only. Do not explain the correction. Verify that shots is an array of "
+                    "exactly 10 objects before responding."
+                )
+            op = ProviderOperation(
+                agent_run_id=agent.id,
+                attempt_no=attempt_no,
+                purpose="primary",
+                operation_kind="text.plan.generate",
+                actual_provider="openai",
+                actual_model="text-llm",
+                request_fingerprint=_content_hash(
+                    {"prompt_chars": len(attempt_prompt), "attempt": attempt_no}
+                ),
+                status="submitted",
+                request_summary={
                     "kind": "plan",
-                    "brief": brief_body,
-                    "max_tokens": 4200,
-                }
+                    "chars": len(attempt_prompt),
+                    "retry": attempt_no > 1,
+                },
+                response_summary={},
+                token_usage={},
+                submitted_at=datetime.now(UTC),
             )
-            remote_id = str(created.get("remote_task_id") or "")
-            op.provider_operation_id = remote_id or None
-            if created.get("status") == "failed":
-                raise RuntimeError(str(created.get("error") or "text llm failed"))
-            text_out = str(created.get("text") or "")
-            plan_body = _parse_plan_json(text_out, logline)
+            self._session.add(op)
+            await self._session.flush()
+            remote_id = ""
+            text_out = ""
+            try:
+                created = await adapter.create(
+                    {
+                        "prompt": attempt_prompt,
+                        "kind": "plan",
+                        "brief": brief_body,
+                        "max_tokens": 6000,
+                    }
+                )
+                remote_id = str(created.get("remote_task_id") or "")
+                op.provider_operation_id = remote_id or None
+                if created.get("status") == "failed":
+                    raise RuntimeError(str(created.get("error") or "text llm failed"))
+                text_out = str(created.get("text") or "")
+                if not text_out and hasattr(adapter, "poll"):
+                    polled = await adapter.poll(remote_id)
+                    text_out = str(polled.get("text") or "")
+                plan_body = _parse_plan_json(text_out, logline)
+            except Exception as exc:  # noqa: BLE001 - provider/schema boundary
+                last_error = exc
+                op.status = "failed"
+                op.completed_at = datetime.now(UTC)
+                op.response_summary = {
+                    "error": str(exc)[:160],
+                    "response_chars": len(text_out),
+                }
+                cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
+                op.provider_cost = Decimal(str(cost.get("amount") or 0))
+                op.token_usage = {
+                    "input_tokens": cost.get("input_tokens"),
+                    "output_tokens": cost.get("output_tokens"),
+                }
+                continue
             op.status = "succeeded"
             op.completed_at = datetime.now(UTC)
             op.response_summary = {"prompt_chars": len(str(plan_body.get("prompt", "")))}
             cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
             op.provider_cost = Decimal(str(cost.get("amount") or 0))
-            agent.status = "succeeded"
-            agent.finished_at = datetime.now(UTC)
-        except Exception as exc:  # noqa: BLE001
-            op.status = "failed"
-            op.completed_at = datetime.now(UTC)
+            op.token_usage = {
+                "input_tokens": cost.get("input_tokens"),
+                "output_tokens": cost.get("output_tokens"),
+            }
+            break
+
+        if plan_body is None:
+            assert last_error is not None
             agent.status = "failed"
-            agent.error_summary = str(exc)[:200]
+            agent.stable_error_code = "TEXT_LLM_FAILED"
+            agent.error_summary = str(last_error)[:200]
             agent.finished_at = datetime.now(UTC)
             await self._session.commit()
             raise ValidationAppError(
-                f"Agent Plan failed: {exc}",
+                f"Agent Plan failed: {last_error}",
                 details={"code": "AGENT_PLAN_FAILED", "manual_ok": True},
-            ) from exc
+            ) from last_error
+        agent.status = "succeeded"
+        agent.finished_at = datetime.now(UTC)
 
         plan = await self._create_or_update_plan(
             project_id=project_id,
