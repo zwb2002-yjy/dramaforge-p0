@@ -604,17 +604,25 @@ class CreationService:
             "You are the head writer for a premium vertical short drama. "
             "Develop the user's idea into a production-ready creative Brief. "
             "Return ONLY valid JSON, no markdown. Use the user's language. Required schema: "
-            '{"title":"", "logline":"", "synopsis":"120-250 words", '
+            '{"title":"", "logline":"", "synopsis":"100-160 words", '
             '"protagonist":{"name":"","profile":"","goal":""}, '
             '"conflict":"", "stakes":"", "world":"", "tone":"", "audience":"", '
             '"visual_style":"specific cinematography, palette and lighting", '
             '"episode_hook":"strong final reveal or cliffhanger"}. '
-            "Make every field concrete and internally consistent. Idea:\n"
+            "Make every field concrete, concise, and internally consistent. Idea:\n"
             f"{idea.strip()}"
         )
         parsed: dict[str, object] | None = None
         last_error: Exception | None = None
-        for attempt_no in range(1, 3):
+        for attempt_no in range(1, 4):
+            attempt_prompt = prompt
+            if last_error is not None:
+                attempt_prompt += (
+                    "\n\nYour previous response failed validation: "
+                    f"{str(last_error)[:180]}. Return a complete replacement JSON object "
+                    "only. Do not explain the correction. Include every required top-level "
+                    "field and protagonist.name, protagonist.profile, and protagonist.goal."
+                )
             op = ProviderOperation(
                 agent_run_id=agent.id,
                 attempt_no=attempt_no,
@@ -622,9 +630,15 @@ class CreationService:
                 operation_kind="text.brief.generate",
                 actual_provider="openai",
                 actual_model="text-llm",
-                request_fingerprint=_content_hash({"prompt_chars": len(prompt)}),
+                request_fingerprint=_content_hash(
+                    {"prompt_chars": len(attempt_prompt), "attempt": attempt_no}
+                ),
                 status="submitted",
-                request_summary={"kind": "brief", "chars": len(prompt)},
+                request_summary={
+                    "kind": "brief",
+                    "chars": len(attempt_prompt),
+                    "retry": attempt_no > 1,
+                },
                 response_summary={},
                 token_usage={},
                 submitted_at=datetime.now(UTC),
@@ -636,10 +650,10 @@ class CreationService:
             try:
                 created = await adapter.create(
                     {
-                        "prompt": prompt,
+                        "prompt": attempt_prompt,
                         "kind": "brief",
                         "idea": idea,
-                        "max_tokens": 1600,
+                        "max_tokens": 2400,
                     }
                 )
                 remote_id = str(created.get("remote_task_id") or "")
