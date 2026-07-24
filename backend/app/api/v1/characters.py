@@ -59,10 +59,11 @@ async def register_project_lead(
             allow_live=settings.app_env != "test",
             allow_fake=settings.app_env == "test",
         )
-        # Bound provider latency so API never hangs (ReadTimeout/502)
+        # Agnes permits a 300-second request and retries transient hub failures.
+        # Do not cancel that recovery path at the API boundary.
         created = await asyncio.wait_for(
             adapter.create({"prompt": prompt, "kind": "keyframe"}),
-            timeout=45.0,
+            timeout=330.0,
         )
         remote = str(created.get("remote_task_id") or "")
         poll = await asyncio.wait_for(adapter.poll(remote), timeout=30.0)

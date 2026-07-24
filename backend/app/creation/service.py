@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
-from app.assets.models import Episode, Scene, Shot
+from app.assets.models import Asset, Character, CharacterReference, Episode, Scene, Shot
 from app.creation.models import (
     AgentRun,
     CreationPlan,
@@ -604,49 +604,82 @@ class CreationService:
             "You are the head writer for a premium vertical short drama. "
             "Develop the user's idea into a production-ready creative Brief. "
             "Return ONLY valid JSON, no markdown. Use the user's language. Required schema: "
-            '{"title":"", "logline":"", "synopsis":"120-250 words", '
+            '{"title":"", "logline":"", "synopsis":"100-160 words", '
             '"protagonist":{"name":"","profile":"","goal":""}, '
             '"conflict":"", "stakes":"", "world":"", "tone":"", "audience":"", '
             '"visual_style":"specific cinematography, palette and lighting", '
             '"episode_hook":"strong final reveal or cliffhanger"}. '
-            "Make every field concrete and internally consistent. Idea:\n"
+            "Make every field concrete, concise, and internally consistent. Idea:\n"
             f"{idea.strip()}"
         )
-        op = ProviderOperation(
-            agent_run_id=agent.id,
-            attempt_no=1,
-            purpose="primary",
-            operation_kind="text.brief.generate",
-            actual_provider="openai",
-            actual_model="text-llm",
-            request_fingerprint=_content_hash({"prompt_chars": len(prompt)}),
-            status="submitted",
-            request_summary={"kind": "brief", "chars": len(prompt)},
-            response_summary={},
-            token_usage={},
-            submitted_at=datetime.now(UTC),
-        )
-        self._session.add(op)
-        await self._session.flush()
-
-        try:
-            created = await adapter.create(
-                {
-                    "prompt": prompt,
+        parsed: dict[str, object] | None = None
+        last_error: Exception | None = None
+        for attempt_no in range(1, 4):
+            attempt_prompt = prompt
+            if last_error is not None:
+                attempt_prompt += (
+                    "\n\nYour previous response failed validation: "
+                    f"{str(last_error)[:180]}. Return a complete replacement JSON object "
+                    "only. Do not explain the correction. Include every required top-level "
+                    "field and protagonist.name, protagonist.profile, and protagonist.goal."
+                )
+            op = ProviderOperation(
+                agent_run_id=agent.id,
+                attempt_no=attempt_no,
+                purpose="primary",
+                operation_kind="text.brief.generate",
+                actual_provider="openai",
+                actual_model="text-llm",
+                request_fingerprint=_content_hash(
+                    {"prompt_chars": len(attempt_prompt), "attempt": attempt_no}
+                ),
+                status="submitted",
+                request_summary={
                     "kind": "brief",
-                    "idea": idea,
-                    "max_tokens": 1600,
-                }
+                    "chars": len(attempt_prompt),
+                    "retry": attempt_no > 1,
+                },
+                response_summary={},
+                token_usage={},
+                submitted_at=datetime.now(UTC),
             )
-            remote_id = str(created.get("remote_task_id") or "")
-            op.provider_operation_id = remote_id or None
-            if created.get("status") == "failed":
-                raise RuntimeError(str(created.get("error") or "text llm failed"))
-            text_out = str(created.get("text") or "")
-            if not text_out and hasattr(adapter, "poll"):
-                polled = await adapter.poll(remote_id)
-                text_out = str(polled.get("text") or "")
-            parsed = _parse_brief_json(text_out, idea)
+            self._session.add(op)
+            await self._session.flush()
+            remote_id = ""
+            text_out = ""
+            try:
+                created = await adapter.create(
+                    {
+                        "prompt": attempt_prompt,
+                        "kind": "brief",
+                        "idea": idea,
+                        "max_tokens": 2400,
+                    }
+                )
+                remote_id = str(created.get("remote_task_id") or "")
+                op.provider_operation_id = remote_id or None
+                if created.get("status") == "failed":
+                    raise RuntimeError(str(created.get("error") or "text llm failed"))
+                text_out = str(created.get("text") or "")
+                if not text_out and hasattr(adapter, "poll"):
+                    polled = await adapter.poll(remote_id)
+                    text_out = str(polled.get("text") or "")
+                parsed = _parse_brief_json(text_out, idea)
+            except Exception as exc:  # noqa: BLE001 - provider/schema boundary
+                last_error = exc
+                op.status = "failed"
+                op.completed_at = datetime.now(UTC)
+                op.response_summary = {
+                    "error": str(exc)[:160],
+                    "response_chars": len(text_out),
+                }
+                cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
+                op.provider_cost = Decimal(str(cost.get("amount") or 0))
+                op.token_usage = {
+                    "input_tokens": cost.get("input_tokens"),
+                    "output_tokens": cost.get("output_tokens"),
+                }
+                continue
             op.status = "succeeded"
             op.completed_at = datetime.now(UTC)
             op.response_summary = {"logline_chars": len(str(parsed.get("logline", "")))}
@@ -656,21 +689,21 @@ class CreationService:
                 "input_tokens": cost.get("input_tokens"),
                 "output_tokens": cost.get("output_tokens"),
             }
-            agent.status = "succeeded"
-            agent.finished_at = datetime.now(UTC)
-        except Exception as exc:  # noqa: BLE001 — map to agent failure
-            op.status = "failed"
-            op.completed_at = datetime.now(UTC)
-            op.response_summary = {"error": str(exc)[:160]}
+            break
+
+        if parsed is None:
+            assert last_error is not None
             agent.status = "failed"
             agent.stable_error_code = "TEXT_LLM_FAILED"
-            agent.error_summary = str(exc)[:200]
+            agent.error_summary = str(last_error)[:200]
             agent.finished_at = datetime.now(UTC)
             await self._session.commit()
             raise ValidationAppError(
-                f"Agent Brief failed: {exc}",
+                f"Agent Brief failed: {last_error}",
                 details={"code": "AGENT_BRIEF_FAILED", "manual_ok": True},
-            ) from exc
+            ) from last_error
+        agent.status = "succeeded"
+        agent.finished_at = datetime.now(UTC)
 
         rev = CreativeBriefRevision(
             creative_brief_id=brief_row.id,
@@ -734,6 +767,18 @@ class CreationService:
                     },
                 )
         logline = str(brief_body.get("logline") or "")
+        canonical_lead = (
+            await self._session.execute(
+                select(Asset.name, Character.locked_prompt)
+                .join(Character, Character.id == Asset.id)
+                .join(CharacterReference, CharacterReference.character_id == Character.id)
+                .where(Asset.project_id == project_id)
+                .where(CharacterReference.is_canonical.is_(True))
+                .limit(1)
+            )
+        ).one_or_none()
+        canonical_lead_name = str(canonical_lead[0]).strip() if canonical_lead else ""
+        canonical_lead_prompt = str(canonical_lead[1]).strip() if canonical_lead else ""
         from app.config import get_settings
 
         settings = get_settings()
@@ -787,60 +832,118 @@ class CreationService:
             '"visual_description":"specific subject action, composition and story beat",'
             '"dialogue":"","keyframe_prompt":"standalone image-generation prompt including '
             'character, action, location, composition, lens, lighting, palette, 9:16",'
+            '"lead_identity_required":true,'
             '"duration_seconds":3.0}]}. Each shot must advance the story, preserve character '
-            "wardrobe/appearance, vary shot scale, and end shot 10 on the episode hook. Brief:\n"
+            "wardrobe/appearance, vary shot scale, and end shot 10 on the episode hook. "
+            "For every shot, lead_identity_required must be a JSON boolean. Set it true only "
+            "when the canonical lead must be visibly identifiable in the generated frame; set "
+            "it false for inserts, empty environments, screens, back-of-head shots, or shots "
+            "of other characters where a lead-face comparison is not applicable. "
+            "Keep each visual_description and keyframe_prompt concise so the complete JSON "
+            "fits in one response. The shots array must contain items 1 through 10 exactly. "
+            + (
+                "A canonical lead is registered. Use this exact identity whenever "
+                "lead_identity_required is true. Include the locked identity description "
+                f"verbatim in each matching keyframe_prompt. Name: {canonical_lead_name}. "
+                f"Locked identity: {canonical_lead_prompt}. "
+                if canonical_lead_name and canonical_lead_prompt
+                else ""
+            )
+            + "Brief:\n"
             f"{json.dumps(brief_body, ensure_ascii=False)}"
         )
-        op = ProviderOperation(
-            agent_run_id=agent.id,
-            attempt_no=1,
-            purpose="primary",
-            operation_kind="text.plan.generate",
-            actual_provider="openai",
-            actual_model="text-llm",
-            request_fingerprint=_content_hash({"prompt_chars": len(prompt)}),
-            status="submitted",
-            request_summary={"kind": "plan", "chars": len(prompt)},
-            response_summary={},
-            token_usage={},
-            submitted_at=datetime.now(UTC),
-        )
-        self._session.add(op)
-        await self._session.flush()
-
-        try:
-            created = await adapter.create(
-                {
-                    "prompt": prompt,
+        plan_body: dict[str, object] | None = None
+        last_error = None
+        for attempt_no in range(1, 4):
+            attempt_prompt = prompt
+            if last_error is not None:
+                attempt_prompt += (
+                    "\n\nYour previous response failed validation: "
+                    f"{str(last_error)[:180]}. Return a complete replacement JSON object "
+                    "only. Do not explain the correction. Verify that shots is an array of "
+                    "exactly 10 objects before responding."
+                )
+            op = ProviderOperation(
+                agent_run_id=agent.id,
+                attempt_no=attempt_no,
+                purpose="primary",
+                operation_kind="text.plan.generate",
+                actual_provider="openai",
+                actual_model="text-llm",
+                request_fingerprint=_content_hash(
+                    {"prompt_chars": len(attempt_prompt), "attempt": attempt_no}
+                ),
+                status="submitted",
+                request_summary={
                     "kind": "plan",
-                    "brief": brief_body,
-                    "max_tokens": 4200,
-                }
+                    "chars": len(attempt_prompt),
+                    "retry": attempt_no > 1,
+                },
+                response_summary={},
+                token_usage={},
+                submitted_at=datetime.now(UTC),
             )
-            remote_id = str(created.get("remote_task_id") or "")
-            op.provider_operation_id = remote_id or None
-            if created.get("status") == "failed":
-                raise RuntimeError(str(created.get("error") or "text llm failed"))
-            text_out = str(created.get("text") or "")
-            plan_body = _parse_plan_json(text_out, logline)
+            self._session.add(op)
+            await self._session.flush()
+            remote_id = ""
+            text_out = ""
+            try:
+                created = await adapter.create(
+                    {
+                        "prompt": attempt_prompt,
+                        "kind": "plan",
+                        "brief": brief_body,
+                        "max_tokens": 6000,
+                    }
+                )
+                remote_id = str(created.get("remote_task_id") or "")
+                op.provider_operation_id = remote_id or None
+                if created.get("status") == "failed":
+                    raise RuntimeError(str(created.get("error") or "text llm failed"))
+                text_out = str(created.get("text") or "")
+                if not text_out and hasattr(adapter, "poll"):
+                    polled = await adapter.poll(remote_id)
+                    text_out = str(polled.get("text") or "")
+                plan_body = _parse_plan_json(text_out, logline)
+            except Exception as exc:  # noqa: BLE001 - provider/schema boundary
+                last_error = exc
+                op.status = "failed"
+                op.completed_at = datetime.now(UTC)
+                op.response_summary = {
+                    "error": str(exc)[:160],
+                    "response_chars": len(text_out),
+                }
+                cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
+                op.provider_cost = Decimal(str(cost.get("amount") or 0))
+                op.token_usage = {
+                    "input_tokens": cost.get("input_tokens"),
+                    "output_tokens": cost.get("output_tokens"),
+                }
+                continue
             op.status = "succeeded"
             op.completed_at = datetime.now(UTC)
             op.response_summary = {"prompt_chars": len(str(plan_body.get("prompt", "")))}
             cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
             op.provider_cost = Decimal(str(cost.get("amount") or 0))
-            agent.status = "succeeded"
-            agent.finished_at = datetime.now(UTC)
-        except Exception as exc:  # noqa: BLE001
-            op.status = "failed"
-            op.completed_at = datetime.now(UTC)
+            op.token_usage = {
+                "input_tokens": cost.get("input_tokens"),
+                "output_tokens": cost.get("output_tokens"),
+            }
+            break
+
+        if plan_body is None:
+            assert last_error is not None
             agent.status = "failed"
-            agent.error_summary = str(exc)[:200]
+            agent.stable_error_code = "TEXT_LLM_FAILED"
+            agent.error_summary = str(last_error)[:200]
             agent.finished_at = datetime.now(UTC)
             await self._session.commit()
             raise ValidationAppError(
-                f"Agent Plan failed: {exc}",
+                f"Agent Plan failed: {last_error}",
                 details={"code": "AGENT_PLAN_FAILED", "manual_ok": True},
-            ) from exc
+            ) from last_error
+        agent.status = "succeeded"
+        agent.finished_at = datetime.now(UTC)
 
         plan = await self._create_or_update_plan(
             project_id=project_id,
@@ -954,6 +1057,11 @@ def _normalize_plan_shot(raw: object, index: int) -> dict[str, object]:
         raise ValueError(f"Agent Plan shot {index} is missing visual_description")
     if not keyframe_prompt:
         raise ValueError(f"Agent Plan shot {index} is missing keyframe_prompt")
+    lead_identity_required = raw.get("lead_identity_required")
+    if not isinstance(lead_identity_required, bool):
+        raise ValueError(
+            f"Agent Plan shot {index} must set lead_identity_required to a JSON boolean"
+        )
     return {
         "shot_number": _positive_int(raw.get("shot_number"), default=index),
         "scene_number": _positive_int(raw.get("scene_number"), default=1),
@@ -964,6 +1072,7 @@ def _normalize_plan_shot(raw: object, index: int) -> dict[str, object]:
         "visual_description": visual,
         "dialogue": _text(raw.get("dialogue")),
         "keyframe_prompt": keyframe_prompt,
+        "lead_identity_required": lead_identity_required,
         "duration_seconds": float(_duration(raw.get("duration_seconds"))),
     }
 
@@ -1030,6 +1139,12 @@ def _normalize_materialization_shot(raw: object, index: int) -> dict[str, object
         "scene_number": _positive_int(raw.get("scene_number"), default=1),
         "visual_description": visual,
         "keyframe_prompt": prompt,
+        # Manual plans predate this field. Omitted values remain fail-closed.
+        "lead_identity_required": (
+            raw["lead_identity_required"]
+            if isinstance(raw.get("lead_identity_required"), bool)
+            else True
+        ),
     }
 
 

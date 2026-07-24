@@ -82,6 +82,7 @@ def build_fake_plan(brief: object) -> dict[str, object]:
                     f"story premise: {logline}, setting: {world}, clear action, "
                     "consistent appearance, motivated lighting"
                 ),
+                "lead_identity_required": number not in {5, 10},
                 "duration_seconds": 3.0,
             }
         )

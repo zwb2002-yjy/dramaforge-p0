@@ -21,8 +21,19 @@ from app.config import Settings, get_settings
 
 
 class AgnesHubClient:
-    def __init__(self, settings: Settings | None = None) -> None:
+    _IMAGE_MAX_ATTEMPTS = 8
+    _IMAGE_REQUEST_TIMEOUT_S = 150.0
+    _IMAGE_RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
+    _IMAGE_BACKOFF_CAP_S = 20.0
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._settings = settings or get_settings()
+        self._transport = transport
         self._base = self._settings.agnes_base_url.rstrip("/")
         self._key = self._settings.agnes_api_key.strip()
         self._image_model = self._settings.agnes_image_model
@@ -50,9 +61,13 @@ class AgnesHubClient:
             "size": size,
         }
         last_err = "unknown"
-        # Free hub can return 503 / disconnect mid-body; retry with backoff.
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            for attempt in range(1, 6):
+        # Eight 150-second requests plus capped backoff fit inside the heavy
+        # Worker's 30-minute execution budget.
+        async with httpx.AsyncClient(
+            timeout=self._IMAGE_REQUEST_TIMEOUT_S,
+            transport=self._transport,
+        ) as client:
+            for attempt in range(1, self._IMAGE_MAX_ATTEMPTS + 1):
                 try:
                     resp = await client.post(url, headers=self._headers(), json=body)
                     try:
@@ -81,9 +96,8 @@ class AgnesHubClient:
                             "artifact_uri": image_url,
                         }
                     last_err = f"agnes image http {resp.status_code}: {str(data)[:120]}"
-                    # Retry transient hub overload
-                    if resp.status_code in {408, 429, 500, 502, 503, 504}:
-                        await asyncio.sleep(2.0 * attempt)
+                    if resp.status_code in self._IMAGE_RETRYABLE_STATUSES:
+                        await asyncio.sleep(self._image_retry_delay(attempt))
                         continue
                 except (
                     httpx.TimeoutException,
@@ -91,7 +105,7 @@ class AgnesHubClient:
                     httpx.RemoteProtocolError,
                 ) as exc:
                     last_err = f"{type(exc).__name__}: {exc}"
-                    await asyncio.sleep(2.0 * attempt)
+                    await asyncio.sleep(self._image_retry_delay(attempt))
                     continue
                 break
             self._tasks[remote_id] = {
@@ -105,6 +119,10 @@ class AgnesHubClient:
                 "status": "failed",
                 "error": last_err[:300],
             }
+
+    @classmethod
+    def _image_retry_delay(cls, attempt: int) -> float:
+        return min(2.0**attempt, cls._IMAGE_BACKOFF_CAP_S)
 
     async def create_video(self, *, prompt: str) -> dict[str, Any]:
         """POST /videos — async task creation."""

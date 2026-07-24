@@ -149,10 +149,48 @@ async def test_fake_agent_results_are_input_derived_without_story_specific_fixtu
     assert "lin xia" not in rendered
     assert "neon rain witness" not in rendered
     assert len({shot["keyframe_prompt"] for shot in plan["shots"]}) == 10
+    assert all(isinstance(shot["lead_identity_required"], bool) for shot in plan["shots"])
 
 
 @pytest.mark.asyncio
-async def test_generate_brief_and_plan_agent_records_ops(session: AsyncSession) -> None:
+async def test_generate_brief_and_plan_agent_retries_invalid_structured_output(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MalformedBriefAndPlanThenFakeAdapter(FakeOpenAIAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self._brief_attempts = 0
+            self._plan_attempts = 0
+            self.brief_prompts: list[str] = []
+            self.plan_prompts: list[str] = []
+
+        async def create(self, request: dict[str, object]) -> dict[str, object]:
+            if request.get("kind") == "brief":
+                self._brief_attempts += 1
+                self.brief_prompts.append(str(request.get("prompt") or ""))
+                if self._brief_attempts == 1:
+                    return {
+                        "remote_task_id": "malformed-brief",
+                        "status": "succeeded",
+                        "text": '{"logline":"incomplete"}',
+                    }
+            if request.get("kind") == "plan":
+                self._plan_attempts += 1
+                self.plan_prompts.append(str(request.get("prompt") or ""))
+                if self._plan_attempts == 1:
+                    return {
+                        "remote_task_id": "malformed-plan",
+                        "status": "succeeded",
+                        "text": '{"title":"missing shots"}',
+                    }
+            return await super().create(request)
+
+    adapter = MalformedBriefAndPlanThenFakeAdapter()
+    monkeypatch.setattr(
+        "app.creation.service.get_openai_adapter",
+        lambda *, allow_live=False: adapter,
+    )
     suffix = uuid4().hex[:8]
     user = User(
         email=f"agent-{suffix}@example.com",
@@ -228,8 +266,37 @@ async def test_generate_brief_and_plan_agent_records_ops(session: AsyncSession) 
         .scalars()
         .all()
     )
-    assert len(ops) >= 2
-    assert all(o.status == "succeeded" for o in ops)
+    assert len(ops) == 4
+    failed_brief = [
+        op
+        for op in ops
+        if op.operation_kind == "text.brief.generate" and op.status == "failed"
+    ]
+    successful_brief = [
+        op for op in ops if op.operation_kind == "text.brief.generate" and op.status == "succeeded"
+    ]
+    assert len(failed_brief) == 1
+    assert failed_brief[0].attempt_no == 1
+    assert failed_brief[0].response_summary["response_chars"] > 0
+    assert len(successful_brief) == 1
+    assert successful_brief[0].attempt_no == 2
+    assert len(adapter.brief_prompts) == 2
+    assert "previous response failed validation" in adapter.brief_prompts[1]
+    failed_plan = [
+        op
+        for op in ops
+        if op.operation_kind == "text.plan.generate" and op.status == "failed"
+    ]
+    successful_plan = [
+        op for op in ops if op.operation_kind == "text.plan.generate" and op.status == "succeeded"
+    ]
+    assert len(failed_plan) == 1
+    assert failed_plan[0].attempt_no == 1
+    assert failed_plan[0].response_summary["response_chars"] > 0
+    assert len(successful_plan) == 1
+    assert successful_plan[0].attempt_no == 2
+    assert len(adapter.plan_prompts) == 2
+    assert "previous response failed validation" in adapter.plan_prompts[1]
 
 
 def test_agent_brief_confirm_plan_api_flow(client: TestClient) -> None:
@@ -359,6 +426,7 @@ def test_plan_parser_preserves_ten_structured_shots() -> None:
             "visual_description": f"镜头 {number} 的明确动作与构图",
             "dialogue": "" if number % 2 else f"台词 {number}",
             "keyframe_prompt": f"9:16 cinematic shot {number}, consistent Lin Xia",
+            "lead_identity_required": number not in {4, 8},
             "duration_seconds": 3.5,
         }
         for number in range(1, 11)
@@ -389,6 +457,10 @@ def test_plan_parser_preserves_ten_structured_shots() -> None:
     assert len(parsed["shots"]) == 10
     assert parsed["shots"][9]["shot_number"] == 10
     assert parsed["shots"][9]["location"] == "废弃车站"
+    invalid = __import__("json").loads(__import__("json").dumps({"shots": shots}))
+    invalid["shots"][0].pop("lead_identity_required")
+    with pytest.raises(ValueError, match="lead_identity_required"):
+        _parse_plan_json(__import__("json").dumps(invalid), "林夏在雨夜发现跟踪者")
 
 
 @pytest.mark.asyncio
@@ -440,6 +512,7 @@ async def test_confirm_plan_materializes_real_shots_and_keyframe_runs(
             "visual_description": f"林夏执行动作 {number}",
             "dialogue": "",
             "keyframe_prompt": f"cinematic rain shot {number}",
+            "lead_identity_required": True,
             "duration_seconds": 3,
         }
         for number in range(1, 4)
@@ -775,6 +848,7 @@ async def test_manual_plan_save_cannot_overwrite_agent_plan(
             "scene_number": 1,
             "visual_description": f"Story beat {number}",
             "keyframe_prompt": f"9:16 shot {number}",
+            "lead_identity_required": True,
         }
         for number in range(1, 11)
     ]

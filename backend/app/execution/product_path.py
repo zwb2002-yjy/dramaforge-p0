@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import dataclass
 from decimal import Decimal
@@ -20,6 +21,7 @@ from app.execution.shot_pipeline import (
     shot_pipeline_definition,
 )
 from app.production.service import GraphService
+from app.providers.base import ProviderAdapter
 from app.providers.fake import FakeFluxAdapter
 from app.shared.db import set_rls_context
 from app.shared.errors import NodeRunAlreadyClaimedError, ValidationAppError
@@ -43,7 +45,7 @@ class ExecuteNodeResult:
     byte_size: int
     face_status: str | None
     face_score: float | None
-    provider_operation_id: UUID
+    provider_operation_id: UUID | None
     node_type: str
 
 
@@ -54,6 +56,33 @@ ExecuteKeyframeResult = ExecuteNodeResult
 def _input_hash(payload: dict[str, object]) -> str:
     raw = repr(sorted(payload.items())).encode()
     return hashlib.sha256(raw).hexdigest()
+
+
+async def _commit_terminal_failure(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    error_code: str,
+    error_summary: str,
+) -> None:
+    """Commit a terminal state before the Worker exception boundary rolls back."""
+    from datetime import UTC, datetime
+
+    run.status = "failed"
+    run.error_code = error_code
+    run.error_summary = error_summary[:500]
+    run.finished_at = datetime.now(UTC)
+    run.output_summary = {
+        "status": "failed",
+        "error_code": error_code,
+    }
+    await session.flush()
+    await session.commit()
+    await set_rls_context(
+        session,
+        user_id=run.created_by,
+        project_id=run.project_id,
+    )
 
 
 async def claim_media_node_run(
@@ -155,18 +184,23 @@ async def enqueue_keyframe_after_plan(
     from app.assets.models import Asset, Character, CharacterReference
 
     canon_key: str | None = None
+    canonical_locked_prompt = ""
     ref = (
         await session.execute(
-            select(CharacterReference)
+            select(CharacterReference, Character.locked_prompt)
             .join(Character, Character.id == CharacterReference.character_id)
             .join(Asset, Asset.id == Character.id)
             .where(Asset.project_id == project_id)
             .where(CharacterReference.is_canonical.is_(True))
             .limit(1)
         )
-    ).scalar_one_or_none()
+    ).one_or_none()
     if ref is not None:
-        canon_key = ref.object_key
+        canon_key = ref[0].object_key
+        canonical_locked_prompt = ref[1]
+    lead_identity_required = shot_body.get("lead_identity_required") is True
+    if lead_identity_required and canonical_locked_prompt:
+        prompt = f"{prompt}\nCanonical lead identity: {canonical_locked_prompt}"
 
     snapshot: dict[str, object] = {
         "plan_id": str(plan.id),
@@ -179,9 +213,12 @@ async def enqueue_keyframe_after_plan(
         },
         "prompt": prompt,
         "materialization": materialization_ops,
+        "lead_identity_required": lead_identity_required,
     }
     if canon_key:
         snapshot["canonical_object_key"] = canon_key
+    if canonical_locked_prompt:
+        snapshot["canonical_locked_prompt"] = canonical_locked_prompt
     ih = _input_hash(snapshot)
     node_run = NodeRun(
         project_id=project_id,
@@ -209,7 +246,7 @@ async def execute_keyframe_node_run(
     *,
     node_run_id: UUID,
     store: ObjectStore | None = None,
-    flux: FakeFluxAdapter | None = None,
+    flux: ProviderAdapter | None = None,
     face_threshold: float = 0.35,
     require_canonical: bool = False,
     canonical_embedding: list[float] | None = None,
@@ -233,7 +270,7 @@ async def execute_media_node_run(
     *,
     node_run_id: UUID,
     store: ObjectStore | None = None,
-    flux: FakeFluxAdapter | None = None,
+    flux: ProviderAdapter | None = None,
     face_threshold: float = 0.35,
     require_canonical: bool = False,
     canonical_embedding: list[float] | None = None,
@@ -274,6 +311,14 @@ async def execute_media_node_run(
             raise ValidationAppError(f"node_run cannot execute from status={run.status}")
 
     obj_store = store or get_object_store()
+    if node_type == "composite":
+        return await _complete_composite_node(
+            session,
+            run=run,
+            node=node,
+            obj_store=obj_store,
+        )
+
     snap = run.input_snapshot or {}
     # Resolve canonical from snapshot object key before enforce (Worker path).
     if canonical_image_bytes is None:
@@ -284,10 +329,12 @@ async def execute_media_node_run(
             except Exception:
                 canonical_image_bytes = None
     if require_canonical and canonical_embedding is None and canonical_image_bytes is None:
-        run.status = "failed"
-        run.error_code = "CANONICAL_REFERENCE_REQUIRED"
-        run.error_summary = "canonical reference required"
-        await session.flush()
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="CANONICAL_REFERENCE_REQUIRED",
+            error_summary="canonical reference required",
+        )
         raise ValidationAppError("CANONICAL_REFERENCE_REQUIRED")
 
     plan_snapshot = snap.get("plan")
@@ -335,7 +382,11 @@ async def execute_media_node_run(
         _env = _gs().app_env
         allow_fake = _env == "test"
         try:
-            if node_type in {"video", "video_review", "composite"}:
+            if node_type == "voice" and not allow_fake:
+                from app.providers.local_tts import get_local_tts_adapter
+
+                adapter = get_local_tts_adapter()
+            elif node_type in {"video", "video_review"}:
                 adapter = get_kling_adapter(allow_fake=allow_fake)
             elif node_type == "voice":
                 # TTS off for P0 — only allow deterministic stub under test
@@ -348,55 +399,26 @@ async def execute_media_node_run(
             else:
                 adapter = get_flux_adapter(allow_fake=allow_fake)
         except ProviderNotConfiguredError as exc:
-            run.status = "failed"
-            run.error_code = "PROVIDER_NOT_CONFIGURED"
-            run.error_summary = exc.message[:500]
-            run.finished_at = datetime.now(UTC)
-            await session.flush()
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code="PROVIDER_NOT_CONFIGURED",
+                error_summary=exc.message,
+            )
             raise
 
     # Produce media bytes by node type via Adapter contract
     kind = node_type
     create = await adapter.create({"prompt": prompt, "kind": kind})
+    create_status = str(create.get("status", "unknown"))
+    create_failed = create_status in {"failed", "error", "cancelled"}
     remote = str(create.get("remote_task_id") or uuid4())
-    # Video may stay queued — poll a few times when not immediate
-    poll = await adapter.poll(remote)
-    for _ in range(40):
-        status = str(poll.get("status", "failed"))
-        if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
-            break
-        import asyncio
-
-        await asyncio.sleep(3.0)
-        poll = await adapter.poll(remote)
-    cost = await adapter.fetch_cost(remote)
-    status = str(poll.get("status", "failed"))
-    if status not in {"succeeded", "completed", "success"}:
-        run.status = "failed"
-        run.error_code = "PROVIDER_FAILED"
-        run.error_summary = str(poll.get("error") or status)[:500]
-        run.finished_at = datetime.now(UTC)
-        await session.flush()
-        raise ValidationAppError(f"PROVIDER_FAILED: {run.error_summary}")
-
-    adapter_blobs = getattr(adapter, "blobs", {})
-    if remote in adapter_blobs:
-        data = adapter_blobs[remote]
-    else:
-        uri = poll.get("artifact_uri") or create.get("artifact_uri")
-        data = await _resolve_media_bytes(kind=kind, remote=remote, prompt=prompt, artifact_uri=uri)
-
-    # Node-specific mime / key
-    mime, ext, art_type = _mime_for_node(node_type)
-    object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
-    stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
-
     from app.config import get_settings
 
     _settings = get_settings()
     provider_name = str(getattr(adapter, "provider", "flux") or "flux")
     if type(adapter).__name__.startswith("Agnes") or provider_name in {"agnes", "flux"}:
-        if node_type in {"video", "video_review", "composite"}:
+        if node_type in {"video", "video_review"}:
             model_name = _settings.agnes_video_model
         else:
             model_name = _settings.agnes_image_model
@@ -412,16 +434,95 @@ async def execute_media_node_run(
         operation_kind=f"{node_type}.generate",
         actual_provider=provider_name,
         actual_model=model_name,
-        provider_operation_id=remote,
+        provider_operation_id=None if create_failed else remote,
         request_fingerprint=hashlib.sha256(f"{kind}:{prompt}".encode()).hexdigest(),
-        status="succeeded",
+        status="submitted",
         request_summary={"kind": kind},
-        response_summary={"status": status},
-        provider_cost=Decimal(str(cost.get("amount", 0.0))),
-        currency=str(cost.get("currency", "USD")),
+        response_summary={"create_status": create_status},
+        submitted_at=datetime.now(UTC),
     )
     session.add(op)
     await session.flush()
+
+    if create_failed:
+        create_error = str(create.get("error") or "provider rejected task creation")[:500]
+        op.status = "failed"
+        op.error_code = "PROVIDER_CREATE_FAILED"
+        op.error_summary = create_error
+        op.response_summary = {
+            "create_status": create_status,
+            "create_error": create_error[:300],
+        }
+        op.completed_at = datetime.now(UTC)
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="PROVIDER_CREATE_FAILED",
+            error_summary=create_error,
+        )
+        raise ValidationAppError(f"PROVIDER_CREATE_FAILED: {create_error}")
+
+    # Provider video tasks can stay running for several minutes. Keep polling
+    # inside the heavy worker's 30-minute job budget; never submit a second task.
+    poll_timeout_s = 1_620.0 if node_type in {"video", "video_review"} else 120.0
+    poll_interval_s = 5.0 if node_type in {"video", "video_review"} else 3.0
+    deadline = asyncio.get_running_loop().time() + poll_timeout_s
+    poll: dict[str, object] = {"status": str(create.get("status", "queued"))}
+    poll_count = 0
+    while True:
+        poll = await adapter.poll(remote)
+        poll_count += 1
+        status = str(poll.get("status", "failed"))
+        op.last_polled_at = datetime.now(UTC)
+        if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
+            break
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            status = "failed"
+            poll = {
+                **poll,
+                "status": status,
+                "error": f"timeout waiting for provider task after {poll_timeout_s:.0f}s",
+            }
+            break
+        await asyncio.sleep(min(poll_interval_s, remaining))
+
+    cost = await adapter.fetch_cost(remote)
+    status = str(poll.get("status", "failed"))
+    op.provider_cost = Decimal(str(cost.get("amount", 0.0)))
+    op.currency = str(cost.get("currency", "USD"))
+    op.response_summary = {
+        "create_status": str(create.get("status", "unknown")),
+        "final_status": status,
+        "poll_count": poll_count,
+    }
+    if status not in {"succeeded", "completed", "success"}:
+        error_summary = str(poll.get("error") or status)[:500]
+        op.status = "failed"
+        op.error_code = "PROVIDER_FAILED"
+        op.error_summary = error_summary
+        op.completed_at = datetime.now(UTC)
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="PROVIDER_FAILED",
+            error_summary=error_summary,
+        )
+        raise ValidationAppError(f"PROVIDER_FAILED: {error_summary}")
+
+    op.status = "succeeded"
+    op.completed_at = datetime.now(UTC)
+    adapter_blobs = getattr(adapter, "blobs", {})
+    if remote in adapter_blobs:
+        data = adapter_blobs[remote]
+    else:
+        uri = poll.get("artifact_uri") or create.get("artifact_uri")
+        data = await _resolve_media_bytes(kind=kind, remote=remote, prompt=prompt, artifact_uri=uri)
+
+    # Node-specific mime / key
+    mime, ext, art_type = _mime_for_node(node_type)
+    object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
+    stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
 
     art = await get_or_create_artifact(
         session,
@@ -438,7 +539,10 @@ async def execute_media_node_run(
     face_score: float | None = None
     if node_type in {"keyframe", "face_review"}:
         # Two-source review only. Never self-match probe to itself.
-        if canonical_image_bytes is not None:
+        lead_identity_required = snap.get("lead_identity_required") is True
+        if not lead_identity_required:
+            face_status = "not_applicable"
+        elif canonical_image_bytes is not None:
             review = face_review_images(
                 probe_image_bytes=data,
                 canonical_image_bytes=canonical_image_bytes,
@@ -500,7 +604,7 @@ async def _completed_result(
         face_score=(
             float(str(output["face_score"])) if output.get("face_score") is not None else None
         ),
-        provider_operation_id=uuid4(),
+        provider_operation_id=None,
         node_type=node_type,
     )
 
@@ -517,6 +621,108 @@ def _mime_for_node(node_type: str) -> tuple[str, str, str]:
     if node_type in {"continuity_review"}:
         return "application/json", "json", "document"
     return "application/octet-stream", "bin", "document"
+
+
+async def _complete_composite_node(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    node: GraphNode,
+    obj_store: ObjectStore,
+) -> ExecuteNodeResult:
+    """Compose local video, voice, and subtitles without a Provider operation."""
+    from datetime import UTC, datetime
+
+    from app.config import get_settings
+    from app.execution.composite_media import (
+        CompositeInputMissingError,
+        render_composite_bytes,
+        resolve_composite_inputs,
+    )
+
+    try:
+        inputs = await resolve_composite_inputs(session, run=run, store=obj_store)
+    except CompositeInputMissingError as exc:
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="COMPOSITE_INPUT_MISSING",
+            error_summary=str(exc),
+        )
+        raise ValidationAppError(f"COMPOSITE_INPUT_MISSING: {exc}") from exc
+
+    # Persist the source lineage before rendering so a terminal render failure
+    # remains auditable.
+    run.input_snapshot = {
+        **(run.input_snapshot or {}),
+        "media_inputs": inputs.media_inputs,
+    }
+
+    try:
+        data = await render_composite_bytes(inputs)
+    except Exception as exc:  # noqa: BLE001 - local render must fail closed
+        detail = str(exc) or type(exc).__name__
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="COMPOSITE_RENDER_FAILED",
+            error_summary=detail,
+        )
+        raise ValidationAppError(f"COMPOSITE_RENDER_FAILED: {detail}") from exc
+
+    try:
+        object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.mp4"
+        stored = await obj_store.put_bytes(
+            object_key=object_key,
+            data=data,
+            mime_type="video/mp4",
+        )
+        art = await get_or_create_artifact(
+            session,
+            project_id=run.project_id,
+            artifact_type="video",
+            object_key=stored.object_key,
+            content_hash=stored.content_hash,
+            mime_type=stored.mime_type,
+            byte_size=stored.byte_size,
+            produced_by_run_id=run.id,
+        )
+    except Exception as exc:  # noqa: BLE001 - local composite output must fail closed
+        detail = str(exc) or type(exc).__name__
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="COMPOSITE_RENDER_FAILED",
+            error_summary=detail,
+        )
+        raise ValidationAppError(f"COMPOSITE_RENDER_FAILED: {type(exc).__name__}") from exc
+
+    run.status = "completed"
+    run.result_artifact_id = art.id
+    run.provider_cost = Decimal("0")
+    run.platform_cost = Decimal("0")
+    run.finished_at = datetime.now(UTC)
+    run.output_summary = {
+        "artifact_id": str(art.id),
+        "node_type": "composite",
+        "byte_size": art.byte_size,
+        "content_hash": art.content_hash,
+        "media_inputs": inputs.media_inputs,
+        "source_commit": get_settings().source_commit,
+    }
+    node.latest_successful_run_id = run.id
+    await session.flush()
+    return ExecuteNodeResult(
+        node_run_id=run.id,
+        artifact_id=art.id,
+        object_key=art.object_key,
+        content_hash=art.content_hash,
+        byte_size=art.byte_size,
+        face_status=None,
+        face_score=None,
+        provider_operation_id=None,
+        node_type="composite",
+    )
 
 
 async def _complete_pure_node(
@@ -617,6 +823,11 @@ async def _complete_pure_node(
         else:
             face_status = "needs_human"
             review_status = "needs_human"
+        if snap.get("lead_identity_required") is not True:
+            face_status = "not_applicable"
+            face_score = None
+            review_status = "not_applicable"
+            payload["review_rule"] = "lead_identity_not_required"
         st = insightface_status()
         payload.update(
             {
@@ -645,7 +856,12 @@ async def _complete_pure_node(
         mime, ext, art_type = "application/json", "json", "document"
     elif key == "subtitle" or node_type == "subtitle":
         text = str(snap.get("subtitle") or snap.get("dialogue") or prompt or "Shot")
-        data = f"1\n00:00:00,000 --> 00:00:02,000\n{text}\n".encode()
+        # The cue number is not rendered. Making it run-specific keeps every
+        # rerun independently attributable without changing the subtitle text
+        # or timing.
+        data = (
+            f"{run.id.int}\n00:00:00,000 --> 00:00:02,000\n{text}\n".encode()
+        )
         mime, ext, art_type = "application/x-subrip", "srt", "subtitle"
         payload["status"] = "passed"
     else:

@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from app.access.models import Organization, OrganizationMember, User
 from app.access.projects import ProjectService
+from app.assets.models import Episode, Scene, Shot
 from app.creation import models as _cm  # noqa: F401
 from app.creation.service import CreationService
 from app.delivery import models as _dm  # noqa: F401
@@ -17,6 +18,7 @@ from app.events.models import OutboxEvent
 from app.execution import models as _xm  # noqa: F401
 from app.execution.models import Artifact, NodeRun
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0, set_shot_lock
+from app.execution.shot_review import local_rerun_from_node, start_shot_nodes
 from app.production import models as _pm  # noqa: F401
 from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
 from app.shared.base import Base
@@ -208,6 +210,90 @@ async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
             new_subtitle="Y",
             budget=Decimal("50"),
         )
+
+
+@pytest.mark.asyncio
+async def test_subtitle_rerun_with_unchanged_text_keeps_independent_artifacts(
+    session: AsyncSession,
+) -> None:
+    user, org_id = await _seed_user_org(session)
+    project = await ProjectService(session).create_project(
+        organization_id=org_id,
+        name=f"Subtitle-{uuid4().hex[:6]}",
+        aspect_ratio="9:16",
+        actor=user,
+    )
+    await session.commit()
+    original_text = "The archive remembers everything."
+    episode = Episode(project_id=project.id, episode_number=1, title="Episode")
+    session.add(episode)
+    await session.flush()
+    scene = Scene(
+        episode_id=episode.id,
+        scene_number=1,
+        location_name="Archive",
+        time_of_day="night",
+    )
+    session.add(scene)
+    await session.flush()
+    shot = Shot(
+        project_id=project.id,
+        scene_id=scene.id,
+        shot_number=1,
+        sort_order=1,
+        visual_description="archive room closeup",
+        dialogue=original_text,
+        status="in_production",
+    )
+    session.add(shot)
+    await session.flush()
+    first_run_ids = await start_shot_nodes(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        user_id=user.id,
+        node_keys=["subtitle"],
+    )
+    assert len(first_run_ids) == 1
+    await WorkerRuntime(session).process_one(first_run_ids[0])
+    first_run = await session.get(NodeRun, first_run_ids[0])
+    assert first_run is not None
+    first_artifact = await session.get(Artifact, first_run.result_artifact_id)
+    assert first_run is not None and first_run.status == "completed"
+    assert first_artifact is not None
+
+    rerun_keys, rerun_ids = await local_rerun_from_node(
+        session,
+        project_id=project.id,
+        user_id=user.id,
+        shot_id=shot.id,
+        changed_node_key="subtitle",
+    )
+    assert rerun_keys[0] == "subtitle"
+    subtitle_rerun_id = rerun_ids[rerun_keys.index("subtitle")]
+    await WorkerRuntime(session).process_one(subtitle_rerun_id)
+    rerun = await session.get(NodeRun, subtitle_rerun_id)
+    assert rerun is not None
+    rerun_artifact = await session.get(Artifact, rerun.result_artifact_id)
+    assert rerun is not None and rerun.status == "completed"
+    assert rerun_artifact is not None
+    assert rerun.id != first_run.id
+    assert rerun_artifact.id != first_artifact.id
+    assert rerun_artifact.object_key != first_artifact.object_key
+    assert rerun_artifact.content_hash != first_artifact.content_hash
+    assert first_artifact.produced_by_run_id == first_run.id
+    assert rerun_artifact.produced_by_run_id == rerun.id
+
+    store = get_object_store()
+    first_srt = (await store.get_bytes(object_key=first_artifact.object_key)).decode()
+    rerun_srt = (await store.get_bytes(object_key=rerun_artifact.object_key)).decode()
+    first_lines = first_srt.splitlines()
+    rerun_lines = rerun_srt.splitlines()
+    assert first_lines[0] == str(first_run.id.int)
+    assert rerun_lines[0] == str(rerun.id.int)
+    assert first_lines[1:] == rerun_lines[1:]
+    assert first_lines[1] == "00:00:00,000 --> 00:00:02,000"
+    assert original_text in first_lines[2]
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ import pytest
 from app.events.models import OutboxEvent
 from app.events.outbox import OutboxDispatcher
 from app.providers.flux import ProviderNotConfiguredError, get_flux_adapter
+from app.providers.local_tts import get_local_tts_adapter
 from app.shared.enums import OutboxStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +39,21 @@ def test_get_flux_adapter_fake_only_in_test(monkeypatch: pytest.MonkeyPatch) -> 
     assert type(ad).__name__ == "FakeFluxAdapter"
 
 
+def test_local_tts_adapter_fail_closed_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("TTS_ENABLED", "false")
+    from app.config import clear_settings_cache
+
+    clear_settings_cache()
+    try:
+        with pytest.raises(ProviderNotConfiguredError) as ei:
+            get_local_tts_adapter()
+        assert ei.value.code == "PROVIDER_NOT_CONFIGURED"
+    finally:
+        monkeypatch.setenv("APP_ENV", "test")
+        clear_settings_cache()
+
+
 @pytest.mark.asyncio
 async def test_enqueue_does_not_return_local_on_redis_failure(
     monkeypatch: pytest.MonkeyPatch,
@@ -59,6 +75,36 @@ async def test_enqueue_does_not_return_local_on_redis_failure(
         await sched._enqueue_node_run(uuid4())
     assert "QUEUE_UNAVAILABLE" in ei.value.message or "Redis" in ei.value.message
     assert "local:" not in ei.value.message
+
+
+@pytest.mark.asyncio
+async def test_media_node_enqueues_on_heavy_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.config import get_settings
+    from app.runtime.scheduler import AgentRunScheduler
+
+    session = MagicMock()
+    session.get = AsyncMock(
+        side_effect=[
+            SimpleNamespace(graph_node_id=uuid4()),
+            SimpleNamespace(node_type="keyframe"),
+        ]
+    )
+    redis = MagicMock()
+    redis.enqueue_job = AsyncMock(return_value=SimpleNamespace(job_id="heavy-job"))
+    redis.close = AsyncMock()
+
+    async def create_pool(*_args, **_kwargs):
+        return redis
+
+    monkeypatch.setattr("arq.create_pool", create_pool)
+
+    job_id = await AgentRunScheduler(session)._enqueue_node_run(uuid4())
+
+    assert job_id == "heavy-job"
+    assert redis.enqueue_job.await_args.kwargs["_queue_name"] == get_settings().arq_heavy_queue_name
 
 
 @pytest.mark.asyncio

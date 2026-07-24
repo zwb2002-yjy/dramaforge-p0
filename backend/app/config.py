@@ -57,6 +57,11 @@ class Settings(BaseSettings):
 
     arq_default_queue_name: str = "dramaforge:default"
     arq_heavy_queue_name: str = "dramaforge:heavy"
+    arq_heavy_max_jobs: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum concurrent heavy media jobs per Arq worker process",
+    )
     worker_kind: Literal["default", "heavy"] = "default"
     worker_token: str = Field(
         default="dev-worker-token",
@@ -83,8 +88,10 @@ class Settings(BaseSettings):
     )
     text_llm_api_style: Literal["anthropic", "openai"] = "anthropic"
 
-    # P0: TTS may be disabled; voice node stays manual/fake until enabled.
+    # Local TTS is opt-in for formal development verification.
     tts_enabled: bool = False
+    tts_engine: str = "espeak-ng"
+    tts_voice: str = "zh"
     insightface_enabled: bool = True
 
     @field_validator("cors_origins", mode="before")

@@ -67,6 +67,7 @@ load_formal_env() {
   export APP_ENV="development"
   export DATABASE_URL="postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
   export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379/0}"
+  export ARQ_HEAVY_MAX_JOBS="${ARQ_HEAVY_MAX_JOBS:-4}"
   export MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://127.0.0.1:9000}"
   export MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
   export MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}"
@@ -76,6 +77,13 @@ load_formal_env() {
   export CORS_ORIGINS="http://localhost:${FE_PORT},http://127.0.0.1:${FE_PORT}"
   export SESSION_SECRET="${SESSION_SECRET:-dev-only-change-me-to-a-long-random-string}"
   export BYOK_FERNET_KEY="${BYOK_FERNET_KEY:-dev-only-fernet-key-replace-in-prod==}"
+  if command -v espeak-ng >/dev/null 2>&1; then
+    export TTS_ENABLED="true"
+    export TTS_ENGINE="espeak-ng"
+    export TTS_VOICE="${TTS_VOICE:-zh}"
+  else
+    export TTS_ENABLED="false"
+  fi
   # Explicitly unset memory force for formal path
   unset DRAMA_FORCE_MEMORY_STORE || true
   export DRAMA_FORCE_MEMORY_STORE=""
