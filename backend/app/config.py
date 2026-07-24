@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     arq_default_queue_name: str = "dramaforge:default"
     arq_heavy_queue_name: str = "dramaforge:heavy"
     arq_heavy_max_jobs: int = Field(
-        default=1,
+        default=4,
         ge=1,
         description="Maximum concurrent heavy media jobs per Arq worker process",
     )

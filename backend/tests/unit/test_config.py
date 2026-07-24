@@ -17,6 +17,7 @@ def test_default_settings_load() -> None:
     assert settings.database_url.startswith("postgresql+asyncpg://")
     assert settings.arq_default_queue_name
     assert settings.arq_heavy_queue_name
+    assert settings.arq_heavy_max_jobs == 4
 
 
 def test_cors_origins_from_csv(monkeypatch: pytest.MonkeyPatch) -> None:
