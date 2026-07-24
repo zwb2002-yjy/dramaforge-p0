@@ -678,7 +678,12 @@ async def _complete_pure_node(
         mime, ext, art_type = "application/json", "json", "document"
     elif key == "subtitle" or node_type == "subtitle":
         text = str(snap.get("subtitle") or snap.get("dialogue") or prompt or "Shot")
-        data = f"1\n00:00:00,000 --> 00:00:02,000\n{text}\n".encode()
+        # The cue number is not rendered. Making it run-specific keeps every
+        # rerun independently attributable without changing the subtitle text
+        # or timing.
+        data = (
+            f"{run.id.int}\n00:00:00,000 --> 00:00:02,000\n{text}\n".encode()
+        )
         mime, ext, art_type = "application/x-subrip", "srt", "subtitle"
         payload["status"] = "passed"
     else:
