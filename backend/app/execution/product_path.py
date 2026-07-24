@@ -57,6 +57,33 @@ def _input_hash(payload: dict[str, object]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+async def _commit_terminal_failure(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    error_code: str,
+    error_summary: str,
+) -> None:
+    """Commit a terminal state before the Worker exception boundary rolls back."""
+    from datetime import UTC, datetime
+
+    run.status = "failed"
+    run.error_code = error_code
+    run.error_summary = error_summary[:500]
+    run.finished_at = datetime.now(UTC)
+    run.output_summary = {
+        "status": "failed",
+        "error_code": error_code,
+    }
+    await session.flush()
+    await session.commit()
+    await set_rls_context(
+        session,
+        user_id=run.created_by,
+        project_id=run.project_id,
+    )
+
+
 async def claim_media_node_run(
     session: AsyncSession,
     *,
@@ -285,10 +312,12 @@ async def execute_media_node_run(
             except Exception:
                 canonical_image_bytes = None
     if require_canonical and canonical_embedding is None and canonical_image_bytes is None:
-        run.status = "failed"
-        run.error_code = "CANONICAL_REFERENCE_REQUIRED"
-        run.error_summary = "canonical reference required"
-        await session.flush()
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="CANONICAL_REFERENCE_REQUIRED",
+            error_summary="canonical reference required",
+        )
         raise ValidationAppError("CANONICAL_REFERENCE_REQUIRED")
 
     plan_snapshot = snap.get("plan")
@@ -353,11 +382,12 @@ async def execute_media_node_run(
             else:
                 adapter = get_flux_adapter(allow_fake=allow_fake)
         except ProviderNotConfiguredError as exc:
-            run.status = "failed"
-            run.error_code = "PROVIDER_NOT_CONFIGURED"
-            run.error_summary = exc.message[:500]
-            run.finished_at = datetime.now(UTC)
-            await session.flush()
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code="PROVIDER_NOT_CONFIGURED",
+                error_summary=exc.message,
+            )
             raise
 
     # Produce media bytes by node type via Adapter contract
@@ -435,11 +465,12 @@ async def execute_media_node_run(
         op.error_code = "PROVIDER_FAILED"
         op.error_summary = error_summary
         op.completed_at = datetime.now(UTC)
-        run.status = "failed"
-        run.error_code = "PROVIDER_FAILED"
-        run.error_summary = error_summary
-        run.finished_at = datetime.now(UTC)
-        await session.flush()
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="PROVIDER_FAILED",
+            error_summary=error_summary,
+        )
         raise ValidationAppError(f"PROVIDER_FAILED: {error_summary}")
 
     op.status = "succeeded"
