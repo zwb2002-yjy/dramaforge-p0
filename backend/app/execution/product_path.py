@@ -457,9 +457,16 @@ async def execute_media_node_run(
         actual_provider=provider_name,
         actual_model=model_name,
         provider_operation_id=None if create_failed else remote,
-        request_fingerprint=hashlib.sha256(f"{kind}:{prompt}".encode()).hexdigest(),
+        request_fingerprint=str(
+            create.get("effective_prompt_fingerprint")
+            or hashlib.sha256(f"{kind}:{prompt}".encode()).hexdigest()
+        ),
         status="submitted",
-        request_summary={"kind": kind},
+        request_summary={
+            "kind": kind,
+            "prompt_adaptation": create.get("prompt_adaptation"),
+            "original_prompt_fingerprint": create.get("original_prompt_fingerprint"),
+        },
         response_summary={"create_status": create_status},
         submitted_at=datetime.now(UTC),
     )

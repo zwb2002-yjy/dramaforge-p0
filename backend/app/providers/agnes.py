@@ -12,6 +12,8 @@ Never logs the full API key.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -54,6 +56,40 @@ class AgnesHubClient:
     def configured(self) -> bool:
         return bool(self._key and self._settings.agnes_enabled)
 
+    @staticmethod
+    def _policy_safe_image_prompt(prompt: str) -> str:
+        """Keep a storyboard beat while removing physical-confrontation wording.
+
+        This is only used after the provider explicitly rejects an image request.
+        The original plan remains on the NodeRun; callers receive fingerprints for
+        both requests so the adaptation is visible in ProviderOperation audit data.
+        """
+        rewritten = prompt
+        replacements = (
+            (r"\bstalker(?:'s)?\b", "unidentified figure"),
+            (r"\bgrabbing\b", "reaching toward"),
+            (r"\bgrabs\b", "reaches toward"),
+            (r"\bgrab\b", "reach toward"),
+            (r"\bslipping to reveal\b", "partially opened to reveal"),
+            (r"\bfreeze frame, then black screen\b", "a dramatic cinematic pause"),
+        )
+        for pattern, replacement in replacements:
+            rewritten = re.sub(pattern, replacement, rewritten, flags=re.IGNORECASE)
+        return rewritten + ", non-violent cinematic suspense, no physical confrontation"
+
+    @staticmethod
+    def _is_image_policy_refusal(data: object) -> bool:
+        message = str(data).lower()
+        return any(
+            marker in message
+            for marker in (
+                "unable to generate this content",
+                "content policy",
+                "safety policy",
+                "modify your prompt",
+            )
+        )
+
     async def create_image(self, *, prompt: str, size: str = "1024x1024") -> dict[str, Any]:
         if not self.configured():
             raise RuntimeError("Agnes hub not configured (AGNES_ENABLED + AGNES_API_KEY)")
@@ -65,6 +101,9 @@ class AgnesHubClient:
             "n": 1,
             "size": size,
         }
+        original_fingerprint = hashlib.sha256(prompt.encode()).hexdigest()
+        effective_prompt = prompt
+        policy_rewrite = False
         last_err = "unknown"
         # Eight 150-second requests plus capped backoff fit inside the heavy
         # Worker's 30-minute execution budget.
@@ -99,8 +138,24 @@ class AgnesHubClient:
                             "remote_task_id": remote_id,
                             "status": "succeeded",
                             "artifact_uri": image_url,
+                            "prompt_adaptation": (
+                                "provider_policy_safe_rewrite" if policy_rewrite else None
+                            ),
+                            "original_prompt_fingerprint": original_fingerprint,
+                            "effective_prompt_fingerprint": hashlib.sha256(
+                                effective_prompt.encode()
+                            ).hexdigest(),
                         }
                     last_err = f"agnes image http {resp.status_code}: {str(data)[:120]}"
+                    if (
+                        resp.status_code == 400
+                        and not policy_rewrite
+                        and self._is_image_policy_refusal(data)
+                    ):
+                        effective_prompt = self._policy_safe_image_prompt(prompt)
+                        body["prompt"] = effective_prompt
+                        policy_rewrite = True
+                        continue
                     if resp.status_code in self._IMAGE_RETRYABLE_STATUSES:
                         await asyncio.sleep(self._image_retry_delay(attempt))
                         continue
@@ -123,6 +178,13 @@ class AgnesHubClient:
                 "remote_task_id": remote_id,
                 "status": "failed",
                 "error": last_err[:300],
+                "prompt_adaptation": (
+                    "provider_policy_safe_rewrite" if policy_rewrite else None
+                ),
+                "original_prompt_fingerprint": original_fingerprint,
+                "effective_prompt_fingerprint": hashlib.sha256(
+                    effective_prompt.encode()
+                ).hexdigest(),
             }
 
     @classmethod

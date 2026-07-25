@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 import httpx
@@ -115,6 +116,69 @@ async def test_agnes_image_retries_transient_503_before_success(
     assert attempts == 3
     assert result["status"] == "succeeded"
     assert result["artifact_uri"] == "https://media.example/image.png"
+
+
+@pytest.mark.asyncio
+async def test_agnes_image_rewrites_only_after_provider_policy_rejection() -> None:
+    prompts: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        prompts.append(str(body["prompt"]))
+        if len(prompts) == 1:
+            return httpx.Response(
+                400,
+                json={"error": {"message": "Unable to generate this content."}},
+            )
+        return httpx.Response(200, json={"data": [{"url": "https://media.example/safe.png"}]})
+
+    client = AgnesHubClient(
+        Settings(
+            app_env="development",
+            agnes_enabled=True,
+            agnes_api_key="test-provider-key",
+            agnes_base_url="https://agnes.example/v1",
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.create_image(
+        prompt="stalker's gloved hand grabbing a wrist, freeze frame, then black screen"
+    )
+
+    assert len(prompts) == 2
+    assert prompts[0].startswith("stalker's")
+    assert "unidentified figure" in prompts[1]
+    assert "reaching toward" in prompts[1]
+    assert "non-violent cinematic suspense" in prompts[1]
+    assert result["status"] == "succeeded"
+    assert result["prompt_adaptation"] == "provider_policy_safe_rewrite"
+    assert result["original_prompt_fingerprint"] != result["effective_prompt_fingerprint"]
+
+
+@pytest.mark.asyncio
+async def test_agnes_image_does_not_rewrite_an_unrelated_bad_request() -> None:
+    prompts: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        prompts.append(str(json.loads(request.content)["prompt"]))
+        return httpx.Response(400, json={"error": {"message": "invalid image size"}})
+
+    client = AgnesHubClient(
+        Settings(
+            app_env="development",
+            agnes_enabled=True,
+            agnes_api_key="test-provider-key",
+            agnes_base_url="https://agnes.example/v1",
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.create_image(prompt="cinematic archive room")
+
+    assert result["status"] == "failed"
+    assert result["prompt_adaptation"] is None
+    assert prompts == ["cinematic archive room"]
 
 
 @pytest.mark.asyncio

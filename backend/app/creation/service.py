@@ -863,6 +863,8 @@ class CreationService:
             "when the canonical lead must be visibly identifiable in the generated frame; set "
             "it false for inserts, empty environments, screens, back-of-head shots, or shots "
             "of other characters where a lead-face comparison is not applicable. "
+            "Keep image prompts provider-safe: portray suspense through distance, lighting, "
+            "and reaction rather than physical confrontation, restraint, injury, or threats. "
             "Keep each visual_description and keyframe_prompt concise so the complete JSON "
             "fits in one response. The shots array must contain items 1 through 10 exactly. "
             + (
