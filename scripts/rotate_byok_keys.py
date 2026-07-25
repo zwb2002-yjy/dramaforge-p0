@@ -22,9 +22,13 @@ from app.config import get_settings  # noqa: E402
 from app.security.byok_keyring import parse_keyring  # noqa: E402
 from app.security.credentials import rotate_credentials  # noqa: E402
 from app.shared.db import get_session_factory  # noqa: E402
+from app.shared.model_registry import load_all_models  # noqa: E402
 
 
 async def _rotate(actor_label: str) -> dict[str, object]:
+    # Rotation touches credential rows with organization foreign keys. Load the
+    # complete registry so SQLAlchemy can resolve those mappings when flushing.
+    load_all_models()
     settings = get_settings()
     keyring = parse_keyring(
         primary_version=settings.byok_primary_key_version,
