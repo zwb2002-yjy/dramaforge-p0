@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -41,6 +42,23 @@ class CompositeInputs:
     video: bytes
     voice: bytes
     subtitle: bytes
+
+
+def composite_lineage_fingerprint(inputs: CompositeInputs) -> str:
+    """Return a stable identity for the exact source Artifact lineage.
+
+    FFmpeg can emit byte-identical containers when distinct Shot NodeRuns have
+    identical source media. The final composite is still a separate production
+    result, so include its immutable source lineage in the container metadata
+    and test fixture bytes rather than weakening Artifact ownership rules.
+    """
+    raw = json.dumps(
+        inputs.media_inputs,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(raw).hexdigest()
 
 
 async def composite_inputs_pending(
@@ -203,6 +221,8 @@ def deterministic_composite_test_bytes(inputs: CompositeInputs) -> bytes:
         digest.update(b"\0")
         digest.update(len(data).to_bytes(8, "big"))
         digest.update(data)
+    digest.update(b"lineage\0")
+    digest.update(composite_lineage_fingerprint(inputs).encode("ascii"))
     return b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + digest.digest()
 
 
@@ -211,6 +231,7 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise CompositeRenderError("ffmpeg executable not found")
+    lineage_fingerprint = composite_lineage_fingerprint(inputs)
 
     with tempfile.TemporaryDirectory(prefix="dramaforge-composite-") as tmp:
         tmp_path = Path(tmp)
@@ -242,6 +263,8 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
             "libx264",
             "-c:a",
             "aac",
+            "-metadata",
+            f"comment=dramaforge-composite-lineage:{lineage_fingerprint}",
             "-shortest",
             "-movflags",
             "+faststart",

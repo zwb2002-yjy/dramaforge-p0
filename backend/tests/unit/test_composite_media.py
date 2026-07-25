@@ -17,6 +17,7 @@ from app.execution.composite_media import (
     CompositeInputs,
     CompositeRenderError,
     composite_inputs_pending,
+    composite_lineage_fingerprint,
     deterministic_composite_test_bytes,
 )
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
@@ -307,6 +308,43 @@ async def test_composite_runs_locally_with_complete_media_lineage(
     assert artifact.mime_type == "video/mp4"
     assert await fixture.store.get_bytes(object_key=artifact.object_key) == expected_bytes
     assert result.provider_operation_id is None
+
+
+def test_deterministic_composite_bytes_bind_source_run_lineage() -> None:
+    """Identical media from independent NodeRuns must not collapse to one Artifact."""
+    base_inputs = {
+        key: {
+            "artifact_id": f"artifact-{key}",
+            "object_key": f"projects/p/nodes/{key}/first",
+            "content_hash": hashlib.sha256(data).hexdigest(),
+            "mime_type": _SOURCE_META[key][1],
+            "source_node_run_id": f"first-{key}",
+        }
+        for key, data in _SOURCE_BYTES.items()
+    }
+    second_inputs = {
+        key: {
+            **value,
+            "object_key": value["object_key"].replace("first", "second"),
+            "source_node_run_id": value["source_node_run_id"].replace("first", "second"),
+        }
+        for key, value in base_inputs.items()
+    }
+    first = CompositeInputs(
+        media_inputs=base_inputs,
+        video=_SOURCE_BYTES["video"],
+        voice=_SOURCE_BYTES["voice"],
+        subtitle=_SOURCE_BYTES["subtitle"],
+    )
+    second = CompositeInputs(
+        media_inputs=second_inputs,
+        video=_SOURCE_BYTES["video"],
+        voice=_SOURCE_BYTES["voice"],
+        subtitle=_SOURCE_BYTES["subtitle"],
+    )
+
+    assert composite_lineage_fingerprint(first) != composite_lineage_fingerprint(second)
+    assert deterministic_composite_test_bytes(first) != deterministic_composite_test_bytes(second)
 
 
 @pytest.mark.asyncio
