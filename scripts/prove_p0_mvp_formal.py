@@ -44,6 +44,7 @@ DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
 # provider to recover from transient hub failures. The proof client must not
 # turn that valid server-side budget into a false negative.
 SYNC_PROVIDER_TIMEOUT_SECONDS = 360.0
+DEFAULT_MAX_FACE_REWORKS = 3
 
 
 def runtime_source_errors(
@@ -85,6 +86,56 @@ def _problem(response: httpx.Response) -> str:
     )
 
 
+def latest_shot_node_runs(
+    state: dict[str, Any], *, shot_ids: list[str]
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Return the newest pipeline run for each requested shot/node pair."""
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    wanted_shots = set(shot_ids)
+    for run in state.get("node_runs", []):
+        snapshot = run.get("input_snapshot") or {}
+        shot_id = str(snapshot.get("shot_id") or "")
+        node_key = str(snapshot.get("node_key") or "")
+        if shot_id not in wanted_shots or node_key not in REQUIRED_NODES:
+            continue
+        key = (shot_id, node_key)
+        previous = latest.get(key)
+        if previous is None or int(run.get("attempt_no", 0)) >= int(
+            previous.get("attempt_no", 0)
+        ):
+            latest[key] = run
+    return latest
+
+
+def review_status(run: dict[str, Any] | None) -> tuple[str, float | None]:
+    """Extract the durable automated review result without inferring approval."""
+    if run is None:
+        return "missing", None
+    output = run.get("output_summary") or {}
+    status = str(output.get("status") or output.get("face_review") or "missing")
+    raw_score = output.get("face_score")
+    try:
+        score = float(raw_score) if raw_score is not None else None
+    except (TypeError, ValueError):
+        score = None
+    return status, score
+
+
+def response_run_id_for_node(response: dict[str, Any], *, node_key: str) -> str:
+    """Resolve a re-run NodeRun from the API's ordered node/run response."""
+    nodes = [str(value) for value in response.get("stale_nodes", [])]
+    run_ids = [str(value) for value in response.get("run_ids", [])]
+    if len(nodes) != len(run_ids):
+        raise RuntimeError(
+            "rerun response has mismatched stale_nodes/run_ids "
+            f"({len(nodes)} != {len(run_ids)})"
+        )
+    try:
+        return run_ids[nodes.index(node_key)]
+    except ValueError as exc:
+        raise RuntimeError(f"rerun response omitted {node_key}") from exc
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://127.0.0.1:8010")
@@ -101,6 +152,15 @@ def main() -> int:
     )
     parser.add_argument("--worker-token", default="dev-worker-token")
     parser.add_argument("--timeout-seconds", type=int, default=900)
+    parser.add_argument(
+        "--max-face-reworks",
+        type=int,
+        default=DEFAULT_MAX_FACE_REWORKS,
+        help=(
+            "Maximum real keyframe candidate reworks for each blocked automated face "
+            "review; approval is never attempted unless a candidate passes."
+        ),
+    )
     parser.add_argument(
         "--resume-project-id",
         help="Resume a timed-out formal proof from this existing project; never creates media.",
@@ -137,6 +197,8 @@ def main() -> int:
         parser.error("--idea, --lead-name and --lead-prompt must not be empty")
     if bool(args.resume_project_id) != bool(args.resume_email):
         parser.error("--resume-project-id and --resume-email must be supplied together")
+    if args.max_face_reworks < 0:
+        parser.error("--max-face-reworks must be zero or greater")
 
     source_context = begin_evidence_context(REPO)
     source_context["command_summary"] = [
@@ -145,6 +207,8 @@ def main() -> int:
         args.base.rstrip("/"),
         "--timeout-seconds",
         str(args.timeout_seconds),
+        "--max-face-reworks",
+        str(args.max_face_reworks),
         "--idea-sha256",
         hashlib.sha256(idea.encode("utf-8")).hexdigest(),
         "--lead-name-sha256",
@@ -282,6 +346,120 @@ def main() -> int:
             "Timed out waiting for worker artifacts. Start Arq workers or pass "
             "--worker-tick only for a local stack that intentionally exposes it."
         )
+
+    def rework_blocked_face_reviews(project_id: str, shot_ids: list[str]) -> None:
+        """Create bounded real candidates and retain only candidates passing the real gate.
+
+        A keyframe re-run queues its existing downstream graph.  Wait for the
+        new keyframe first, then deliberately re-run face_review so its probe
+        snapshot binds to that new Artifact rather than the prior candidate.
+        """
+        state = snapshot(project_id)
+        latest = latest_shot_node_runs(state, shot_ids=shot_ids)
+        report["face_rework"] = []
+        for shot_id in shot_ids:
+            face_run = latest.get((shot_id, "face_review"))
+            initial_status, initial_score = review_status(face_run)
+            if initial_status in {"passed", "not_applicable"}:
+                continue
+            if initial_status != "blocked":
+                raise RuntimeError(
+                    "face review is neither passed, not_applicable, nor a reworkable "
+                    f"block for shot={shot_id}: {initial_status}"
+                )
+
+            entry: dict[str, Any] = {
+                "shot_id": shot_id,
+                "initial_status": initial_status,
+                "initial_score": initial_score,
+                "max_candidates": args.max_face_reworks,
+                "candidates": [],
+                "passed": False,
+            }
+            report["face_rework"].append(entry)
+            for candidate_no in range(1, args.max_face_reworks + 1):
+                keyframe_rerun = post(
+                    f"/api/v1/projects/{project_id}/shots/{shot_id}/rerun",
+                    {"changed_node_key": "keyframe"},
+                )
+                if keyframe_rerun.status_code not in {200, 201}:
+                    raise RuntimeError(
+                        "keyframe face rework failed "
+                        f"{keyframe_rerun.status_code}: {_problem(keyframe_rerun)}"
+                    )
+                keyframe_body = keyframe_rerun.json()
+                keyframe_run_id = response_run_id_for_node(
+                    keyframe_body, node_key="keyframe"
+                )
+                keyframe_state = wait_for_runs(project_id, [keyframe_run_id])
+                new_keyframe = latest_shot_node_runs(
+                    keyframe_state, shot_ids=[shot_id]
+                ).get((shot_id, "keyframe"))
+                new_keyframe_artifact_id = str(
+                    (new_keyframe or {}).get("result_artifact_id") or ""
+                )
+                if not new_keyframe_artifact_id:
+                    raise RuntimeError(
+                        f"keyframe face rework completed without Artifact for shot={shot_id}"
+                    )
+
+                review_rerun = post(
+                    f"/api/v1/projects/{project_id}/shots/{shot_id}/rerun",
+                    {"changed_node_key": "face_review"},
+                )
+                if review_rerun.status_code not in {200, 201}:
+                    raise RuntimeError(
+                        "face review rework failed "
+                        f"{review_rerun.status_code}: {_problem(review_rerun)}"
+                    )
+                review_body = review_rerun.json()
+                review_ids = [str(value) for value in review_body.get("run_ids", [])]
+                if not review_ids:
+                    raise RuntimeError("face review rework returned no replacement NodeRuns")
+                final_state = wait_for_runs(project_id, review_ids)
+                final_face = latest_shot_node_runs(final_state, shot_ids=[shot_id]).get(
+                    (shot_id, "face_review")
+                )
+                final_status, final_score = review_status(final_face)
+                review_probe_key = str(
+                    ((final_face or {}).get("input_snapshot") or {}).get(
+                        "probe_object_key"
+                    )
+                    or ""
+                )
+                artifacts = {
+                    str(artifact.get("id")): artifact
+                    for artifact in final_state.get("artifacts", [])
+                }
+                keyframe_artifact = artifacts.get(new_keyframe_artifact_id) or {}
+                candidate = {
+                    "candidate": candidate_no,
+                    "keyframe_run_id": keyframe_run_id,
+                    "keyframe_artifact_id": new_keyframe_artifact_id,
+                    "keyframe_object_key": keyframe_artifact.get("object_key"),
+                    "face_review_run_id": str((final_face or {}).get("id") or ""),
+                    "face_review_probe_object_key": review_probe_key,
+                    "face_review_bound_to_keyframe": review_probe_key
+                    == str(keyframe_artifact.get("object_key") or ""),
+                    "status": final_status,
+                    "score": final_score,
+                    "review_run_ids": review_ids,
+                }
+                entry["candidates"].append(candidate)
+                if not candidate["face_review_bound_to_keyframe"]:
+                    raise RuntimeError(
+                        "face review candidate was not bound to its replacement keyframe "
+                        f"for shot={shot_id}"
+                    )
+                if final_status == "passed":
+                    entry["passed"] = True
+                    break
+
+            if not entry["passed"]:
+                raise RuntimeError(
+                    "real face gate remained blocked after bounded keyframe rework "
+                    f"for shot={shot_id}; candidates={len(entry['candidates'])}"
+                )
 
     try:
         assert client is not None
@@ -497,6 +675,7 @@ def main() -> int:
                     f"got {len(remaining_run_ids)}"
                 )
         wait_for_runs(project_id, remaining_run_ids)
+        rework_blocked_face_reviews(project_id, shot_ids)
 
         rejected_shot_id = shot_ids[0]
         rejected = post(
