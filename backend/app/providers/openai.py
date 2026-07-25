@@ -7,12 +7,14 @@ Never logs full API keys or full prompt/response bodies.
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.providers.fake import FakeOpenAIAdapter
+from app.providers.organization_credentials import settings_for_organization_provider
 
 
 class AnthropicCompatibleTextAdapter:
@@ -158,13 +160,30 @@ def _extract_text(data: object) -> str:
     return str(data)[:500]
 
 
-def get_openai_adapter(*, allow_live: bool = False) -> Any:
-    settings = get_settings()
+def get_openai_adapter(
+    *, allow_live: bool = False, settings: Settings | None = None
+) -> Any:
+    settings = settings or get_settings()
     if settings.app_env == "test" and not allow_live:
         return FakeOpenAIAdapter()
     if settings.text_llm_configured():
         return AnthropicCompatibleTextAdapter(settings)
     return FakeOpenAIAdapter()
+
+
+async def get_openai_adapter_for_organization(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    allow_live: bool = False,
+) -> Any:
+    """Resolve the project organization credential before creating a text adapter."""
+    settings = await settings_for_organization_provider(
+        session,
+        organization_id=organization_id,
+        provider="text",
+    )
+    return get_openai_adapter(allow_live=allow_live, settings=settings)
 
 
 # Default export for tests that import OpenAIAdapter class name

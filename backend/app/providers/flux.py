@@ -8,10 +8,14 @@ FakeFluxAdapter is only for APP_ENV=test or explicit allow_fake=True.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
-from app.config import get_settings
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import Settings, get_settings
 from app.providers.agnes import AgnesImageAdapter
 from app.providers.fake import FakeFluxAdapter
+from app.providers.organization_credentials import settings_for_organization_provider
 from app.shared.errors import AppError
 
 
@@ -26,14 +30,19 @@ class ProviderNotConfiguredError(AppError):
         )
 
 
-def get_flux_adapter(*, allow_live: bool = False, allow_fake: bool = False) -> Any:
+def get_flux_adapter(
+    *,
+    allow_live: bool = False,
+    allow_fake: bool = False,
+    settings: Settings | None = None,
+) -> Any:
     """Return image adapter.
 
     - test env (unless allow_live): Fake for pytest contracts
     - agnes configured: live Agnes
     - otherwise: Fake only if allow_fake; else provider_not_configured
     """
-    settings = get_settings()
+    settings = settings or get_settings()
     if settings.app_env == "test" and not allow_live:
         return FakeFluxAdapter()
     if settings.agnes_configured():
@@ -43,6 +52,29 @@ def get_flux_adapter(*, allow_live: bool = False, allow_fake: bool = False) -> A
     raise ProviderNotConfiguredError(
         "provider_not_configured: image Provider (Agnes/Flux) not configured. "
         "Set AGNES_ENABLED + AGNES_API_KEY, or use audited manual media upload."
+    )
+
+
+async def get_flux_adapter_for_organization(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    allow_live: bool = False,
+    allow_fake: bool = False,
+) -> Any:
+    """Resolve the project organization credential before creating an image adapter."""
+    # Keep the established Fake adapter injection point intact for unit/integration tests.
+    if get_settings().app_env == "test":
+        return get_flux_adapter(allow_fake=allow_fake)
+    settings = await settings_for_organization_provider(
+        session,
+        organization_id=organization_id,
+        provider="agnes",
+    )
+    return get_flux_adapter(
+        allow_live=allow_live,
+        allow_fake=allow_fake,
+        settings=settings,
     )
 
 

@@ -12,6 +12,7 @@ from run_p0_section31_gate import (  # noqa: E402
     REQUIRED_NODES,
     Check,
     evaluate_multishot_snapshot,
+    extract_json_object,
     record_check,
 )
 
@@ -62,6 +63,39 @@ def test_blocked_outweighs_pass_but_fail_outweighs_blocked() -> None:
     record_check(checks, Check("3.1.10", "ten shots", "FAIL", "proof mismatch"))
 
     assert checks == [Check("3.1.10", "ten shots", "FAIL", "proof mismatch")]
+
+
+def test_authoritative_formal_evidence_supersedes_independent_probe_failure() -> None:
+    checks = [Check("FLOW", "probe", "FAIL", "timed out")]
+
+    record_check(
+        checks,
+        Check("FLOW", "formal proof", "PASS", "clean source-bound formal evidence"),
+        authoritative=True,
+    )
+
+    assert checks == [
+        Check("FLOW", "formal proof", "PASS", "clean source-bound formal evidence")
+    ]
+
+
+def test_extract_json_object_skips_insightface_model_logs() -> None:
+    output = "\n".join(
+        [
+            (
+                "Applied providers: ['CPUExecutionProvider'], with options: "
+                "{'CPUExecutionProvider': {}}"
+            ),
+            "find model: /home/zwb/.insightface/models/buffalo_l/w600k_r50.onnx",
+            '{"available": true, "embedding_dim": 512, "backend": "insightface+onnx"}',
+        ]
+    )
+
+    assert extract_json_object(output) == {
+        "available": True,
+        "embedding_dim": 512,
+        "backend": "insightface+onnx",
+    }
 
 
 def test_unknown_gate_status_is_rejected() -> None:

@@ -543,7 +543,10 @@ class CreationService:
         authorize: bool = True,
     ) -> CreativeBriefRevision:
         """BYOK text LLM → draft Brief revision. No Key → ValidationAppError (manual path)."""
-        await self._projects.get_project_for_member(project_id=project_id, actor=actor)
+        project = await self._projects.get_project_for_member(
+            project_id=project_id,
+            actor=actor,
+        )
         if not authorize:
             raise ValidationAppError(
                 "planning authorization required for Agent Brief",
@@ -554,9 +557,18 @@ class CreationService:
             raise ValidationAppError("idea required for Agent Brief")
         from app.config import get_settings
         settings = get_settings()
-        adapter = get_openai_adapter(allow_live=True)
+        if settings.app_env == "test":
+            adapter = get_openai_adapter(allow_live=True)
+        else:
+            from app.providers.openai import get_openai_adapter_for_organization
+
+            adapter = await get_openai_adapter_for_organization(
+                self._session,
+                organization_id=project.organization_id,
+                allow_live=True,
+            )
         # Product path: require live TEXT_LLM unless unit tests force Fake.
-        if settings.app_env != "test" and not settings.text_llm_configured():
+        if settings.app_env != "test" and not adapter.configured():
             raise ValidationAppError(
                 "TEXT_LLM not configured; use manual Brief path",
                 details={"code": "TEXT_LLM_NOT_CONFIGURED", "manual_ok": True},
@@ -744,7 +756,10 @@ class CreationService:
         authorize: bool = True,
     ) -> CreationPlan:
         """BYOK text LLM → draft Plan with ten production-ready storyboard Shots."""
-        await self._projects.get_project_for_member(project_id=project_id, actor=actor)
+        project = await self._projects.get_project_for_member(
+            project_id=project_id,
+            actor=actor,
+        )
         if not authorize:
             raise ValidationAppError(
                 "planning authorization required for Agent Plan",
@@ -782,8 +797,17 @@ class CreationService:
         from app.config import get_settings
 
         settings = get_settings()
-        adapter = get_openai_adapter(allow_live=True)
-        if settings.app_env != "test" and not settings.text_llm_configured():
+        if settings.app_env == "test":
+            adapter = get_openai_adapter(allow_live=True)
+        else:
+            from app.providers.openai import get_openai_adapter_for_organization
+
+            adapter = await get_openai_adapter_for_organization(
+                self._session,
+                organization_id=project.organization_id,
+                allow_live=True,
+            )
+        if settings.app_env != "test" and not adapter.configured():
             raise ValidationAppError(
                 "TEXT_LLM not configured; use manual Plan path",
                 details={"code": "TEXT_LLM_NOT_CONFIGURED", "manual_ok": True},
@@ -839,6 +863,8 @@ class CreationService:
             "when the canonical lead must be visibly identifiable in the generated frame; set "
             "it false for inserts, empty environments, screens, back-of-head shots, or shots "
             "of other characters where a lead-face comparison is not applicable. "
+            "Keep image prompts provider-safe: portray suspense through distance, lighting, "
+            "and reaction rather than physical confrontation, restraint, injury, or threats. "
             "Keep each visual_description and keyframe_prompt concise so the complete JSON "
             "fits in one response. The shots array must contain items 1 through 10 exactly. "
             + (

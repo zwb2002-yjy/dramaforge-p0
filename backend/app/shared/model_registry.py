@@ -12,6 +12,7 @@ def load_all_models() -> None:
     from app.events import models as event_models
     from app.execution import models as execution_models
     from app.production import models as production_models
+    from app.security import models as security_models
 
     _ = (
         access_models,
@@ -21,4 +22,5 @@ def load_all_models() -> None:
         event_models,
         execution_models,
         production_models,
+        security_models,
     )

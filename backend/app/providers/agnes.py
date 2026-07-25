@@ -12,6 +12,10 @@ Never logs the full API key.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 from uuid import uuid4
 
@@ -25,6 +29,9 @@ class AgnesHubClient:
     _IMAGE_REQUEST_TIMEOUT_S = 150.0
     _IMAGE_RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
     _IMAGE_BACKOFF_CAP_S = 20.0
+    _VIDEO_MAX_ATTEMPTS = 8
+    _VIDEO_REQUEST_TIMEOUT_S = 120.0
+    _VIDEO_BACKOFF_CAP_S = 90.0
 
     def __init__(
         self,
@@ -49,6 +56,40 @@ class AgnesHubClient:
     def configured(self) -> bool:
         return bool(self._key and self._settings.agnes_enabled)
 
+    @staticmethod
+    def _policy_safe_image_prompt(prompt: str) -> str:
+        """Keep a storyboard beat while removing physical-confrontation wording.
+
+        This is only used after the provider explicitly rejects an image request.
+        The original plan remains on the NodeRun; callers receive fingerprints for
+        both requests so the adaptation is visible in ProviderOperation audit data.
+        """
+        rewritten = prompt
+        replacements = (
+            (r"\bstalker(?:'s)?\b", "unidentified figure"),
+            (r"\bgrabbing\b", "reaching toward"),
+            (r"\bgrabs\b", "reaches toward"),
+            (r"\bgrab\b", "reach toward"),
+            (r"\bslipping to reveal\b", "partially opened to reveal"),
+            (r"\bfreeze frame, then black screen\b", "a dramatic cinematic pause"),
+        )
+        for pattern, replacement in replacements:
+            rewritten = re.sub(pattern, replacement, rewritten, flags=re.IGNORECASE)
+        return rewritten + ", non-violent cinematic suspense, no physical confrontation"
+
+    @staticmethod
+    def _is_image_policy_refusal(data: object) -> bool:
+        message = str(data).lower()
+        return any(
+            marker in message
+            for marker in (
+                "unable to generate this content",
+                "content policy",
+                "safety policy",
+                "modify your prompt",
+            )
+        )
+
     async def create_image(self, *, prompt: str, size: str = "1024x1024") -> dict[str, Any]:
         if not self.configured():
             raise RuntimeError("Agnes hub not configured (AGNES_ENABLED + AGNES_API_KEY)")
@@ -60,6 +101,9 @@ class AgnesHubClient:
             "n": 1,
             "size": size,
         }
+        original_fingerprint = hashlib.sha256(prompt.encode()).hexdigest()
+        effective_prompt = prompt
+        policy_rewrite = False
         last_err = "unknown"
         # Eight 150-second requests plus capped backoff fit inside the heavy
         # Worker's 30-minute execution budget.
@@ -94,8 +138,24 @@ class AgnesHubClient:
                             "remote_task_id": remote_id,
                             "status": "succeeded",
                             "artifact_uri": image_url,
+                            "prompt_adaptation": (
+                                "provider_policy_safe_rewrite" if policy_rewrite else None
+                            ),
+                            "original_prompt_fingerprint": original_fingerprint,
+                            "effective_prompt_fingerprint": hashlib.sha256(
+                                effective_prompt.encode()
+                            ).hexdigest(),
                         }
                     last_err = f"agnes image http {resp.status_code}: {str(data)[:120]}"
+                    if (
+                        resp.status_code == 400
+                        and not policy_rewrite
+                        and self._is_image_policy_refusal(data)
+                    ):
+                        effective_prompt = self._policy_safe_image_prompt(prompt)
+                        body["prompt"] = effective_prompt
+                        policy_rewrite = True
+                        continue
                     if resp.status_code in self._IMAGE_RETRYABLE_STATUSES:
                         await asyncio.sleep(self._image_retry_delay(attempt))
                         continue
@@ -118,11 +178,35 @@ class AgnesHubClient:
                 "remote_task_id": remote_id,
                 "status": "failed",
                 "error": last_err[:300],
+                "prompt_adaptation": (
+                    "provider_policy_safe_rewrite" if policy_rewrite else None
+                ),
+                "original_prompt_fingerprint": original_fingerprint,
+                "effective_prompt_fingerprint": hashlib.sha256(
+                    effective_prompt.encode()
+                ).hexdigest(),
             }
 
     @classmethod
     def _image_retry_delay(cls, attempt: int) -> float:
         return min(2.0**attempt, cls._IMAGE_BACKOFF_CAP_S)
+
+    @classmethod
+    def _video_retry_delay(cls, response: httpx.Response, attempt: int) -> float:
+        """Honor the hub cooldown when it supplies one for a rejected create."""
+        retry_after = response.headers.get("Retry-After", "").strip()
+        if retry_after:
+            try:
+                return min(max(float(retry_after), 0.0), cls._VIDEO_BACKOFF_CAP_S)
+            except ValueError:
+                try:
+                    delay = (
+                        parsedate_to_datetime(retry_after) - datetime.now(UTC)
+                    ).total_seconds()
+                    return min(max(delay, 0.0), cls._VIDEO_BACKOFF_CAP_S)
+                except (TypeError, ValueError):
+                    pass
+        return min(15.0 * 2.0 ** (attempt - 1), cls._VIDEO_BACKOFF_CAP_S)
 
     async def create_video(self, *, prompt: str) -> dict[str, Any]:
         """POST /videos — async task creation."""
@@ -130,38 +214,56 @@ class AgnesHubClient:
             raise RuntimeError("Agnes hub not configured (AGNES_ENABLED + AGNES_API_KEY)")
         url = f"{self._base}/videos"
         body = {"model": self._video_model, "prompt": prompt}
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(url, headers=self._headers(), json=body)
-            try:
-                data = resp.json()
-            except Exception:
-                data = {"raw_status": resp.status_code}
-            ok = resp.status_code < 400
-            task_id = None
-            if isinstance(data, dict):
-                task_id = (
-                    data.get("task_id")
-                    or data.get("video_id")
-                    or data.get("id")
-                )
-            if not ok or not task_id:
-                return {
-                    "remote_task_id": str(task_id or uuid4()),
-                    "status": "failed",
-                    "error": f"agnes video http {resp.status_code}: {str(data)[:200]}",
-                }
-            remote_id = str(task_id)
-            self._tasks[remote_id] = {
-                "kind": "video",
-                "status": str(data.get("status", "queued")),
-                "http_status": resp.status_code,
-                "artifact_uri": None,
-                "error": None,
-            }
-            return {
-                "remote_task_id": remote_id,
-                "status": str(data.get("status", "queued")),
-            }
+        last_err = "unknown"
+        async with httpx.AsyncClient(
+            timeout=self._VIDEO_REQUEST_TIMEOUT_S,
+            transport=self._transport,
+        ) as client:
+            for attempt in range(1, self._VIDEO_MAX_ATTEMPTS + 1):
+                try:
+                    resp = await client.post(url, headers=self._headers(), json=body)
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {"raw_status": resp.status_code}
+                    task_id = None
+                    if isinstance(data, dict):
+                        task_id = (
+                            data.get("task_id")
+                            or data.get("video_id")
+                            or data.get("id")
+                        )
+                    if resp.status_code < 400 and task_id:
+                        remote_id = str(task_id)
+                        self._tasks[remote_id] = {
+                            "kind": "video",
+                            "status": str(data.get("status", "queued")),
+                            "http_status": resp.status_code,
+                            "artifact_uri": None,
+                            "error": None,
+                        }
+                        return {
+                            "remote_task_id": remote_id,
+                            "status": str(data.get("status", "queued")),
+                        }
+                    last_err = f"agnes video http {resp.status_code}: {str(data)[:200]}"
+                    if resp.status_code in self._IMAGE_RETRYABLE_STATUSES:
+                        await asyncio.sleep(self._video_retry_delay(resp, attempt))
+                        continue
+                except (
+                    httpx.TimeoutException,
+                    httpx.NetworkError,
+                    httpx.RemoteProtocolError,
+                ) as exc:
+                    last_err = f"{type(exc).__name__}: {exc}"
+                    await asyncio.sleep(self._image_retry_delay(attempt))
+                    continue
+                break
+        return {
+            "remote_task_id": str(uuid4()),
+            "status": "failed",
+            "error": last_err[:300],
+        }
 
     async def poll_video(self, remote_task_id: str) -> dict[str, Any]:
         """GET /videos/{id} for async video tasks."""

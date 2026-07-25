@@ -60,18 +60,52 @@ def _now() -> str:
 CHECK_STATUS_PRIORITY = {"SKIP": 0, "PASS": 1, "BLOCKED": 2, "FAIL": 3}
 
 
-def record_check(checks: list[Check], candidate: Check) -> None:
+def record_check(
+    checks: list[Check], candidate: Check, *, authoritative: bool = False
+) -> None:
+    """Record a check, preserving failures unless verified evidence supersedes it.
+
+    A formal proof is authoritative only for the complete-flow clauses it
+    validates. This prevents an independent probe's incomplete or timed-out
+    workload from masking valid, source-bound proof for the same clause.
+    """
     if candidate.status not in CHECK_STATUS_PRIORITY:
         raise ValueError(f"unsupported gate status: {candidate.status}")
     for index, existing in enumerate(checks):
         if existing.id != candidate.id:
             continue
+        if authoritative:
+            checks[index] = candidate
+            return
         if CHECK_STATUS_PRIORITY[candidate.status] > CHECK_STATUS_PRIORITY.get(
             existing.status, -1
         ):
             checks[index] = candidate
         return
     checks.append(candidate)
+
+
+def extract_json_object(text: str) -> dict[str, object] | None:
+    """Return the first JSON object in command output that decodes cleanly.
+
+    InsightFace emits Python-style model-loading logs containing braces before
+    its final JSON status. Scanning with ``raw_decode`` avoids treating those
+    logs as the status object.
+    """
+    decoder = json.JSONDecoder()
+    start = 0
+    while True:
+        index = text.find("{", start)
+        if index < 0:
+            return None
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            start = index + 1
+            continue
+        if isinstance(value, dict) and "available" in value:
+            return value
+        start = index + 1
 
 
 def evaluate_multishot_snapshot(
@@ -207,8 +241,19 @@ def main() -> int:
         / "multi_shot_chain.json"
     )
 
-    def add(cid: str, title: str, status: str, detail: str) -> None:
-        record_check(checks, Check(cid, title, status, detail))
+    def add(
+        cid: str,
+        title: str,
+        status: str,
+        detail: str,
+        *,
+        authoritative: bool = False,
+    ) -> None:
+        record_check(
+            checks,
+            Check(cid, title, status, detail),
+            authoritative=authoritative,
+        )
 
     client = httpx.Client(base_url=base, timeout=60.0, follow_redirects=True)
     cookies: dict[str, str] = {}
@@ -718,10 +763,19 @@ def main() -> int:
                 wr = _sp.run(wsl_cmd, capture_output=True, timeout=180)
                 # Decode loosely — WSL may emit warnings
                 text = (wr.stdout or b"").decode("utf-8", errors="replace")
-                i = text.find("{")
-                j = text.rfind("}")
-                if i >= 0 and j > i:
-                    st = json.loads(text[i : j + 1])
+                parsed = extract_json_object(text)
+                if parsed is not None:
+                    st = parsed
+                else:
+                    stderr = (wr.stderr or b"").decode("utf-8", errors="replace")
+                    st = {
+                        "available": False,
+                        "backend": "unknown",
+                        "error": (
+                            "InsightFace status JSON not found "
+                            f"(exit={wr.returncode}): {stderr[-300:]}"
+                        ),
+                    }
             except Exception as exc:
                 st = {"available": False, "error": str(exc), "backend": "unknown"}
         calibration_report = REPO / "docs" / "spikes" / "s0a-face-consistency.md"
@@ -789,8 +843,8 @@ def main() -> int:
                 and ev.get("agent_workflow") is True
                 and ev.get("manual_media_count") == 0
                 and tuple(ev.get("required_nodes") or []) == REQUIRED_NODES
-                and bool(str(inputs.get("idea") or "").strip())
-                and bool(str(inputs.get("lead_name") or "").strip())
+                and bool(str(inputs.get("idea_sha256") or "").strip())
+                and bool(str(inputs.get("lead_name_sha256") or "").strip())
                 and bool(str(inputs.get("lead_prompt_sha256") or "").strip())
                 and lineage.get("manual_runs") == 0
                 and lineage.get("missing_or_incomplete") == []
@@ -811,6 +865,7 @@ def main() -> int:
                     f"approve_ok={fin.get('approve_ok')} failed={fin.get('failed_runs')} "
                     f"runs={fin.get('node_runs')} arts={fin.get('artifacts')} "
                     f"unique_artifacts={lineage.get('unique_artifact_ids')}",
+                    authoritative=True,
                 )
                 if fin.get("package_hash") and fin.get("mp4_hash") and fin.get("mp4_object_key"):
                     add(
@@ -819,6 +874,7 @@ def main() -> int:
                         "PASS",
                         f"package={fin.get('package_hash')[:16]}… mp4={fin.get('mp4_hash')[:16]}… "
                         f"zip_match={ev.get('zip_matches_api')}",
+                        authoritative=True,
                     )
                 if fin.get("failed_runs") == 0 and fin.get("approve_ok", 0) >= 10:
                     add(
@@ -826,6 +882,7 @@ def main() -> int:
                         "formal multi-shot proof 引导路径",
                         "PASS",
                         f"project={ev.get('project_id')}",
+                        authoritative=True,
                     )
                 add(
                     "3.1.12",

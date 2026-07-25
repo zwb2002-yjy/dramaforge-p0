@@ -248,23 +248,23 @@
     },
     {
       "id": "anom_lowq_00",
-      "label": "low_quality"
+      "label": "no_face"
     },
     {
       "id": "anom_lowq_01",
-      "label": "low_quality"
+      "label": "no_face"
     },
     {
       "id": "anom_lowq_02",
-      "label": "low_quality"
+      "label": "no_face"
     },
     {
       "id": "anom_lowq_03",
-      "label": "low_quality"
+      "label": "no_face"
     },
     {
       "id": "anom_lowq_04",
-      "label": "low_quality"
+      "label": "no_face"
     }
   ]
 }

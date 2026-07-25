@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from app.execution.models import Artifact, GraphNode, NodeRun
 from app.storage.minio_store import ObjectStore
 
 _SUCCESS_STATUSES = frozenset({"completed", "cached", "completed_after_cancel"})
+_PENDING_STATUSES = frozenset({"queued", "running"})
 _MEDIA_REQUIREMENTS = {
     "video": ("video", "video/"),
     "voice": ("audio", "audio/"),
@@ -40,6 +42,78 @@ class CompositeInputs:
     video: bytes
     voice: bytes
     subtitle: bytes
+
+
+def composite_lineage_fingerprint(inputs: CompositeInputs) -> str:
+    """Return a stable identity for the exact source Artifact lineage.
+
+    FFmpeg can emit byte-identical containers when distinct Shot NodeRuns have
+    identical source media. The final composite is still a separate production
+    result, so include its immutable source lineage in the container metadata
+    and test fixture bytes rather than weakening Artifact ownership rules.
+    """
+    raw = json.dumps(
+        inputs.media_inputs,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(raw).hexdigest()
+
+
+async def composite_inputs_pending(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+) -> bool:
+    """Return whether this composite is waiting for a newer source attempt.
+
+    The shot start endpoint queues the whole pipeline together. A composite
+    must remain unclaimed while the latest video, voice, or subtitle attempt
+    for its shot is queued or running. Absent, failed, or unreadable media is
+    intentionally left for the terminal fail-closed resolution path.
+    """
+    node = await session.get(GraphNode, run.graph_node_id)
+    if node is None or node.node_key != "composite":
+        return False
+
+    shot_id = str((run.input_snapshot or {}).get("shot_id") or "").strip()
+    if not shot_id:
+        return False
+
+    rows = list(
+        (
+            await session.execute(
+                select(NodeRun, GraphNode)
+                .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                .where(NodeRun.project_id == run.project_id)
+                .where(NodeRun.graph_version_id == run.graph_version_id)
+                .where(GraphNode.graph_version_id == run.graph_version_id)
+                .where(GraphNode.node_key.in_(tuple(_MEDIA_REQUIREMENTS)))
+            )
+        )
+        .tuples()
+        .all()
+    )
+
+    latest_by_key: dict[str, NodeRun] = {}
+    for source_run, source_node in rows:
+        if str((source_run.input_snapshot or {}).get("shot_id") or "") != shot_id:
+            continue
+        key = source_node.node_key
+        current = latest_by_key.get(key)
+        if current is None or (
+            source_run.attempt_no,
+            source_run.created_at,
+            str(source_run.id),
+        ) > (
+            current.attempt_no,
+            current.created_at,
+            str(current.id),
+        ):
+            latest_by_key[key] = source_run
+
+    return any(source.status in _PENDING_STATUSES for source in latest_by_key.values())
 
 
 async def resolve_composite_inputs(
@@ -147,6 +221,8 @@ def deterministic_composite_test_bytes(inputs: CompositeInputs) -> bytes:
         digest.update(b"\0")
         digest.update(len(data).to_bytes(8, "big"))
         digest.update(data)
+    digest.update(b"lineage\0")
+    digest.update(composite_lineage_fingerprint(inputs).encode("ascii"))
     return b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + digest.digest()
 
 
@@ -155,6 +231,7 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise CompositeRenderError("ffmpeg executable not found")
+    lineage_fingerprint = composite_lineage_fingerprint(inputs)
 
     with tempfile.TemporaryDirectory(prefix="dramaforge-composite-") as tmp:
         tmp_path = Path(tmp)
@@ -186,6 +263,8 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
             "libx264",
             "-c:a",
             "aac",
+            "-metadata",
+            f"comment=dramaforge-composite-lineage:{lineage_fingerprint}",
             "-shortest",
             "-movflags",
             "+faststart",

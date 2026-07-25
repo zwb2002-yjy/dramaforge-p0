@@ -11,7 +11,7 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep
 from app.assets.characters import register_lead_character
 from app.config import get_settings
-from app.providers.flux import get_flux_adapter
+from app.providers.flux import get_flux_adapter_for_organization
 from app.storage.minio_store import get_object_store
 
 router = APIRouter(tags=["characters"])
@@ -46,7 +46,10 @@ async def register_project_lead(
     """Register lead + canonical reference image (required for consistent keyframes)."""
     from app.shared.errors import ValidationAppError
 
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    project = await ProjectService(session).get_project_for_member(
+        project_id=project_id,
+        actor=user,
+    )
     settings = get_settings()
     prompt = body.locked_prompt.strip() or (
         f"portrait reference sheet of {body.name}, consistent face, clean background, studio light"
@@ -55,7 +58,9 @@ async def register_project_lead(
         import asyncio
 
         # Formal path: live only when configured; no silent Fake outside test
-        adapter = get_flux_adapter(
+        adapter = await get_flux_adapter_for_organization(
+            session,
+            organization_id=project.organization_id,
             allow_live=settings.app_env != "test",
             allow_fake=settings.app_env == "test",
         )
