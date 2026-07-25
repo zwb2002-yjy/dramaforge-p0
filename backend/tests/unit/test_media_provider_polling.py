@@ -83,6 +83,20 @@ class CreateFailureAdapter:
         raise AssertionError(f"cost lookup must not run after create failure: {remote_task_id}")
 
 
+class CreateExceptionAdapter:
+    provider = "kling"
+
+    async def create(self, request: dict[str, object]) -> dict[str, object]:
+        assert request["kind"] == "video"
+        raise TimeoutError()
+
+    async def poll(self, remote_task_id: str) -> dict[str, object]:
+        raise AssertionError(f"poll must not run after create exception: {remote_task_id}")
+
+    async def fetch_cost(self, remote_task_id: str) -> dict[str, object]:
+        raise AssertionError(f"cost lookup must not run after create exception: {remote_task_id}")
+
+
 @pytest.mark.asyncio
 async def test_agnes_image_retries_transient_503_before_success(
     monkeypatch: pytest.MonkeyPatch,
@@ -382,6 +396,39 @@ async def test_video_create_failure_does_not_poll_and_preserves_create_error(
     assert op.status == "failed"
     assert op.error_code == "PROVIDER_CREATE_FAILED"
     assert op.error_summary == "agnes video http 400: {'error': 'unsupported input'}"
+    assert op.response_summary["create_error"] == op.error_summary
+    failed_run = await session.get(NodeRun, run.id)
+    assert failed_run is not None
+    assert failed_run.status == "failed"
+    assert failed_run.error_code == "PROVIDER_CREATE_FAILED"
+    assert failed_run.error_summary == op.error_summary
+
+
+@pytest.mark.asyncio
+async def test_video_create_exception_becomes_auditable_terminal_failure(
+    session: AsyncSession,
+) -> None:
+    run = await _video_run(session)
+
+    with pytest.raises(
+        ValidationAppError,
+        match="PROVIDER_CREATE_FAILED: provider create raised TimeoutError",
+    ):
+        await execute_media_node_run(
+            session,
+            node_run_id=run.id,
+            flux=CreateExceptionAdapter(),  # type: ignore[arg-type]
+        )
+
+    op = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalar_one()
+    assert op.provider_operation_id is None
+    assert op.status == "failed"
+    assert op.error_code == "PROVIDER_CREATE_FAILED"
+    assert op.error_summary == "provider create raised TimeoutError"
     assert op.response_summary["create_error"] == op.error_summary
     failed_run = await session.get(NodeRun, run.id)
     assert failed_run is not None

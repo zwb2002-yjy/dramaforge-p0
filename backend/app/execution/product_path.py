@@ -431,7 +431,17 @@ async def execute_media_node_run(
 
     # Produce media bytes by node type via Adapter contract
     kind = node_type
-    create = await adapter.create({"prompt": prompt, "kind": kind})
+    try:
+        create = await adapter.create({"prompt": prompt, "kind": kind})
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - provider boundary must remain auditable
+        # A Provider may fail before returning a remote task id. Do not retain
+        # its message because transport exceptions can include sensitive URLs.
+        create = {
+            "status": "failed",
+            "error": f"provider create raised {type(exc).__name__}",
+        }
     create_status = str(create.get("status", "unknown"))
     create_failed = create_status in {"failed", "error", "cancelled"}
     remote = str(create.get("remote_task_id") or uuid4())
