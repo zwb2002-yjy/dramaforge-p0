@@ -81,12 +81,6 @@ def test_can_insert_graph_node_and_artifact_shell() -> None:
     engine = create_engine(_sync_url(), pool_pre_ping=True)
     suffix = uuid.uuid4().hex[:8]
     with engine.begin() as conn:
-        org_id = conn.execute(
-            text(
-                "INSERT INTO organizations (name) VALUES (:n) RETURNING id"
-            ),
-            {"n": f"db-test-org-{suffix}"},
-        ).scalar_one()
         user_id = conn.execute(
             text(
                 """
@@ -96,15 +90,24 @@ def test_can_insert_graph_node_and_artifact_shell() -> None:
             ),
             {"e": f"db-{suffix}@example.com"},
         ).scalar_one()
+        workspace_id = conn.execute(
+            text(
+                """
+                INSERT INTO workspaces (owner_user_id, name)
+                VALUES (:u, :n) RETURNING id
+                """
+            ),
+            {"u": user_id, "n": f"db-test-workspace-{suffix}"},
+        ).scalar_one()
         proj_id = conn.execute(
             text(
                 """
                 INSERT INTO projects (
-                  organization_id, name, aspect_ratio, budget_limit
+                  workspace_id, name, aspect_ratio, budget_limit
                 ) VALUES (:o, :n, '9:16', 0) RETURNING id
                 """
             ),
-            {"o": org_id, "n": f"db-proj-{suffix}"},
+            {"o": workspace_id, "n": f"db-proj-{suffix}"},
         ).scalar_one()
         graph_id = conn.execute(
             text(

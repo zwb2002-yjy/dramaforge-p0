@@ -9,14 +9,6 @@ class AppEnv(StrEnum):
     PRODUCTION = "production"
 
 
-class MemberRole(StrEnum):
-    OWNER = "owner"
-    ADMIN = "admin"
-    EDITOR = "editor"
-    REVIEWER = "reviewer"
-    VIEWER = "viewer"
-
-
 class ProjectStage(StrEnum):
     DRAFT = "draft"
     PLANNING = "planning"

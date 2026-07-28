@@ -2,8 +2,12 @@ name: CI
 
 on:
   pull_request:
+    branches:
+      - dev
+      - main
   push:
     branches:
+      - dev
       - main
 
 permissions:
@@ -18,18 +22,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Require agent task branch
+      - name: Enforce integration branch flow
         if: github.event_name == 'pull_request'
         env:
           HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          case "$HEAD_REF" in
-            agent/*) ;;
-            *)
-              echo "Pull requests must originate from an agent/<task-id> branch."
-              exit 1
-              ;;
-          esac
+          if [ "$BASE_REF" = "main" ]; then
+            case "$HEAD_REF" in
+              dev|agent/hotfix-*) ;;
+              *)
+                echo "Stable releases must target main from dev; only agent/hotfix-* branches are allowed for urgent fixes."
+                exit 1
+                ;;
+            esac
+          fi
+          if [ "$BASE_REF" = "dev" ]; then
+            case "$HEAD_REF" in
+              agent/*) ;;
+              *)
+                echo "Only short-lived agent/<task-id> branches may target dev by PR. Routine work is pushed directly to dev."
+                exit 1
+                ;;
+            esac
+          fi
       - run: python scripts/check_directory_compliance.py
       - run: python scripts/repo_guardrails.py policy --repo-root .
 

@@ -24,7 +24,7 @@ from app.execution.shot_pipeline import (
 from app.production.service import GraphService
 from app.providers.base import ProviderAdapter
 from app.providers.fake import FakeFluxAdapter
-from app.shared.db import set_rls_context
+from app.shared.db import set_node_run_rls_context
 from app.shared.errors import AppError, NodeRunAlreadyClaimedError, ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
 
@@ -79,11 +79,7 @@ async def _commit_terminal_failure(
     }
     await session.flush()
     await session.commit()
-    await set_rls_context(
-        session,
-        user_id=run.created_by,
-        project_id=run.project_id,
-    )
+    await set_node_run_rls_context(session, node_run_id=run.id)
 
 
 async def claim_media_node_run(
@@ -114,14 +110,8 @@ async def claim_media_node_run(
             raise NodeRunAlreadyClaimedError()
         raise ValidationAppError(f"node_run cannot execute from status={run.status}")
 
-    user_id = run.created_by
-    project_id = run.project_id
     await session.commit()
-    await set_rls_context(
-        session,
-        user_id=user_id,
-        project_id=project_id,
-    )
+    await set_node_run_rls_context(session, node_run_id=run.id)
     await session.refresh(run)
     return run
 
@@ -376,12 +366,8 @@ async def execute_media_node_run(
     project = await session.scalar(select(Project).where(Project.id == run.project_id))
     if project is None:
         raise ValidationAppError("project not found for node run")
-    await set_rls_context(
-        session,
-        user_id=run.created_by,
-        organization_id=project.organization_id,
-        project_id=run.project_id,
-    )
+    if await set_node_run_rls_context(session, node_run_id=run.id) is None:
+        raise ValidationAppError("node_run ownership context unavailable")
 
     # Select Adapter: real Agnes when configured. No silent Fake outside test.
     adapter = flux
@@ -389,9 +375,9 @@ async def execute_media_node_run(
         from app.config import get_settings as _gs
         from app.providers.flux import (
             ProviderNotConfiguredError,
-            get_flux_adapter_for_organization,
+            get_flux_adapter_for_workspace,
         )
-        from app.providers.kling import get_kling_adapter_for_organization
+        from app.providers.kling import get_kling_adapter_for_workspace
 
         _env = _gs().app_env
         allow_fake = _env == "test"
@@ -401,9 +387,9 @@ async def execute_media_node_run(
 
                 adapter = get_local_tts_adapter()
             elif node_type in {"video", "video_review"}:
-                adapter = await get_kling_adapter_for_organization(
+                adapter = await get_kling_adapter_for_workspace(
                     session,
-                    organization_id=project.organization_id,
+                    workspace_id=project.workspace_id,
                     allow_fake=allow_fake,
                 )
             elif node_type == "voice":
@@ -415,9 +401,9 @@ async def execute_media_node_run(
                     )
                 adapter = FakeFluxAdapter()
             else:
-                adapter = await get_flux_adapter_for_organization(
+                adapter = await get_flux_adapter_for_workspace(
                     session,
-                    organization_id=project.organization_id,
+                    workspace_id=project.workspace_id,
                     allow_fake=allow_fake,
                 )
         except AppError as exc:

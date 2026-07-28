@@ -21,7 +21,7 @@ Alembic 迁移按工程阶段分期落地：
 | 阶段 | 迁移范围原则 |
 |---|---|
 | BOOT-0 | 可建立 Alembic 工程与空/占位 `versions/`；不宣称业务表已完成。 |
-| S1 | 会话、组织/项目/成员、BYOK 边界、EventLog、Outbox、Production Graph 分层与 Creation 入口相关全量字段。 |
+| S1 | 会话、私有创作空间/项目、工作区级 BYOK、EventLog、Outbox、Production Graph 分层与 Creation 入口相关全量字段。 |
 | S2–S5 | 仅当行为进入该阶段 Gate 时，引入对应表、索引、触发器与 RLS。 |
 
 未进入当前阶段的表不为追求“目录齐全”而提前创建。

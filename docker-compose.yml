@@ -42,6 +42,18 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: ./backend
@@ -60,8 +72,8 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
@@ -88,9 +100,9 @@ services:
       BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
       WORKER_KIND: default
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
-        condition: service_healthy
-      postgres:
         condition: service_healthy
     command:
       [
@@ -114,9 +126,9 @@ services:
       BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
       WORKER_KIND: heavy
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
-        condition: service_healthy
-      postgres:
         condition: service_healthy
     command:
       [

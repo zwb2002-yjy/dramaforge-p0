@@ -45,7 +45,7 @@ if os.environ.get("DRAMA_FORCE_MEMORY_STORE") == "1":
 async def main() -> int:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-    from app.access.models import Organization, OrganizationMember, User
+    from app.access.models import Workspace, User
     from app.assets.characters import register_lead_character
     from app.assets.models import Shot
     from app.assets.script_import import import_script
@@ -58,7 +58,6 @@ async def main() -> int:
     from app.providers.openai import get_openai_adapter
     from app.runtime.scheduler import AgentRunScheduler
     from app.shared.db import set_rls_context
-    from app.shared.enums import MemberRole
     from app.shared.security import hash_password
     from app.storage.minio_store import get_object_store
     from decimal import Decimal
@@ -142,21 +141,16 @@ async def main() -> int:
         )
         session.add(user)
         await session.flush()
-        org = Organization(name=f"P0FullOrg-{suffix}")
-        session.add(org)
-        await session.flush()
-        session.add(
-            OrganizationMember(
-                organization_id=org.id,
-                user_id=user.id,
-                role=MemberRole.OWNER.value,
-            )
+        workspace = Workspace(
+            owner_user_id=user.id,
+            name=f"P0FullWorkspace-{suffix}",
         )
+        session.add(workspace)
         await session.commit()
 
-        await set_rls_context(session, user_id=user.id, organization_id=org.id)
+        await set_rls_context(session, user_id=user.id, workspace_id=workspace.id)
         started = await CreationService(session).start_project(
-            organization_id=org.id,
+            workspace_id=workspace.id,
             name=f"{args.project_name.strip() or 'P0 Full Product Evidence'}-{suffix}",
             aspect_ratio="9:16",
             actor=user,
@@ -171,7 +165,7 @@ async def main() -> int:
         await set_rls_context(
             session,
             user_id=user.id,
-            organization_id=org.id,
+            workspace_id=workspace.id,
             project_id=started.project_id,
         )
         rev = await CreationService(session).update_brief_manual(

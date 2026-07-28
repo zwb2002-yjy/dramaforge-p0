@@ -117,23 +117,23 @@ def main() -> int:
             write_report(scratch, report)
             return 2
 
-        organization = post(
-            "/api/v1/organizations",
+        workspace = post(
+            "/api/v1/workspaces",
             {"name": f"WorkerEvidence-{uuid4().hex[:6]}"},
         )
-        if organization.status_code not in (200, 201):
-            report["error"] = f"organization failed: {organization.status_code}"
+        if workspace.status_code not in (200, 201):
+            report["error"] = f"workspace failed: {workspace.status_code}"
             report["steps"].append(
-                {"organization": organization.status_code, "body": organization.text[:300]}
+                {"workspace": workspace.status_code, "body": workspace.text[:300]}
             )
             write_report(scratch, report)
             return 2
-        organization_id = organization.json()["id"]
+        workspace_id = workspace.json()["id"]
 
         created = post(
             "/api/v1/creation/start-project",
             {
-                "organization_id": organization_id,
+                "workspace_id": workspace_id,
                 "name": project_name,
                 "aspect_ratio": "9:16",
                 "experience_mode": "quick",

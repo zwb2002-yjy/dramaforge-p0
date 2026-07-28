@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.providers.agnes import AgnesImageAdapter
 from app.providers.fake import FakeFluxAdapter
-from app.providers.organization_credentials import settings_for_organization_provider
+from app.providers.workspace_credentials import settings_for_workspace_provider
 from app.shared.errors import AppError
 
 
@@ -55,20 +55,20 @@ def get_flux_adapter(
     )
 
 
-async def get_flux_adapter_for_organization(
+async def get_flux_adapter_for_workspace(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     allow_live: bool = False,
     allow_fake: bool = False,
 ) -> Any:
-    """Resolve the project organization credential before creating an image adapter."""
+    """Resolve the project workspace credential before creating an image adapter."""
     # Keep the established Fake adapter injection point intact for unit/integration tests.
     if get_settings().app_env == "test":
         return get_flux_adapter(allow_fake=allow_fake)
-    settings = await settings_for_organization_provider(
+    settings = await settings_for_workspace_provider(
         session,
-        organization_id=organization_id,
+        workspace_id=workspace_id,
         provider="agnes",
     )
     return get_flux_adapter(

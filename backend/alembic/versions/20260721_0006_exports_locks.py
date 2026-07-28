@@ -94,8 +94,8 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE POLICY exports_project_scope ON exports
-        FOR ALL USING (project_id = app.current_project_id() OR app.current_project_id() IS NULL)
-        WITH CHECK (project_id = app.current_project_id() OR app.current_project_id() IS NULL)
+        FOR ALL USING (project_id = app.current_project_id())
+        WITH CHECK (project_id = app.current_project_id())
         """
     )
     op.execute("DROP POLICY IF EXISTS export_items_project_scope ON export_items")
@@ -105,13 +105,13 @@ def upgrade() -> None:
         FOR ALL USING (
           EXISTS (
             SELECT 1 FROM exports e WHERE e.id = export_items.export_id
-              AND (e.project_id = app.current_project_id() OR app.current_project_id() IS NULL)
+              AND e.project_id = app.current_project_id()
           )
         )
         WITH CHECK (
           EXISTS (
             SELECT 1 FROM exports e WHERE e.id = export_items.export_id
-              AND (e.project_id = app.current_project_id() OR app.current_project_id() IS NULL)
+              AND e.project_id = app.current_project_id()
           )
         )
         """
@@ -120,8 +120,8 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE POLICY shot_human_locks_project_scope ON shot_human_locks
-        FOR ALL USING (project_id = app.current_project_id() OR app.current_project_id() IS NULL)
-        WITH CHECK (project_id = app.current_project_id() OR app.current_project_id() IS NULL)
+        FOR ALL USING (project_id = app.current_project_id())
+        WITH CHECK (project_id = app.current_project_id())
         """
     )
 

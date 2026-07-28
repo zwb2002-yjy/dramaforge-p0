@@ -4,7 +4,7 @@
 
 **适用仓库：`D:\调研\dramaforge`**
 
-**执行记录：遵守 `AGENT_EXECUTION_PROTOCOL.md` v3.2。每个 Agent/subagent 在任务开始、完成、失败或暂停时，通过 `.agent-control/control.ps1` 追加本地事实；写入任务由 Git 分支、GitHub PR、路径所有权和独立 worktree 隔离。只有用户可以在批准并合并 PR 后记录 `MERGED`。没有观察器、Session、Token、心跳或进程门禁。**
+**执行记录：遵守 `AGENT_EXECUTION_PROTOCOL.md` v3.3。每个 Agent/subagent 在任务开始、完成、失败或暂停时，通过 `.agent-control/control.ps1` 追加本地事实；日常写入在 `dev` 集成分支，只有并行隔离或 hotfix 使用短期分支和 worktree。`main` 只接收受保护的稳定发布 PR。只有用户可以在批准并合并 PR 后记录 `MERGED`。没有观察器、Session、Token、心跳或进程门禁。**
 
 **目标执行者：Grok 4.5 或其他编码 Agent**
 
@@ -22,7 +22,7 @@
 先执行 `.agent-control/control.ps1 -Operation open` 和 `tail -Tail 20`，再核验 `git status --short`、`git worktree list`、`git branch --all` 和 GitHub 远端状态。不要依赖聊天记忆，不要覆盖已有未提交改动。
 从 `docs/开发执行检查点.md` 的“当前唯一执行任务”恢复，不要重复已经有证据的工作。持续执行本文的“开发控制循环”：当前 Task 通过后立即选择下一 Task，当前阶段 Gate 通过后立即进入下一阶段，直到 P0、P1.1、P1.2、P1.3、P2 依次完成，或遇到本文定义的真实人工阻塞。不要只完成一个 Task 就等待新的“继续”指令。
 开始 Task 或 subtask 前写 STARTED；完成、失败或暂停时立即写 COMPLETED、FAILED 或 PAUSED。记录摘要、分支、worktree、改动文件、测试、commit、证据和下一步。
-允许主 Agent 使用多个 subagent：只读调查可以并行。每个写入任务必须使用独立 `agent/<task-id>` 分支、`.worktrees/<task-id>` 和不重叠的 `owned_paths`；仓库根 worktree 保持在 `main`。远端不可用时提交保留在任务分支并记录 `PAUSED`，不存在本地 main 提交例外。Agent 复核 diff、测试和合同后创建或更新 PR，但不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以完成这些动作。每个 subagent 必须自行记录开始和结束状态。
+允许主 Agent 使用多个 subagent：日常串行写入在根 worktree 的 `dev` 分支进行并推送到 `origin/dev`。只有并行写入才使用独立 `agent/<task-id>` 分支、`.worktrees/<task-id>` 和不重叠的 `owned_paths`，其 PR 合回 `dev`。`main` 只接收 `dev -> main` 的稳定发布 PR；紧急 hotfix 从 `main` 单独处理并随后同步回 `dev`。Agent 复核 diff、测试和合同后创建或更新 PR，但不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以完成这些动作。每个 subagent 必须自行记录开始和结束状态。
 遇到真实 Provider 费用、外部账号、不可逆操作或冻结合同冲突时先停止对应动作并说明；其他本地开发自主完成。
 ```
 
@@ -30,9 +30,9 @@
 
 ## 1. 你的任务
 
-你是 DramaForge 的主开发 Agent。你的目标不是制作界面原型，也不是一次性生成大量占位代码，而是严格依据当前阶段合同和 Gate 持续开发：先完成可供 1–6 人短剧团队内部试产的 P0 MVP，再按产品路线依次完成 P1.1、P1.2、P1.3 和 P2。完成单个 Task 不是停机条件；只有项目目标完成、用户明确暂停，或出现本文定义的真实人工阻塞才停止推进。
+你是 DramaForge 的主开发 Agent。你的目标不是制作界面原型，也不是一次性生成大量占位代码，而是严格依据当前阶段合同和 Gate 持续开发：先完成供个人创作者在私有工作区内部试产的 P0 MVP，再按产品路线依次完成 P1.1、P1.2、P1.3 和 P2。完成单个 Task 不是停机条件；只有项目目标完成、用户明确暂停，或出现本文定义的真实人工阻塞才停止推进。
 
-P0 完成后的真实产品效果是：团队可以在私有部署环境中，从创意或剧本建立同一个正式 Project，维护角色、场景、道具和参考资产，完成至少 10 个 Shot 的图像、视频、语音、字幕、合成、一致性检查、审核、局部返工和交付；每次 Provider 调用、输入、成本、失败、产物和人工决定均可追溯。
+P0 完成后的真实产品效果是：个人创作者可以在私有工作区中，从创意或剧本建立正式 Project，维护角色、场景、道具和参考资产，完成至少 10 个 Shot 的图像、视频、语音、字幕、合成、一致性检查、审核、局部返工和交付；每次 Provider 调用、输入、成本、失败、产物和人工决定均可追溯。
 
 最终 P0 交付物固定为：
 
@@ -42,7 +42,7 @@ P0 完成后的真实产品效果是：团队可以在私有部署环境中，�
 - 可重现的 MP4、SRT、素材包和 `timeline_json` 交付。
 - 自动化测试、迁移、OpenAPI 类型、运行手册和验收证据。
 
-P0 不是 LibTV、Jellyfish、Toonflow 或 ArcReel 的复刻。DramaForge 的核心侧重点是团队私有化、Production Graph、角色与剧情连续性、受控返工、预算和审计。
+P0 不是 LibTV、Jellyfish、Toonflow 或 ArcReel 的复刻。DramaForge 的核心侧重点是个人私有工作区、Production Graph、角色与剧情连续性、受控返工、预算和审计。
 
 ## 2. 指令优先级与事实源
 
@@ -119,8 +119,8 @@ BOOT-0 仓库启动
 → 选择一个 READY Task
 → 写 Task 完成效果和验收合同
 → 实现、测试、自审、修复
-→ 分支提交、复核、PR
-→ 用户批准并合并后更新检查点和本地账本
+→ 提交并推送 dev、复核
+→ 稳定发布通过 dev -> main PR；用户批准并合并后更新检查点和本地账本
 → Gate 未通过：选择同阶段下一 Task
 → Gate 已通过：关闭阶段并启动下一阶段合同任务
 → 全部路线完成或遇到真实人工阻塞时停止
@@ -158,7 +158,7 @@ Task ID：唯一且稳定
 3. 先运行最窄的受影响检查，再运行 Task 合同要求的集成检查和仓库级回归。
 4. 测试失败时进入 5.4 自修复循环；不得在第一次失败后直接把普通工程问题交给用户。
 5. 检查 `git diff`、合同镜像、迁移、OpenAPI 类型、权限、幂等、日志脱敏、临时文件和目录合规。
-6. 在独立 `agent/<task-id>` 分支提交并走 PR。远端不可用时保留分支提交并记录 `PAUSED`，不得改写本地 `main`。主 Agent 或独立只读审查 subagent 按 diff、测试和合同复核，发现问题就回到步骤 1，不以自然语言汇报代替修复。
+6. 日常 Task 在 `dev` 提交并推送；只有并行隔离 Task 使用 `agent/<task-id>` 分支并通过 PR 合回 `dev`。远端不可用时保留当前分支提交并记录 `PAUSED`，不得改写或直接推送 `main`。主 Agent 或独立只读审查 subagent 按 diff、测试和合同复核，发现问题就回到步骤 1，不以自然语言汇报代替修复。
 7. Task 的全部完成定义通过后 Agent 才能写 `COMPLETED`。只有用户批准并合并 PR 后，用户才能写带 `ApprovedBy @zwb2002-yjy` 的 `MERGED`，然后主 Agent回到 5.3 选择下一 Task。
 
 ### 5.3 Task 选择与阶段自动推进
@@ -210,7 +210,7 @@ P0 完成后无需等待新的开发指令。主 Agent 依次启动 `P1.1-CONTRA
 - 主 Agent 为每个委派分配唯一 task_id；派出前记录任务、目标分支、worktree、非空 `owned_paths` 和验收命令。
 - 只读 subagent 可以并行，不需要 worktree；它仍须自行记录 STARTED 和结束状态。
 - 每个写入 subagent 使用独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`，不得共用根工作区；活动写入任务的 `owned_paths` 不得重叠。
-- 写入 subagent 在自己的分支提交并推送同名远端分支，不直接提交或推送业务改动到 `main`。远端暂时不可用时提交停留在任务分支，并记录 `PAUSED`。
+- 写入 subagent 在自己的隔离分支提交并推送，PR 目标为 `dev`；根 worktree 的日常开发直接提交并推送 `dev`。两者都不得直接推送业务改动到 `main`。远端暂时不可用时提交停留在当前分支，并记录 `PAUSED`。
 - 主 Agent检查 diff、测试和合同后创建或复核 PR。Agent 不得批准或合并；只在用户合并后继续依赖该结果的任务。
 - 尽量按文件所有权拆分。多个分支修改同一文件时，分支不会自动消除冲突，主 Agent必须负责解决冲突，并在用户合并后运行联合测试。
 - subagent 的汇报不是完成证据。至少记录 `owned_paths`、changed_files、tests 和 commit；用户批准并合并后记录 `MERGED`。
@@ -255,8 +255,8 @@ P0 完成后无需等待新的开发指令。主 Agent 依次启动 `P1.1-CONTRA
 
 - 一个提交只对应一个可验证 Task；不要把整个阶段塞入一个提交。
 - 提交前查看 `git diff`，只暂存本 Task 文件，不包含既有用户改动。
-- 每个写入 Task 必须在独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>` 中提交，并通过 PR 进入 `main`；根 worktree 不承载业务修改。
-- 远端不可用时，提交停留在任务分支并记录 `PAUSED`，不得提交或合并到本地 `main`。Agent 不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以执行。禁止 force push、历史重写或未审查自动合并。
+- 日常写入 Task 在根 worktree 的 `dev` 分支提交并推送；并行隔离 Task 才使用独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`，并通过 PR 进入 `dev`。稳定发布只能通过 `dev -> main` PR，常规发布不使用 cherry-pick。
+- 远端不可用时，提交停留在当前 `dev` 或任务分支并记录 `PAUSED`，不得提交或合并到本地 `main`。Agent 不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以执行。禁止 force push、历史重写或未审查自动合并。
 - 正式 P0 证据只能从干净候选 commit 生成到 `tmp/p0-evidence/<sha>/` 或仓库外路径；dirty、source mismatch、任何 `FAIL` 或 `BLOCKED` 都禁止完成标签。
 - 不使用 `git reset --hard`、`git clean -fd`、`git checkout -- <file>` 清理工作区。
 
@@ -311,11 +311,11 @@ BOOT-0 Gate：
 
 ### S1：可信基础骨架和双模式应用壳
 
-**目标效果**：两名不同权限成员能进入同一项目；快速入口和专业入口打开同一个 Project；越权、断线和重复事件不能破坏数据。
+**目标效果**：一个用户可在多个私有工作区中创建项目；快速入口和专业入口打开同一个 Project；跨用户或跨工作区越权、断线和重复事件不能破坏数据。
 
 必须实现：
 
-- Cookie 会话、CSRF、Organization/Project/Membership、BYOK 加密边界。
+- Cookie 会话、CSRF、User/Workspace/Project 私有隔离、工作区 BYOK 加密边界。
 - `04` 定义的相关全量字段、枚举、FK、触发器、索引和逐表 RLS；应用角色不可是 owner、superuser 或 `BYPASSRLS`。
 - EventLog、Transactional Outbox、死信、Redis Streams、SSE 续传和快照重取骨架。
 - Outbox pending 数与最老等待时长、lease 超时/补偿、死信数和 SSE 重连次数的基础 Prometheus 指标；建立可执行的死信查看与人工重放 runbook 草稿。
@@ -389,7 +389,7 @@ S3 Gate：冻结包要求的缓存命中、预算不足、取消竞态、Outbox 
 
 ### S4：10 Shot 专业生产与审核闭环
 
-**目标效果**：内部团队可用 3–5 场冻结剧本完成至少 10 个 Shot 的生产、审核和局部返工，人工锁定内容不会被 Agent 覆盖。
+**目标效果**：个人创作者可用 3–5 场冻结剧本完成至少 10 个 Shot 的生产、审核和局部返工，人工锁定内容不会被 Agent 覆盖。
 
 必须实现：
 
@@ -425,13 +425,13 @@ S5 / P0 Gate：
 
 - `01` §3.1 的 18 条端到端条件全部通过。
 - MP4、SRT、素材包和 timeline JSON 可从固定输入重现并校验哈希。
-- 团队无需工程师手工修库、补队列或拼对象存储文件。
+- 创作者无需工程师手工修库、补队列或拼对象存储文件。
 - 所有 P0 非功能演练通过，未通过项不得用“已知问题”替代 Gate。
 - 只有此时才可将产品状态写为“P0 MVP 完成”。S2、S3 或 S4 均不能提前宣布 MVP 完成。
 
 ## 8. P0 完成后的顺序
 
-P0 完成并用真实团队项目验证后，主 Agent 按以下顺序自动创建阶段合同任务、更新合同并继续开发：
+P0 完成并用真实个人创作项目验证后，主 Agent 按以下顺序自动创建阶段合同任务、更新合同并继续开发：
 
 1. P1.1：候选结果治理与项目内复用。
 2. P1.2：评论、指派、审片和责任闭环。

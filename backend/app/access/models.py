@@ -1,4 +1,4 @@
-"""Access domain ORM models (organizations, users, membership). Fields mirror `04`."""
+"""Access domain ORM models for private user-owned workspaces."""
 
 from __future__ import annotations
 
@@ -23,17 +23,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 from app.shared.base import Base
-from app.shared.enums import ExperienceMode, MemberRole, ProjectStage
+from app.shared.enums import ExperienceMode, ProjectStage
 
 # PG native enums (create_type=False — Alembic owns types); SQLite uses string values.
-_member_role = Enum(
-    MemberRole,
-    name="member_role",
-    native_enum=True,
-    create_constraint=False,
-    values_callable=lambda e: [m.value for m in e],
-    validate_strings=True,
-)
 _project_stage = Enum(
     ProjectStage,
     name="project_stage",
@@ -52,10 +44,16 @@ _experience_mode = Enum(
 )
 
 
-class Organization(Base):
-    __tablename__ = "organizations"
+class Workspace(Base):
+    __tablename__ = "workspaces"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "name", name="uq_workspaces_owner_name"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    owner_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -83,34 +81,15 @@ class User(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
-class OrganizationMember(Base):
-    __tablename__ = "organization_members"
-    __table_args__ = (PrimaryKeyConstraint("organization_id", "user_id"),)
-
-    organization_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
-    )
-    user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    role: Mapped[MemberRole | str] = mapped_column(
-        _member_role.with_variant(String(32), "sqlite"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-
-    def role_enum(self) -> MemberRole:
-        return self.role if isinstance(self.role, MemberRole) else MemberRole(self.role)
-
-
 class Project(Base):
     __tablename__ = "projects"
-    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_projects_org_name"),)
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_projects_workspace_name"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    organization_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     stage: Mapped[ProjectStage | str] = mapped_column(
@@ -131,24 +110,6 @@ class Project(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-
-
-class ProjectMember(Base):
-    __tablename__ = "project_members"
-    __table_args__ = (PrimaryKeyConstraint("project_id", "user_id"),)
-
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
-    )
-    user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    role: Mapped[MemberRole | str] = mapped_column(
-        _member_role.with_variant(String(32), "sqlite"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
 
 
 class UserProjectPreference(Base):

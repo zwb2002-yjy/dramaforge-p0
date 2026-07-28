@@ -49,9 +49,12 @@ def _make_task_worktree(tmp_path: Path, task_id: str) -> tuple[Path, Path]:
     _git(root, "add", "README.md", ".gitignore")
     _git(root, "commit", "-m", "init")
     _git(root, "update-ref", "refs/remotes/origin/main", "main")
+    _git(root, "branch", "dev", "main")
+    _git(root, "update-ref", "refs/remotes/origin/dev", "dev")
+    _git(root, "switch", "dev")
     worktree = root / ".worktrees" / task_id
     worktree.parent.mkdir()
-    _git(root, "worktree", "add", str(worktree), "-b", f"agent/{task_id}", "main")
+    _git(root, "worktree", "add", str(worktree), "-b", f"agent/{task_id}", "dev")
     return root, worktree
 
 
@@ -95,6 +98,7 @@ def _prepare_merged_task(
     task_commit = _commit_file(worktree, "backend/change.py")
     _git(root, "merge", "--no-ff", f"agent/{task_id}", "-m", "merge task")
     merge_commit = _git(root, "rev-parse", "HEAD")
+    _git(root, "branch", "-f", "main", "dev")
     _git(root, "update-ref", "refs/remotes/origin/main", "main")
     progress = tmp_path / "PROGRESS.jsonl"
     progress.write_text(
@@ -126,7 +130,7 @@ def _merged_pr_payload(
         "number": 42,
         "state": "MERGED",
         "baseRefName": "main",
-        "headRefName": f"agent/{task_id}",
+        "headRefName": "dev",
         "headRefOid": task_commit,
         "mergeCommit": {"oid": merge_commit},
         "mergedBy": {"login": "zwb2002-yjy"},
@@ -241,21 +245,40 @@ def test_writable_started_event_requires_matching_branch_worktree_and_ownership(
         )
 
 
-def test_writable_task_rejects_dirty_or_out_of_sync_root_main(
+def test_daily_dev_task_uses_root_worktree(tmp_path: Path) -> None:
+    root, _worktree = _make_task_worktree(tmp_path, "guard-test")
+    progress = root / ".agent-control" / "PROGRESS.jsonl"
+
+    event = validate_event(
+        repo_root=root,
+        progress_path=progress,
+        candidate={
+            "task_id": "daily-dev-task",
+            "status": "STARTED",
+            "owned_paths": ["backend/app"],
+            "read_only": False,
+        },
+    )
+
+    assert event["branch"] == "dev"
+    assert event["worktree"] == "."
+
+
+def test_writable_task_rejects_dirty_or_out_of_sync_root_dev(
     tmp_path: Path,
 ) -> None:
     root, worktree = _make_task_worktree(tmp_path, "guard-test")
 
     (root / "dirty.txt").write_text("dirty\n", encoding="utf-8")
-    with pytest.raises(GuardrailError, match="root main worktree must stay clean"):
+    with pytest.raises(GuardrailError, match="root dev worktree must stay clean"):
         validate_worktree(worktree, "guard-test")
     (root / "dirty.txt").unlink()
 
-    _git(root, "update-ref", "refs/remotes/origin/main", "main^{}")
+    _git(root, "update-ref", "refs/remotes/origin/dev", "dev^{}")
     (root / "README.md").write_text("changed\n", encoding="utf-8")
     _git(root, "add", "README.md")
-    _git(root, "commit", "-m", "advance main")
-    with pytest.raises(GuardrailError, match="root main must match origin/main"):
+    _git(root, "commit", "-m", "advance dev")
+    with pytest.raises(GuardrailError, match="root dev must match origin/dev"):
         validate_worktree(worktree, "guard-test")
 
 
@@ -378,7 +401,7 @@ def test_completed_rejects_dirty_uncommitted_worktree(tmp_path: Path) -> None:
         )
 
 
-def test_completed_rejects_branch_without_task_commit(tmp_path: Path) -> None:
+def test_completed_rejects_task_without_head_commit(tmp_path: Path) -> None:
     _root, worktree = _make_task_worktree(tmp_path, "guard-test")
     progress = tmp_path / "PROGRESS.jsonl"
     _write_started_event(
@@ -387,7 +410,7 @@ def test_completed_rejects_branch_without_task_commit(tmp_path: Path) -> None:
         owned_paths=["backend"],
     )
 
-    with pytest.raises(GuardrailError, match="at least one task commit"):
+    with pytest.raises(GuardrailError, match="nonempty task HEAD commit"):
         validate_event(
             repo_root=worktree,
             progress_path=progress,
@@ -530,7 +553,7 @@ def test_merged_requires_verified_github_pr_facts(
         )
 
 
-def test_merged_requires_pr_head_to_match_completed_commit(
+def test_merged_accepts_release_pr_with_multiple_task_commits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -543,17 +566,17 @@ def test_merged_requires_pr_head_to_match_completed_commit(
     payload["headRefOid"] = _git(root, "rev-parse", "main")
     monkeypatch.setattr(repo_guardrails, "_gh_json", lambda *_args: payload)
 
-    with pytest.raises(GuardrailError, match="head does not match"):
-        validate_event(
-            repo_root=root,
-            progress_path=progress,
-            candidate={
-                "task_id": "guard-test",
-                "status": "MERGED",
-                "approved_by": "@zwb2002-yjy",
-                "pr_number": 42,
-            },
-        )
+    merged = validate_event(
+        repo_root=root,
+        progress_path=progress,
+        candidate={
+            "task_id": "guard-test",
+            "status": "MERGED",
+            "approved_by": "@zwb2002-yjy",
+            "pr_number": 42,
+        },
+    )
+    assert merged["merge_commit"] == merge_commit
 
 
 def test_merged_requires_all_successful_checks(

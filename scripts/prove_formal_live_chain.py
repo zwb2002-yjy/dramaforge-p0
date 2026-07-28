@@ -100,12 +100,12 @@ def main() -> int:
         {"email": email, "password": "password123", "display_name": "Prove"},
     )
     out["steps"].append({"register": r.status_code})
-    r = post("/api/v1/organizations", {"name": f"Org-{uuid4().hex[:6]}"})
-    org_id = r.json()["id"]
+    r = post("/api/v1/workspaces", {"name": f"Org-{uuid4().hex[:6]}"})
+    workspace_id = r.json()["id"]
     r = post(
         "/api/v1/creation/start-project",
         {
-            "organization_id": org_id,
+            "workspace_id": workspace_id,
             "name": "Formal Live Chain Probe",
             "aspect_ratio": "9:16",
             "experience_mode": "quick",

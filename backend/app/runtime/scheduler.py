@@ -12,7 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.events.outbox import OutboxDispatcher, StreamPublisher
 from app.execution.models import GraphNode, NodeRun
-from app.shared.db import set_rls_context
+from app.shared.db import (
+    NodeRunRlsScope,
+    list_pending_outbox_event_rls_scopes,
+    list_queued_node_run_rls_scopes,
+    set_node_run_rls_context,
+    set_rls_context,
+)
 from app.shared.errors import (
     NodeRunAlreadyClaimedError,
     NotFoundError,
@@ -63,33 +69,70 @@ class AgentRunScheduler:
         self._dispatcher = OutboxDispatcher(session, publisher=publisher)
         self.enqueued_job_ids: list[str] = []
 
-    async def dispatch_pending(self, *, worker_id: str = "scheduler") -> int:
+    async def dispatch_pending(
+        self,
+        *,
+        worker_id: str = "scheduler",
+        project_id: UUID | None = None,
+    ) -> int:
         """Claim outbox + enqueue Arq jobs for queued NodeRuns (no Adapter here)."""
         count = 0
-        events = await self._dispatcher.claim_pending(worker_id=worker_id, limit=20)
-        for ev in events:
+        event_scopes = await list_pending_outbox_event_rls_scopes(
+            self._session,
+            limit=20,
+            project_id=project_id,
+        )
+        for scope in event_scopes:
+            await set_rls_context(
+                self._session,
+                user_id=scope.user_id,
+                workspace_id=scope.workspace_id,
+                project_id=scope.project_id,
+            )
+            event = await self._dispatcher.claim_one_by_event_id(
+                event_id=scope.event_id,
+                worker_id=worker_id,
+            )
+            if event is None:
+                await self._session.rollback()
+                continue
             try:
-                await self._dispatcher.publish_leased(ev)
+                await self._dispatcher.publish_leased(event)
+                await self._session.commit()
                 count += 1
             except Exception as exc:  # noqa: BLE001
-                await self._dispatcher.fail_leased(ev, error=str(exc))
+                try:
+                    await self._dispatcher.fail_leased(event, error=str(exc))
+                    await self._session.commit()
+                except Exception:  # noqa: BLE001
+                    await self._session.rollback()
 
-        result = await self._session.execute(
-            select(NodeRun)
-            .where(NodeRun.status == "queued")
-            .order_by(NodeRun.created_at)
-            .limit(50)
+        candidates = await list_queued_node_run_rls_scopes(
+            self._session,
+            limit=50,
+            project_id=project_id,
         )
-        # Commit Outbox publish state before any Arq enqueue (Worker must see DB).
-        await self._session.commit()
-
-        for run in result.scalars().all():
+        for run_id, scope in candidates:
             try:
-                job_id = await self._enqueue_node_run(run.id)
+                await set_rls_context(
+                    self._session,
+                    user_id=scope.user_id,
+                    workspace_id=scope.workspace_id,
+                    project_id=scope.project_id,
+                )
+                job_id = await self._enqueue_node_run(run_id)
+                await self._session.commit()
                 self.enqueued_job_ids.append(job_id)
                 count += 1
             except Exception as exc:  # noqa: BLE001
-                await self._mark_queue_failed(run.id, error=str(exc))
+                await self._session.rollback()
+                await set_rls_context(
+                    self._session,
+                    user_id=scope.user_id,
+                    workspace_id=scope.workspace_id,
+                    project_id=scope.project_id,
+                )
+                await self._mark_queue_failed(run_id, error=str(exc))
         return count
 
     async def enqueue_node_run_only(self, node_run_id: UUID) -> str:
@@ -210,58 +253,66 @@ class WorkerRuntime:
         self._session = session
 
     async def process_queued(self, *, limit: int = 20) -> int:
+        from app.execution.composite_media import composite_inputs_pending
         from app.execution.product_path import (
             claim_media_node_run,
             execute_media_node_run,
         )
 
-        result = await self._session.execute(
-            select(NodeRun)
-            .where(NodeRun.status == "queued")
-            .order_by(NodeRun.created_at)
-            .limit(limit)
-        )
-        candidates = [
-            (run.id, run.created_by, run.project_id) for run in result.scalars().all()
-        ]
+        candidates = await list_queued_node_run_rls_scopes(self._session, limit=limit)
         n = 0
-        for run_id, user_id, project_id in candidates:
-            try:
-                await set_rls_context(
-                    self._session,
-                    user_id=user_id,
-                    project_id=project_id,
-                )
-                await claim_media_node_run(self._session, node_run_id=run_id)
-                await execute_media_node_run(
-                    self._session,
-                    node_run_id=run_id,
-                    already_claimed=True,
-                )
-                await self._session.commit()
-            except NodeRunAlreadyClaimedError:
-                await self._session.rollback()
-                continue
-            except Exception as exc:  # noqa: BLE001
-                await self._session.rollback()
-                await set_rls_context(
-                    self._session,
-                    user_id=user_id,
-                    project_id=project_id,
-                )
-                current = await self._session.get(NodeRun, run_id)
-                if current is not None and current.status in {"queued", "running"}:
-                    current.status = "failed"
-                    current.error_code = (
-                        getattr(exc, "code", None) or "NODE_EXECUTION_FAILED"
+        deferred = candidates
+        while deferred:
+            next_deferred: list[tuple[UUID, NodeRunRlsScope]] = []
+            progressed = False
+            for run_id, scope in deferred:
+                try:
+                    await set_rls_context(
+                        self._session,
+                        user_id=scope.user_id,
+                        workspace_id=scope.workspace_id,
+                        project_id=scope.project_id,
                     )
-                    current.error_summary = str(exc)[:500]
-                    from datetime import UTC, datetime
-
-                    current.finished_at = datetime.now(UTC)
-                    await self._session.flush()
+                    current = await self._session.get(NodeRun, run_id)
+                    if current is None:
+                        await self._session.rollback()
+                        continue
+                    if await composite_inputs_pending(self._session, run=current):
+                        await self._session.rollback()
+                        next_deferred.append((run_id, scope))
+                        continue
+                    await claim_media_node_run(self._session, node_run_id=run_id)
+                    await execute_media_node_run(
+                        self._session,
+                        node_run_id=run_id,
+                        already_claimed=True,
+                    )
                     await self._session.commit()
-            n += 1
+                    progressed = True
+                except NodeRunAlreadyClaimedError:
+                    await self._session.rollback()
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    await self._session.rollback()
+                    if await set_node_run_rls_context(self._session, node_run_id=run_id) is None:
+                        continue
+                    current = await self._session.get(NodeRun, run_id)
+                    if current is not None and current.status in {"queued", "running"}:
+                        current.status = "failed"
+                        current.error_code = (
+                            getattr(exc, "code", None) or "NODE_EXECUTION_FAILED"
+                        )
+                        current.error_summary = str(exc)[:500]
+                        from datetime import UTC, datetime
+
+                        current.finished_at = datetime.now(UTC)
+                        await self._session.flush()
+                        await self._session.commit()
+                    progressed = True
+                n += 1
+            if not progressed:
+                break
+            deferred = next_deferred
         return n
 
     async def process_one(self, node_run_id: UUID) -> bool:
@@ -270,6 +321,8 @@ class WorkerRuntime:
             execute_media_node_run,
         )
 
+        if await set_node_run_rls_context(self._session, node_run_id=node_run_id) is None:
+            raise NotFoundError("node_run not found")
         try:
             await claim_media_node_run(self._session, node_run_id=node_run_id)
         except NodeRunAlreadyClaimedError:

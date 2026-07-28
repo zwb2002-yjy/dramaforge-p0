@@ -1,4 +1,4 @@
-"""Golden script import → Episode/Scene/Shot + canonical character."""
+﻿"""Golden script import → Episode/Scene/Shot + canonical character."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.access.projects import ProjectService
 from app.assets import models as _am  # noqa: F401
 from app.assets.characters import register_lead_character, require_canonical_for_shot
@@ -20,7 +20,6 @@ from app.execution import models as _xm  # noqa: F401
 from app.production import models as _pm  # noqa: F401
 from app.providers.fake import FakeFluxAdapter
 from app.shared.base import Base
-from app.shared.enums import MemberRole
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
@@ -52,16 +51,11 @@ async def _project(session: AsyncSession):
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"SO-{uuid4().hex[:6]}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"SO-{uuid4().hex[:6]}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     project = await ProjectService(session).create_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"Script-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
         actor=user,
@@ -155,7 +149,7 @@ async def test_import_reconciles_materialized_agent_plan_shots(session: AsyncSes
     user, base_project = await _project(session)
     service = CreationService(session)
     started = await service.start_project(
-        organization_id=base_project.organization_id,
+        workspace_id=base_project.workspace_id,
         name="Agent plan script reconciliation",
         aspect_ratio="9:16",
         actor=user,

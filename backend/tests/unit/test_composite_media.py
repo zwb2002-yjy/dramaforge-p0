@@ -1,4 +1,4 @@
-"""Contract tests for local composite media execution."""
+﻿"""Contract tests for local composite media execution."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.access.projects import ProjectService
 from app.config import clear_settings_cache
 from app.creation import models as _cm  # noqa: F401
@@ -25,7 +25,6 @@ from app.execution.product_path import execute_media_node_run
 from app.production import models as _pm  # noqa: F401
 from app.production.service import GraphService
 from app.shared.base import Base
-from app.shared.enums import MemberRole
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import InMemoryObjectStore, reset_object_store_for_tests
@@ -105,19 +104,12 @@ async def _make_composite_fixture(
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"Composite-{uuid4().hex[:8]}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"Composite-{uuid4().hex[:8]}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id,
-            user_id=user.id,
-            role=MemberRole.OWNER.value,
-        )
-    )
     await session.flush()
     project = await ProjectService(session).create_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name="Composite media",
         aspect_ratio="9:16",
         actor=user,

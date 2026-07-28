@@ -1,4 +1,4 @@
-"""S3 NodeRun cache/stale and S5 export from Artifact rows."""
+﻿"""S3 NodeRun cache/stale and S5 export from Artifact rows."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 from app.access import models as _a  # noqa: F401
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.access.projects import ProjectService
 from app.delivery.export_local import build_export_from_runs, build_export_package
 from app.events import models as _e  # noqa: F401
@@ -17,7 +17,6 @@ from app.execution.runtime_invariants import mark_stale_downstream, run_or_cache
 from app.production import models as _p  # noqa: F401
 from app.production.service import GraphService
 from app.shared.base import Base
-from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -41,16 +40,11 @@ async def _project(session: AsyncSession) -> tuple[User, object]:
     )
     session.add(user)
     await session.flush()
-    org = Organization(name="O")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name="O")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     project = await ProjectService(session).create_project(
-        organization_id=org.id, name=f"P{uuid4().hex[:6]}", aspect_ratio="9:16", actor=user
+        workspace_id=workspace.id, name=f"P{uuid4().hex[:6]}", aspect_ratio="9:16", actor=user
     )
     return user, project
 

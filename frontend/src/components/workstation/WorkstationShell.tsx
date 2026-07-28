@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 
-import { fetchHealth, fetchSnapshot } from "../../lib/api";
+import { artifactContentUrl, fetchHealth, fetchSnapshot } from "../../lib/api";
 import { useUiStore } from "../../stores/uiStore";
 
 type WorkstationShellProps = {
@@ -163,11 +163,11 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                   {snapshot.data.name}
                 </p>
               )}
-              {arts[0] && (
+              {projectId && arts[0] && (
                 <div style={{ marginTop: "0.75rem" }}>
                   <h3>最近产物</h3>
                   <a
-                    href={`/api/v1/projects/${projectId}/artifacts/${arts[0].id}/content`}
+                    href={artifactContentUrl(projectId, arts[0].id)}
                     target="_blank"
                     rel="noreferrer"
                     style={{ fontSize: "0.78rem", wordBreak: "break-all" }}

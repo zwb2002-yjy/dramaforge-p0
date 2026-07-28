@@ -77,7 +77,7 @@ async def test_published_graph_version_immutable() -> None:
     await engine.dispose()
 
 
-def _auth_org(client: TestClient) -> str:
+def _auth_workspace(client: TestClient) -> str:
     client.post(
         "/api/v1/auth/register",
         json={
@@ -86,22 +86,20 @@ def _auth_org(client: TestClient) -> str:
             "display_name": "Creator",
         },
     )
-    csrf = client.get("/api/v1/auth/csrf").json()["csrf_token"]
-    org = client.post(
-        "/api/v1/organizations",
-        json={"name": "CreateOrg"},
-        headers={CSRF_HEADER: csrf},
-    )
-    return org.json()["id"]
+    workspaces = client.get("/api/v1/workspaces")
+    assert workspaces.status_code == 200
+    workspace_id = str(workspaces.json()[0]["id"])
+    client.headers["X-Workspace-Id"] = workspace_id
+    return workspace_id
 
 
 def test_start_project_zero_text_providers(client: TestClient) -> None:
-    org_id = _auth_org(client)
+    workspace_id = _auth_workspace(client)
     csrf = client.get("/api/v1/auth/csrf").json()["csrf_token"]
     r = client.post(
         "/api/v1/creation/start-project",
         json={
-            "organization_id": org_id,
+            "workspace_id": workspace_id,
             "name": "QuickStart",
             "aspect_ratio": "9:16",
             "experience_mode": "quick",

@@ -1,4 +1,4 @@
-"""Access application service (transactional use cases)."""
+"""Access use cases for private workspaces."""
 
 from __future__ import annotations
 
@@ -6,11 +6,13 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import User, Workspace
 from app.access.repository import AccessRepository
-from app.shared.enums import MemberRole
+from app.shared.db import set_rls_context
 from app.shared.errors import ForbiddenError, NotFoundError, UnauthorizedError, ValidationAppError
 from app.shared.security import hash_password, verify_password
+
+DEFAULT_WORKSPACE_NAME = "我的创作空间"
 
 
 class AccessService:
@@ -18,28 +20,28 @@ class AccessService:
         self._session = session
         self._repo = AccessRepository(session)
 
-    async def register(
-        self, *, email: str, password: str, display_name: str
-    ) -> User:
-        existing = await self._repo.get_user_by_email(email.lower())
-        if existing is not None:
+    async def register(self, *, email: str, password: str, display_name: str) -> User:
+        if await self._repo.get_user_by_email(email.lower()):
             raise ValidationAppError("email already registered")
-        user = User(
-            email=email.lower(),
-            display_name=display_name,
-            password_hash=hash_password(password),
-            is_active=True,
+        user = await self._repo.add_user(
+            User(
+                email=email.lower(),
+                display_name=display_name,
+                password_hash=hash_password(password),
+                is_active=True,
+            )
         )
-        await self._repo.add_user(user)
+        await set_rls_context(self._session, user_id=user.id)
+        await self._repo.add_workspace(
+            Workspace(owner_user_id=user.id, name=DEFAULT_WORKSPACE_NAME)
+        )
         await self._session.commit()
         await self._session.refresh(user)
         return user
 
     async def authenticate(self, *, email: str, password: str) -> User:
         user = await self._repo.get_user_by_email(email.lower())
-        if user is None or not user.is_active:
-            raise UnauthorizedError("invalid credentials")
-        if not verify_password(password, user.password_hash):
+        if user is None or not user.is_active or not verify_password(password, user.password_hash):
             raise UnauthorizedError("invalid credentials")
         return user
 
@@ -49,82 +51,43 @@ class AccessService:
             raise UnauthorizedError("session user not found")
         return user
 
-    async def create_organization(self, *, name: str, owner: User) -> Organization:
-        org, _member = await self._repo.create_org_with_owner(name=name, owner=owner)
+    async def create_workspace(self, *, name: str, owner: User) -> Workspace:
+        workspace = await self._repo.add_workspace(
+            Workspace(owner_user_id=owner.id, name=name)
+        )
         await self._session.commit()
-        await self._session.refresh(org)
-        return org
+        await self._session.refresh(workspace)
+        return workspace
 
-    async def get_organization_for_member(
-        self, *, org_id: UUID, user: User
-    ) -> Organization:
-        org = await self._repo.get_organization(org_id)
-        if org is None:
-            raise NotFoundError("organization not found")
-        if not await self._repo.user_is_member(organization_id=org_id, user_id=user.id):
-            raise ForbiddenError("not a member of this organization")
-        return org
+    async def list_workspaces(self, *, owner: User) -> list[Workspace]:
+        return await self._repo.list_workspaces(owner_user_id=owner.id)
 
-    async def require_organization_role(
-        self,
-        *,
-        org_id: UUID,
-        actor: User,
-        allowed: set[MemberRole] | frozenset[MemberRole],
-        action: str,
-    ) -> Organization:
-        org = await self.get_organization_for_member(org_id=org_id, user=actor)
-        membership = await self._repo.get_membership(
-            organization_id=org_id,
-            user_id=actor.id,
-        )
-        assert membership is not None
-        role = MemberRole(str(membership.role))
-        if role not in allowed:
-            raise ForbiddenError(
-                f"role '{role.value}' cannot {action}; requires one of "
-                f"{sorted(item.value for item in allowed)}"
-            )
-        return org
+    async def get_workspace_for_owner(
+        self, *, workspace_id: UUID, user: User
+    ) -> Workspace:
+        workspace = await self._repo.get_workspace(workspace_id)
+        if workspace is None:
+            raise NotFoundError("workspace not found")
+        if workspace.owner_user_id != user.id:
+            raise ForbiddenError("workspace belongs to another user")
+        return workspace
 
-    async def add_member(
-        self,
-        *,
-        org_id: UUID,
-        actor: User,
-        user_id: UUID,
-        role: MemberRole,
-    ) -> OrganizationMember:
-        await self.get_organization_for_member(org_id=org_id, user=actor)
-        actor_membership = await self._repo.get_membership(
-            organization_id=org_id, user_id=actor.id
+    async def rename_workspace(
+        self, *, workspace_id: UUID, name: str, actor: User
+    ) -> Workspace:
+        workspace = await self.get_workspace_for_owner(
+            workspace_id=workspace_id, user=actor
         )
-        assert actor_membership is not None
-        if actor_membership.role not in {
-            MemberRole.OWNER.value,
-            MemberRole.ADMIN.value,
-        }:
-            raise ForbiddenError("only owner/admin can add members")
-        target = await self._repo.get_user_by_id(user_id)
-        if target is None:
-            raise NotFoundError("user not found")
-        existing = await self._repo.get_membership(
-            organization_id=org_id, user_id=user_id
-        )
-        if existing is not None:
-            raise ValidationAppError("user already a member")
-        member = OrganizationMember(
-            organization_id=org_id,
-            user_id=user_id,
-            role=role.value,
-        )
-        await self._repo.add_membership(member)
+        workspace.name = name
         await self._session.commit()
-        await self._session.refresh(member)
-        return member
+        await self._session.refresh(workspace)
+        return workspace
 
-    async def list_members(
-        self, *, org_id: UUID, actor: User
-    ) -> list[OrganizationMember]:
-        await self.get_organization_for_member(org_id=org_id, user=actor)
-        return await self._repo.list_memberships(org_id)
+    async def delete_workspace(self, *, workspace_id: UUID, actor: User) -> None:
+        workspace = await self.get_workspace_for_owner(
+            workspace_id=workspace_id, user=actor
+        )
+        if await self._repo.count_projects(workspace_id=workspace_id):
+            raise ValidationAppError("workspace must be empty before deletion")
+        await self._repo.delete_workspace(workspace)
+        await self._session.commit()

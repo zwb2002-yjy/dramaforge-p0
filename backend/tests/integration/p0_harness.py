@@ -1,18 +1,17 @@
-"""Shared P0 gate harness — one store, one project spine for all matrix tests."""
+﻿"""Shared P0 gate harness — one store, one project spine for all matrix tests."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from uuid import uuid4
 
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.creation.service import CreationService
 from app.delivery.export_service import build_project_export
 from app.execution.models import NodeRun
 from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
 from app.shared.base import Base
 from app.shared.db import set_rls_context
-from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -21,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 @dataclass
 class HarnessProject:
     user: User
-    org_id: object
+    workspace_id: object
     project_id: object
     session: AsyncSession
 
@@ -44,18 +43,13 @@ async def bootstrap_project(session: AsyncSession, *, name: str | None = None) -
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"Org-{uuid4().hex[:6]}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"Org-{uuid4().hex[:6]}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     await session.commit()
-    await set_rls_context(session, user_id=user.id, organization_id=org.id)
+    await set_rls_context(session, user_id=user.id, workspace_id=workspace.id)
     started = await CreationService(session).start_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=name or f"P0-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
         actor=user,
@@ -64,11 +58,14 @@ async def bootstrap_project(session: AsyncSession, *, name: str | None = None) -
     await set_rls_context(
         session,
         user_id=user.id,
-        organization_id=org.id,
+        workspace_id=workspace.id,
         project_id=started.project_id,
     )
     return HarnessProject(
-        user=user, org_id=org.id, project_id=started.project_id, session=session
+        user=user,
+        workspace_id=workspace.id,
+        project_id=started.project_id,
+        session=session,
     )
 
 

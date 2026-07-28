@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 os.environ["APP_ENV"] = "test"
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-32chars-min")
 os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
-# Keep live keys out of accidental adapter selection if present in parent env.
-os.environ.setdefault("AGNES_ENABLED", "false")
-os.environ.setdefault("TEXT_LLM_ENABLED", "false")
+# Keep live keys out of accidental adapter selection, including ones in root .env.
+os.environ["AGNES_ENABLED"] = "false"
+os.environ["TEXT_LLM_ENABLED"] = "false"
 os.environ.setdefault("DRAMAFORGE_SOURCE_COMMIT", "test-source-commit")
 os.environ.setdefault("INSIGHTFACE_ENABLED", "false")
 

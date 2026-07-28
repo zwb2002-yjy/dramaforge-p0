@@ -1,4 +1,4 @@
-"""P0-AGENT-1: Agent Brief/Plan generation with Fake text adapter (APP_ENV=test)."""
+﻿"""P0-AGENT-1: Agent Brief/Plan generation with Fake text adapter (APP_ENV=test)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.assets.models import Shot
 from app.config import Settings
 from app.creation import models as _cm  # noqa: F401
@@ -23,7 +23,6 @@ from app.providers.fake import FakeOpenAIAdapter
 from app.providers.openai import AnthropicCompatibleTextAdapter
 from app.runtime.scheduler import WorkerRuntime
 from app.shared.base import Base
-from app.shared.enums import MemberRole
 from app.shared.errors import ValidationAppError
 from app.shared.security import CSRF_HEADER, hash_password
 from fastapi.testclient import TestClient
@@ -199,17 +198,14 @@ async def test_generate_brief_and_plan_agent_retries_invalid_structured_output(
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"O-{suffix}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"O-{suffix}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
-    )
     await session.commit()
 
     svc = CreationService(session)
     started = await svc.start_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"P-{suffix}",
         aspect_ratio="9:16",
         actor=user,
@@ -311,19 +307,16 @@ def test_agent_brief_confirm_plan_api_flow(client: TestClient) -> None:
     )
     assert registered.status_code == 201, registered.text
 
-    csrf = client.get("/api/v1/auth/csrf").json()["csrf_token"]
-    organization = client.post(
-        "/api/v1/organizations",
-        json={"name": f"AgentApiOrg-{suffix}"},
-        headers={CSRF_HEADER: csrf},
-    )
-    assert organization.status_code == 201, organization.text
+    workspaces = client.get("/api/v1/workspaces")
+    assert workspaces.status_code == 200, workspaces.text
+    workspace_id = workspaces.json()[0]["id"]
+    client.headers["X-Workspace-Id"] = workspace_id
 
     csrf = client.get("/api/v1/auth/csrf").json()["csrf_token"]
     started = client.post(
         "/api/v1/creation/start-project",
         json={
-            "organization_id": organization.json()["id"],
+            "workspace_id": workspace_id,
             "name": f"AgentApiProject-{suffix}",
             "aspect_ratio": "9:16",
             "experience_mode": "quick",
@@ -475,17 +468,14 @@ async def test_confirm_plan_materializes_real_shots_and_keyframe_runs(
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"Materialize-{suffix}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"Materialize-{suffix}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
-    )
     await session.commit()
 
     service = CreationService(session)
     started = await service.start_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"Plan-{suffix}",
         aspect_ratio="9:16",
         actor=user,
@@ -572,17 +562,14 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"AgentPipeline-{uuid4().hex[:6]}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"AgentPipeline-{uuid4().hex[:6]}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
-    )
     await session.commit()
 
     service = CreationService(session)
     started = await service.start_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name="Agent ten-shot pipeline",
         aspect_ratio="9:16",
         actor=user,
@@ -747,17 +734,14 @@ async def test_legacy_agent_plan_requires_regeneration_before_materialization(
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"LegacyPlan-{suffix}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"LegacyPlan-{suffix}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
-    )
     await session.commit()
 
     service = CreationService(session)
     started = await service.start_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"Legacy-{suffix}",
         aspect_ratio="9:16",
         actor=user,
@@ -816,17 +800,14 @@ async def test_manual_plan_save_cannot_overwrite_agent_plan(
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"AgentPlanGuard-{suffix}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"AgentPlanGuard-{suffix}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
-    )
     await session.commit()
 
     service = CreationService(session)
     started = await service.start_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"AgentPlanGuard-{suffix}",
         aspect_ratio="9:16",
         actor=user,

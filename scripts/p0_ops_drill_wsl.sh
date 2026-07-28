@@ -9,6 +9,7 @@
 #   P0_BACKUP_FERNET_KEY       Fernet key for the generated backup archive
 #   BYOK_PRIMARY_KEY_VERSION   New encryption version
 #   BYOK_KEYRING               Retains old and new version:key entries
+#   BYOK_ROTATION_DATABASE_URL Dedicated maintenance DSN with rotation role access
 #
 # Usage:
 #   P0_BACKUP_FERNET_KEY=... BYOK_PRIMARY_KEY_VERSION=v2 BYOK_KEYRING=v1:...,v2:... \
@@ -46,7 +47,7 @@ load_formal_env() {
       value="${line#*=}"
       [[ "$key" == "DRAMA_FORCE_MEMORY_STORE" ]] && continue
       case "$key" in
-        P0_BACKUP_FERNET_KEY|BYOK_PRIMARY_KEY_VERSION|BYOK_KEYRING)
+        P0_BACKUP_FERNET_KEY|BYOK_PRIMARY_KEY_VERSION|BYOK_KEYRING|BYOK_ROTATION_DATABASE_URL)
           [[ -n "${!key:-}" ]] && continue
           ;;
       esac
@@ -69,6 +70,7 @@ validate_preconditions() {
   [[ -n "${P0_BACKUP_FERNET_KEY:-}" ]] || fail "P0_BACKUP_FERNET_KEY is required"
   [[ -n "${BYOK_PRIMARY_KEY_VERSION:-}" ]] || fail "BYOK_PRIMARY_KEY_VERSION is required"
   [[ -n "${BYOK_KEYRING:-}" ]] || fail "BYOK_KEYRING must retain old and new keys"
+  [[ -n "${BYOK_ROTATION_DATABASE_URL:-}" ]] || fail "BYOK_ROTATION_DATABASE_URL is required"
   [[ "$BYOK_KEYRING" == *,* ]] || fail "BYOK_KEYRING must include at least old and new versions"
   [[ "$RESTORE_DB_NAME" =~ ^[a-zA-Z0-9_]+$ ]] || fail "restore database name has unsafe characters"
   [[ "$RESTORE_DB_NAME" != "dramaforge" ]] || fail "restore database must not be dramaforge"

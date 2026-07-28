@@ -1,4 +1,4 @@
-"""Shipped product path using shared get_object_store() singleton."""
+﻿"""Shipped product path using shared get_object_store() singleton."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.access.projects import ProjectService
 from app.assets.models import Episode, Scene, Shot
 from app.creation import models as _cm  # noqa: F401
@@ -22,7 +22,6 @@ from app.execution.shot_review import local_rerun_from_node, start_shot_nodes
 from app.production import models as _pm  # noqa: F401
 from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
 from app.shared.base import Base
-from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from app.workers.jobs import health_ping
@@ -43,7 +42,7 @@ async def session() -> AsyncSession:
     reset_object_store_for_tests()
 
 
-async def _seed_user_org(session: AsyncSession) -> tuple[User, object]:
+async def _seed_user_workspace(session: AsyncSession) -> tuple[User, object]:
     user = User(
         email=f"u-{uuid4().hex[:8]}@example.com",
         display_name="U",
@@ -51,23 +50,18 @@ async def _seed_user_org(session: AsyncSession) -> tuple[User, object]:
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"O-{uuid4().hex[:6]}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"O-{uuid4().hex[:6]}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     await session.commit()
-    return user, org.id
+    return user, workspace.id
 
 
 @pytest.mark.asyncio
 async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSession) -> None:
-    user, org_id = await _seed_user_org(session)
+    user, workspace_id = await _seed_user_workspace(session)
     started = await CreationService(session).start_project(
-        organization_id=org_id,
+        workspace_id=workspace_id,
         name=f"KF-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
         actor=user,
@@ -158,9 +152,9 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
 
 @pytest.mark.asyncio
 async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
-    user, org_id = await _seed_user_org(session)
+    user, workspace_id = await _seed_user_workspace(session)
     project = await ProjectService(session).create_project(
-        organization_id=org_id,
+        workspace_id=workspace_id,
         name=f"S4-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
         actor=user,
@@ -216,9 +210,9 @@ async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
 async def test_subtitle_rerun_with_unchanged_text_keeps_independent_artifacts(
     session: AsyncSession,
 ) -> None:
-    user, org_id = await _seed_user_org(session)
+    user, workspace_id = await _seed_user_workspace(session)
     project = await ProjectService(session).create_project(
-        organization_id=org_id,
+        workspace_id=workspace_id,
         name=f"Subtitle-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
         actor=user,
@@ -301,9 +295,9 @@ async def test_scheduler_drains_queued(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user, org_id = await _seed_user_org(session)
+    user, workspace_id = await _seed_user_workspace(session)
     started = await CreationService(session).start_project(
-        organization_id=org_id,
+        workspace_id=workspace_id,
         name=f"Sch-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
         actor=user,
@@ -345,9 +339,9 @@ async def test_scheduler_drains_queued(
 async def test_explicit_enqueue_reuses_materialization_outbox(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    user, org_id = await _seed_user_org(session)
+    user, workspace_id = await _seed_user_workspace(session)
     started = await CreationService(session).start_project(
-        organization_id=org_id,
+        workspace_id=workspace_id,
         name=f"Outbox-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
         actor=user,

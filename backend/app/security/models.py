@@ -15,13 +15,13 @@ class EncryptedProviderCredential(Base):
     __tablename__ = "encrypted_provider_credentials"
     __table_args__ = (
         UniqueConstraint(
-            "organization_id", "provider", name="uq_encrypted_provider_credential"
+            "workspace_id", "provider", name="uq_encrypted_provider_credential"
         ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    organization_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     provider: Mapped[str] = mapped_column(String(80), nullable=False)
     ciphertext: Mapped[str] = mapped_column(Text, nullable=False)

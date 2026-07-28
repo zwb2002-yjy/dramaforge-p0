@@ -510,11 +510,11 @@ app.project_id_for_provider_operation(id)
 
 ```text
 SET LOCAL app.current_user_id
-SET LOCAL app.current_organization_id
+SET LOCAL app.current_workspace_id
 SET LOCAL app.current_project_id
 ```
 
-用户成员关系或 Provider Key 在排队后被撤销时，执行必须失败，不能沿用排队时的权限快照。
+工作区所有权或工作区 Provider 凭据在排队后失效时，执行必须失败，不能沿用排队时的权限快照。
 
 ## 12. Trace、事件、SSE 与请求标识
 

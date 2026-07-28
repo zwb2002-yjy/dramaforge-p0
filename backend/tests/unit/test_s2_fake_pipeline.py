@@ -1,4 +1,4 @@
-"""S2 vertical: Graph → NodeRun → Fake Adapter → Artifact → face review."""
+﻿"""S2 vertical: Graph → NodeRun → Fake Adapter → Artifact → face review."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 from app.access import models as _a  # noqa: F401
-from app.access.models import Organization, User
+from app.access.models import Workspace, User
 from app.access.projects import ProjectService
 from app.events import models as _e  # noqa: F401
 from app.execution import models as _x  # noqa: F401
@@ -43,17 +43,11 @@ async def _seed_project(session: AsyncSession) -> tuple[User, UUID]:
     )
     session.add(user)
     await session.flush()
-    org = Organization(name="S2Org")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name="S2Org")
+    session.add(workspace)
     await session.flush()
-    from app.access.models import OrganizationMember
-    from app.shared.enums import MemberRole
-
-    session.add(
-        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
-    )
     project = await ProjectService(session).create_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name="S2Proj",
         aspect_ratio="9:16",
         actor=user,

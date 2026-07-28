@@ -85,7 +85,7 @@ class CreationService:
     async def start_project(
         self,
         *,
-        organization_id: UUID,
+        workspace_id: UUID,
         name: str,
         aspect_ratio: str,
         actor: User,
@@ -95,10 +95,10 @@ class CreationService:
         await set_rls_context(
             self._session,
             user_id=actor.id,
-            organization_id=organization_id,
+            workspace_id=workspace_id,
         )
         project = await self._projects.create_project(
-            organization_id=organization_id,
+            workspace_id=workspace_id,
             name=name,
             aspect_ratio=aspect_ratio,
             actor=actor,
@@ -107,7 +107,7 @@ class CreationService:
         await set_rls_context(
             self._session,
             user_id=actor.id,
-            organization_id=organization_id,
+            workspace_id=workspace_id,
             project_id=project.id,
         )
         await self._projects.set_experience_mode(
@@ -167,7 +167,7 @@ class CreationService:
     async def get_brief_revision(
         self, *, project_id: UUID, revision_id: UUID, actor: User
     ) -> CreativeBriefRevision:
-        await self._projects.get_project_for_member(project_id=project_id, actor=actor)
+        await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
         rev = await self._session.get(CreativeBriefRevision, revision_id)
         if rev is None or rev.project_id != project_id:
             raise NotFoundError("brief revision not found")
@@ -177,7 +177,7 @@ class CreationService:
         self, *, project_id: UUID, actor: User
     ) -> CreationStateResult:
         """Return the current Brief and its latest Plan for Quick workflow recovery."""
-        await self._projects.get_project_for_member(project_id=project_id, actor=actor)
+        await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
         brief = (
             await self._session.execute(
                 select(CreativeBrief).where(CreativeBrief.project_id == project_id)
@@ -215,7 +215,7 @@ class CreationService:
         tone: str = "",
         audience: str = "",
     ) -> CreativeBriefRevision:
-        await self._projects.get_project_for_member(project_id=project_id, actor=actor)
+        await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
         brief = (
             await self._session.execute(
                 select(CreativeBrief).where(CreativeBrief.project_id == project_id)
@@ -300,7 +300,7 @@ class CreationService:
         plan_body: dict[str, object],
         source_agent_run_id: UUID | None,
     ) -> CreationPlan:
-        await self._projects.get_project_for_member(project_id=project_id, actor=actor)
+        await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
         rev = await self.get_brief_revision(
             project_id=project_id, revision_id=brief_revision_id, actor=actor
         )
@@ -366,7 +366,7 @@ class CreationService:
         from app.execution.product_path import enqueue_keyframe_after_plan
         from app.production.models import GraphVersion, ProductionGraph
 
-        await self._projects.get_project_for_member(project_id=project_id, actor=actor)
+        await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
         plan = await self._session.get(CreationPlan, plan_id)
         if plan is None or plan.project_id != project_id:
             raise NotFoundError("plan not found")
@@ -543,7 +543,7 @@ class CreationService:
         authorize: bool = True,
     ) -> CreativeBriefRevision:
         """BYOK text LLM → draft Brief revision. No Key → ValidationAppError (manual path)."""
-        project = await self._projects.get_project_for_member(
+        project = await self._projects.get_project_for_owner(
             project_id=project_id,
             actor=actor,
         )
@@ -560,11 +560,11 @@ class CreationService:
         if settings.app_env == "test":
             adapter = get_openai_adapter(allow_live=True)
         else:
-            from app.providers.openai import get_openai_adapter_for_organization
+            from app.providers.openai import get_openai_adapter_for_workspace
 
-            adapter = await get_openai_adapter_for_organization(
+            adapter = await get_openai_adapter_for_workspace(
                 self._session,
-                organization_id=project.organization_id,
+                workspace_id=project.workspace_id,
                 allow_live=True,
             )
         # Product path: require live TEXT_LLM unless unit tests force Fake.
@@ -756,7 +756,7 @@ class CreationService:
         authorize: bool = True,
     ) -> CreationPlan:
         """BYOK text LLM → draft Plan with ten production-ready storyboard Shots."""
-        project = await self._projects.get_project_for_member(
+        project = await self._projects.get_project_for_owner(
             project_id=project_id,
             actor=actor,
         )
@@ -800,11 +800,11 @@ class CreationService:
         if settings.app_env == "test":
             adapter = get_openai_adapter(allow_live=True)
         else:
-            from app.providers.openai import get_openai_adapter_for_organization
+            from app.providers.openai import get_openai_adapter_for_workspace
 
-            adapter = await get_openai_adapter_for_organization(
+            adapter = await get_openai_adapter_for_workspace(
                 self._session,
-                organization_id=project.organization_id,
+                workspace_id=project.workspace_id,
                 allow_live=True,
             )
         if settings.app_env != "test" and not adapter.configured():

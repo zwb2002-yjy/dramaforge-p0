@@ -1,17 +1,23 @@
 """Application configuration loaded from environment variables."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
+def project_env_file() -> Path:
+    """Return the repository .env file regardless of the process working directory."""
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
 class Settings(BaseSettings):
     """Validated runtime settings. Secrets must come from env, never defaults with real keys."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=project_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
@@ -37,6 +43,13 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql+asyncpg://dramaforge:dramaforge@localhost:5432/dramaforge",
         description="SQLAlchemy async DSN using asyncpg",
+    )
+    byok_rotation_database_url: str = Field(
+        default="",
+        description=(
+            "Dedicated maintenance DSN for BYOK key rotation; never used by "
+            "the API or workers"
+        ),
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
     minio_endpoint: str = Field(default="http://localhost:9000")

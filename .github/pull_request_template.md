@@ -14,7 +14,7 @@
 - [ ] `frontend-smoke`
 - [ ] `frontend-smoke-windows`
 - [ ] No generated formal evidence was committed from a dirty worktree.
-- [ ] The branch is `agent/<task-id>` and the PR targets `main`.
+- [ ] This is either the release PR `dev -> main`, an isolation PR `agent/<task-id> -> dev`, or an urgent `agent/hotfix-* -> main` PR that will be synchronized back to `dev`.
 
 ## Approval
 

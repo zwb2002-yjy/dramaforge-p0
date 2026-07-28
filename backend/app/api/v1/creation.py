@@ -5,18 +5,20 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
-from app.api.deps import CsrfDep, CurrentUser, SessionDep
+from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.creation.service import CreationService
 from app.shared.enums import ExperienceMode
 
-router = APIRouter(tags=["creation"])
+router = APIRouter(
+    tags=["creation"], dependencies=[Depends(require_selected_workspace)]
+)
 
 
 class StartProjectRequest(BaseModel):
-    organization_id: UUID
+    workspace_id: UUID
     name: str = Field(min_length=1, max_length=160)
     aspect_ratio: str = Field(pattern="^(9:16|16:9)$")
     experience_mode: ExperienceMode = ExperienceMode.QUICK
@@ -108,7 +110,7 @@ async def start_project(
     _: CsrfDep,
 ) -> StartProjectResponse:
     result = await CreationService(session).start_project(
-        organization_id=body.organization_id,
+        workspace_id=body.workspace_id,
         name=body.name,
         aspect_ratio=body.aspect_ratio,
         actor=user,

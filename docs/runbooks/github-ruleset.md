@@ -27,6 +27,18 @@ Only `@zwb2002-yjy` may provide the required approval and merge. An agent may cr
 update a PR, but it must not approve, merge, or record `MERGED` in the local ledger.
 After the merge, the user records `MERGED` with `ApprovedBy @zwb2002-yjy`.
 
+## Branch Flow
+
+- `main` is the protected, stable release branch. Direct pushes are forbidden.
+- `dev` is the routine integration and forward-development branch. The repository root
+  worktree normally tracks `dev`; daily commits are pushed directly to `origin/dev`.
+- Promote a verified release through the only normal stable-release PR direction:
+  `dev -> main`. After it merges, fast-forward local `main` and merge or fast-forward the
+  resulting `main` commit back into `dev` if the histories differ.
+- Use a short-lived `agent/<task-id>` branch and `.worktrees/<task-id>` only for parallel
+  isolated work. It starts from `dev` and its PR targets `dev`. A production hotfix may
+  start from `main`, target `main`, and must then be synchronized back to `dev`.
+
 ## Local Setup
 
 Install the tracked hooks once per clone:
@@ -35,7 +47,7 @@ Install the tracked hooks once per clone:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_git_hooks.ps1
 ```
 
-Create a writable task in an isolated worktree:
+Create a writable parallel task in an isolated worktree (routine work stays on `dev`):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\task_worktree.ps1 `

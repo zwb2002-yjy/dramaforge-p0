@@ -1,4 +1,4 @@
-"""S4 multi-shot via Graph/NodeRun with partial subtitle rework."""
+﻿"""S4 multi-shot via Graph/NodeRun with partial subtitle rework."""
 
 from __future__ import annotations
 
@@ -7,14 +7,13 @@ from uuid import uuid4
 
 import pytest
 from app.access import models as _a  # noqa: F401
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.access.projects import ProjectService
 from app.events import models as _e  # noqa: F401
 from app.execution import models as _x  # noqa: F401
 from app.execution.multi_shot import produce_shots, rework_subtitle_only
 from app.production import models as _p  # noqa: F401
 from app.shared.base import Base
-from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -38,16 +37,11 @@ async def _seed(session: AsyncSession) -> tuple[User, object]:
     )
     session.add(user)
     await session.flush()
-    org = Organization(name="MSO")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name="MSO")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     project = await ProjectService(session).create_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"MSP{uuid4().hex[:4]}",
         aspect_ratio="9:16",
         actor=user,

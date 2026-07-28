@@ -183,7 +183,7 @@ async def main() -> int:
     try:
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-        from app.access.models import Organization, OrganizationMember, User  # noqa: F401
+        from app.access.models import Workspace, User  # noqa: F401
         from app.access.projects import ProjectService
         from app.events import models as _em  # noqa: F401
         from app.execution import models as _xm  # noqa: F401
@@ -194,7 +194,6 @@ async def main() -> int:
         from app.production import models as _pm  # noqa: F401
         from app.providers.fake import FakeOpenAIAdapter
         from app.shared.base import Base
-        from app.shared.enums import MemberRole
         from app.shared.model_registry import load_all_models
         from app.shared.security import hash_password
 
@@ -211,16 +210,10 @@ async def main() -> int:
             )
             session.add(user)
             await session.flush()
-            org = Organization(name="E2E-Org")
-            session.add(org)
-            await session.flush()
-            session.add(
-                OrganizationMember(
-                    organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-                )
-            )
+            workspace = Workspace(owner_user_id=user.id, name="E2E-Workspace")
+            session.add(workspace)
             project = await ProjectService(session).create_project(
-                organization_id=org.id,
+                workspace_id=workspace.id,
                 name="E2E-Project",
                 aspect_ratio="9:16",
                 actor=user,

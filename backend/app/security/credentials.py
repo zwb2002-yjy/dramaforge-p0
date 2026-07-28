@@ -1,4 +1,4 @@
-"""Persist and rotate encrypted organization-scoped provider credentials."""
+"""Persist and rotate encrypted workspace-scoped provider credentials."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class RotationResult:
 async def store_credential(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     provider: str,
     plaintext: str,
     keyring: ByokKeyring,
@@ -30,13 +30,13 @@ async def store_credential(
     encrypted = keyring.encrypt(plaintext)
     record = await session.scalar(
         select(EncryptedProviderCredential).where(
-            EncryptedProviderCredential.organization_id == organization_id,
+            EncryptedProviderCredential.workspace_id == workspace_id,
             EncryptedProviderCredential.provider == provider,
         )
     )
     if record is None:
         record = EncryptedProviderCredential(
-            organization_id=organization_id,
+            workspace_id=workspace_id,
             provider=provider,
             ciphertext=encrypted.ciphertext,
             key_version=encrypted.key_version,
@@ -52,13 +52,13 @@ async def store_credential(
 async def read_credential(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     provider: str,
     keyring: ByokKeyring,
 ) -> str | None:
     record = await session.scalar(
         select(EncryptedProviderCredential).where(
-            EncryptedProviderCredential.organization_id == organization_id,
+            EncryptedProviderCredential.workspace_id == workspace_id,
             EncryptedProviderCredential.provider == provider,
         )
     )
@@ -70,14 +70,14 @@ async def read_credential(
 async def has_credential(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     provider: str,
 ) -> bool:
-    """Return whether an organization has a stored credential without decrypting it."""
+    """Return whether an workspace has a stored credential without decrypting it."""
     return (
         await session.scalar(
             select(EncryptedProviderCredential.id).where(
-                EncryptedProviderCredential.organization_id == organization_id,
+                EncryptedProviderCredential.workspace_id == workspace_id,
                 EncryptedProviderCredential.provider == provider,
             )
         )

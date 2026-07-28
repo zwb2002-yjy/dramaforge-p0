@@ -50,12 +50,17 @@ class SseHub:
         return out
 
     async def stream(
-        self, *, last_event_id: str | None = None
+        self,
+        *,
+        last_event_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> AsyncIterator[SseEnvelope]:
+        """Yield only the selected workspace's explicitly scoped envelopes."""
         if last_event_id:
             SSE_RECONNECT_TOTAL.inc()
         for env in self.since(last_event_id):
-            yield env
+            if workspace_id is None or str(env.data.get("workspace_id")) == workspace_id:
+                yield env
         cursor = self._events[-1].id if self._events else last_event_id
         while True:
             waiter = asyncio.Event()
@@ -65,8 +70,9 @@ class SseHub:
             finally:
                 self._waiters.remove(waiter)
             for env in self.since(cursor):
-                yield env
                 cursor = env.id
+                if workspace_id is None or str(env.data.get("workspace_id")) == workspace_id:
+                    yield env
 
 
 def format_sse(envelope: SseEnvelope) -> str:

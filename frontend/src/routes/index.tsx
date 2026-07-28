@@ -1,13 +1,22 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import {
-  createOrganization,
+  ApiError,
+  createWorkspace,
+  deleteWorkspace,
+  fetchCurrentUser,
   fetchHealth,
+  getSelectedWorkspaceId,
+  listWorkspaceProjects,
+  listWorkspaces,
   loginUser,
   registerUser,
+  renameWorkspace,
+  setSelectedWorkspaceId as persistSelectedWorkspaceId,
   startProject,
+  type WorkspaceRead,
 } from "../lib/api";
 import { rootRoute } from "./__root";
 
@@ -19,173 +28,196 @@ export const indexRoute = createRoute({
 
 function HomePage() {
   const navigate = useNavigate();
-  const health = useQuery({
-    queryKey: ["health"],
-    queryFn: fetchHealth,
-    refetchInterval: 8_000,
-    retry: 1,
+  const queryClient = useQueryClient();
+  const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, refetchInterval: 8_000, retry: 1 });
+  const currentUser = useQuery({ queryKey: ["current-user"], queryFn: fetchCurrentUser, retry: false });
+  const workspaces = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: listWorkspaces,
+    enabled: Boolean(currentUser.data),
   });
-  const [email, setEmail] = useState(`creator-${Date.now()}@example.com`);
+  const [email, setEmail] = useState("creator@example.com");
   const [password, setPassword] = useState("password123");
-  const [name, setName] = useState("霓虹雨夜 · 试产项目");
+  const [displayName, setDisplayName] = useState("Creator");
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+    getSelectedWorkspaceId,
+  );
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [projectName, setProjectName] = useState("New short drama");
   const [idea, setIdea] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const bootstrap = useMutation({
-    mutationFn: async () => {
+  useEffect(() => {
+    if (!selectedWorkspaceId && workspaces.data?.[0]) setSelectedWorkspaceId(workspaces.data[0].id);
+    if (selectedWorkspaceId && workspaces.data && !workspaces.data.some((workspace) => workspace.id === selectedWorkspaceId)) {
+      setSelectedWorkspaceId(workspaces.data[0]?.id ?? null);
+    }
+  }, [selectedWorkspaceId, workspaces.data]);
+
+  useEffect(() => {
+    persistSelectedWorkspaceId(selectedWorkspaceId);
+  }, [selectedWorkspaceId]);
+
+  const projects = useQuery({
+    queryKey: ["workspace-projects", selectedWorkspaceId],
+    queryFn: () => listWorkspaceProjects(selectedWorkspaceId!),
+    enabled: Boolean(
+      currentUser.data &&
+        selectedWorkspaceId &&
+        workspaces.data?.some((workspace) => workspace.id === selectedWorkspaceId),
+    ),
+  });
+
+  const invalidateWorkspaceData = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    await queryClient.invalidateQueries({ queryKey: ["workspace-projects"] });
+  };
+
+  const authenticate = useMutation({
+    onMutate: async () => {
+      // A session can change accounts without a full page reload. Do not render
+      // the prior account's selected workspace or cached projects while the
+      // new session is being established.
+      setSelectedWorkspaceId(null);
+      persistSelectedWorkspaceId(null);
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["current-user"] }),
+        queryClient.cancelQueries({ queryKey: ["workspaces"] }),
+        queryClient.cancelQueries({ queryKey: ["workspace-projects"] }),
+      ]);
+      queryClient.removeQueries({ queryKey: ["current-user"] });
+      queryClient.removeQueries({ queryKey: ["workspaces"] });
+      queryClient.removeQueries({ queryKey: ["workspace-projects"] });
+    },
+    mutationFn: async (mode: "login" | "register") => {
       setError(null);
-      try {
-        await registerUser(email, password, "Creator");
-      } catch {
-        await loginUser(email, password);
-      }
-      const org = await createOrganization(`Org-${Date.now()}`);
-      const project = await startProject({
-        organization_id: org.id,
-        name,
-        aspect_ratio: "9:16",
-        idea,
-      });
-      return project;
+      if (mode === "register") return registerUser(email, password, displayName);
+      return loginUser(email, password);
     },
-    onSuccess: (project) => {
-      void navigate({
-        to: "/projects/$projectId/quick",
-        params: { projectId: project.project_id },
-      });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["current-user"] });
+      await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (cause: Error) => setError(cause.message),
+  });
+
+  const createWorkspaceMutation = useMutation({
+    mutationFn: async () => createWorkspace(workspaceName.trim()),
+    onSuccess: async (workspace) => {
+      setWorkspaceName("");
+      setSelectedWorkspaceId(workspace.id);
+      await invalidateWorkspaceData();
+    },
+    onError: (cause: Error) => setError(cause.message),
+  });
+
+  const renameWorkspaceMutation = useMutation({
+    mutationFn: async (workspace: WorkspaceRead) => {
+      const name = window.prompt("Workspace name", workspace.name)?.trim();
+      if (!name || name === workspace.name) return;
+      await renameWorkspace(workspace.id, name);
+    },
+    onSuccess: invalidateWorkspaceData,
+    onError: (cause: Error) => setError(cause.message),
+  });
+
+  const deleteWorkspaceMutation = useMutation({
+    mutationFn: async (workspace: WorkspaceRead) => {
+      if (!window.confirm(`Delete workspace "${workspace.name}"?`)) return;
+      await deleteWorkspace(workspace.id);
+    },
+    onSuccess: invalidateWorkspaceData,
+    onError: (cause: Error) => setError(cause.message),
+  });
+
+  const createProjectMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedWorkspaceId) throw new Error("Select a workspace first");
+      return startProject({ workspace_id: selectedWorkspaceId, name: projectName, aspect_ratio: "9:16", idea });
+    },
+    onSuccess: async (project) => {
+      await invalidateWorkspaceData();
+      void navigate({ to: "/projects/$projectId/quick", params: { projectId: project.project_id } });
+    },
+    onError: (cause: Error) => setError(cause.message),
   });
 
   const dbUp = health.data?.db === "up" || (health.data?.status === "ok" && !health.data?.db);
-  const apiLive = !!health.data && !health.isError && health.data.status === "ok" && dbUp !== false;
+  const apiLive = Boolean(health.data && !health.isError && health.data.status === "ok" && dbUp);
+  const selectedWorkspace = workspaces.data?.find((workspace) => workspace.id === selectedWorkspaceId);
+  const workspacesError = workspaces.error instanceof ApiError ? workspaces.error.message : null;
+
+  function submitWorkspace(event: FormEvent) {
+    event.preventDefault();
+    if (workspaceName.trim()) createWorkspaceMutation.mutate();
+  }
 
   return (
-    <div className="hero-home" data-testid="home-panel">
-      <section className="panel">
-        <div className="page-title-row">
-          <div>
-            <h2>短剧生产工作台</h2>
-            <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-              创意 → Brief/Plan → 角色一致性 → 分镜流水线 → 审核交付。
-              信息密度对标行业生产台，产品合同以 DramaForge 冻结包为准。
-            </p>
-          </div>
+    <div className="workspace-home" data-testid="home-panel">
+      <section className="workspace-header">
+        <div>
+          <h1>Personal creation workspace</h1>
+          <p className="muted">Keep each short-drama project in a workspace owned only by your account.</p>
         </div>
-
-        <div className="callout">
-          <strong>标准 P0 路径</strong>
-          <br />
-          ① 创建正式项目 → ② 快速创作竖切首帧（Agent 或手工）→ ③ 专业板 10 Shot → ④ 可追溯导出
-        </div>
-
-        <div className="status-grid" data-testid="api-status">
-          <div className="status-card">
-            <span className="status-label">API /health</span>
-            {health.isLoading && <strong className="status-pending">连接中…</strong>}
-            {health.isError && (
-              <strong className="status-bad">离线 — 启动 Postgres + API</strong>
-            )}
-            {health.data && health.data.status === "ok" && (health.data.db === "up" || !health.data.db) && (
-              <strong className="status-ok">
-                在线 · db {health.data.db ?? "ok"} · {health.data.env}
-              </strong>
-            )}
-            {health.data && (health.data.status !== "ok" || health.data.db === "down") && (
-              <strong className="status-bad">
-                {health.data.status} · db {health.data.db ?? "?"}
-              </strong>
-            )}
-          </div>
-          <div className="status-card">
-            <span className="status-label">画幅</span>
-            <strong>9:16 竖屏</strong>
-          </div>
-          <div className="status-card">
-            <span className="status-label">双模式</span>
-            <strong>同 Project</strong>
-          </div>
-          <div className="status-card">
-            <span className="status-label">P0 验收</span>
-            <strong className="status-pending">§3.1 未盖章</strong>
-          </div>
-        </div>
-
-        <form
-          className="auth-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            bootstrap.mutate();
-          }}
-        >
-          <label>
-            工作账号 Email
-            <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
-          </label>
-          <label>
-            密码
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-            />
-          </label>
-          <label>
-            项目名称
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label>
-            创意
-            <textarea
-              value={idea}
-              onChange={(e) => setIdea(e.target.value)}
-              rows={3}
-              placeholder="输入本次短剧的创意"
-            />
-          </label>
-          <div className="toolbar">
-            <button className="primary" type="submit" disabled={bootstrap.isPending || !apiLive}>
-              {bootstrap.isPending ? "创建中…" : "进入工作台 · 注册/登录并创建项目"}
-            </button>
-          </div>
-          {!apiLive && (
-            <p className="status-bad">
-              后端未就绪时无法创建项目。请运行{" "}
-              <code>scripts/start_p0_stack.ps1</code> 保证 PostgreSQL + API(:8010)。
-            </p>
-          )}
-          {error && <p className="flash err">{error}</p>}
-        </form>
+        <span className={apiLive ? "status-ok" : "status-bad"}>{apiLive ? "API ready" : "API unavailable"}</span>
       </section>
 
-      <section className="panel">
-        <h3>工作台地图</h3>
-        <ul className="clean">
-          <li>
-            <strong>快速创作</strong>：创意 → Agent/手工 Brief·Plan → 主角 canonical → 竖屏首帧预览
-          </li>
-          <li>
-            <strong>专业生产板</strong>：10 Shot 分镜板、节点轨、导出回链（非假黄金冒充验收）
-          </li>
-          <li>
-            <strong>检查器</strong>：Run 统计、失败、产物哈希（右侧栏实时）
-          </li>
-        </ul>
-        <div className="pipeline-rail" aria-hidden>
-          {["prompt", "keyframe", "face", "video", "voice", "subtitle", "composite", "continuity"].map(
-            (n) => (
-              <span key={n} className="pipeline-node">
-                {n}
-              </span>
-            ),
-          )}
-        </div>
-        <div className="callout warn" style={{ marginTop: "0.75rem" }}>
-          对照行业台看信息密度与流水线感；DramaForge 不复刻 LibTV / Jellyfish / Toonflow / ArcReel
-          的产品面，核心是私有化 Graph、一致性与审计。
-        </div>
-      </section>
+      {!currentUser.data ? (
+        <section className="panel auth-panel">
+          <h2>Sign in</h2>
+          <form className="auth-form" onSubmit={(event) => { event.preventDefault(); authenticate.mutate("login"); }}>
+            <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" /></label>
+            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
+            <label>Display name<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label>
+            <div className="toolbar">
+              <button className="primary" type="submit" disabled={authenticate.isPending || !apiLive}>Sign in</button>
+              <button type="button" onClick={() => authenticate.mutate("register")} disabled={authenticate.isPending || !apiLive}>Create account</button>
+            </div>
+          </form>
+        </section>
+      ) : (
+        <>
+          <section className="panel workspace-manager">
+            <div className="panel-header">
+              <div><h2>{currentUser.data.display_name}</h2><p className="muted">{currentUser.data.email}</p></div>
+              <form className="inline-form" onSubmit={submitWorkspace}>
+                <input aria-label="New workspace name" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="New workspace" />
+                <button type="submit" disabled={!workspaceName.trim() || createWorkspaceMutation.isPending}>Create workspace</button>
+              </form>
+            </div>
+            <div className="workspace-list" role="list" aria-label="Your workspaces">
+              {workspaces.data?.map((workspace) => (
+                <div className={workspace.id === selectedWorkspaceId ? "workspace-row selected" : "workspace-row"} key={workspace.id} role="listitem">
+                  <button className="workspace-select" type="button" onClick={() => setSelectedWorkspaceId(workspace.id)}>{workspace.name}</button>
+                  <div className="workspace-actions">
+                    <button className="ghost" type="button" onClick={() => renameWorkspaceMutation.mutate(workspace)}>Rename</button>
+                    <button className="ghost danger" type="button" onClick={() => deleteWorkspaceMutation.mutate(workspace)} disabled={projects.data?.some((project) => project.workspace_id === workspace.id)}>Delete</button>
+                  </div>
+                </div>
+              ))}
+              {!workspaces.isLoading && !workspaces.data?.length && <p className="muted">Create a workspace to begin.</p>}
+            </div>
+          </section>
+
+          <section className="panel project-manager">
+            <div className="panel-header"><div><h2>{selectedWorkspace?.name ?? "Select a workspace"}</h2><p className="muted">Projects are isolated to the selected workspace.</p></div></div>
+            <form className="inline-form project-create" onSubmit={(event) => { event.preventDefault(); createProjectMutation.mutate(); }}>
+              <input aria-label="Project name" value={projectName} onChange={(event) => setProjectName(event.target.value)} disabled={!selectedWorkspaceId} />
+              <input aria-label="Creative idea" value={idea} onChange={(event) => setIdea(event.target.value)} placeholder="Creative idea (optional)" disabled={!selectedWorkspaceId} />
+              <button className="primary" type="submit" disabled={!selectedWorkspaceId || createProjectMutation.isPending}>Create project</button>
+            </form>
+            <div className="project-list">
+              {projects.data?.map((project) => (
+                <button className="project-row" type="button" key={project.id} onClick={() => void navigate({ to: "/projects/$projectId/quick", params: { projectId: project.id } })}>
+                  <span>{project.name}</span><span className="muted">{project.stage} · {project.aspect_ratio}</span>
+                </button>
+              ))}
+              {selectedWorkspaceId && !projects.isLoading && !projects.data?.length && <p className="muted">No projects yet.</p>}
+            </div>
+          </section>
+        </>
+      )}
+      {(error || workspacesError) && <p className="flash err">{error ?? workspacesError}</p>}
     </div>
   );
 }

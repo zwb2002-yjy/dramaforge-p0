@@ -1,4 +1,4 @@
-"""Versioned persisted BYOK credentials and metadata-only rotation audits.
+"""Add workspace BYOK keyrings.
 
 Revision ID: 20260724_0008
 Revises: 20260721_0007
@@ -27,7 +27,7 @@ def upgrade() -> None:
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
         ),
-        sa.Column("organization_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("workspace_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("provider", sa.String(80), nullable=False),
         sa.Column("ciphertext", sa.Text(), nullable=False),
         sa.Column("key_version", sa.String(80), nullable=False),
@@ -43,8 +43,8 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
-        sa.UniqueConstraint("organization_id", "provider", name="uq_encrypted_provider_credential"),
+        sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="CASCADE"),
+        sa.UniqueConstraint("workspace_id", "provider", name="uq_encrypted_provider_credential"),
     )
     op.create_table(
         "key_rotation_audits",

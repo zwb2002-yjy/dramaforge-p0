@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.providers.agnes import AgnesVideoAdapter
 from app.providers.fake import FakeFluxAdapter
-from app.providers.organization_credentials import settings_for_organization_provider
+from app.providers.workspace_credentials import settings_for_workspace_provider
 
 
 class FakeKlingAdapter:
@@ -61,19 +61,19 @@ def get_kling_adapter(
     )
 
 
-async def get_kling_adapter_for_organization(
+async def get_kling_adapter_for_workspace(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     allow_live: bool = False,
     allow_fake: bool = False,
 ) -> Any:
-    """Resolve the project organization credential before creating a video adapter."""
+    """Resolve the project workspace credential before creating a video adapter."""
     if get_settings().app_env == "test":
         return get_kling_adapter(allow_fake=allow_fake)
-    settings = await settings_for_organization_provider(
+    settings = await settings_for_workspace_provider(
         session,
-        organization_id=organization_id,
+        workspace_id=workspace_id,
         provider="agnes",
     )
     return get_kling_adapter(

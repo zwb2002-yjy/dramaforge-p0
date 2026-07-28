@@ -6,6 +6,7 @@ import { ArtifactStage } from "../lib/artifactStage";
 import {
   approveShot,
   artifactContentUrl,
+  exportDownloadUrl,
   exportProject,
   fetchProjectShots,
   fetchShotStatus,
@@ -190,7 +191,7 @@ function ProductionPage() {
       return grantExportDownload(projectId, lastExportId, "timeline_json");
     },
     onSuccess: (g) => {
-      const url = `/api/v1/projects/${projectId}/exports/${g.export_id}/download?token=${encodeURIComponent(g.token)}&object_role=timeline_json`;
+      const url = exportDownloadUrl(projectId, g.export_id, g.token, "timeline_json");
       setDownloadHint(`授权下载：${g.object_key}`);
       window.open(url, "_blank", "noopener,noreferrer");
     },

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from app.access.models import Project, Workspace
 from app.config import clear_settings_cache
 from app.execution.models import NodeRun
+from app.shared.db import NodeRunRlsScope
 from app.shared.errors import ValidationAppError
 from app.workers.jobs import execute_node_run
 from app.workers.main import describe_worker, main
@@ -48,14 +51,31 @@ def test_main_default_ok() -> None:
 
 
 class _FakeSession:
-    def __init__(self, run: NodeRun) -> None:
+    def __init__(
+        self,
+        run: NodeRun,
+        *,
+        project: object | None = None,
+        workspace: object | None = None,
+    ) -> None:
         self.run = run
+        self.project = project
+        self.workspace = workspace
         self.commits = 0
         self.rollbacks = 0
 
-    async def get(self, model: object, ident: object) -> NodeRun | None:
-        _ = model
-        return self.run if ident == self.run.id else None
+    async def get(self, model: object, ident: object) -> object | None:
+        if model is NodeRun and ident == self.run.id:
+            return self.run
+        if model is Project and self.project is not None and ident == self.run.project_id:
+            return self.project
+        if (
+            model is Workspace
+            and self.workspace is not None
+            and ident == self.project.workspace_id
+        ):
+            return self.workspace
+        return None
 
     async def commit(self) -> None:
         self.commits += 1
@@ -75,6 +95,14 @@ class _SessionContext(AbstractAsyncContextManager[_FakeSession]):
         return None
 
 
+def _worker_scope(run: NodeRun) -> tuple[object, object]:
+    workspace_id = uuid4()
+    return (
+        SimpleNamespace(id=run.project_id, workspace_id=workspace_id),
+        SimpleNamespace(id=workspace_id, owner_user_id=uuid4()),
+    )
+
+
 @pytest.mark.asyncio
 async def test_worker_persists_unhandled_provider_failure(
     monkeypatch: pytest.MonkeyPatch,
@@ -90,15 +118,23 @@ async def test_worker_persists_unhandled_provider_failure(
         input_snapshot={},
         created_by=uuid4(),
     )
-    first = _FakeSession(run)
-    fallback = _FakeSession(run)
+    project, workspace = _worker_scope(run)
+    first = _FakeSession(run, project=project, workspace=workspace)
+    fallback = _FakeSession(run, project=project, workspace=workspace)
     sessions = iter([first, fallback])
+    scope_calls: list[dict[str, object]] = []
 
     def factory() -> _SessionContext:
         return _SessionContext(next(sessions))
 
-    async def no_rls(*args: object, **kwargs: object) -> None:
-        _ = args, kwargs
+    async def resolve_scope(*args: object, **kwargs: object) -> NodeRunRlsScope:
+        _ = args
+        scope_calls.append(kwargs)
+        return NodeRunRlsScope(
+            user_id=workspace.owner_user_id,
+            workspace_id=workspace.id,
+            project_id=run.project_id,
+        )
 
     async def claim(*args: object, **kwargs: object) -> NodeRun:
         _ = args, kwargs
@@ -110,13 +146,15 @@ async def test_worker_persists_unhandled_provider_failure(
         raise ValidationAppError("PROVIDER_FAILED: hub overloaded")
 
     monkeypatch.setattr("app.workers.jobs.get_session_factory", lambda: factory)
-    monkeypatch.setattr("app.workers.jobs.set_rls_context", no_rls)
+    monkeypatch.setattr("app.workers.jobs.set_node_run_rls_context", resolve_scope)
     monkeypatch.setattr("app.execution.product_path.claim_media_node_run", claim)
     monkeypatch.setattr("app.execution.product_path.execute_media_node_run", fail)
 
     result = await execute_node_run({}, str(run.id))
 
     assert result["status"] == "failed"
+    assert workspace.owner_user_id != run.created_by
+    assert scope_calls[0] == {"node_run_id": run.id}
     assert first.rollbacks == 1
     assert fallback.commits == 1
     assert run.status == "failed"
@@ -146,13 +184,19 @@ async def test_worker_retries_composite_while_source_media_is_pending(
         input_snapshot={"shot_id": str(uuid4()), "node_key": "composite"},
         created_by=uuid4(),
     )
-    first = _FakeSession(run)
+    project, workspace = _worker_scope(run)
+    first = _FakeSession(run, project=project, workspace=workspace)
 
     def factory() -> _SessionContext:
         return _SessionContext(first)
 
-    async def no_rls(*args: object, **kwargs: object) -> None:
+    async def resolve_scope(*args: object, **kwargs: object) -> NodeRunRlsScope:
         _ = args, kwargs
+        return NodeRunRlsScope(
+            user_id=workspace.owner_user_id,
+            workspace_id=workspace.id,
+            project_id=run.project_id,
+        )
 
     async def pending(*args: object, **kwargs: object) -> bool:
         _ = args, kwargs
@@ -162,7 +206,7 @@ async def test_worker_retries_composite_while_source_media_is_pending(
         raise AssertionError("pending composite must not be claimed")
 
     monkeypatch.setattr("app.workers.jobs.get_session_factory", lambda: factory)
-    monkeypatch.setattr("app.workers.jobs.set_rls_context", no_rls)
+    monkeypatch.setattr("app.workers.jobs.set_node_run_rls_context", resolve_scope)
     monkeypatch.setattr("app.execution.composite_media.composite_inputs_pending", pending)
     monkeypatch.setattr("app.execution.product_path.claim_media_node_run", claim)
 

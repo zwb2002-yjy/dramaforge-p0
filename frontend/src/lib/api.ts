@@ -1,6 +1,31 @@
 /** REST client with cookie session + CSRF for DramaForge product path. */
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const SELECTED_WORKSPACE_STORAGE_KEY = "dramaforge.selected-workspace-id";
+
+export function getSelectedWorkspaceId(): string | null {
+  return window.sessionStorage.getItem(SELECTED_WORKSPACE_STORAGE_KEY);
+}
+
+export function setSelectedWorkspaceId(workspaceId: string | null): void {
+  if (workspaceId) {
+    window.sessionStorage.setItem(SELECTED_WORKSPACE_STORAGE_KEY, workspaceId);
+  } else {
+    window.sessionStorage.removeItem(SELECTED_WORKSPACE_STORAGE_KEY);
+  }
+}
+
+function workspaceHeaders(): Record<string, string> {
+  const workspaceId = getSelectedWorkspaceId();
+  return workspaceId ? { "X-Workspace-Id": workspaceId } : {};
+}
+
+function workspaceScopedUrl(path: string): string {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) return `${API_BASE}${path}`;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${API_BASE}${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -30,7 +55,7 @@ async function parseError(response: Response): Promise<ApiError> {
 export async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...workspaceHeaders() },
   });
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as T;
@@ -47,6 +72,7 @@ export async function apiSend<T>(
     "Content-Type": "application/json",
   };
   if (csrf) headers["X-CSRF-Token"] = csrf;
+  Object.assign(headers, workspaceHeaders());
   const response = await fetch(`${API_BASE}${path}`, {
     method,
     credentials: "include",
@@ -78,6 +104,23 @@ export type UserRead = {
   display_name: string;
 };
 
+export type WorkspaceRead = {
+  id: string;
+  owner_user_id: string;
+  name: string;
+};
+
+export type ProjectRead = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  stage: string;
+  aspect_ratio: string;
+  target_platform: string;
+  budget_limit: string;
+  budget_currency: string;
+};
+
 export async function fetchCsrf(): Promise<string> {
   const r = await apiGet<CsrfResponse>("/api/v1/auth/csrf");
   return r.csrf_token;
@@ -102,9 +145,31 @@ export async function loginUser(email: string, password: string): Promise<UserRe
   return apiSend<UserRead>("POST", "/api/v1/auth/login", { email, password }, csrf);
 }
 
-export async function createOrganization(name: string): Promise<{ id: string; name: string }> {
+export function fetchCurrentUser(): Promise<UserRead> {
+  return apiGet<UserRead>("/api/v1/auth/me");
+}
+
+export function listWorkspaces(): Promise<WorkspaceRead[]> {
+  return apiGet<WorkspaceRead[]>("/api/v1/workspaces");
+}
+
+export async function createWorkspace(name: string): Promise<{ id: string; name: string }> {
   const csrf = await fetchCsrf();
-  return apiSend("POST", "/api/v1/organizations", { name }, csrf);
+  return apiSend("POST", "/api/v1/workspaces", { name }, csrf);
+}
+
+export async function renameWorkspace(workspaceId: string, name: string): Promise<WorkspaceRead> {
+  const csrf = await fetchCsrf();
+  return apiSend("PATCH", `/api/v1/workspaces/${workspaceId}`, { name }, csrf);
+}
+
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  const csrf = await fetchCsrf();
+  await apiSend<void>("DELETE", `/api/v1/workspaces/${workspaceId}`, undefined, csrf);
+}
+
+export function listWorkspaceProjects(workspaceId: string): Promise<ProjectRead[]> {
+  return apiGet<ProjectRead[]>(`/api/v1/workspaces/${workspaceId}/projects`);
 }
 
 export type StartProjectResponse = {
@@ -116,7 +181,7 @@ export type StartProjectResponse = {
 };
 
 export async function startProject(input: {
-  organization_id: string;
+  workspace_id: string;
   name: string;
   aspect_ratio: string;
   idea?: string;
@@ -126,7 +191,7 @@ export async function startProject(input: {
     "POST",
     "/api/v1/creation/start-project",
     {
-      organization_id: input.organization_id,
+      workspace_id: input.workspace_id,
       name: input.name,
       aspect_ratio: input.aspect_ratio,
       experience_mode: "quick",
@@ -476,7 +541,18 @@ export async function rerunShot(
 }
 
 export function artifactContentUrl(projectId: string, artifactId: string): string {
-  return `/api/v1/projects/${projectId}/artifacts/${artifactId}/content`;
+  return workspaceScopedUrl(`/api/v1/projects/${projectId}/artifacts/${artifactId}/content`);
+}
+
+export function exportDownloadUrl(
+  projectId: string,
+  exportId: string,
+  token: string,
+  objectRole: string,
+): string {
+  return workspaceScopedUrl(
+    `/api/v1/projects/${projectId}/exports/${exportId}/download?token=${encodeURIComponent(token)}&object_role=${encodeURIComponent(objectRole)}`,
+  );
 }
 
 export async function registerLeadCharacter(

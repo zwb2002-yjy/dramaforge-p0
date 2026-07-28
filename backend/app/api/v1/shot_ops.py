@@ -5,23 +5,19 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
 
-from app.access.projects import (
-    ROLES_PRODUCE,
-    ROLES_REVIEW,
-    ProjectService,
-)
-from app.api.deps import CsrfDep, CurrentUser, SessionDep
+from app.access.projects import ProjectService
+from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.execution import shot_review
 from app.runtime.scheduler import AgentRunScheduler
-from app.shared.enums import MemberRole
 from app.shared.errors import ValidationAppError
 
-router = APIRouter(tags=["shot-ops"])
+router = APIRouter(
+    tags=["shot-ops"], dependencies=[Depends(require_selected_workspace)]
+)
 
-RoleSet = set[MemberRole] | frozenset[MemberRole]
 ShotActionHandler = Callable[..., Awaitable[shot_review.ShotReviewResult]]
 EnqueueActionResult = list[UUID] | tuple[list[str], list[UUID]]
 EnqueueActionHandler = Callable[..., Awaitable[EnqueueActionResult]]
@@ -94,17 +90,10 @@ async def _run_shot_action(
     project_id: UUID,
     shot_id: UUID,
     user: CurrentUser,
-    allowed: RoleSet,
-    action: str,
     handler: ShotActionHandler,
 ) -> ShotActionResponse:
     """Authorize, run a shot-review handler, commit, and build the response."""
-    await ProjectService(session).require_project_role(
-        project_id=project_id,
-        actor=user,
-        allowed=allowed,
-        action=action,
-    )
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     r = await handler(session, project_id=project_id, shot_id=shot_id, user_id=user.id)
     await session.commit()
     return ShotActionResponse(
@@ -121,19 +110,12 @@ async def _run_shot_action_with_enqueue(
     project_id: UUID,
     shot_id: UUID,
     user: CurrentUser,
-    allowed: RoleSet,
-    action: str,
     message: str,
     handler: EnqueueActionHandler,
     changed_node_key: str | None = None,
 ) -> ShotActionResponse:
     """Authorize, run a handler that returns new run_ids, enqueue them."""
-    await ProjectService(session).require_project_role(
-        project_id=project_id,
-        actor=user,
-        allowed=allowed,
-        action=action,
-    )
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     if changed_node_key:
         result = await handler(
             session,
@@ -175,7 +157,7 @@ async def shot_status(
     user: CurrentUser,
     session: SessionDep,
 ) -> ShotStatusResponse:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     data = await shot_review.shot_status_summary(
         session, project_id=project_id, shot_id=shot_id
     )
@@ -199,8 +181,6 @@ async def start_shot(
         project_id=project_id,
         shot_id=shot_id,
         user=user,
-        allowed=ROLES_PRODUCE,
-        action="start shot production",
         message="NodeRuns committed and enqueued for Worker",
         handler=lambda s, **kw: shot_review.start_shot_nodes(
             s, node_keys=body.node_keys, **kw
@@ -225,8 +205,6 @@ async def approve_shot(
         project_id=project_id,
         shot_id=shot_id,
         user=user,
-        allowed=ROLES_REVIEW,
-        action="approve shot",
         handler=lambda s, **kw: shot_review.approve_shot(s, note=body.note, **kw),
     )
 
@@ -248,8 +226,6 @@ async def reject_shot(
         project_id=project_id,
         shot_id=shot_id,
         user=user,
-        allowed=ROLES_REVIEW,
-        action="reject shot",
         handler=lambda s, **kw: shot_review.reject_shot(
             s, reason=body.reason or body.note or "rejected", **kw
         ),
@@ -273,8 +249,6 @@ async def lock_shot(
         project_id=project_id,
         shot_id=shot_id,
         user=user,
-        allowed=ROLES_PRODUCE,
-        action="lock shot",
         handler=lambda s, **kw: shot_review.lock_shot(s, locked=body.locked, **kw),
     )
 
@@ -296,8 +270,6 @@ async def rerun_shot(
         project_id=project_id,
         shot_id=shot_id,
         user=user,
-        allowed=ROLES_PRODUCE,
-        action="rerun shot nodes",
         message=f"local re-run from {body.changed_node_key}",
         handler=shot_review.local_rerun_from_node,
         changed_node_key=body.changed_node_key,
@@ -318,12 +290,7 @@ async def manual_media(
     note: str = Form(""),
     file: UploadFile = File(...),  # noqa: B008
 ) -> ManualUploadResponse:
-    await ProjectService(session).require_project_role(
-        project_id=project_id,
-        actor=user,
-        allowed=ROLES_PRODUCE,
-        action="upload manual media",
-    )
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     data = await file.read()
     mime = file.content_type or "application/octet-stream"
     art = await shot_review.upload_manual_media(

@@ -1,4 +1,4 @@
-"""Export must read Worker frames from shared get_object_store (not empty store)."""
+﻿"""Export must read Worker frames from shared get_object_store (not empty store)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import shutil
 from uuid import uuid4
 
 import pytest
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.creation import models as _cm  # noqa: F401
 from app.creation.service import CreationService
 from app.delivery import models as _dm  # noqa: F401
@@ -17,7 +17,6 @@ from app.execution.models import Artifact, NodeRun
 from app.production import models as _pm  # noqa: F401
 from app.runtime.scheduler import WorkerRuntime
 from app.shared.base import Base
-from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -45,16 +44,11 @@ async def test_export_default_store_sees_worker_png_frames(session: AsyncSession
     )
     session.add(user)
     await session.flush()
-    org = Organization(name="ExOrg")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name="ExOrg")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     started = await CreationService(session).start_project(
-        organization_id=org.id, name="Ex", aspect_ratio="9:16", actor=user
+        workspace_id=workspace.id, name="Ex", aspect_ratio="9:16", actor=user
     )
     rev = await CreationService(session).update_brief_manual(
         project_id=started.project_id, actor=user, logline="frames"

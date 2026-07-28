@@ -59,26 +59,26 @@ if ([string]::IsNullOrWhiteSpace($OwnedPaths)) {
 }
 
 $rootBranch = (& git -C $RepoRoot branch --show-current).Trim()
-if ($LASTEXITCODE -ne 0 -or $rootBranch -ne 'main') {
-    throw "Repository root worktree must be on main; current branch is '$rootBranch'."
+if ($LASTEXITCODE -ne 0 -or $rootBranch -ne 'dev') {
+    throw "Repository root worktree must be on dev; current branch is '$rootBranch'."
 }
 $rootChanges = @(& git -C $RepoRoot status --porcelain)
 if ($LASTEXITCODE -ne 0 -or $rootChanges.Count -gt 0) {
-    throw 'Repository root main worktree must be clean before creating a task.'
+    throw 'Repository root dev worktree must be clean before creating an isolated task.'
 }
 
-& git -C $RepoRoot fetch origin main
+& git -C $RepoRoot fetch origin dev
 if ($LASTEXITCODE -ne 0) {
-    throw 'git fetch origin main failed.'
+    throw 'git fetch origin dev failed.'
 }
-$null = & git -C $RepoRoot show-ref --verify --quiet refs/remotes/origin/main
+$null = & git -C $RepoRoot show-ref --verify --quiet refs/remotes/origin/dev
 if ($LASTEXITCODE -ne 0) {
-    throw 'origin/main is missing after fetch.'
+    throw 'origin/dev is missing after fetch.'
 }
-$mainSha = (& git -C $RepoRoot rev-parse main).Trim()
-$originMainSha = (& git -C $RepoRoot rev-parse origin/main).Trim()
-if ($mainSha -ne $originMainSha) {
-    throw "Local main ($mainSha) differs from origin/main ($originMainSha)."
+$devSha = (& git -C $RepoRoot rev-parse dev).Trim()
+$originDevSha = (& git -C $RepoRoot rev-parse origin/dev).Trim()
+if ($devSha -ne $originDevSha) {
+    throw "Local dev ($devSha) differs from origin/dev ($originDevSha)."
 }
 
 & $Python $Validator check-ownership `
@@ -99,7 +99,7 @@ if ($LASTEXITCODE -eq 0) {
     throw "Branch already exists: $branch"
 }
 
-& git -C $RepoRoot worktree add $worktree -b $branch main
+& git -C $RepoRoot worktree add $worktree -b $branch dev
 if ($LASTEXITCODE -ne 0) {
     throw 'git worktree add failed.'
 }

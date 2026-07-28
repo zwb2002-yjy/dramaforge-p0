@@ -1,4 +1,4 @@
-"""P0 product path on real PostgreSQL: start → brief/plan → worker keyframe → export.
+﻿"""P0 product path on real PostgreSQL: start → brief/plan → worker keyframe → export.
 
 Requires Docker postgres. Captures evidence for Gate (async path, not request-thread spike).
 """
@@ -7,20 +7,29 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import User, Workspace
+from app.access.projects import ProjectService
 from app.config import Settings
 from app.creation.models import AgentRun, PlanningAuthorization
 from app.creation.service import CreationService
 from app.delivery.export_service import build_project_export
+from app.events.models import OutboxEvent
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0
+from app.production.models import GraphVersion, ProductionGraph, definition_hash
 from app.providers.fake import FakeOpenAIAdapter
 from app.runtime.scheduler import WorkerRuntime
-from app.shared.db import set_rls_context
-from app.shared.enums import MemberRole
+from app.shared.db import (
+    list_pending_outbox_event_rls_scopes,
+    list_queued_node_run_rls_scopes,
+    resolve_node_run_rls_scope,
+    set_rls_context,
+)
+from app.shared.enums import OutboxStatus
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from sqlalchemy import select, text
@@ -89,21 +98,16 @@ async def test_agent_ten_shot_async_product_path(
     )
     pg_session.add(user)
     await pg_session.flush()
-    org = Organization(name=f"P0Org-{suffix}")
-    pg_session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"P0Org-{suffix}")
+    pg_session.add(workspace)
     await pg_session.flush()
-    pg_session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     await pg_session.commit()
 
     await set_rls_context(
-        pg_session, user_id=user.id, organization_id=org.id
+        pg_session, user_id=user.id, workspace_id=workspace.id
     )
     started = await CreationService(pg_session).start_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"P0Proj-{suffix}",
         aspect_ratio="9:16",
         actor=user,
@@ -115,7 +119,7 @@ async def test_agent_ten_shot_async_product_path(
     await set_rls_context(
         pg_session,
         user_id=user.id,
-        organization_id=org.id,
+        workspace_id=workspace.id,
         project_id=started.project_id,
     )
     service = CreationService(pg_session)
@@ -279,20 +283,15 @@ async def test_agent_brief_plan_postgres_enum_contract(
     )
     pg_session.add(user)
     await pg_session.flush()
-    org = Organization(name=f"AgentPgOrg-{suffix}")
-    pg_session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"AgentPgOrg-{suffix}")
+    pg_session.add(workspace)
     await pg_session.flush()
-    pg_session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     await pg_session.commit()
 
-    await set_rls_context(pg_session, user_id=user.id, organization_id=org.id)
+    await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id)
     service = CreationService(pg_session)
     started = await service.start_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"AgentPg-{suffix}",
         aspect_ratio="9:16",
         actor=user,
@@ -301,7 +300,7 @@ async def test_agent_brief_plan_postgres_enum_contract(
     await set_rls_context(
         pg_session,
         user_id=user.id,
-        organization_id=org.id,
+        workspace_id=workspace.id,
         project_id=started.project_id,
     )
 
@@ -387,19 +386,12 @@ async def test_cancelled_worker_keeps_durable_claim_and_blocks_duplicate_provide
     )
     pg_session.add(user)
     await pg_session.flush()
-    org = Organization(name=f"ClaimOrg-{suffix}")
-    pg_session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"ClaimOrg-{suffix}")
+    pg_session.add(workspace)
     await pg_session.flush()
-    pg_session.add(
-        OrganizationMember(
-            organization_id=org.id,
-            user_id=user.id,
-            role=MemberRole.OWNER.value,
-        )
-    )
-    await set_rls_context(pg_session, user_id=user.id, organization_id=org.id)
+    await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id)
     project = await ProjectService(pg_session).create_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"ClaimProj-{suffix}",
         aspect_ratio="9:16",
         actor=user,
@@ -448,7 +440,7 @@ async def test_cancelled_worker_keeps_durable_claim_and_blocks_duplicate_provide
             await set_rls_context(
                 session,
                 user_id=user.id,
-                organization_id=org.id,
+                workspace_id=workspace.id,
                 project_id=project.id,
             )
             return await WorkerRuntime(session).process_one(run.id)
@@ -461,7 +453,7 @@ async def test_cancelled_worker_keeps_durable_claim_and_blocks_duplicate_provide
             await set_rls_context(
                 observer,
                 user_id=user.id,
-                organization_id=org.id,
+                workspace_id=workspace.id,
                 project_id=project.id,
             )
             observed = await observer.get(NodeRun, run.id)
@@ -484,7 +476,7 @@ async def test_cancelled_worker_keeps_durable_claim_and_blocks_duplicate_provide
     await set_rls_context(
         pg_session,
         user_id=user.id,
-        organization_id=org.id,
+        workspace_id=workspace.id,
         project_id=project.id,
     )
     await pg_session.refresh(run)
@@ -515,25 +507,20 @@ async def test_ten_shot_p0_and_subtitle_rework(pg_session: AsyncSession) -> None
     )
     pg_session.add(user)
     await pg_session.flush()
-    org = Organization(name=f"S4Org-{suffix}")
-    pg_session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"S4Org-{suffix}")
+    pg_session.add(workspace)
     await pg_session.flush()
-    pg_session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     from app.access.projects import ProjectService
 
-    await set_rls_context(pg_session, user_id=user.id, organization_id=org.id)
+    await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id)
     project = await ProjectService(pg_session).create_project(
-        organization_id=org.id, name=f"S4-{suffix}", aspect_ratio="9:16", actor=user
+        workspace_id=workspace.id, name=f"S4-{suffix}", aspect_ratio="9:16", actor=user
     )
     await pg_session.commit()
     await set_rls_context(
         pg_session,
         user_id=user.id,
-        organization_id=org.id,
+        workspace_id=workspace.id,
         project_id=project.id,
     )
     from app.execution.shot_p0 import set_shot_lock
@@ -635,73 +622,53 @@ async def test_rls_cross_project_denied_as_app_role() -> None:
             ),
             {"e": f"rls-b-{uuid4().hex[:6]}@example.com"},
         ).scalar_one()
-        o1 = conn.execute(
-            text("INSERT INTO organizations (name) VALUES (:n) RETURNING id"),
-            {"n": f"O1-{uuid4().hex[:6]}"},
-        ).scalar_one()
-        o2 = conn.execute(
-            text("INSERT INTO organizations (name) VALUES (:n) RETURNING id"),
-            {"n": f"O2-{uuid4().hex[:6]}"},
-        ).scalar_one()
-        conn.execute(
-            text(
-                "INSERT INTO organization_members (organization_id, user_id, role) "
-                "VALUES (:o,:u,'owner')"
-            ),
-            {"o": o1, "u": u1},
-        )
-        conn.execute(
-            text(
-                "INSERT INTO organization_members (organization_id, user_id, role) "
-                "VALUES (:o,:u,'owner')"
-            ),
-            {"o": o2, "u": u2},
-        )
         conn.execute(text("SELECT set_config('app.current_user_id', :v, true)"), {"v": str(u1)})
+        w1 = conn.execute(
+            text(
+                "INSERT INTO workspaces (owner_user_id, name) "
+                "VALUES (:u, :n) RETURNING id"
+            ),
+            {"u": u1, "n": f"O1-{uuid4().hex[:6]}"},
+        ).scalar_one()
         conn.execute(
-            text("SELECT set_config('app.current_organization_id', :v, true)"),
-            {"v": str(o1)},
+            text("SELECT set_config('app.current_workspace_id', :v, true)"),
+            {"v": str(w1)},
         )
         p1 = conn.execute(
             text(
                 """
-                INSERT INTO projects (organization_id, name, aspect_ratio, budget_limit)
+                INSERT INTO projects (workspace_id, name, aspect_ratio, budget_limit)
                 VALUES (:o, :n, '9:16', 0) RETURNING id
                 """
             ),
-            {"o": o1, "n": f"P1-{uuid4().hex[:6]}"},
+            {"o": w1, "n": f"P1-{uuid4().hex[:6]}"},
+        ).scalar_one()
+        conn.execute(text("SELECT set_config('app.current_user_id', :v, true)"), {"v": str(u2)})
+        w2 = conn.execute(
+            text(
+                "INSERT INTO workspaces (owner_user_id, name) "
+                "VALUES (:u, :n) RETURNING id"
+            ),
+            {"u": u2, "n": f"O2-{uuid4().hex[:6]}"},
         ).scalar_one()
         conn.execute(
-            text(
-                "INSERT INTO project_members (project_id, user_id, role) VALUES (:p,:u,'owner')"
-            ),
-            {"p": p1, "u": u1},
-        )
-        conn.execute(text("SELECT set_config('app.current_user_id', :v, true)"), {"v": str(u2)})
-        conn.execute(
-            text("SELECT set_config('app.current_organization_id', :v, true)"),
-            {"v": str(o2)},
+            text("SELECT set_config('app.current_workspace_id', :v, true)"),
+            {"v": str(w2)},
         )
         p2 = conn.execute(
             text(
                 """
-                INSERT INTO projects (organization_id, name, aspect_ratio, budget_limit)
+                INSERT INTO projects (workspace_id, name, aspect_ratio, budget_limit)
                 VALUES (:o, :n, '9:16', 0) RETURNING id
                 """
             ),
-            {"o": o2, "n": f"P2-{uuid4().hex[:6]}"},
+            {"o": w2, "n": f"P2-{uuid4().hex[:6]}"},
         ).scalar_one()
-        conn.execute(
-            text(
-                "INSERT INTO project_members (project_id, user_id, role) VALUES (:p,:u,'owner')"
-            ),
-            {"p": p2, "u": u2},
-        )
         # As user1 with project1 context, cannot see project2
         conn.execute(text("SELECT set_config('app.current_user_id', :v, true)"), {"v": str(u1)})
         conn.execute(
-            text("SELECT set_config('app.current_organization_id', :v, true)"),
-            {"v": str(o1)},
+            text("SELECT set_config('app.current_workspace_id', :v, true)"),
+            {"v": str(w1)},
         )
         conn.execute(
             text("SELECT set_config('app.current_project_id', :v, true)"),
@@ -715,8 +682,8 @@ async def test_rls_cross_project_denied_as_app_role() -> None:
         # Re-set GUC after role switch
         conn.execute(text("SELECT set_config('app.current_user_id', :v, true)"), {"v": str(u1)})
         conn.execute(
-            text("SELECT set_config('app.current_organization_id', :v, true)"),
-            {"v": str(o1)},
+            text("SELECT set_config('app.current_workspace_id', :v, true)"),
+            {"v": str(w1)},
         )
         conn.execute(
             text("SELECT set_config('app.current_project_id', :v, true)"),
@@ -732,3 +699,229 @@ async def test_rls_cross_project_denied_as_app_role() -> None:
         assert len(own) == 1, "own project must remain visible under matching GUC"
         assert own[0][0] == p1
     eng.dispose()
+
+
+@pytest.mark.asyncio
+async def test_rls_same_owner_cross_workspace_denied_as_app_role() -> None:
+    """An active workspace excludes another workspace owned by the same user."""
+    from sqlalchemy import create_engine
+
+    sync = _url().replace("postgresql+asyncpg://", "postgresql+psycopg://")
+    eng = create_engine(sync)
+    with eng.begin() as conn:
+        user_id = conn.execute(
+            text(
+                """
+                INSERT INTO users (email, display_name, password_hash)
+                VALUES (:email, 'Workspace owner', 'x') RETURNING id
+                """
+            ),
+            {"email": f"rls-workspaces-{uuid4().hex[:6]}@example.com"},
+        ).scalar_one()
+        conn.execute(
+            text("SELECT set_config('app.current_user_id', :value, true)"),
+            {"value": str(user_id)},
+        )
+        workspace_a = conn.execute(
+            text(
+                "INSERT INTO workspaces (owner_user_id, name) "
+                "VALUES (:owner, :name) RETURNING id"
+            ),
+            {"owner": user_id, "name": f"Workspace A-{uuid4().hex[:6]}"},
+        ).scalar_one()
+        conn.execute(
+            text("SELECT set_config('app.current_workspace_id', :value, true)"),
+            {"value": str(workspace_a)},
+        )
+        project_a = conn.execute(
+            text(
+                "INSERT INTO projects (workspace_id, name, aspect_ratio, budget_limit) "
+                "VALUES (:workspace, :name, '9:16', 0) RETURNING id"
+            ),
+            {"workspace": workspace_a, "name": f"Project A-{uuid4().hex[:6]}"},
+        ).scalar_one()
+        workspace_b = conn.execute(
+            text(
+                "INSERT INTO workspaces (owner_user_id, name) "
+                "VALUES (:owner, :name) RETURNING id"
+            ),
+            {"owner": user_id, "name": f"Workspace B-{uuid4().hex[:6]}"},
+        ).scalar_one()
+        conn.execute(
+            text("SELECT set_config('app.current_workspace_id', :value, true)"),
+            {"value": str(workspace_b)},
+        )
+        project_b = conn.execute(
+            text(
+                "INSERT INTO projects (workspace_id, name, aspect_ratio, budget_limit) "
+                "VALUES (:workspace, :name, '9:16', 0) RETURNING id"
+            ),
+            {"workspace": workspace_b, "name": f"Project B-{uuid4().hex[:6]}"},
+        ).scalar_one()
+        credential_b = conn.execute(
+            text(
+                """
+                INSERT INTO encrypted_provider_credentials
+                  (workspace_id, provider, ciphertext, key_version)
+                VALUES (:workspace, 'text', :ciphertext, 'test')
+                RETURNING id
+                """
+            ),
+            {"workspace": workspace_b, "ciphertext": "ciphertext-b"},
+        ).scalar_one()
+        # Select workspace A again before adding its credential. The credential
+        # policy requires the selected workspace even while seeding as table owner.
+        conn.execute(
+            text("SELECT set_config('app.current_workspace_id', :value, true)"),
+            {"value": str(workspace_a)},
+        )
+        credential_a = conn.execute(
+            text(
+                """
+                INSERT INTO encrypted_provider_credentials
+                  (workspace_id, provider, ciphertext, key_version)
+                VALUES (:workspace, 'text', :ciphertext, 'test')
+                RETURNING id
+                """
+            ),
+            {"workspace": workspace_a, "ciphertext": "ciphertext-a"},
+        ).scalar_one()
+
+        conn.execute(text("SET LOCAL ROLE dramaforge_app"))
+        conn.execute(
+            text("SELECT set_config('app.current_user_id', :value, true)"),
+            {"value": str(user_id)},
+        )
+        conn.execute(
+            text("SELECT set_config('app.current_workspace_id', :value, true)"),
+            {"value": str(workspace_a)},
+        )
+        conn.execute(text("SELECT set_config('app.current_project_id', '', true)"))
+
+        assert conn.execute(
+            text("SELECT id FROM projects WHERE id = :project_id"),
+            {"project_id": project_a},
+        ).scalar_one() == project_a
+        assert conn.execute(
+            text("SELECT id FROM projects WHERE id = :project_id"),
+            {"project_id": project_b},
+        ).fetchall() == []
+        assert conn.execute(
+            text(
+                "SELECT id FROM encrypted_provider_credentials WHERE id = :credential_id"
+            ),
+            {"credential_id": credential_a},
+        ).scalar_one() == credential_a
+        assert conn.execute(
+            text(
+                "SELECT id FROM encrypted_provider_credentials WHERE id = :credential_id"
+            ),
+            {"credential_id": credential_b},
+        ).fetchall() == []
+    eng.dispose()
+
+
+@pytest.mark.asyncio
+async def test_worker_resolvers_use_workspace_owner_and_project_scope(
+    pg_session: AsyncSession,
+) -> None:
+    """Worker scope comes from NodeRun -> Project -> Workspace, never created_by."""
+    suffix = uuid4().hex[:8]
+    owner = User(
+        email=f"resolver-owner-{suffix}@example.com",
+        display_name="Owner",
+        password_hash="x",
+    )
+    creator = User(
+        email=f"resolver-creator-{suffix}@example.com",
+        display_name="Creator",
+        password_hash="x",
+    )
+    pg_session.add_all([owner, creator])
+    await pg_session.flush()
+    workspace = Workspace(owner_user_id=owner.id, name=f"Resolver-{suffix}")
+    pg_session.add(workspace)
+    await pg_session.flush()
+    await set_rls_context(pg_session, user_id=owner.id, workspace_id=workspace.id)
+    project = await ProjectService(pg_session).create_project(
+        workspace_id=workspace.id,
+        name=f"Resolver-project-{suffix}",
+        aspect_ratio="9:16",
+        actor=owner,
+    )
+    graph = ProductionGraph(
+        project_id=project.id,
+        scope_type="episode",
+        scope_entity_id=project.id,
+        template_key="resolver-test",
+        status="draft",
+        created_by=owner.id,
+    )
+    pg_session.add(graph)
+    await pg_session.flush()
+    version = GraphVersion(
+        graph_id=graph.id,
+        version_number=1,
+        status="draft",
+        definition={"nodes": []},
+        definition_hash=definition_hash({"nodes": []}),
+    )
+    pg_session.add(version)
+    await pg_session.flush()
+    node = GraphNode(
+        graph_version_id=version.id,
+        node_key="resolver",
+        node_type="keyframe",
+        display_name="Resolver",
+        input_schema={},
+        output_schema={},
+        config={},
+    )
+    pg_session.add(node)
+    await pg_session.flush()
+    run = NodeRun(
+        project_id=project.id,
+        graph_version_id=version.id,
+        graph_node_id=node.id,
+        attempt_no=1,
+        idempotency_key=f"resolver-{suffix}",
+        input_hash="a" * 64,
+        status="queued",
+        input_snapshot={},
+        output_summary={},
+        provider_cost=0,
+        platform_cost=0,
+        avoided_cost_estimate=0,
+        created_by=creator.id,
+    )
+    pg_session.add(run)
+    event = OutboxEvent(
+        event_id=uuid4(),
+        project_id=project.id,
+        topic="resolver.test",
+        schema_version=1,
+        payload={"node_run_id": str(run.id)},
+        status=OutboxStatus.PENDING.value,
+        attempt_count=0,
+        next_attempt_at=datetime.now(UTC),
+    )
+    pg_session.add(event)
+    await pg_session.commit()
+
+    run_scope = await resolve_node_run_rls_scope(pg_session, node_run_id=run.id)
+    assert run_scope is not None
+    assert run_scope.user_id == owner.id
+    assert run_scope.user_id != creator.id
+    assert run_scope.workspace_id == workspace.id
+    assert run_scope.project_id == project.id
+
+    queued = await list_queued_node_run_rls_scopes(
+        pg_session, limit=10, project_id=project.id
+    )
+    assert [(run_id, scope.user_id) for run_id, scope in queued] == [(run.id, owner.id)]
+    pending = await list_pending_outbox_event_rls_scopes(
+        pg_session, limit=10, project_id=project.id
+    )
+    assert [(scope.event_id, scope.user_id) for scope in pending] == [
+        (event.event_id, owner.id)
+    ]

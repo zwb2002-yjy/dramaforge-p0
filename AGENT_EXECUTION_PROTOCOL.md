@@ -2,9 +2,9 @@
 
 **状态：强制执行**
 
-**版本：v3.2**
+**版本：v3.3**
 
-**最近修订：2026-07-22**
+**最近修订：2026-07-26**
 
 ## 1. 目的与边界
 
@@ -12,7 +12,7 @@
 
 1. 每个 Task 在开始前先定义可观察的完成效果和验收证据，结束时在本地留下可恢复事实。
 2. Agent 在普通失败后自行诊断、修复和回归；Task 完成后继续下一个 Task，阶段 Gate 通过后继续下一个阶段。
-3. 所有写入 Agent 使用 Git 分支、GitHub PR 和独立 worktree 隔离；Agent 复核并提交 PR，只有 `@zwb2002-yjy` 可以批准和合并。
+3. 日常写入在 `dev` 集成分支完成并推送；`main` 只接收经验证的稳定发布 PR。并行隔离或紧急修复才使用短期分支和独立 worktree；只有 `@zwb2002-yjy` 可以批准和合并受保护分支 PR。
 
 完整的任务选择、自修复和阶段推进规则由 [`agent.md`](agent.md) 定义；本协议只规定记录语义、恢复方式和 Git 隔离。它不是调度器，也不判断哪个进程“拥有”仓库。项目不使用观察器、后台监控、Session、Token、心跳、进程数量门禁或恢复状态机。
 
@@ -71,8 +71,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1
   -TaskId S1-SESSION-0.1 `
   -Agent grok-subagent-session `
   -Summary "建立可验收的 Cookie 会话纵向切片" `
-  -Branch agent/s1-session-0.1 `
-  -Worktree .worktrees/s1-session-0.1 `
+  -Branch dev `
+  -Worktree . `
   -OwnedPaths "backend/app/access;backend/tests/integration/test_session_pg.py" `
   -NextStep "先运行会话未授权失败测试"
 ```
@@ -86,14 +86,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1
   -TaskId S1-SESSION-0.1 `
   -Agent grok-subagent-session `
   -Summary "Cookie 会话切片及未授权回归已通过" `
-  -Branch agent/s1-session-0.1 `
-  -Worktree .worktrees/s1-session-0.1 `
+  -Branch dev `
+  -Worktree . `
   -OwnedPaths "backend/app/access;backend/tests/integration/test_session_pg.py" `
   -ChangedFiles "backend/app/...;backend/tests/..." `
   -Tests "targeted pytest: passed; backend regression: passed" `
   -Commit "<sha>" `
   -Evidence "unauthorized=401;authorized=200" `
-  -NextStep "主 Agent 复核 diff、合同和回归后创建或更新 PR"
+  -NextStep "推送 origin/dev；达到稳定发布条件时创建 dev -> main PR"
 ```
 
 失败或暂停也必须立即记录，并在 `next_step` 中写清替代方案或唯一继续条件。Agent 不得自行记录 `MERGED`；`@zwb2002-yjy` 批准并合并 PR 后，由用户追加 `MERGED`，同时传入 `-ApprovedBy @zwb2002-yjy` 并记录 PR 与 merge commit。
@@ -107,7 +107,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1
 
 ## 5. 连续执行与中断恢复
 
-主 Agent 必须遵守 [`agent.md`](agent.md) 的持续开发控制循环：恢复事实、执行一个 `READY` Task、自修复、复核并提交 PR；用户合并后重算 Gate，然后继续同阶段下一 Task 或下一阶段合同任务。完成一个 Task、一个 subagent 批次或一次提交都不是等待“继续”的理由。
+主 Agent 必须遵守 [`agent.md`](agent.md) 的持续开发控制循环：恢复事实、执行一个 `READY` Task、自修复、复核并提交到 `dev`；稳定发布合并后重算 Gate，然后继续同阶段下一 Task 或下一阶段合同任务。完成一个 Task、一个 subagent 批次或一次提交都不是等待“继续”的理由。
 
 Agent 重启后按事实恢复：
 
@@ -124,21 +124,29 @@ Agent 重启后按事实恢复：
 主 Agent 负责维护检查点、拆分 Task、分配文件所有权、指定分支/worktree、复核结果、创建或更新 PR，并在用户合并后重算阶段 Gate。subagent 只处理被分派的 Task 合同范围。
 
 - 只读 subagent 可以并行，不需要分支或 worktree，但仍须留下开始和结束记录。
-- 每个写入任务从同步后的 `main` 创建独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`；仓库根 worktree 始终停留在 `main`，不得承载业务修改。
-- 写入任务的 `STARTED` 必须声明非空 `owned_paths`；其他活动写入任务不得声明重叠路径。只读任务必须显式记录 `read_only=true`。
-- 远端可用时，每个写入 subagent 在自己的分支提交并创建或更新 PR；远端暂时不可用时，提交保留在该任务分支并记录 `PAUSED`，不得提交、合并或直接推送到 `main`。
+- 根 worktree 默认跟踪同步后的 `dev`，日常串行 Task 直接在其中提交并推送 `origin/dev`。
+- 仅并行写入任务从同步后的 `dev` 创建独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`。这类任务的 `STARTED` 必须声明非空 `owned_paths`，且其他活动隔离任务不得声明重叠路径；只读任务必须显式记录 `read_only=true`。
+- 远端可用时，日常 Task 推送 `dev`；隔离 Task 推送自己的分支并通过 PR 合回 `dev`。远端暂时不可用时保留提交并记录 `PAUSED`，不得直接推送 `main`。
 - 同一文件尽量只分配给一个写入 subagent。确需交叉修改时，由主 Agent 负责冲突解决和合并后联合回归。
 - subagent 的自然语言汇报不是完成证据。至少需要 commit、改动文件、实际测试结果和 Task 合同逐项结论。
 - 主 Agent 不一次性派出具有依赖关系的后续 Task；用户每轮合并后重新计算 `READY` 队列和文件所有权。
 
 ## 7. Git 分支、worktree 与 GitHub
 
-所有写入任务使用：
+日常写入使用：
+
+```text
+branch:   dev
+worktree: 仓库根 worktree
+GitHub:   push origin dev
+```
+
+只有并行隔离任务使用：
 
 ```text
 branch:   agent/<task-id>
 worktree: .worktrees/<task-id>
-GitHub:   同名远端分支 + PR
+GitHub:   同名远端分支 + PR -> dev
 ```
 
 示例：
@@ -152,14 +160,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\task_worktree.ps1 
 
 规则：
 
-1. `main` 和 `origin/main` 必须同步后才能创建任务；根 worktree 必须保持在 `main`。
-2. 一个写入 Task 对应一个 `agent/<task-id>` 分支、一个 `.worktrees/<task-id>` 和一组不与活动任务重叠的 `owned_paths`。
-3. 分支创建、首次推送、PR、测试、用户批准、合并和清理都写入本地账本；Agent 只能记录到 `COMPLETED` 或 `PAUSED`。
-4. 所有代码通过 PR 进入 `main`。本地 `.githooks/pre-push` 拒绝直接推送 `main`；GitHub Ruleset 必须要求固定 CI、Code Owner review 和 `@zwb2002-yjy` 的批准。
-5. 远端或认证暂时不可用时，只能继续在当前 `agent/*` 分支工作并提交；无法创建或更新 PR 时记录 `PAUSED`。不存在“本地 main 串行提交”例外。
-6. Agent 不得批准或合并自己的 PR，也不得调用 `MERGED` 记录；只有 `@zwb2002-yjy` 完成批准和合并。
-7. 禁止 force push、历史重写、`git reset --hard`、`git clean -fd` 和用 checkout 覆盖用户改动。
-8. 用户确认 PR 已合并且任务不再需要后，才能移除 worktree 和分支。
+1. 根 worktree 必须保持在同步后的 `dev`；`main` 和 `origin/main` 只在准备发布或处理 hotfix 时同步。
+2. 日常 Task 可直接在 `dev` 提交和推送。一个并行隔离 Task 才对应一个 `agent/<task-id>` 分支、一个 `.worktrees/<task-id>` 和一组不与活动隔离 Task 重叠的 `owned_paths`。
+3. 提交、测试、发布 PR、用户批准、合并和清理都写入本地账本；Agent 只能记录到 `COMPLETED` 或 `PAUSED`。
+4. `main` 只通过 `dev -> main` 的受保护 PR 接收稳定发布。本地 `.githooks/pre-push` 拒绝直接推送 `main`；GitHub Ruleset 必须要求固定 CI、Code Owner review 和 `@zwb2002-yjy` 的批准。
+5. 紧急生产修复可从 `main` 创建 `agent/hotfix-<task-id>`，通过 PR 合入 `main` 后立即同步回 `dev`。常规发布不得用 cherry-pick 代替 `dev -> main` PR。
+6. 远端或认证暂时不可用时，可继续在当前 `dev` 或隔离分支提交并记录 `PAUSED`，但不得直接推送 `main`。
+7. Agent 不得批准或合并自己的 PR，也不得调用 `MERGED` 记录；只有 `@zwb2002-yjy` 完成批准和合并。
+8. 禁止 force push、历史重写、`git reset --hard`、`git clean -fd` 和用 checkout 覆盖用户改动。
+9. 用户确认隔离分支 PR 已合并且任务不再需要后，才能移除 worktree 和分支。
 
 GitHub 保存团队共享的分支、提交、PR、审查和合并历史；`PROGRESS.jsonl` 保存当前机器上的执行断点。两者用途不同，不能互相替代。
 

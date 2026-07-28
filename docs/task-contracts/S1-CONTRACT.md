@@ -41,7 +41,7 @@ S1 阶段完成仍需全部满足 `agent.md` S1 Gate，包括但不限于：
 
 ### 5.1 完成效果
 
-系统具备最小 access 边界：可创建/读取 Organization、User、Membership；HTTP 会话（Cookie）与 CSRF 保护可测；未认证请求被拒绝。尚未要求完整 BYOK 加密轮换 UI。
+系统具备最小 access 边界：可创建/读取 User 及其所有者 Workspace；HTTP 会话（Cookie）与 CSRF 保护可测；未认证请求被拒绝。尚未要求完整 BYOK 加密轮换 UI。
 
 ### 5.2 范围
 

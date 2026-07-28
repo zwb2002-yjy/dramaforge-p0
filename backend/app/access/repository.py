@@ -1,14 +1,13 @@
-"""Access data access layer."""
+"""Persistence operations for user-owned workspaces."""
 
 from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import Organization, OrganizationMember, User
-from app.shared.enums import MemberRole
+from app.access.models import Project, User, Workspace
 
 
 class AccessRepository:
@@ -28,54 +27,31 @@ class AccessRepository:
         await self._session.flush()
         return user
 
-    async def add_organization(self, org: Organization) -> Organization:
-        self._session.add(org)
+    async def add_workspace(self, workspace: Workspace) -> Workspace:
+        self._session.add(workspace)
         await self._session.flush()
-        return org
+        return workspace
 
-    async def get_organization(self, org_id: UUID) -> Organization | None:
+    async def get_workspace(self, workspace_id: UUID) -> Workspace | None:
         result = await self._session.execute(
-            select(Organization).where(Organization.id == org_id)
+            select(Workspace).where(Workspace.id == workspace_id)
         )
         return result.scalar_one_or_none()
 
-    async def add_membership(self, member: OrganizationMember) -> OrganizationMember:
-        self._session.add(member)
-        await self._session.flush()
-        return member
-
-    async def get_membership(
-        self, *, organization_id: UUID, user_id: UUID
-    ) -> OrganizationMember | None:
+    async def list_workspaces(self, *, owner_user_id: UUID) -> list[Workspace]:
         result = await self._session.execute(
-            select(OrganizationMember).where(
-                OrganizationMember.organization_id == organization_id,
-                OrganizationMember.user_id == user_id,
-            )
-        )
-        return result.scalar_one_or_none()
-
-    async def list_memberships(self, organization_id: UUID) -> list[OrganizationMember]:
-        result = await self._session.execute(
-            select(OrganizationMember).where(
-                OrganizationMember.organization_id == organization_id
-            )
+            select(Workspace)
+            .where(Workspace.owner_user_id == owner_user_id)
+            .order_by(Workspace.created_at, Workspace.id)
         )
         return list(result.scalars().all())
 
-    async def user_is_member(self, *, organization_id: UUID, user_id: UUID) -> bool:
-        row = await self.get_membership(organization_id=organization_id, user_id=user_id)
-        return row is not None
-
-    async def create_org_with_owner(
-        self, *, name: str, owner: User
-    ) -> tuple[Organization, OrganizationMember]:
-        org = Organization(name=name)
-        await self.add_organization(org)
-        member = OrganizationMember(
-            organization_id=org.id,
-            user_id=owner.id,
-            role=MemberRole.OWNER.value,
+    async def count_projects(self, *, workspace_id: UUID) -> int:
+        result = await self._session.execute(
+            select(func.count()).select_from(Project).where(Project.workspace_id == workspace_id)
         )
-        await self.add_membership(member)
-        return org, member
+        return int(result.scalar_one())
+
+    async def delete_workspace(self, workspace: Workspace) -> None:
+        await self._session.delete(workspace)
+        await self._session.flush()

@@ -1,4 +1,4 @@
-"""Regression for inspector blockers: approve gate, export gate, package meta, redis fail-closed."""
+﻿"""Regression for inspector blockers: approve gate, export gate, package meta, redis fail-closed."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 from app.access import models as _am  # noqa: F401
-from app.access.models import Organization, OrganizationMember, Project, ProjectMember, User
-from app.access.projects import ROLES_PRODUCE, ROLES_REVIEW, ProjectService
+from app.access.models import Workspace, Project, User
+from app.access.projects import ProjectService
 from app.assets import models as _asm  # noqa: F401
 from app.assets.models import Episode, Scene, Shot
 from app.delivery import models as _dm  # noqa: F401
@@ -20,7 +20,7 @@ from app.execution.shot_review import approve_shot, assert_shot_approvable, uplo
 from app.production import models as _pm  # noqa: F401
 from app.production.models import GraphVersion, ProductionGraph, definition_hash
 from app.shared.base import Base
-from app.shared.enums import GraphStatus, MemberRole
+from app.shared.enums import GraphStatus
 from app.shared.errors import ForbiddenError, ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import InMemoryObjectStore
@@ -47,21 +47,17 @@ async def _seed(session: AsyncSession) -> tuple[User, Project, Shot]:
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"IG-{uuid4().hex[:6]}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"IG-{uuid4().hex[:6]}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value)
-    )
     project = Project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name=f"IGP-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
         budget_limit=Decimal("0"),
     )
     session.add(project)
     await session.flush()
-    session.add(ProjectMember(project_id=project.id, user_id=user.id, role=MemberRole.OWNER.value))
     ep = Episode(project_id=project.id, episode_number=1, title="E1")
     session.add(ep)
     await session.flush()
@@ -298,7 +294,7 @@ async def test_manual_media_does_not_reassign_existing_artifact_lineage(
 
 
 @pytest.mark.asyncio
-async def test_viewer_cannot_start_or_approve(session: AsyncSession) -> None:
+async def test_non_owner_cannot_resolve_project(session: AsyncSession) -> None:
     owner, project, _shot = await _seed(session)
     viewer = User(
         email=f"view-{uuid4().hex[:8]}@ex.com",
@@ -307,32 +303,11 @@ async def test_viewer_cannot_start_or_approve(session: AsyncSession) -> None:
     )
     session.add(viewer)
     await session.flush()
-    session.add(
-        ProjectMember(project_id=project.id, user_id=viewer.id, role=MemberRole.VIEWER.value)
-    )
-    await session.flush()
     svc = ProjectService(session)
 
     with pytest.raises(ForbiddenError):
-        await svc.require_project_role(
-            project_id=project.id,
-            actor=viewer,
-            allowed=ROLES_PRODUCE,
-            action="start shot production",
-        )
-    with pytest.raises(ForbiddenError):
-        await svc.require_project_role(
-            project_id=project.id,
-            actor=viewer,
-            allowed=ROLES_REVIEW,
-            action="approve shot",
-        )
-    await svc.require_project_role(
-        project_id=project.id,
-        actor=owner,
-        allowed=ROLES_PRODUCE,
-        action="start shot production",
-    )
+        await svc.get_project_for_owner(project_id=project.id, actor=viewer)
+    assert await svc.get_project_for_owner(project_id=project.id, actor=owner) is project
 
 
 @pytest.mark.asyncio

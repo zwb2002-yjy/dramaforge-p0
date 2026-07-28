@@ -1,11 +1,11 @@
-"""Golden P0 path from fixtures/scripts/p0_10_shots.md."""
+﻿"""Golden P0 path from fixtures/scripts/p0_10_shots.md."""
 
 from __future__ import annotations
 
 from uuid import uuid4
 
 import pytest
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.access.projects import ProjectService
 from app.assets import models as _am  # noqa: F401
 from app.creation import models as _cm  # noqa: F401
@@ -15,7 +15,6 @@ from app.execution import models as _xm  # noqa: F401
 from app.execution.golden_path import run_golden_p0_path
 from app.production import models as _pm  # noqa: F401
 from app.shared.base import Base
-from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -43,16 +42,11 @@ async def test_golden_path_10_shots_export(session: AsyncSession) -> None:
     )
     session.add(user)
     await session.flush()
-    org = Organization(name="GoldOrg")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name="GoldOrg")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     project = await ProjectService(session).create_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name="Golden",
         aspect_ratio="9:16",
         actor=user,

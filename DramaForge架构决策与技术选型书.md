@@ -19,7 +19,7 @@ DramaForge 必须在同一生产底座上提供两种可切换的创作体验：
 | 模式 | 面向用户 | 用户目标 | 主交互 | 系统承诺 |
 |---|---|---|---|---|
 | **快速出片模式** | 普通创作者、轻量运营人员 | 从创意、文本或剧本尽快得到可审核成片 | 对话式 Agent + 向导卡片 + 阶段确认 | 隐藏复杂配置，但不牺牲可追溯、可恢复和成本可控 |
-| **专业工作台模式** | 编导、制片、后期及协作团队 | 精细管理资产、剧本、分镜、任务、成本和交付 | 项目化工作台 + 可视化编辑 + 任务队列 | 暴露完整控制能力，支持审核、协作与专业交付 |
+| **专业工作台模式** | 需要精细控制的个人创作者 | 精细管理资产、剧本、分镜、任务、成本和交付 | 项目化工作台 + 可视化编辑 + 任务队列 | 暴露完整控制能力，支持审核与专业交付 |
 
 两种模式不是两套产品，也不得分别维护项目、资产、任务、费用或导出记录。它们只是同一项目状态的不同操作界面。
 
@@ -28,7 +28,7 @@ DramaForge 必须在同一生产底座上提供两种可切换的创作体验：
 以下对象是两种模式共同读写的唯一业务真相：
 
 ```text
-Organization / Member / Project
+User / Workspace / Project
   ├─ Story Bible / Script / Episode / Scene / Shot
   ├─ Asset Library / Reference Set
   ├─ Production Graph / GraphVersion / NodeRun
@@ -41,7 +41,7 @@ Organization / Member / Project
 - 专业模式对同一项目做出的修改，必须立即成为快速模式后续 Agent 规划与生成时的上下文。
 - Production Graph 是执行、重试、缓存、取消、成本和产物的唯一真相；对话记录不能替代图定义或任务状态。
 - 工作模式是用户界面偏好与当前入口，不是项目类型、权限角色或数据隔离维度。切换模式不迁移数据、不复制项目、不丢失执行历史。
-- 团队角色、RLS、预算、BYOK、审核与审计在两种模式下规则完全一致。快速模式的“简单”不能成为越权或绕过预算的路径。
+- 工作区私有隔离、RLS、预算、BYOK、审核与审计在两种模式下规则完全一致。快速模式的“简单”不能成为越权或绕过预算的路径。P0 不提供成员、邀请或团队协作。
 
 ### 0.3 快速出片模式：从意图到成片的受控 Agent 流程
 
@@ -72,9 +72,9 @@ Agent 澄清并生成 Creative Brief
 5. 任一阶段均可“进入专业工作台”，直接查看并编辑当前项目、资产、分镜、Graph、任务和产物。
 6. Agent 的工具调用只可通过稳定的领域 Interface 创建计划或请求执行；不得直接修改节点状态或绕过 Production Graph。
 
-### 0.4 专业工作台模式：从可控生产到团队交付
+### 0.4 专业工作台模式：从可控生产到个人交付
 
-专业模式面向需要精修和协同交付的用户。它不应重复实现一套生成能力，而是将快速模式已经创建的正式对象完整呈现并开放细粒度控制。
+专业模式面向需要精修和专业交付的个人创作者。它不应重复实现一套生成能力，而是将快速模式已经创建的正式对象完整呈现并开放细粒度控制。
 
 | 工作区 | 核心能力 |
 |---|---|
@@ -94,7 +94,7 @@ Agent 澄清并生成 Creative Brief
 |---|---|---|
 | 快速 → 专业 | 打开同一个项目与当前 GraphVersion；保留对话上下文、计划、运行历史、成本和产物 | 新建副本项目、重新排队已完成任务、丢失确认记录 |
 | 专业 → 快速 | 读取专业模式的最新已保存项目快照；以摘要方式提示当前阶段和待处理事项 | 覆盖人工锁定资产、分镜或审核结论 |
-| 多人协作 | 按项目角色显示可执行动作；变更进入审计事件与实时同步 | 因模式不同而绕过 RLS、预算或审核 |
+| 工作区私有隔离 | 仅当前所有者可在两个模式中执行动作；变更进入审计事件与实时同步 | 因模式不同而绕过 RLS、预算或审核，或以项目角色模拟 P0 协作 |
 
 “快速模式”与“专业模式”的关系类似同一 Agent 产品中的 Chat 与 Agent 工作流：前者帮助用户表达意图并推进任务，后者提供过程透明度与可控性。但 DramaForge 的差异是，二者都必须落到可审计的影视生产图中。
 
@@ -124,7 +124,7 @@ resume_quick_flow(project_id) -> GuidedStep
 | **S1** | 双模式应用壳、统一项目路由、创作体验 Module Interface、模式偏好 | 同一项目可在两个入口打开；权限与数据范围一致 |
 | **S2** | 快速出片最小闭环：文本 → 计划确认 → 一张首帧 → 相似度/成本 → 进入工作台 | 不靠人工搬运数据即可从快速模式切到工作台查看同一 Run |
 | **S3** | 快速模式的预算确认、失败解释、重试建议与恢复；专业模式读取完整 Graph 快照 | 取消、失败、缓存、预算状态在两种模式显示一致 |
-| **S4** | 专业工作台完整业务闭环；双向上下文同步；团队审核协作 | 手工锁定资产或分镜后，快速模式不会擅自覆盖 |
+| **S4** | 专业工作台完整业务闭环；双向上下文同步；个人审核工作流 | 手工锁定资产或分镜后，快速模式不会擅自覆盖 |
 | **S5** | 两种模式共享交付中心、回归测试和可观测性看板 | 同一项目从任一入口发起都能得到可复现交付包 |
 
 所有双模式场景必须纳入端到端测试：模式切换无数据副本、成本只记一次、同一 NodeRun 不重复执行、人工锁定不被 Agent 覆盖、权限与对象 URL 不因模式而扩大。
@@ -178,7 +178,7 @@ DramaForge
 
 | 产品概念 | P0 代码归属 | 边界 |
 |---|---|---|
-| Organization / Project / Member / BYOK | `access` | Project 本体、成员、权限、RLS 和用户 Provider Key。 |
+| User / Workspace / Project / BYOK | `access` | 私有工作区、Project 本体、所有权校验、RLS 和工作区加密 Provider 凭据。 |
 | Creation Experience | `creation` | Brief/Plan、AgentRun、确认、物化与 ProjectSnapshot。 |
 | Script / Episode / Scene / Shot / Asset / Character / Reference / Artifact | `assets` | 内容层级、资产、参考和 Artifact 生命周期。 |
 | Story Bible | `access` 中的 `Project.style_bible` + `assets` | 不建立独立 bible 服务。 |
@@ -860,23 +860,22 @@ Hash 必须包含：
 
 **修改原因**：若 commit 成功后进程崩溃或 Redis 不可用，原实现无法保证“待发送事件”可恢复。Outbox 将业务状态和待发布事件绑定在同一事务中。此前也没有定义重复投递、失败终态、payload 边界和已投递记录的清理策略，长期运行会造成重复副作用、敏感数据扩散或 PostgreSQL 无界增长。
 
-### 10.6 团队权限、RLS、SSE 与对象存储形成闭环 `[修订 2026-07-13｜把多租户隔离落到运行时而非描述层]`
+### 10.6 私有工作区、RLS、SSE 与对象存储形成闭环 `[修订 2026-07-26｜把工作区隔离落到运行时而非描述层]`
 
 新增模型：
 
 ```text
-Organization
-  └─ OrganizationMember(role)
-  └─ Project
-       └─ ProjectMember(role)
+User
+  └─ Workspace(owner_user_id)
+       └─ Project(workspace_id)
 ```
 
 - API 和 Worker 运行账户不得是 PostgreSQL schema owner、superuser 或带 `BYPASSRLS` 的账户。
-- 每个数据库事务使用 `SET LOCAL` 注入当前组织、用户和项目上下文；连接归还池前必须清理。
-- RLS policy 以组织成员与项目角色为依据；Worker 读取资源时同样受项目范围限制，不信任队列消息中的资源 ID 或对象路径。
+- 每个数据库事务使用 `SET LOCAL` 注入当前用户、选中工作区和项目上下文；连接归还池前必须清理。
+- RLS policy 同时验证 `Workspace.owner_user_id = current_user_id`、选中工作区和项目范围；同一用户的两个工作区也必须互相隔离。Worker 从持久化的 `NodeRun -> Project -> Workspace` 链重建上下文，不信任队列消息中的资源 ID、工作区或对象路径。
 - P0 使用同站 `HttpOnly + Secure` 会话 Cookie 与 CSRF 防护。SSE 不通过 URL 传递长期 JWT。
 - SSE 统一事件 Envelope：`id / type / occurred_at / project_id / entity(type,id,version) / payload`。
-- MinIO 使用 `org/{org_id}/project/{project_id}/artifact/{artifact_id}/{content_hash}` 对象键；预签名 URL 限时、单对象、单动作。
+- MinIO 使用 `workspace/{workspace_id}/project/{project_id}/artifact/{artifact_id}/{content_hash}` 对象键；预签名 URL 限时、单对象、单动作。
 - 上传对象先进入隔离区，完成 MIME 嗅探、尺寸/时长校验和安全扫描后再转入正式路径。
 
 **修改原因**：原方案仅写“RLS + user_id/project_id + 预签名 URL”，未处理连接池上下文、Worker 越权、EventSource 认证限制及上传文件安全。
@@ -924,7 +923,7 @@ DaVinci XML、EDL、AAF 仍按原 P1/P2 规划推进；PR 工程继续不做。
 | **S1：可信基础骨架** | 2 周 | RLS、Outbox、Graph 模型、Creation Experience Interface、统一项目路由 | 迁移、隔离、Outbox 重放、队列启动与同项目双入口打开均通过 |
 | **S2：快速模式首帧垂直切片** | 2 周 | 文本→计划确认→首帧→相似度/成本→同项目工作台切换 | 不靠人工搬运数据即可查看同一 Run；API→Graph→Worker→Adapter→Artifact→SSE 全链路可用；不得视为 P0 完成 |
 | **S3：Production Runtime 加厚** | 2.5 周 | DAG、缓存、取消、重试、预算和恢复 | 局部修改只影响正确下游，断点恢复与幂等测试通过 |
-| **S4：专业工作台与完整生产闭环** | 3 周 | 项目/资产/剧本/分镜、`shot-p0-v1` 全节点、规则、质检与团队审核 | 10 Shot 可生成、审核、修复和局部重跑；人工锁定不被 Agent 覆盖 |
+| **S4：专业工作台与完整生产闭环** | 3 周 | 项目/资产/剧本/分镜、`shot-p0-v1` 全节点、规则、质检与个人审核 | 10 Shot 可生成、审核、修复和局部重跑；人工锁定不被 Agent 覆盖 |
 | **S5：交付与集成硬化** | 2.5 周 | MP4/SRT/素材包/时间线 JSON、部署恢复、压测与安全回归 | 10 Shot 流程无阻断，正式交付可复现；通过后才可宣布 P0 MVP 完成 |
 
 S0-A 具体要求：不得只观察“5 张同角色图是否大于 0.7”；必须同时衡量不同角色误通过、同角色误拒绝、无脸/多脸/遮挡分类、人工标注一致率、平均耗时和单次修复成本。

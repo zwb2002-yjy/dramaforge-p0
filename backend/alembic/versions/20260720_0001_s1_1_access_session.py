@@ -1,4 +1,4 @@
-"""S1.1 access session: organizations, users, organization_members.
+"""S1.1 access session: users and private user-owned workspaces.
 
 Revision ID: 20260720_0001
 Revises:
@@ -22,17 +22,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    member_role = postgresql.ENUM(
-        "owner",
-        "admin",
-        "editor",
-        "reviewer",
-        "viewer",
-        name="member_role",
-        create_type=False,
-    )
-    member_role.create(op.get_bind(), checkfirst=True)
-
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     op.execute("CREATE SCHEMA IF NOT EXISTS app")
     op.execute(
@@ -45,9 +34,9 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE OR REPLACE FUNCTION app.current_organization_id() RETURNS uuid
+        CREATE OR REPLACE FUNCTION app.current_workspace_id() RETURNS uuid
         LANGUAGE sql STABLE AS $$
-          SELECT NULLIF(current_setting('app.current_organization_id', true),'')::uuid
+          SELECT NULLIF(current_setting('app.current_workspace_id', true),'')::uuid
         $$
         """
     )
@@ -60,25 +49,6 @@ def upgrade() -> None:
         """
     )
 
-    op.create_table(
-        "organizations",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("name", sa.String(length=120), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.Column("version", sa.Integer(), server_default="1", nullable=False),
-        sa.CheckConstraint("version > 0", name="ck_organizations_version_positive"),
-    )
     op.create_table(
         "users",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
@@ -103,26 +73,29 @@ def upgrade() -> None:
         sa.CheckConstraint("version > 0", name="ck_users_version_positive"),
     )
     op.create_table(
-        "organization_members",
-        sa.Column("organization_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("role", member_role, nullable=False),
+        "workspaces",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("owner_user_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"], ["organizations.id"], ondelete="CASCADE"
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("organization_id", "user_id"),
+        sa.Column("version", sa.Integer(), server_default="1", nullable=False),
+        sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.UniqueConstraint("owner_user_id", "name", name="uq_workspaces_owner_name"),
+        sa.CheckConstraint("version > 0", name="ck_workspaces_version_positive"),
     )
 
 
 def downgrade() -> None:
-    op.drop_table("organization_members")
+    op.drop_table("workspaces")
     op.drop_table("users")
-    op.drop_table("organizations")
-    op.execute("DROP TYPE IF EXISTS member_role")

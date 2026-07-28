@@ -1,4 +1,4 @@
-"""Download must return file body, not JSON metadata wrapper."""
+﻿"""Download must return file body, not JSON metadata wrapper."""
 
 from __future__ import annotations
 
@@ -7,13 +7,12 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from app.access.models import Organization, OrganizationMember, Project, ProjectMember, User
+from app.access.models import Workspace, Project, User
 from app.config import clear_settings_cache, get_settings
 from app.delivery.models import Export
 from app.main import create_app
 from app.shared.base import Base
 from app.shared.db import get_session
-from app.shared.enums import MemberRole
 from app.shared.security import hash_password
 from app.storage.minio_store import reset_object_store_for_tests
 from fastapi.testclient import TestClient
@@ -70,7 +69,7 @@ def test_download_returns_file_body_not_metadata_json(download_client: TestClien
     loop = client._loop  # type: ignore[attr-defined]
     store = reset_object_store_for_tests()
 
-    async def seed() -> tuple[str, str, str]:
+    async def seed() -> tuple[str, str, str, str]:
         async with factory() as session:
             user = User(
                 email=f"dl-{uuid4().hex[:8]}@ex.com",
@@ -79,31 +78,17 @@ def test_download_returns_file_body_not_metadata_json(download_client: TestClien
             )
             session.add(user)
             await session.flush()
-            org = Organization(name=f"DLOrg-{uuid4().hex[:6]}")
-            session.add(org)
+            workspace = Workspace(owner_user_id=user.id, name=f"DLOrg-{uuid4().hex[:6]}")
+            session.add(workspace)
             await session.flush()
-            session.add(
-                OrganizationMember(
-                    organization_id=org.id,
-                    user_id=user.id,
-                    role=MemberRole.OWNER.value,
-                )
-            )
             project = Project(
-                organization_id=org.id,
+                workspace_id=workspace.id,
                 name=f"DLProj-{uuid4().hex[:6]}",
                 aspect_ratio="9:16",
                 budget_limit=Decimal("0"),
             )
             session.add(project)
             await session.flush()
-            session.add(
-                ProjectMember(
-                    project_id=project.id,
-                    user_id=user.id,
-                    role=MemberRole.OWNER.value,
-                )
-            )
             exp = Export(
                 project_id=project.id,
                 format="timeline_json",
@@ -126,9 +111,9 @@ def test_download_returns_file_body_not_metadata_json(download_client: TestClien
                 mime_type="application/zip",
             )
             await session.commit()
-            return str(user.email), str(project.id), str(exp.id)
+            return str(user.email), str(workspace.id), str(project.id), str(exp.id)
 
-    email, project_id, export_id = loop.run_until_complete(seed())
+    email, workspace_id, project_id, export_id = loop.run_until_complete(seed())
 
     csrf = client.get("/api/v1/auth/csrf").json()["csrf_token"]
     client.post(
@@ -136,6 +121,7 @@ def test_download_returns_file_body_not_metadata_json(download_client: TestClien
         json={"email": email, "password": "password123"},
         headers={"X-CSRF-Token": csrf},
     )
+    client.headers["X-Workspace-Id"] = workspace_id
     csrf = client.get("/api/v1/auth/csrf").json()["csrf_token"]
     g = client.post(
         f"/api/v1/projects/{project_id}/exports/{export_id}/download-grant",

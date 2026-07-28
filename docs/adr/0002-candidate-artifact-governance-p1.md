@@ -25,7 +25,7 @@
 
 候选产物治理整体延期到 P1.1，不修改当前 `01`–`06` 的 P0 数据合同、DAG、接口和黄金样本完成定义。P0 继续以每个 NodeRun 的单一正式 `result_artifact_id` 完成生成、审核、局部重跑和交付闭环。
 
-P0 已吸收且继续实施的相关底座包括：项目成员和 RLS、Shot 与资产引用、Canonical Character Reference、AssetStateTimeline、ContinuityRule、Review、Artifact 不可变性、`input_hash`、缓存、局部失效、预算/成本和可追溯交付。
+P0 已吸收且继续实施的相关底座包括：私有 Workspace 所有者和项目 RLS、Shot 与资产引用、Canonical Character Reference、AssetStateTimeline、ContinuityRule、Review、Artifact 不可变性、`input_hash`、缓存、局部失效、预算/成本和可追溯交付。
 
 ### 2. P1.1 建立独立候选产物 Module
 
@@ -80,9 +80,9 @@ P1.1 的候选产物 Module 在 Artifact 与 Shot/Asset/Reference 之间提供�
 
 ### 4. 权限和界面约束
 
-- 数据层继续保留 `owner/admin/editor/reviewer/viewer` 五角色，避免为三类常用工作流破坏既有合同。
-- 首版常用 UI 可将 Owner/Admin 汇总为项目管理入口，并突出 Editor 与 Reviewer；Viewer 保持只读观察能力。
-- 提升为 Canonical Reference、覆盖已审核 Shot 选择和正式导出必须经过相应权限与审计。
+- P1.1 仍使用当前私有 Workspace 所有者模型：只有 `Workspace.owner_user_id` 可以处置该空间中项目的候选、正式引用和导出。
+- P1.1 不引入成员、角色、邀请、共享或空间转让。未来多人协作必须先单独批准授权模型，不能复活已移除的组织兼容层。
+- 提升为 Canonical Reference、覆盖已审核 Shot 选择和正式导出必须经过所有者操作与审计。
 - 候选池、正式资产库、故事板/无限画布、导演台和编辑器是不同视图或 Module，必须消费同一 Project、Shot、Asset、Artifact、Review、GraphVersion 和 Delivery 事实源。
 - 画布不能直接写执行状态；导演台数据必须在 P2 版本化并进入生成输入；OpenCut 只有通过 S5 后 Spike 才能接入。
 
@@ -110,7 +110,7 @@ P1.1 实现至少覆盖：
 
 ## 后果
 
-正面结果：候选复用从 UI 功能变成可治理的生产事实；团队可以解释为什么选片、避免坏参考污染后续镜头，并把有价值的非入选结果转化为项目资产。
+正面结果：候选复用从 UI 功能变成可治理的生产事实；创作者可以解释为什么选片、避免坏参考污染后续镜头，并把有价值的非入选结果转化为项目资产。
 
 代价：P1.1 会引入新的关系、状态机、并发控制、权限和迁移工作；NodeRun 单结果假设需要受控演进。因此它不得在 P0 末期以小功能名义插入。
 

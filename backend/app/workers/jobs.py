@@ -10,7 +10,7 @@ from uuid import UUID
 from arq import Retry
 
 from app.config import get_settings
-from app.shared.db import get_session_factory, set_rls_context
+from app.shared.db import get_session_factory, set_node_run_rls_context
 from app.shared.errors import AppError, NodeRunAlreadyClaimedError
 from app.shared.model_registry import load_all_models
 
@@ -48,20 +48,12 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
     _ = ctx
     factory = get_session_factory()
     run_uuid = UUID(node_run_id)
-    worker_user_id = None
-    worker_project_id = None
+    scope = None
     async with factory() as session:
         try:
-            run = await session.get(NodeRun, run_uuid)
-            if run is None:
+            scope = await set_node_run_rls_context(session, node_run_id=run_uuid)
+            if scope is None:
                 return {"status": "failed", "error": "node_run not found"}
-            worker_user_id = run.created_by
-            worker_project_id = run.project_id
-            await set_rls_context(
-                session,
-                user_id=worker_user_id,
-                project_id=worker_project_id,
-            )
             run = await session.get(NodeRun, run_uuid)
             if run is None:
                 return {"status": "failed", "error": "node_run not visible under RLS"}
@@ -100,11 +92,8 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             # trigger a duplicate submission.
             try:
                 async with factory() as s2:
-                    await set_rls_context(
-                        s2,
-                        user_id=worker_user_id,
-                        project_id=worker_project_id,
-                    )
+                    if await set_node_run_rls_context(s2, node_run_id=run_uuid) is None:
+                        return {"status": "failed", "error": str(exc)[:300]}
                     run2 = await s2.get(NodeRun, run_uuid)
                     if run2 is not None and run2.status in {"queued", "running"}:
                         run2.status = "failed"

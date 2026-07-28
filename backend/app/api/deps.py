@@ -6,10 +6,10 @@ from collections.abc import AsyncGenerator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Cookie, Depends, Header, Request
+from fastapi import Cookie, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import User
+from app.access.models import User, Workspace
 from app.access.service import AccessService
 from app.config import Settings, get_settings
 from app.shared.db import get_session, set_rls_context
@@ -42,12 +42,42 @@ async def get_current_user(
         user_id: UUID = parse_session_token(dramaforge_session, secret=settings.session_secret)
     except ValueError as exc:
         raise UnauthorizedError("invalid session") from exc
-    # Establish user RLS context early (org/project refined by route services).
+    # Establish user RLS context early (workspace/project refined by route services).
     await set_rls_context(session, user_id=user_id)
     return await AccessService(session).get_user(user_id)
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def require_selected_workspace(
+    user: CurrentUser,
+    session: SessionDep,
+    x_workspace_id: Annotated[UUID | None, Header(alias="X-Workspace-Id")] = None,
+    query_workspace_id: Annotated[UUID | None, Query(alias="workspace_id")] = None,
+) -> Workspace:
+    """Apply the owned workspace selected for a project-scoped request.
+
+    Browser fetches use ``X-Workspace-Id``. The query fallback exists only so
+    native image/download navigations can carry the same explicit scope.
+    """
+    if x_workspace_id is not None and query_workspace_id is not None:
+        if x_workspace_id != query_workspace_id:
+            raise ForbiddenError("workspace context mismatch")
+    workspace_id = x_workspace_id or query_workspace_id
+    if workspace_id is None:
+        raise ForbiddenError("workspace context required")
+
+    workspace = await AccessService(session).get_workspace_for_owner(
+        workspace_id=workspace_id,
+        user=user,
+    )
+    session.info["selected_workspace_id"] = workspace.id
+    await set_rls_context(session, user_id=user.id, workspace_id=workspace.id)
+    return workspace
+
+
+SelectedWorkspace = Annotated[Workspace, Depends(require_selected_workspace)]
 
 
 async def require_csrf(

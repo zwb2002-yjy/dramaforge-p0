@@ -238,27 +238,38 @@ def git_context(repo_root: Path) -> tuple[Path, Path, str]:
     return primary_root, worktree_root, branch
 
 
-def validate_primary_main(primary_root: Path) -> None:
+def validate_primary_dev(primary_root: Path, *, require_synced: bool = True) -> None:
     root_branch = _git(primary_root, "branch", "--show-current")
-    if root_branch != "main":
+    if root_branch != "dev":
         raise GuardrailError(
-            f"repository root worktree must stay on main; current branch is {root_branch}"
+            f"repository root worktree must stay on dev; current branch is {root_branch}"
         )
-    if _git(primary_root, "status", "--porcelain"):
-        raise GuardrailError("repository root main worktree must stay clean")
-    main_sha = _git(primary_root, "rev-parse", "main")
-    origin_main_sha = _git(primary_root, "rev-parse", "origin/main")
-    if main_sha != origin_main_sha:
+    if require_synced and _git(primary_root, "status", "--porcelain"):
+        raise GuardrailError("repository root dev worktree must stay clean")
+    if not require_synced:
+        return
+    dev_sha = _git(primary_root, "rev-parse", "dev")
+    origin_dev_sha = _git(primary_root, "rev-parse", "origin/dev")
+    if dev_sha != origin_dev_sha:
         raise GuardrailError(
-            f"repository root main must match origin/main; got "
-            f"{main_sha} != {origin_main_sha}"
+            f"repository root dev must match origin/dev; got "
+            f"{dev_sha} != {origin_dev_sha}"
         )
 
 
-def validate_worktree(repo_root: Path, task_id: str) -> dict[str, str]:
+def validate_worktree(
+    repo_root: Path, task_id: str, *, require_synced: bool = True
+) -> dict[str, str]:
     normalized_task = normalize_task_id(task_id)
     primary_root, worktree_root, branch = git_context(repo_root)
-    validate_primary_main(primary_root)
+    validate_primary_dev(primary_root, require_synced=require_synced)
+    if os.path.normcase(str(worktree_root)) == os.path.normcase(str(primary_root)):
+        return {
+            "task_id": normalized_task,
+            "branch": "dev",
+            "worktree": ".",
+        }
+
     expected_branch = f"agent/{normalized_task}"
     expected_worktree = (primary_root / ".worktrees" / normalized_task).resolve()
     if branch != expected_branch:
@@ -304,19 +315,11 @@ def _validate_completed_context(
     owned_paths: list[str],
     declared_commit: str,
 ) -> tuple[str, list[str]]:
-    validate_worktree(repo_root, task_id)
+    context = validate_worktree(repo_root, task_id, require_synced=False)
     if _git(repo_root, "status", "--porcelain"):
         raise GuardrailError(
             "COMPLETED requires a clean task worktree with every change committed"
         )
-    if not _git_succeeds(repo_root, "merge-base", "--is-ancestor", "origin/main", "HEAD"):
-        raise GuardrailError(
-            "COMPLETED requires the task branch to contain the current origin/main"
-        )
-    commits_ahead = int(_git(repo_root, "rev-list", "--count", "origin/main..HEAD"))
-    if commits_ahead < 1:
-        raise GuardrailError("COMPLETED requires at least one task commit")
-
     head_commit = _git(repo_root, "rev-parse", "HEAD")
     if not declared_commit.strip():
         raise GuardrailError("COMPLETED requires the exact task commit")
@@ -330,11 +333,18 @@ def _validate_completed_context(
         )
 
     changed_files = normalize_owned_paths(
-        _git(repo_root, "diff", "--name-only", "--diff-filter=ACDMRTUXB", "origin/main...HEAD")
-        .splitlines()
+        _git(
+            repo_root,
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--diff-filter=ACDMRTUXB",
+            "HEAD",
+        ).splitlines()
     )
     if not changed_files:
-        raise GuardrailError("COMPLETED requires a nonempty committed diff")
+        raise GuardrailError("COMPLETED requires a nonempty task HEAD commit")
     unauthorized = [
         path
         for path in changed_files
@@ -343,6 +353,12 @@ def _validate_completed_context(
     if unauthorized:
         raise GuardrailError(
             "committed changes fall outside owned_paths: " + ", ".join(unauthorized)
+        )
+    if context["branch"] == "agent/" + task_id and not _git_succeeds(
+        repo_root, "merge-base", "--is-ancestor", "origin/dev", "HEAD"
+    ):
+        raise GuardrailError(
+            "COMPLETED requires an isolated task branch to contain current origin/dev"
         )
     return head_commit, changed_files
 
@@ -368,9 +384,12 @@ def _validate_merged_context(
     primary_root, worktree_root, branch = git_context(repo_root)
     if os.path.normcase(str(worktree_root)) != os.path.normcase(str(primary_root)):
         raise GuardrailError("MERGED must be recorded from the repository root worktree")
-    if branch != "main":
-        raise GuardrailError(f"MERGED requires root branch main; current branch is {branch}")
-    validate_primary_main(primary_root)
+    main_sha = _git(primary_root, "rev-parse", "main")
+    origin_main_sha = _git(primary_root, "rev-parse", "origin/main")
+    if main_sha != origin_main_sha:
+        raise GuardrailError(
+            f"local main must match origin/main; got {main_sha} != {origin_main_sha}"
+        )
     if pr_number < 1:
         raise GuardrailError("MERGED requires a positive GitHub pull request number")
     if approved_by != MERGE_APPROVER:
@@ -393,14 +412,10 @@ def _validate_merged_context(
         raise GuardrailError(f"GitHub PR #{pr_number} is not merged")
     if raw_pr.get("baseRefName") != "main":
         raise GuardrailError(f"GitHub PR #{pr_number} does not target main")
-    expected_head = f"agent/{task_id}"
-    if raw_pr.get("headRefName") != expected_head:
+    head_ref = str(raw_pr.get("headRefName") or "")
+    if head_ref != "dev" and not head_ref.startswith("agent/hotfix-"):
         raise GuardrailError(
-            f"GitHub PR #{pr_number} head must be {expected_head}"
-        )
-    if str(raw_pr.get("headRefOid") or "") != completed_commit:
-        raise GuardrailError(
-            f"GitHub PR #{pr_number} head does not match the recorded COMPLETED commit"
+            f"GitHub PR #{pr_number} head must be dev or agent/hotfix-<task-id>"
         )
 
     merged_by = str((raw_pr.get("mergedBy") or {}).get("login") or "")
@@ -442,6 +457,12 @@ def _validate_merged_context(
     if not _git_succeeds(primary_root, "merge-base", "--is-ancestor", merge_commit, "main"):
         raise GuardrailError(
             f"local main does not contain GitHub PR #{pr_number} merge commit {merge_commit}"
+        )
+    if not _git_succeeds(
+        primary_root, "merge-base", "--is-ancestor", completed_commit, "main"
+    ):
+        raise GuardrailError(
+            f"local main does not contain the recorded COMPLETED commit {completed_commit}"
         )
     return f"@{merged_by}", merge_commit
 

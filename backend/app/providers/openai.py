@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.providers.fake import FakeOpenAIAdapter
-from app.providers.organization_credentials import settings_for_organization_provider
+from app.providers.workspace_credentials import settings_for_workspace_provider
 
 
 class AnthropicCompatibleTextAdapter:
@@ -171,16 +171,16 @@ def get_openai_adapter(
     return FakeOpenAIAdapter()
 
 
-async def get_openai_adapter_for_organization(
+async def get_openai_adapter_for_workspace(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     allow_live: bool = False,
 ) -> Any:
-    """Resolve the project organization credential before creating a text adapter."""
-    settings = await settings_for_organization_provider(
+    """Resolve the project workspace credential before creating a text adapter."""
+    settings = await settings_for_workspace_provider(
         session,
-        organization_id=organization_id,
+        workspace_id=workspace_id,
         provider="text",
     )
     return get_openai_adapter(allow_live=allow_live, settings=settings)

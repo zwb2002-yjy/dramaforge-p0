@@ -1,6 +1,6 @@
 # DramaForge Agent 开发执行规范
 
-**版本**：1.0
+**版本**：1.1
 **适用仓库**：`D:\调研\dramaforge`
 **生效前提**：与 `AGENT_EXECUTION_PROTOCOL.md`、`agent.md`、`docs/开发执行检查点.md` 共同构成 Agent 执行合同。发生冲突时，以 `AGENT_EXECUTION_PROTOCOL.md` 和 `agent.md` 为准。
 
@@ -8,10 +8,10 @@
 
 ## 1. 总则
 
-1. 所有项目改动必须以 **Task** 为单位管理，通过 `agent/<task-id>` 分支 + GitHub PR 进入 `main`。
+1. 日常项目改动以 **Task** 为单位管理，在 `dev` 分支提交并推送。稳定发布只通过 `dev -> main` 的 GitHub PR 进入 `main`。
 2. **禁止直接推送 `main`**。本地 hook 会拒绝 `git push origin main`。
-3. **禁止直接修改本地 `main` 工作树**。仓库根工作区只用于状态检查、分支切换和账本操作，业务代码写入独立的 `.worktrees/<task-id>`。
-4. 每个写入 Task 使用独立分支、独立 worktree、不重叠的 `owned_paths`。
+3. 仓库根工作区默认跟踪 `dev`，承载日常串行开发；`main` 只用于发布核验、hotfix 基线和同步。
+4. 仅并行隔离 Task 使用独立 `agent/<task-id>` 分支、独立 worktree 和不重叠的 `owned_paths`；其 PR 目标为 `dev`。
 5. Agent 可以提交、推送、创建 PR、复核 diff，但 **不得批准、合并或记录 `MERGED`**。只有 `@zwb2002-yjy` 能执行这些动作。
 6. 每次会话开始时必须先恢复事实：运行 `.agent-control/control.ps1 -Operation open` 和 `tail -Tail 20`，并检查 `git status --short`、`git worktree list`、`git branch --all`、`git remote -v`。
 
@@ -23,12 +23,12 @@
 
 ```text
 在 docs/开发执行检查点.md 写 Task 合同
-  → 用 scripts/task_worktree.ps1 创建 agent/<task-id> 分支和 .worktrees/<task-id>
+  → 日常 Task 在同步后的 dev 实现；并行 Task 用 scripts/task_worktree.ps1 创建 agent/<task-id> 分支和 .worktrees/<task-id>
   → .agent-control/control.ps1 append STARTED
-  → 在独立 worktree 中实现、测试、自审
-  → git add 本 Task 文件；git commit；git push origin agent/<task-id>
-  → 创建/更新 GitHub PR（目标 main，来源 agent/<task-id>）
-  → CI 全绿 + 用户批准后由用户合并
+  → 在 dev 根 worktree（或并行任务的独立 worktree）中实现、测试、自审
+  → git add 本 Task 文件；git commit；git push origin dev
+  → 稳定发布时创建 GitHub PR（目标 main，来源 dev）
+  → CI 全绿 + 用户批准后由用户合并稳定发布 PR
   → 用户写 MERGED 到 .agent-control/PROGRESS.jsonl
   → 清理本地/远端任务分支和 worktree
   → 更新 docs/开发执行检查点.md 为下一阶段唯一任务
@@ -68,9 +68,10 @@ Task ID：唯一且稳定
 
 ### 3.1 分支命名
 
-- 业务改动分支：`agent/<task-id>`，例如 `agent/REPO-GUARDRAILS-BOOTSTRAP`。
-- 禁止分支：`fix-*`、`feature/*`、`dev` 等不统一的分支名。
-- 一个 Task 只能有一个 `agent/<task-id>` 分支。
+- 日常集成分支：`dev`。
+- 稳定发布分支：`main`。
+- 并行隔离分支：`agent/<task-id>`，例如 `agent/REPO-GUARDRAILS-BOOTSTRAP`。
+- 紧急生产修复：`agent/hotfix-<task-id>`，从 `main` 创建、合回 `main` 后立即同步到 `dev`。
 
 ### 3.2 worktree 创建
 
@@ -81,15 +82,15 @@ scripts/task_worktree.ps1 -TaskId <task-id> [-OwnedPaths <paths>]
 ```
 
 脚本会校验：
-- 当前在 `main` 分支的 worktree；
-- `main` 与 `origin/main` 同步；
+- 当前在 `dev` 分支的 worktree；
+- `dev` 与 `origin/dev` 同步；
 - 该 Task 的 `owned_paths` 不与其他 `IN_PROGRESS` 或 `STARTED` 的 Task 重叠。
 
 ### 3.3 根工作区规则
 
-- 仓库根目录（`D:\调研\dramaforge`）不承载业务修改。
-- 在根目录允许的操作：切换分支、查看状态、运行账本命令、运行仓库级检查脚本。
-- 需要改代码时，必须进入 `.worktrees/<task-id>`。
+- 仓库根目录（`D:\调研\dramaforge`）默认检出 `dev` 并承载日常业务修改。
+- 需要并行写入隔离时，才进入 `.worktrees/<task-id>`。
+- `main` 只用于稳定发布核验、hotfix 基线和同步，不承载日常开发。
 
 ### 3.4 禁止的 Git 操作
 
@@ -148,9 +149,9 @@ REPO-GUARDRAILS-BOOTSTRAP: add branch/worktree guardrail script
 
 ### 5.1 PR 来源与目标
 
-- PR 目标分支必须是 `main`。
-- PR 来源分支必须是 `agent/<task-id>`。
-- CI 会拒绝来源不是 `agent/*` 的 PR。
+- 常规稳定发布 PR 的目标必须是 `main`，来源必须是 `dev`。
+- 并行隔离 Task 的 PR 目标必须是 `dev`，来源必须是 `agent/<task-id>`。
+- 紧急 hotfix PR 可从 `agent/hotfix-*` 目标 `main`，且合并后必须同步到 `dev`。
 
 ### 5.2 PR 模板
 
@@ -171,7 +172,7 @@ REPO-GUARDRAILS-BOOTSTRAP: add branch/worktree guardrail script
 - [ ] frontend-smoke
 - [ ] frontend-smoke-windows
 - [ ] No generated formal evidence was committed from a dirty worktree.
-- [ ] The branch is `agent/<task-id>` and the PR targets `main`.
+- [ ] The PR follows the `dev -> main`, `agent/<task-id> -> dev`, or `agent/hotfix-* -> main` flow.
 
 ## Approval
 - [ ] `@zwb2002-yjy` has reviewed and approved this PR.
@@ -263,8 +264,8 @@ PR 合并前必须通过 `.github/workflows/ci.yml` 定义的全部 job：
 ### 8.2 subagent 职责
 
 - 只读 subagent 可以并行，不需要 worktree，但仍须记录 `STARTED` 和结束状态。
-- 写入 subagent 必须使用独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`。
-- subagent 在自己的分支提交并推送，不得直接修改 `main`。
+- 并行写入 subagent 必须使用独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`。
+- subagent 在自己的分支提交并推送，PR 合入 `dev`；日常主开发直接在 `dev` 提交并推送。两者都不得直接修改或推送 `main`。
 - subagent 返回时须提供：改动文件、测试命令与结果、commit SHA、已知阻塞。
 
 ### 8.3 并行限制
@@ -277,13 +278,16 @@ PR 合并前必须通过 `.github/workflows/ci.yml` 定义的全部 job：
 
 ## 9. 合并后清理清单
 
-PR 合并到 `main` 后，按顺序执行：
+稳定发布 PR 合并到 `main` 后，按顺序执行：
 
 1. 切回根工作区并拉取最新 `main`：
    ```powershell
    cd D:\调研\dramaforge
    git checkout main
    git pull origin main
+   git checkout dev
+   git merge main
+   git push origin dev
    ```
 2. 删除本地任务分支：
    ```powershell
@@ -368,7 +372,7 @@ npm run test:smoke
 - [ ] 前端 lint、typecheck、Vitest、build 通过。
 - [ ] Playwright smoke 通过。
 - [ ] 没有提交密钥、真实数据、构建产物、临时文件。
-- [ ] PR 目标 `main`，来源 `agent/<task-id>`，模板填写完整。
+- [ ] 日常改动已推送 `dev`；稳定发布 PR 为 `dev -> main`，或隔离/hotfix PR 使用允许的例外流向，模板填写完整。
 - [ ] 已创建/更新 PR，等待 `@zwb2002-yjy` review。
 - [ ] `.agent-control/PROGRESS.jsonl` 已追加 `COMPLETED`。
 
@@ -379,3 +383,4 @@ npm run test:smoke
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | 1.0 | 2026-07-23 | 建立 DramaForge Agent 改动管理、分支、提交、PR、CI、账本和 subagent 规范。 |
+| 1.1 | 2026-07-26 | 改为 dev 日常集成、main 稳定发布，短期 agent 分支只用于并行隔离或 hotfix。 |

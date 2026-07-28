@@ -202,9 +202,9 @@ async def import_script(
     text: str,
     actor: User | None = None,
 ) -> ImportResult:
-    """Persist ScriptDocument + Episode + Scenes + Shots under project membership."""
+    """Persist ScriptDocument + Episode + Scenes + Shots under an owned project."""
     if actor is not None:
-        await ProjectService(session).get_project_for_member(project_id=project_id, actor=actor)
+        await ProjectService(session).get_project_for_owner(project_id=project_id, actor=actor)
     parsed = parse_script_markdown(text)
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     existing_doc = (

@@ -534,14 +534,14 @@ def main() -> int:
             )
             if registered.status_code not in {200, 201}:
                 return finish(f"register failed {registered.status_code}: {_problem(registered)}")
-            org = post("/api/v1/organizations", {"name": f"Formal-{uuid4().hex[:8]}"})
+            org = post("/api/v1/workspaces", {"name": f"Formal-{uuid4().hex[:8]}"})
             if org.status_code not in {200, 201}:
-                return finish(f"organization failed {org.status_code}: {_problem(org)}")
+                return finish(f"workspace failed {org.status_code}: {_problem(org)}")
 
             created = post(
                 "/api/v1/creation/start-project",
                 {
-                    "organization_id": org.json()["id"],
+                    "workspace_id": org.json()["id"],
                     "name": args.project_name.strip(),
                     "aspect_ratio": "9:16",
                     "experience_mode": "workbench",

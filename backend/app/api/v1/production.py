@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
-from app.api.deps import CsrfDep, CurrentUser, SessionDep
+from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.delivery.download import (
     authorize_export_download,
     fetch_export_bytes,
@@ -21,7 +21,9 @@ from app.execution.models import Artifact, NodeRun
 from app.runtime.scheduler import AgentRunScheduler
 from app.shared.errors import ForbiddenError
 
-router = APIRouter(tags=["production"])
+router = APIRouter(
+    tags=["production"], dependencies=[Depends(require_selected_workspace)]
+)
 
 
 class NodeRunRead(BaseModel):
@@ -86,10 +88,10 @@ async def get_artifact_content(
     user: CurrentUser,
     session: SessionDep,
 ) -> Response:
-    """Stream artifact bytes for workstation preview (membership + RLS)."""
+    """Stream artifact bytes for the owning user's workspace."""
     from app.storage.minio_store import get_object_store
 
-    await ProjectService(session).get_project_for_member(
+    await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=user
     )
     art = await session.get(Artifact, artifact_id)
@@ -114,7 +116,7 @@ async def project_snapshot(
     user: CurrentUser,
     session: SessionDep,
 ) -> ProjectSnapshot:
-    project = await ProjectService(session).get_project_for_member(
+    project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=user
     )
     runs = list(
@@ -182,9 +184,12 @@ async def dispatch_project_work(
     _: CsrfDep,
 ) -> DispatchResponse:
     """Publish Outbox + enqueue Arq jobs only — does not run Adapters."""
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     sched = AgentRunScheduler(session)
-    n = await sched.dispatch_pending(worker_id=f"api-enqueue:{user.id}")
+    n = await sched.dispatch_pending(
+        worker_id=f"api-enqueue:{user.id}",
+        project_id=project_id,
+    )
     return DispatchResponse(enqueued=n, job_ids=list(sched.enqueued_job_ids))
 
 
@@ -200,7 +205,7 @@ async def enqueue_node_run(
     _: CsrfDep,
 ) -> EnqueueResponse:
     """Enqueue Worker job for a NodeRun. Adapter runs only in Worker."""
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     run = await session.get(NodeRun, node_run_id)
     if run is None or run.project_id != project_id:
         from app.shared.errors import NotFoundError
@@ -218,14 +223,7 @@ async def export_project(
     session: SessionDep,
     _: CsrfDep,
 ) -> ExportResponse:
-    from app.access.projects import ROLES_EXPORT
-
-    await ProjectService(session).require_project_role(
-        project_id=project_id,
-        actor=user,
-        allowed=ROLES_EXPORT,
-        action="export deliverables",
-    )
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     result = await build_project_export(
         session,
         project_id=project_id,
@@ -281,7 +279,7 @@ async def produce_golden_path(
     """Import frozen golden script if needed path via fixture, produce 10 shots, export."""
     from app.execution.golden_path import run_golden_p0_path
 
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     result = await run_golden_p0_path(
         session,
         project_id=project_id,
@@ -315,7 +313,7 @@ async def grant_export_download(
     _: CsrfDep,
     object_role: str = "timeline_json",
 ) -> DownloadGrantResponse:
-    await ProjectService(session).get_project_for_member(
+    await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=user
     )
     grant = await authorize_export_download(
@@ -341,7 +339,7 @@ async def download_export_object(
     object_role: str = "timeline_json",
 ) -> Response:
     """Authorized download: return raw file bytes (not JSON metadata)."""
-    await ProjectService(session).get_project_for_member(
+    await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=user
     )
     grant = await authorize_export_download(

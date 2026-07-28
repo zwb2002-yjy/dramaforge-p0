@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
-from app.api.deps import CsrfDep, CurrentUser, SessionDep
+from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Shot
 from app.assets.script_import import import_script
 
-router = APIRouter(tags=["scripts"])
+router = APIRouter(
+    tags=["scripts"], dependencies=[Depends(require_selected_workspace)]
+)
 
 
 class ScriptImportBody(BaseModel):
@@ -57,7 +59,7 @@ async def import_project_script(
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> ScriptImportResponse:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     result = await import_script(
         session,
         project_id=project_id,
@@ -93,7 +95,7 @@ async def list_project_shots(
     user: CurrentUser,
     session: SessionDep,
 ) -> list[ShotRead]:
-    await ProjectService(session).get_project_for_member(project_id=project_id, actor=user)
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     rows = list(
         (
             await session.execute(

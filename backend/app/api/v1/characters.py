@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.access.projects import ProjectService
-from app.api.deps import CsrfDep, CurrentUser, SessionDep
+from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.characters import register_lead_character
 from app.config import get_settings
-from app.providers.flux import get_flux_adapter_for_organization
+from app.providers.flux import get_flux_adapter_for_workspace
 from app.storage.minio_store import get_object_store
 
-router = APIRouter(tags=["characters"])
+router = APIRouter(
+    tags=["characters"], dependencies=[Depends(require_selected_workspace)]
+)
 
 
 class RegisterLeadBody(BaseModel):
@@ -46,7 +48,7 @@ async def register_project_lead(
     """Register lead + canonical reference image (required for consistent keyframes)."""
     from app.shared.errors import ValidationAppError
 
-    project = await ProjectService(session).get_project_for_member(
+    project = await ProjectService(session).get_project_for_owner(
         project_id=project_id,
         actor=user,
     )
@@ -58,9 +60,9 @@ async def register_project_lead(
         import asyncio
 
         # Formal path: live only when configured; no silent Fake outside test
-        adapter = await get_flux_adapter_for_organization(
+        adapter = await get_flux_adapter_for_workspace(
             session,
-            organization_id=project.organization_id,
+            workspace_id=project.workspace_id,
             allow_live=settings.app_env != "test",
             allow_fake=settings.app_env == "test",
         )

@@ -1,4 +1,4 @@
-"""P0 gate matrix — one test per closable freeze row (shared harness + store).
+﻿"""P0 gate matrix — one test per closable freeze row (shared harness + store).
 
 External-only rows (S0-A FAR/FRR samples, live Playwright browser, live multi-provider)
 are documented as skip reasons, not marked passed.
@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import Workspace, User
 from app.access.projects import ProjectService
 from app.assets import models as _am  # noqa: F401
 from app.assets.characters import register_lead_character, require_canonical_for_shot
@@ -39,7 +39,7 @@ from app.production.service import GraphService
 from app.providers.fake import FakeFluxAdapter
 from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
 from app.shared.base import Base
-from app.shared.enums import MemberRole, OutboxStatus
+from app.shared.enums import OutboxStatus
 from app.shared.errors import ForbiddenError, ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
@@ -61,7 +61,7 @@ async def session() -> AsyncSession:
     reset_object_store_for_tests()
 
 
-async def _user_org(session: AsyncSession) -> tuple[User, object]:
+async def _user_workspace(session: AsyncSession) -> tuple[User, object]:
     user = User(
         email=f"g-{uuid4().hex[:8]}@example.com",
         display_name="G",
@@ -69,23 +69,18 @@ async def _user_org(session: AsyncSession) -> tuple[User, object]:
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"GOrg-{uuid4().hex[:6]}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"GWorkspace-{uuid4().hex[:6]}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id, user_id=user.id, role=MemberRole.OWNER.value
-        )
-    )
     await session.commit()
-    return user, org.id
+    return user, workspace.id
 
 
 @pytest.mark.asyncio
 async def test_matrix_start_project_brief_zero_text_ops(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     r = await CreationService(session).start_project(
-        organization_id=org_id,
+        workspace_id=workspace_id,
         name="GateStart",
         aspect_ratio="9:16",
         actor=user,
@@ -98,9 +93,9 @@ async def test_matrix_start_project_brief_zero_text_ops(session: AsyncSession) -
 
 @pytest.mark.asyncio
 async def test_matrix_async_enqueue_then_worker_shared_store(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     started = await CreationService(session).start_project(
-        organization_id=org_id, name="GateAsync", aspect_ratio="9:16", actor=user
+        workspace_id=workspace_id, name="GateAsync", aspect_ratio="9:16", actor=user
     )
     rev = await CreationService(session).update_brief_manual(
         project_id=started.project_id, actor=user, logline="Opening rain"
@@ -141,9 +136,9 @@ async def test_matrix_async_enqueue_then_worker_shared_store(session: AsyncSessi
 
 @pytest.mark.asyncio
 async def test_matrix_canonical_ref_required_rejects(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     project = await ProjectService(session).create_project(
-        organization_id=org_id, name="Canon", aspect_ratio="9:16", actor=user
+        workspace_id=workspace_id, name="Canon", aspect_ratio="9:16", actor=user
     )
     await session.commit()
     graphs = GraphService(session)
@@ -185,9 +180,9 @@ async def test_matrix_canonical_ref_required_rejects(session: AsyncSession) -> N
 
 @pytest.mark.asyncio
 async def test_matrix_budget_blocked(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     project = await ProjectService(session).create_project(
-        organization_id=org_id, name="Bud", aspect_ratio="9:16", actor=user
+        workspace_id=workspace_id, name="Bud", aspect_ratio="9:16", actor=user
     )
     await session.commit()
     graphs = GraphService(session)
@@ -224,9 +219,9 @@ async def test_matrix_budget_blocked(session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_matrix_ten_shot_face_two_source_and_lock(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     project = await ProjectService(session).create_project(
-        organization_id=org_id, name="Ten", aspect_ratio="9:16", actor=user
+        workspace_id=workspace_id, name="Ten", aspect_ratio="9:16", actor=user
     )
     await session.commit()
     shots = await produce_shots_p0(
@@ -274,9 +269,9 @@ async def test_matrix_ten_shot_face_two_source_and_lock(session: AsyncSession) -
 
 @pytest.mark.asyncio
 async def test_matrix_export_hash_equality_shared_store(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     started = await CreationService(session).start_project(
-        organization_id=org_id, name="Exp", aspect_ratio="9:16", actor=user
+        workspace_id=workspace_id, name="Exp", aspect_ratio="9:16", actor=user
     )
     rev = await CreationService(session).update_brief_manual(
         project_id=started.project_id, actor=user, logline="export path"
@@ -343,10 +338,10 @@ async def test_matrix_export_hash_equality_shared_store(session: AsyncSession) -
 
 
 @pytest.mark.asyncio
-async def test_matrix_cross_project_member_denied(session: AsyncSession) -> None:
-    owner, org_a = await _user_org(session)
+async def test_matrix_cross_workspace_owner_denied(session: AsyncSession) -> None:
+    owner, workspace_id = await _user_workspace(session)
     p = await ProjectService(session).create_project(
-        organization_id=org_a, name="Private", aspect_ratio="9:16", actor=owner
+        workspace_id=workspace_id, name="Private", aspect_ratio="9:16", actor=owner
     )
     await session.commit()
     intruder = User(
@@ -357,16 +352,16 @@ async def test_matrix_cross_project_member_denied(session: AsyncSession) -> None
     session.add(intruder)
     await session.commit()
     with pytest.raises(ForbiddenError):
-        await ProjectService(session).get_project_for_member(
+        await ProjectService(session).get_project_for_owner(
             project_id=p.id, actor=intruder
         )
 
 
 @pytest.mark.asyncio
 async def test_matrix_script_import_and_canonical(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     project = await ProjectService(session).create_project(
-        organization_id=org_id, name="ScriptGate", aspect_ratio="9:16", actor=user
+        workspace_id=workspace_id, name="ScriptGate", aspect_ratio="9:16", actor=user
     )
     await session.commit()
     text = GOLDEN.read_text(encoding="utf-8")
@@ -396,9 +391,9 @@ async def test_matrix_script_import_and_canonical(session: AsyncSession) -> None
 
 @pytest.mark.asyncio
 async def test_matrix_cache_hit_and_cancel(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     project = await ProjectService(session).create_project(
-        organization_id=org_id, name="CacheGate", aspect_ratio="9:16", actor=user
+        workspace_id=workspace_id, name="CacheGate", aspect_ratio="9:16", actor=user
     )
     await session.commit()
     graphs = GraphService(session)
@@ -451,9 +446,9 @@ async def test_matrix_cache_hit_and_cancel(session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_matrix_single_flight_one_leader(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     project = await ProjectService(session).create_project(
-        organization_id=org_id, name="SF", aspect_ratio="9:16", actor=user
+        workspace_id=workspace_id, name="SF", aspect_ratio="9:16", actor=user
     )
     await session.commit()
     graphs = GraphService(session)
@@ -540,9 +535,9 @@ async def test_matrix_outbox_dead_letter_replay(session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_matrix_authorized_export_download(session: AsyncSession) -> None:
-    user, org_id = await _user_org(session)
+    user, workspace_id = await _user_workspace(session)
     started = await CreationService(session).start_project(
-        organization_id=org_id, name="Dl", aspect_ratio="9:16", actor=user
+        workspace_id=workspace_id, name="Dl", aspect_ratio="9:16", actor=user
     )
     rev = await CreationService(session).update_brief_manual(
         project_id=started.project_id, actor=user, logline="dl path"

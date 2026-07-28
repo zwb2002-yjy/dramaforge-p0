@@ -33,14 +33,28 @@ values supplied by the secret manager, never literal keys in this document.
 ```bash
 export BYOK_PRIMARY_KEY_VERSION=v2
 export BYOK_KEYRING="v1:${BYOK_V1_FERNET_KEY},v2:${BYOK_V2_FERNET_KEY}"
+export BYOK_ROTATION_DATABASE_URL="postgresql+asyncpg://<rotation-login>:<secret>@127.0.0.1:5432/dramaforge"
 ```
 
-The credential store must contain at least one real, organization-scoped BYOK
+`BYOK_ROTATION_DATABASE_URL` must use a dedicated maintenance login, not the
+API or worker database login. Before the drill, a database administrator must
+grant that login the non-login `dramaforge_byok_rotation` role created by the
+migration:
+
+```sql
+GRANT dramaforge_byok_rotation TO <rotation_login>;
+```
+
+The rotation command explicitly assumes that role. It has `BYPASSRLS` only
+for selecting/updating encrypted credentials and inserting metadata-only
+rotation audits; application roles remain subject to workspace RLS.
+
+The credential store must contain at least one real, workspace-scoped BYOK
 credential before this drill can demonstrate re-encryption. A result with
 `scanned: 0` is a configuration check only and does not close the rotation
-evidence gate. Organization-scoped `text` and `agnes` credentials are used by
+evidence gate. Workspace-scoped `text` and `agnes` credentials are used by
 the Agent Brief/Plan, canonical image, and Worker image/video adapters. When
-an organization has no stored credential, the existing process environment key
+a workspace has no stored credential, the existing process environment key
 remains a local-development fallback. Do not claim that rotating the stored
 credential changes an unrelated global environment key.
 The drill fails before writing `ops_drill.json` when `reencrypted` is zero, so

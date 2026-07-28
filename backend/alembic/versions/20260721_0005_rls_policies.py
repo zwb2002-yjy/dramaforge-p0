@@ -1,4 +1,4 @@
-"""S1-RLS-0.1: ENABLE RLS + project/org scope policies for shipped tables.
+"""S1-RLS-0.1: ENABLE RLS + private workspace/project scope policies.
 
 Revision ID: 20260721_0005
 Revises: 20260721_0004
@@ -17,7 +17,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 # Tables with direct project_id (USING/WITH CHECK = current_project_id)
 _PROJECT_TABLES = (
-    "project_members",
     "user_project_preferences",
     "creative_briefs",
     "creative_brief_revisions",
@@ -41,6 +40,18 @@ def upgrade() -> None:
         BEGIN
           IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dramaforge_app') THEN
             CREATE ROLE dramaforge_app NOINHERIT LOGIN PASSWORD 'dramaforge_app';
+          END IF;
+        END $$
+        """
+    )
+    op.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_roles WHERE rolname = 'dramaforge_worker_resolver'
+          ) THEN
+            CREATE ROLE dramaforge_worker_resolver NOLOGIN NOINHERIT BYPASSRLS;
           END IF;
         END $$
         """
@@ -111,46 +122,162 @@ def upgrade() -> None:
         $$
         """
     )
-
-    # projects: organization scope
-    op.execute("ALTER TABLE projects ENABLE ROW LEVEL SECURITY")
-    op.execute("ALTER TABLE projects FORCE ROW LEVEL SECURITY")
-    op.execute("DROP POLICY IF EXISTS projects_organization_scope ON projects")
     op.execute(
         """
-        CREATE POLICY projects_organization_scope ON projects
-        FOR ALL
-        USING (
-          organization_id = app.current_organization_id()
-          OR EXISTS (
-            SELECT 1 FROM project_members pm
-            WHERE pm.project_id = projects.id
-              AND pm.user_id = app.current_user_id()
+        CREATE OR REPLACE FUNCTION app.node_run_context(p_node_run_id uuid)
+        RETURNS TABLE(owner_user_id uuid, workspace_id uuid, project_id uuid)
+        LANGUAGE sql
+        STABLE
+        SECURITY DEFINER
+        SET search_path = public, pg_temp
+        AS $$
+          SELECT w.owner_user_id, w.id, p.id
+          FROM node_runs nr
+          JOIN projects p ON p.id = nr.project_id
+          JOIN workspaces w ON w.id = p.workspace_id
+          WHERE nr.id = p_node_run_id
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION app.queued_node_run_contexts(
+          p_limit integer,
+          p_project_id uuid DEFAULT NULL
+        )
+        RETURNS TABLE(node_run_id uuid, owner_user_id uuid, workspace_id uuid, project_id uuid)
+        LANGUAGE sql
+        STABLE
+        SECURITY DEFINER
+        SET search_path = public, pg_temp
+        AS $$
+          SELECT nr.id, w.owner_user_id, w.id, p.id
+          FROM node_runs nr
+          JOIN projects p ON p.id = nr.project_id
+          JOIN workspaces w ON w.id = p.workspace_id
+          WHERE nr.status = 'queued'
+            AND (p_project_id IS NULL OR nr.project_id = p_project_id)
+          ORDER BY nr.created_at, nr.id
+          LIMIT GREATEST(p_limit, 0)
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION app.pending_outbox_event_contexts(
+          p_limit integer,
+          p_project_id uuid DEFAULT NULL
+        )
+        RETURNS TABLE(
+          outbox_event_id uuid,
+          owner_user_id uuid,
+          workspace_id uuid,
+          project_id uuid
+        )
+        LANGUAGE sql
+        STABLE
+        SECURITY DEFINER
+        SET search_path = public, pg_temp
+        AS $$
+          SELECT oe.event_id, w.owner_user_id, w.id, p.id
+          FROM outbox_events oe
+          LEFT JOIN projects p ON p.id = oe.project_id
+          LEFT JOIN workspaces w ON w.id = p.workspace_id
+          WHERE (
+            (oe.status = 'pending' AND oe.next_attempt_at <= now())
+            OR (oe.status = 'leased' AND oe.leased_until < now())
           )
-          OR id = app.current_project_id()
-        )
-        WITH CHECK (
-          organization_id = app.current_organization_id()
-          OR organization_id IS NOT NULL
-        )
+            AND (p_project_id IS NULL OR oe.project_id = p_project_id)
+          ORDER BY oe.created_at, oe.event_id
+          LIMIT GREATEST(p_limit, 0)
+        $$
+        """
+    )
+    op.execute(
+        "ALTER FUNCTION app.node_run_context(uuid) OWNER TO dramaforge_worker_resolver"
+    )
+    op.execute(
+        "ALTER FUNCTION app.queued_node_run_contexts(integer, uuid) "
+        "OWNER TO dramaforge_worker_resolver"
+    )
+    op.execute(
+        "ALTER FUNCTION app.pending_outbox_event_contexts(integer, uuid) "
+        "OWNER TO dramaforge_worker_resolver"
+    )
+    op.execute("REVOKE ALL ON FUNCTION app.node_run_context(uuid) FROM PUBLIC")
+    op.execute(
+        "REVOKE ALL ON FUNCTION app.queued_node_run_contexts(integer, uuid) FROM PUBLIC"
+    )
+    op.execute(
+        "REVOKE ALL ON FUNCTION app.pending_outbox_event_contexts(integer, uuid) FROM PUBLIC"
+    )
+    op.execute(
+        "GRANT EXECUTE ON FUNCTION app.node_run_context(uuid) "
+        "TO dramaforge, dramaforge_app"
+    )
+    op.execute(
+        "GRANT EXECUTE ON FUNCTION app.queued_node_run_contexts(integer, uuid) "
+        "TO dramaforge, dramaforge_app"
+    )
+    op.execute(
+        "GRANT EXECUTE ON FUNCTION app.pending_outbox_event_contexts(integer, uuid) "
+        "TO dramaforge, dramaforge_app"
+    )
+    op.execute(
+        "GRANT SELECT ON node_runs, outbox_events, projects, workspaces "
+        "TO dramaforge_worker_resolver"
+    )
+
+    # Workspaces are visible and mutable only to their owning user.
+    op.execute("ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE workspaces FORCE ROW LEVEL SECURITY")
+    op.execute("DROP POLICY IF EXISTS workspaces_owner_scope ON workspaces")
+    op.execute(
+        """
+        CREATE POLICY workspaces_owner_scope ON workspaces
+        FOR ALL
+        USING (owner_user_id = app.current_user_id())
+        WITH CHECK (owner_user_id = app.current_user_id())
         """
     )
 
-    # organization_members: user sees own memberships in current org
-    op.execute("ALTER TABLE organization_members ENABLE ROW LEVEL SECURITY")
-    op.execute("ALTER TABLE organization_members FORCE ROW LEVEL SECURITY")
-    op.execute("DROP POLICY IF EXISTS org_members_scope ON organization_members")
+    # Projects must belong to a workspace owned by the current user.
+    op.execute("ALTER TABLE projects ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE projects FORCE ROW LEVEL SECURITY")
+    op.execute("DROP POLICY IF EXISTS projects_workspace_scope ON projects")
     op.execute(
         """
-        CREATE POLICY org_members_scope ON organization_members
+        CREATE POLICY projects_workspace_scope ON projects
         FOR ALL
         USING (
-          user_id = app.current_user_id()
-          OR organization_id = app.current_organization_id()
+          EXISTS (
+            SELECT 1 FROM workspaces w
+            WHERE w.id = projects.workspace_id
+              AND w.owner_user_id = app.current_user_id()
+          )
+          AND (
+            app.current_workspace_id() IS NULL
+            OR projects.workspace_id = app.current_workspace_id()
+          )
+          AND (
+            app.current_project_id() IS NULL
+            OR projects.id = app.current_project_id()
+          )
         )
         WITH CHECK (
-          user_id = app.current_user_id()
-          OR organization_id = app.current_organization_id()
+          EXISTS (
+            SELECT 1 FROM workspaces w
+            WHERE w.id = projects.workspace_id
+              AND w.owner_user_id = app.current_user_id()
+          )
+          AND (
+            app.current_workspace_id() IS NULL
+            OR projects.workspace_id = app.current_workspace_id()
+          )
+          AND (
+            app.current_project_id() IS NULL
+            OR projects.id = app.current_project_id()
+          )
         )
         """
     )
@@ -188,7 +315,7 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
         op.execute(f"DROP POLICY IF EXISTS {table}_project_scope ON {table}")
         # event_log.project_id is nullable — allow NULL only when no project context needed
-        if table == "event_log":
+        if table in {"event_log", "outbox_events"}:
             op.execute(
                 f"""
                 CREATE POLICY {table}_project_scope ON {table}
@@ -210,26 +337,11 @@ def upgrade() -> None:
                 FOR ALL
                 USING (
                   user_id = app.current_user_id()
-                  AND (
-                    project_id = app.current_project_id()
-                    OR app.current_project_id() IS NULL
-                  )
-                )
-                WITH CHECK (user_id = app.current_user_id())
-                """
-            )
-        elif table == "project_members":
-            op.execute(
-                f"""
-                CREATE POLICY {table}_project_scope ON {table}
-                FOR ALL
-                USING (
-                  user_id = app.current_user_id()
-                  OR project_id = app.current_project_id()
+                  AND project_id = app.current_project_id()
                 )
                 WITH CHECK (
                   user_id = app.current_user_id()
-                  OR project_id = app.current_project_id()
+                  AND project_id = app.current_project_id()
                 )
                 """
             )
@@ -240,11 +352,9 @@ def upgrade() -> None:
                 FOR ALL
                 USING (
                   project_id = app.current_project_id()
-                  OR app.current_project_id() IS NULL
                 )
                 WITH CHECK (
                   project_id = app.current_project_id()
-                  OR app.current_project_id() IS NULL
                 )
                 """
             )
@@ -368,14 +478,14 @@ def downgrade() -> None:
         "graph_versions",
         *_PROJECT_TABLES,
         "users",
-        "organization_members",
+        "workspaces",
         "projects",
     ):
         op.execute(f"DROP POLICY IF EXISTS {table}_project_scope ON {table}")
         if table == "projects":
-            op.execute("DROP POLICY IF EXISTS projects_organization_scope ON projects")
-        if table == "organization_members":
-            op.execute("DROP POLICY IF EXISTS org_members_scope ON organization_members")
+            op.execute("DROP POLICY IF EXISTS projects_workspace_scope ON projects")
+        if table == "workspaces":
+            op.execute("DROP POLICY IF EXISTS workspaces_owner_scope ON workspaces")
         if table == "users":
             op.execute("DROP POLICY IF EXISTS users_self ON users")
         op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")

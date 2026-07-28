@@ -318,17 +318,17 @@ def main() -> int:
             add("3.1.1a", "注册用户", "FAIL", f"{r.status_code} {r.text[:200]}")
             raise RuntimeError("register failed")
 
-        r = post("/api/v1/organizations", {"name": f"GateOrg-{uuid4().hex[:6]}"})
+        r = post("/api/v1/workspaces", {"name": f"GateWorkspace-{uuid4().hex[:6]}"})
         if r.status_code not in (200, 201):
-            add("3.1.1b", "创建组织", "FAIL", f"{r.status_code} {r.text[:200]}")
-            raise RuntimeError("org failed")
-        org_id = r.json()["id"]
-        add("3.1.1b", "创建组织", "PASS", org_id)
+            add("3.1.1b", "创建创作空间", "FAIL", f"{r.status_code} {r.text[:200]}")
+            raise RuntimeError("workspace creation failed")
+        workspace_id = r.json()["id"]
+        add("3.1.1b", "创建创作空间", "PASS", workspace_id)
 
         r = post(
             "/api/v1/creation/start-project",
             {
-                "organization_id": org_id,
+                "workspace_id": workspace_id,
                 "name": f"GateProj-{uuid4().hex[:6]}",
                 "aspect_ratio": "9:16",
                 "experience_mode": "quick",

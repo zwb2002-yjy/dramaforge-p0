@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import Enum, String
 from sqlalchemy.types import TypeEngine
 
-from app.shared.enums import ExperienceMode, GraphStatus, MemberRole, OutboxStatus, ProjectStage
+from app.shared.enums import ExperienceMode, GraphStatus, OutboxStatus, ProjectStage
 
 
 def pg_str_enum(name: str, *values: str) -> Enum:
@@ -35,7 +35,6 @@ def col_enum(pg: Enum, sqlite_len: int = 32) -> TypeEngine[Any]:
     return pg.with_variant(String(sqlite_len), "sqlite")
 
 
-MEMBER_ROLE = pg_py_enum(MemberRole, "member_role")
 PROJECT_STAGE = pg_py_enum(ProjectStage, "project_stage")
 EXPERIENCE_MODE = pg_py_enum(ExperienceMode, "experience_mode")
 OUTBOX_STATUS = pg_py_enum(OutboxStatus, "outbox_status")
