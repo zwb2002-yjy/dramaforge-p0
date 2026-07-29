@@ -68,7 +68,11 @@ def test_workspace_byok_requires_workspace_owner(client: TestClient, monkeypatch
     workspace_id, _ = _register_and_get_workspace(client)
     assert client.post(
         "/api/v1/auth/register",
-        json={"email": f"intruder-{uuid4().hex}@example.com", "password": "password123", "display_name": "Intruder"},
+        json={
+            "email": f"intruder-{uuid4().hex}@example.com",
+            "password": "password123",
+            "display_name": "Intruder",
+        },
     ).status_code == 201
     denied = client.put(
         f"/api/v1/workspaces/{workspace_id}/provider-credentials",
@@ -110,19 +114,37 @@ def test_workspace_credential_resolver_overrides_environment_and_keeps_ciphertex
         factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         old_key = Fernet.generate_key().decode("ascii")
         workspace_key = Fernet.generate_key().decode("ascii")
-        keyring = parse_keyring(primary_version="v2", encoded=f"v1:{old_key},v2:{workspace_key}", legacy_key="")
+        keyring = parse_keyring(
+            primary_version="v2", encoded=f"v1:{old_key},v2:{workspace_key}", legacy_key="",
+        )
         owner_id, workspace_id = uuid4(), uuid4()
         config = Settings(
-            app_env="development", byok_primary_key_version="v2", byok_keyring=f"v1:{old_key},v2:{workspace_key}",
-            text_llm_enabled=True, text_llm_api_key="environment-key", text_llm_base_url="https://text.example/v1",
+            app_env="development",
+            byok_primary_key_version="v2",
+            byok_keyring=f"v1:{old_key},v2:{workspace_key}",
+            text_llm_enabled=True,
+            text_llm_api_key="environment-key",
+            text_llm_base_url="https://text.example/v1",
         )
         async with factory() as session:
-            session.add(User(id=owner_id, email="owner@example.com", display_name="Owner", password_hash="hash"))
-            session.add(Workspace(id=workspace_id, owner_user_id=owner_id, name="Resolver workspace"))
+            session.add(User(
+                id=owner_id, email="owner@example.com",
+                display_name="Owner", password_hash="hash",
+            ))
+            session.add(Workspace(
+                id=workspace_id, owner_user_id=owner_id,
+                name="Resolver workspace",
+            ))
             await session.flush()
-            record = await store_credential(session, workspace_id=workspace_id, provider="text", plaintext="workspace-key", keyring=keyring)
+            record = await store_credential(
+                session, workspace_id=workspace_id, provider="text",
+                plaintext="workspace-key", keyring=keyring,
+            )
             await session.commit()
-            resolved = await settings_for_workspace_provider(session, workspace_id=workspace_id, provider="text", settings=config)
+            resolved = await settings_for_workspace_provider(
+                session, workspace_id=workspace_id,
+                provider="text", settings=config,
+            )
             assert resolved.text_llm_api_key == "workspace-key"
             assert config.text_llm_api_key == "environment-key"
             stored = await session.get(EncryptedProviderCredential, record.id)
@@ -134,10 +156,19 @@ def test_workspace_credential_resolver_overrides_environment_and_keeps_ciphertex
                 text_llm_enabled=True, text_llm_api_key="environment-key", text_llm_base_url="https://text.example/v1",
             )
             with pytest.raises(WorkspaceCredentialConfigurationError) as error:
-                await settings_for_workspace_provider(session, workspace_id=workspace_id, provider="text", settings=unavailable)
+                await settings_for_workspace_provider(
+                    session, workspace_id=workspace_id,
+                    provider="text", settings=unavailable,
+                )
             assert error.value.code == "WORKSPACE_BYOK_UNAVAILABLE"
         async with factory() as session:
-            assert await settings_for_workspace_provider(session, workspace_id=uuid4(), provider="text", settings=config) is config
+            assert (
+                await settings_for_workspace_provider(
+                    session, workspace_id=uuid4(),
+                    provider="text", settings=config,
+                )
+                is config
+            )
         await engine.dispose()
 
     asyncio.run(run())
