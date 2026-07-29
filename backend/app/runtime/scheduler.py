@@ -82,15 +82,15 @@ class AgentRunScheduler:
             limit=20,
             project_id=project_id,
         )
-        for scope in event_scopes:
+        for event_scope in event_scopes:
             await set_rls_context(
                 self._session,
-                user_id=scope.user_id,
-                workspace_id=scope.workspace_id,
-                project_id=scope.project_id,
+                user_id=event_scope.user_id,
+                workspace_id=event_scope.workspace_id,
+                project_id=event_scope.project_id,
             )
             event = await self._dispatcher.claim_one_by_event_id(
-                event_id=scope.event_id,
+                event_id=event_scope.event_id,
                 worker_id=worker_id,
             )
             if event is None:
@@ -112,13 +112,13 @@ class AgentRunScheduler:
             limit=50,
             project_id=project_id,
         )
-        for run_id, scope in candidates:
+        for run_id, node_run_scope in candidates:
             try:
                 await set_rls_context(
                     self._session,
-                    user_id=scope.user_id,
-                    workspace_id=scope.workspace_id,
-                    project_id=scope.project_id,
+                    user_id=node_run_scope.user_id,
+                    workspace_id=node_run_scope.workspace_id,
+                    project_id=node_run_scope.project_id,
                 )
                 job_id = await self._enqueue_node_run(run_id)
                 await self._session.commit()
@@ -128,9 +128,9 @@ class AgentRunScheduler:
                 await self._session.rollback()
                 await set_rls_context(
                     self._session,
-                    user_id=scope.user_id,
-                    workspace_id=scope.workspace_id,
-                    project_id=scope.project_id,
+                    user_id=node_run_scope.user_id,
+                    workspace_id=node_run_scope.workspace_id,
+                    project_id=node_run_scope.project_id,
                 )
                 await self._mark_queue_failed(run_id, error=str(exc))
         return count

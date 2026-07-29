@@ -17,32 +17,45 @@ P0 完成标准是使用一份 3-5 场、至少 10 Shot、至少 1 名主角的�
 唯一代码仓和 Git 根目录：
 
 ```text
-D:\调研\dramaforge
+D:\dramaforge
 ```
 
-`D:\调研\项目` 保存外部研究和源资料，不是开发工作区。任何应用代码、迁移、测试、fixture 或运行手册都不得写入研究目录。
+`D:\项目` 保存外部研究和源资料，不是开发工作区。任何应用代码、迁移、测试、fixture 或运行手册都不得写入研究目录。
 
 ## 本地启动
 
-### 0. Windows + WSL 推荐栈（绕过 Postgres 断连）
+### 架构总览
 
-本机若 PostgreSQL 在 **WSL**、API 却在 **Windows**，`127.0.0.1:5432` 的 localhost 转发会间歇断开，表现为 `/health` 的 `db=down` 与 503。  
-**默认绕过：API 与 PG 都在 WSL 内**，前端仍在 Windows。
+无论用哪种方式，最终都需要以下组件：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\start_p0_stack.ps1
-# 等价于 -Mode WslApi
-```
+| 组件 | 说明 |
+|------|------|
+| PostgreSQL 15 | 主数据库 |
+| Redis 7 | 任务队列（Arq） |
+| MinIO | S3 兼容对象存储 |
+| API (FastAPI) | `:8000`，后端服务 |
+| Worker (default + heavy) | Arq 异步任务消费 |
+| 前端 (Vite + React) | `:5173`，浏览器打开 |
 
-备选与原理见 [`docs/runbooks/local-stack-bypass.md`](docs/runbooks/local-stack-bypass.md)。
+`docker-compose.yml` 已容器化了除前端外的所有组件。**前端目前不容器化**——开发时需要 Vite HMR（热模块替换），始终保持 `npm run dev` 在宿主机运行。
 
-### 1. 环境文件
+下面提供三种部署方式，**任选其一**：
+
+---
+
+### 方式一：Docker Compose（推荐）
+
+把所有后端服务跑在 Docker 容器内，网络在容器内网打通，最稳定。
+
+**前置条件**：Docker Compose v2。
+
+**1. 准备环境文件**
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-`.env.example` 仅含假值。生产或共享环境请重新生成：
+`.env.example` 是假值，本地开发可以直接用；如果需要非假密钥：
 
 ```powershell
 # SESSION_SECRET
@@ -52,24 +65,71 @@ Copy-Item .env.example .env
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-### 2. 基础设施 + API + Workers（Docker Compose）
-
-需要本机已安装 Docker Compose v2：
+**2. 启动后端容器**
 
 ```powershell
-docker compose config
-docker compose up -d postgres redis minio
-docker compose up -d api worker-default worker-heavy
-curl http://localhost:8000/health
+docker compose up -d
 ```
 
-GPU / ComfyUI **默认不启用**。仅在有明确需求时：
+> 这会启动 **所有** 服务（postgres、redis、minio、migrate、api、worker-default、worker-heavy）。首次运行会构建 `backend/Dockerfile` 镜像。
+
+**3. 启动前端**
+
+```powershell
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+浏览器打开 `http://localhost:5173`。
+
+**4. 验证**
+
+```powershell
+curl http://localhost:8000/health
+# → {"status":"ok","db":"up"}
+```
+
+**GPU / ComfyUI（可选）**：
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gpu up -d
 ```
 
-### 3. 后端（本地 Python 3.12）
+---
+
+### 方式二：WSL 一键脚本（Windows 开发推荐）
+
+当 Docker 不可用，且 PostgreSQL 在 WSL 内时使用。脚本自动管理 API 和前端进程。
+
+**为什么需要这个**：如果把 API 放 Windows 但 PG 放 WSL，`127.0.0.1:5432` 的跨边界转发会间歇断开，`/health` 返回 `db=down`。此脚本把 API 也放在 WSL 内，避免这个问题。
+
+```powershell
+# 启动
+powershell -ExecutionPolicy Bypass -File .\scripts\start_p0_stack.ps1
+
+# 检查状态
+powershell -ExecutionPolicy Bypass -File .\scripts\start_p0_stack.ps1 -Action Status
+
+# 停止
+powershell -ExecutionPolicy Bypass -File .\scripts\start_p0_stack.ps1 -Action Stop
+```
+
+> Windows API 模式：`-Mode WindowsApi -DbHost WslIp`（API 在 Windows，PG 通过 WSL 网卡 IP 直连，不用 localhost 转发）。
+
+详细说明见 [`docs/runbooks/local-stack-bypass.md`](docs/runbooks/local-stack-bypass.md)。
+
+---
+
+### 方式三：后端裸机运行（调试用）
+
+当你需要在宿主机打断点调试 Python 代码时。
+
+**先启动基础设施**（任选其一）：
+- Docker：`docker compose up -d postgres redis minio`
+- 或宿主机自行安装 PostgreSQL 15+ / Redis 7+ / MinIO，然后修改 `.env` 中的连接地址
+
+**后端**（Python 3.12 + venv）：
 
 ```powershell
 cd backend
@@ -79,16 +139,17 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload --port 8000
 ```
 
-Worker 入口（需 Redis）：
+**Worker**（需 Redis 已启动）：
 
 ```powershell
 python -m app.workers.main default
 arq app.workers.default.WorkerSettings
+
 python -m app.workers.main heavy
 arq app.workers.heavy.WorkerSettings
 ```
 
-### 4. 前端（Node 20+）
+**前端**（同上）：
 
 ```powershell
 cd frontend
@@ -96,7 +157,7 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-浏览器打开 `http://localhost:5173`。工作台壳使用 TanStack Router + QueryClient；服务端状态后续只放 TanStack Query，Zustand 仅保存布局/选择等 UI 状态。
+> 工作台壳使用 TanStack Router + QueryClient；服务端状态只放 TanStack Query，Zustand 仅保存布局/选择等 UI 状态。
 
 ## 测试与质量门禁
 
