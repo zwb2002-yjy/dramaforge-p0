@@ -61,9 +61,12 @@ async def require_selected_workspace(
     Browser fetches use ``X-Workspace-Id``. The query fallback exists only so
     native image/download navigations can carry the same explicit scope.
     """
-    if x_workspace_id is not None and query_workspace_id is not None:
-        if x_workspace_id != query_workspace_id:
-            raise ForbiddenError("workspace context mismatch")
+    if (
+        x_workspace_id is not None
+        and query_workspace_id is not None
+        and x_workspace_id != query_workspace_id
+    ):
+        raise ForbiddenError("workspace context mismatch")
     workspace_id = x_workspace_id or query_workspace_id
     if workspace_id is None:
         raise ForbiddenError("workspace context required")

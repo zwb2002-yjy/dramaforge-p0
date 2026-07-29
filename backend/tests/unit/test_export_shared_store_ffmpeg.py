@@ -6,7 +6,7 @@ import shutil
 from uuid import uuid4
 
 import pytest
-from app.access.models import Workspace, User
+from app.access.models import User, Workspace
 from app.creation import models as _cm  # noqa: F401
 from app.creation.service import CreationService
 from app.delivery import models as _dm  # noqa: F401

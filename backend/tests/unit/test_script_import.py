@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from app.access.models import Workspace, User
+from app.access.models import User, Workspace
 from app.access.projects import ProjectService
 from app.assets import models as _am  # noqa: F401
 from app.assets.characters import register_lead_character, require_canonical_for_shot

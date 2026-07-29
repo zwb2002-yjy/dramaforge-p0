@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 from app.access import models as _a  # noqa: F401
-from app.access.models import Workspace, User
+from app.access.models import User, Workspace
 from app.access.projects import ProjectService
 from app.events import models as _e  # noqa: F401
 from app.execution import models as _x  # noqa: F401

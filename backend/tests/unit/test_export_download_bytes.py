@@ -7,7 +7,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from app.access.models import Workspace, Project, User
+from app.access.models import Project, User, Workspace
 from app.config import clear_settings_cache, get_settings
 from app.delivery.models import Export
 from app.main import create_app

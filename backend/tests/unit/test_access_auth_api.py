@@ -27,7 +27,9 @@ def test_me_unauthenticated_returns_401(client: TestClient) -> None:
     assert response.json()["code"] == "UNAUTHORIZED"
 
 
-def test_register_creates_one_owned_default_workspace_and_login_roundtrip(client: TestClient) -> None:
+def test_register_creates_one_owned_default_workspace_and_login_roundtrip(
+    client: TestClient,
+) -> None:
     user = _register(client, "alice@example.com")
     assert user["email"] == "alice@example.com"
     assert "password" not in user

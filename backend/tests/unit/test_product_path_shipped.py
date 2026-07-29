@@ -6,7 +6,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from app.access.models import Workspace, User
+from app.access.models import User, Workspace
 from app.access.projects import ProjectService
 from app.assets.models import Episode, Scene, Shot
 from app.creation import models as _cm  # noqa: F401

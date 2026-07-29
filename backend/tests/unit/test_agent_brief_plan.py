@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from app.access.models import Workspace, User
+from app.access.models import User, Workspace
 from app.assets.models import Shot
 from app.config import Settings
 from app.creation import models as _cm  # noqa: F401

@@ -43,22 +43,50 @@ def _set_csrf_cookie(response: Response, *, token: str, secure: bool) -> None:
 
 
 @router.post("/auth/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, response: Response, session: SessionDep, settings: SettingsDep) -> UserRead:
+async def register(
+    body: RegisterRequest, response: Response,
+    session: SessionDep, settings: SettingsDep,
+) -> UserRead:
     user = await AccessService(session).register(
         email=str(body.email), password=body.password, display_name=body.display_name
     )
     secure = settings.app_env == "production"
-    _set_session_cookie(response, token=issue_session_token(user_id=user.id, secret=settings.session_secret), secure=secure)
-    _set_csrf_cookie(response, token=issue_csrf_token(secret=settings.session_secret), secure=secure)
+    _set_session_cookie(
+        response,
+        token=issue_session_token(
+            user_id=user.id, secret=settings.session_secret,
+        ),
+        secure=secure,
+    )
+    _set_csrf_cookie(
+        response,
+        token=issue_csrf_token(secret=settings.session_secret),
+        secure=secure,
+    )
     return UserRead.model_validate(user)
 
 
 @router.post("/auth/login", response_model=UserRead)
-async def login(body: LoginRequest, response: Response, session: SessionDep, settings: SettingsDep) -> UserRead:
-    user = await AccessService(session).authenticate(email=str(body.email), password=body.password)
+async def login(
+    body: LoginRequest, response: Response,
+    session: SessionDep, settings: SettingsDep,
+) -> UserRead:
+    user = await AccessService(session).authenticate(
+        email=str(body.email), password=body.password,
+    )
     secure = settings.app_env == "production"
-    _set_session_cookie(response, token=issue_session_token(user_id=user.id, secret=settings.session_secret), secure=secure)
-    _set_csrf_cookie(response, token=issue_csrf_token(secret=settings.session_secret), secure=secure)
+    _set_session_cookie(
+        response,
+        token=issue_session_token(
+            user_id=user.id, secret=settings.session_secret,
+        ),
+        secure=secure,
+    )
+    _set_csrf_cookie(
+        response,
+        token=issue_csrf_token(secret=settings.session_secret),
+        secure=secure,
+    )
     return UserRead.model_validate(user)
 
 
@@ -89,24 +117,43 @@ async def list_workspaces(user: CurrentUser, session: SessionDep) -> list[Worksp
 
 
 @router.post("/workspaces", response_model=WorkspaceRead, status_code=status.HTTP_201_CREATED)
-async def create_workspace(body: WorkspaceCreate, user: CurrentUser, session: SessionDep, _: CsrfDep) -> WorkspaceRead:
+async def create_workspace(
+    body: WorkspaceCreate, user: CurrentUser,
+    session: SessionDep, _: CsrfDep,
+) -> WorkspaceRead:
     workspace = await AccessService(session).create_workspace(name=body.name, owner=user)
     return WorkspaceRead.model_validate(workspace)
 
 
 @router.get("/workspaces/{workspace_id}", response_model=WorkspaceRead)
-async def get_workspace(workspace_id: UUID, user: CurrentUser, session: SessionDep) -> WorkspaceRead:
-    workspace = await AccessService(session).get_workspace_for_owner(workspace_id=workspace_id, user=user)
+async def get_workspace(
+    workspace_id: UUID, user: CurrentUser, session: SessionDep,
+) -> WorkspaceRead:
+    workspace = await AccessService(session).get_workspace_for_owner(
+        workspace_id=workspace_id, user=user,
+    )
     return WorkspaceRead.model_validate(workspace)
 
 
 @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceRead)
-async def rename_workspace(workspace_id: UUID, body: WorkspaceUpdate, user: CurrentUser, session: SessionDep, _: CsrfDep) -> WorkspaceRead:
-    workspace = await AccessService(session).rename_workspace(workspace_id=workspace_id, name=body.name, actor=user)
+async def rename_workspace(
+    workspace_id: UUID, body: WorkspaceUpdate,
+    user: CurrentUser, session: SessionDep, _: CsrfDep,
+) -> WorkspaceRead:
+    workspace = await AccessService(session).rename_workspace(
+        workspace_id=workspace_id, name=body.name, actor=user,
+    )
     return WorkspaceRead.model_validate(workspace)
 
 
-@router.delete("/workspaces/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
-async def delete_workspace(workspace_id: UUID, user: CurrentUser, session: SessionDep, _: CsrfDep) -> Response:
+@router.delete(
+    "/workspaces/{workspace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_workspace(
+    workspace_id: UUID, user: CurrentUser,
+    session: SessionDep, _: CsrfDep,
+) -> Response:
     await AccessService(session).delete_workspace(workspace_id=workspace_id, actor=user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

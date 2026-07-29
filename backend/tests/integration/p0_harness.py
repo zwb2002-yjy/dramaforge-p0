@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid4
 
-from app.access.models import Workspace, User
+from app.access.models import User, Workspace
 from app.creation.service import CreationService
 from app.delivery.export_service import build_project_export
 from app.execution.models import NodeRun
