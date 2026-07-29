@@ -12,20 +12,21 @@ P0 目标为可运行的 React/FastAPI/PostgreSQL/Redis/MinIO/Arq 应用 + 一�
 
 ### 当前完成度
 
-**标签：P0 功能候选版**（2026-07-23 标记）
+**标签：P0 功能候选版**（2026-07-29 更新）
 
 已实现：
 - 应用骨架：FastAPI `/health`、Arq default/heavy Worker、React 工作台壳、Docker Compose 全栈
 - 个人创作空间模型：User → Workspace → Project，RLS 隔离，BYOK 凭证管理
 - Production Graph 完整链路：Brief/Plan → GraphVersion → NodeRun → ProviderOperation → Artifact → 审核 → 导出
+- 文本 LLM：OpenAI 兼容 + Anthropic Messages 双风格适配器，DeepSeek V4 Flash free 已验证
 - 手工媒体路径：10 Shot 全必需节点、approve_ok=10、failed=0、package.zip 哈希一致、真实 MP4
 - FFmpeg 导出、缓存复用、幂等取消/补偿、Outbox/SSE/Redis Streams 事件流
 - 目录合规、Ruff/mypy/unit/integration/frontend/e2e CI 门禁全绿
-- InsightFace 512-d embedding smoke 通过
+- InsightFace FAR/FRR 已完成（20+20+10 样本，final_threshold=0.60）
 
-P0 Gate 阻塞项（19 PASS / 4 BLOCKED）：
-1. 未配置真实文本 LLM BYOK，无法现场证明 Agent Brief→Plan→10 Shot 全链
-2. 缺少 InsightFace FAR/FRR 完整校准（需 20+20+10 样本）
+P0 Gate 阻塞项：
+1. ~~文本 LLM~~ **已解除** — `opencode.ai/zen/v1` + DeepSeek V4 Flash free，Agent Brief→Plan→10 Shot JSON 全链通过
+2. InsightFace 校准已完成但缺正式盖章验收（sample 数量达标，threshold=0.60 已记录）
 3. 缺少真实 review_passed Shot 和逐 Shot 审核/驳回/重跑闭环
 4. 备份恢复、密钥轮换、真实 Playwright 10 Shot E2E 未留存
 
