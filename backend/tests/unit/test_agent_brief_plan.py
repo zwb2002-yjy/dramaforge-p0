@@ -103,19 +103,19 @@ async def test_text_adapter_uses_configured_provider_contract(
     assert request.url.path == expected_path
     assert json.loads(request.content) == {
         "model": "test-model",
-        "max_tokens": 321,
+        "max_completion_tokens" if api_style == "openai" else "max_tokens": 321,
         "messages": [
             {"role": "user", "content": "Turn this idea into a structured brief."}
         ],
+        **({"reasoning": {"enabled": True}} if api_style == "openai" else {}),
     }
-    if api_style == "anthropic":
+    if api_style == "openai":
+        assert request.headers["authorization"] == "Bearer test-provider-key"
+        assert request.headers["content-type"] == "application/json"
+    elif api_style == "anthropic":
         assert request.headers["x-api-key"] == "test-provider-key"
         assert request.headers["anthropic-version"] == "2023-06-01"
         assert "authorization" not in request.headers
-    else:
-        assert request.headers["authorization"] == "Bearer test-provider-key"
-        assert "x-api-key" not in request.headers
-        assert "anthropic-version" not in request.headers
 
 
 @pytest.mark.asyncio

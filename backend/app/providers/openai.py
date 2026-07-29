@@ -54,14 +54,33 @@ class AnthropicCompatibleTextAdapter:
         if self._settings.text_llm_api_style == "openai":
             if base.endswith("/chat/completions"):
                 return base
-            if base.endswith("/v1"):
-                return f"{base}/chat/completions"
-            return f"{base}/v1/chat/completions"
+            return f"{base}/chat/completions"
         if base.endswith("/messages"):
             return base
         if base.endswith("/v1"):
             return f"{base}/messages"
         return f"{base}/v1/messages"
+
+    def _build_body(
+        self, request: dict[str, Any], *, api_style: str | None = None,
+    ) -> dict[str, Any]:
+        style = api_style or self._settings.text_llm_api_style
+        prompt = str(request.get("prompt") or request.get("text") or "")
+        max_tokens = int(request.get("max_tokens") or 512)
+        if style == "openai":
+            # DeepSeek reasoning models: use max_completion_tokens
+            # so reasoning tokens don't consume the output budget.
+            return {
+                "model": self._settings.text_llm_model,
+                "max_completion_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+                "reasoning": {"enabled": True},
+            }
+        return {
+            "model": self._settings.text_llm_model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
 
     async def create(self, request: dict[str, Any]) -> dict[str, Any]:
         if not self.configured():
@@ -71,15 +90,13 @@ class AnthropicCompatibleTextAdapter:
         self.calls.append(
             {"op": "create", "prompt_chars": len(prompt), "kind": request.get("kind")}
         )
-        body = {
-            "model": self._settings.text_llm_model,
-            "max_tokens": int(request.get("max_tokens") or 512),
-            "messages": [{"role": "user", "content": prompt}],
-        }
+        body = self._build_body(request)
         url = self._messages_url()
         async with httpx.AsyncClient(
             timeout=120.0,
             transport=self._transport,
+            proxy=None,
+            trust_env=False,
         ) as client:
             resp = await client.post(url, headers=self._headers(), json=body)
             try:

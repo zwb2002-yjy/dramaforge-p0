@@ -4,9 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概况
 
-DramaForge 是面向个人创作者的镜头级 AI 短剧生产工作台，私有化部署。一个账号可拥有多个私有创作空间（Workspace），每个空间包含独立的项目、素材、预算和凭证。以受控 Production Graph 管理剧本、资产、生成、连续性检查、审核、成本和可追溯交付。P0 目标为可运行的 React/FastAPI/PostgreSQL/Redis/MinIO/Arq 应用 + 至少 10 Shot 的黄金样本交付。
+DramaForge 是面向个人创作者的镜头级 AI 短剧生产工作台，私有化部署。一个账号可拥有多个私有创作空间（Workspace），每个空间包含独立的项目、素材、预算和凭证。以受控 Production Graph 管理剧本、资产、生成、连续性检查、审核、成本和可追溯交付。
+
+P0 目标为可运行的 React/FastAPI/PostgreSQL/Redis/MinIO/Arq 应用 + 一份 3–5 场、至少 10 Shot、至少 1 名主角的冻结黄金样本，产出可重现的 MP4、SRT、素材包和 timeline JSON 交付。
 
 当前 `dev` 分支已从团队协作模型重构为个人创作空间模型（`docs/个人创作空间重构方案.md`），移除了 Organization、成员、角色等概念。`main` 分支仍保留重构前的团队向代码。
+
+### 当前完成度
+
+**标签：P0 功能候选版**（2026-07-23 标记）
+
+已实现：
+- 应用骨架：FastAPI `/health`、Arq default/heavy Worker、React 工作台壳、Docker Compose 全栈
+- 个人创作空间模型：User → Workspace → Project，RLS 隔离，BYOK 凭证管理
+- Production Graph 完整链路：Brief/Plan → GraphVersion → NodeRun → ProviderOperation → Artifact → 审核 → 导出
+- 手工媒体路径：10 Shot 全必需节点、approve_ok=10、failed=0、package.zip 哈希一致、真实 MP4
+- FFmpeg 导出、缓存复用、幂等取消/补偿、Outbox/SSE/Redis Streams 事件流
+- 目录合规、Ruff/mypy/unit/integration/frontend/e2e CI 门禁全绿
+- InsightFace 512-d embedding smoke 通过
+
+P0 Gate 阻塞项（19 PASS / 4 BLOCKED）：
+1. 未配置真实文本 LLM BYOK，无法现场证明 Agent Brief→Plan→10 Shot 全链
+2. 缺少 InsightFace FAR/FRR 完整校准（需 20+20+10 样本）
+3. 缺少真实 review_passed Shot 和逐 Shot 审核/驳回/重跑闭环
+4. 备份恢复、密钥轮换、真实 Playwright 10 Shot E2E 未留存
 
 ## 技术栈（不可替换）
 
