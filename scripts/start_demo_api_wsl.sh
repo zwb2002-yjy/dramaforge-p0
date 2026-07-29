@@ -1,6 +1,6 @@
 #!/bin/bash
 set -uo pipefail
-REPO=/mnt/d/调研/dramaforge
+REPO=/mnt/d/dramaforge
 VENV=$HOME/.cache/dramaforge-venv
 LOG=$HOME/.cache/dramaforge-api.log
 PIDF=$HOME/.cache/dramaforge-api.pid

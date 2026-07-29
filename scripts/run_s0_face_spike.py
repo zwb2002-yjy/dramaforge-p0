@@ -229,7 +229,7 @@ def render_blocked_report(
         "## 重跑命令",
         "",
         "```powershell",
-        "cd D:\\调研\\dramaforge",
+        "cd D:\\dramaforge",
         "python .\\scripts\\run_s0_face_spike.py",
         "```",
         "",

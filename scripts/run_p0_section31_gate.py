@@ -757,7 +757,7 @@ def main() -> int:
                 "Ubuntu-24.04",
                 "--",
                 "bash",
-                "/mnt/d/调研/dramaforge/scripts/check_insightface.sh",
+                "/mnt/d/dramaforge/scripts/check_insightface.sh",
             ]
             try:
                 wr = _sp.run(wsl_cmd, capture_output=True, timeout=180)

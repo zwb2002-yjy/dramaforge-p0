@@ -15,7 +15,7 @@ commit as the formal proof and Section 3.1 gate.
 Start the formal WSL stack from the same clean worktree:
 
 ```powershell
-wsl -d Ubuntu-24.04 -- bash /mnt/d/调研/dramaforge/scripts/start_p0_wsl_stack.sh start
+wsl -d Ubuntu-24.04 -- bash /mnt/d/dramaforge/scripts/start_p0_wsl_stack.sh start
 ```
 
 In that WSL shell, create a backup encryption key in the current shell only.
@@ -63,7 +63,7 @@ an empty credential store cannot produce a successful operations report.
 ## Execute
 
 ```bash
-cd /mnt/d/调研/dramaforge
+cd /mnt/d/dramaforge
 bash scripts/p0_ops_drill_wsl.sh
 ```
 

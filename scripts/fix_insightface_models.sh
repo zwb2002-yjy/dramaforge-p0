@@ -27,7 +27,7 @@ if [[ -d "${DEST}/buffalo_l" ]]; then
 fi
 ls -la "${DEST}"
 source "${HOME}/.cache/dramaforge-venv/bin/activate"
-export PYTHONPATH="/mnt/d/调研/dramaforge/backend"
+export PYTHONPATH="/mnt/d/dramaforge/backend"
 python - <<'PY'
 from app.consistency.image_embed import insightface_status, embedding_from_image_bytes
 from pathlib import Path
@@ -36,7 +36,7 @@ st = insightface_status()
 print(json.dumps(st, indent=2))
 if st.get("available"):
     # smoke: embed a fixture face if present
-    p = Path("/mnt/d/调研/dramaforge/fixtures/images/character_canonical")
+    p = Path("/mnt/d/dramaforge/fixtures/images/character_canonical")
     jpg = next(p.glob("*.jpg"), None)
     if jpg:
         emb = embedding_from_image_bytes(jpg.read_bytes())

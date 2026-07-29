@@ -16,8 +16,8 @@ API_PORT="${2:-8010}"
 FE_PORT="${3:-5173}"
 SCRIPT="$(readlink -f "$0" 2>/dev/null || realpath "$0")"
 REPO="$(cd "$(dirname "$SCRIPT")/.." && pwd -P)"
-if [[ ! -d "${REPO}/backend" && -d "/mnt/d/调研/dramaforge/backend" ]]; then
-  REPO="/mnt/d/调研/dramaforge"
+if [[ ! -d "${REPO}/backend" && -d "/mnt/d/dramaforge/backend" ]]; then
+  REPO="/mnt/d/dramaforge"
 fi
 VENV="${HOME}/.cache/dramaforge-venv"
 PYTHON="${VENV}/bin/python"

@@ -1,7 +1,7 @@
 # DramaForge Agent 开发执行规范
 
 **版本**：1.1
-**适用仓库**：`D:\调研\dramaforge`
+**适用仓库**：`D:\dramaforge`
 **生效前提**：与 `AGENT_EXECUTION_PROTOCOL.md`、`agent.md`、`docs/开发执行检查点.md` 共同构成 Agent 执行合同。发生冲突时，以 `AGENT_EXECUTION_PROTOCOL.md` 和 `agent.md` 为准。
 
 ---
@@ -88,7 +88,7 @@ scripts/task_worktree.ps1 -TaskId <task-id> [-OwnedPaths <paths>]
 
 ### 3.3 根工作区规则
 
-- 仓库根目录（`D:\调研\dramaforge`）默认检出 `dev` 并承载日常业务修改。
+- 仓库根目录（`D:\dramaforge`）默认检出 `dev` 并承载日常业务修改。
 - 需要并行写入隔离时，才进入 `.worktrees/<task-id>`。
 - `main` 只用于稳定发布核验、hotfix 基线和同步，不承载日常开发。
 
@@ -233,7 +233,7 @@ PR 合并前必须通过 `.github/workflows/ci.yml` 定义的全部 job：
 
 ### 7.2 每次会话开始必须执行
 
-1. 核验当前目录为 `D:\调研\dramaforge`。
+1. 核验当前目录为 `D:\dramaforge`。
 2. `.agent-control/control.ps1 -Operation open`
 3. `.agent-control/control.ps1 -Operation tail -Tail 20`
 4. `git status --short`
@@ -282,7 +282,7 @@ PR 合并前必须通过 `.github/workflows/ci.yml` 定义的全部 job：
 
 1. 切回根工作区并拉取最新 `main`：
    ```powershell
-   cd D:\调研\dramaforge
+   cd D:\dramaforge
    git checkout main
    git pull origin main
    git checkout dev

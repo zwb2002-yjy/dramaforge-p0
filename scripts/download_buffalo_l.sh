@@ -42,7 +42,7 @@ if nested.is_dir():
 print("onnx", list(root.rglob("*.onnx")))
 PY
 source "${HOME}/.cache/dramaforge-venv/bin/activate"
-export PYTHONPATH="/mnt/d/调研/dramaforge/backend"
+export PYTHONPATH="/mnt/d/dramaforge/backend"
 # Clear module-level InsightFace cache by new process
 python - <<'PY'
 import json
@@ -52,7 +52,7 @@ st = insightface_status()
 print(json.dumps(st, indent=2))
 assert st.get("available") is True, st
 assert st.get("backend") == "insightface+onnx", st
-p = Path("/mnt/d/调研/dramaforge/fixtures/images/character_canonical")
+p = Path("/mnt/d/dramaforge/fixtures/images/character_canonical")
 jpg = next(p.glob("*.jpg"), None)
 assert jpg is not None
 emb = embedding_from_image_bytes(jpg.read_bytes())

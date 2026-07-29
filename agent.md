@@ -2,7 +2,7 @@
 
 **状态：ACTIVE / Grok 4.5 开发执行入口**
 
-**适用仓库：`D:\调研\dramaforge`**
+**适用仓库：`D:\dramaforge`**
 
 **执行记录：遵守 `AGENT_EXECUTION_PROTOCOL.md` v3.3。每个 Agent/subagent 在任务开始、完成、失败或暂停时，通过 `.agent-control/control.ps1` 追加本地事实；日常写入在 `dev` 集成分支，只有并行隔离或 hotfix 使用短期分支和 worktree。`main` 只接收受保护的稳定发布 PR。只有用户可以在批准并合并 PR 后记录 `MERGED`。没有观察器、Session、Token、心跳或进程门禁。**
 
@@ -10,15 +10,15 @@
 
 **当前事实：仓库骨架和 S0-A 的阻塞路径已经提交；当前真实阶段、未关闭 Gate 和唯一下一任务以 `docs/开发执行检查点.md` 为准。**
 
-**目录边界：所有应用代码、迁移、测试、fixture、运行手册和开发状态只能写入 `D:\调研\dramaforge`；`D:\调研\项目` 是外部研究与源资料目录，不是开发工作区。**
+**目录边界：所有应用代码、迁移、测试、fixture、运行手册和开发状态只能写入 `D:\dramaforge`；`D:\项目` 是外部研究与源资料目录，不是开发工作区。**
 
 ## 0. 交给 Grok 4.5 的启动指令
 
-在 Grok 4.5 的代码执行环境中将工作目录设为 `D:\调研\dramaforge`，并发送以下指令：
+在 Grok 4.5 的代码执行环境中将工作目录设为 `D:\dramaforge`，并发送以下指令：
 
 ```text
-确认当前工作目录是 D:\调研\dramaforge。读取仓库根目录 agent.md，并把它作为本项目开发执行入口。
-所有项目代码、测试、迁移、fixture 和开发文档只能写入 D:\调研\dramaforge；不得在 D:\调研\项目 或其他目录建立代码副本。
+确认当前工作目录是 D:\dramaforge。读取仓库根目录 agent.md，并把它作为本项目开发执行入口。
+所有项目代码、测试、迁移、fixture 和开发文档只能写入 D:\dramaforge；不得在 D:\项目 或其他目录建立代码副本。
 先执行 `.agent-control/control.ps1 -Operation open` 和 `tail -Tail 20`，再核验 `git status --short`、`git worktree list`、`git branch --all` 和 GitHub 远端状态。不要依赖聊天记忆，不要覆盖已有未提交改动。
 从 `docs/开发执行检查点.md` 的“当前唯一执行任务”恢复，不要重复已经有证据的工作。持续执行本文的“开发控制循环”：当前 Task 通过后立即选择下一 Task，当前阶段 Gate 通过后立即进入下一阶段，直到 P0、P1.1、P1.2、P1.3、P2 依次完成，或遇到本文定义的真实人工阻塞。不要只完成一个 Task 就等待新的“继续”指令。
 开始 Task 或 subtask 前写 STARTED；完成、失败或暂停时立即写 COMPLETED、FAILED 或 PAUSED。记录摘要、分支、worktree、改动文件、测试、commit、证据和下一步。
@@ -57,7 +57,7 @@ P0 不是 LibTV、Jellyfish、Toonflow 或 ArcReel 的复刻。DramaForge 的核
 7. [`docs/产品阶段与效果路线图.md`](docs/产品阶段与效果路线图.md)：仅在判断产品阶段边界时读取。
 8. [`docs/MVP能力延期台账.md`](docs/MVP能力延期台账.md)：仅在判断 P0 外能力时读取。
 
-默认禁止把以下文件加入当前 Task 的上下文：`AI短剧工作台完整实施规划.md`、`DramaForge架构决策与技术选型书.md`、`DramaForge双模式产品与架构汇报方案.md`、P1/P2 ADR，以及 `D:\调研\项目` 下的研究资料。只有当前 Task 明确需要解释决策背景时才可只读打开；它们不能产生实现任务、目录、接口或排期。
+默认禁止把以下文件加入当前 Task 的上下文：`AI短剧工作台完整实施规划.md`、`DramaForge架构决策与技术选型书.md`、`DramaForge双模式产品与架构汇报方案.md`、P1/P2 ADR，以及 `D:\项目` 下的研究资料。只有当前 Task 明确需要解释决策背景时才可只读打开；它们不能产生实现任务、目录、接口或排期。
 
 发现冲突时，不要自行挑选更容易实现的一方。先引用冲突文件与条款，在 `docs/开发执行检查点.md` 记录，再停止冲突范围的实现；其他不受影响的工作可继续。
 
@@ -130,7 +130,7 @@ BOOT-0 仓库启动
 
 每次开始执行时必须按以下顺序工作：
 
-1. 核验当前工作目录和 Git 根目录均为 `D:\调研\dramaforge`；不是则停止写入并切换目录。
+1. 核验当前工作目录和 Git 根目录均为 `D:\dramaforge`；不是则停止写入并切换目录。
 2. 执行 `open` 和 `tail -Tail 20`，然后检查 `git status --short`、`git worktree list`、`git branch --all` 和 `git remote -v`。
 3. 对未闭合任务检查其分支、worktree、commit、diff 和测试；根据事实补记 COMPLETED、FAILED 或 PAUSED，不盲目重跑。
 4. 读取 `agent.md`、执行协议、开发检查点和当前 Task 明确引用的冻结条款。
