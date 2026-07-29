@@ -31,6 +31,7 @@ ALLOWED_ROOT = {
     "AI短剧工作台完整实施规划.md",
     "README.md",
     "CLAUDE.md",
+    ".claude",
     "agent.md",
     "AGENT.md",
     "AGENT_EXECUTION_PROTOCOL.md",
