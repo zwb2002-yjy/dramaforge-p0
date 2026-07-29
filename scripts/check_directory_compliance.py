@@ -30,6 +30,7 @@ ALLOWED_ROOT = {
     "DramaForge双模式产品与架构汇报方案.md",
     "AI短剧工作台完整实施规划.md",
     "README.md",
+    "CLAUDE.md",
     "agent.md",
     "AGENT.md",
     "AGENT_EXECUTION_PROTOCOL.md",
