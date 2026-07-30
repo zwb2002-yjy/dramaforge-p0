@@ -324,6 +324,7 @@ def main() -> int:
             raise RuntimeError("workspace creation failed")
         workspace_id = r.json()["id"]
         add("3.1.1b", "创建创作空间", "PASS", workspace_id)
+        client.headers["X-Workspace-Id"] = str(workspace_id)
 
         r = post(
             "/api/v1/creation/start-project",
