@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +25,20 @@ from app.shared.errors import (
     NotFoundError,
     ValidationAppError,
 )
+
+
+def queue_scoped_job_id(*, queue_name: str, node_run_id: UUID) -> str:
+    """Return an idempotency key that cannot leak across isolated Arq queues.
+
+    Arq stores job definitions under a global Redis key. Reusing only the
+    NodeRun id meant an old job key could survive after a formal stack switched
+    to its commit-scoped queue: enqueue then returned ``None`` even though the
+    current queue had no job to execute. Scoping the key to the target queue
+    preserves idempotency within that queue while allowing recovery after a
+    stack restart on a new source commit.
+    """
+    queue_fingerprint = hashlib.sha256(queue_name.encode("utf-8")).hexdigest()[:12]
+    return f"node-run:{queue_fingerprint}:{node_run_id}"
 
 
 class RedisStreamPublisher(StreamPublisher):
@@ -210,7 +225,6 @@ class AgentRunScheduler:
         from arq.connections import RedisSettings
 
         settings = get_settings()
-        stable_job_id = f"node-run:{node_run_id}"
         run = await self._session.get(NodeRun, node_run_id)
         node = await self._session.get(GraphNode, run.graph_node_id) if run else None
         # Real media Providers are capacity-limited and must not be submitted as
@@ -219,6 +233,10 @@ class AgentRunScheduler:
             settings.arq_heavy_queue_name
             if node and node.node_type in {"keyframe", "video", "voice", "composite"}
             else settings.arq_default_queue_name
+        )
+        stable_job_id = queue_scoped_job_id(
+            queue_name=queue_name,
+            node_run_id=node_run_id,
         )
 
         async def _arq() -> str:

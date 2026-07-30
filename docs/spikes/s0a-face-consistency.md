@@ -2,7 +2,7 @@
 
 **状态：`COMPLETE_WITH_METRICS`**
 
-**生成时间（UTC）：2026-07-25T12:28:34Z**
+**生成时间（UTC）：2026-07-30T08:19:26Z**
 
 ## 结论
 
@@ -48,19 +48,19 @@
 
 ## 耗时（单图 embed，ms）
 
-- mean：707.64
-- p50：808.68
-- p95：1084.95
-- p99：1245.73
-- max：1347.53
+- mean：488.77
+- p50：548.18
+- p95：675.94
+- p99：944.39
+- max：1071.69
 - n：45
 
 ## 环境版本
 
 - Python：3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]
-- Platform：Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+- Platform：Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
 - InsightFace：1.0.1
-- ONNX Runtime：1.27.0
+- ONNX Runtime：1.28.0
 - Embedding dim：512（L2-normalized）
 
 ## 隐私

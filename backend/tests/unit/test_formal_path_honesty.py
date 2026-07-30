@@ -39,6 +39,30 @@ def test_get_flux_adapter_fake_only_in_test(monkeypatch: pytest.MonkeyPatch) -> 
     assert type(ad).__name__ == "FakeFluxAdapter"
 
 
+def test_queue_scoped_job_id_prevents_stale_job_collision_after_stack_restart() -> None:
+    from app.runtime.scheduler import queue_scoped_job_id
+
+    node_run_id = uuid4()
+    old_queue = "dramaforge:heavy:old-source"
+    new_queue = "dramaforge:heavy:new-source"
+
+    old_job_id = queue_scoped_job_id(
+        queue_name=old_queue,
+        node_run_id=node_run_id,
+    )
+    new_job_id = queue_scoped_job_id(
+        queue_name=new_queue,
+        node_run_id=node_run_id,
+    )
+    repeated_new_job_id = queue_scoped_job_id(
+        queue_name=new_queue,
+        node_run_id=node_run_id,
+    )
+
+    assert old_job_id != new_job_id
+    assert new_job_id == repeated_new_job_id
+
+
 def test_local_tts_adapter_fail_closed_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("TTS_ENABLED", "false")
