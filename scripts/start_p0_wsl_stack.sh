@@ -172,6 +172,33 @@ ensure_minio() {
   exit 1
 }
 
+ensure_ffmpeg() {
+  if command -v ffmpeg >/dev/null 2>&1; then
+    return
+  fi
+  # Keep formal export deterministic without requiring a privileged apt
+  # install in WSL. Docker is only used to extract the pinned binary; runtime
+  # still executes inside the WSL formal stack.
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "FFmpeg unavailable: install ffmpeg or provide Docker for extraction." >&2
+    exit 1
+  fi
+  if [[ ! -x "${RUN_DIR}/ffmpeg" ]]; then
+    log "extracting FFmpeg binary from jrottenberg/ffmpeg:6.0-ubuntu"
+    docker image inspect jrottenberg/ffmpeg:6.0-ubuntu >/dev/null 2>&1 || \
+      docker pull jrottenberg/ffmpeg:6.0-ubuntu >/dev/null
+    docker create --name df-ffmpeg-extract jrottenberg/ffmpeg:6.0-ubuntu >/dev/null
+    docker cp df-ffmpeg-extract:/usr/local/bin/ffmpeg "${RUN_DIR}/ffmpeg"
+    docker rm df-ffmpeg-extract >/dev/null
+    chmod +x "${RUN_DIR}/ffmpeg"
+  fi
+  export PATH="${RUN_DIR}:${PATH}"
+  command -v ffmpeg >/dev/null 2>&1 || {
+    echo "FFmpeg extraction failed" >&2
+    exit 1
+  }
+}
+
 ensure_venv() {
   if [[ -x "${PYTHON}" ]]; then
     return
@@ -356,6 +383,7 @@ do_start() {
   ensure_postgres
   ensure_redis
   ensure_minio
+  ensure_ffmpeg
   ensure_venv
   # Formal evidence cannot reuse API/Worker processes from an older checkout.
   stop_application_processes
