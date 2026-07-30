@@ -309,6 +309,7 @@ def main() -> int:
     email = f"gate-{uuid4().hex[:8]}@example.com"
     password = "password123"
     project_id: str | None = None
+    canonical_probe_started = False
 
     try:
         r = post(
@@ -570,6 +571,7 @@ def main() -> int:
                 add("3.1.6", "confirm_plan 白名单物化 + NodeRun", "PASS", f"node_run={node_run_id}")
 
         # Lead character
+        canonical_probe_started = True
         r = post(
             f"/api/v1/projects/{project_id}/characters/lead",
             {
@@ -577,6 +579,7 @@ def main() -> int:
                 "locked_prompt": f"consistent face portrait reference for {probe_idea}",
             },
         )
+        canonical_probe_started = False
         if r.status_code in (200, 201):
             add("3.1.9", "主角 canonical Reference", "PASS", r.json().get("canonical_object_key", "")[:80])
         elif r.status_code == 422 and (
@@ -633,7 +636,15 @@ def main() -> int:
             add("3.1.8b", "Shot 列表可读", "FAIL", f"{r.status_code}")
 
     except Exception as exc:  # noqa: BLE001
-        if not any(c.id.startswith("3.1") and c.status == "FAIL" for c in checks):
+        if canonical_probe_started and isinstance(exc, httpx.TimeoutException):
+            add(
+                "3.1.9",
+                "主角 canonical Reference",
+                "BLOCKED",
+                "live image Provider request exceeded the API/probe timeout; "
+                "formal evidence requires a completed live image response",
+            )
+        elif not any(c.id.startswith("3.1") and c.status == "FAIL" for c in checks):
             add("FLOW", "引导路径异常中止", "FAIL", str(exc))
 
     # --- Attempt remaining §3.1 checks (no static BLOCKED list without evaluation) ---
