@@ -33,7 +33,7 @@ def write_report(scratch: Path, report: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default="http://127.0.0.1:8010")
+    parser.add_argument("--base", default="http://127.0.0.1:8000")
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument(
         "--idea",

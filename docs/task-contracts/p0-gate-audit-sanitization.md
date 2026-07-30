@@ -20,7 +20,7 @@ are not used as current formal Gate evidence.
 
 - Running paid Provider calls.
 - Producing formal P0 evidence or closing any P0 Gate.
-- Changing the P0 Gate checker, WSL stack, Provider implementation, or product
+- Changing the P0 Gate checker, deployment stack, Provider implementation, or product
   runtime.
 
 ## Preconditions

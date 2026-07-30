@@ -45,7 +45,7 @@ def dispatch_source_commit() -> str | None:
     """Return the formal runtime commit used to isolate queued NodeRuns.
 
     Unit tests intentionally create historical fixture rows without a runtime
-    binding, so they retain broad scheduling. The formal WSL launcher always
+    binding, so they retain broad scheduling. The formal Compose runtime always
     provides a commit and therefore never replays rows from an earlier stack.
     """
     settings = get_settings()
@@ -83,6 +83,12 @@ class RedisStreamPublisher(StreamPublisher):
                 f"OUTBOX_PUBLISH_FAILED: Redis Stream write failed "
                 f"({type(exc).__name__}: {exc}). Outbox must not be marked published."
             ) from exc
+
+    async def close(self) -> None:
+        """Release the Redis connection held by one dispatcher iteration."""
+        if self._redis is not None:
+            await self._redis.close()
+            self._redis = None
 
 
 class AgentRunScheduler:
@@ -274,7 +280,7 @@ class AgentRunScheduler:
         except Exception as exc:
             raise ValidationAppError(
                 f"QUEUE_UNAVAILABLE: Redis/Arq enqueue failed ({type(exc).__name__}: {exc}). "
-                "NodeRun marked failed; start Redis + workers (start_p0_wsl_stack.sh)."
+                "NodeRun marked failed; start Redis + workers (docker compose up -d)."
             ) from exc
 
 

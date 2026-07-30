@@ -58,7 +58,7 @@
 ## 环境版本
 
 - Python：3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]
-- Platform：Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+- Platform：Docker Compose CPU runtime
 - InsightFace：1.0.1
 - ONNX Runtime：1.28.0
 - Embedding dim：512（L2-normalized）

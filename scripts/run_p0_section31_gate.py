@@ -6,7 +6,7 @@ Does NOT claim MVP complete when any required item fails.
 Exit 0 only if all runnable checks pass; otherwise exit 2.
 
 Usage:
-  python scripts/run_p0_section31_gate.py [--base http://127.0.0.1:8010] [--out path]
+  python scripts/run_p0_section31_gate.py [--base http://127.0.0.1:8000] [--out path]
 """
 
 from __future__ import annotations
@@ -201,7 +201,7 @@ def evaluate_multishot_snapshot(
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:8010")
+    ap.add_argument("--base", default="http://127.0.0.1:8000")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument(
         "--probe-idea",
@@ -766,17 +766,22 @@ def main() -> int:
                 except Exception:
                     pass
         if not st.get("available"):
-            wsl_cmd = [
-                "wsl",
-                "-d",
-                "Ubuntu-24.04",
-                "--",
-                "bash",
-                "/mnt/d/dramaforge/scripts/check_insightface.sh",
+            compose_cmd = [
+                "docker",
+                "compose",
+                "exec",
+                "-T",
+                "api",
+                "python",
+                "-c",
+                (
+                    "import json; "
+                    "from app.consistency.image_embed import insightface_status; "
+                    "print(json.dumps(insightface_status()))"
+                ),
             ]
             try:
-                wr = _sp.run(wsl_cmd, capture_output=True, timeout=180)
-                # Decode loosely — WSL may emit warnings
+                wr = _sp.run(compose_cmd, capture_output=True, timeout=180)
                 text = (wr.stdout or b"").decode("utf-8", errors="replace")
                 parsed = extract_json_object(text)
                 if parsed is not None:
@@ -787,7 +792,7 @@ def main() -> int:
                         "available": False,
                         "backend": "unknown",
                         "error": (
-                            "InsightFace status JSON not found "
+                            "Compose InsightFace status JSON not found "
                             f"(exit={wr.returncode}): {stderr[-300:]}"
                         ),
                     }

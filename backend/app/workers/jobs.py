@@ -124,10 +124,13 @@ async def dispatch_outbox(ctx: dict[str, Any]) -> dict[str, Any]:
     factory = get_session_factory()
     async with factory() as session:
         pub = RedisStreamPublisher(settings.redis_url)
-        n = await AgentRunScheduler(session, publisher=pub).dispatch_pending(
-            worker_id=str(ctx.get("job_id", "worker"))
-        )
-        return {"enqueued": n}
+        try:
+            n = await AgentRunScheduler(session, publisher=pub).dispatch_pending(
+                worker_id=str(ctx.get("job_id", "worker"))
+            )
+            return {"enqueued": n}
+        finally:
+            await pub.close()
 
 
 JOB_FUNCTIONS = [health_ping, execute_node_run, dispatch_outbox]

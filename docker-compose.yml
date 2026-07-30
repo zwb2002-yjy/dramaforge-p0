@@ -98,7 +98,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  dispatcher:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: development
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
+      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: dramaforge
+      SESSION_SECRET: dev-only-change-me-to-a-long-random-string
+      BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
+      OUTBOX_DISPATCH_INTERVAL_SECONDS: ${OUTBOX_DISPATCH_INTERVAL_SECONDS:-1}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.dispatcher"]
 
   worker-default:
     build:
@@ -139,6 +164,7 @@ services:
         "-c",
         "python -m app.workers.main default && arq app.workers.default.WorkerSettings",
       ]
+    restart: unless-stopped
 
   worker-heavy:
     build:
@@ -179,6 +205,7 @@ services:
         "-c",
         "python -m app.workers.main heavy && arq app.workers.heavy.WorkerSettings",
       ]
+    restart: unless-stopped
 
 volumes:
   postgres_data:

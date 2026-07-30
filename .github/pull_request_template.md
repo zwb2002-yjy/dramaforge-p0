@@ -23,7 +23,7 @@
 
 ## Release Evidence
 
-The full non-Docker WSL P0 Gate is run manually before a release or P0 tag. Link the
+The Docker Compose P0 Gate is run manually before a release or P0 tag. Link the
 commit-bound evidence here when this PR is part of a release:
 
 - Source commit:

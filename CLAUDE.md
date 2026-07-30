@@ -21,11 +21,11 @@ P0 目标为可运行的 React/FastAPI/PostgreSQL/Redis/MinIO/Arq 应用 + 一�
 - 手工媒体路径：10 Shot 全必需节点、approve_ok=10、failed=0、package.zip 哈希一致、真实 MP4
 - FFmpeg 导出、缓存复用、幂等取消/补偿、Outbox/SSE/Redis Streams 事件流
 - 目录合规、Ruff/mypy/unit/integration/frontend/e2e CI 门禁全绿
-- InsightFace 512-d embedding smoke 通过
+- Compose 镜像内 InsightFace 0.7.3 / ONNX Runtime CPU / buffalo_l 已完成构建期 `FaceAnalysis.prepare()` 与容器运行期 512-d smoke
 
 P0 Gate 阻塞项（19 PASS / 4 BLOCKED）：
 1. 未配置真实文本 LLM BYOK，无法现场证明 Agent Brief→Plan→10 Shot 全链
-2. 缺少 InsightFace FAR/FRR 完整校准（需 20+20+10 样本）
+2. 需将已有 InsightFace 20/20/10 FAR/FRR 校准与当前候选提交的正式证据链重新绑定
 3. 缺少真实 review_passed Shot 和逐 Shot 审核/驳回/重跑闭环
 4. 备份恢复、密钥轮换、真实 Playwright 10 Shot E2E 未留存
 
@@ -95,9 +95,6 @@ frontend/src/
 docker compose up -d                          # 启动全部后端
 cd frontend && npm.cmd install && npm.cmd run dev  # 启动前端 (:5173)
 curl http://localhost:8000/health
-
-# WSL 正式栈（非 Docker 的替代方案）
-powershell -ExecutionPolicy Bypass -File .\scripts\start_p0_stack.ps1
 
 # 质量一键
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality.ps1

@@ -1,0 +1,35 @@
+{
+  "recorded_at_utc": "2026-07-30T11:32:40Z",
+  "scope": "Docker Compose backend image smoke verification",
+  "built_at_utc": "2026-07-30T11:08:35Z",
+  "image_services": [
+    "api",
+    "migrate",
+    "dispatcher",
+    "worker-default",
+    "worker-heavy"
+  ],
+  "model": "buffalo_l",
+  "provider": "CPUExecutionProvider",
+  "images": {
+    "api": "sha256:f2b2ceba634a490842937c3deb1cbea98abb84bc9673ecc3a96f5d795dfeed78",
+    "migrate": "sha256:a6c277f31b5f73d60ea6e02161a178effc9f2f31f0d3ab0bbf4d58e5bce75910",
+    "dispatcher": "sha256:fc285eb2fa65db6a638c6348c0c9a9b7bdd4cdf40d3b83c8cb44110bc1f01d66",
+    "worker-default": "sha256:aacd0e00ada69a9afdea10e8f8f30eb81c54436104b7b2397c74838fca3c684f",
+    "worker-heavy": "sha256:21690694ac806bf1fd12ac1baf4076242ee5e3fd3c6bf7679d5e088cdb480014"
+  },
+  "build_validation": {
+    "command": "FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider']).prepare(ctx_id=-1)",
+    "result": "passed"
+  },
+  "runtime_status": {
+    "available": true,
+    "backend": "insightface+onnx",
+    "embedding_dim": 512,
+    "error": null
+  },
+  "limitations": [
+    "This smoke verifies only the containerized InsightFace runtime and model availability.",
+    "It does not replace the S0-A FAR/FRR calibration or close any P0 formal evidence gate."
+  ]
+}

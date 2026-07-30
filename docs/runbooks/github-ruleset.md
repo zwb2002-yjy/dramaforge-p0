@@ -64,7 +64,7 @@ or the protected-branch merge record.
 
 ## Release Gate
 
-Before a release or P0 tag, run the full non-Docker WSL formal proof and section 3.1 Gate
+Before a release or P0 tag, run the Docker Compose formal proof and section 3.1 Gate
 from a clean checkout of the exact candidate commit. Any `FAIL`, `BLOCKED`, dirty source,
 or source mismatch prevents `p0_mvp_complete=true`. Generated reports default to
 `tmp/p0-evidence/<sha>/formal/` and `tmp/p0-evidence/<sha>/gate/`; do not refresh or

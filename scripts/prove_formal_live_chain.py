@@ -36,7 +36,7 @@ def summarize_download_grant(response: httpx.Response) -> dict[str, object]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:8010")
+    ap.add_argument("--base", default="http://127.0.0.1:8000")
     ap.add_argument("--scratch", type=Path, required=True)
     ap.add_argument("--idea", required=True)
     ap.add_argument(

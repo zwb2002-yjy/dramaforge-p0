@@ -172,7 +172,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\task_worktree.ps1 
 
 GitHub 保存团队共享的分支、提交、PR、审查和合并历史；`PROGRESS.jsonl` 保存当前机器上的执行断点。两者用途不同，不能互相替代。
 
-正式发布或 P0 tag 前，必须从候选 commit 的干净 worktree 运行非 Docker WSL formal proof 和 §3.1 Gate。报告必须包含相同的 `source_commit`、`dirty=false`、UTC 起止时间、脱敏命令与环境摘要，并证明运行期间 source 未变化。任何 `FAIL`、`BLOCKED`、dirty 或 source mismatch 都禁止 `p0_mvp_complete=true`；生成报告只写入 `tmp/p0-evidence/<sha>/` 或仓库外路径，不刷新 tracked `docs/acceptance/*latest.json`。
+正式发布或 P0 tag 前，必须从候选 commit 的干净 worktree 运行 Docker Compose formal proof 和 §3.1 Gate。报告必须包含相同的 `source_commit`、`dirty=false`、UTC 起止时间、脱敏命令与环境摘要，并证明运行期间 source 未变化。任何 `FAIL`、`BLOCKED`、dirty 或 source mismatch 都禁止 `p0_mvp_complete=true`；生成报告只写入 `tmp/p0-evidence/<sha>/` 或仓库外路径，不刷新 tracked `docs/acceptance/*latest.json`。
 
 ## 8. 当前状态入口
 

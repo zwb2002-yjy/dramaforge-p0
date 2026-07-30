@@ -138,7 +138,7 @@ def response_run_id_for_node(response: dict[str, Any], *, node_key: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default="http://127.0.0.1:8010")
+    parser.add_argument("--base", default="http://127.0.0.1:8000")
     parser.add_argument(
         "--scratch",
         type=Path,

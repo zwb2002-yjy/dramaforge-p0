@@ -1,6 +1,6 @@
 # DramaForge
 
-DramaForge 是面向 1-6 人短剧制作团队私有化部署的镜头级 AI 生产工作台。项目以受控 Production Graph 管理剧本、资产、生成、连续性检查、审核、成本、局部返工和可追溯交付。
+DramaForge 是面向个人创作者私有化部署的镜头级 AI 短剧生产工作台。项目以受控 Production Graph 管理剧本、资产、生成、连续性检查、审核、成本、局部返工和可追溯交付。
 
 ## 当前状态
 
@@ -34,16 +34,14 @@ D:\dramaforge
 | Redis 7 | 任务队列（Arq） |
 | MinIO | S3 兼容对象存储 |
 | API (FastAPI) | `:8000`，后端服务 |
-| Worker (default + heavy) | Arq 异步任务消费 |
+| Dispatcher / Worker (default + heavy) | Outbox 派发与 Arq 异步任务消费 |
 | 前端 (Vite + React) | `:5173`，浏览器打开 |
 
-`docker-compose.yml` 已容器化了除前端外的所有组件。**前端目前不容器化**——开发时需要 Vite HMR（热模块替换），始终保持 `npm run dev` 在宿主机运行。
-
-下面提供三种部署方式，**任选其一**：
+`docker-compose.yml` 是唯一的服务端部署方式：它启动 PostgreSQL、Redis、MinIO、迁移、API、常驻 Outbox dispatcher 与两类 Arq Worker。前端使用本机 Vite 提供 HMR；它通过 `http://127.0.0.1:8000` 访问 Compose API。
 
 ---
 
-### 方式一：Docker Compose（推荐）
+### Docker Compose
 
 把所有后端服务跑在 Docker 容器内，网络在容器内网打通，最稳定。
 
@@ -75,7 +73,7 @@ Compose 会从本地忽略的 `.env` 读取 `AGNES_*`、`TEXT_LLM_*` 和可选�
 并仅注入 API 与 Worker 容器；未配置时保持 fail-closed。不要把真实密钥写入
 `docker-compose.yml` 或提交到 Git。
 
-> 这会启动 **所有** 服务（postgres、redis、minio、migrate、api、worker-default、worker-heavy）。首次运行会构建 `backend/Dockerfile` 镜像。
+> 这会启动 **所有** 服务（postgres、redis、minio、migrate、api、dispatcher、worker-default、worker-heavy）。首次运行会构建 `backend/Dockerfile` 镜像，其中包含 FFmpeg、eSpeak NG、InsightFace 0.7.3、ONNX Runtime CPU 与预下载的 buffalo_l 模型。构建会执行 `FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"]).prepare(ctx_id=-1)`；初始化失败时不会生成服务镜像。
 
 **3. 启动前端**
 
@@ -94,6 +92,16 @@ curl http://localhost:8000/health
 # → {"status":"ok","db":"up"}
 ```
 
+验证镜像内的人脸一致性运行时，不依赖宿主机 Python 或模型下载：
+
+```powershell
+docker compose build api worker-heavy
+docker run --rm --entrypoint python dramaforge-api:latest -c "import json; from app.consistency.image_embed import insightface_status; print(json.dumps(insightface_status(), sort_keys=True))"
+# → {"available": true, "backend": "insightface+onnx", "embedding_dim": 512, "error": null}
+```
+
+`insightface_status()` 的 `available=true` 只证明镜像内的 CPU 初始化与 512 维 embedding 运行时可用；它不替代 S0-A 的 FAR/FRR 校准，也不关闭 P0 的正式证据 Gate。
+
 **GPU / ComfyUI（可选）**：
 
 ```powershell
@@ -102,36 +110,11 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gpu up 
 
 ---
 
-### 方式二：WSL 一键脚本（Windows 开发推荐）
-
-当 Docker 不可用，且 PostgreSQL 在 WSL 内时使用。脚本自动管理 API 和前端进程。
-
-**为什么需要这个**：如果把 API 放 Windows 但 PG 放 WSL，`127.0.0.1:5432` 的跨边界转发会间歇断开，`/health` 返回 `db=down`。此脚本把 API 也放在 WSL 内，避免这个问题。
-
-```powershell
-# 启动
-powershell -ExecutionPolicy Bypass -File .\scripts\start_p0_stack.ps1
-
-# 检查状态
-powershell -ExecutionPolicy Bypass -File .\scripts\start_p0_stack.ps1 -Action Status
-
-# 停止
-powershell -ExecutionPolicy Bypass -File .\scripts\start_p0_stack.ps1 -Action Stop
-```
-
-> Windows API 模式：`-Mode WindowsApi -DbHost WslIp`（API 在 Windows，PG 通过 WSL 网卡 IP 直连，不用 localhost 转发）。
-
-详细说明见 [`docs/runbooks/local-stack-bypass.md`](docs/runbooks/local-stack-bypass.md)。
-
----
-
-### 方式三：后端裸机运行（调试用）
+### 原生 Python 调试
 
 当你需要在宿主机打断点调试 Python 代码时。
 
-**先启动基础设施**（任选其一）：
-- Docker：`docker compose up -d postgres redis minio`
-- 或宿主机自行安装 PostgreSQL 15+ / Redis 7+ / MinIO，然后修改 `.env` 中的连接地址
+先启动 Docker 基础设施：`docker compose up -d postgres redis minio`。原生调试不提供另一套部署模式；数据库、队列和对象存储仍由 Compose 管理。
 
 **后端**（Python 3.12 + venv）：
 

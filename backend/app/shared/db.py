@@ -44,7 +44,7 @@ def get_engine(settings: Settings | None = None) -> AsyncEngine:
     global _engine, _session_factory
     if _engine is None:
         cfg = settings or get_settings()
-        # Local/dev asyncpg: disable TLS handshake (common behind WSL/port proxies).
+        # Local/dev asyncpg: disable TLS handshake for local Compose connections.
         _engine = create_async_engine(
             cfg.database_url,
             pool_pre_ping=True,

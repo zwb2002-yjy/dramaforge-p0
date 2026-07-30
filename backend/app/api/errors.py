@@ -73,7 +73,10 @@ def register_exception_handlers(app: FastAPI) -> None:
             return problem_response(
                 status_code=503,
                 code="DATABASE_UNAVAILABLE",
-                message="数据库不可用（PostgreSQL 连接失败）。请启动 WSL Postgres 后重试。",
+                message=(
+                    "数据库不可用（PostgreSQL 连接失败）。"
+                    "请启动 Docker Compose PostgreSQL 后重试。"
+                ),
                 details={"error_type": name},
             )
         # sqlalchemy wraps asyncpg errors

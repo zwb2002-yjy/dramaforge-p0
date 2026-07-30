@@ -6,7 +6,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
-const apiTarget = process.env.DRAMAFORGE_API_URL ?? "http://127.0.0.1:8010";
+const apiTarget = process.env.DRAMAFORGE_API_URL ?? "http://127.0.0.1:8000";
 
 export default defineConfig({
   cacheDir: "./tmp/vite-cache",
@@ -19,7 +19,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // The local-stack launcher supplies the WSL IP when localhost forwarding fails.
+      // Compose publishes the API on the default local development port.
       "/api": apiTarget,
       "/health": apiTarget,
     },

@@ -185,19 +185,12 @@ async def test_outbox_reclaim_expired_lease() -> None:
     await engine.dispose()
 
 
-def test_stack_script_does_not_force_memory_store() -> None:
+def test_compose_stack_does_not_force_memory_store() -> None:
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[3]
-    text = (repo / "scripts" / "start_p0_wsl_stack.sh").read_text(encoding="utf-8")
-    # Must never assign formal force-memory (=1); comments may mention the forbidden value.
-    assert 'export DRAMA_FORCE_MEMORY_STORE="1"' not in text
-    assert "DRAMA_FORCE_MEMORY_STORE=1" not in [
-        ln.strip() for ln in text.splitlines() if not ln.strip().startswith("#")
-    ]
-    assert "unset DRAMA_FORCE_MEMORY_STORE" in text or 'DRAMA_FORCE_MEMORY_STORE=""' in text
-    api = (repo / "scripts" / "start_api_wsl_stable.sh").read_text(encoding="utf-8")
-    assert 'export DRAMA_FORCE_MEMORY_STORE="1"' not in api
+    text = (repo / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "DRAMA_FORCE_MEMORY_STORE" not in text
 
 
 def test_insightface_status_reports_backend() -> None:

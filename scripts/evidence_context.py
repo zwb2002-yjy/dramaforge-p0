@@ -87,7 +87,6 @@ def environment_summary(*, cwd: Path | None = None) -> dict[str, Any]:
         "cwd": str((cwd or Path.cwd()).resolve()),
         "app_env": os.getenv("APP_ENV"),
         "ci": os.getenv("CI"),
-        "wsl_distro_name": os.getenv("WSL_DISTRO_NAME"),
     }
 
 

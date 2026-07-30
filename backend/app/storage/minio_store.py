@@ -171,7 +171,7 @@ def get_object_store(settings: Settings | None = None) -> ObjectStore:
 
         raise ValidationAppError(
             f"OBJECT_STORE_UNAVAILABLE: MinIO not reachable ({type(exc).__name__}: {exc}). "
-            "Start formal stack (scripts/start_p0_wsl_stack.sh). "
+            "Start the Docker Compose stack (docker compose up -d). "
             "Memory store is only allowed for APP_ENV=test or DRAMA_FORCE_MEMORY_STORE=1."
         ) from exc
 
