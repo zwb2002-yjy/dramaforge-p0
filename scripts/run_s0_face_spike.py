@@ -129,7 +129,7 @@ def try_build_face_app() -> tuple[Any | None, str | None]:
 def embed_image(app: Any, image_path: Path) -> tuple[list[float] | None, FaceAnomalyLabel | None, float]:
     """Return (embedding or None, anomaly or None, latency_ms). Embedding is 512-d L2-normalized by model."""
     import cv2  # type: ignore[import-untyped]
-    import numpy as np
+    import numpy as np  # type: ignore[import-untyped]
 
     t0 = time.perf_counter()
     img = cv2.imread(str(image_path))

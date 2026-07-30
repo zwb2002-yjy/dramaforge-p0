@@ -45,7 +45,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if not session.config.getoption("--fail-on-skip"):
         return
     reporter = session.config.pluginmanager.getplugin("terminalreporter")
-    skipped = len(reporter.stats.get("skipped", [])) if reporter is not None else 0
+    skipped = len(reporter.stats.get("skipped", [])) if reporter is not None else 0  # type: ignore[union-attr]
     if skipped:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 

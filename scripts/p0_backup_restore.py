@@ -94,7 +94,7 @@ def _create_payload(settings: Any, payload_dir: Path) -> dict[str, Any]:
     for index, item in enumerate(store.list_objects(bucket, recursive=True)):
         archive_name = f"objects/{index:08d}.bin"
         target = payload_dir / archive_name
-        response = store.get_object(bucket, item.object_name)
+        response = store.get_object(bucket, item.object_name or "")
         try:
             with target.open("wb") as out:
                 shutil.copyfileobj(response, out)
@@ -234,7 +234,8 @@ def restore_verify(
                     "SELECT count(*) FROM information_schema.tables "
                     "WHERE table_schema = 'public'"
                 )
-                table_count = int(cur.fetchone()[0])
+                row = cur.fetchone()
+                table_count = int(row[0]) if row is not None else 0
         return {
             "ok": True,
             "source_commit": manifest.get("source_commit"),

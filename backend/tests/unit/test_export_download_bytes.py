@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from decimal import Decimal
 from uuid import uuid4
 
@@ -20,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 @pytest.fixture
-def download_client() -> TestClient:
+def download_client() -> Iterator[TestClient]:
     import os
 
     os.environ["APP_ENV"] = "test"

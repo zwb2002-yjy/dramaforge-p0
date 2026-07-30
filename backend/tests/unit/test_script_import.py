@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
 
@@ -31,7 +32,7 @@ GOLDEN = REPO / "fixtures" / "scripts" / "p0_10_shots.md"
 
 
 @pytest.fixture
-async def session() -> AsyncSession:
+async def session() -> AsyncGenerator[AsyncSession, None]:
     reset_object_store_for_tests()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

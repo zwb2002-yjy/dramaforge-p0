@@ -83,7 +83,7 @@ async def main() -> int:
         parser.error("--image-prompt and --video-prompt must not be empty when provided")
 
     clear_settings_cache()
-    settings = Settings(_env_file=str(env_path) if env_path.is_file() else None)
+    settings = Settings()
     key = settings.agnes_api_key
     report: dict = {
         "started_at": datetime.now(timezone.utc).isoformat(),

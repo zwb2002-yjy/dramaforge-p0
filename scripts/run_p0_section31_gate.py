@@ -867,12 +867,16 @@ def main() -> int:
                     f"unique_artifacts={lineage.get('unique_artifact_ids')}",
                     authoritative=True,
                 )
-                if fin.get("package_hash") and fin.get("mp4_hash") and fin.get("mp4_object_key"):
+                pkg_h = fin.get("package_hash")
+                mp4_h = fin.get("mp4_hash")
+                if pkg_h and mp4_h and fin.get("mp4_object_key"):
+                    pkg_s: str = str(pkg_h)
+                    mp4_s: str = str(mp4_h)
                     add(
                         "3.1.18",
                         "导出 timeline/SRT/package+MP4（formal evidence）",
                         "PASS",
-                        f"package={fin.get('package_hash')[:16]}… mp4={fin.get('mp4_hash')[:16]}… "
+                        f"package={pkg_s[:16]}… mp4={mp4_s[:16]}… "
                         f"zip_match={ev.get('zip_matches_api')}",
                         authoritative=True,
                     )

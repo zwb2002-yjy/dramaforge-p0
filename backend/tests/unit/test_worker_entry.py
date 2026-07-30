@@ -55,8 +55,8 @@ class _FakeSession:
         self,
         run: NodeRun,
         *,
-        project: object | None = None,
-        workspace: object | None = None,
+        project: SimpleNamespace | None = None,
+        workspace: SimpleNamespace | None = None,
     ) -> None:
         self.run = run
         self.project = project
@@ -72,6 +72,7 @@ class _FakeSession:
         if (
             model is Workspace
             and self.workspace is not None
+            and self.project is not None
             and ident == self.project.workspace_id
         ):
             return self.workspace
@@ -95,12 +96,11 @@ class _SessionContext(AbstractAsyncContextManager[_FakeSession]):
         return None
 
 
-def _worker_scope(run: NodeRun) -> tuple[object, object]:
+def _worker_scope(run: NodeRun) -> tuple[SimpleNamespace, SimpleNamespace]:
     workspace_id = uuid4()
-    return (
-        SimpleNamespace(id=run.project_id, workspace_id=workspace_id),
-        SimpleNamespace(id=workspace_id, owner_user_id=uuid4()),
-    )
+    project = SimpleNamespace(id=run.project_id, workspace_id=workspace_id)
+    workspace = SimpleNamespace(id=workspace_id, owner_user_id=uuid4())
+    return project, workspace
 
 
 @pytest.mark.asyncio

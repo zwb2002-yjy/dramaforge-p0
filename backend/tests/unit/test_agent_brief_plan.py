@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator
+from typing import Literal, cast
 from uuid import uuid4
 
 import httpx
@@ -31,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 @pytest.fixture
-async def session() -> AsyncSession:
+async def session() -> AsyncGenerator[AsyncSession, None]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
@@ -87,7 +89,7 @@ async def test_text_adapter_uses_configured_provider_contract(
             text_llm_api_key="test-provider-key",
             text_llm_base_url=base_url,
             text_llm_model="test-model",
-            text_llm_api_style=api_style,
+            text_llm_api_style=cast("Literal['anthropic', 'openai']", api_style),
         ),
         transport=httpx.MockTransport(handler),
     )
@@ -237,9 +239,10 @@ async def test_generate_brief_and_plan_agent_retries_invalid_structured_output(
         authorize=True,
     )
     assert plan.plan.get("prompt")
-    assert len(plan.plan.get("shots", [])) == 10
+    plan_shots = cast(list[dict[str, object]], plan.plan.get("shots", []))
+    assert len(plan_shots) == 10
     assert all(
-        shot.get("keyframe_prompt") for shot in plan.plan.get("shots", []) if isinstance(shot, dict)
+        shot.get("keyframe_prompt") for shot in plan_shots if isinstance(shot, dict)
     )
     assert plan.source_agent_run_id is not None
 
@@ -273,7 +276,7 @@ async def test_generate_brief_and_plan_agent_retries_invalid_structured_output(
     ]
     assert len(failed_brief) == 1
     assert failed_brief[0].attempt_no == 1
-    assert failed_brief[0].response_summary["response_chars"] > 0
+    assert cast(int, failed_brief[0].response_summary["response_chars"]) > 0
     assert len(successful_brief) == 1
     assert successful_brief[0].attempt_no == 2
     assert len(adapter.brief_prompts) == 2
@@ -288,7 +291,7 @@ async def test_generate_brief_and_plan_agent_retries_invalid_structured_output(
     ]
     assert len(failed_plan) == 1
     assert failed_plan[0].attempt_no == 1
-    assert failed_plan[0].response_summary["response_chars"] > 0
+    assert cast(int, failed_plan[0].response_summary["response_chars"]) > 0
     assert len(successful_plan) == 1
     assert successful_plan[0].attempt_no == 2
     assert len(adapter.plan_prompts) == 2
@@ -395,16 +398,16 @@ def test_brief_parser_preserves_creative_contract() -> None:
     )
 
     assert parsed["title"] == "雨幕证人"
-    assert parsed["synopsis"].startswith("林夏循着")
+    assert cast(str, parsed["synopsis"]).startswith("林夏循着")
     assert parsed["protagonist"] == {
         "name": "林夏",
         "profile": "冷静的调查记者，外冷内热",
         "goal": "找到姐姐并确认跟踪者身份",
     }
-    assert parsed["conflict"].startswith("她必须")
-    assert parsed["stakes"].startswith("失败")
-    assert parsed["visual_style"].startswith("高反差")
-    assert parsed["episode_hook"].startswith("跟踪者")
+    assert cast(str, parsed["conflict"]).startswith("她必须")
+    assert cast(str, parsed["stakes"]).startswith("失败")
+    assert cast(str, parsed["visual_style"]).startswith("高反差")
+    assert cast(str, parsed["episode_hook"]).startswith("跟踪者")
 
 
 def test_plan_parser_preserves_ten_structured_shots() -> None:
@@ -445,11 +448,15 @@ def test_plan_parser_preserves_ten_structured_shots() -> None:
     )
 
     assert parsed["prompt"] == shots[0]["keyframe_prompt"]
-    assert parsed["episode_summary"].startswith("林夏追踪")
-    assert parsed["visual_bible"]["character_continuity"] == "林夏始终穿黑色短风衣"
-    assert len(parsed["shots"]) == 10
-    assert parsed["shots"][9]["shot_number"] == 10
-    assert parsed["shots"][9]["location"] == "废弃车站"
+    assert cast(str, parsed["episode_summary"]).startswith("林夏追踪")
+    assert (
+        cast(dict[str, object], parsed["visual_bible"])["character_continuity"]
+        == "林夏始终穿黑色短风衣"
+    )
+    parsed_shots = cast(list[dict[str, object]], parsed["shots"])
+    assert len(parsed_shots) == 10
+    assert parsed_shots[9]["shot_number"] == 10
+    assert parsed_shots[9]["location"] == "废弃车站"
     invalid = __import__("json").loads(__import__("json").dumps({"shots": shots}))
     invalid["shots"][0].pop("lead_identity_required")
     with pytest.raises(ValueError, match="lead_identity_required"):
@@ -592,7 +599,7 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
         brief_revision_id=confirmed.id,
         authorize=True,
     )
-    assert len(plan.plan["shots"]) == 10
+    assert len(cast(list[dict[str, object]], plan.plan["shots"])) == 10
 
     materialized = await service.confirm_plan_and_materialize(
         project_id=started.project_id,
@@ -852,11 +859,11 @@ async def test_manual_plan_save_cannot_overwrite_agent_plan(
 
     assert error.value.details["code"] == "AGENT_PLAN_MANUAL_OVERWRITE_FORBIDDEN"
     await session.refresh(agent_plan)
-    assert len(agent_plan.plan["shots"]) == 10
+    assert len(cast(list[dict[str, object]], agent_plan.plan["shots"])) == 10
     state = await service.get_creation_state(
         project_id=started.project_id,
         actor=user,
     )
     assert state.plan is not None
     assert state.plan.id == agent_plan.id
-    assert len(state.plan.plan["shots"]) == 10
+    assert len(cast(list[dict[str, object]], state.plan.plan["shots"])) == 10

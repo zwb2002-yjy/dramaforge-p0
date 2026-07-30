@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 from app.access import models as _a  # noqa: F401
-from app.access.models import User, Workspace
+from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.events import models as _e  # noqa: F401
 from app.execution import models as _x  # noqa: F401
@@ -19,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 @pytest.fixture
-async def session() -> AsyncSession:
+async def session() -> AsyncGenerator[AsyncSession, None]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
@@ -29,7 +30,7 @@ async def session() -> AsyncSession:
     await engine.dispose()
 
 
-async def _seed(session: AsyncSession) -> tuple[User, object]:
+async def _seed(session: AsyncSession) -> tuple[User, Project]:
     user = User(
         email=f"ms{uuid4().hex[:8]}@ex.com",
         display_name="MS",

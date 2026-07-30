@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.access.models import User, Workspace
 from app.creation.service import CreationService
@@ -20,8 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 @dataclass
 class HarnessProject:
     user: User
-    workspace_id: object
-    project_id: object
+    workspace_id: UUID
+    project_id: UUID
     session: AsyncSession
 
 

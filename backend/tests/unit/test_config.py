@@ -1,3 +1,4 @@
+
 """Settings validation tests."""
 
 from __future__ import annotations
@@ -45,4 +46,4 @@ def test_project_env_file_does_not_depend_on_working_directory(
     env_file = project_env_file()
 
     assert env_file == Path(__file__).resolve().parents[3] / ".env"
-    assert Settings.model_config["env_file"] == env_file
+    assert Settings.model_config.get("env_file") == env_file

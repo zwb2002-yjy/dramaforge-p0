@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.consistency.face_review import FaceReviewResult, face_review_hook, face_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.service import GraphService
+from app.providers.base import ProviderAdapter
 from app.providers.fake import FakeFluxAdapter, FakeOpenAIAdapter
 from app.shared.errors import ValidationAppError
 from app.storage.minio_store import get_object_store
@@ -78,7 +79,7 @@ class FirstFramePipeline:
         self,
         session: AsyncSession,
         openai: FakeOpenAIAdapter | None = None,
-        flux: FakeFluxAdapter | None = None,
+        flux: ProviderAdapter | None = None,
     ) -> None:
         self._session = session
         self.openai = openai or FakeOpenAIAdapter()

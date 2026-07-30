@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 from app.access import models as _a  # noqa: F401
-from app.access.models import User, Workspace
+from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.delivery.export_local import build_export_from_runs, build_export_package
 from app.events import models as _e  # noqa: F401
@@ -22,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 @pytest.fixture
-async def session() -> AsyncSession:
+async def session() -> AsyncGenerator[AsyncSession, None]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
@@ -32,7 +33,7 @@ async def session() -> AsyncSession:
     await engine.dispose()
 
 
-async def _project(session: AsyncSession) -> tuple[User, object]:
+async def _project(session: AsyncSession) -> tuple[User, Project]:
     user = User(
         email=f"u{uuid4().hex[:8]}@ex.com",
         display_name="U",
@@ -115,7 +116,10 @@ def test_stale_downstream_from_subtitle() -> None:
 
 def test_export_package_hashes_stable() -> None:
     pid = uuid4()
-    shots = [{"id": "1", "subtitle": "Hello"}, {"id": "2", "subtitle": "World"}]
+    shots: list[dict[str, object]] = [
+        {"id": "1", "subtitle": "Hello"},
+        {"id": "2", "subtitle": "World"},
+    ]
     a = build_export_package(project_id=pid, shots=shots)
     b = build_export_package(project_id=pid, shots=shots)
     assert a.timeline_hash == b.timeline_hash

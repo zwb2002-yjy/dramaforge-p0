@@ -6,9 +6,10 @@ are documented as skip reasons, not marked passed.
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.access.models import User, Workspace
@@ -49,7 +50,7 @@ GOLDEN = Path(__file__).resolve().parents[3] / "fixtures" / "scripts" / "p0_10_s
 
 
 @pytest.fixture
-async def session() -> AsyncSession:
+async def session() -> AsyncGenerator[AsyncSession, None]:
     reset_object_store_for_tests()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -61,7 +62,7 @@ async def session() -> AsyncSession:
     reset_object_store_for_tests()
 
 
-async def _user_workspace(session: AsyncSession) -> tuple[User, object]:
+async def _user_workspace(session: AsyncSession) -> tuple[User, UUID]:
     user = User(
         email=f"g-{uuid4().hex[:8]}@example.com",
         display_name="G",
@@ -194,6 +195,7 @@ async def test_matrix_budget_blocked(session: AsyncSession) -> None:
         created_by=user.id,
         definition={},
     )
+    assert g.current_version_id is not None
     node = GraphNode(
         graph_version_id=g.current_version_id,
         node_key="video",
@@ -414,6 +416,7 @@ async def test_matrix_cache_hit_and_cancel(session: AsyncSession) -> None:
     )
     session.add(node)
     await session.flush()
+    assert g.current_version_id is not None
     ih = "c" * 64
     r1, bud = await run_or_cache(
         session,
@@ -469,6 +472,7 @@ async def test_matrix_single_flight_one_leader(session: AsyncSession) -> None:
     )
     session.add(node)
     await session.flush()
+    assert g.current_version_id is not None
     ih = "d" * 64
     r1, lead1 = await single_flight_claim(
         session,

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.access.models import User, Workspace
@@ -30,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 @pytest.fixture
-async def session() -> AsyncSession:
+async def session() -> AsyncGenerator[AsyncSession, None]:
     reset_object_store_for_tests()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -42,7 +43,7 @@ async def session() -> AsyncSession:
     reset_object_store_for_tests()
 
 
-async def _seed_user_workspace(session: AsyncSession) -> tuple[User, object]:
+async def _seed_user_workspace(session: AsyncSession) -> tuple[User, UUID]:
     user = User(
         email=f"u-{uuid4().hex[:8]}@example.com",
         display_name="U",
