@@ -67,20 +67,6 @@ if ($LASTEXITCODE -ne 0 -or $rootChanges.Count -gt 0) {
     throw 'Repository root dev worktree must be clean before creating an isolated task.'
 }
 
-& git -C $RepoRoot fetch origin dev
-if ($LASTEXITCODE -ne 0) {
-    throw 'git fetch origin dev failed.'
-}
-$null = & git -C $RepoRoot show-ref --verify --quiet refs/remotes/origin/dev
-if ($LASTEXITCODE -ne 0) {
-    throw 'origin/dev is missing after fetch.'
-}
-$devSha = (& git -C $RepoRoot rev-parse dev).Trim()
-$originDevSha = (& git -C $RepoRoot rev-parse origin/dev).Trim()
-if ($devSha -ne $originDevSha) {
-    throw "Local dev ($devSha) differs from origin/dev ($originDevSha)."
-}
-
 & $Python $Validator check-ownership `
     --progress-path $ProgressPath `
     --task-id $normalized `

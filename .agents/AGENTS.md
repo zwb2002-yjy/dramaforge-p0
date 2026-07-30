@@ -23,7 +23,7 @@
 
 ```text
 在 docs/开发执行检查点.md 写 Task 合同
-  → 日常 Task 在同步后的 dev 实现；并行 Task 用 scripts/task_worktree.ps1 创建 agent/<task-id> 分支和 .worktrees/<task-id>
+  → 日常 Task 在当前本地 dev 实现；并行 Task 用 scripts/task_worktree.ps1 从当前本地 dev 创建 agent/<task-id> 分支和 .worktrees/<task-id>
   → .agent-control/control.ps1 append STARTED
   → 在 dev 根 worktree（或并行任务的独立 worktree）中实现、测试、自审
   → git add 本 Task 文件；git commit；git push origin dev
@@ -83,7 +83,7 @@ scripts/task_worktree.ps1 -TaskId <task-id> [-OwnedPaths <paths>]
 
 脚本会校验：
 - 当前在 `dev` 分支的 worktree；
-- `dev` 与 `origin/dev` 同步；
+- 根 worktree 在本地 `dev`；本地 `dev` 可在推送前领先 `origin/dev`；
 - 该 Task 的 `owned_paths` 不与其他 `IN_PROGRESS` 或 `STARTED` 的 Task 重叠。
 
 ### 3.3 根工作区规则

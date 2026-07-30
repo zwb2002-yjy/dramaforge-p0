@@ -124,8 +124,8 @@ Agent 重启后按事实恢复：
 主 Agent 负责维护检查点、拆分 Task、分配文件所有权、指定分支/worktree、复核结果、创建或更新 PR，并在用户合并后重算阶段 Gate。subagent 只处理被分派的 Task 合同范围。
 
 - 只读 subagent 可以并行，不需要分支或 worktree，但仍须留下开始和结束记录。
-- 根 worktree 默认跟踪同步后的 `dev`，日常串行 Task 直接在其中提交并推送 `origin/dev`。
-- 仅并行写入任务从同步后的 `dev` 创建独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`。这类任务的 `STARTED` 必须声明非空 `owned_paths`，且其他活动隔离任务不得声明重叠路径；只读任务必须显式记录 `read_only=true`。
+- 根 worktree 默认跟踪本地 `dev`，日常串行 Task 直接在其中提交并推送 `origin/dev`；本地 `dev` 可以在推送前领先 `origin/dev`。
+- 仅并行写入任务从当前本地 `dev` 创建独立 `agent/<task-id>` 分支和 `.worktrees/<task-id>`。这类任务的 `STARTED` 必须声明非空 `owned_paths`，且其他活动隔离任务不得声明重叠路径；只读任务必须显式记录 `read_only=true`。
 - 远端可用时，日常 Task 推送 `dev`；隔离 Task 推送自己的分支并通过 PR 合回 `dev`。远端暂时不可用时保留提交并记录 `PAUSED`，不得直接推送 `main`。
 - 同一文件尽量只分配给一个写入 subagent。确需交叉修改时，由主 Agent 负责冲突解决和合并后联合回归。
 - subagent 的自然语言汇报不是完成证据。至少需要 commit、改动文件、实际测试结果和 Task 合同逐项结论。
@@ -160,8 +160,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\task_worktree.ps1 
 
 规则：
 
-1. 根 worktree 必须保持在同步后的 `dev`；`main` 和 `origin/main` 只在准备发布或处理 hotfix 时同步。
-2. 日常 Task 可直接在 `dev` 提交和推送。一个并行隔离 Task 才对应一个 `agent/<task-id>` 分支、一个 `.worktrees/<task-id>` 和一组不与活动隔离 Task 重叠的 `owned_paths`。
+1. 根 worktree 必须保持在本地 `dev`；本地 `dev` 是日常开发源，日常 Task 无需预先与 `origin/dev` 同步，完成后直接推送。`main` 和 `origin/main` 只在准备发布或处理 hotfix 时同步。
+2. 日常 Task 可直接在 `dev` 提交和推送。一个并行隔离 Task 从当前本地 `dev` 创建，并对应一个 `agent/<task-id>` 分支、一个 `.worktrees/<task-id>` 和一组不与活动隔离 Task 重叠的 `owned_paths`。
 3. 提交、测试、发布 PR、用户批准、合并和清理都写入本地账本；Agent 只能记录到 `COMPLETED` 或 `PAUSED`。
 4. `main` 只通过 `dev -> main` 的受保护 PR 接收稳定发布。本地 `.githooks/pre-push` 拒绝直接推送 `main`；GitHub Ruleset 必须要求固定 CI、Code Owner review 和 `@zwb2002-yjy` 的批准。
 5. 紧急生产修复可从 `main` 创建 `agent/hotfix-<task-id>`，通过 PR 合入 `main` 后立即同步回 `dev`。常规发布不得用 cherry-pick 代替 `dev -> main` PR。

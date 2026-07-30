@@ -22,7 +22,7 @@
 先执行 `.agent-control/control.ps1 -Operation open` 和 `tail -Tail 20`，再核验 `git status --short`、`git worktree list`、`git branch --all` 和 GitHub 远端状态。不要依赖聊天记忆，不要覆盖已有未提交改动。
 从 `docs/开发执行检查点.md` 的“当前唯一执行任务”恢复，不要重复已经有证据的工作。持续执行本文的“开发控制循环”：当前 Task 通过后立即选择下一 Task，当前阶段 Gate 通过后立即进入下一阶段，直到 P0、P1.1、P1.2、P1.3、P2 依次完成，或遇到本文定义的真实人工阻塞。不要只完成一个 Task 就等待新的“继续”指令。
 开始 Task 或 subtask 前写 STARTED；完成、失败或暂停时立即写 COMPLETED、FAILED 或 PAUSED。记录摘要、分支、worktree、改动文件、测试、commit、证据和下一步。
-允许主 Agent 使用多个 subagent：日常串行写入在根 worktree 的 `dev` 分支进行并推送到 `origin/dev`。只有并行写入才使用独立 `agent/<task-id>` 分支、`.worktrees/<task-id>` 和不重叠的 `owned_paths`，其 PR 合回 `dev`。`main` 只接收 `dev -> main` 的稳定发布 PR；紧急 hotfix 从 `main` 单独处理并随后同步回 `dev`。Agent 复核 diff、测试和合同后创建或更新 PR，但不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以完成这些动作。每个 subagent 必须自行记录开始和结束状态。
+允许主 Agent 使用多个 subagent：日常串行写入在根 worktree 的本地 `dev` 分支进行并推送到 `origin/dev`；推送前本地 `dev` 可以领先远端。只有并行写入才从当前本地 `dev` 创建独立 `agent/<task-id>` 分支、`.worktrees/<task-id>` 和不重叠的 `owned_paths`，其 PR 合回 `dev`。`main` 只接收 `dev -> main` 的稳定发布 PR；紧急 hotfix 从 `main` 单独处理并随后同步回 `dev`。Agent 复核 diff、测试和合同后创建或更新 PR，但不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以完成这些动作。每个 subagent 必须自行记录开始和结束状态。
 遇到真实 Provider 费用、外部账号、不可逆操作或冻结合同冲突时先停止对应动作并说明；其他本地开发自主完成。
 ```
 

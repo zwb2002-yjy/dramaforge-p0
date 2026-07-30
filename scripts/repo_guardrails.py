@@ -238,31 +238,24 @@ def git_context(repo_root: Path) -> tuple[Path, Path, str]:
     return primary_root, worktree_root, branch
 
 
-def validate_primary_dev(primary_root: Path, *, require_synced: bool = True) -> None:
+def validate_primary_dev(primary_root: Path, *, require_clean: bool = True) -> None:
     root_branch = _git(primary_root, "branch", "--show-current")
     if root_branch != "dev":
         raise GuardrailError(
             f"repository root worktree must stay on dev; current branch is {root_branch}"
         )
-    if require_synced and _git(primary_root, "status", "--porcelain"):
+    if require_clean and _git(primary_root, "status", "--porcelain"):
         raise GuardrailError("repository root dev worktree must stay clean")
-    if not require_synced:
-        return
-    dev_sha = _git(primary_root, "rev-parse", "dev")
-    origin_dev_sha = _git(primary_root, "rev-parse", "origin/dev")
-    if dev_sha != origin_dev_sha:
-        raise GuardrailError(
-            f"repository root dev must match origin/dev; got "
-            f"{dev_sha} != {origin_dev_sha}"
-        )
+    # The local dev branch is the source of truth for routine work. It may
+    # legitimately lead origin/dev until the current task is pushed.
 
 
 def validate_worktree(
-    repo_root: Path, task_id: str, *, require_synced: bool = True
+    repo_root: Path, task_id: str, *, require_clean: bool = True
 ) -> dict[str, str]:
     normalized_task = normalize_task_id(task_id)
     primary_root, worktree_root, branch = git_context(repo_root)
-    validate_primary_dev(primary_root, require_synced=require_synced)
+    validate_primary_dev(primary_root, require_clean=require_clean)
     if os.path.normcase(str(worktree_root)) == os.path.normcase(str(primary_root)):
         return {
             "task_id": normalized_task,
@@ -315,7 +308,7 @@ def _validate_completed_context(
     owned_paths: list[str],
     declared_commit: str,
 ) -> tuple[str, list[str]]:
-    context = validate_worktree(repo_root, task_id, require_synced=False)
+    context = validate_worktree(repo_root, task_id, require_clean=False)
     if _git(repo_root, "status", "--porcelain"):
         raise GuardrailError(
             "COMPLETED requires a clean task worktree with every change committed"
@@ -355,10 +348,10 @@ def _validate_completed_context(
             "committed changes fall outside owned_paths: " + ", ".join(unauthorized)
         )
     if context["branch"] == "agent/" + task_id and not _git_succeeds(
-        repo_root, "merge-base", "--is-ancestor", "origin/dev", "HEAD"
+        repo_root, "merge-base", "--is-ancestor", "dev", "HEAD"
     ):
         raise GuardrailError(
-            "COMPLETED requires an isolated task branch to contain current origin/dev"
+            "COMPLETED requires an isolated task branch to contain current local dev"
         )
     return head_commit, changed_files
 

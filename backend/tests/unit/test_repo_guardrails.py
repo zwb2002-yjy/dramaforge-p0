@@ -264,7 +264,7 @@ def test_daily_dev_task_uses_root_worktree(tmp_path: Path) -> None:
     assert event["worktree"] == "."
 
 
-def test_writable_task_rejects_dirty_or_out_of_sync_root_dev(
+def test_writable_task_rejects_dirty_root_dev_but_allows_local_dev_ahead(
     tmp_path: Path,
 ) -> None:
     root, worktree = _make_task_worktree(tmp_path, "guard-test")
@@ -274,12 +274,33 @@ def test_writable_task_rejects_dirty_or_out_of_sync_root_dev(
         validate_worktree(worktree, "guard-test")
     (root / "dirty.txt").unlink()
 
-    _git(root, "update-ref", "refs/remotes/origin/dev", "dev^{}")
     (root / "README.md").write_text("changed\n", encoding="utf-8")
     _git(root, "add", "README.md")
     _git(root, "commit", "-m", "advance dev")
-    with pytest.raises(GuardrailError, match="root dev must match origin/dev"):
-        validate_worktree(worktree, "guard-test")
+    result = validate_worktree(worktree, "guard-test")
+    assert result["branch"] == "agent/guard-test"
+
+
+def test_completed_task_uses_local_dev_as_ancestor(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _make_task_worktree(tmp_path, "guard-test")
+    _commit_file(root, "README.md", "local dev advance\n")
+    _git(worktree, "merge", "--no-ff", "dev", "-m", "include local dev")
+    task_commit = _commit_file(worktree, "backend/change.py")
+    progress = tmp_path / "PROGRESS.jsonl"
+    _write_started_event(progress, task_id="guard-test", owned_paths=["backend"])
+
+    event = validate_event(
+        repo_root=worktree,
+        progress_path=progress,
+        candidate={
+            "task_id": "guard-test",
+            "status": "COMPLETED",
+            "commit": task_commit,
+        },
+    )
+    assert event["commit"] == task_commit
 
 
 def test_follow_up_event_inherits_identity_and_rejects_drift(
