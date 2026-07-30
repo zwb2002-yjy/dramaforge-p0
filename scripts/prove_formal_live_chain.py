@@ -102,6 +102,7 @@ def main() -> int:
     out["steps"].append({"register": r.status_code})
     r = post("/api/v1/workspaces", {"name": f"Org-{uuid4().hex[:6]}"})
     workspace_id = r.json()["id"]
+    client.headers["X-Workspace-Id"] = str(workspace_id)
     r = post(
         "/api/v1/creation/start-project",
         {

@@ -6,6 +6,7 @@ Never logs full API keys or full prompt/response bodies.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -21,6 +22,8 @@ class AnthropicCompatibleTextAdapter:
     """POST to the configured text LLM API style without exposing request contents."""
 
     provider = "openai"
+    _MAX_ATTEMPTS = 3
+    _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
 
     def __init__(
         self,
@@ -98,26 +101,39 @@ class AnthropicCompatibleTextAdapter:
             proxy=None,
             trust_env=False,
         ) as client:
-            resp = await client.post(url, headers=self._headers(), json=body)
-            try:
-                data = resp.json()
-            except Exception:
-                data = {"raw_status": resp.status_code, "text": resp.text[:200]}
-            if resp.status_code >= 400:
-                err = f"text_llm http {resp.status_code}: {str(data)[:160]}"
-                self._tasks[task_id] = {"status": "failed", "error": err, "text": ""}
-                return {"remote_task_id": task_id, "status": "failed", "error": err}
-            text_out = _extract_text(data)
-            self._tasks[task_id] = {
-                "status": "succeeded",
-                "text": text_out,
-                "usage": data.get("usage") if isinstance(data, dict) else None,
-            }
-            return {
-                "remote_task_id": task_id,
-                "status": "succeeded",
-                "text": text_out,
-            }
+            last_error = "text_llm request failed"
+            for attempt in range(1, self._MAX_ATTEMPTS + 1):
+                try:
+                    resp = await client.post(url, headers=self._headers(), json=body)
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {"raw_status": resp.status_code, "text": resp.text[:200]}
+                    if resp.status_code < 400:
+                        text_out = _extract_text(data)
+                        self._tasks[task_id] = {
+                            "status": "succeeded",
+                            "text": text_out,
+                            "usage": data.get("usage") if isinstance(data, dict) else None,
+                        }
+                        return {
+                            "remote_task_id": task_id,
+                            "status": "succeeded",
+                            "text": text_out,
+                        }
+                    last_error = f"text_llm http {resp.status_code}: {str(data)[:160]}"
+                    if resp.status_code not in self._RETRYABLE_STATUSES:
+                        break
+                except (
+                    httpx.TimeoutException,
+                    httpx.NetworkError,
+                    httpx.RemoteProtocolError,
+                ) as exc:
+                    last_error = f"text_llm {type(exc).__name__}: {exc}"
+                if attempt < self._MAX_ATTEMPTS:
+                    await asyncio.sleep(min(2.0 ** (attempt - 1), 4.0))
+            self._tasks[task_id] = {"status": "failed", "error": last_error, "text": ""}
+            return {"remote_task_id": task_id, "status": "failed", "error": last_error}
 
     async def poll(self, remote_task_id: str) -> dict[str, Any]:
         task = self._tasks.get(remote_task_id)

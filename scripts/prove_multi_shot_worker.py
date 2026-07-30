@@ -129,6 +129,7 @@ def main() -> int:
             write_report(scratch, report)
             return 2
         workspace_id = workspace.json()["id"]
+        client.headers["X-Workspace-Id"] = str(workspace_id)
 
         created = post(
             "/api/v1/creation/start-project",

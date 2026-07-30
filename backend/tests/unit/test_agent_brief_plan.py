@@ -121,6 +121,39 @@ async def test_text_adapter_uses_configured_provider_contract(
 
 
 @pytest.mark.asyncio
+async def test_text_adapter_retries_transient_provider_failure() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(500, json={"error": "temporary"})
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"title":"Recovered"}'}}]},
+        )
+
+    adapter = AnthropicCompatibleTextAdapter(
+        Settings(
+            app_env="development",
+            text_llm_enabled=True,
+            text_llm_api_key="test-provider-key",
+            text_llm_base_url="https://text.example/v1",
+            text_llm_model="test-model",
+            text_llm_api_style="openai",
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await adapter.create({"kind": "brief", "prompt": "retry me"})
+
+    assert result["status"] == "succeeded"
+    assert result["text"] == '{"title":"Recovered"}'
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
 async def test_fake_agent_results_are_input_derived_without_story_specific_fixture() -> None:
     adapter = FakeOpenAIAdapter()
     clockmaker = await adapter.create(
