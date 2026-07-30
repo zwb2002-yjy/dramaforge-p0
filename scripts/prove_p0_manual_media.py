@@ -119,10 +119,16 @@ def main() -> int:
         cookies.update(response.cookies)
         return str(response.json()["csrf_token"])
 
-    def post(path: str, body: dict[str, Any] | None = None) -> httpx.Response:
+    def post(
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> httpx.Response:
         response = client.post(
             path,
             json=body or {},
+            params=params,
             cookies=cookies,
             headers={"X-CSRF-Token": csrf(), "Content-Type": "application/json"},
         )
@@ -225,6 +231,7 @@ def main() -> int:
         grant = post(
             f"/api/v1/projects/{project_id}/exports/{export['export_id']}/download-grant",
             {},
+            params={"object_role": "package"},
         )
         if grant.status_code not in (200, 201):
             raise RuntimeError(f"download grant failed: {_problem(grant)}")
