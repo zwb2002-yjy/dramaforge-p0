@@ -255,7 +255,10 @@ def main() -> int:
             authoritative=authoritative,
         )
 
-    client = httpx.Client(base_url=base, timeout=60.0, follow_redirects=True)
+    # A live text Provider may use the adapter's 120-second request budget for
+    # the larger Plan prompt. Keep the probe budget above that limit so a valid
+    # response is not misreported as a generic flow failure.
+    client = httpx.Client(base_url=base, timeout=180.0, follow_redirects=True)
     cookies: dict[str, str] = {}
 
     def csrf() -> str:
