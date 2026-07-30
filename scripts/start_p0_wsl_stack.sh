@@ -342,8 +342,16 @@ do_status() {
 do_start() {
   load_formal_env
   bind_source_commit
+  # Each formal stack run gets isolated Arq queues. Old Provider jobs can take
+  # minutes or hours; reusing their queue would starve a fresh verification run
+  # and make queued NodeRuns look like a Worker regression.
+  local queue_suffix="${SOURCE_COMMIT:0:12}"
+  export ARQ_DEFAULT_QUEUE_NAME="dramaforge:default:${queue_suffix}"
+  export ARQ_HEAVY_QUEUE_NAME="dramaforge:heavy:${queue_suffix}"
   log "formal stack start REPO=${REPO}"
   log "SOURCE_COMMIT=${SOURCE_COMMIT}"
+  log "ARQ_DEFAULT_QUEUE_NAME=${ARQ_DEFAULT_QUEUE_NAME}"
+  log "ARQ_HEAVY_QUEUE_NAME=${ARQ_HEAVY_QUEUE_NAME}"
   log "DRAMA_FORCE_MEMORY_STORE=${DRAMA_FORCE_MEMORY_STORE:-<unset>} (must be empty)"
   ensure_postgres
   ensure_redis
