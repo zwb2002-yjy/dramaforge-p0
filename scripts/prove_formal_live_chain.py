@@ -59,7 +59,7 @@ def main() -> int:
     # Client-side FORCE_MEMORY does not affect remote formal stack; clear for safety.
     os.environ.pop("DRAMA_FORCE_MEMORY_STORE", None)
 
-    client = httpx.Client(base_url=base, timeout=90.0, follow_redirects=True)
+    client = httpx.Client(base_url=base, timeout=360.0, follow_redirects=True)
     cookies: dict[str, str] = {}
 
     def csrf() -> str:

@@ -255,10 +255,10 @@ def main() -> int:
             authoritative=authoritative,
         )
 
-    # A live text Provider may use the adapter's 120-second request budget for
-    # the larger Plan prompt. Keep the probe budget above that limit so a valid
-    # response is not misreported as a generic flow failure.
-    client = httpx.Client(base_url=base, timeout=180.0, follow_redirects=True)
+    # Live text and image Providers have API-boundary budgets up to 330 seconds
+    # (canonical image generation). Keep the probe budget above those limits so
+    # a valid fail-closed response is not misreported as a generic flow failure.
+    client = httpx.Client(base_url=base, timeout=360.0, follow_redirects=True)
     cookies: dict[str, str] = {}
 
     def csrf() -> str:
