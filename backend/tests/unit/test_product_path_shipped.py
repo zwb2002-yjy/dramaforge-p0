@@ -337,6 +337,79 @@ async def test_scheduler_drains_queued(
 
 
 @pytest.mark.asyncio
+async def test_scheduler_skips_queued_runs_from_a_different_formal_source_commit(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.config import clear_settings_cache
+
+    user, workspace_id = await _seed_user_workspace(session)
+    started = await CreationService(session).start_project(
+        workspace_id=workspace_id,
+        name=f"Source-{uuid4().hex[:6]}",
+        aspect_ratio="9:16",
+        actor=user,
+        idea="x",
+    )
+    project_id = started.project_id
+    rev = await CreationService(session).update_brief_manual(
+        project_id=project_id, actor=user, logline="line"
+    )
+    await CreationService(session).confirm_brief(
+        project_id=project_id, revision_id=rev.id, actor=user
+    )
+    plan = await CreationService(session).create_or_update_plan_manual(
+        project_id=project_id,
+        actor=user,
+        brief_revision_id=rev.id,
+        plan_body={"prompt": "p"},
+    )
+    current = await CreationService(session).confirm_plan_and_materialize(
+        project_id=project_id, plan_id=plan.id, actor=user
+    )
+    current_run = await session.get(NodeRun, current.node_run_id)
+    assert current_run is not None
+    current_run.input_snapshot = {
+        **current_run.input_snapshot,
+        "source_commit": "current-source",
+    }
+
+    old_run = NodeRun(
+        project_id=current_run.project_id,
+        graph_version_id=current_run.graph_version_id,
+        graph_node_id=current_run.graph_node_id,
+        attempt_no=2,
+        idempotency_key=f"old-source:{uuid4()}",
+        input_hash="f" * 64,
+        status="queued",
+        input_snapshot={"source_commit": "old-source"},
+        created_by=user.id,
+    )
+    session.add(old_run)
+    await session.commit()
+
+    enqueued: list[UUID] = []
+
+    async def _fake_arq(self, node_run_id: UUID) -> str:  # type: ignore[no-untyped-def]
+        _ = self
+        enqueued.append(node_run_id)
+        return f"test-job:{node_run_id}"
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DRAMAFORGE_SOURCE_COMMIT", "current-source")
+    monkeypatch.setattr(AgentRunScheduler, "_enqueue_node_run", _fake_arq)
+    clear_settings_cache()
+    try:
+        await AgentRunScheduler(session).dispatch_pending(worker_id="test")
+    finally:
+        monkeypatch.setenv("APP_ENV", "test")
+        clear_settings_cache()
+
+    assert current_run.id in enqueued
+    assert old_run.id not in enqueued
+
+
+@pytest.mark.asyncio
 async def test_explicit_enqueue_reuses_materialization_outbox(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

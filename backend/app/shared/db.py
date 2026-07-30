@@ -163,8 +163,14 @@ async def list_queued_node_run_rls_scopes(
     *,
     limit: int,
     project_id: UUID | None = None,
+    source_commit: str | None = None,
 ) -> list[tuple[UUID, NodeRunRlsScope]]:
-    """Find queued work and ownership through the narrowly scoped DB resolver."""
+    """Find queued work and ownership through the narrowly scoped DB resolver.
+
+    Formal stacks bind a source commit at process start. Filtering by that
+    value prevents a new commit-scoped Arq queue from replaying queued work
+    that was created by an older runtime.
+    """
     bind = session.get_bind()
     dialect = bind.dialect.name if bind is not None else ""
     if dialect == "postgresql":
@@ -172,10 +178,14 @@ async def list_queued_node_run_rls_scopes(
             text(
                 """
                 SELECT node_run_id, owner_user_id, workspace_id, project_id
-                FROM app.queued_node_run_contexts(:limit, :project_id)
+                FROM app.queued_node_run_contexts(:limit, :project_id, :source_commit)
                 """
             ),
-            {"limit": limit, "project_id": project_id},
+            {
+                "limit": limit,
+                "project_id": project_id,
+                "source_commit": source_commit,
+            },
         )
         return [
             (
@@ -201,6 +211,8 @@ async def list_queued_node_run_rls_scopes(
     )
     if project_id is not None:
         stmt = stmt.where(NodeRun.project_id == project_id)
+    if source_commit is not None:
+        stmt = stmt.where(NodeRun.input_snapshot["source_commit"].as_string() == source_commit)
     result = await session.execute(stmt)
     scopes: list[tuple[UUID, NodeRunRlsScope]] = []
     for node_run_id in result.scalars().all():

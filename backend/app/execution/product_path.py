@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
+from app.config import get_settings
 from app.consistency.face_review import face_review_images
 from app.creation.models import CreationPlan
 from app.execution.artifact_lineage import get_or_create_artifact
@@ -197,6 +198,7 @@ async def enqueue_keyframe_after_plan(
         "plan_id": str(plan.id),
         "shot_id": str(shot_id),
         "node_key": "keyframe",
+        "source_commit": get_settings().source_commit,
         "plan": {
             "prompt": prompt,
             "shot": shot_body,

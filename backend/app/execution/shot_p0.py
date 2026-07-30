@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.consistency.continuity import continuity_four_layers
 from app.consistency.face_review import face_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ShotHumanLock
@@ -148,6 +149,7 @@ async def _queue_node_run(
         "shot_id": str(shot_id),
         "plan": {"prompt": prompt},
         "node_key": key,
+        "source_commit": get_settings().source_commit,
     }
     if canonical_object_key:
         snap["canonical_object_key"] = canonical_object_key

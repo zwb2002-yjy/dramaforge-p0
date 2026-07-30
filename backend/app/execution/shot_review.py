@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.models import Shot
+from app.config import get_settings
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.execution.runtime_invariants import mark_stale_downstream
@@ -384,6 +385,7 @@ async def start_shot_nodes(
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),
             "node_key": key,
+            "source_commit": get_settings().source_commit,
             "plan_id": definition.get("plan_id"),
             "prompt": prompt,
             "plan": {
@@ -569,6 +571,7 @@ async def upload_manual_media(
         input_snapshot={
             "shot_id": str(shot_id),
             "node_key": node_key,
+            "source_commit": get_settings().source_commit,
             "manual": True,
             "prompt": f"manual:{node_key}:{shot_id}",
         },

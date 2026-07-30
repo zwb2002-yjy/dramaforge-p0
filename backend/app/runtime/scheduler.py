@@ -41,6 +41,19 @@ def queue_scoped_job_id(*, queue_name: str, node_run_id: UUID) -> str:
     return f"node-run:{queue_fingerprint}:{node_run_id}"
 
 
+def dispatch_source_commit() -> str | None:
+    """Return the formal runtime commit used to isolate queued NodeRuns.
+
+    Unit tests intentionally create historical fixture rows without a runtime
+    binding, so they retain broad scheduling. The formal WSL launcher always
+    provides a commit and therefore never replays rows from an earlier stack.
+    """
+    settings = get_settings()
+    if settings.app_env == "test":
+        return None
+    return settings.source_commit.strip() or None
+
+
 class RedisStreamPublisher(StreamPublisher):
     """Publish to Redis Streams. Formal path is fail-closed (no silent in-memory fallback)."""
 
@@ -126,6 +139,7 @@ class AgentRunScheduler:
             self._session,
             limit=50,
             project_id=project_id,
+            source_commit=dispatch_source_commit(),
         )
         for run_id, node_run_scope in candidates:
             try:

@@ -63,6 +63,20 @@ def test_queue_scoped_job_id_prevents_stale_job_collision_after_stack_restart() 
     assert new_job_id == repeated_new_job_id
 
 
+def test_formal_dispatch_uses_its_bound_source_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import clear_settings_cache
+    from app.runtime.scheduler import dispatch_source_commit
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DRAMAFORGE_SOURCE_COMMIT", "source-for-runtime")
+    clear_settings_cache()
+    try:
+        assert dispatch_source_commit() == "source-for-runtime"
+    finally:
+        monkeypatch.setenv("APP_ENV", "test")
+        clear_settings_cache()
+
+
 def test_local_tts_adapter_fail_closed_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("TTS_ENABLED", "false")
