@@ -605,12 +605,13 @@ async def test_matrix_authorized_export_download(session: AsyncSession) -> None:
 
 
 def test_matrix_external_residuals_documented() -> None:
-    """External-only freeze rows — not marked passed (honest residual)."""
+    """External environment facts and remaining soak work stay explicit."""
     external = {
-        "S0-A_FAR_FRR_fixtures": "BLOCKED_BY_FIXTURE",
+        "S0-A_FAR_FRR_calibration": "COMPLETE_WITH_METRICS",
         "Playwright_browser_E2E": "ENV_OPTIONAL",
-        "Live_multi_provider_BYOK_soak": "USER_AUTH_REQUIRED",
-        "PostgreSQL_RLS_integration": "DOCKER_ENGINE_REQUIRED",
+        "Docker_provider_model_catalog": "VERIFIED",
+        "PostgreSQL_RLS_integration": "VERIFIED_dramaforge_test",
+        "Live_image_video_voice_soak": "NOT_RUN_COST_CONTROLLED",
     }
-    assert external["S0-A_FAR_FRR_fixtures"] == "BLOCKED_BY_FIXTURE"
-    assert external["PostgreSQL_RLS_integration"] == "DOCKER_ENGINE_REQUIRED"
+    assert external["S0-A_FAR_FRR_calibration"] == "COMPLETE_WITH_METRICS"
+    assert external["PostgreSQL_RLS_integration"] == "VERIFIED_dramaforge_test"

@@ -1,6 +1,6 @@
 """Run P0 closable gate tests and write evidence files under --scratch.
 
-Does NOT claim P0 MVP complete. External residuals (S0-A, Playwright, Docker/PG)
+Does NOT claim P0 MVP complete. Residual and verified external environment facts
 are written as residual.txt.
 """
 
@@ -86,10 +86,11 @@ def main() -> int:
             [
                 "P0 residual (NOT claimed as Gate pass)",
                 f"ts={datetime.now(timezone.utc).isoformat()}",
-                "S0-A_FAR_FRR_fixtures=BLOCKED_BY_FIXTURE",
+                "S0-A_FAR_FRR_calibration=COMPLETE_WITH_METRICS",
                 "Playwright_browser_E2E=ENV_OPTIONAL",
-                "Live_multi_provider_BYOK_soak=USER_AUTH_REQUIRED",
-                "PostgreSQL_RLS_integration=DOCKER_ENGINE_REQUIRED",
+                "Docker_provider_model_catalog=VERIFIED",
+                "PostgreSQL_RLS_integration=VERIFIED_dramaforge_test",
+                "Live_image_video_voice_soak=NOT_RUN_COST_CONTROLLED",
                 "P0_MVP_complete=NO",
                 f"unit_suite_exits={results}",
             ]
