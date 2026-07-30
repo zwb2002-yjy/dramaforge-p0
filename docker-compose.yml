@@ -48,6 +48,7 @@ services:
       dockerfile: Dockerfile
     environment:
       APP_ENV: development
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
       DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
     command: ["alembic", "upgrade", "head"]
     depends_on:
@@ -60,6 +61,7 @@ services:
       dockerfile: Dockerfile
     environment:
       APP_ENV: development
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
       DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
@@ -69,6 +71,19 @@ services:
       SESSION_SECRET: dev-only-change-me-to-a-long-random-string
       BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
       CORS_ORIGINS: http://localhost:5173
+      AGNES_ENABLED: ${AGNES_ENABLED:-false}
+      AGNES_API_KEY: ${AGNES_API_KEY:-}
+      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
+      AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
+      AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
+      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
+      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
+      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
+      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
+      TTS_ENABLED: ${TTS_ENABLED:-false}
+      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
+      TTS_VOICE: ${TTS_VOICE:-zh}
     ports:
       - "8000:8000"
     depends_on:
@@ -91,6 +106,7 @@ services:
       dockerfile: Dockerfile
     environment:
       APP_ENV: development
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
       DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
@@ -99,6 +115,19 @@ services:
       SESSION_SECRET: dev-only-change-me-to-a-long-random-string
       BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
       WORKER_KIND: default
+      AGNES_ENABLED: ${AGNES_ENABLED:-false}
+      AGNES_API_KEY: ${AGNES_API_KEY:-}
+      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
+      AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
+      AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
+      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
+      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
+      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
+      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
+      TTS_ENABLED: ${TTS_ENABLED:-false}
+      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
+      TTS_VOICE: ${TTS_VOICE:-zh}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -117,6 +146,7 @@ services:
       dockerfile: Dockerfile
     environment:
       APP_ENV: development
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
       DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
@@ -125,6 +155,19 @@ services:
       SESSION_SECRET: dev-only-change-me-to-a-long-random-string
       BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
       WORKER_KIND: heavy
+      AGNES_ENABLED: ${AGNES_ENABLED:-false}
+      AGNES_API_KEY: ${AGNES_API_KEY:-}
+      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
+      AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
+      AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
+      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
+      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
+      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
+      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
+      TTS_ENABLED: ${TTS_ENABLED:-false}
+      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
+      TTS_VOICE: ${TTS_VOICE:-zh}
     depends_on:
       migrate:
         condition: service_completed_successfully

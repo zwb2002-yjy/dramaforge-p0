@@ -19,6 +19,25 @@ def test_compose_defines_required_boot0_services() -> None:
     assert "healthcheck" in services["postgres"]
     assert "healthcheck" in services["redis"]
     assert "healthcheck" in services["minio"]
+    provider_env = {
+        "AGNES_ENABLED",
+        "AGNES_API_KEY",
+        "AGNES_BASE_URL",
+        "AGNES_IMAGE_MODEL",
+        "AGNES_VIDEO_MODEL",
+        "TEXT_LLM_ENABLED",
+        "TEXT_LLM_API_KEY",
+        "TEXT_LLM_BASE_URL",
+        "TEXT_LLM_MODEL",
+        "TEXT_LLM_API_STYLE",
+        "TTS_ENABLED",
+        "TTS_ENGINE",
+        "TTS_VOICE",
+    }
+    for name in ("api", "worker-default", "worker-heavy"):
+        env = services[name]["environment"]
+        assert provider_env <= set(env), f"missing runtime provider config in {name}"
+        assert "DRAMAFORGE_SOURCE_COMMIT" in env
     # GPU/ComfyUI must not be in the default compose file.
     assert "comfyui" not in services
 

@@ -71,6 +71,10 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 docker compose up -d
 ```
 
+Compose 会从本地忽略的 `.env` 读取 `AGNES_*`、`TEXT_LLM_*` 和可选的 `TTS_*`，
+并仅注入 API 与 Worker 容器；未配置时保持 fail-closed。不要把真实密钥写入
+`docker-compose.yml` 或提交到 Git。
+
 > 这会启动 **所有** 服务（postgres、redis、minio、migrate、api、worker-default、worker-heavy）。首次运行会构建 `backend/Dockerfile` 镜像。
 
 **3. 启动前端**
