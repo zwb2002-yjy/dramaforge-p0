@@ -176,6 +176,16 @@ ensure_ffmpeg() {
   if command -v ffmpeg >/dev/null 2>&1; then
     return
   fi
+  # Docker Desktop may be available on Windows while its CLI socket is not
+  # mounted into WSL. Reuse a workspace-local binary extracted by the Windows
+  # launcher in that case.
+  local windows_ffmpeg="${REPO}/tmp/ffmpeg-static/ffmpeg"
+  if [[ -x "${windows_ffmpeg}" ]]; then
+    cp "${windows_ffmpeg}" "${RUN_DIR}/ffmpeg"
+    chmod +x "${RUN_DIR}/ffmpeg"
+    export PATH="${RUN_DIR}:${PATH}"
+    return
+  fi
   # Keep formal export deterministic without requiring a privileged apt
   # install in WSL. Docker is only used to extract the pinned binary; runtime
   # still executes inside the WSL formal stack.
