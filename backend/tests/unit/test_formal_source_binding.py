@@ -26,6 +26,16 @@ def test_formal_agent_flow_binds_created_workspace_before_project_start() -> Non
     )
 
 
+def test_formal_resume_flow_resolves_workspace_before_project_read() -> None:
+    script = (REPO / "scripts" / "prove_p0_mvp_formal.py").read_text(encoding="utf-8")
+    assert 'client.get("/api/v1/workspaces", cookies=cookies)' in script
+    assert '"/api/v1/workspaces/{workspace_id}/projects"' in script
+    assert script.index('"/api/v1/workspaces", cookies=cookies') < script.index(
+        'f"/api/v1/projects/{project_id}/shots"'
+    )
+    assert 'client.headers["X-Workspace-Id"] = workspace_id' in script
+
+
 def test_runtime_source_accepts_one_commit() -> None:
     assert (
         runtime_source_errors(

@@ -488,6 +488,31 @@ def main() -> int:
             cookies.update(login.cookies)
             if login.status_code != 200:
                 return finish(f"resume login failed {login.status_code}: {_problem(login)}")
+            workspaces = client.get("/api/v1/workspaces", cookies=cookies)
+            if workspaces.status_code != 200:
+                return finish(
+                    f"resume workspace list failed {workspaces.status_code}: "
+                    f"{_problem(workspaces)}"
+                )
+            selected_workspace_id: str | None = None
+            for workspace in workspaces.json():
+                workspace_id = str(workspace.get("id") or "")
+                if not workspace_id:
+                    continue
+                client.headers["X-Workspace-Id"] = workspace_id
+                projects = client.get(
+                    f"/api/v1/workspaces/{workspace_id}/projects",
+                    cookies=cookies,
+                )
+                if projects.status_code != 200:
+                    continue
+                if any(str(project.get("id") or "") == args.resume_project_id for project in projects.json()):
+                    selected_workspace_id = workspace_id
+                    break
+            if selected_workspace_id is None:
+                return finish(
+                    "resume project workspace could not be resolved for the authenticated owner"
+                )
             project_id = args.resume_project_id
             shot_response = client.get(
                 f"/api/v1/projects/{project_id}/shots",
