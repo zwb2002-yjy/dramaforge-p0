@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -896,6 +895,11 @@ async def test_worker_resolvers_use_workspace_owner_and_project_scope(
         created_by=creator.id,
     )
     pg_session.add(run)
+    # The dispatch predicate compares next_attempt_at against PostgreSQL now().
+    # Deriving it from the host clock makes the event undispatchable whenever the
+    # database clock lags the host (Docker Desktop's VM drifts by up to ~0.7s),
+    # so anchor the timestamp to the server clock the query actually uses.
+    server_now = (await pg_session.execute(text("SELECT now()"))).scalar_one()
     event = OutboxEvent(
         event_id=uuid4(),
         project_id=project.id,
@@ -904,7 +908,7 @@ async def test_worker_resolvers_use_workspace_owner_and_project_scope(
         payload={"node_run_id": str(run.id)},
         status=OutboxStatus.PENDING.value,
         attempt_count=0,
-        next_attempt_at=datetime.now(UTC),
+        next_attempt_at=server_now,
     )
     pg_session.add(event)
     await pg_session.commit()

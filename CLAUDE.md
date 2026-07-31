@@ -22,12 +22,22 @@ P0 目标为可运行的 React/FastAPI/PostgreSQL/Redis/MinIO/Arq 应用 + 一�
 - FFmpeg 导出、缓存复用、幂等取消/补偿、Outbox/SSE/Redis Streams 事件流
 - 目录合规、Ruff/mypy/unit/integration/frontend/e2e CI 门禁全绿
 - Compose 镜像内 InsightFace 0.7.3 / ONNX Runtime CPU / buffalo_l 已完成构建期 `FaceAnalysis.prepare()` 与容器运行期 512-d smoke
+- 真实 Provider 全链（2026-07-31 于 `4792f29` 实测）：OpenAI 文本 Brief/Plan、
+  Agnes 图像 10 次、Agnes 视频 10 次、本地 TTS 10 次，32 条 ProviderOperation 无失败；
+  10 Shot × 9 节点 = 90 NodeRun / 90 独立 Artifact / 90 独立 object key，
+  导出 ZIP 现场下载 39.5 MB 且 SHA-256 与记录一致
 
-P0 Gate 阻塞项（19 PASS / 4 BLOCKED）：
-1. 未配置真实文本 LLM BYOK，无法现场证明 Agent Brief→Plan→10 Shot 全链
-2. 需将已有 InsightFace 20/20/10 FAR/FRR 校准与当前候选提交的正式证据链重新绑定
-3. 缺少真实 review_passed Shot 和逐 Shot 审核/驳回/重跑闭环
-4. 备份恢复、密钥轮换、真实 Playwright 10 Shot E2E 未留存
+P0 Gate 阻塞项（详见 `docs/开发执行检查点.md` §3.1）：
+1. **人脸一致性 Gate 未被证明**：模型与像素均正常（5/5 canonical、7/10 关键帧检出人脸，
+   含全部 5 个主角分镜），但 10 个 `face_review` 的 `face_score` 全为 `null`
+   （5 `not_applicable` + 5 `needs_human`），审核门禁不拦 `needs_human`。
+   离线重放正确配对后，5 个主角分镜有 3 个应被拦截。
+2. **图依赖顺序未强制**：`graph_edges` 全库 0 行，Worker 仅 `composite` 等上游，
+   实测 10/10 个 Shot 的 `face_review` 早于上游 `keyframe` 完成即启动——这正是第 1 项的
+   运行期根因。单独修顺序会让当前黄金样本不通过，两项须一起处理。
+3. **已盖章阈值未落地**：已批 `final_threshold=0.60` 在运行期不存在，各处硬编码 `0.35`。
+4. `snapshot` API 不返回 NodeRun 时间戳，执行顺序无法在前端自证。
+5. 备份恢复、密钥轮换未在当前提交的正式栈留存端到端记录。
 
 ## 技术栈（不可替换）
 
