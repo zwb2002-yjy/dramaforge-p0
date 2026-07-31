@@ -65,7 +65,11 @@ function cleanSourceCommit(): string {
 
 async function browserGet<T>(page: Page, url: string): Promise<T> {
   return page.evaluate(async (requestUrl) => {
-    const response = await fetch(requestUrl, { credentials: "include" });
+    const workspaceId = window.sessionStorage.getItem("dramaforge.selected-workspace-id");
+    const response = await fetch(requestUrl, {
+      credentials: "include",
+      headers: workspaceId ? { "X-Workspace-Id": workspaceId } : {},
+    });
     if (!response.ok) throw new Error(`${requestUrl} returned ${response.status}`);
     return response.json();
   }, url) as Promise<T>;
@@ -141,17 +145,42 @@ test.describe("P0 real 10 Shot browser proof", () => {
       expect(health.db).toBe("up");
       expect(health.source_commit).toBe(sourceCommit);
 
+      await expect(page.getByText("API ready", { exact: true })).toBeVisible({ timeout: 30_000 });
+      const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      const email = `p0-browser-${suffix}@example.com`;
+      const workspaceName = `P0 Browser Workspace ${suffix}`;
+      await page.getByLabel("Email").fill(email);
+      await page.getByLabel("Password").fill("password123");
+      await page.getByLabel("Display name").fill("P0 Browser Proof");
+      await page.getByRole("button", { name: "Create account", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "P0 Browser Proof", exact: true }),
+      ).toBeVisible({
+        timeout: 60_000,
+      });
+
+      await page.getByLabel("New workspace name").fill(workspaceName);
+      await page.getByRole("button", { name: "Create workspace", exact: true }).click();
+      await expect(page.getByRole("button", { name: workspaceName, exact: true })).toBeVisible({
+        timeout: 60_000,
+      });
+      await page.getByLabel("Project name").fill(`P0 Real Browser ${suffix}`);
       await page
-        .locator("form.auth-form textarea")
+        .getByLabel("Creative idea")
         .fill("A reporter follows an encrypted message through an old city before dawn.");
-      await page.locator("form.auth-form button[type='submit']").click();
+      await page.getByRole("button", { name: "Create project", exact: true }).click();
       await expect(page.getByTestId("quick-mode")).toBeVisible({ timeout: 60_000 });
       const match = page.url().match(/projects\/([^/]+)\/quick/);
       if (!match) throw new Error(`project route missing from ${page.url()}`);
       projectId = match[1];
+      await page.screenshot({
+        path: path.join(sourceDir, "01-project-created.png"),
+        fullPage: true,
+      });
 
       await page.getByTestId("agent-brief").click();
       await expect(page.getByTestId("agent-brief-summary")).toBeVisible({ timeout: 360_000 });
+      await page.screenshot({ path: path.join(sourceDir, "02-agent-brief.png"), fullPage: true });
       await page.getByTestId("confirm-brief").click();
       await expect
         .poll(() => browserGet<CreationState>(page, `/api/v1/projects/${projectId}/creation-state`))
@@ -167,6 +196,7 @@ test.describe("P0 real 10 Shot browser proof", () => {
       );
       expect(stateWithPlan.plan).toMatchObject({ source: "agent", status: "draft" });
       expect(stateWithPlan.plan?.plan.shots).toHaveLength(10);
+      await page.screenshot({ path: path.join(sourceDir, "03-agent-plan.png"), fullPage: true });
       expect(requestCounts.agentBrief).toBe(1);
       expect(requestCounts.agentPlan).toBe(1);
 
@@ -204,6 +234,7 @@ test.describe("P0 real 10 Shot browser proof", () => {
           { timeout: 90_000 },
         )
         .toEqual({ materialized: true, keyframes: 10 });
+      await page.screenshot({ path: path.join(sourceDir, "04-keyframes.png"), fullPage: true });
 
       await page.goto(`/projects/${projectId}/production`);
       await expect(page.getByTestId("production-mode")).toBeVisible({ timeout: 60_000 });
@@ -246,6 +277,10 @@ test.describe("P0 real 10 Shot browser proof", () => {
           { timeout: 2_100_000, intervals: [5_000, 10_000, 20_000] },
         )
         .toBe(true);
+      await page.screenshot({
+        path: path.join(sourceDir, "05-ten-shot-complete.png"),
+        fullPage: true,
+      });
 
       await page.reload();
       await expect(page.getByTestId("production-mode")).toBeVisible({ timeout: 60_000 });
@@ -300,7 +335,7 @@ test.describe("P0 real 10 Shot browser proof", () => {
       expect(exportResult.source_artifact_ids).not.toHaveLength(0);
       expect(exportResult.source_node_run_ids).not.toHaveLength(0);
       await page.screenshot({
-        path: path.join(sourceDir, "real_ten_shot_complete.png"),
+        path: path.join(sourceDir, "06-export-complete.png"),
         fullPage: true,
       });
     } finally {
