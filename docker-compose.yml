@@ -76,6 +76,9 @@ services:
       AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
       AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
       AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio}
       TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
       TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
       TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
@@ -145,6 +148,9 @@ services:
       AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
       AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
       AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio}
       TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
       TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
       TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
@@ -186,6 +192,9 @@ services:
       AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
       AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
       AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio}
       TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
       TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
       TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
