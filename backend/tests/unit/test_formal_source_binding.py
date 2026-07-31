@@ -17,6 +17,15 @@ from prove_p0_mvp_formal import (  # noqa: E402
 )
 
 
+def test_formal_agent_flow_binds_created_workspace_before_project_start() -> None:
+    script = (REPO / "scripts" / "prove_p0_mvp_formal.py").read_text(encoding="utf-8")
+    workspace_binding = 'client.headers["X-Workspace-Id"] = str(org.json()["id"])'
+    assert workspace_binding in script
+    assert script.index(workspace_binding) < script.index(
+        '"/api/v1/creation/start-project"'
+    )
+
+
 def test_runtime_source_accepts_one_commit() -> None:
     assert (
         runtime_source_errors(

@@ -537,6 +537,10 @@ def main() -> int:
             org = post("/api/v1/workspaces", {"name": f"Formal-{uuid4().hex[:8]}"})
             if org.status_code not in {200, 201}:
                 return finish(f"workspace failed {org.status_code}: {_problem(org)}")
+            # Project-scoped routes require the same explicit workspace context
+            # as browser requests. Keep this binding on the formal proof client
+            # so the Agent path exercises the production authorization contract.
+            client.headers["X-Workspace-Id"] = str(org.json()["id"])
 
             created = post(
                 "/api/v1/creation/start-project",
