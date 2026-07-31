@@ -9,6 +9,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "scripts"))
 
 from prove_p0_mvp_formal import (  # noqa: E402
+    DEFAULT_POLL_INTERVAL_SECONDS,
     SYNC_PROVIDER_TIMEOUT_SECONDS,
     latest_shot_node_runs,
     response_run_id_for_node,
@@ -69,6 +70,10 @@ def test_runtime_source_rejects_old_api_and_worker() -> None:
 
 def test_formal_proof_allows_canonical_provider_budget() -> None:
     assert SYNC_PROVIDER_TIMEOUT_SECONDS >= 330.0
+
+
+def test_formal_proof_uses_a_bounded_non_busy_poll_interval() -> None:
+    assert DEFAULT_POLL_INTERVAL_SECONDS >= 5.0
 
 
 def test_latest_shot_node_runs_keeps_newest_attempt_for_each_pipeline_node() -> None:

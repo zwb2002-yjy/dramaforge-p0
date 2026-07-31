@@ -45,6 +45,7 @@ DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
 # turn that valid server-side budget into a false negative.
 SYNC_PROVIDER_TIMEOUT_SECONDS = 360.0
 DEFAULT_MAX_FACE_REWORKS = 3
+DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 
 
 def runtime_source_errors(
@@ -153,6 +154,12 @@ def main() -> int:
     parser.add_argument("--worker-token", default="dev-worker-token")
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument(
+        "--poll-interval-seconds",
+        type=float,
+        default=DEFAULT_POLL_INTERVAL_SECONDS,
+        help="Seconds between Worker-status polls; must be greater than zero.",
+    )
+    parser.add_argument(
         "--max-face-reworks",
         type=int,
         default=DEFAULT_MAX_FACE_REWORKS,
@@ -199,6 +206,8 @@ def main() -> int:
         parser.error("--resume-project-id and --resume-email must be supplied together")
     if args.max_face_reworks < 0:
         parser.error("--max-face-reworks must be zero or greater")
+    if args.poll_interval_seconds <= 0:
+        parser.error("--poll-interval-seconds must be greater than zero")
 
     source_context = begin_evidence_context(REPO)
     source_context["command_summary"] = [
@@ -207,6 +216,8 @@ def main() -> int:
         args.base.rstrip("/"),
         "--timeout-seconds",
         str(args.timeout_seconds),
+        "--poll-interval-seconds",
+        str(args.poll_interval_seconds),
         "--max-face-reworks",
         str(args.max_face_reworks),
         "--idea-sha256",
@@ -341,7 +352,7 @@ def main() -> int:
                         ensure_ascii=False,
                     )
                 )
-            time.sleep(1)
+            time.sleep(args.poll_interval_seconds)
         raise RuntimeError(
             "Timed out waiting for worker artifacts. Start Arq workers or pass "
             "--worker-tick only for a local stack that intentionally exposes it."
