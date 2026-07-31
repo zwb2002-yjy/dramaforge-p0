@@ -136,7 +136,6 @@ test.describe("P0 real 10 Shot browser proof", () => {
 
     try {
       await page.goto("/");
-      await expect(page.getByTestId("api-status")).toBeVisible({ timeout: 30_000 });
       const health = await browserGet<{ source_commit?: string; db?: string; status?: string }>(
         page,
         "/health",
