@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.assets.models import Shot
 from app.config import get_settings
 from app.execution.artifact_lineage import get_or_create_artifact
+from app.execution.product_path import identity_priority_keyframe_prompt
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.execution.runtime_invariants import mark_stale_downstream
 from app.execution.shot_p0 import is_shot_locked, set_shot_lock
@@ -381,7 +382,10 @@ async def start_shot_nodes(
         )
         lead_identity_required = shot_plan.get("lead_identity_required") is True
         if key == "keyframe" and lead_identity_required and canonical_locked_prompt:
-            prompt = f"{prompt}\nCanonical lead identity: {canonical_locked_prompt}"
+            prompt = identity_priority_keyframe_prompt(
+                prompt,
+                canonical_locked_prompt=canonical_locked_prompt,
+            )
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),
             "node_key": key,

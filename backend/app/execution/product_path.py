@@ -60,6 +60,24 @@ def _input_hash(payload: dict[str, object]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def identity_priority_keyframe_prompt(
+    prompt: str,
+    *,
+    canonical_locked_prompt: str,
+) -> str:
+    """Preserve the planned beat while making a two-source face review feasible."""
+    return (
+        f"{prompt}\n"
+        f"Canonical lead identity: {canonical_locked_prompt}\n"
+        "Identity reference priority: depict exactly one adult lead character. "
+        "Keep the requested action, wardrobe, lighting, and setting, but make the "
+        "lead's unobscured face clearly visible in a front or three-quarter view. "
+        "The face must be in sharp focus and occupy a substantial, recognizable "
+        "portion of the vertical frame; no profile-only face, no back-facing pose, "
+        "no sunglasses, mask, hands, hair, phone, or shadow obscuring the face."
+    )
+
+
 async def _commit_terminal_failure(
     session: AsyncSession,
     *,
@@ -192,7 +210,10 @@ async def enqueue_keyframe_after_plan(
         canonical_locked_prompt = ref[1]
     lead_identity_required = shot_body.get("lead_identity_required") is True
     if lead_identity_required and canonical_locked_prompt:
-        prompt = f"{prompt}\nCanonical lead identity: {canonical_locked_prompt}"
+        prompt = identity_priority_keyframe_prompt(
+            prompt,
+            canonical_locked_prompt=canonical_locked_prompt,
+        )
 
     snapshot: dict[str, object] = {
         "plan_id": str(plan.id),
