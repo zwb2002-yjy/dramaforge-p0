@@ -38,6 +38,7 @@ class CompositeRenderError(RuntimeError):
 class CompositeInputs:
     """Resolved media bytes and immutable lineage for one composite execution."""
 
+    composite_run_id: str
     media_inputs: dict[str, dict[str, str]]
     video: bytes
     voice: bytes
@@ -45,15 +46,18 @@ class CompositeInputs:
 
 
 def composite_lineage_fingerprint(inputs: CompositeInputs) -> str:
-    """Return a stable identity for the exact source Artifact lineage.
+    """Return a stable identity for one composite output and its source lineage.
 
-    FFmpeg can emit byte-identical containers when distinct Shot NodeRuns have
-    identical source media. The final composite is still a separate production
-    result, so include its immutable source lineage in the container metadata
-    and test fixture bytes rather than weakening Artifact ownership rules.
+    FFmpeg can emit byte-identical containers when a composite is re-run with
+    unchanged source media. The final output must remain independently
+    attributable to its NodeRun, so bind the output run ID and source lineage
+    into the container metadata and test fixture bytes.
     """
     raw = json.dumps(
-        inputs.media_inputs,
+        {
+            "composite_run_id": inputs.composite_run_id,
+            "media_inputs": inputs.media_inputs,
+        },
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
@@ -195,6 +199,7 @@ async def resolve_composite_inputs(
         }
 
     return CompositeInputs(
+        composite_run_id=str(run.id),
         media_inputs=media_inputs,
         video=bytes_by_key["video"],
         voice=bytes_by_key["voice"],

@@ -272,6 +272,7 @@ async def test_composite_runs_locally_with_complete_media_lineage(
     expected_inputs = _media_lineage(fixture.sources)
     expected_bytes = deterministic_composite_test_bytes(
         CompositeInputs(
+            composite_run_id=str(fixture.composite_run.id),
             media_inputs=expected_inputs,
             video=fixture.sources["video"].data,
             voice=fixture.sources["voice"].data,
@@ -303,8 +304,8 @@ async def test_composite_runs_locally_with_complete_media_lineage(
     assert result.provider_operation_id is None
 
 
-def test_deterministic_composite_bytes_bind_source_run_lineage() -> None:
-    """Identical media from independent NodeRuns must not collapse to one Artifact."""
+def test_deterministic_composite_bytes_bind_source_and_output_run_lineage() -> None:
+    """Independent composite NodeRuns must not collapse to one Artifact."""
     base_inputs = {
         key: {
             "artifact_id": f"artifact-{key}",
@@ -324,12 +325,14 @@ def test_deterministic_composite_bytes_bind_source_run_lineage() -> None:
         for key, value in base_inputs.items()
     }
     first = CompositeInputs(
+        composite_run_id="composite-first",
         media_inputs=base_inputs,
         video=_SOURCE_BYTES["video"],
         voice=_SOURCE_BYTES["voice"],
         subtitle=_SOURCE_BYTES["subtitle"],
     )
     second = CompositeInputs(
+        composite_run_id="composite-second",
         media_inputs=second_inputs,
         video=_SOURCE_BYTES["video"],
         voice=_SOURCE_BYTES["voice"],
@@ -338,6 +341,37 @@ def test_deterministic_composite_bytes_bind_source_run_lineage() -> None:
 
     assert composite_lineage_fingerprint(first) != composite_lineage_fingerprint(second)
     assert deterministic_composite_test_bytes(first) != deterministic_composite_test_bytes(second)
+
+
+def test_deterministic_composite_bytes_distinguish_reruns_with_same_inputs() -> None:
+    """A legal composite re-run has new output ownership even with unchanged media."""
+    inputs = {
+        key: {
+            "artifact_id": f"artifact-{key}",
+            "object_key": f"projects/p/nodes/{key}/source",
+            "content_hash": hashlib.sha256(data).hexdigest(),
+            "mime_type": _SOURCE_META[key][1],
+            "source_node_run_id": f"source-{key}",
+        }
+        for key, data in _SOURCE_BYTES.items()
+    }
+    first = CompositeInputs(
+        composite_run_id="composite-first",
+        media_inputs=inputs,
+        video=_SOURCE_BYTES["video"],
+        voice=_SOURCE_BYTES["voice"],
+        subtitle=_SOURCE_BYTES["subtitle"],
+    )
+    rerun = CompositeInputs(
+        composite_run_id="composite-rerun",
+        media_inputs=inputs,
+        video=_SOURCE_BYTES["video"],
+        voice=_SOURCE_BYTES["voice"],
+        subtitle=_SOURCE_BYTES["subtitle"],
+    )
+
+    assert composite_lineage_fingerprint(first) != composite_lineage_fingerprint(rerun)
+    assert deterministic_composite_test_bytes(first) != deterministic_composite_test_bytes(rerun)
 
 
 @pytest.mark.asyncio
