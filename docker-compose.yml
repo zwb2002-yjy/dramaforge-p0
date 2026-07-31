@@ -187,6 +187,7 @@ services:
       SESSION_SECRET: dev-only-change-me-to-a-long-random-string
       BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
       WORKER_KIND: heavy
+      ARQ_HEAVY_MAX_JOBS: ${ARQ_HEAVY_MAX_JOBS:-4}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
       AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
