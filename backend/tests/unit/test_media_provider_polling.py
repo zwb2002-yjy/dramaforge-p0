@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncGenerator
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -343,6 +344,39 @@ async def test_video_waits_for_late_provider_completion(
     assert op.provider_operation_id == "provider-video-1"
     assert op.status == "succeeded"
     assert op.response_summary["poll_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_video_poll_transport_error_keeps_remote_task_and_retries(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await _video_run(session)
+
+    class PollTimeoutThenSuccessAdapter(DelayedVideoAdapter):
+        async def poll(self, remote_task_id: str) -> dict[str, Any]:
+            self.poll_count += 1
+            if self.poll_count == 1:
+                return {"status": "running", "poll_error": "ReadTimeout"}
+            return {"status": "succeeded", "artifact_uri": "fake://provider-video-1"}
+
+    adapter = PollTimeoutThenSuccessAdapter([])
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.execution.product_path.asyncio.sleep", no_sleep)
+    result = await execute_media_node_run(session, node_run_id=run.id, flux=adapter)  # type: ignore[arg-type]
+
+    assert result.node_type == "video"
+    assert adapter.poll_count == 2
+    op = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalar_one()
+    assert op.provider_operation_id == "provider-video-1"
+    assert op.status == "succeeded"
+    assert op.response_summary["poll_count"] == 2
 
 
 @pytest.mark.asyncio

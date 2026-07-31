@@ -9,9 +9,14 @@ import socket
 
 from app.runtime.scheduler import AgentRunScheduler, RedisStreamPublisher
 from app.shared.db import get_session_factory
+from app.shared.model_registry import load_all_models
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = float(os.getenv("OUTBOX_DISPATCH_INTERVAL_SECONDS", "1"))
+
+# This resident process writes OutboxEvent rows directly. Register every ORM
+# model before SQLAlchemy compiles the cross-domain foreign keys during flush.
+load_all_models()
 
 
 async def dispatch_once(*, worker_id: str) -> int:

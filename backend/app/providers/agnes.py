@@ -270,8 +270,18 @@ class AgnesHubClient:
         if not self.configured():
             raise RuntimeError("Agnes hub not configured")
         url = f"{self._base}/videos/{remote_task_id}"
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(url, headers=self._headers())
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.get(url, headers=self._headers())
+        except (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+        ) as exc:
+            # A poll failure is not a task failure. The Worker retains the same
+            # remote task id and retries polling within its bounded job window.
+            return {"status": "running", "poll_error": type(exc).__name__}
+        else:
             try:
                 raw_data = resp.json()
             except Exception:
