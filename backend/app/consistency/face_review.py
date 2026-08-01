@@ -27,7 +27,7 @@ def face_review_hook(
     *,
     embedding: list[float] | None,
     canonical: list[float] | None,
-    threshold: float = 0.35,
+    threshold: float,
 ) -> FaceReviewResult:
     """Compare two 512-d embeddings (already derived from separate image sources)."""
     if embedding is None or canonical is None:
@@ -44,7 +44,7 @@ def face_review_images(
     *,
     probe_image_bytes: bytes,
     canonical_image_bytes: bytes,
-    threshold: float = 0.35,
+    threshold: float,
 ) -> FaceReviewOutcome:
     """Compare embeddings derived *separately* from probe and canonical images.
 

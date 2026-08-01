@@ -9,8 +9,10 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "scripts"))
 
 from prove_p0_mvp_formal import (  # noqa: E402
+    APPROVED_FACE_POLICY,
     DEFAULT_POLL_INTERVAL_SECONDS,
     SYNC_PROVIDER_TIMEOUT_SECONDS,
+    face_policy_errors,
     latest_shot_node_runs,
     response_run_id_for_node,
     review_status,
@@ -112,6 +114,48 @@ def test_review_status_preserves_block_and_numeric_score() -> None:
         {"output_summary": {"status": "blocked", "face_score": "0.123"}}
     ) == ("blocked", 0.123)
     assert review_status(None) == ("missing", None)
+
+
+def test_face_policy_evidence_rejects_mismatched_policy_and_low_score() -> None:
+    run = {
+        "id": "face-run",
+        "input_snapshot": {
+            "node_key": "face_review",
+            "lead_identity_required": True,
+            "face_policy": {**APPROVED_FACE_POLICY, "threshold": 0.35},
+        },
+        "output_summary": {
+            "status": "passed",
+            "face_score": 0.42,
+            "face_policy": APPROVED_FACE_POLICY,
+            "face_threshold": 0.35,
+        },
+    }
+
+    errors = face_policy_errors([run])
+
+    assert "snapshot policy mismatch" in errors[0]
+    assert "output threshold=0.35 expected=0.60" in errors[1]
+    assert "below approved threshold=0.60" in errors[2]
+
+
+def test_face_policy_evidence_accepts_approved_passing_lead_review() -> None:
+    run = {
+        "id": "face-run",
+        "input_snapshot": {
+            "node_key": "face_review",
+            "lead_identity_required": True,
+            "face_policy": APPROVED_FACE_POLICY,
+        },
+        "output_summary": {
+            "status": "passed",
+            "face_score": 0.60,
+            "face_policy": APPROVED_FACE_POLICY,
+            "face_threshold": 0.60,
+        },
+    }
+
+    assert face_policy_errors([run]) == []
 
 
 def test_response_run_id_for_node_uses_api_order_and_rejects_mismatches() -> None:

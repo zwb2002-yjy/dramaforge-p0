@@ -231,7 +231,6 @@ async def main() -> int:
                 authorized_text=True,
                 authorized_image=True,
                 materialization_ops=["create_shot_stub", "enqueue_keyframe"],
-                face_threshold=0.0,
             )
             art = await session.get(Artifact, result.artifact_id)
             report["steps"]["pipeline"] = {

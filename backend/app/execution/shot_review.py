@@ -12,9 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.models import Shot
 from app.config import get_settings
+from app.consistency.face_policy import approved_face_policy_snapshot, approved_face_threshold
 from app.execution.artifact_lineage import get_or_create_artifact
-from app.execution.product_path import identity_priority_keyframe_prompt
 from app.execution.models import Artifact, GraphNode, NodeRun
+from app.execution.product_path import identity_priority_keyframe_prompt
 from app.execution.runtime_invariants import mark_stale_downstream
 from app.execution.shot_p0 import is_shot_locked, set_shot_lock
 from app.execution.shot_pipeline import (
@@ -133,6 +134,21 @@ async def assert_shot_approvable(session: AsyncSession, *, project_id: UUID, sho
             # Manual audited completion stores status=passed
             if status in {"blocked", "fail", "failed", "reject"}:
                 blocked.append(f"{key}:{status}")
+            if key == "face_review" and (run.input_snapshot or {}).get(
+                "lead_identity_required"
+            ) is True:
+                policy = approved_face_policy_snapshot()
+                if (run.input_snapshot or {}).get("face_policy") != policy:
+                    blocked.append("face_review:policy_mismatch")
+                score = summary.get("face_score")
+                try:
+                    if not isinstance(score, int | float | str):
+                        raise TypeError("face score is not numeric")
+                    score_ok = float(score) >= approved_face_threshold()
+                except (TypeError, ValueError):
+                    score_ok = False
+                if status != "passed" or not score_ok:
+                    blocked.append("face_review:score_below_approved_threshold")
 
     if missing or incomplete or blocked or no_artifact:
         parts = []
@@ -401,6 +417,7 @@ async def start_shot_nodes(
             "dialogue": dialogue,
             "subtitle": dialogue,
             "lead_identity_required": lead_identity_required,
+            "face_policy": approved_face_policy_snapshot(),
         }
         if canonical_object_key:
             snapshot["canonical_object_key"] = canonical_object_key
@@ -578,6 +595,7 @@ async def upload_manual_media(
             "source_commit": get_settings().source_commit,
             "manual": True,
             "prompt": f"manual:{node_key}:{shot_id}",
+            "face_policy": approved_face_policy_snapshot(),
         },
         provider_cost=Decimal("0"),
         started_at=now,

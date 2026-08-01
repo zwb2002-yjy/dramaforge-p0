@@ -147,7 +147,7 @@ class Character(Base):
     negative_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     calibration_state: Mapped[str] = mapped_column(String(16), nullable=False, default="cold")
     similarity_threshold: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.7
+        Float, nullable=False, default=0.60
     )
 
 

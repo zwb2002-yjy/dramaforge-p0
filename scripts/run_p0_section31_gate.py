@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -43,6 +44,12 @@ REQUIRED_NODES = (
     "continuity_review",
 )
 DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
+APPROVED_FACE_POLICY = {
+    "policy_id": "P0-S0A-2026-07-25",
+    "policy_version": "s0a-far-frr-v1",
+    "approval_id": "USER-APPROVED-2026-07-25-P0-S0A",
+    "threshold": 0.60,
+}
 
 
 @dataclass
@@ -106,6 +113,24 @@ def extract_json_object(text: str) -> dict[str, object] | None:
         if isinstance(value, dict) and "available" in value:
             return value
         start = index + 1
+
+
+def calibration_policy_errors(report_text: str) -> list[str]:
+    """Parse the stamped S0-A policy rather than merely checking its label."""
+    errors: list[str] = []
+    threshold_match = re.search(r"final_threshold:\s*`?([0-9.]+)`?", report_text)
+    approval_match = re.search(r"approval_id=([A-Za-z0-9-]+)", report_text)
+    expected_threshold = float(APPROVED_FACE_POLICY["threshold"])
+    if threshold_match is None:
+        errors.append("calibration report missing final_threshold")
+    elif float(threshold_match.group(1)) != expected_threshold:
+        errors.append(
+            f"calibration final_threshold={threshold_match.group(1)} expected={expected_threshold:.2f}"
+        )
+    expected_approval = str(APPROVED_FACE_POLICY["approval_id"])
+    if approval_match is None or approval_match.group(1) != expected_approval:
+        errors.append(f"calibration approval_id must equal {expected_approval}")
+    return errors
 
 
 def evaluate_multishot_snapshot(
@@ -810,10 +835,12 @@ def main() -> int:
             and "| FRR |" in report_text
             and "final_threshold" in report_text
         )
+        calibration_errors = calibration_policy_errors(report_text)
         if (
             st.get("available")
             and st.get("backend") == "insightface+onnx"
             and calibrated
+            and not calibration_errors
         ):
             add(
                 "3.1.11",
@@ -829,6 +856,7 @@ def main() -> int:
                 missing.append(
                     "calibration report must be COMPLETE_WITH_METRICS with FAR/FRR and final_threshold"
                 )
+            missing.extend(calibration_errors)
             add(
                 "3.1.11",
                 "InsightFace 512-d + calibrated threshold",
@@ -845,6 +873,7 @@ def main() -> int:
             fin = ev.get("final") or {}
             lineage = ev.get("lineage") or {}
             inputs = ev.get("inputs") or {}
+            policy_evidence = ev.get("face_policy") or {}
             source_errors = evidence_source_errors(
                 ev,
                 expected_commit=source_commit,
@@ -875,6 +904,9 @@ def main() -> int:
                 and fin.get("per_shot_full") == 10
                 and fin.get("failed_runs") == 0
                 and fin.get("approve_ok") == 10
+                and policy_evidence.get("approved") == APPROVED_FACE_POLICY
+                and policy_evidence.get("checked_face_reviews", 0) > 0
+                and policy_evidence.get("errors") == []
             )
             if valid_agent_evidence:
                 add(
@@ -885,6 +917,14 @@ def main() -> int:
                     f"approve_ok={fin.get('approve_ok')} failed={fin.get('failed_runs')} "
                     f"runs={fin.get('node_runs')} arts={fin.get('artifacts')} "
                     f"unique_artifacts={lineage.get('unique_artifact_ids')}",
+                    authoritative=True,
+                )
+                add(
+                    "3.1.11",
+                    "InsightFace calibrated policy bound to lead face-review scores",
+                    "PASS",
+                    f"threshold={APPROVED_FACE_POLICY['threshold']:.2f} "
+                    f"lead_reviews={policy_evidence.get('checked_face_reviews')}",
                     authoritative=True,
                 )
                 pkg_h = fin.get("package_hash")
@@ -915,6 +955,13 @@ def main() -> int:
                     "per-shot Worker continuity_review has independent artifact lineage",
                 )
             else:
+                add(
+                    "3.1.11",
+                    "InsightFace calibrated policy bound to lead face-review scores",
+                    "FAIL",
+                    f"policy={policy_evidence}",
+                    authoritative=True,
+                )
                 add(
                     "3.1.10",
                     "10 Shot formal evidence is not independent Agent workflow proof",

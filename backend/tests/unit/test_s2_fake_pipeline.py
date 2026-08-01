@@ -67,7 +67,6 @@ async def test_first_frame_writes_graph_node_run_artifact(session: AsyncSession)
         authorized_text=True,
         authorized_image=True,
         materialization_ops=["create_shot_stub", "enqueue_keyframe"],
-        face_threshold=0.35,
     )
     assert result.brief_text.startswith("BRIEF:")
     graph = await session.get(ProductionGraph, result.graph_id)

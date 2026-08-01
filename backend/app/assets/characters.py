@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.models import Asset, Character, CharacterReference
+from app.consistency.face_policy import approved_face_threshold
 from app.consistency.image_embed import embedding_from_image_bytes
 from app.shared.errors import ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
@@ -32,7 +33,6 @@ async def register_lead_character(
     locked_prompt: str,
     canonical_image_bytes: bytes,
     store: ObjectStore | None = None,
-    similarity_threshold: float = 0.35,
 ) -> CharacterWithCanonical:
     """Create character asset + canonical reference with 512-d embedding from image."""
     if not canonical_image_bytes:
@@ -56,8 +56,8 @@ async def register_lead_character(
         id=asset.id,
         locked_prompt=locked_prompt,
         negative_prompt="",
-        calibration_state="cold",
-        similarity_threshold=similarity_threshold,
+        calibration_state="calibrated",
+        similarity_threshold=approved_face_threshold(),
     )
     session.add(char)
     await session.flush()
@@ -80,7 +80,7 @@ async def register_lead_character(
         asset_id=asset.id,
         name=name,
         canonical_object_key=object_key,
-        similarity_threshold=similarity_threshold,
+        similarity_threshold=approved_face_threshold(),
         embedding_dim=len(emb),
     )
 

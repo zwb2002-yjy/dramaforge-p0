@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
 from app.config import get_settings
+from app.consistency.face_policy import (
+    approved_face_policy_snapshot,
+    approved_face_threshold,
+    approved_face_threshold_from_snapshot,
+)
 from app.consistency.face_review import face_review_images
 from app.creation.models import CreationPlan
 from app.execution.artifact_lineage import get_or_create_artifact
@@ -228,6 +233,7 @@ async def enqueue_keyframe_after_plan(
         "prompt": prompt,
         "materialization": materialization_ops,
         "lead_identity_required": lead_identity_required,
+        "face_policy": approved_face_policy_snapshot(),
     }
     if canon_key:
         snapshot["canonical_object_key"] = canon_key
@@ -261,7 +267,6 @@ async def execute_keyframe_node_run(
     node_run_id: UUID,
     store: ObjectStore | None = None,
     flux: ProviderAdapter | None = None,
-    face_threshold: float = 0.35,
     require_canonical: bool = False,
     canonical_embedding: list[float] | None = None,
     canonical_image_bytes: bytes | None = None,
@@ -272,7 +277,6 @@ async def execute_keyframe_node_run(
         node_run_id=node_run_id,
         store=store,
         flux=flux,
-        face_threshold=face_threshold,
         require_canonical=require_canonical,
         canonical_embedding=canonical_embedding,
         canonical_image_bytes=canonical_image_bytes,
@@ -285,7 +289,6 @@ async def execute_media_node_run(
     node_run_id: UUID,
     store: ObjectStore | None = None,
     flux: ProviderAdapter | None = None,
-    face_threshold: float = 0.35,
     require_canonical: bool = False,
     canonical_embedding: list[float] | None = None,
     canonical_image_bytes: bytes | None = None,
@@ -334,6 +337,7 @@ async def execute_media_node_run(
         )
 
     snap = run.input_snapshot or {}
+    face_threshold = approved_face_threshold()
     # Resolve canonical from snapshot object key before enforce (Worker path).
     if canonical_image_bytes is None:
         snap_canon = snap.get("canonical_object_key")
@@ -374,6 +378,11 @@ async def execute_media_node_run(
         "prompt",
         "subtitle",
     }:
+        if node.node_key in {"face_review", "video_drift_review"} or node_type in {
+            "face_review",
+            "video_review",
+        }:
+            face_threshold = approved_face_threshold_from_snapshot(snap)
         return await _complete_pure_node(
             session,
             run=run,
@@ -614,6 +623,8 @@ async def execute_media_node_run(
         "byte_size": art.byte_size,
         "content_hash": art.content_hash,
         "source_commit": _settings.source_commit,
+        "face_policy": approved_face_policy_snapshot(),
+        "face_threshold": face_threshold,
     }
     node.latest_successful_run_id = run.id
     await session.flush()
@@ -949,6 +960,8 @@ async def _complete_pure_node(
         "byte_size": art.byte_size,
         "content_hash": art.content_hash,
         "source_commit": get_settings().source_commit,
+        "face_policy": approved_face_policy_snapshot(),
+        "face_threshold": face_threshold,
     }
     node.latest_successful_run_id = run.id
     await session.flush()

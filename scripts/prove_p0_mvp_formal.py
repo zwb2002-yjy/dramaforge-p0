@@ -46,6 +46,12 @@ DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
 SYNC_PROVIDER_TIMEOUT_SECONDS = 360.0
 DEFAULT_MAX_FACE_REWORKS = 3
 DEFAULT_POLL_INTERVAL_SECONDS = 5.0
+APPROVED_FACE_POLICY = {
+    "policy_id": "P0-S0A-2026-07-25",
+    "policy_version": "s0a-far-frr-v1",
+    "approval_id": "USER-APPROVED-2026-07-25-P0-S0A",
+    "threshold": 0.60,
+}
 
 
 def runtime_source_errors(
@@ -120,6 +126,40 @@ def review_status(run: dict[str, Any] | None) -> tuple[str, float | None]:
     except (TypeError, ValueError):
         score = None
     return status, score
+
+
+def face_policy_errors(runs: list[dict[str, Any]]) -> list[str]:
+    """Require each lead face review to prove its frozen policy and score."""
+    errors: list[str] = []
+    threshold = float(APPROVED_FACE_POLICY["threshold"])
+    for run in runs:
+        snapshot = run.get("input_snapshot") or {}
+        if snapshot.get("node_key") != "face_review":
+            continue
+        if snapshot.get("lead_identity_required") is not True:
+            continue
+        run_id = str(run.get("id") or "<missing>")
+        output = run.get("output_summary") or {}
+        if snapshot.get("face_policy") != APPROVED_FACE_POLICY:
+            errors.append(f"face review run={run_id} snapshot policy mismatch")
+        if output.get("face_policy") != APPROVED_FACE_POLICY:
+            errors.append(f"face review run={run_id} output policy mismatch")
+        try:
+            output_threshold = float(output.get("face_threshold"))
+        except (TypeError, ValueError):
+            output_threshold = float("nan")
+        if output_threshold != threshold:
+            errors.append(
+                f"face review run={run_id} output threshold={output.get('face_threshold')!r} "
+                f"expected={threshold:.2f}"
+            )
+        status, score = review_status(run)
+        if status != "passed" or score is None or score < threshold:
+            errors.append(
+                f"face review run={run_id} status={status} score={score!r} "
+                f"below approved threshold={threshold:.2f}"
+            )
+    return errors
 
 
 def response_run_id_for_node(response: dict[str, Any], *, node_key: str) -> str:
@@ -814,6 +854,7 @@ def main() -> int:
             health=report["health"],
             runs=list(latest.values()),
         )
+        policy_errors = face_policy_errors(list(latest.values()))
         worker_commits = sorted(
             {
                 str((run.get("output_summary") or {}).get("source_commit") or "<missing>")
@@ -826,6 +867,16 @@ def main() -> int:
             "worker_source_commits": worker_commits,
             "checked_worker_runs": len(latest),
             "errors": runtime_errors,
+        }
+        report["face_policy"] = {
+            "approved": APPROVED_FACE_POLICY,
+            "checked_face_reviews": sum(
+                1
+                for run in latest.values()
+                if (run.get("input_snapshot") or {}).get("node_key") == "face_review"
+                and (run.get("input_snapshot") or {}).get("lead_identity_required") is True
+            ),
+            "errors": policy_errors,
         }
         report["lineage"] = {
             "required_run_count": len(shot_ids) * len(REQUIRED_NODES),
@@ -866,6 +917,7 @@ def main() -> int:
             and not missing
             and not bad_lineage
             and not runtime_errors
+            and not policy_errors
             and len(final_artifact_ids) == 90
             and len(final_object_keys) == 90
             and report["final"]["failed_runs"] == 0

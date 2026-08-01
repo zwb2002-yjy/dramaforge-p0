@@ -9,8 +9,10 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "scripts"))
 
 from run_p0_section31_gate import (  # noqa: E402
+    APPROVED_FACE_POLICY,
     REQUIRED_NODES,
     Check,
+    calibration_policy_errors,
     evaluate_multishot_snapshot,
     extract_json_object,
     record_check,
@@ -101,6 +103,19 @@ def test_extract_json_object_skips_insightface_model_logs() -> None:
 def test_unknown_gate_status_is_rejected() -> None:
     with pytest.raises(ValueError, match="unsupported gate status"):
         record_check([], Check("x", "bad", "UNKNOWN", "invalid"))
+
+
+def test_calibration_policy_requires_the_approved_stamp() -> None:
+    report = (
+        "COMPLETE_WITH_METRICS\n"
+        "- final_threshold: `0.60` "
+        "(approval_id=USER-APPROVED-2026-07-25-P0-S0A)"
+    )
+    assert calibration_policy_errors(report) == []
+    assert calibration_policy_errors(report.replace("0.60", "0.35")) == [
+        "calibration final_threshold=0.35 expected=0.60"
+    ]
+    assert APPROVED_FACE_POLICY["threshold"] == 0.60
 
 
 def test_multishot_snapshot_requires_ninety_independent_artifacts() -> None:

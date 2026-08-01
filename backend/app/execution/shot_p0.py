@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.consistency.continuity import continuity_four_layers
+from app.consistency.face_policy import approved_face_policy_snapshot, approved_face_threshold
 from app.consistency.face_review import face_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ShotHumanLock
 from app.execution.product_path import execute_media_node_run
@@ -150,6 +151,7 @@ async def _queue_node_run(
         "plan": {"prompt": prompt},
         "node_key": key,
         "source_commit": get_settings().source_commit,
+        "face_policy": approved_face_policy_snapshot(),
     }
     if canonical_object_key:
         snap["canonical_object_key"] = canonical_object_key
@@ -207,7 +209,6 @@ async def _queue_and_run(
             session,
             node_run_id=run.id,
             store=store,
-            face_threshold=0.35,
             require_canonical=key in {"keyframe", "face_review"},
             canonical_image_bytes=canonical_image_bytes,
         )
@@ -363,7 +364,7 @@ async def produce_shots_p0(
                     review = face_review_images(
                         probe_image_bytes=probe,
                         canonical_image_bytes=canon_bytes,
-                        threshold=0.35,
+                        threshold=approved_face_threshold(),
                     )
                 else:
                     review = None

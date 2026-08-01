@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.consistency.face_policy import approved_face_policy_snapshot, approved_face_threshold
 from app.consistency.face_review import FaceReviewResult, face_review_hook, face_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.service import GraphService
@@ -96,7 +97,6 @@ class FirstFramePipeline:
         authorized_text: bool,
         authorized_image: bool,
         materialization_ops: list[str],
-        face_threshold: float = 0.0,
         scope_entity_id: UUID | None = None,
     ) -> FirstFrameResult:
         if not authorized_text:
@@ -143,6 +143,7 @@ class FirstFramePipeline:
             "brief": brief,
             "plan": plan,
             "materialization": applied,
+            "face_policy": approved_face_policy_snapshot(),
         }
         ih = _input_hash(snapshot)
         node_run = NodeRun(
@@ -245,11 +246,10 @@ class FirstFramePipeline:
         await self._session.flush()
 
         # Two-source face review only (never identity match of same vector)
-        thr = face_threshold if face_threshold > 0 else 0.35
         face_out = face_review_images(
             probe_image_bytes=probe_bytes,
             canonical_image_bytes=canon_bytes,
-            threshold=thr,
+            threshold=approved_face_threshold(),
         )
         review = FaceReviewResult(status=face_out.status, score=face_out.score, rule=face_out.rule)
 
@@ -262,6 +262,8 @@ class FirstFramePipeline:
             "face_score": review.score,
             "canonical_object_key": canon_key,
             "embedding_source": "probe_vs_canonical_images",
+            "face_policy": approved_face_policy_snapshot(),
+            "face_threshold": approved_face_threshold(),
         }
         node.latest_successful_run_id = node_run.id
         await self._session.commit()
