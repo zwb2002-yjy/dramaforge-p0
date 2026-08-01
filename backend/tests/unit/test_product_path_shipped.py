@@ -18,6 +18,7 @@ from app.events import models as _em  # noqa: F401
 from app.events.models import OutboxEvent
 from app.execution import models as _xm  # noqa: F401
 from app.execution.models import Artifact, NodeRun
+from app.execution.product_path import execute_media_node_run
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0, set_shot_lock
 from app.execution.shot_review import local_rerun_from_node, start_shot_nodes
 from app.production import models as _pm  # noqa: F401
@@ -149,6 +150,74 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
             require_approved=False,
         )
     ).timeline_hash
+
+
+@pytest.mark.asyncio
+async def test_lead_keyframe_passes_canonical_bytes_to_provider(session: AsyncSession) -> None:
+    user, workspace_id = await _seed_user_workspace(session)
+    started = await CreationService(session).start_project(
+        workspace_id=workspace_id,
+        name=f"Identity-{uuid4().hex[:6]}",
+        aspect_ratio="9:16",
+        actor=user,
+    )
+    rev = await CreationService(session).update_brief_manual(
+        project_id=started.project_id, actor=user, logline="lead portrait"
+    )
+    await CreationService(session).confirm_brief(
+        project_id=started.project_id, revision_id=rev.id, actor=user
+    )
+    plan = await CreationService(session).create_or_update_plan_manual(
+        project_id=started.project_id,
+        actor=user,
+        brief_revision_id=rev.id,
+        plan_body={"prompt": "lead portrait", "shots": []},
+    )
+    mat = await CreationService(session).confirm_plan_and_materialize(
+        project_id=started.project_id, plan_id=plan.id, actor=user
+    )
+    run = await session.get(NodeRun, mat.node_run_id)
+    assert run is not None
+    canonical = b"canonical-reference-bytes"
+    store = get_object_store()
+    canonical_key = f"projects/{started.project_id}/canonical/identity.png"
+    await store.put_bytes(object_key=canonical_key, data=canonical, mime_type="image/png")
+    run.input_snapshot = {
+        **(run.input_snapshot or {}),
+        "canonical_object_key": canonical_key,
+        "lead_identity_required": True,
+    }
+
+    class RecordingAdapter:
+        provider = "recording"
+
+        def __init__(self) -> None:
+            self.request: dict[str, object] | None = None
+            self.blobs = {"recording-keyframe": b"\x89PNG\r\n\x1a\nidentity"}
+
+        async def create(self, request: dict[str, object]) -> dict[str, object]:
+            self.request = request
+            return {
+                "remote_task_id": "recording-keyframe",
+                "status": "succeeded",
+                "identity_conditioning": "canonical_image_edit",
+                "canonical_image_fingerprint": "fingerprint",
+            }
+
+        async def poll(self, remote_task_id: str) -> dict[str, object]:
+            assert remote_task_id == "recording-keyframe"
+            return {"status": "succeeded"}
+
+        async def fetch_cost(self, remote_task_id: str) -> dict[str, object]:
+            assert remote_task_id == "recording-keyframe"
+            return {"amount": 0.0, "currency": "USD"}
+
+    adapter = RecordingAdapter()
+    await execute_media_node_run(session, node_run_id=run.id, store=store, flux=adapter)
+
+    assert adapter.request is not None
+    assert adapter.request["canonical_image_bytes"] == canonical
+    assert adapter.request["canonical_image_mime"] == "image/png"
 
 
 @pytest.mark.asyncio

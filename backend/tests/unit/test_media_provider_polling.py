@@ -172,6 +172,51 @@ async def test_agnes_image_rewrites_only_after_provider_policy_rejection() -> No
 
 
 @pytest.mark.asyncio
+async def test_agnes_image_edit_sends_canonical_bytes_and_retries_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        assert request.url.path == "/v1/images/edits"
+        assert request.headers["content-type"].startswith("multipart/form-data;")
+        assert b'name="image"; filename="canonical.png"' in request.content
+        assert b"canonical-image-bytes" in request.content
+        if attempts == 1:
+            return httpx.Response(503, json={"error": "hub overloaded"})
+        return httpx.Response(200, json={"data": [{"url": "https://media.example/edit.png"}]})
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.providers.agnes.asyncio.sleep", no_sleep)
+    canonical = b"canonical-image-bytes"
+    client = AgnesHubClient(
+        Settings(
+            app_env="development",
+            agnes_enabled=True,
+            agnes_api_key="test-provider-key",
+            agnes_base_url="https://agnes.example/v1",
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.create_image(
+        prompt="single adult portrait in a cafe",
+        canonical_image_bytes=canonical,
+    )
+
+    assert attempts == 2
+    assert result["status"] == "succeeded"
+    assert result["identity_conditioning"] == "canonical_image_edit"
+    assert result["canonical_image_fingerprint"] == __import__("hashlib").sha256(
+        canonical
+    ).hexdigest()
+
+
+@pytest.mark.asyncio
 async def test_agnes_image_does_not_rewrite_an_unrelated_bad_request() -> None:
     prompts: list[str] = []
 

@@ -355,6 +355,24 @@ async def execute_media_node_run(
         )
         raise ValidationAppError("CANONICAL_REFERENCE_REQUIRED")
 
+    lead_identity_required = snap.get("lead_identity_required") is True
+    canonical_object_key = snap.get("canonical_object_key")
+    has_canonical_binding = isinstance(canonical_object_key, str) and bool(canonical_object_key)
+    missing_bound_canonical = (
+        node_type == "keyframe"
+        and lead_identity_required
+        and has_canonical_binding
+        and canonical_image_bytes is None
+    )
+    if missing_bound_canonical:
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="CANONICAL_REFERENCE_REQUIRED",
+            error_summary="lead keyframe requires canonical reference image",
+        )
+        raise ValidationAppError("CANONICAL_REFERENCE_REQUIRED")
+
     plan_snapshot = snap.get("plan")
     prompt = str(plan_snapshot or {})
     if isinstance(plan_snapshot, dict):
@@ -450,7 +468,11 @@ async def execute_media_node_run(
     # Produce media bytes by node type via Adapter contract
     kind = node_type
     try:
-        create = await adapter.create({"prompt": prompt, "kind": kind})
+        create_request: dict[str, object] = {"prompt": prompt, "kind": kind}
+        if node_type == "keyframe" and lead_identity_required and has_canonical_binding:
+            create_request["canonical_image_bytes"] = canonical_image_bytes
+            create_request["canonical_image_mime"] = "image/png"
+        create = await adapter.create(create_request)
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - provider boundary must remain auditable
@@ -494,6 +516,8 @@ async def execute_media_node_run(
             "kind": kind,
             "prompt_adaptation": create.get("prompt_adaptation"),
             "original_prompt_fingerprint": create.get("original_prompt_fingerprint"),
+            "identity_conditioning": create.get("identity_conditioning"),
+            "canonical_image_fingerprint": create.get("canonical_image_fingerprint"),
         },
         response_summary={"create_status": create_status},
         submitted_at=datetime.now(UTC),

@@ -90,17 +90,35 @@ class AgnesHubClient:
             )
         )
 
-    async def create_image(self, *, prompt: str, size: str = "1024x1024") -> dict[str, Any]:
+    async def create_image(
+        self,
+        *,
+        prompt: str,
+        size: str = "1024x1024",
+        canonical_image_bytes: bytes | None = None,
+        canonical_image_mime: str = "image/png",
+    ) -> dict[str, Any]:
+        """Create an image, using a canonical image edit when identity is required.
+
+        The Agnes generation endpoint silently ignores unknown JSON image fields.
+        A lead keyframe therefore uses the standard multipart image-edit endpoint
+        instead of pretending that a text-only prompt preserves identity.
+        """
         if not self.configured():
             raise RuntimeError("Agnes hub not configured (AGNES_ENABLED + AGNES_API_KEY)")
         remote_id = f"agnes-img-{uuid4()}"
-        url = f"{self._base}/images/generations"
-        body = {
+        identity_conditioned = canonical_image_bytes is not None
+        endpoint = "/images/edits" if identity_conditioned else "/images/generations"
+        url = f"{self._base}{endpoint}"
+        body: dict[str, str | int] = {
             "model": self._image_model,
             "prompt": prompt,
             "n": 1,
             "size": size,
         }
+        reference_fingerprint = (
+            hashlib.sha256(canonical_image_bytes).hexdigest() if canonical_image_bytes else None
+        )
         original_fingerprint = hashlib.sha256(prompt.encode()).hexdigest()
         effective_prompt = prompt
         policy_rewrite = False
@@ -113,7 +131,21 @@ class AgnesHubClient:
         ) as client:
             for attempt in range(1, self._IMAGE_MAX_ATTEMPTS + 1):
                 try:
-                    resp = await client.post(url, headers=self._headers(), json=body)
+                    if canonical_image_bytes is None:
+                        resp = await client.post(url, headers=self._headers(), json=body)
+                    else:
+                        resp = await client.post(
+                            url,
+                            headers={"Authorization": f"Bearer {self._key}"},
+                            data=body,
+                            files={
+                                "image": (
+                                    "canonical.png",
+                                    canonical_image_bytes,
+                                    canonical_image_mime,
+                                )
+                            },
+                        )
                     try:
                         data = resp.json()
                     except Exception:
@@ -141,6 +173,10 @@ class AgnesHubClient:
                             "prompt_adaptation": (
                                 "provider_policy_safe_rewrite" if policy_rewrite else None
                             ),
+                            "identity_conditioning": (
+                                "canonical_image_edit" if identity_conditioned else "none"
+                            ),
+                            "canonical_image_fingerprint": reference_fingerprint,
                             "original_prompt_fingerprint": original_fingerprint,
                             "effective_prompt_fingerprint": hashlib.sha256(
                                 effective_prompt.encode()
@@ -181,6 +217,10 @@ class AgnesHubClient:
                 "prompt_adaptation": (
                     "provider_policy_safe_rewrite" if policy_rewrite else None
                 ),
+                "identity_conditioning": (
+                    "canonical_image_edit" if identity_conditioned else "none"
+                ),
+                "canonical_image_fingerprint": reference_fingerprint,
                 "original_prompt_fingerprint": original_fingerprint,
                 "effective_prompt_fingerprint": hashlib.sha256(
                     effective_prompt.encode()
@@ -380,7 +420,14 @@ class AgnesImageAdapter:
 
     async def create(self, request: dict[str, Any]) -> dict[str, Any]:
         prompt = str(request.get("prompt", ""))
-        return await self._client.create_image(prompt=prompt)
+        image_bytes = request.get("canonical_image_bytes")
+        if image_bytes is not None and not isinstance(image_bytes, bytes):
+            raise TypeError("canonical_image_bytes must be bytes")
+        return await self._client.create_image(
+            prompt=prompt,
+            canonical_image_bytes=image_bytes,
+            canonical_image_mime=str(request.get("canonical_image_mime") or "image/png"),
+        )
 
     async def poll(self, remote_task_id: str) -> dict[str, Any]:
         return await self._client.poll(remote_task_id)
