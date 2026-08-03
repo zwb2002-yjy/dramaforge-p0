@@ -1270,7 +1270,7 @@ FINAL VERDICT: BLOCKED / NOT ACCEPTED
 | Agnes 真实 T2I Probe | 2026-08-04：`image_t2i` → `passed / account_verified`，真实图片生成成功（remote task 有值） | `PASS` |
 | §3.1 Gate（绑定候选 339569c） | `20 PASS / 0 FAIL / 4 BLOCKED`：Agent brief/plan 真实文本、10 Shot 物化、Canonical 真实 I2I 生成（`3.1.9` 不再是 fail-closed）；`3.1.10/3.1.11/3.1.18` BLOCKED 因 gate 不跑完整媒体管线 | `PASS`（栈验证） |
 | 真实 10 Shot 图片链（proof，绑定 26fa8d6） | 10 keyframe + 10 face_review + prompt/subtitle/voice 全部真实 completed；真实 Face 双源评分：多个 shot `passed >= 0.60`（0.6556/0.6680/0.6865/0.7011），blocked 正确 fail-closed（0.5569/0.5928/0.0243）；`probe_content_hash` 显式绑定；face rework 机制真实重生成 keyframe | `PASS`（图片链）/ `BLOCKED`（video） |
-| 真实 Video I2V | 未完成：`REFERENCE_PUBLIC_BASE_URL` 未配置，video 节点失败（预期）；需公网 HTTPS origin | `BLOCKED` |
+| 真实 Video I2V | **已解除公网 origin 依赖**：2026-08-04 实测 Agnes `/v1/videos` 接受 base64 Data URI 首帧（真实视频任务 `queued->in_progress->completed` 端到端成功），计划 §6.4/§9.2 假设的公网 HTTPS 前置不成立。代码已改 I2V 走 `image_bytes` Data URI（`agnes.py`/`product_path.py`）。冻结样本驱动跑通垂直链：canonical->keyframe->face>=0.60->video(Data URI)->drift review（1 shot 完整，3 个 face passed 0.6144/0.8978/0.9049）；其余 9 shot 因 429 免费层限流 + keyframe 400 内容过滤 + face blocked 级联失败 | `PASS`（机制）/ `BLOCKED`（10 视频全量） |
 | Agnes 真实 Image Probe（旧 Key） | 2026-08-04 早前：`/v1/models`、`image_t2i`、`image_i2i` 均 `401 / PROVIDER_AUTH_FAILED`（Connection 与 `.env` 存的是旧 Key）；已更新为有效 Key | 已解除 |
 | Directory compliance | `Directory compliance OK` | `PASS` |
 | `git diff --check` | 通过；仅已有 CRLF 转 LF warning | `PASS` |
@@ -1313,9 +1313,9 @@ Playwright 使用 DOM、可访问名称、网络失败、console、page error �
 ### 22.5 正式阻断清单
 
 1. ~~**候选源不成立**~~：已解除。工作树 63 条变更已形成候选 commit `cee5306`，并叠加 `9191b6a`（Canonical 审计父级）、`82c320f`（全历史 Ruff 清理）及后续验收记录提交。`git status` 干净；下一步按候选提交构建 Compose 并核对 `/health.source_commit`。
-2. **公网 Reference 不成立（关键路径）**：`REFERENCE_PUBLIC_BASE_URL` 未配置；真实 Agnes Video I2V 不应启动。图片链（canonical/keyframe/face）已证明不需要它；video/composite/continuity 节点因此失败，是 10 Shot proof 无法完整收尾的唯一代码级前置。配置管道已 fail-closed（非 HTTPS/localhost/私网均拒绝），设公网 HTTPS origin 即可解除。
+2. ~~**公网 Reference 不成立**~~：已解除。2026-08-04 实测 Agnes China `/v1/videos` 接受 base64 Data URI 首帧（真实视频任务端到端完成），I2V 不再需要 `REFERENCE_PUBLIC_BASE_URL`。代码 `agnes.py`/`product_path.py` 已改 Data URI 路径。剩余 video 全量瓶颈为免费层 429 限流（并发视频）与 keyframe 400 内容过滤，非公网 origin。
 3. ~~**Agnes Key 未通过鉴权**~~：已解除。2026-08-04 更新为有效 Key 后，`auth_models` 与 `image_t2i` 均 `passed / account_verified`（HTTP 200、真实图片生成成功）；`AGNES_API_KEY`（`.env`）与 Connection 凭证均已更新为有效 Key。
-4. **真实 Provider 证据部分完成**：已确认鉴权 + T2I + Canonical 真实 I2I + 10 keyframe + 10 face 双源评分（多个 `>= 0.60`，blocked 正确 fail-closed）；仍缺 Video I2V（需公网 origin）、Video Drift、下载 Artifact 与三段 SHA-256 完整链。
+4. **真实 Provider 证据大幅完成**：垂直链（canonical->keyframe->face>=0.60->video(Data URI)->drift review）已真实打通，3 个 lead shot `passed >= 0.60`；剩 10 视频全量：429 免费层并发限流（需 throttle 视频提交）、keyframe 400 内容过滤（需 prompt 返工/调整）、Face blocked 级联（正确 fail-closed）。
 5. **Video Drift 未批准**：实现保持 `PROBE_REQUIRED`，固定样本分布、阈值和 approval ID 尚未批准。
 6. ~~**Canonical 审计父级缺口**~~：已解除。`9191b6a` 引入 `create_canonical_generation_run`（最小单节点 canonical graph + running NodeRun 作为审计父级）、`record_canonical_provider_operation`（ProviderOperation 挂 `node_run_id`），Artifact 经 `produced_by_run_id` 回链 Run；XOR 约束满足（单测 `test_canonical_generation_has_audit_parent_run` 断言 `node_run_id` 非空、`agent_run_id` 为空）。
 7. **当前候选 10 Shot 缺失**：没有当前 commit 的 10 Shot x 9 Node、真实 Face/Drift/Continuity、个人审核、字幕局部返工和四项交付证明。
