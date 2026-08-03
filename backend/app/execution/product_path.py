@@ -1019,22 +1019,41 @@ async def execute_media_node_run(
         initial_fingerprint = hashlib.sha256(
             f"{kind}:{prompt}:{safe_request_summary}".encode()
         ).hexdigest()
-        op = ProviderOperation(
-            node_run_id=run.id,
-            attempt_no=run.attempt_no,
-            purpose="primary",
-            operation_kind=f"{node_type}.generate",
-            actual_provider=provider_name,
-            actual_model=model_name,
-            provider_operation_id=None,
-            protocol_profile=str(getattr(adapter, "protocol_profile", "") or "") or None,
-            request_fingerprint=initial_fingerprint,
-            status="created",
-            request_summary=safe_request_summary,
-            response_summary={},
-            submitted_at=datetime.now(UTC),
-        )
-        session.add(op)
+        # Idempotent: a 429 requeue re-executes this node_run; reuse the single
+        # ProviderOperation row (uq_provider_operations_node_run) instead of
+        # inserting a duplicate.
+        op = (
+            await session.execute(
+                select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+            )
+        ).scalars().first()
+        if op is None:
+            op = ProviderOperation(
+                node_run_id=run.id,
+                attempt_no=run.attempt_no,
+                purpose="primary",
+                operation_kind=f"{node_type}.generate",
+                actual_provider=provider_name,
+                actual_model=model_name,
+                provider_operation_id=None,
+                protocol_profile=str(getattr(adapter, "protocol_profile", "") or "") or None,
+                request_fingerprint=initial_fingerprint,
+                status="created",
+                request_summary=safe_request_summary,
+                response_summary={},
+                submitted_at=datetime.now(UTC),
+            )
+            session.add(op)
+        else:
+            op.status = "created"
+            op.error_code = None
+            op.error_summary = None
+            op.provider_operation_id = None
+            op.request_fingerprint = initial_fingerprint
+            op.request_summary = safe_request_summary
+            op.response_summary = {}
+            op.submitted_at = datetime.now(UTC)
+            op.completed_at = None
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
