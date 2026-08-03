@@ -749,9 +749,13 @@ def main() -> int:
                 remaining_run_ids.extend(
                     str(value) for value in started.json().get("run_ids", [])
                 )
-            if len(remaining_run_ids) != 80:
+            # Materialization pre-creates prompt + keyframe NodeRuns per shot
+            # (prompt is a zero-cost upstream lineage result). start_shot_nodes
+            # therefore returns the other 7 non-keyframe nodes per shot.
+            if len(remaining_run_ids) != 70:
                 return finish(
-                    "expected 80 non-keyframe NodeRuns from ten starts, "
+                    "expected 70 non-keyframe NodeRuns from ten starts "
+                    "(prompt+keyframe pre-created by materialization), "
                     f"got {len(remaining_run_ids)}"
                 )
         wait_for_runs(project_id, remaining_run_ids)
