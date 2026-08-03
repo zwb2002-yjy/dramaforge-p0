@@ -214,7 +214,7 @@ def main() -> int:
             "face_passed": len(passed),
             "face_blocked": len(blocked),
         }
-        video_ok = all(node_summary.get("video", {}).get("completed", 0) >= 10)
+        video_ok = node_summary.get("video", {}).get("completed", 0) >= 10
         face_ok = len(passed) >= 1
         report["summary"] = {
             "image_chain_ok": bool(passed),
