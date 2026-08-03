@@ -937,3 +937,73 @@ async def test_manual_plan_save_cannot_overwrite_agent_plan(
     assert state.plan is not None
     assert state.plan.id == agent_plan.id
     assert len(cast(list[dict[str, object]], state.plan.plan["shots"])) == 10
+
+
+@pytest.mark.asyncio
+async def test_canonical_generation_has_audit_parent_run(session: AsyncSession) -> None:
+    """Canonical generation must have a NodeRun audit parent + ProviderOperation (XOR)."""
+    from app.access.projects import ProjectService
+    from app.assets.characters import (
+        create_canonical_generation_run,
+        record_canonical_provider_operation,
+    )
+
+    user = User(
+        email=f"canon-audit-{uuid4().hex[:8]}@example.com",
+        display_name="CanonAudit",
+        password_hash=hash_password("pw"),
+    )
+    session.add(user)
+    await session.flush()
+    workspace = Workspace(owner_user_id=user.id, name=f"CanonAudit-{uuid4().hex[:6]}")
+    session.add(workspace)
+    await session.flush()
+    await session.commit()
+    project = await ProjectService(session).create_project(
+        workspace_id=workspace.id,
+        name="Canon audit",
+        aspect_ratio="9:16",
+        actor=user,
+    )
+
+    run = await create_canonical_generation_run(
+        session,
+        project_id=project.id,
+        user_id=user.id,
+        name="Lead",
+        prompt="portrait reference sheet",
+    )
+    assert run.status == "running"
+
+    adapter = FakeFluxAdapter()
+    created = await adapter.create({"prompt": "portrait", "kind": "keyframe"})
+    remote = str(created["remote_task_id"])
+    blob = adapter.blobs[remote]
+
+    op = await record_canonical_provider_operation(
+        session,
+        run=run,
+        adapter=adapter,
+        provider_name="flux",
+        model_name="fake-flux",
+        prompt="portrait reference sheet",
+        remote_id=remote,
+    )
+    assert op.node_run_id == run.id
+    assert op.agent_run_id is None
+
+    char = await register_lead_character(
+        session,
+        project_id=project.id,
+        name="Lead",
+        locked_prompt="portrait reference sheet",
+        canonical_image_bytes=blob,
+        produced_by_run_id=run.id,
+    )
+    art = await session.get(Artifact, char.canonical_artifact_id)
+    assert art is not None
+    assert art.produced_by_run_id == run.id
+
+    run.status = "completed"
+    run.result_artifact_id = char.canonical_artifact_id
+    await session.commit()
