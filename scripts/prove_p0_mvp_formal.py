@@ -43,7 +43,7 @@ DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
 # The canonical-reference API deliberately permits 330 seconds for a live image
 # provider to recover from transient hub failures. The proof client must not
 # turn that valid server-side budget into a false negative.
-SYNC_PROVIDER_TIMEOUT_SECONDS = 360.0
+SYNC_PROVIDER_TIMEOUT_SECONDS = 600.0
 DEFAULT_MAX_FACE_REWORKS = 3
 DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 APPROVED_FACE_POLICY = {
