@@ -1293,7 +1293,7 @@ Playwright 使用 DOM、可访问名称、网络失败、console、page error �
 | `P0-AGNES-03` | 四层 capability/model 状态机和 UI 已实现 | Connection unit + P0 E2E 独立状态断言通过 | I2I/I2V 尚未 `account_verified/quality_gated` | `PASS`（实现）/ `BLOCKED`（真实证据） |
 | `P0-FACE-01` | Canonical/probe 显式 Artifact/hash/attempt 血缘 | 两源、跨 Shot、hash/availability fail-closed 测试通过 | 当前候选真实 I2I Artifact 未生成 | `PASS`（实现）/ `BLOCKED`（真实链） |
 | `P0-FACE-02` | 固定 0.60、`needs_human`、有限返工 | Face policy、返工和审核 Gate 测试通过 | 当前候选没有真实 `score >= 0.60` | `PASS`（实现）/ `BLOCKED`（真实链） |
-| `P0-VIDEO-01` | MP4 确定性抽帧、scene change、脱敏 evidence 已实现 | Video Drift unit 通过，不保存 embedding | 阈值和 approval ID 未校准/批准 | `BLOCKED` |
+| `P0-VIDEO-01` | MP4 确定性抽帧、scene change、脱敏 evidence 已实现；离线校准 harness（`scripts/calibrate_video_drift.py`）已建并在合成样本上验证（5 帧评分 + 分布输出） | Video Drift unit 通过，不保存 embedding | 阈值和 approval ID 未校准/批准；需真实 Video 样本（依赖公网 origin）形成权威分布 | `BLOCKED` |
 | `P0-UI-01` | Connection、轮换、Probe、四层状态和项目绑定 UI 已实现 | lint/typecheck/unit/P0 E2E 通过 | 真实账户 UI 验收未做 | `PASS`（实现）/ `BLOCKED`（人工） |
 | `P0-UI-02` | 9 节点 attempt/依赖/时间/费用/Artifact/错误建议已实现 | P0 E2E 覆盖 Provider pending、上游失败、Drift、预算等 | 真实运行现场未签字 | `PASS`（实现）/ `BLOCKED`（人工） |
 | `P0-E2E-01` | 旧 `api-status` 假设已删除，Mock 主业务流重写 | smoke 和 P0 mock 均通过，10 Shot 审核/返工/导出已执行 | Real Provider E2E 被明确分离且未执行 | `PASS`（Mock）/ `BLOCKED`（Real） |
