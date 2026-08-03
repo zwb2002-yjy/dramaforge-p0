@@ -36,6 +36,7 @@
 | 人脸阈值 | `0.60`，策略 ID `P0-S0A-2026-07-25` |
 | P0 正式人物链 fallback | `none`，不能退化为纯文字关键帧 |
 | 产品方向 | 个人创作、选片、精剪与交付；团队协作不在当前路线 |
+| Agnes 费用 | 用户 2026-08-04 明确 Agnes 免费、不考虑费用；官方存在“免费 / 默认用户”，但仍受 RPM/订阅配额约束 |
 
 本机 API Key 只能保存在 Git 忽略的 `.env` 或 Workspace 加密凭据中。文档、测试夹具、普通日志、错误消息、截图和证据 JSON 均不得包含明文 Key。由于 Key 已经通过会话传递，完成开发验收后应轮换一次。
 
@@ -93,7 +94,7 @@
 | 缺口 | 当前事实 | 影响 |
 | --- | --- | --- |
 | 候选源一致性 | 候选提交序列 `5bbb089` -> `1832b4f` -> `bc1a0b4` -> `041bc9f` -> `1a8fb41` 已形成，工作树干净 | 可构建 Compose 并核对 `source_commit`；真实证据仍需执行 |
-| Agnes 账户证据 | 本机存在 Key 配置，但未执行有明确费用授权的中国站 I2I/I2V Probe | 不能把 `documented/contract_tested` 冒充为 `account_verified` |
+| Agnes 账户证据 | 本机存在 Key 配置；2026-08-04 真实 Probe 的 `GET /v1/models`、`image_t2i`、`image_i2i` 均返回 401（“无效的令牌”） | 当前 Key 不属于可调用账户；不能把 `documented/contract_tested` 冒充为 `account_verified` |
 | 公网 Reference origin | `PROVIDER_REFERENCE_PUBLIC_ORIGIN` 未配置 | Agnes 无法从公网 HTTPS HEAD/GET first-frame，真实 I2V 前置条件不成立 |
 | 中国站响应 Fixture | 当前无本账户脱敏 I2I/I2V 响应 Fixture | 宽解析仍只能作为迁移兼容，不能冻结为已接受合同 |
 | Video Drift 策略 | 抽帧和 evidence 已实现，阈值/approval ID 尚未通过固定样本校准 | Drift 只能保持阻断或人工复核，不能进入正式自动交付 |
@@ -1246,7 +1247,7 @@ MANUAL ACCEPTANCE: BLOCKED
 FINAL VERDICT: BLOCKED / NOT ACCEPTED
 ```
 
-2026-08-04 更新：候选 commit `5bbb089` 形成（63 条脏工作树已提交），`1832b4f` 修复 Canonical 审计父级缺口（ProviderOperation XOR 合同满足），`bc1a0b4` 清零全历史 Ruff（`ruff check app tests alembic` 通过），`041bc9f` 与 `1a8fb41` 更新并校准验收记录。剩余阻断为公网 Reference origin、费用授权、Video Drift 策略批准、真实 I2I/I2V Probe、10 Shot 正式证据与人工/运维签字，均需外部前置或用户授权，不反向否定已通过的自动化证据。
+2026-08-04 更新：候选 commit `5bbb089` 形成（63 条脏工作树已提交），`1832b4f` 修复 Canonical 审计父级缺口（ProviderOperation XOR 合同满足），`bc1a0b4` 清零全历史 Ruff（`ruff check app tests alembic` 通过），`041bc9f`、`1a8fb41`、`29e0d81` 更新并校准验收记录。用户明确 Agnes 免费、不考虑费用，费用授权不再作为阻断；但真实 Image Probe 返回 401（“无效的令牌”），因此账户合同与 I2I/I2V 证据仍 `BLOCKED`。剩余阻断为公网 Reference origin、有效 Agnes Key、Video Drift 策略批准、真实 I2I/I2V Probe、10 Shot 正式证据与人工/运维签字。
 
 最终状态不是 `ACCEPTED`。阻断来自正式证据前提，不反向否定已通过的 Graph、RLS、Adapter Contract、安全、UI 和 Mock E2E 自动化证据。
 
@@ -1265,6 +1266,7 @@ FINAL VERDICT: BLOCKED / NOT ACCEPTED
 | Frontend production build | Vite build 通过 | `PASS` |
 | Playwright smoke | `1 passed` | `PASS` |
 | Playwright P0 mock | `1 passed`；10 Shot Brief/Plan、Connection、四层证据、九节点错误、审核、字幕返工、导出 | `PASS` |
+| Agnes 真实 Image Probe | 2026-08-04：`/v1/models`、`image_t2i`、`image_i2i` 均 `401 / PROVIDER_AUTH_FAILED`；“无效的令牌”；无 remote ID/Artifact | `BLOCKED` |
 | Directory compliance | `Directory compliance OK` | `PASS` |
 | `git diff --check` | 通过；仅已有 CRLF 转 LF warning | `PASS` |
 | tracked 文本 Key-like scan | 命中文件数 `0` | `PASS` |
@@ -1307,7 +1309,7 @@ Playwright 使用 DOM、可访问名称、网络失败、console、page error �
 
 1. ~~**候选源不成立**~~：已解除。工作树 63 条变更已形成候选 commit `5bbb089`，并叠加 `1832b4f`（Canonical 审计父级）、`bc1a0b4`（全历史 Ruff 清理）、`041bc9f` 与 `1a8fb41`（验收记录）。`git status` 干净；下一步按候选提交构建 Compose 并核对 `/health.source_commit`。
 2. **公网 Reference 不成立**：`PROVIDER_REFERENCE_PUBLIC_ORIGIN` 未配置；真实 Agnes Video I2V 不应启动。配置管道已 fail-closed（非 HTTPS/localhost/私网均拒绝），设公网 HTTPS origin 即可解除。
-3. **费用未授权**：虽然本机存在 Agnes Key 配置，本轮没有用户给出的明确真实图片/视频预算和调用次数授权，因此未发付费请求。
+3. **Agnes Key 未通过鉴权**：用户已明确 Agnes 免费、不考虑费用，官方也确认存在“免费 / 默认用户”，但当前 Key 在 2026-08-04 真实 Probe 中返回 401（“无效的令牌”），需在 Agnes 开发者控制台确认/重新生成有效 Key 后重试鉴权与 Image Probe。
 4. **真实 Provider 证据缺失**：未生成当前账户 I2I/I2V 脱敏 Fixture、remote ID、成本、下载 Artifact 和三段 SHA-256 证据。
 5. **Video Drift 未批准**：实现保持 `PROBE_REQUIRED`，固定样本分布、阈值和 approval ID 尚未批准。
 6. ~~**Canonical 审计父级缺口**~~：已解除。`1832b4f` 引入 `create_canonical_generation_run`（最小单节点 canonical graph + running NodeRun 作为审计父级）、`record_canonical_provider_operation`（ProviderOperation 挂 `node_run_id`），Artifact 经 `produced_by_run_id` 回链 Run；XOR 约束满足（单测 `test_canonical_generation_has_audit_parent_run` 断言 `node_run_id` 非空、`agent_run_id` 为空）。
