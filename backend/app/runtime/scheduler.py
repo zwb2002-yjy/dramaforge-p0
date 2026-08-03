@@ -23,6 +23,7 @@ from app.shared.db import (
 from app.shared.errors import (
     NodeRunAlreadyClaimedError,
     NotFoundError,
+    ProviderRateLimitedError,
     ProviderTaskPendingError,
     ValidationAppError,
 )
@@ -361,6 +362,19 @@ class WorkerRuntime:
                     continue
                 except ProviderTaskPendingError:
                     await self._rollback_if_active()
+                    next_deferred.append((run_id, scope))
+                    continue
+                except ProviderRateLimitedError:
+                    await self._rollback_if_active()
+                    # Requeue the claimed run so a later dispatch retries after
+                    # Retry-After (plan §11.2: 429 follows Retry-After).
+                    if await set_node_run_rls_context(self._session, node_run_id=run_id) is None:
+                        continue
+                    current = await self._session.get(NodeRun, run_id)
+                    if current is not None and current.status == "running":
+                        current.status = "queued"
+                        await self._session.flush()
+                        await self._commit_if_active()
                     next_deferred.append((run_id, scope))
                     continue
                 except Exception as exc:  # noqa: BLE001

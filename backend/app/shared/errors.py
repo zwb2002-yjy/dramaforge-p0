@@ -56,6 +56,22 @@ class ProviderTaskPendingError(AppError):
         )
 
 
+class ProviderRateLimitedError(AppError):
+    """Provider returned 429; the worker should retry after Retry-After."""
+
+    def __init__(self, retry_after_seconds: float = 5.0, **kwargs: Any) -> None:
+        super().__init__(
+            code="PROVIDER_RATE_LIMITED",
+            message=(
+                "Provider rate limit exceeded; defer and retry after "
+                f"{retry_after_seconds:.0f}s"
+            ),
+            status_code=429,
+            details={"retry_after_seconds": retry_after_seconds},
+            **kwargs,
+        )
+
+
 class UnauthorizedError(AppError):
     def __init__(self, message: str = "Unauthorized", **kwargs: Any) -> None:
         super().__init__(code="UNAUTHORIZED", message=message, status_code=401, **kwargs)

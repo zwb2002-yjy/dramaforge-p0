@@ -1104,6 +1104,22 @@ async def execute_media_node_run(
 
     if create_failed:
         create_error = str(create.get("error") or "provider rejected task creation")[:500]
+        # 429 rate limit: defer and retry after Retry-After (plan §11.2), never
+        # mark the node terminally failed on a transient provider throttle.
+        if str(create.get("error_code")) == "PROVIDER_RATE_LIMITED":
+            raw_retry_after = create.get("retry_after_seconds")
+            try:
+                retry_after = float(str(raw_retry_after)) if raw_retry_after else 5.0
+            except (TypeError, ValueError):
+                retry_after = 5.0
+            op.status = "failed"
+            op.error_code = "PROVIDER_RATE_LIMITED"
+            op.error_summary = create_error
+            op.completed_at = datetime.now(UTC)
+            await session.flush()
+            from app.shared.errors import ProviderRateLimitedError
+
+            raise ProviderRateLimitedError(retry_after_seconds=retry_after)
         op.status = "failed"
         op.error_code = "PROVIDER_CREATE_FAILED"
         op.error_summary = create_error

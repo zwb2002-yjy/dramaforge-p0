@@ -14,6 +14,7 @@ from app.shared.db import get_session_factory, set_node_run_rls_context
 from app.shared.errors import (
     AppError,
     NodeRunAlreadyClaimedError,
+    ProviderRateLimitedError,
     ProviderTaskPendingError,
 )
 from app.shared.model_registry import load_all_models
@@ -105,6 +106,21 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
         except ProviderTaskPendingError:
             await session.rollback()
             raise Retry(defer=5) from None
+        except ProviderRateLimitedError as exc:
+            await session.rollback()
+            retry_after = float(exc.details.get("retry_after_seconds") or 5.0)
+            # Requeue the claimed run so the dispatcher re-enqueues it after
+            # Retry-After (plan §11.2: 429 follows Retry-After, new attempt).
+            try:
+                async with factory() as s2:
+                    if await set_node_run_rls_context(s2, node_run_id=run_uuid) is not None:
+                        run2 = await s2.get(NodeRun, run_uuid)
+                        if run2 is not None and run2.status == "running":
+                            run2.status = "queued"
+                            await s2.commit()
+            except Exception:  # noqa: BLE001 - requeue must not mask the Retry
+                pass
+            raise Retry(defer=max(retry_after, 1.0)) from None
         except asyncio.CancelledError:
             await session.rollback()
             raise
