@@ -303,6 +303,8 @@ class AgnesHubClient:
         *,
         prompt: str,
         image_url: str | None = None,
+        image_bytes: bytes | None = None,
+        image_mime: str = "image/png",
         num_frames: int = 121,
         frame_rate: int = 24,
         keyframe_urls: list[str] | None = None,
@@ -315,6 +317,8 @@ class AgnesHubClient:
         _validate_video_shape(num_frames=num_frames, frame_rate=frame_rate)
         if image_url and keyframe_urls:
             raise ValueError("first-frame I2V and keyframes mode are mutually exclusive")
+        if image_bytes is not None and (image_url or keyframe_urls):
+            raise ValueError("image_bytes cannot be combined with image_url/keyframe_urls")
         body: dict[str, object] = {
             "model": self._video_model,
             "prompt": prompt_value,
@@ -322,6 +326,7 @@ class AgnesHubClient:
             "frame_rate": frame_rate,
         }
         operation = "video.i2v"
+        reference_transport = "short_lived_https"
         references: list[str]
         if keyframe_urls is not None:
             if len(keyframe_urls) != 2:
@@ -332,6 +337,14 @@ class AgnesHubClient:
         elif image_url is not None:
             references = [_require_https_reference(image_url)]
             body["image"] = references[0]
+        elif image_bytes is not None:
+            # Agnes China accepts a base64 Data URI for the first-frame image, so
+            # I2V does not require a public HTTPS origin (verified 2026-08-04:
+            # data URI -> video task completed end-to-end).
+            data_uri, _ = _reference_data_uri(data=image_bytes, mime_type=image_mime)
+            body["image"] = data_uri
+            references = [data_uri]
+            reference_transport = "data_uri"
         else:
             raise ValueError("video I2V requires one first-frame reference")
         request_fingerprint = hashlib.sha256(
@@ -347,7 +360,7 @@ class AgnesHubClient:
             "reference_count": len(references),
             "reference_artifact_ids": list(reference_artifact_ids or []),
             "reference_fingerprints": list(reference_fingerprints or []),
-            "reference_transport": "short_lived_https",
+            "reference_transport": reference_transport,
             "request_schema_fingerprint": _schema_fingerprint(body),
         }
         try:
@@ -587,6 +600,8 @@ class AgnesVideoAdapter:
         return await self._client.create_video(
             prompt=str(request.get("prompt") or ""),
             image_url=(str(request["image_url"]) if request.get("image_url") else None),
+            image_bytes=request.get("image_bytes"),
+            image_mime=str(request.get("image_mime") or "image/png"),
             num_frames=int(request.get("num_frames", 121)),
             frame_rate=int(request.get("frame_rate", 24)),
             keyframe_urls=[str(item) for item in keyframe_urls] if keyframe_urls else None,

@@ -261,6 +261,51 @@ async def test_agnes_video_i2v_top_level_image_and_dual_remote_ids() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agnes_video_i2v_data_uri_first_frame_does_not_require_public_url() -> None:
+    """Agnes China accepts a base64 Data URI for the I2V first-frame (no public origin)."""
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/videos"
+        body = json.loads(request.content)
+        assert body["image"].startswith("data:image/png;base64,")
+        assert body["num_frames"] == 121
+        assert body["frame_rate"] == 24
+        assert "image_url" not in body
+        return httpx.Response(
+            200,
+            json={"video_id": "video-duri", "task_id": "task-duri", "status": "queued"},
+        )
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.create_video(
+        prompt="controlled camera motion",
+        image_bytes=b"\x89PNG\r\n\x1a\nfake-png-bytes",
+        image_mime="image/png",
+        reference_artifact_ids=["artifact-1"],
+        reference_fingerprints=["a" * 64],
+    )
+
+    assert result["remote_task_id"] == "video-duri"
+    assert result["remote_secondary_id"] == "task-duri"
+    assert result["request_summary"]["reference_transport"] == "data_uri"
+    serialized = json.dumps(result["request_summary"])
+    assert "base64" not in serialized  # request summary never stores the Data URI
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_i2v_data_uri_rejects_combined_image_sources() -> None:
+    async def _never(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("network must not be reached for invalid source combination")
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(_never))
+    with pytest.raises(ValueError, match="cannot be combined"):
+        await client.create_video(
+            prompt="motion",
+            image_url="https://references.example/token",
+            image_bytes=b"\x89PNG fake",
+        )
+
+
+@pytest.mark.asyncio
 async def test_agnes_video_rate_limit_is_not_reposted_and_keeps_retry_after() -> None:
     attempts = 0
 

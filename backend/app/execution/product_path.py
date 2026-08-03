@@ -980,21 +980,27 @@ async def execute_media_node_run(
                 ]
                 safe_request_summary["reference_transport"] = "data_uri"
         if node_type == "video" and provider_name == "agnes":
-            from app.providers.reference_delivery import (
-                approved_first_frame_for_video,
-                issue_artifact_reference,
-            )
+            from app.providers.reference_delivery import approved_first_frame_for_video
 
             first_frame = await approved_first_frame_for_video(session, video_run=run)
-            grant = await issue_artifact_reference(
-                session,
-                artifact=first_frame,
-                workspace_id=project.workspace_id,
-                created_by_run_id=run.id,
-            )
+            # Agnes China accepts a base64 Data URI for the I2V first-frame
+            # (verified 2026-08-04: data URI -> video task completed). This
+            # removes the public HTTPS origin dependency for the P0 video chain.
+            try:
+                first_frame_bytes = await obj_store.get_bytes(
+                    object_key=first_frame.object_key
+                )
+            except Exception:
+                first_frame_bytes = None
+            if not first_frame_bytes:
+                raise ValidationAppError(
+                    "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes unavailable "
+                    "for video I2V"
+                )
             create_request.update(
                 {
-                    "image_url": grant.url,
+                    "image_bytes": first_frame_bytes,
+                    "image_mime": first_frame.mime_type or "image/png",
                     "num_frames": _snapshot_int(snap.get("num_frames"), default=121),
                     "frame_rate": _snapshot_int(snap.get("frame_rate"), default=24),
                     "reference_artifact_ids": [str(first_frame.id)],
@@ -1005,8 +1011,7 @@ async def execute_media_node_run(
                 {
                     "reference_artifact_ids": [str(first_frame.id)],
                     "reference_fingerprints": [first_frame.content_hash],
-                    "reference_transport": "short_lived_https",
-                    "reference_expires_at": grant.expires_at.isoformat(),
+                    "reference_transport": "data_uri",
                     "num_frames": create_request["num_frames"],
                     "frame_rate": create_request["frame_rate"],
                 }
