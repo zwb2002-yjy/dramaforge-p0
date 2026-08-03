@@ -417,6 +417,11 @@ async def start_shot_nodes(
             else f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}"
         )
         lead_identity_required = shot_plan.get("lead_identity_required") is True
+        # A project with a registered lead canonical is single-lead in P0. Script
+        # imports carry no per-shot lead flag, so default lead shots to identity
+        # required when a canonical exists (face gate applies).
+        if not lead_identity_required and canonical_binding:
+            lead_identity_required = True
         if key == "keyframe" and lead_identity_required and canonical_locked_prompt:
             prompt = identity_priority_keyframe_prompt(
                 prompt,
