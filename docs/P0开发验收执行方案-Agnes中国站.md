@@ -1241,7 +1241,7 @@ cd D:\dramaforge\backend
 IMPLEMENTED SCOPE: PASS（Graph、Agnes Adapter、Connection/Reference、Face 血缘、UI、Mock E2E）
 OPEN DEVELOPMENT ITEMS: 部分解除（Canonical 审计父级、全历史 Ruff 已修复；Video Drift 策略批准仍 BLOCKED）
 AUTOMATED VERIFICATION: PASS（含全历史 migration Ruff）
-REAL AGNES PROVIDER PROOF: 部分 PASS（鉴权、T2I、Canonical I2I 已 `account_verified`；I2V 与 Face 评分证据仍 BLOCKED）
+REAL AGNES PROVIDER PROOF: 部分 PASS（鉴权、T2I、Canonical、10 keyframe、真实 Face >=0.60、5 条 video+drift 垂直链已 `account_verified`；10 全量受内容过滤与 face 分上限限制）
 CURRENT COMMIT FORMAL PROOF: BLOCKED（候选 commit cee5306 已形成，栈已绑定 339569c，待 Face/Video 证据）
 MANUAL ACCEPTANCE: BLOCKED
 FINAL VERDICT: BLOCKED / NOT ACCEPTED
@@ -1270,7 +1270,7 @@ FINAL VERDICT: BLOCKED / NOT ACCEPTED
 | Agnes 真实 T2I Probe | 2026-08-04：`image_t2i` → `passed / account_verified`，真实图片生成成功（remote task 有值） | `PASS` |
 | §3.1 Gate（绑定候选 339569c） | `20 PASS / 0 FAIL / 4 BLOCKED`：Agent brief/plan 真实文本、10 Shot 物化、Canonical 真实 I2I 生成（`3.1.9` 不再是 fail-closed）；`3.1.10/3.1.11/3.1.18` BLOCKED 因 gate 不跑完整媒体管线 | `PASS`（栈验证） |
 | 真实 10 Shot 图片链（proof，绑定 26fa8d6） | 10 keyframe + 10 face_review + prompt/subtitle/voice 全部真实 completed；真实 Face 双源评分：多个 shot `passed >= 0.60`（0.6556/0.6680/0.6865/0.7011），blocked 正确 fail-closed（0.5569/0.5928/0.0243）；`probe_content_hash` 显式绑定；face rework 机制真实重生成 keyframe | `PASS`（图片链）/ `BLOCKED`（video） |
-| 真实 10 Shot 全链（冻结样本，绑定 a2977cc） | `run_frozen_sample_proof.py` 驱动：**4 个完整垂直链**（canonical->keyframe->face>=0.60->video->drift review）真实跑通，face passed 0.636/0.668/0.69/0.758；429 重试（Retry-After + ProviderOperation 幂等）生效；剩余 3 keyframe 内容过滤 400 + 3 face blocked（正确 fail-closed） | `PASS`（垂直链）/ `BLOCKED`（10 全量） |
+| 真实 10 Shot 全链（冻结样本，绑定 a2977cc） | `run_frozen_sample_proof.py` 驱动 + bound rework：**5 条完整垂直链**（canonical->keyframe->face>=0.60->video->drift review）真实跑通，6 个 face passed；21 个返工周期把 4->5 提升；429 重试 + ProviderOperation 幂等生效 | `PASS`（垂直链）/ `BLOCKED`（10 全量：内容过滤 400 与 face 分 <0.60 为真实上限，需改样本文案/换 canonical） |
 | 真实 Video I2V | **已解除公网 origin 依赖**：2026-08-04 实测 Agnes `/v1/videos` 接受 base64 Data URI 首帧（真实视频任务 `queued->in_progress->completed` 端到端成功），计划 §6.4/§9.2 假设的公网 HTTPS 前置不成立。代码已改 I2V 走 `image_bytes` Data URI（`agnes.py`/`product_path.py`）。冻结样本驱动跑通垂直链：canonical->keyframe->face>=0.60->video(Data URI)->drift review（1 shot 完整，3 个 face passed 0.6144/0.8978/0.9049）；其余 9 shot 因 429 免费层限流 + keyframe 400 内容过滤 + face blocked 级联失败 | `PASS`（机制）/ `BLOCKED`（10 视频全量） |
 | Agnes 真实 Image Probe（旧 Key） | 2026-08-04 早前：`/v1/models`、`image_t2i`、`image_i2i` 均 `401 / PROVIDER_AUTH_FAILED`（Connection 与 `.env` 存的是旧 Key）；已更新为有效 Key | 已解除 |
 | Directory compliance | `Directory compliance OK` | `PASS` |
