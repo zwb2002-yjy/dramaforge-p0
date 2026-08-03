@@ -208,6 +208,83 @@ def main() -> int:
 
         passed = [f for f in face_rows if f.get("status") == "passed"]
         blocked = [f for f in face_rows if f.get("status") == "blocked"]
+
+        # Bounded face rework: for each blocked lead shot, regenerate the
+        # keyframe and re-run face_review until a candidate passes 0.60 or the
+        # bounded candidate budget is exhausted (plan §12.2, max 3 reworks).
+        max_reworks = 3
+        for f in list(blocked):
+            shot_id = str(f["shot"] or "")
+            if not shot_id:
+                continue
+            reworked = False
+            candidate = 0
+            for candidate in range(1, max_reworks + 1):
+                report["steps"].setdefault("face_rework", []).append(
+                    {"shot": shot_id[:8], "candidate": candidate}
+                )
+                kr = post(
+                    f"/api/v1/projects/{project_id}/shots/{shot_id}/rerun",
+                    {"changed_node_key": "keyframe"},
+                )
+                if kr.status_code not in {200, 201}:
+                    break
+                self_deadline = time.time() + args.timeout_seconds
+                while time.time() < self_deadline:
+                    snap = get(f"/api/v1/projects/{project_id}/snapshot")
+                    if snap.status_code != 200:
+                        break
+                    runs_now = snap.json().get("node_runs", [])
+                    kf_runs = [
+                        r for r in runs_now
+                        if str((r.get("input_snapshot") or {}).get("shot_id") or "") == shot_id
+                        and (r.get("input_snapshot") or {}).get("node_key") == "keyframe"
+                    ]
+                    if kf_runs and all(r.get("status") in TERMINAL for r in kf_runs):
+                        break
+                    time.sleep(args.poll)
+                fr = post(
+                    f"/api/v1/projects/{project_id}/shots/{shot_id}/rerun",
+                    {"changed_node_key": "face_review"},
+                )
+                if fr.status_code not in {200, 201}:
+                    break
+                while time.time() < self_deadline:
+                    snap = get(f"/api/v1/projects/{project_id}/snapshot")
+                    if snap.status_code != 200:
+                        break
+                    runs_now = snap.json().get("node_runs", [])
+                    fr_runs = [
+                        r for r in runs_now
+                        if str((r.get("input_snapshot") or {}).get("shot_id") or "") == shot_id
+                        and (r.get("input_snapshot") or {}).get("node_key") == "face_review"
+                    ]
+                    if fr_runs and all(r.get("status") in TERMINAL for r in fr_runs):
+                        break
+                    time.sleep(args.poll)
+                # re-check the latest face result for this shot
+                snap = get(f"/api/v1/projects/{project_id}/snapshot")
+                if snap.status_code == 200:
+                    for run in snap.json().get("node_runs", []):
+                        si = run.get("input_snapshot") or {}
+                        if (
+                            si.get("node_key") == "face_review"
+                            and str(si.get("shot_id") or "") == shot_id
+                            and run.get("status") in DONE
+                        ):
+                            o = run.get("output_summary") or {}
+                            if o.get("face_review") == "passed":
+                                f["status"] = "passed"
+                                f["score"] = o.get("face_score")
+                                f["attempt"] = run.get("attempt_no")
+                                reworked = True
+                                break
+                    if reworked:
+                        break
+            f["rework_candidates"] = candidate if not reworked else candidate
+
+        passed = [f for f in face_rows if f.get("status") == "passed"]
+        blocked = [f for f in face_rows if f.get("status") == "blocked"]
         report["steps"]["result"] = {
             "node_summary": node_summary,
             "face_review": face_rows,
