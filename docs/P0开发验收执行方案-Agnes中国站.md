@@ -93,15 +93,15 @@
 
 | 缺口 | 当前事实 | 影响 |
 | --- | --- | --- |
-| 候选源一致性 | 候选源提交 `5bbb089`，叠加 `1832b4f`、`bc1a0b4`、`041bc9f` 及后续验收记录提交（`1a8fb41`/`29e0d81`/`ca5e0fb`/当前），工作树干净 | 可构建 Compose 并核对 `source_commit`；真实证据仍需执行 |
+| 候选源一致性 | 候选源提交 `cee5306`，叠加 `9191b6a`、`82c320f`、`a18655c` 及后续验收记录提交（`84cce3c`/`afe73c9`/`c6d85fb`/当前），工作树干净 | 可构建 Compose 并核对 `source_commit`；真实证据仍需执行 |
 | Agnes 账户证据 | 本机存在 Key 配置；2026-08-04 真实 Probe 的 `GET /v1/models`、`image_t2i`、`image_i2i` 均返回 401（“无效的令牌”） | 当前 Key 不属于可调用账户；不能把 `documented/contract_tested` 冒充为 `account_verified` |
-| 公网 Reference origin | `PROVIDER_REFERENCE_PUBLIC_ORIGIN` 未配置 | Agnes 无法从公网 HTTPS HEAD/GET first-frame，真实 I2V 前置条件不成立 |
+| 公网 Reference origin | `REFERENCE_PUBLIC_BASE_URL` 未配置 | Agnes 无法从公网 HTTPS HEAD/GET first-frame，真实 I2V 前置条件不成立 |
 | 中国站响应 Fixture | 当前无本账户脱敏 I2I/I2V 响应 Fixture | 宽解析仍只能作为迁移兼容，不能冻结为已接受合同 |
 | Video Drift 策略 | 抽帧和 evidence 已实现，阈值/approval ID 尚未通过固定样本校准 | Drift 只能保持阻断或人工复核，不能进入正式自动交付 |
-| Canonical 审计父级 | `1832b4f` 已引入 canonical graph + NodeRun 审计父 Run + ProviderOperation（`node_run_id` 挂载，XOR 满足） | 真实 Canonical 生成审计链可写；仍需真实 Provider 执行 |
+| Canonical 审计父级 | `9191b6a` 已引入 canonical graph + NodeRun 审计父 Run + ProviderOperation（`node_run_id` 挂载，XOR 满足） | 真实 Canonical 生成审计链可写；仍需真实 Provider 执行 |
 | 正式人物链 | 没有当前候选 commit 的 Canonical -> I2I -> Face >= 0.60 -> I2V -> Drift 真实证据 | 阶段 4 不能通过 |
 | 正式 10 Shot 与运维 | 历史 evidence 绑定其他 commit；本轮未执行真实 10 Shot、备份/轮换/死信/取消/SSE/冷存储演练 | 阶段 6 和人工签字不能通过 |
-| 全历史迁移 Ruff | `bc1a0b4` 已清零：`ruff check app tests alembic` 通过（67 修复 + 91 E501 冻结豁免） | 无剩余 Ruff 债务 |
+| 全历史迁移 Ruff | `82c320f` 已清零：`ruff check app tests alembic` 通过（67 修复 + 91 E501 冻结豁免） | 无剩余 Ruff 债务 |
 
 ### 4.3 初始脏工作映射
 
@@ -1242,12 +1242,12 @@ IMPLEMENTED SCOPE: PASS（Graph、Agnes Adapter、Connection/Reference、Face �
 OPEN DEVELOPMENT ITEMS: 部分解除（Canonical 审计父级、全历史 Ruff 已修复；Video Drift 策略批准仍 BLOCKED）
 AUTOMATED VERIFICATION: PASS（含全历史 migration Ruff）
 REAL AGNES PROVIDER PROOF: BLOCKED
-CURRENT COMMIT FORMAL PROOF: BLOCKED（候选 commit 5bbb089 已形成，待真实 Provider 证据）
+CURRENT COMMIT FORMAL PROOF: BLOCKED（候选 commit cee5306 已形成，待真实 Provider 证据）
 MANUAL ACCEPTANCE: BLOCKED
 FINAL VERDICT: BLOCKED / NOT ACCEPTED
 ```
 
-2026-08-04 更新：候选 commit `5bbb089` 形成（63 条脏工作树已提交），`1832b4f` 修复 Canonical 审计父级缺口（ProviderOperation XOR 合同满足），`bc1a0b4` 清零全历史 Ruff（`ruff check app tests alembic` 通过），`041bc9f`、`1a8fb41`、`29e0d81`、`ca5e0fb` 更新并校准验收记录。用户明确 Agnes 免费、不考虑费用，费用授权不再作为阻断；但真实 Image Probe 返回 401（“无效的令牌”），因此账户合同与 I2I/I2V 证据仍 `BLOCKED`。剩余阻断为公网 Reference origin、有效 Agnes Key、Video Drift 策略批准、真实 I2I/I2V Probe、10 Shot 正式证据与人工/运维签字。
+2026-08-04 更新：候选 commit `cee5306` 形成（63 条脏工作树已提交），`9191b6a` 修复 Canonical 审计父级缺口（ProviderOperation XOR 合同满足），`82c320f` 清零全历史 Ruff（`ruff check app tests alembic` 通过），`a18655c`、`84cce3c`、`afe73c9`、`c6d85fb` 更新并校准验收记录。用户明确 Agnes 免费、不考虑费用，费用授权不再作为阻断；但真实 Image Probe 返回 401（“无效的令牌”），因此账户合同与 I2I/I2V 证据仍 `BLOCKED`。剩余阻断为公网 Reference origin、有效 Agnes Key、Video Drift 策略批准、真实 I2I/I2V Probe、10 Shot 正式证据与人工/运维签字。
 
 最终状态不是 `ACCEPTED`。阻断来自正式证据前提，不反向否定已通过的 Graph、RLS、Adapter Contract、安全、UI 和 Mock E2E 自动化证据。
 
@@ -1260,7 +1260,7 @@ FINAL VERDICT: BLOCKED / NOT ACCEPTED
 | Backend PostgreSQL integration | `12 passed`，使用 `--fail-on-skip`，无 skip | `PASS` |
 | Backend mypy | `Success: no issues found in 105 source files` | `PASS` |
 | Ruff 本轮范围 | `app tests` 加迁移 `0013/0014`：`All checks passed` | `PASS` |
-| Ruff 全历史迁移 | `bc1a0b4` 后 `ruff check app tests alembic`：`All checks passed`（67 自动修复 + 91 E501 冻结豁免） | `PASS` |
+| Ruff 全历史迁移 | `82c320f` 后 `ruff check app tests alembic`：`All checks passed`（67 自动修复 + 91 E501 冻结豁免） | `PASS` |
 | Frontend lint / typecheck | 均通过 | `PASS` |
 | Frontend unit | 5 files、`15 passed` | `PASS` |
 | Frontend production build | Vite build 通过 | `PASS` |
@@ -1307,14 +1307,14 @@ Playwright 使用 DOM、可访问名称、网络失败、console、page error �
 
 ### 22.5 正式阻断清单
 
-1. ~~**候选源不成立**~~：已解除。工作树 63 条变更已形成候选 commit `5bbb089`，并叠加 `1832b4f`（Canonical 审计父级）、`bc1a0b4`（全历史 Ruff 清理）及后续验收记录提交。`git status` 干净；下一步按候选提交构建 Compose 并核对 `/health.source_commit`。
-2. **公网 Reference 不成立**：`PROVIDER_REFERENCE_PUBLIC_ORIGIN` 未配置；真实 Agnes Video I2V 不应启动。配置管道已 fail-closed（非 HTTPS/localhost/私网均拒绝），设公网 HTTPS origin 即可解除。
+1. ~~**候选源不成立**~~：已解除。工作树 63 条变更已形成候选 commit `cee5306`，并叠加 `9191b6a`（Canonical 审计父级）、`82c320f`（全历史 Ruff 清理）及后续验收记录提交。`git status` 干净；下一步按候选提交构建 Compose 并核对 `/health.source_commit`。
+2. **公网 Reference 不成立**：`REFERENCE_PUBLIC_BASE_URL` 未配置；真实 Agnes Video I2V 不应启动。配置管道已 fail-closed（非 HTTPS/localhost/私网均拒绝），设公网 HTTPS origin 即可解除。
 3. **Agnes Key 未通过鉴权**：用户已明确 Agnes 免费、不考虑费用，官方也确认存在“免费 / 默认用户”，但当前 Key 在 2026-08-04 真实 Probe 中返回 401（“无效的令牌”），需在 Agnes 开发者控制台确认/重新生成有效 Key 后重试鉴权与 Image Probe。
 4. **真实 Provider 证据缺失**：未生成当前账户 I2I/I2V 脱敏 Fixture、remote ID、成本、下载 Artifact 和三段 SHA-256 证据。
 5. **Video Drift 未批准**：实现保持 `PROBE_REQUIRED`，固定样本分布、阈值和 approval ID 尚未批准。
-6. ~~**Canonical 审计父级缺口**~~：已解除。`1832b4f` 引入 `create_canonical_generation_run`（最小单节点 canonical graph + running NodeRun 作为审计父级）、`record_canonical_provider_operation`（ProviderOperation 挂 `node_run_id`），Artifact 经 `produced_by_run_id` 回链 Run；XOR 约束满足（单测 `test_canonical_generation_has_audit_parent_run` 断言 `node_run_id` 非空、`agent_run_id` 为空）。
+6. ~~**Canonical 审计父级缺口**~~：已解除。`9191b6a` 引入 `create_canonical_generation_run`（最小单节点 canonical graph + running NodeRun 作为审计父级）、`record_canonical_provider_operation`（ProviderOperation 挂 `node_run_id`），Artifact 经 `produced_by_run_id` 回链 Run；XOR 约束满足（单测 `test_canonical_generation_has_audit_parent_run` 断言 `node_run_id` 非空、`agent_run_id` 为空）。
 7. **当前候选 10 Shot 缺失**：没有当前 commit 的 10 Shot x 9 Node、真实 Face/Drift/Continuity、个人审核、字幕局部返工和四项交付证明。
 8. **人工与运维未签字**：备份恢复、Key 轮换、Outbox/死信、取消、SSE、冷存储演练和验收人/费用摘要均未记录。
-9. ~~**全历史 Ruff 未清零**~~：已解除。`bc1a0b4` 清理 136 条旧 migration/`alembic/env.py` 风格问题：67 条自动修复（UP007/UP035/I001），91 条 E501 对冻结迁移版本 per-file-ignores（SQL/revision 逻辑未动，`alembic heads` 与迁移 PG 测试验证）。`ruff check app tests alembic` 现为 `All checks passed`。
+9. ~~**全历史 Ruff 未清零**~~：已解除。`82c320f` 清理 136 条旧 migration/`alembic/env.py` 风格问题：67 条自动修复（UP007/UP035/I001），91 条 E501 对冻结迁移版本 per-file-ignores（SQL/revision 逻辑未动，`alembic heads` 与迁移 PG 测试验证）。`ruff check app tests alembic` 现为 `All checks passed`。
 
 解除阻断的顺序固定为：形成干净候选 commit（已完成）-> 配置公网 HTTPS Reference origin -> 明确费用预算 -> 逐 capability 真实 Probe 并保存脱敏 Fixture -> 批准 Video Drift 策略 -> 修复 Canonical 审计父级（已完成）-> 单 Shot 真实链 -> 10 Shot formal/gate/ops -> 人工验收签字。任何一步都不能用历史证据、Mock 或降低阈值替代。
