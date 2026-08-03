@@ -6,14 +6,14 @@ Revises: 20260721_0004
 
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision: str = "20260721_0005"
-down_revision: Union[str, None] = "20260721_0004"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "20260721_0004"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 # Tables with direct project_id (USING/WITH CHECK = current_project_id)
 _PROJECT_TABLES = (
