@@ -20,9 +20,8 @@ DEFAULT_URL = "postgresql+psycopg://dramaforge:dramaforge@127.0.0.1:5432/dramafo
 def _sync_url() -> str:
     url = os.environ.get("DATABASE_URL", DEFAULT_URL)
     # alembic/app use asyncpg; sync tests use psycopg
-    return (
-        url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
-        .replace("postgresql+psycopg2://", "postgresql+psycopg://")
+    return url.replace("postgresql+asyncpg://", "postgresql+psycopg://").replace(
+        "postgresql+psycopg2://", "postgresql+psycopg://"
     )
 
 
@@ -55,6 +54,12 @@ REQUIRED_TABLES = (
     "planning_authorizations",
     "agent_runs",
     "materialization_operations",
+    "provider_connections",
+    "provider_capability_evidence",
+    "provider_model_bindings",
+    "project_provider_bindings",
+    "provider_quality_evidence",
+    "artifact_reference_tokens",
 )
 
 

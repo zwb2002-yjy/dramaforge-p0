@@ -4,9 +4,9 @@ DramaForge 是面向个人创作者私有化部署的镜头级 AI 短剧生产�
 
 ## 当前状态
 
-仓库已经实现 `BOOT-0` 应用骨架：FastAPI `/health`、Arq default/heavy Worker 入口、React 工作台壳、Docker Compose（PostgreSQL / Redis / MinIO / API / Workers）、质量入口与目录合规检查均已落地。
+仓库当前处于 **P0 功能候选版**，已经具备账号与私有创作空间、同一 Project 的快速/专业双入口、受控 Brief/Plan、10 Shot Production Graph、ProviderOperation/Artifact 血缘、审核、局部返工、导出、RLS、Outbox/SSE 和 Docker Compose 正式运行栈。当前候选仍未关闭 Graph 依赖顺序、人脸一致性真实 Gate 和当前提交上的完整 10 Shot 交付证据，因此不得标记 P0 MVP 完成。证据化现状、优缺点和需求冲突见 [`docs/项目现状与需求对齐-20260801.md`](docs/项目现状与需求对齐-20260801.md)。
 
-**状态语义：** 本地质量入口（`scripts/run_quality.ps1`，使用 `backend/.venv`）与 Playwright E2E 可在本机跑通，**不等于** P0 MVP 已完成。Docker Compose 的 PostgreSQL、Redis、MinIO、API 与 Arq Worker 已完成本机启动验证；真实文本与 Agnes Provider 的容器连通性也已验证。下一步工程主线和剩余 Gate 见 `docs/开发执行检查点.md`。
+**状态语义：** 本地质量入口（`scripts/run_quality.ps1`，使用 `backend/.venv`）通过，**不等于** P0 MVP 已完成。Docker Compose 的 PostgreSQL、Redis、MinIO、API、dispatcher 与 Arq Worker 已完成本机启动验证；真实 Provider 与完整交付必须按候选提交重新形成正式证据。下一步工程主线和剩余 Gate 见 `docs/开发执行检查点.md`。
 
 S0-A 已使用本地 InsightFace 1.0.1 / ONNX Runtime CPU 对 20 对同角色、20 对异角色和 10 个异常样本完成 FAR/FRR 校准，并有带审批标识的最终阈值；见 [`docs/spikes/s0a-face-consistency.md`](docs/spikes/s0a-face-consistency.md)。当前唯一执行任务、外部暂停项和后续 `READY` 队列以 [`docs/开发执行检查点.md`](docs/开发执行检查点.md) 为准。
 

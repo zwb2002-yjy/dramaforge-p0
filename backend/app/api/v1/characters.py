@@ -14,9 +14,7 @@ from app.config import get_settings
 from app.providers.flux import get_flux_adapter_for_workspace
 from app.storage.minio_store import get_object_store
 
-router = APIRouter(
-    tags=["characters"], dependencies=[Depends(require_selected_workspace)]
-)
+router = APIRouter(tags=["characters"], dependencies=[Depends(require_selected_workspace)])
 
 
 class RegisterLeadBody(BaseModel):
@@ -30,6 +28,8 @@ class RegisterLeadResponse(BaseModel):
     asset_id: UUID
     name: str
     canonical_object_key: str
+    canonical_artifact_id: UUID
+    canonical_content_hash: str
     provider: str
     byte_size: int
 
@@ -66,8 +66,6 @@ async def register_project_lead(
             allow_live=settings.app_env != "test",
             allow_fake=settings.app_env == "test",
         )
-        # Agnes permits a 300-second request and retries transient hub failures.
-        # Do not cancel that recovery path at the API boundary.
         created = await asyncio.wait_for(
             adapter.create({"prompt": prompt, "kind": "keyframe"}),
             timeout=330.0,
@@ -140,6 +138,8 @@ async def register_project_lead(
         asset_id=char.asset_id,
         name=char.name,
         canonical_object_key=char.canonical_object_key,
+        canonical_artifact_id=char.canonical_artifact_id,
+        canonical_content_hash=char.canonical_content_hash,
         provider=provider,
         byte_size=len(blob),
     )

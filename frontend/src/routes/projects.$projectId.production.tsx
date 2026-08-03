@@ -45,6 +45,37 @@ const NODES = [
   "continuity_review",
 ] as const;
 
+const NODE_DEPENDENCIES: Record<string, string[]> = {
+  prompt: [],
+  keyframe: ["prompt"],
+  face_review: ["keyframe"],
+  video: ["face_review"],
+  video_drift_review: ["video"],
+  voice: [],
+  subtitle: [],
+  composite: ["video_drift_review", "voice", "subtitle"],
+  continuity_review: ["composite"],
+};
+
+const RETRY_SUGGESTIONS: Record<string, string> = {
+  PROVIDER_NOT_CONFIGURED: "配置 Provider 或使用受审计手工媒体上传",
+  MODEL_BINDING_NOT_VERIFIED: "完成四层模型证据后再绑定项目",
+  CANONICAL_REFERENCE_REQUIRED: "先注册并锁定主角 Canonical Reference",
+  UPSTREAM_RUN_MISSING: "检查同 Shot、同版本、同 attempt 的上游 Run",
+  UPSTREAM_TERMINAL_FAILURE: "先处理首个上游失败节点，再局部重跑",
+  UPSTREAM_ARTIFACT_MISSING: "核对上游 Run、Artifact 和对象存储 hash",
+  PROVIDER_TASK_PENDING: "保留远端任务 ID，恢复 Worker 后继续 Poll",
+  PROVIDER_SUBMISSION_UNKNOWN: "人工核对 Provider 任务和账单后再创建新 attempt",
+  PROVIDER_CREATE_FAILED: "检查 Provider 错误和请求合同，只重试当前节点",
+  PROVIDER_TASK_FAILED: "检查远端任务错误，再重跑当前节点及下游",
+  PROVIDER_MEDIA_DOWNLOAD_FAILED: "续查同一任务或结果 URL，修复后再入库",
+  FACE_BELOW_THRESHOLD: "保持 0.60 阈值，从 Keyframe 返工",
+  FACE_PROBE_UNAVAILABLE: "检查两源 Artifact 和人脸检测后人工复核",
+  VIDEO_DRIFT_BLOCKED: "查看抽样时间点，从 Video 及下游重跑",
+  blocked_budget: "调整项目预算后重试原节点",
+  QUEUE_UNAVAILABLE: "恢复 Redis/Worker 后重新 enqueue",
+};
+
 const SCRIPT_TEMPLATE = `# Episode 1 - Untitled
 
 Lead: Lead Name
@@ -75,7 +106,8 @@ function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, str
       const input = run.input_snapshot ?? {};
       const summary = run.output_summary ?? {};
       const key = String(
-        input.node_key ??
+        run.node_key ??
+          input.node_key ??
           summary.node_key ??
           summary.node_type ??
           summary.node_name ??
@@ -109,6 +141,38 @@ function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, str
     }
   }
   return map;
+}
+
+function formatTimestamp(value: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+function nodeStatusLabel(run: ProjectSnapshot["node_runs"][number] | undefined, node: string): string {
+  if (!run) {
+    const dependencies = NODE_DEPENDENCIES[node] ?? [];
+    return dependencies.length ? "等待上游" : "未开始";
+  }
+  if (run.status === "failed") return run.error_code || "Provider 失败";
+  if (run.status === "blocked_budget") return "预算阻断";
+  if (run.status === "queued" || run.status === "running") {
+    if (run.output_summary?.status === "provider_pending") return "Provider pending";
+    return run.status === "queued" ? "排队中" : "运行中";
+  }
+  if (run.status === "completed_after_cancel") return "取消后完成";
+  if (run.status === "completed" || run.status === "cached") {
+    const reviewStatus = String(run.output_summary?.status ?? "");
+    if (reviewStatus === "needs_human") return "需人工复核";
+    if (reviewStatus === "blocked") return "质量阻断";
+    return "已完成";
+  }
+  return run.status;
+}
+
+function retrySuggestion(code: string | null): string {
+  if (!code) return "—";
+  return RETRY_SUGGESTIONS[code] ?? "查看错误摘要后局部重跑失败节点";
 }
 
 function ProductionPage() {
@@ -209,6 +273,22 @@ function ProductionPage() {
 
   const selectedShot =
     shots.data?.find((s) => s.id === selectedShotId) ?? shots.data?.[0] ?? null;
+
+  const selectedShotRuns = useMemo(
+    () =>
+      selectedShot
+        ? runs.filter((run) => String(run.input_snapshot?.shot_id ?? "") === selectedShot.id)
+        : [],
+    [runs, selectedShot],
+  );
+  const selectedShotByNode = useMemo(() => {
+    const byNode: Record<string, ProjectSnapshot["node_runs"][number]> = {};
+    for (const run of selectedShotRuns) {
+      const previous = byNode[run.node_key];
+      if (!previous || run.attempt_no >= previous.attempt_no) byNode[run.node_key] = run;
+    }
+    return byNode;
+  }, [selectedShotRuns]);
 
   const shotStatus = useQuery({
     queryKey: ["shot-status", projectId, selectedShot?.id],
@@ -482,13 +562,60 @@ function ProductionPage() {
               </div>
               <div className="pipeline-rail" style={{ marginTop: "0.75rem" }}>
                 {NODES.map((n) => (
-                  <span key={n} className={`pipeline-node ${nodeRailClass[n] ?? ""}`}>
+                  <span key={n} className={`pipeline-node ${nodeRailForRuns(selectedShotRuns)[n] ?? ""}`}>
                     {n}
                   </span>
                 ))}
               </div>
+              <div className="node-runtime-table" data-testid="shot-runtime-nodes">
+                {NODES.map((node) => {
+                  const run = selectedShotByNode[node];
+                  const dependencies = run?.upstream_dependencies?.length
+                    ? run.upstream_dependencies.map((dependency) => `${dependency.node_key}:${dependency.status}`)
+                    : (NODE_DEPENDENCIES[node] ?? []).map((dependency) => `${dependency}:—`);
+                  const artifact = run?.result_artifact_id
+                    ? arts.find((item) => item.id === run.result_artifact_id)
+                    : null;
+                  const state = nodeStatusLabel(run, node);
+                  const stateClass = run ? statusClass(run.status) : dependencies.length ? "run" : "";
+                  return (
+                    <article className="node-runtime-row" key={node} data-testid={`shot-runtime-node-${node}`}>
+                      <div className="node-runtime-heading">
+                        <strong>{node}</strong>
+                        <span className={`node-runtime-state ${stateClass}`}>{state}</span>
+                      </div>
+                      <dl className="node-runtime-meta">
+                        <dt>Attempt</dt>
+                        <dd>{run?.attempt_no ?? "—"}</dd>
+                        <dt>Dependencies</dt>
+                        <dd>{dependencies.length ? dependencies.join(" · ") : "—"}</dd>
+                        <dt>Started</dt>
+                        <dd>{formatTimestamp(run?.started_at ?? null)}</dd>
+                        <dt>Finished</dt>
+                        <dd>{formatTimestamp(run?.finished_at ?? null)}</dd>
+                        <dt>Provider cost</dt>
+                        <dd>{run?.provider_cost ?? "0"}</dd>
+                        <dt>Artifact</dt>
+                        <dd>
+                          {artifact ? (
+                            <a href={artifactContentUrl(projectId, artifact.id)} target="_blank" rel="noreferrer">
+                              {artifact.id.slice(0, 8)}… · {artifact.byte_size}B
+                            </a>
+                          ) : "—"}
+                        </dd>
+                        <dt>Error</dt>
+                        <dd className={run?.error_code ? "status-bad" : undefined}>
+                          {run?.error_code ? `${run.error_code}: ${run.error_summary ?? ""}` : "—"}
+                        </dd>
+                        <dt>Guidance</dt>
+                        <dd>{retrySuggestion(run?.error_code ?? null)}</dd>
+                      </dl>
+                    </article>
+                  );
+                })}
+              </div>
               {shotStatus.data && (
-                <div className="muted" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }} data-testid="shot-status">
+                  <div className="muted" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }} data-testid="shot-status">
                   runs={shotStatus.data.node_run_count} failed={shotStatus.data.failed_count}{" "}
                   locked={String(shotStatus.data.locked)}
                   {shotStatus.data.guidance ? (

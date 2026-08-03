@@ -57,15 +57,19 @@ def face_review_images(
         return FaceReviewOutcome("blocked", None, "missing_canonical", 0, 0)
     probe = embedding_from_image_bytes(probe_image_bytes)
     canon = embedding_from_image_bytes(canonical_image_bytes)
-    same_payload = probe_image_bytes == canonical_image_bytes
+    if probe_image_bytes == canonical_image_bytes:
+        return FaceReviewOutcome(
+            "blocked",
+            None,
+            "identical_payload_invalid_evidence",
+            0,
+            0,
+        )
     result = face_review_hook(embedding=probe, canonical=canon, threshold=threshold)
-    rule = result.rule
-    if same_payload and result.status == "passed":
-        rule = f"{result.rule}|identical_payload"
     return FaceReviewOutcome(
         status=result.status,
         score=result.score,
-        rule=rule,
+        rule=result.rule,
         probe_dim=len(probe),
         canonical_dim=len(canon),
     )

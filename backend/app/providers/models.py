@@ -1,0 +1,240 @@
+"""Workspace provider connections, capability evidence, and model bindings."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+from uuid import UUID, uuid4
+
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.shared.base import Base
+
+
+class ProviderConnection(Base):
+    __tablename__ = "provider_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "provider_type",
+            "protocol_profile",
+            name="uq_provider_connection_profile",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(240), nullable=False)
+    protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
+    credential_id: Mapped[UUID] = mapped_column(
+        ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    credential_revision: Mapped[int] = mapped_column(nullable=False, default=1)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    verification_status: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="unverified"
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    updated_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ProviderCapabilityEvidence(Base):
+    __tablename__ = "provider_capability_evidence"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    connection_id: Mapped[UUID] = mapped_column(
+        ForeignKey("provider_connections.id", ondelete="CASCADE"), nullable=False
+    )
+    capability: Mapped[str] = mapped_column(String(60), nullable=False)
+    model_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    evidence_level: Mapped[str] = mapped_column(String(40), nullable=False)
+    http_status: Mapped[int | None] = mapped_column(nullable=True)
+    provider_request_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    reference_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
+    )
+    remote_query_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    budget_authorized: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False, default=Decimal("0")
+    )
+    provider_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    cost_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_reported")
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+
+
+class ProviderModelBinding(Base):
+    __tablename__ = "provider_model_bindings"
+    __table_args__ = (
+        UniqueConstraint(
+            "connection_id",
+            "media_type",
+            "model_id",
+            "purpose",
+            name="uq_provider_model_binding",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    connection_id: Mapped[UUID] = mapped_column(
+        ForeignKey("provider_connections.id", ondelete="CASCADE"), nullable=False
+    )
+    media_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(40), nullable=False)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    documented: Mapped[bool] = mapped_column(nullable=False, default=True)
+    contract_tested: Mapped[bool] = mapped_column(nullable=False, default=True)
+    account_verified: Mapped[bool] = mapped_column(nullable=False, default=False)
+    quality_gated: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    updated_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ProjectProviderBinding(Base):
+    __tablename__ = "project_provider_bindings"
+    __table_args__ = (
+        UniqueConstraint("project_id", "purpose", name="uq_project_provider_binding"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    purpose: Mapped[str] = mapped_column(String(40), nullable=False)
+    model_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("provider_model_bindings.id", ondelete="RESTRICT"), nullable=False
+    )
+    fallback_policy: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
+    updated_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ProviderQualityEvidence(Base):
+    """Immutable proof used to advance one model binding to quality_gated."""
+
+    __tablename__ = "provider_quality_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "model_binding_id",
+            "node_run_id",
+            name="uq_provider_quality_evidence_run",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    model_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("provider_model_bindings.id", ondelete="CASCADE"), nullable=False
+    )
+    node_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("node_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    artifact_id: Mapped[UUID] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=False
+    )
+    evidence_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    policy_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    approved_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ArtifactReferenceToken(Base):
+    """One-artifact public delivery grant; only the token hash is persisted."""
+
+    __tablename__ = "artifact_reference_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_artifact_reference_token_hash"),
+        CheckConstraint(
+            "(created_by_run_id IS NOT NULL) <> (created_by_user_id IS NOT NULL)",
+            name="ck_artifact_reference_token_creator",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    artifact_id: Mapped[UUID] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("node_runs.id", ondelete="CASCADE"), nullable=True
+    )
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

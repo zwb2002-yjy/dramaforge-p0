@@ -11,7 +11,11 @@ from arq import Retry
 
 from app.config import get_settings
 from app.shared.db import get_session_factory, set_node_run_rls_context
-from app.shared.errors import AppError, NodeRunAlreadyClaimedError
+from app.shared.errors import (
+    AppError,
+    NodeRunAlreadyClaimedError,
+    ProviderTaskPendingError,
+)
 from app.shared.model_registry import load_all_models
 
 # Ensure full MetaData / FK graph is registered in worker process (SQLAlchemy
@@ -44,6 +48,10 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
     from app.execution.composite_media import composite_inputs_pending
     from app.execution.models import NodeRun
     from app.execution.product_path import claim_media_node_run, execute_media_node_run
+    from app.execution.runtime_invariants import (
+        evaluate_required_dependencies,
+        fail_run_for_dependency,
+    )
 
     _ = ctx
     factory = get_session_factory()
@@ -57,6 +65,21 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             run = await session.get(NodeRun, run_uuid)
             if run is None:
                 return {"status": "failed", "error": "node_run not visible under RLS"}
+            dependency = await evaluate_required_dependencies(session, run=run)
+            if dependency.action == "defer":
+                raise Retry(defer=5)
+            if dependency.action == "fail":
+                await fail_run_for_dependency(
+                    session,
+                    run=run,
+                    decision=dependency,
+                )
+                await session.commit()
+                return {
+                    "status": "failed",
+                    "node_run_id": node_run_id,
+                    "error_code": dependency.error_code,
+                }
             if await composite_inputs_pending(session, run=run):
                 raise Retry(defer=5)
             await claim_media_node_run(session, node_run_id=run_uuid)
@@ -79,6 +102,9 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
         except NodeRunAlreadyClaimedError:
             await session.rollback()
             return {"status": "already_claimed", "node_run_id": node_run_id}
+        except ProviderTaskPendingError:
+            await session.rollback()
+            raise Retry(defer=5) from None
         except asyncio.CancelledError:
             await session.rollback()
             raise

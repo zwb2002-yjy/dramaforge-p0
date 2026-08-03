@@ -18,6 +18,7 @@ import {
   startProject,
   type WorkspaceRead,
 } from "../lib/api";
+import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
 import { rootRoute } from "./__root";
 
 export const indexRoute = createRoute({
@@ -198,6 +199,11 @@ function HomePage() {
               {!workspaces.isLoading && !workspaces.data?.length && <p className="muted">Create a workspace to begin.</p>}
             </div>
           </section>
+
+          <ProviderConnectionPanel
+            workspaceId={selectedWorkspaceId}
+            projects={projects.data ?? []}
+          />
 
           <section className="panel project-manager">
             <div className="panel-header"><div><h2>{selectedWorkspace?.name ?? "Select a workspace"}</h2><p className="muted">Projects are isolated to the selected workspace.</p></div></div>

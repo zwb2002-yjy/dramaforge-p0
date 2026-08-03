@@ -18,7 +18,7 @@ from app.creation.models import AgentRun, PlanningAuthorization
 from app.creation.service import CreationService
 from app.delivery.export_service import build_project_export
 from app.events.models import OutboxEvent
-from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
+from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0
 from app.production.models import GraphVersion, ProductionGraph, definition_hash
 from app.providers.fake import FakeOpenAIAdapter
@@ -90,6 +90,7 @@ async def test_agent_ten_shot_async_product_path(
 
     monkeypatch.setattr(pg_session, "commit", _flush_instead_of_commit)
 
+    reset_object_store_for_tests()
     suffix = uuid4().hex[:8]
     user = User(
         email=f"p0-{suffix}@example.com",
@@ -141,6 +142,21 @@ async def test_agent_ten_shot_async_product_path(
     )
     assert plan.source_agent_run_id is not None
     assert len(plan.plan["shots"]) == 10  # type: ignore[arg-type]
+    from app.assets.characters import register_lead_character
+    from app.providers.fake import FakeFluxAdapter
+
+    canonical_adapter = FakeFluxAdapter()
+    canonical_result = await canonical_adapter.create(
+        {"prompt": "canonical lead", "kind": "keyframe"}
+    )
+    await register_lead_character(
+        pg_session,
+        project_id=started.project_id,
+        name="Lead",
+        locked_prompt="Lead character identity",
+        canonical_image_bytes=canonical_adapter.blobs[canonical_result["remote_task_id"]],
+        store=get_object_store(),
+    )
     confirmed = await service.confirm_plan_and_materialize(
         project_id=started.project_id,
         plan_id=plan.id,
@@ -167,8 +183,14 @@ async def test_agent_ten_shot_async_product_path(
             )
         ).scalars().all()
         assert {node.node_key for node in graph_nodes} == set(SHOT_NODES)
+        assert len(graph_nodes) == 9
+        graph_edges = (
+            await pg_session.execute(
+                select(GraphEdge).where(GraphEdge.graph_version_id == version.id)
+            )
+        ).scalars().all()
+        assert len(graph_edges) == 8
 
-    reset_object_store_for_tests()
     store = get_object_store()
     worker = WorkerRuntime(pg_session)
     async def run_current_project_nodes(node_run_ids: list[UUID]) -> None:
@@ -190,7 +212,8 @@ async def test_agent_ten_shot_async_product_path(
             shot_id=shot_id,
             user_id=user.id,
         )
-        assert len(queued) == len(SHOT_NODES) - 1
+        # Plan confirmation already persisted prompt + keyframe Runs.
+        assert len(queued) == len(SHOT_NODES) - 2
         queued_node_run_ids.extend(queued)
     await pg_session.commit()
     await run_current_project_nodes(queued_node_run_ids)
@@ -211,6 +234,7 @@ async def test_agent_ten_shot_async_product_path(
     done = {"completed", "cached", "completed_after_cancel"}
     artifact_ids: set[object] = set()
     object_keys: set[str] = set()
+    expected_artifact_count = 0
     for shot_id in confirmed.shot_ids:
         latest_by_key: dict[str, NodeRun] = {}
         for run in runs:
@@ -224,7 +248,7 @@ async def test_agent_ten_shot_async_product_path(
             ):
                 latest_by_key[key] = run
         assert set(latest_by_key) == set(SHOT_NODES)
-        for key in SHOT_NODES:
+        for key in {"prompt", "keyframe", "face_review", "voice", "subtitle"}:
             run = latest_by_key[key]
             assert run.status in done, (
                 f"shot={shot_id} node={key} status={run.status} "
@@ -236,8 +260,45 @@ async def test_agent_ten_shot_async_product_path(
             assert await store.get_bytes(object_key=artifact.object_key)
             artifact_ids.add(artifact.id)
             object_keys.add(artifact.object_key)
-    assert len(artifact_ids) == 10 * len(SHOT_NODES)
-    assert len(object_keys) == 10 * len(SHOT_NODES)
+        expected_artifact_count += 5
+        identity_required = (
+            latest_by_key["face_review"].input_snapshot.get("lead_identity_required")
+            is True
+        )
+        if identity_required:
+            video = latest_by_key["video"]
+            assert latest_by_key["face_review"].output_summary["status"] in {
+                "needs_human",
+                "blocked",
+            }
+            assert video.status == "failed"
+            assert video.error_code == "UPSTREAM_TERMINAL_FAILURE"
+            assert video.result_artifact_id is None
+            video_ops = list(
+                (
+                    await pg_session.execute(
+                        select(ProviderOperation).where(
+                            ProviderOperation.node_run_id == video.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert video_ops == []
+        else:
+            assert latest_by_key["face_review"].output_summary["status"] == "not_applicable"
+            for key in {"video", "video_drift_review", "composite", "continuity_review"}:
+                run = latest_by_key[key]
+                assert run.status in done
+                assert run.result_artifact_id is not None
+                artifact = artifacts[run.result_artifact_id]
+                assert await store.get_bytes(object_key=artifact.object_key)
+                artifact_ids.add(artifact.id)
+                object_keys.add(artifact.object_key)
+                expected_artifact_count += 1
+    assert len(artifact_ids) == expected_artifact_count
+    assert len(object_keys) == expected_artifact_count
 
     # store=None forces product default get_object_store() (same singleton Worker used)
     exp = await build_project_export(
@@ -494,7 +555,9 @@ async def test_cancelled_worker_keeps_durable_claim_and_blocks_duplicate_provide
     assert adapter.create_attempts == 1
     assert len(adapter.calls) == 0
     assert artifacts == []
-    assert operations == []
+    assert len(operations) == 1
+    assert operations[0].status == "created"
+    assert operations[0].provider_operation_id is None
 
 
 @pytest.mark.asyncio
@@ -822,6 +885,313 @@ async def test_rls_same_owner_cross_workspace_denied_as_app_role() -> None:
 
 
 @pytest.mark.asyncio
+async def test_provider_reference_tables_enforce_workspace_rls() -> None:
+    """All 0014 tables hide another Workspace from the application role."""
+    from sqlalchemy import create_engine
+
+    sync = _url().replace("postgresql+asyncpg://", "postgresql+psycopg://")
+    eng = create_engine(sync)
+    table_names = (
+        "provider_connections",
+        "provider_capability_evidence",
+        "provider_model_bindings",
+        "project_provider_bindings",
+        "provider_quality_evidence",
+        "artifact_reference_tokens",
+    )
+
+    with eng.begin() as conn:
+        user_id = conn.execute(
+            text(
+                """
+                INSERT INTO users (email, display_name, password_hash)
+                VALUES (:email, 'Provider RLS owner', 'x') RETURNING id
+                """
+            ),
+            {"email": f"provider-rls-{uuid4().hex[:8]}@example.com"},
+        ).scalar_one()
+        conn.execute(
+            text("SELECT set_config('app.current_user_id', :value, true)"),
+            {"value": str(user_id)},
+        )
+
+        def seed_workspace(label: str) -> tuple[object, object, dict[str, object]]:
+            workspace_id = conn.execute(
+                text(
+                    "INSERT INTO workspaces (owner_user_id, name) "
+                    "VALUES (:owner, :name) RETURNING id"
+                ),
+                {"owner": user_id, "name": f"Provider RLS {label}-{uuid4().hex[:6]}"},
+            ).scalar_one()
+            conn.execute(
+                text("SELECT set_config('app.current_workspace_id', :value, true)"),
+                {"value": str(workspace_id)},
+            )
+            project_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO projects (workspace_id, name, aspect_ratio, budget_limit)
+                    VALUES (:workspace, :name, '9:16', 0) RETURNING id
+                    """
+                ),
+                {"workspace": workspace_id, "name": f"Provider project {label}"},
+            ).scalar_one()
+            conn.execute(
+                text("SELECT set_config('app.current_project_id', :value, true)"),
+                {"value": str(project_id)},
+            )
+            credential_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO encrypted_provider_credentials
+                      (workspace_id, provider, ciphertext, key_version)
+                    VALUES (:workspace, 'agnes', :ciphertext, 'test')
+                    RETURNING id
+                    """
+                ),
+                {"workspace": workspace_id, "ciphertext": f"ciphertext-{label}"},
+            ).scalar_one()
+            connection_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO provider_connections
+                      (id, workspace_id, provider_type, display_name, base_url,
+                       protocol_profile, credential_id, created_by, updated_by)
+                    VALUES
+                      (gen_random_uuid(), :workspace, 'agnes', :name, 'https://api.agnes-ai.cn',
+                       'agnes_cn_v1', :credential, :actor, :actor)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "workspace": workspace_id,
+                    "name": f"Agnes {label}",
+                    "credential": credential_id,
+                    "actor": user_id,
+                },
+            ).scalar_one()
+            capability_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO provider_capability_evidence
+                      (id, workspace_id, connection_id, capability, status,
+                       evidence_level, request_fingerprint, created_by)
+                    VALUES
+                      (gen_random_uuid(), :workspace, :connection, 'image_i2i', 'passed',
+                       'account_verified', :fingerprint, :actor)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "workspace": workspace_id,
+                    "connection": connection_id,
+                    "fingerprint": (label.lower() * 64)[:64],
+                    "actor": user_id,
+                },
+            ).scalar_one()
+            model_binding_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO provider_model_bindings
+                      (id, workspace_id, connection_id, media_type, model_id, purpose,
+                       documented, contract_tested, account_verified, quality_gated,
+                       created_by, updated_by)
+                    VALUES
+                      (gen_random_uuid(), :workspace, :connection, 'image', 'agnes-image-2.1-flash',
+                       'keyframe', true, true, true, true, :actor, :actor)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "workspace": workspace_id,
+                    "connection": connection_id,
+                    "actor": user_id,
+                },
+            ).scalar_one()
+            project_binding_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO project_provider_bindings
+                      (id, project_id, workspace_id, purpose, model_binding_id, updated_by)
+                    VALUES (gen_random_uuid(), :project, :workspace, 'keyframe', :model, :actor)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "project": project_id,
+                    "workspace": workspace_id,
+                    "model": model_binding_id,
+                    "actor": user_id,
+                },
+            ).scalar_one()
+            graph_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO production_graphs
+                      (project_id, scope_type, scope_entity_id, template_key, created_by)
+                    VALUES (:project, 'shot', :scope, 'provider-rls', :actor)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "project": project_id,
+                    "scope": uuid4(),
+                    "actor": user_id,
+                },
+            ).scalar_one()
+            graph_version_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO graph_versions
+                      (graph_id, version_number, definition_hash, definition)
+                    VALUES (:graph, 1, :hash, '{}'::jsonb) RETURNING id
+                    """
+                ),
+                {"graph": graph_id, "hash": uuid4().hex * 2},
+            ).scalar_one()
+            graph_node_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO graph_nodes
+                      (graph_version_id, node_key, node_type, display_name)
+                    VALUES (:version, 'face_review', 'face_review', 'Face Review')
+                    RETURNING id
+                    """
+                ),
+                {"version": graph_version_id},
+            ).scalar_one()
+            node_run_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO node_runs
+                      (project_id, graph_version_id, graph_node_id, idempotency_key,
+                       input_hash, status, input_snapshot, created_by)
+                    VALUES
+                      (:project, :version, :node, :key, :hash, 'queued',
+                       '{}'::jsonb, :actor)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "project": project_id,
+                    "version": graph_version_id,
+                    "node": graph_node_id,
+                    "key": f"provider-rls-{label}-{uuid4().hex}",
+                    "hash": uuid4().hex * 2,
+                    "actor": user_id,
+                },
+            ).scalar_one()
+            artifact_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO artifacts
+                      (project_id, artifact_type, storage_state, object_key,
+                       content_hash, mime_type, byte_size)
+                    VALUES
+                      (:project, 'image', 'available', :key, :hash, 'image/png', 3)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "project": project_id,
+                    "key": f"provider-rls/{label}/{uuid4().hex}.png",
+                    "hash": uuid4().hex * 2,
+                },
+            ).scalar_one()
+            quality_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO provider_quality_evidence
+                      (id, workspace_id, model_binding_id, node_run_id, artifact_id,
+                       evidence_kind, policy_id, approved_by)
+                    VALUES
+                      (gen_random_uuid(), :workspace, :model, :run, :artifact,
+                       'face_review', 'P0-S0A-2026-07-25', :actor)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "workspace": workspace_id,
+                    "model": model_binding_id,
+                    "run": node_run_id,
+                    "artifact": artifact_id,
+                    "actor": user_id,
+                },
+            ).scalar_one()
+            token_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO artifact_reference_tokens
+                      (id, workspace_id, project_id, artifact_id, token_hash,
+                       expires_at, created_by_user_id)
+                    VALUES
+                      (gen_random_uuid(), :workspace, :project, :artifact, :hash,
+                       now() + interval '1 hour', :actor)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "workspace": workspace_id,
+                    "project": project_id,
+                    "artifact": artifact_id,
+                    "hash": uuid4().hex * 2,
+                    "actor": user_id,
+                },
+            ).scalar_one()
+            return workspace_id, project_id, {
+                "provider_connections": connection_id,
+                "provider_capability_evidence": capability_id,
+                "provider_model_bindings": model_binding_id,
+                "project_provider_bindings": project_binding_id,
+                "provider_quality_evidence": quality_id,
+                "artifact_reference_tokens": token_id,
+            }
+
+        workspace_a, project_a, rows_a = seed_workspace("a")
+        _, _, rows_b = seed_workspace("b")
+
+        catalog_rows = conn.execute(
+            text(
+                """
+                SELECT relname, relrowsecurity, relforcerowsecurity
+                FROM pg_class
+                WHERE relname = ANY(:tables)
+                """
+            ),
+            {"tables": list(table_names)},
+        ).fetchall()
+        assert {row[0] for row in catalog_rows} == set(table_names)
+        assert all(row[1] and row[2] for row in catalog_rows)
+
+        conn.execute(text("SET LOCAL ROLE dramaforge_app"))
+        conn.execute(
+            text("SELECT set_config('app.current_user_id', :value, true)"),
+            {"value": str(user_id)},
+        )
+        conn.execute(
+            text("SELECT set_config('app.current_workspace_id', :value, true)"),
+            {"value": str(workspace_a)},
+        )
+        conn.execute(
+            text("SELECT set_config('app.current_project_id', :value, true)"),
+            {"value": str(project_a)},
+        )
+
+        for table_name in table_names:
+            own = conn.execute(
+                text(f"SELECT id FROM {table_name} WHERE id = :row_id"),
+                {"row_id": rows_a[table_name]},
+            ).scalar_one()
+            assert own == rows_a[table_name]
+            hidden = conn.execute(
+                text(f"SELECT id FROM {table_name} WHERE id = :row_id"),
+                {"row_id": rows_b[table_name]},
+            ).fetchall()
+            assert hidden == [], f"{table_name} leaked a cross-Workspace row"
+    eng.dispose()
+
+
+@pytest.mark.asyncio
 async def test_worker_resolvers_use_workspace_owner_and_project_scope(
     pg_session: AsyncSession,
 ) -> None:
@@ -930,3 +1300,156 @@ async def test_worker_resolvers_use_workspace_owner_and_project_scope(
     assert [(scope.event_id, scope.user_id) for scope in pending] == [
         (event.event_id, owner.id)
     ]
+
+
+@pytest.mark.asyncio
+async def test_graph_edges_persisted_for_shot_pipeline(pg_session: AsyncSession) -> None:
+    """shot-p0-v1 edges must be persisted to graph_edges, not only the version JSON."""
+    from app.execution.shot_pipeline import SHOT_PIPELINE_EDGES
+
+    suffix = uuid4().hex[:8]
+    user = User(
+        email=f"edges-{suffix}@example.com",
+        display_name="Edges",
+        password_hash=hash_password("password123"),
+    )
+    pg_session.add(user)
+    await pg_session.flush()
+    workspace = Workspace(owner_user_id=user.id, name=f"EdgesOrg-{suffix}")
+    pg_session.add(workspace)
+    await pg_session.flush()
+    await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id)
+    project = await ProjectService(pg_session).create_project(
+        workspace_id=workspace.id, name=f"Edges-{suffix}", aspect_ratio="9:16", actor=user
+    )
+    await pg_session.commit()
+    await set_rls_context(
+        pg_session,
+        user_id=user.id,
+        workspace_id=workspace.id,
+        project_id=project.id,
+    )
+    store = get_object_store()
+    shots = await produce_shots_p0(
+        pg_session,
+        project_id=project.id,
+        user_id=user.id,
+        n=1,
+        store=store,
+        execute_inline=False,
+    )
+    assert len(shots) == 1
+    graph_version_id = shots[0].graph_version_id
+
+    nodes = (
+        await pg_session.execute(
+            select(GraphNode).where(GraphNode.graph_version_id == graph_version_id)
+        )
+    ).scalars().all()
+    key_by_id = {node.id: node.node_key for node in nodes}
+    assert set(key_by_id.values()) == {edge[0] for edge in SHOT_PIPELINE_EDGES} | {
+        edge[1] for edge in SHOT_PIPELINE_EDGES
+    }
+
+    edges = (
+        await pg_session.execute(
+            select(GraphEdge).where(GraphEdge.graph_version_id == graph_version_id)
+        )
+    ).scalars().all()
+    assert len(edges) == len(SHOT_PIPELINE_EDGES)
+    pairs = sorted(
+        (key_by_id[edge.upstream_node_id], key_by_id[edge.downstream_node_id])
+        for edge in edges
+    )
+    assert pairs == sorted(SHOT_PIPELINE_EDGES)
+    assert all(edge.required is True for edge in edges)
+
+
+@pytest.mark.asyncio
+async def test_required_dependencies_enforce_shot_scoped_order(
+    pg_session: AsyncSession,
+) -> None:
+    """face_review defers until its own shot's keyframe completes (graph_edges order)."""
+    from app.execution.runtime_invariants import evaluate_required_dependencies
+
+    suffix = uuid4().hex[:8]
+    user = User(
+        email=f"order-{suffix}@example.com",
+        display_name="Order",
+        password_hash=hash_password("password123"),
+    )
+    pg_session.add(user)
+    await pg_session.flush()
+    workspace = Workspace(owner_user_id=user.id, name=f"OrderOrg-{suffix}")
+    pg_session.add(workspace)
+    await pg_session.flush()
+    await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id)
+    project = await ProjectService(pg_session).create_project(
+        workspace_id=workspace.id, name=f"Order-{suffix}", aspect_ratio="9:16", actor=user
+    )
+    await pg_session.commit()
+    await set_rls_context(
+        pg_session,
+        user_id=user.id,
+        workspace_id=workspace.id,
+        project_id=project.id,
+    )
+    store = get_object_store()
+    shots = await produce_shots_p0(
+        pg_session,
+        project_id=project.id,
+        user_id=user.id,
+        n=1,
+        store=store,
+        execute_inline=False,
+    )
+    assert len(shots) == 1
+    graph_version_id = shots[0].graph_version_id
+
+    runs = (
+        await pg_session.execute(
+            select(NodeRun).where(NodeRun.graph_version_id == graph_version_id)
+        )
+    ).scalars().all()
+    by_key = {
+        str((run.input_snapshot or {}).get("node_key") or ""): run for run in runs
+    }
+    keyframe = by_key["keyframe"]
+    face_review = by_key["face_review"]
+    assert keyframe.status == "queued"
+    assert face_review.status == "queued"
+
+    # keyframe still queued => face_review must defer
+    assert (await evaluate_required_dependencies(pg_session, run=face_review)).action == "defer"
+    # A different shot's completed keyframe must not satisfy this shot's ordering
+    other_shot = await produce_shots_p0(
+        pg_session,
+        project_id=project.id,
+        user_id=user.id,
+        n=1,
+        store=store,
+        execute_inline=False,
+    )
+    assert len(other_shot) == 1
+    other_runs = (
+        await pg_session.execute(
+            select(NodeRun).where(
+                NodeRun.graph_version_id == other_shot[0].graph_version_id
+            )
+        )
+    ).scalars().all()
+    other_by_key = {
+        str((r.input_snapshot or {}).get("node_key")): r for r in other_runs
+    }
+    other_keyframe = other_by_key["keyframe"]
+    worker = WorkerRuntime(pg_session)
+    assert await worker.process_one(other_by_key["prompt"].id)
+    assert await worker.process_one(other_keyframe.id)
+    # other shot's keyframe completed, but this shot's keyframe still queued
+    # => face_review is still deferred
+    assert (await evaluate_required_dependencies(pg_session, run=face_review)).action == "defer"
+
+    # complete the current shot's keyframe => face_review may proceed
+    assert await worker.process_one(by_key["prompt"].id)
+    assert await worker.process_one(keyframe.id)
+    assert (await evaluate_required_dependencies(pg_session, run=face_review)).action == "ready"

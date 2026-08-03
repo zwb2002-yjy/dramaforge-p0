@@ -91,12 +91,17 @@ class Settings(BaseSettings):
         description="Shared secret for /api/v1/worker/tick (local Worker substitute)",
     )
 
-    # Agnes AI OpenAI-compatible hub (local BYOK). Never log the raw key.
+    # Agnes China profile (local BYOK). Never log the raw key.
     agnes_enabled: bool = False
     agnes_api_key: str = Field(default="", description="User BYOK for Agnes hub")
-    agnes_base_url: str = Field(default="https://apihub.agnes-ai.com/v1")
+    agnes_base_url: str = Field(default="https://api.agnes-ai.cn/v1")
     agnes_image_model: str = Field(default="agnes-image-2.1-flash")
     agnes_video_model: str = Field(default="agnes-video-v2.0")
+    reference_public_base_url: str = Field(
+        default="",
+        description="Public HTTPS API origin used for short-lived Provider references",
+    )
+    reference_token_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
 
     # Text LLM BYOK (Anthropic-compatible Messages API, e.g. baizhi / DeepSeek).
     text_llm_enabled: bool = False

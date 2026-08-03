@@ -22,19 +22,11 @@ P0 目标为可运行的 React/FastAPI/PostgreSQL/Redis/MinIO/Arq 应用 + 一�
 - FFmpeg 导出、缓存复用、幂等取消/补偿、Outbox/SSE/Redis Streams 事件流
 - 目录合规、Ruff/mypy/unit/integration/frontend/e2e CI 门禁全绿
 - Compose 镜像内 InsightFace 0.7.3 / ONNX Runtime CPU / buffalo_l 已完成构建期 `FaceAnalysis.prepare()` 与容器运行期 512-d smoke
-- 真实 Provider 全链（2026-07-31 于 `4792f29` 实测）：OpenAI 文本 Brief/Plan、
-  Agnes 图像 10 次、Agnes 视频 10 次、本地 TTS 10 次，32 条 ProviderOperation 无失败；
-  10 Shot × 9 节点 = 90 NodeRun / 90 独立 Artifact / 90 独立 object key，
-  导出 ZIP 现场下载 39.5 MB 且 SHA-256 与记录一致
+- 真实 Provider 全链（2026-07-31 于 `4792f29` 实测）：OpenAI 文本 Brief/Plan、Agnes 图像 10 次、Agnes 视频 10 次、本地 TTS 10 次，32 条 ProviderOperation 无失败；10 Shot × 9 节点 = 90 NodeRun / 90 独立 Artifact / 90 独立 object key，导出 ZIP 现场下载 39.5 MB 且 SHA-256 与记录一致
 
 P0 Gate 阻塞项（详见 `docs/开发执行检查点.md` §3.1）：
-1. **人脸一致性 Gate 未被证明**：模型与像素均正常（5/5 canonical、7/10 关键帧检出人脸，
-   含全部 5 个主角分镜），但 10 个 `face_review` 的 `face_score` 全为 `null`
-   （5 `not_applicable` + 5 `needs_human`），审核门禁不拦 `needs_human`。
-   离线重放正确配对后，5 个主角分镜有 3 个应被拦截。
-2. **图依赖顺序未强制**：`graph_edges` 全库 0 行，Worker 仅 `composite` 等上游，
-   实测 10/10 个 Shot 的 `face_review` 早于上游 `keyframe` 完成即启动——这正是第 1 项的
-   运行期根因。单独修顺序会让当前黄金样本不通过，两项须一起处理。
+1. **人脸一致性 Gate 未被证明**：模型与像素均正常（5/5 canonical、7/10 关键帧检出人脸，含全部 5 个主角分镜），但 10 个 `face_review` 的 `face_score` 全为 `null`（5 `not_applicable` + 5 `needs_human`），审核门禁不拦 `needs_human`。离线重放正确配对后，5 个主角分镜有 3 个应被拦截。
+2. **图依赖顺序未强制**：`graph_edges` 全库 0 行，Worker 仅 `composite` 等上游，实测 10/10 个 Shot 的 `face_review` 早于上游 `keyframe` 完成即启动——这正是第 1 项的运行期根因。单独修顺序会让当前黄金样本不通过，两项须一起处理。
 3. **已盖章阈值未落地**：已批 `final_threshold=0.60` 在运行期不存在，各处硬编码 `0.35`。
 4. `snapshot` API 不返回 NodeRun 时间戳，执行顺序无法在前端自证。
 5. 备份恢复、密钥轮换未在当前提交的正式栈留存端到端记录。
@@ -98,6 +90,57 @@ frontend/src/
 
 `03_全局目录规范.md` 是所有模块边界的权威来源。禁止新建 `common`/`helpers`/`misc`/`utils2` 等目录。
 
+## 关键架构模式
+
+### 分层数据流
+```
+Route → Service → Repository/Domain
+  │         │
+  │         └→ Provider Adapter (AI/Media)
+  │         └→ ObjectStore (MinIO)
+  │
+  └→ OutboxEvent → Dispatcher → Arq → Worker → execute_media_node_run()
+```
+
+### Transactional Outbox
+所有命令写入首先持久化到 OutboxEvent 表，Dispatcher 在单独事务中 claim 并 publish 到 Redis Streams。Arq 作业由 Outbox 触发，而非业务代码直接调用 `arq.enqueue_job()`。关键文件：`app/events/outbox.py`, `app/runtime/scheduler.py`。
+
+### Snapshot-based 审计
+每个 NodeRun 启动时冻结 `input_snapshot`（包含 `face_policy`、`shot_id`、`node_key`、`canonical_object_key` 等），运行时不可变。Worker 通过 `approved_face_threshold_from_snapshot()` 验证快照策略与已批准策略一致，不一致则 fail-closed。关键文件：`app/consistency/face_policy.py`。
+
+### 双源人脸审核
+`face_review` 永远使用两个独立来源：canonical (注册角色照) 和 probe (生成关键帧)。禁止 self-match。阈值由 `face_policy.py` 中的 `APPROVED_FACE_THRESHOLD = 0.60` 单一来源下发。关键文件：`app/consistency/face_review.py`, `app/consistency/face_policy.py`。
+
+### Formal Proof 系统
+Gate 脚本 `run_p0_section31_gate.py` 有两种验证路径：
+1. **主动探测路径**：通过 Docker Compose exec 或 API 直接探测运行环境
+2. **证据路径**：`prove_p0_mvp_formal.py` 通过真实 API 运行完整 10 Shot 流水线，产出 `multi_shot_chain.json` 证据文件。如果证据文件存在且权威，覆盖主动探测路径的结果
+
+关键文件：`scripts/run_p0_section31_gate.py`, `scripts/prove_p0_mvp_formal.py`, `scripts/evidence_context.py`。
+
+### 执行顺序
+`graph_edges` 在 DB 中存在表定义但未被运行时查询。Pipeline 依赖顺序由 `SHOT_PIPELINE_EDGES`（`shot_pipeline.py`）定义，目前仅用于 `mark_stale_downstream()` 缓存失效，不用于运行时调度。运行时唯一顺序约束是 `composite_inputs_pending()`。关键文件：`app/execution/shot_pipeline.py`, `app/runtime/scheduler.py`。
+
+## 关键文件参考
+
+| 文件 | 作用 |
+|------|------|
+| `app/consistency/face_policy.py` | 阈值单源，`APPROVED_FACE_THRESHOLD = 0.60` |
+| `app/consistency/face_review.py` | 双源人脸比较核心逻辑 |
+| `app/consistency/image_embed.py` | InsightFace embedding 生成 |
+| `app/execution/shot_pipeline.py` | 9 节点 Pipeline 定义（`SHOT_PIPELINE_NODES` + `SHOT_PIPELINE_EDGES`） |
+| `app/execution/product_path.py` | Worker 媒体执行路径 |
+| `app/execution/shot_p0.py` | 10 Shot 编排入口 |
+| `app/execution/runtime_invariants.py` | `mark_stale_downstream()`, `single_flight_claim()` |
+| `app/execution/composite_media.py` | `composite_inputs_pending()` 唯一运行时顺序约束 |
+| `app/runtime/scheduler.py` | `AgentRunScheduler` 调度 + `WorkerRuntime` 轮询执行 |
+| `app/workers/jobs.py` | Arq 作业注册表（`execute_node_run` + `dispatch_outbox`） |
+| `app/events/outbox.py` | OutboxDispatcher 事务发布 |
+| `app/production/service.py` | Graph 创建/发布/版本管理 |
+| `scripts/run_p0_section31_gate.py` | §3.1 Gate 主动探测脚本 |
+| `scripts/prove_p0_mvp_formal.py` | 正式证据生成脚本（通过真实 API） |
+| `scripts/evidence_context.py` | 证据上下文管理、提交校验 |
+
 ## 开发命令
 
 ```powershell
@@ -117,6 +160,10 @@ cd backend
 .\.venv\Scripts\python.exe -m pytest tests/integration -q -rs --fail-on-skip
 .\.venv\Scripts\python.exe -m alembic -c alembic.ini upgrade head
 
+# 单个测试
+cd backend && .\.venv\Scripts\python.exe -m pytest tests/unit/test_workspace_byok.py -q
+cd backend && .\.venv\Scripts\python.exe -m pytest tests/unit/test_workspace_byok.py::test_workspace_byok_api_stores_without_readback -q
+
 # 前端分项
 cd frontend
 npm.cmd run lint
@@ -125,9 +172,20 @@ npm.cmd run test
 npm.cmd run build
 npm.cmd run test:e2e -- tests/e2e/smoke.spec.ts
 
-# 单个测试
-cd backend && .\.venv\Scripts\python.exe -m pytest tests/unit/test_workspace_byok.py -q
-cd backend && .\.venv\Scripts\python.exe -m pytest tests/unit/test_workspace_byok.py::test_workspace_byok_api_stores_without_readback -q
+# 运行 Gate 脚本
+cd backend && .\.venv\Scripts\python.exe ../scripts/run_p0_section31_gate.py --base http://localhost:8000
+cd backend && .\.venv\Scripts\python.exe ../scripts/run_p0_gate_evidence.py --scratch tmp/p0-evidence
+
+# 运行 Formal Proof
+cd backend && .\.venv\Scripts\python.exe ../scripts/prove_p0_mvp_formal.py --base http://localhost:8000 --scratch tmp/p0-proof
+
+# 常用调试命令
+docker compose logs api --tail=50                         # 查看 API 日志
+docker compose logs worker-heavy --tail=50                 # 查看 Worker 日志
+docker compose logs dispatcher --tail=50                   # 查看 Dispatch 日志
+docker compose exec api python -c "from app.consistency.face_policy import approved_face_threshold; print(approved_face_threshold())"  # 验证运行期阈值
+docker compose exec redis redis-cli LRANGE arq:job 0 -1   # 查看 Arq 队列
+docker compose exec minio mc ls dramaforge/               # 查看 MinIO 对象
 ```
 
 ## Git 工作流（强制执行）

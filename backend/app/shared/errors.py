@@ -42,6 +42,20 @@ class NodeRunAlreadyClaimedError(AppError):
         )
 
 
+class ConflictError(AppError):
+    def __init__(self, message: str = "Resource already exists", **kwargs: Any) -> None:
+        super().__init__(code="CONFLICT", message=message, status_code=409, **kwargs)
+
+
+class ProviderTaskPendingError(AppError):
+    def __init__(self, message: str = "Provider task is still running") -> None:
+        super().__init__(
+            code="PROVIDER_TASK_PENDING",
+            message=message,
+            status_code=503,
+        )
+
+
 class UnauthorizedError(AppError):
     def __init__(self, message: str = "Unauthorized", **kwargs: Any) -> None:
         super().__init__(code="UNAUTHORIZED", message=message, status_code=401, **kwargs)

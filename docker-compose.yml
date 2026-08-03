@@ -73,9 +73,11 @@ services:
       CORS_ORIGINS: http://localhost:5173
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
-      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
+      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
       AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
       AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      REFERENCE_PUBLIC_BASE_URL: ${REFERENCE_PUBLIC_BASE_URL:-}
+      REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio}
@@ -102,7 +104,7 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
 
   dispatcher:
     build:
@@ -145,9 +147,11 @@ services:
       WORKER_KIND: default
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
-      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
+      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
       AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
       AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      REFERENCE_PUBLIC_BASE_URL: ${REFERENCE_PUBLIC_BASE_URL:-}
+      REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio}
@@ -190,9 +194,11 @@ services:
       ARQ_HEAVY_MAX_JOBS: ${ARQ_HEAVY_MAX_JOBS:-4}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
-      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://apihub.agnes-ai.com/v1}
+      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
       AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
       AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      REFERENCE_PUBLIC_BASE_URL: ${REFERENCE_PUBLIC_BASE_URL:-}
+      REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio}

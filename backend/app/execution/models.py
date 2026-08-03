@@ -100,6 +100,7 @@ _provider_status = Enum(
     "succeeded",
     "failed",
     "timed_out",
+    "unknown_submission",
     name="provider_operation_status",
     create_constraint=False,
     native_enum=True,
@@ -134,6 +135,24 @@ class GraphNode(Base):
 
 class GraphEdge(Base):
     __tablename__ = "graph_edges"
+    __table_args__ = (
+        UniqueConstraint(
+            "graph_version_id",
+            "upstream_node_id",
+            "output_port",
+            "downstream_node_id",
+            "input_port",
+            "position",
+            name="uq_graph_edges_identity",
+        ),
+        UniqueConstraint(
+            "graph_version_id",
+            "downstream_node_id",
+            "input_port",
+            "position",
+            name="uq_graph_edges_input_position",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     graph_version_id: Mapped[UUID] = mapped_column(
@@ -289,6 +308,8 @@ class ProviderOperation(Base):
     actual_provider: Mapped[str] = mapped_column(String(64), nullable=False)
     actual_model: Mapped[str] = mapped_column(String(120), nullable=False)
     provider_operation_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    remote_secondary_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    protocol_profile: Mapped[str | None] = mapped_column(String(80), nullable=True)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(
         _provider_status.with_variant(String(40), "sqlite"),

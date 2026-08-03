@@ -10,6 +10,8 @@ from app.api.v1 import (
     events,
     production,
     projects,
+    provider_connections,
+    provider_references,
     scripts,
     shot_ops,
     worker,
@@ -24,6 +26,8 @@ api_router.include_router(production.router)
 api_router.include_router(scripts.router)
 api_router.include_router(characters.router)
 api_router.include_router(credentials.router)
+api_router.include_router(provider_connections.router)
+api_router.include_router(provider_references.router)
 api_router.include_router(shot_ops.router)
 api_router.include_router(worker.router)
 api_router.include_router(events.router)

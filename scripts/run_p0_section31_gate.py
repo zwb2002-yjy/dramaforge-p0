@@ -21,7 +21,6 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-
 from evidence_context import (
     begin_evidence_context,
     default_evidence_dir,
@@ -836,11 +835,127 @@ def main() -> int:
             and "final_threshold" in report_text
         )
         calibration_errors = calibration_policy_errors(report_text)
+
+        # Probe the running code's approved_face_threshold() to verify the
+        # approved policy is actually enforced at runtime, not just in a report.
+        runtime_threshold_errors: list[str] = []
+        try:
+            _rt_cmd = [
+                "docker",
+                "compose",
+                "exec",
+                "-T",
+                "api",
+                "python",
+                "-c",
+                "from app.consistency.face_policy import approved_face_threshold; "
+                "print(approved_face_threshold())",
+            ]
+            _rt_wr = _sp.run(_rt_cmd, capture_output=True, timeout=30)
+            _rt_text = (_rt_wr.stdout or b"").decode("utf-8", errors="replace").strip()
+            _rt_expected = float(APPROVED_FACE_POLICY["threshold"])
+            if _rt_text:
+                try:
+                    _rt_val = float(_rt_text)
+                    if _rt_val != _rt_expected:
+                        runtime_threshold_errors.append(
+                            f"runtime approved_face_threshold()={_rt_val} "
+                            f"expected={_rt_expected:.2f}"
+                        )
+                except ValueError:
+                    runtime_threshold_errors.append(
+                        f"runtime threshold output not float: {_rt_text!r}"
+                    )
+            else:
+                runtime_threshold_errors.append(
+                    "runtime threshold probe returned empty output"
+                )
+        except FileNotFoundError:
+            # Fallback: read the local face_policy.py constant directly
+            try:
+                _fp = REPO / "backend" / "app" / "consistency" / "face_policy.py"
+                _src = _fp.read_text(encoding="utf-8") if _fp.is_file() else ""
+                _m = re.search(
+                    r'APPROVED_FACE_THRESHOLD\s*=\s*([0-9.]+)', _src
+                )
+                if _m:
+                    _rt_val = float(_m.group(1))
+                    _rt_expected = float(APPROVED_FACE_POLICY["threshold"])
+                    if _rt_val != _rt_expected:
+                        runtime_threshold_errors.append(
+                            f"face_policy.py APPROVED_FACE_THRESHOLD={_rt_val} "
+                            f"expected={_rt_expected:.2f}"
+                        )
+                else:
+                    runtime_threshold_errors.append(
+                        "face_policy.py APPROVED_FACE_THRESHOLD constant not found"
+                    )
+            except Exception as _rt_exc:
+                runtime_threshold_errors.append(
+                    f"runtime threshold probe (local fallback): {_rt_exc}"
+                )
+        except Exception as _rt_exc:
+            runtime_threshold_errors.append(
+                f"runtime threshold probe: {_rt_exc}"
+            )
+
+        # Verify real lead face-review scores: the calibrated threshold alone is
+        # not proof the face gate works. Every completed lead face_review must
+        # carry an actual face_score >= the approved threshold.
+        face_score_errors: list[str] = []
+        if project_id:
+            try:
+                snap_r = client.get(
+                    f"/api/v1/projects/{project_id}/snapshot", cookies=cookies
+                )
+                if snap_r.status_code == 200:
+                    snap = snap_r.json()
+                    runs = snap.get("node_runs") or []
+                    lead_face_runs = []
+                    for run in runs:
+                        snapshot = run.get("input_snapshot") or {}
+                        if snapshot.get("node_key") != "face_review":
+                            continue
+                        if snapshot.get("lead_identity_required") is not True:
+                            continue
+                        if run.get("status") not in DONE_STATUSES:
+                            continue
+                        lead_face_runs.append(run)
+                    threshold = float(APPROVED_FACE_POLICY["threshold"])
+                    for run in lead_face_runs:
+                        output = run.get("output_summary") or {}
+                        raw_score = output.get("face_score")
+                        try:
+                            score = float(raw_score) if raw_score is not None else None
+                        except (TypeError, ValueError):
+                            score = None
+                        if score is None or score < threshold:
+                            face_score_errors.append(
+                                f"lead face_review run={run.get('id')} "
+                                f"status={output.get('status')} score={raw_score!r} "
+                                f"below approved threshold={threshold:.2f}"
+                            )
+                    if not lead_face_runs:
+                        face_score_errors.append(
+                            "no completed lead face_review with a real score on the "
+                            "active-probe path; requires formal evidence "
+                            "(prove_p0_mvp_formal.py)"
+                        )
+                else:
+                    face_score_errors.append(
+                        f"snapshot fetch for face-score verification returned "
+                        f"{snap_r.status_code}"
+                    )
+            except Exception as _fs_exc:
+                face_score_errors.append(f"face-score verification: {_fs_exc}")
+
         if (
             st.get("available")
             and st.get("backend") == "insightface+onnx"
             and calibrated
             and not calibration_errors
+            and not runtime_threshold_errors
+            and not face_score_errors
         ):
             add(
                 "3.1.11",
@@ -857,6 +972,8 @@ def main() -> int:
                     "calibration report must be COMPLETE_WITH_METRICS with FAR/FRR and final_threshold"
                 )
             missing.extend(calibration_errors)
+            missing.extend(runtime_threshold_errors)
+            missing.extend(face_score_errors)
             add(
                 "3.1.11",
                 "InsightFace 512-d + calibrated threshold",

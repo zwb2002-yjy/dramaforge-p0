@@ -62,6 +62,36 @@ class DelayedVideoAdapter:
         return {"amount": 1.25, "currency": "USD"}
 
 
+class ResumeOnlyAgnesVideoAdapter:
+    provider = "agnes"
+    protocol_profile = "agnes_cn_v1"
+
+    def __init__(self) -> None:
+        self.poll_count = 0
+        self.blobs = {"provider-video-resume": b"\x00\x00\x00\x18ftypmp42resumed-video"}
+
+    async def create(self, request: dict[str, object]) -> dict[str, object]:
+        raise AssertionError(f"persisted remote task must not be created again: {request}")
+
+    async def poll(self, remote_task_id: str) -> dict[str, object]:
+        raise AssertionError(f"Agnes resume must use the persisted query kind: {remote_task_id}")
+
+    async def poll_persisted(
+        self,
+        remote_task_id: str,
+        *,
+        query_kind: str | None,
+    ) -> dict[str, object]:
+        assert remote_task_id == "provider-video-resume"
+        assert query_kind == "video_id"
+        self.poll_count += 1
+        return {"status": "succeeded"}
+
+    async def fetch_cost(self, remote_task_id: str) -> dict[str, object]:
+        assert remote_task_id == "provider-video-resume"
+        return {"amount": 0.75, "currency": "USD"}
+
+
 class CreateFailureAdapter:
     provider = "kling"
 
@@ -98,224 +128,182 @@ class CreateExceptionAdapter:
         raise AssertionError(f"cost lookup must not run after create exception: {remote_task_id}")
 
 
+def _agnes_settings() -> Settings:
+    return Settings(
+        app_env="development",
+        agnes_enabled=True,
+        agnes_api_key="test-provider-key",
+        agnes_base_url="https://agnes.example/v1",
+    )
+
+
 @pytest.mark.asyncio
-async def test_agnes_image_retries_transient_503_before_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_agnes_image_create_is_single_attempt_on_503() -> None:
     attempts = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
         nonlocal attempts
         attempts += 1
         assert request.url.path == "/v1/images/generations"
-        if attempts < 3:
-            return httpx.Response(503, json={"error": "hub overloaded"})
-        return httpx.Response(200, json={"data": [{"url": "https://media.example/image.png"}]})
+        return httpx.Response(503, json={"error": "hub overloaded"})
 
-    async def no_sleep(_seconds: float) -> None:
-        return None
-
-    monkeypatch.setattr("app.providers.agnes.asyncio.sleep", no_sleep)
-    client = AgnesHubClient(
-        Settings(
-            app_env="development",
-            agnes_enabled=True,
-            agnes_api_key="test-provider-key",
-            agnes_base_url="https://agnes.example/v1",
-        ),
-        transport=httpx.MockTransport(handler),
-    )
-
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
     result = await client.create_image(prompt="cinematic archive room")
 
-    assert attempts == 3
-    assert result["status"] == "succeeded"
-    assert result["artifact_uri"] == "https://media.example/image.png"
+    assert attempts == 1
+    assert result["status"] == "failed"
+    assert result["error_code"] == "PROVIDER_UNAVAILABLE"
 
 
 @pytest.mark.asyncio
-async def test_agnes_image_rewrites_only_after_provider_policy_rejection() -> None:
-    prompts: list[str] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        prompts.append(str(body["prompt"]))
-        if len(prompts) == 1:
-            return httpx.Response(
-                400,
-                json={"error": {"message": "Unable to generate this content."}},
-            )
-        return httpx.Response(200, json={"data": [{"url": "https://media.example/safe.png"}]})
-
-    client = AgnesHubClient(
-        Settings(
-            app_env="development",
-            agnes_enabled=True,
-            agnes_api_key="test-provider-key",
-            agnes_base_url="https://agnes.example/v1",
-        ),
-        transport=httpx.MockTransport(handler),
-    )
-
-    result = await client.create_image(
-        prompt="stalker's gloved hand grabbing a wrist, freeze frame, then black screen"
-    )
-
-    assert len(prompts) == 2
-    assert prompts[0].startswith("stalker's")
-    assert "unidentified figure" in prompts[1]
-    assert "reaching toward" in prompts[1]
-    assert "non-violent cinematic suspense" in prompts[1]
-    assert result["status"] == "succeeded"
-    assert result["prompt_adaptation"] == "provider_policy_safe_rewrite"
-    assert result["original_prompt_fingerprint"] != result["effective_prompt_fingerprint"]
-
-
-@pytest.mark.asyncio
-async def test_agnes_image_edit_sends_canonical_bytes_and_retries_transient_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attempts = 0
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal attempts
-        attempts += 1
-        assert request.url.path == "/v1/images/edits"
-        assert request.headers["content-type"].startswith("multipart/form-data;")
-        assert b'name="image"; filename="canonical.png"' in request.content
-        assert b"canonical-image-bytes" in request.content
-        if attempts == 1:
-            return httpx.Response(503, json={"error": "hub overloaded"})
-        return httpx.Response(200, json={"data": [{"url": "https://media.example/edit.png"}]})
-
-    async def no_sleep(_seconds: float) -> None:
-        return None
-
-    monkeypatch.setattr("app.providers.agnes.asyncio.sleep", no_sleep)
-    canonical = b"canonical-image-bytes"
-    client = AgnesHubClient(
-        Settings(
-            app_env="development",
-            agnes_enabled=True,
-            agnes_api_key="test-provider-key",
-            agnes_base_url="https://agnes.example/v1",
-        ),
-        transport=httpx.MockTransport(handler),
-    )
-
-    result = await client.create_image(
-        prompt="single adult portrait in a cafe",
-        canonical_image_bytes=canonical,
-    )
-
-    assert attempts == 2
-    assert result["status"] == "succeeded"
-    assert result["identity_conditioning"] == "canonical_image_edit"
-    assert result["canonical_image_fingerprint"] == __import__("hashlib").sha256(
-        canonical
-    ).hexdigest()
-
-
-@pytest.mark.asyncio
-async def test_agnes_image_does_not_rewrite_an_unrelated_bad_request() -> None:
+async def test_agnes_image_policy_refusal_is_not_hidden_rewritten_post() -> None:
     prompts: list[str] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         prompts.append(str(json.loads(request.content)["prompt"]))
-        return httpx.Response(400, json={"error": {"message": "invalid image size"}})
-
-    client = AgnesHubClient(
-        Settings(
-            app_env="development",
-            agnes_enabled=True,
-            agnes_api_key="test-provider-key",
-            agnes_base_url="https://agnes.example/v1",
-        ),
-        transport=httpx.MockTransport(handler),
-    )
-
-    result = await client.create_image(prompt="cinematic archive room")
-
-    assert result["status"] == "failed"
-    assert result["prompt_adaptation"] is None
-    assert prompts == ["cinematic archive room"]
-
-
-@pytest.mark.asyncio
-async def test_agnes_video_retries_transient_503_before_task_acceptance(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attempts = 0
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal attempts
-        attempts += 1
-        assert request.url.path == "/v1/videos"
-        if attempts < 3:
-            return httpx.Response(503, json={"error": "hub overloaded"})
-        return httpx.Response(200, json={"task_id": "video-task-123", "status": "queued"})
-
-    async def no_sleep(_seconds: float) -> None:
-        return None
-
-    monkeypatch.setattr("app.providers.agnes.asyncio.sleep", no_sleep)
-    client = AgnesHubClient(
-        Settings(
-            app_env="development",
-            agnes_enabled=True,
-            agnes_api_key="test-provider-key",
-            agnes_base_url="https://agnes.example/v1",
-        ),
-        transport=httpx.MockTransport(handler),
-    )
-
-    result = await client.create_video(prompt="cinematic rain-soaked harbor")
-
-    assert attempts == 3
-    assert result == {"remote_task_id": "video-task-123", "status": "queued"}
-
-
-@pytest.mark.asyncio
-async def test_agnes_video_honors_retry_after_for_rate_limited_create(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attempts = 0
-    delays: list[float] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal attempts
-        attempts += 1
-        assert request.url.path == "/v1/videos"
-        if attempts == 1:
-            return httpx.Response(
-                429,
-                headers={"Retry-After": "17"},
-                json={"error": "rate limited"},
-            )
         return httpx.Response(
-            200,
-            json={"task_id": "video-task-456", "status": "queued"},
+            400,
+            json={"error": {"message": "Unable to generate this content."}},
         )
 
-    async def record_sleep(seconds: float) -> None:
-        delays.append(seconds)
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.create_image(prompt="a rejected creative prompt")
 
-    monkeypatch.setattr("app.providers.agnes.asyncio.sleep", record_sleep)
-    client = AgnesHubClient(
-        Settings(
-            app_env="development",
-            agnes_enabled=True,
-            agnes_api_key="test-provider-key",
-            agnes_base_url="https://agnes.example/v1",
-        ),
-        transport=httpx.MockTransport(handler),
+    assert prompts == ["a rejected creative prompt"]
+    assert result["status"] == "failed"
+    assert result["error_code"] == "PROVIDER_BAD_REQUEST"
+
+
+@pytest.mark.asyncio
+async def test_agnes_image_i2i_uses_generation_json_and_redacted_summary() -> None:
+    canonical = b"canonical-image-bytes"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/images/generations"
+        assert request.headers["content-type"] == "application/json"
+        body = json.loads(request.content)
+        assert set(body) == {"model", "prompt", "size", "extra_body"}
+        assert body["model"] == "agnes-image-2.1-flash"
+        assert body["size"] == "1024x768"
+        assert "image" not in {key for key in body if key != "extra_body"}
+        assert body["extra_body"]["response_format"] == "url"
+        assert len(body["extra_body"]["image"]) == 1
+        assert body["extra_body"]["image"][0].startswith("data:image/png;base64,")
+        return httpx.Response(200, json={"data": [{"url": "https://media.example/edit.png"}]})
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.create_image(
+        prompt="single adult portrait in a cafe",
+        canonical_image_bytes=canonical,
+        reference_artifact_id="artifact-1",
     )
 
-    result = await client.create_video(prompt="cinematic rain-soaked harbor")
+    assert result["status"] == "succeeded"
+    summary = result["request_summary"]
+    assert summary["protocol_profile"] == "agnes_cn_v1"
+    assert summary["operation"] == "image.i2i"
+    assert summary["reference_artifact_ids"] == ["artifact-1"]
+    assert summary["reference_fingerprints"] == [
+        __import__("hashlib").sha256(canonical).hexdigest()
+    ]
+    serialized = json.dumps(summary)
+    assert "base64" not in serialized
+    assert "canonical-image-bytes" not in serialized
 
-    assert attempts == 2
-    assert delays == [17.0]
-    assert result == {"remote_task_id": "video-task-456", "status": "queued"}
+
+@pytest.mark.asyncio
+async def test_agnes_image_bad_request_has_stable_code_and_no_repost() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(400, json={"error": {"message": "invalid image size"}})
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.create_image(prompt="cinematic archive room")
+
+    assert attempts == 1
+    assert result["status"] == "failed"
+    assert result["error_code"] == "PROVIDER_BAD_REQUEST"
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_i2v_top_level_image_and_dual_remote_ids() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/videos"
+        body = json.loads(request.content)
+        assert body == {
+            "model": "agnes-video-v2.0",
+            "prompt": "cinematic rain-soaked harbor",
+            "image": "https://references.example/opaque-token",
+            "num_frames": 121,
+            "frame_rate": 24,
+        }
+        return httpx.Response(
+            200,
+            json={"video_id": "video-123", "task_id": "task-456", "status": "queued"},
+        )
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.create_video(
+        prompt="cinematic rain-soaked harbor",
+        image_url="https://references.example/opaque-token",
+        reference_artifact_ids=["artifact-1"],
+        reference_fingerprints=["a" * 64],
+    )
+
+    assert result["remote_task_id"] == "video-123"
+    assert result["remote_secondary_id"] == "task-456"
+    assert result["query_kind"] == "video_id"
+    serialized = json.dumps(result["request_summary"])
+    assert "opaque-token" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_rate_limit_is_not_reposted_and_keeps_retry_after() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            429,
+            headers={"Retry-After": "17"},
+            json={"error": "rate limited"},
+        )
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.create_video(
+        prompt="cinematic rain-soaked harbor",
+        image_url="https://references.example/opaque-token",
+    )
+
+    assert attempts == 1
+    assert result["status"] == "failed"
+    assert result["error_code"] == "PROVIDER_RATE_LIMITED"
+    assert result["retry_after_seconds"] == 17.0
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_invalid_shape_fails_before_network() -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={})
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    with pytest.raises(ValueError, match=r"8n \+ 1"):
+        await client.create_video(
+            prompt="motion",
+            image_url="https://references.example/token",
+            num_frames=120,
+        )
+    with pytest.raises(ValueError, match="first-frame reference"):
+        await client.create_video(prompt="motion")
+    assert calls == 0
 
 
 async def _video_run(session: AsyncSession) -> NodeRun:
@@ -422,6 +410,57 @@ async def test_video_poll_transport_error_keeps_remote_task_and_retries(
     assert op.provider_operation_id == "provider-video-1"
     assert op.status == "succeeded"
     assert op.response_summary["poll_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_worker_restart_resumes_persisted_operation_without_create(
+    session: AsyncSession,
+) -> None:
+    run = await _video_run(session)
+    operation = ProviderOperation(
+        node_run_id=run.id,
+        attempt_no=run.attempt_no,
+        purpose="primary",
+        operation_kind="video.generate",
+        actual_provider="agnes",
+        actual_model="agnes-video-v2.0",
+        provider_operation_id="provider-video-resume",
+        remote_secondary_id="task-video-resume",
+        protocol_profile="agnes_cn_v1",
+        request_fingerprint="b" * 64,
+        status="submitted",
+        request_summary={"reference_transport": "short_lived_https"},
+        response_summary={"create_status": "queued", "query_kind": "video_id"},
+    )
+    session.add(operation)
+    await session.commit()
+    run_id = run.id
+    operation_id = operation.id
+    session.expunge_all()
+
+    adapter = ResumeOnlyAgnesVideoAdapter()
+    result = await execute_media_node_run(
+        session,
+        node_run_id=run_id,
+        flux=adapter,  # type: ignore[arg-type]
+    )
+
+    assert result.node_type == "video"
+    assert adapter.poll_count == 1
+    operations = list(
+        (
+            await session.execute(
+                select(ProviderOperation).where(ProviderOperation.node_run_id == run_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(operations) == 1
+    assert operations[0].id == operation_id
+    assert operations[0].provider_operation_id == "provider-video-resume"
+    assert operations[0].status == "succeeded"
+    assert operations[0].response_summary["query_kind"] == "video_id"
 
 
 @pytest.mark.asyncio

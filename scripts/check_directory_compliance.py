@@ -28,6 +28,7 @@ ALLOWED_ROOT = {
     "06_受控混合Agent运行时规范.md",
     "DramaForge架构决策与技术选型书.md",
     "DramaForge双模式产品与架构汇报方案.md",
+    "Agnes-first通用Provider适配规划.md",
     "AI短剧工作台完整实施规划.md",
     "README.md",
     "CLAUDE.md",

@@ -14,13 +14,12 @@ from app.assets.models import Shot
 from app.config import get_settings
 from app.consistency.face_policy import approved_face_policy_snapshot, approved_face_threshold
 from app.execution.artifact_lineage import get_or_create_artifact
-from app.execution.models import Artifact, GraphNode, NodeRun
+from app.execution.models import Artifact, NodeRun
 from app.execution.product_path import identity_priority_keyframe_prompt
 from app.execution.runtime_invariants import mark_stale_downstream
 from app.execution.shot_p0 import is_shot_locked, set_shot_lock
 from app.execution.shot_pipeline import (
     SHOT_EDGES,
-    SHOT_NODE_BY_KEY,
     SHOT_NODES,
     SHOT_PIPELINE_TEMPLATE_KEY,
     shot_pipeline_definition,
@@ -134,9 +133,10 @@ async def assert_shot_approvable(session: AsyncSession, *, project_id: UUID, sho
             # Manual audited completion stores status=passed
             if status in {"blocked", "fail", "failed", "reject"}:
                 blocked.append(f"{key}:{status}")
-            if key == "face_review" and (run.input_snapshot or {}).get(
-                "lead_identity_required"
-            ) is True:
+            if (
+                key == "face_review"
+                and (run.input_snapshot or {}).get("lead_identity_required") is True
+            ):
                 policy = approved_face_policy_snapshot()
                 if (run.input_snapshot or {}).get("face_policy") != policy:
                     blocked.append("face_review:policy_mismatch")
@@ -317,6 +317,9 @@ async def start_shot_nodes(
     assert graph.current_version_id is not None
     version_id = graph.current_version_id
     version = await session.get(GraphVersion, version_id)
+    materialized = await graphs.materialize_definition(version_id=version_id)
+    if version is not None and version.status == "draft":
+        version = await graphs.publish(version_id=version_id, published_by=user_id)
     definition = dict(version.definition or {}) if version is not None else {}
     shot_plan = definition.get("shot")
     if not isinstance(shot_plan, dict):
@@ -342,45 +345,62 @@ async def start_shot_nodes(
         .all()
     )
     latest_by_key = _latest_by_node_key(_shot_runs(existing_runs, shot_id))
-    canonical_object_key = ""
+    canonical_binding: dict[str, object] = {}
     canonical_locked_prompt = ""
     prior_keyframe = latest_by_key.get("keyframe")
     if prior_keyframe is not None:
         keyframe_snapshot = prior_keyframe.input_snapshot or {}
-        candidate = keyframe_snapshot.get("canonical_object_key")
-        if isinstance(candidate, str):
-            canonical_object_key = candidate
+        for field in (
+            "canonical_artifact_id",
+            "canonical_object_key",
+            "canonical_content_hash",
+            "canonical_mime_type",
+        ):
+            if keyframe_snapshot.get(field) is not None:
+                canonical_binding[field] = keyframe_snapshot[field]
         candidate_prompt = keyframe_snapshot.get("canonical_locked_prompt")
         if isinstance(candidate_prompt, str):
             canonical_locked_prompt = candidate_prompt
-    probe_object_key = ""
+    if not canonical_binding:
+        from app.assets.models import Asset, Character, CharacterReference
+
+        canonical = (
+            await session.execute(
+                select(CharacterReference, Character.locked_prompt, Artifact)
+                .join(Character, Character.id == CharacterReference.character_id)
+                .join(Asset, Asset.id == Character.id)
+                .outerjoin(Artifact, Artifact.id == CharacterReference.artifact_id)
+                .where(Asset.project_id == project_id)
+                .where(CharacterReference.is_canonical.is_(True))
+                .order_by(CharacterReference.created_at.desc(), CharacterReference.id.desc())
+                .limit(1)
+            )
+        ).one_or_none()
+        if canonical is not None:
+            reference, locked_prompt, artifact = canonical
+            if artifact is not None and reference.artifact_id is not None:
+                canonical_binding = {
+                    "canonical_artifact_id": str(artifact.id),
+                    "canonical_object_key": artifact.object_key,
+                    "canonical_content_hash": artifact.content_hash,
+                    "canonical_mime_type": artifact.mime_type,
+                }
+            if isinstance(locked_prompt, str):
+                canonical_locked_prompt = locked_prompt
+    probe_binding: dict[str, object] = {}
     if prior_keyframe is not None and prior_keyframe.result_artifact_id is not None:
         artifact = await session.get(Artifact, prior_keyframe.result_artifact_id)
         if artifact is not None:
-            probe_object_key = artifact.object_key
+            probe_binding = {
+                "probe_artifact_id": str(artifact.id),
+                "probe_object_key": artifact.object_key,
+                "probe_content_hash": artifact.content_hash,
+                "probe_mime_type": artifact.mime_type,
+            }
 
     run_ids: list[UUID] = []
     for key in keys:
-        # Reuse graph node if already present for this version
-        node = (
-            await session.execute(
-                select(GraphNode).where(
-                    GraphNode.graph_version_id == version_id,
-                    GraphNode.node_key == key,
-                )
-            )
-        ).scalar_one_or_none()
-        if node is None:
-            spec = SHOT_NODE_BY_KEY[key]
-            node = GraphNode(
-                graph_version_id=version_id,
-                node_key=key,
-                node_type=spec.node_type,
-                display_name=spec.display_name,
-                cacheable=True,
-            )
-            session.add(node)
-            await session.flush()
+        node = materialized.nodes[key]
         prior_for_node = [run for run in existing_runs if run.graph_node_id == node.id]
         latest = latest_by_key.get(key)
         if (
@@ -419,12 +439,11 @@ async def start_shot_nodes(
             "lead_identity_required": lead_identity_required,
             "face_policy": approved_face_policy_snapshot(),
         }
-        if canonical_object_key:
-            snapshot["canonical_object_key"] = canonical_object_key
+        snapshot.update(canonical_binding)
         if canonical_locked_prompt:
             snapshot["canonical_locked_prompt"] = canonical_locked_prompt
-        if key in {"face_review", "video_drift_review"} and probe_object_key:
-            snapshot["probe_object_key"] = probe_object_key
+        if key == "face_review":
+            snapshot.update(probe_binding)
         run = NodeRun(
             project_id=project_id,
             graph_version_id=version_id,
@@ -548,25 +567,10 @@ async def upload_manual_media(
         graph = existing
     assert graph.current_version_id is not None
     version_id = graph.current_version_id
-    node = (
-        await session.execute(
-            select(GraphNode).where(
-                GraphNode.graph_version_id == version_id,
-                GraphNode.node_key == node_key,
-            )
-        )
-    ).scalar_one_or_none()
-    if node is None:
-        spec = SHOT_NODE_BY_KEY[node_key]
-        node = GraphNode(
-            graph_version_id=version_id,
-            node_key=node_key,
-            node_type=spec.node_type,
-            display_name=spec.display_name,
-            cacheable=True,
-        )
-        session.add(node)
-        await session.flush()
+    materialized = await graphs.materialize_definition(version_id=version_id)
+    if materialized.version.status == "draft":
+        await graphs.publish(version_id=version_id, published_by=user_id)
+    node = materialized.nodes[node_key]
     prior = list(
         (
             await session.execute(
@@ -678,7 +682,23 @@ async def shot_status_summary(
 def _retry_suggestion(code: str) -> str:
     mapping = {
         "PROVIDER_NOT_CONFIGURED": "配置 BYOK Provider 或使用受审计手工媒体上传",
+        "MODEL_BINDING_NOT_VERIFIED": (
+            "完成 documented、contract_tested、account_verified、quality_gated 四层证据"
+        ),
         "CANONICAL_REFERENCE_REQUIRED": "先注册主角 canonical Reference",
+        "UPSTREAM_RUN_MISSING": "检查同 Shot、同 GraphVersion、同 attempt 的上游 NodeRun",
+        "UPSTREAM_TERMINAL_FAILURE": "先处理首个上游失败节点，再从该节点及真实下游局部重跑",
+        "UPSTREAM_ARTIFACT_MISSING": "核对上游 Run、Artifact、对象存储状态和 content hash",
+        "PROVIDER_TASK_PENDING": "保留远端任务 ID，恢复 Worker 后继续 Poll，不重新创建任务",
+        "PROVIDER_SUBMISSION_UNKNOWN": "人工核对 Provider 任务和账单后再决定是否创建新 attempt",
+        "PROVIDER_CREATE_FAILED": "检查脱敏 Provider 错误和请求合同，只重试当前创建节点",
+        "PROVIDER_TASK_FAILED": "检查远端任务错误；确认后只重跑当前 Provider 节点及下游",
+        "PROVIDER_MEDIA_DOWNLOAD_FAILED": "续查同一远端任务或结果 URL，修复下载后再入库",
+        "FACE_BELOW_THRESHOLD": "保持 0.60 阈值，从 Keyframe 返工，最多使用批准的有限次数",
+        "FACE_PROBE_UNAVAILABLE": "检查两源 Artifact、InsightFace 和画面清晰度后进入人工复核",
+        "VIDEO_DRIFT_BLOCKED": "查看抽样时间点和分数，从 Video 及下游重跑",
+        "VIDEO_DRIFT_POLICY_UNAPPROVED": "等待 Video Drift 策略校准和批准，不把 needs_human 当通过",
+        "blocked_budget": "增加或调整项目预算后重试原节点，不创建 ProviderOperation",
         "PROVIDER_FAILED": "检查 Provider 状态后重试该节点及正确下游",
         "QUEUE_UNAVAILABLE": "启动 Redis 与 Arq Worker 后 dispatch/enqueue",
         "APPROVE_GATE": "先完成必需节点与 face/continuity 审核",

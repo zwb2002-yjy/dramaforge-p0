@@ -145,8 +145,16 @@ async def test_worker_persists_unhandled_provider_failure(
         _ = args, kwargs
         raise ValidationAppError("PROVIDER_FAILED: hub overloaded")
 
+    async def ready(*args: object, **kwargs: object) -> SimpleNamespace:
+        _ = args, kwargs
+        return SimpleNamespace(action="ready")
+
     monkeypatch.setattr("app.workers.jobs.get_session_factory", lambda: factory)
     monkeypatch.setattr("app.workers.jobs.set_node_run_rls_context", resolve_scope)
+    monkeypatch.setattr(
+        "app.execution.runtime_invariants.evaluate_required_dependencies",
+        ready,
+    )
     monkeypatch.setattr("app.execution.product_path.claim_media_node_run", claim)
     monkeypatch.setattr("app.execution.product_path.execute_media_node_run", fail)
 
@@ -205,8 +213,16 @@ async def test_worker_retries_composite_while_source_media_is_pending(
     async def claim(*args: object, **kwargs: object) -> NodeRun:
         raise AssertionError("pending composite must not be claimed")
 
+    async def ready(*args: object, **kwargs: object) -> SimpleNamespace:
+        _ = args, kwargs
+        return SimpleNamespace(action="ready")
+
     monkeypatch.setattr("app.workers.jobs.get_session_factory", lambda: factory)
     monkeypatch.setattr("app.workers.jobs.set_node_run_rls_context", resolve_scope)
+    monkeypatch.setattr(
+        "app.execution.runtime_invariants.evaluate_required_dependencies",
+        ready,
+    )
     monkeypatch.setattr("app.execution.composite_media.composite_inputs_pending", pending)
     monkeypatch.setattr("app.execution.product_path.claim_media_node_run", claim)
 

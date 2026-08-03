@@ -1,4 +1,4 @@
-﻿"""Shipped product path using shared get_object_store() singleton."""
+"""Shipped product path using shared get_object_store() singleton."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from app.delivery.export_service import build_project_export
 from app.events import models as _em  # noqa: F401
 from app.events.models import OutboxEvent
 from app.execution import models as _xm  # noqa: F401
+from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import Artifact, NodeRun
 from app.execution.product_path import execute_media_node_run
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0, set_shot_lock
@@ -105,10 +106,10 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
         "plan": {"prompt": "keyframe neon"},
     }
     await session.flush()
+
     # Unit tests: mock Arq (commit-then-enqueue still runs; no live Redis required)
     async def _fake_arq(self, node_run_id):  # type: ignore[no-untyped-def]
         return f"test-job:{node_run_id}"
-
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(AgentRunScheduler, "_enqueue_node_run", _fake_arq)
@@ -139,17 +140,20 @@ async def test_shipped_keyframe_via_creation_and_worker_entry(session: AsyncSess
         try_ffmpeg=False,
         require_approved=False,
     )
-    assert exp.timeline_hash == (
-        await build_project_export(
-            session,
-            project_id=project_id,
-            requested_by=user.id,
-            shot_subtitles=[("1", "Hi")],
-            store=store,
-            try_ffmpeg=False,
-            require_approved=False,
-        )
-    ).timeline_hash
+    assert (
+        exp.timeline_hash
+        == (
+            await build_project_export(
+                session,
+                project_id=project_id,
+                requested_by=user.id,
+                shot_subtitles=[("1", "Hi")],
+                store=store,
+                try_ffmpeg=False,
+                require_approved=False,
+            )
+        ).timeline_hash
+    )
 
 
 @pytest.mark.asyncio
@@ -181,10 +185,27 @@ async def test_lead_keyframe_passes_canonical_bytes_to_provider(session: AsyncSe
     canonical = b"canonical-reference-bytes"
     store = get_object_store()
     canonical_key = f"projects/{started.project_id}/canonical/identity.png"
-    await store.put_bytes(object_key=canonical_key, data=canonical, mime_type="image/png")
+    stored = await store.put_bytes(
+        object_key=canonical_key,
+        data=canonical,
+        mime_type="image/png",
+    )
+    canonical_artifact = await get_or_create_artifact(
+        session,
+        project_id=started.project_id,
+        artifact_type="image",
+        object_key=stored.object_key,
+        content_hash=stored.content_hash,
+        mime_type=stored.mime_type,
+        byte_size=stored.byte_size,
+        produced_by_run_id=None,
+    )
     run.input_snapshot = {
         **(run.input_snapshot or {}),
-        "canonical_object_key": canonical_key,
+        "canonical_artifact_id": str(canonical_artifact.id),
+        "canonical_object_key": canonical_artifact.object_key,
+        "canonical_content_hash": canonical_artifact.content_hash,
+        "canonical_mime_type": canonical_artifact.mime_type,
         "lead_identity_required": True,
     }
 
@@ -230,9 +251,7 @@ async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
         actor=user,
     )
     await session.commit()
-    shots = await produce_shots_p0(
-        session, project_id=project.id, user_id=user.id, n=10
-    )
+    shots = await produce_shots_p0(session, project_id=project.id, user_id=user.id, n=10)
     assert len(shots) == 10
     assert all(len(s.node_ids) == 9 for s in shots)
     assert all(s.face_checked and s.continuity_checked for s in shots)
@@ -513,10 +532,10 @@ async def test_explicit_enqueue_reuses_materialization_outbox(
     await AgentRunScheduler(session).enqueue_node_run_only(mat.node_run_id)
 
     outbox_rows = (
-        await session.execute(
-            select(OutboxEvent).where(OutboxEvent.topic == "node_run.enqueue")
-        )
-    ).scalars().all()
+        (await session.execute(select(OutboxEvent).where(OutboxEvent.topic == "node_run.enqueue")))
+        .scalars()
+        .all()
+    )
     matching = [
         row
         for row in outbox_rows

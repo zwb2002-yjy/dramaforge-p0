@@ -19,7 +19,6 @@ from app.execution.product_path import execute_media_node_run
 from app.execution.runtime_invariants import mark_stale_downstream
 from app.execution.shot_pipeline import (
     SHOT_EDGES,
-    SHOT_NODE_BY_KEY,
     SHOT_NODES,
     SHOT_PIPELINE_TEMPLATE_KEY,
     shot_pipeline_definition,
@@ -292,6 +291,13 @@ async def produce_shots_p0(
             definition=shot_pipeline_definition(),
         )
         assert graph.current_version_id is not None
+        materialized = await graphs.materialize_definition(
+            version_id=graph.current_version_id
+        )
+        await graphs.publish(
+            version_id=graph.current_version_id,
+            published_by=user_id,
+        )
         rec = ShotRecord(
             shot_id=shot_id,
             graph_id=graph.id,
@@ -305,16 +311,7 @@ async def produce_shots_p0(
         keyframe_artifact_id: UUID | None = None
 
         for key in SHOT_NODES:
-            spec = SHOT_NODE_BY_KEY[key]
-            node = GraphNode(
-                graph_version_id=graph.current_version_id,
-                node_key=key,
-                node_type=spec.node_type,
-                display_name=spec.display_name,
-                cacheable=True,
-            )
-            session.add(node)
-            await session.flush()
+            node = materialized.nodes[key]
             rec.node_ids[key] = node.id
 
             if key == "continuity_review":

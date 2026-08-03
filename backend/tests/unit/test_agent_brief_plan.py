@@ -10,6 +10,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from app.access.models import User, Workspace
+from app.assets.characters import register_lead_character
 from app.assets.models import Shot
 from app.config import Settings
 from app.creation import models as _cm  # noqa: F401
@@ -21,7 +22,7 @@ from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.execution.shot_p0 import SHOT_NODES
 from app.execution.shot_review import start_shot_nodes
 from app.production.models import GraphVersion
-from app.providers.fake import FakeOpenAIAdapter
+from app.providers.fake import FakeFluxAdapter, FakeOpenAIAdapter
 from app.providers.openai import AnthropicCompatibleTextAdapter
 from app.runtime.scheduler import WorkerRuntime
 from app.shared.base import Base
@@ -583,7 +584,9 @@ async def test_confirm_plan_materializes_real_shots_and_keyframe_runs(
     assert len(result.node_run_ids) == 3
     assert result.node_run_id == result.node_run_ids[0]
     assert {str(run.input_snapshot["shot_id"]) for run in runs} == {str(shot.id) for shot in shots}
-    assert all(run.input_snapshot["node_key"] == "keyframe" for run in runs)
+    assert {str(run.input_snapshot["node_key"]) for run in runs} == {"prompt", "keyframe"}
+    assert sum(run.status == "completed" for run in runs) == 3
+    assert sum(run.status == "queued" for run in runs) == 3
 
 
 @pytest.mark.asyncio
@@ -614,6 +617,17 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
         aspect_ratio="9:16",
         actor=user,
         idea="A detective follows a neon-rain clue through one dangerous night.",
+    )
+    canonical_adapter = FakeFluxAdapter()
+    canonical_result = await canonical_adapter.create(
+        {"prompt": "canonical lead", "kind": "keyframe"}
+    )
+    await register_lead_character(
+        session,
+        project_id=started.project_id,
+        name="Lead",
+        locked_prompt="Lead character identity",
+        canonical_image_bytes=canonical_adapter.blobs[canonical_result["remote_task_id"]],
     )
     brief = await service.generate_brief_agent(
         project_id=started.project_id,
@@ -688,13 +702,14 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
     }
     artifact_ids: set[object] = set()
     artifact_object_keys: set[str] = set()
+    expected_artifact_count = 0
     for shot_id in materialized.shot_ids:
         shot_runs = [
             run for run in runs if str((run.input_snapshot or {}).get("shot_id")) == str(shot_id)
         ]
         by_key = {str((run.input_snapshot or {}).get("node_key")): run for run in shot_runs}
         assert set(SHOT_NODES).issubset(by_key)
-        for key in SHOT_NODES:
+        for key in {"prompt", "keyframe", "face_review", "voice", "subtitle"}:
             run = by_key[key]
             assert run.status in done, (
                 f"shot={shot_id} node={key} status={run.status} "
@@ -705,8 +720,30 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
             assert artifact.produced_by_run_id == run.id
             artifact_ids.add(artifact.id)
             artifact_object_keys.add(artifact.object_key)
-    assert len(artifact_ids) == 10 * len(SHOT_NODES)
-    assert len(artifact_object_keys) == 10 * len(SHOT_NODES)
+        expected_artifact_count += 5
+        identity_required = (
+            by_key["face_review"].input_snapshot.get("lead_identity_required") is True
+        )
+        if identity_required:
+            assert by_key["face_review"].output_summary["status"] in {
+                "needs_human",
+                "blocked",
+            }
+            assert by_key["video"].status == "failed"
+            assert by_key["video"].error_code == "UPSTREAM_TERMINAL_FAILURE"
+            assert by_key["video"].result_artifact_id is None
+        else:
+            assert by_key["face_review"].output_summary["status"] == "not_applicable"
+            for key in {"video", "video_drift_review", "composite", "continuity_review"}:
+                run = by_key[key]
+                assert run.status in done
+                assert run.result_artifact_id is not None
+                artifact = artifacts_by_id[run.result_artifact_id]
+                artifact_ids.add(artifact.id)
+                artifact_object_keys.add(artifact.object_key)
+                expected_artifact_count += 1
+    assert len(artifact_ids) == expected_artifact_count
+    assert len(artifact_object_keys) == expected_artifact_count
 
 
 @pytest.mark.asyncio

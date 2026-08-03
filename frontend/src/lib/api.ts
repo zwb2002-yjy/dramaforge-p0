@@ -110,6 +110,187 @@ export type WorkspaceRead = {
   name: string;
 };
 
+export type ProviderConnectionRead = {
+  id: string;
+  workspace_id: string;
+  provider_type: string;
+  display_name: string;
+  base_url: string;
+  protocol_profile: string;
+  enabled: boolean;
+  credential_configured: boolean;
+  credential_key_version: string | null;
+  verification_status: string;
+  verified_at: string | null;
+};
+
+export type ProviderProbeRead = {
+  probe_id: string;
+  capability: string;
+  status: string;
+  evidence_level: string;
+  http_status: number | null;
+  provider_request_id: string | null;
+  reference_artifact_id: string | null;
+  remote_query_kind: string | null;
+  request_fingerprint: string;
+  budget_authorized: string;
+  provider_cost: string | null;
+  currency: string;
+  cost_status: string;
+  tested_at: string;
+  error_code: string | null;
+};
+
+export type ProviderModelBindingRead = {
+  id: string;
+  connection_id: string;
+  media_type: string;
+  model_id: string;
+  purpose: string;
+  enabled: boolean;
+  documented: boolean;
+  contract_tested: boolean;
+  account_verified: boolean;
+  quality_gated: boolean;
+};
+
+export type ProviderQualityEvidenceRead = {
+  id: string;
+  model_binding_id: string;
+  node_run_id: string;
+  artifact_id: string;
+  evidence_kind: string;
+  policy_id: string;
+  score: string | null;
+  approved_by: string;
+  created_at: string;
+};
+
+export type ProjectProviderBindingRead = {
+  id: string;
+  project_id: string;
+  purpose: string;
+  model_binding_id: string;
+  fallback_policy: string;
+};
+
+export function listProviderConnections(workspaceId: string): Promise<ProviderConnectionRead[]> {
+  return apiGet(`/api/v1/workspaces/${workspaceId}/provider-connections`);
+}
+
+export async function createProviderConnection(
+  workspaceId: string,
+  apiKey: string,
+): Promise<ProviderConnectionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/workspaces/${workspaceId}/provider-connections`,
+    {
+      provider_type: "agnes",
+      display_name: "Agnes 中国站",
+      protocol_profile: "agnes_cn_v1",
+      api_key: apiKey,
+      enabled: true,
+    },
+    csrf,
+  );
+}
+
+export async function updateProviderConnectionCredential(
+  workspaceId: string,
+  connectionId: string,
+  apiKey: string,
+): Promise<ProviderConnectionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "PUT",
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/credential`,
+    { api_key: apiKey },
+    csrf,
+  );
+}
+
+export function listProviderProbes(
+  workspaceId: string,
+  connectionId: string,
+): Promise<ProviderProbeRead[]> {
+  return apiGet(`/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/probes`);
+}
+
+export async function runProviderProbe(
+  workspaceId: string,
+  connectionId: string,
+  input: {
+    capability: string;
+    reference_artifact_id?: string;
+    remote_task_id?: string;
+    remote_query_kind?: string;
+    budget_authorized?: string;
+  },
+): Promise<ProviderProbeRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/probes`,
+    input,
+    csrf,
+  );
+}
+
+export function listProviderModelBindings(
+  workspaceId: string,
+  connectionId: string,
+): Promise<ProviderModelBindingRead[]> {
+  return apiGet(
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/model-bindings`,
+  );
+}
+
+export async function createProviderModelBinding(
+  workspaceId: string,
+  connectionId: string,
+  input: { media_type: "image" | "video"; model_id: string; purpose: "keyframe" | "video" },
+): Promise<ProviderModelBindingRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/model-bindings`,
+    { ...input, enabled: true },
+    csrf,
+  );
+}
+
+export async function recordProviderQualityEvidence(
+  workspaceId: string,
+  connectionId: string,
+  modelBindingId: string,
+  input: { node_run_id: string; artifact_id: string },
+): Promise<ProviderQualityEvidenceRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/model-bindings/${modelBindingId}/quality-evidence`,
+    input,
+    csrf,
+  );
+}
+
+export async function bindProjectProvider(
+  projectId: string,
+  purpose: "keyframe" | "video",
+  modelBindingId: string,
+): Promise<ProjectProviderBindingRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "PUT",
+    `/api/v1/projects/${projectId}/provider-bindings/${purpose}`,
+    { model_binding_id: modelBindingId, fallback_policy: "none" },
+    csrf,
+  );
+}
+
 export type ProjectRead = {
   id: string;
   workspace_id: string;
@@ -354,6 +535,19 @@ export type ProjectSnapshot = {
     output_summary: Record<string, unknown>;
     input_snapshot: Record<string, unknown>;
     idempotency_key: string;
+    attempt_no: number;
+    node_key: string;
+    provider_cost: string;
+    started_at: string | null;
+    finished_at: string | null;
+    error_code: string | null;
+    error_summary: string | null;
+    upstream_dependencies: Array<{
+      node_key: string;
+      run_id: string | null;
+      status: string;
+      result_artifact_id: string | null;
+    }>;
   }>;
   artifacts: Array<{
     id: string;

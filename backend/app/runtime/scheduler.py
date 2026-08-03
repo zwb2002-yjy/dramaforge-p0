@@ -23,6 +23,7 @@ from app.shared.db import (
 from app.shared.errors import (
     NodeRunAlreadyClaimedError,
     NotFoundError,
+    ProviderTaskPendingError,
     ValidationAppError,
 )
 
@@ -290,11 +291,25 @@ class WorkerRuntime:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def _rollback_if_active(self) -> None:
+        """Clear only an active transaction; do not expire committed ORM state."""
+        if self._session.in_transaction():
+            await self._session.rollback()
+
+    async def _commit_if_active(self) -> None:
+        """Close a transaction opened while inspecting a terminal run."""
+        if self._session.in_transaction():
+            await self._session.commit()
+
     async def process_queued(self, *, limit: int = 20) -> int:
         from app.execution.composite_media import composite_inputs_pending
         from app.execution.product_path import (
             claim_media_node_run,
             execute_media_node_run,
+        )
+        from app.execution.runtime_invariants import (
+            evaluate_required_dependencies,
+            fail_run_for_dependency,
         )
 
         candidates = await list_queued_node_run_rls_scopes(self._session, limit=limit)
@@ -304,6 +319,7 @@ class WorkerRuntime:
             next_deferred: list[tuple[UUID, NodeRunRlsScope]] = []
             progressed = False
             for run_id, scope in deferred:
+                current: NodeRun | None = None
                 try:
                     await set_rls_context(
                         self._session,
@@ -313,10 +329,23 @@ class WorkerRuntime:
                     )
                     current = await self._session.get(NodeRun, run_id)
                     if current is None:
-                        await self._session.rollback()
                         continue
+                    dependency = await evaluate_required_dependencies(self._session, run=current)
+                    if dependency.action == "defer":
+                        next_deferred.append((run_id, scope))
+                        continue
+                    if dependency.action == "fail":
+                        await fail_run_for_dependency(
+                            self._session,
+                            run=current,
+                            decision=dependency,
+                        )
+                        await self._session.commit()
+                        progressed = True
+                        n += 1
+                        continue
+                    # Composite-specific additional check (media key matching)
                     if await composite_inputs_pending(self._session, run=current):
-                        await self._session.rollback()
                         next_deferred.append((run_id, scope))
                         continue
                     await claim_media_node_run(self._session, node_run_id=run_id)
@@ -328,24 +357,33 @@ class WorkerRuntime:
                     await self._session.commit()
                     progressed = True
                 except NodeRunAlreadyClaimedError:
-                    await self._session.rollback()
+                    await self._rollback_if_active()
+                    continue
+                except ProviderTaskPendingError:
+                    await self._rollback_if_active()
+                    next_deferred.append((run_id, scope))
                     continue
                 except Exception as exc:  # noqa: BLE001
-                    await self._session.rollback()
+                    # Product execution can commit a terminal Provider/validation
+                    # result before raising so the boundary cannot erase it. A
+                    # read after that commit still autobegins a transaction, and
+                    # rolling it back would expire ORM objects owned by callers.
+                    if current is not None and current.status not in {"queued", "running"}:
+                        await self._commit_if_active()
+                    else:
+                        await self._rollback_if_active()
                     if await set_node_run_rls_context(self._session, node_run_id=run_id) is None:
                         continue
                     current = await self._session.get(NodeRun, run_id)
                     if current is not None and current.status in {"queued", "running"}:
                         current.status = "failed"
-                        current.error_code = (
-                            getattr(exc, "code", None) or "NODE_EXECUTION_FAILED"
-                        )
+                        current.error_code = getattr(exc, "code", None) or "NODE_EXECUTION_FAILED"
                         current.error_summary = str(exc)[:500]
                         from datetime import UTC, datetime
 
                         current.finished_at = datetime.now(UTC)
                         await self._session.flush()
-                        await self._session.commit()
+                    await self._commit_if_active()
                     progressed = True
                 n += 1
             if not progressed:
@@ -358,18 +396,40 @@ class WorkerRuntime:
             claim_media_node_run,
             execute_media_node_run,
         )
+        from app.execution.runtime_invariants import (
+            evaluate_required_dependencies,
+            fail_run_for_dependency,
+        )
 
         if await set_node_run_rls_context(self._session, node_run_id=node_run_id) is None:
             raise NotFoundError("node_run not found")
+        current = await self._session.get(NodeRun, node_run_id)
+        if current is None:
+            raise NotFoundError("node_run not found")
+        dependency = await evaluate_required_dependencies(self._session, run=current)
+        if dependency.action == "defer":
+            return False
+        if dependency.action == "fail":
+            await fail_run_for_dependency(
+                self._session,
+                run=current,
+                decision=dependency,
+            )
+            await self._session.commit()
+            return True
         try:
             await claim_media_node_run(self._session, node_run_id=node_run_id)
         except NodeRunAlreadyClaimedError:
-            await self._session.rollback()
+            await self._rollback_if_active()
             return False
-        await execute_media_node_run(
-            self._session,
-            node_run_id=node_run_id,
-            already_claimed=True,
-        )
+        try:
+            await execute_media_node_run(
+                self._session,
+                node_run_id=node_run_id,
+                already_claimed=True,
+            )
+        except ProviderTaskPendingError:
+            await self._rollback_if_active()
+            return False
         await self._session.commit()
         return True
