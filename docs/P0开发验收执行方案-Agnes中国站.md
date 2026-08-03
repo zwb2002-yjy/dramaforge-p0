@@ -1241,8 +1241,8 @@ cd D:\dramaforge\backend
 IMPLEMENTED SCOPE: PASS（Graph、Agnes Adapter、Connection/Reference、Face 血缘、UI、Mock E2E）
 OPEN DEVELOPMENT ITEMS: 部分解除（Canonical 审计父级、全历史 Ruff 已修复；Video Drift 策略批准仍 BLOCKED）
 AUTOMATED VERIFICATION: PASS（含全历史 migration Ruff）
-REAL AGNES PROVIDER PROOF: BLOCKED
-CURRENT COMMIT FORMAL PROOF: BLOCKED（候选 commit cee5306 已形成，待真实 Provider 证据）
+REAL AGNES PROVIDER PROOF: 部分 PASS（鉴权、T2I、Canonical I2I 已 `account_verified`；I2V 与 Face 评分证据仍 BLOCKED）
+CURRENT COMMIT FORMAL PROOF: BLOCKED（候选 commit cee5306 已形成，栈已绑定 339569c，待 Face/Video 证据）
 MANUAL ACCEPTANCE: BLOCKED
 FINAL VERDICT: BLOCKED / NOT ACCEPTED
 ```
@@ -1266,7 +1266,10 @@ FINAL VERDICT: BLOCKED / NOT ACCEPTED
 | Frontend production build | Vite build 通过 | `PASS` |
 | Playwright smoke | `1 passed` | `PASS` |
 | Playwright P0 mock | `1 passed`；10 Shot Brief/Plan、Connection、四层证据、九节点错误、审核、字幕返工、导出 | `PASS` |
-| Agnes 真实 Image Probe | 2026-08-04：`/v1/models`、`image_t2i`、`image_i2i` 均 `401 / PROVIDER_AUTH_FAILED`；“无效的令牌”；无 remote ID/Artifact | `BLOCKED` |
+| Agnes 真实鉴权 Probe | 2026-08-04（有效 Key）：`auth_models` → `passed / account_verified`，HTTP 200，Connection `verified` | `PASS` |
+| Agnes 真实 T2I Probe | 2026-08-04：`image_t2i` → `passed / account_verified`，真实图片生成成功（remote task 有值） | `PASS` |
+| §3.1 Gate（绑定候选 339569c） | `20 PASS / 0 FAIL / 4 BLOCKED`：Agent brief/plan 真实文本、10 Shot 物化、Canonical 真实 I2I 生成（`3.1.9` 不再是 fail-closed）；`3.1.10/3.1.11/3.1.18` BLOCKED 因 gate 不跑完整媒体管线 | `PASS`（栈验证） |
+| Agnes 真实 Image Probe（旧 Key） | 2026-08-04 早前：`/v1/models`、`image_t2i`、`image_i2i` 均 `401 / PROVIDER_AUTH_FAILED`（Connection 与 `.env` 存的是旧 Key）；已更新为有效 Key | 已解除 |
 | Directory compliance | `Directory compliance OK` | `PASS` |
 | `git diff --check` | 通过；仅已有 CRLF 转 LF warning | `PASS` |
 | tracked 文本 Key-like scan | 命中文件数 `0` | `PASS` |
@@ -1308,9 +1311,9 @@ Playwright 使用 DOM、可访问名称、网络失败、console、page error �
 ### 22.5 正式阻断清单
 
 1. ~~**候选源不成立**~~：已解除。工作树 63 条变更已形成候选 commit `cee5306`，并叠加 `9191b6a`（Canonical 审计父级）、`82c320f`（全历史 Ruff 清理）及后续验收记录提交。`git status` 干净；下一步按候选提交构建 Compose 并核对 `/health.source_commit`。
-2. **公网 Reference 不成立**：`REFERENCE_PUBLIC_BASE_URL` 未配置；真实 Agnes Video I2V 不应启动。配置管道已 fail-closed（非 HTTPS/localhost/私网均拒绝），设公网 HTTPS origin 即可解除。
-3. **Agnes Key 未通过鉴权**：用户已明确 Agnes 免费、不考虑费用，官方也确认存在“免费 / 默认用户”，但当前 Key 在 2026-08-04 真实 Probe 中返回 401（“无效的令牌”），需在 Agnes 开发者控制台确认/重新生成有效 Key 后重试鉴权与 Image Probe。
-4. **真实 Provider 证据缺失**：未生成当前账户 I2I/I2V 脱敏 Fixture、remote ID、成本、下载 Artifact 和三段 SHA-256 证据。
+2. **公网 Reference 不成立**：`REFERENCE_PUBLIC_BASE_URL` 未配置；真实 Agnes Video I2V 不应启动。配置管道已 fail-closed（非 HTTPS/localhost/私网均拒绝），设公网 HTTPS origin 即可解除（本地图片链不需要它）。
+3. ~~**Agnes Key 未通过鉴权**~~：已解除。2026-08-04 更新为有效 Key 后，`auth_models` 与 `image_t2i` 均 `passed / account_verified`（HTTP 200、真实图片生成成功）；`AGNES_API_KEY`（`.env`）与 Connection 凭证均已更新为有效 Key。
+4. **真实 Provider 证据部分缺失**：已确认鉴权 + T2I + Canonical 真实 I2I 生成（§3.1 Gate `3.1.9` PASS，含真实 remote ID）；仍缺 I2V 脱敏 Fixture（需公网 origin）、Face `>= 0.60` 评分证据（需跑单 Shot/10 Shot 完整管线）、成本、下载 Artifact 和三段 SHA-256 完整链。
 5. **Video Drift 未批准**：实现保持 `PROBE_REQUIRED`，固定样本分布、阈值和 approval ID 尚未批准。
 6. ~~**Canonical 审计父级缺口**~~：已解除。`9191b6a` 引入 `create_canonical_generation_run`（最小单节点 canonical graph + running NodeRun 作为审计父级）、`record_canonical_provider_operation`（ProviderOperation 挂 `node_run_id`），Artifact 经 `produced_by_run_id` 回链 Run；XOR 约束满足（单测 `test_canonical_generation_has_audit_parent_run` 断言 `node_run_id` 非空、`agent_run_id` 为空）。
 7. **当前候选 10 Shot 缺失**：没有当前 commit 的 10 Shot x 9 Node、真实 Face/Drift/Continuity、个人审核、字幕局部返工和四项交付证明。
