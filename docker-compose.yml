@@ -69,7 +69,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: dramaforge
       SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:-dev-only-fernet-key-replace-in-prod==}
       CORS_ORIGINS: http://localhost:5173
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
@@ -120,7 +120,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: dramaforge
       SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:-dev-only-fernet-key-replace-in-prod==}
       OUTBOX_DISPATCH_INTERVAL_SECONDS: ${OUTBOX_DISPATCH_INTERVAL_SECONDS:-1}
     depends_on:
       migrate:
@@ -143,7 +143,7 @@ services:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:-dev-only-fernet-key-replace-in-prod==}
       WORKER_KIND: default
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
@@ -189,7 +189,7 @@ services:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:-dev-only-fernet-key-replace-in-prod==}
       WORKER_KIND: heavy
       ARQ_HEAVY_MAX_JOBS: ${ARQ_HEAVY_MAX_JOBS:-4}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
