@@ -33,6 +33,7 @@ REQUIRED_APPROVE_NODES: tuple[str, ...] = (
     "keyframe",
     "face_review",
     "video",
+    "video_drift_review",
     "voice",
     "subtitle",
     "composite",
@@ -117,7 +118,7 @@ async def assert_shot_approvable(session: AsyncSession, *, project_id: UUID, sho
             )
             if not manual:
                 no_artifact.append(key)
-        if key in {"face_review", "continuity_review"}:
+        if key in {"face_review", "video_drift_review", "continuity_review"}:
             summary = run.output_summary or {}
             status = str(
                 summary.get("status")
@@ -125,6 +126,17 @@ async def assert_shot_approvable(session: AsyncSession, *, project_id: UUID, sho
                 or summary.get("face_review")
                 or ""
             )
+            if key == "video_drift_review":
+                # Drift gate is passed-only: blocked/needs_human must be resolved
+                # by re-running the video, never bypassed by approve.
+                if status == "not_applicable":
+                    applicable = (run.input_snapshot or {}).get("lead_identity_required")
+                    if applicable is not False:
+                        blocked.append("video_drift_review:invalid_not_applicable")
+                    continue
+                if status != "passed":
+                    blocked.append(f"video_drift_review:{status}")
+                continue
             if key == "face_review" and status == "not_applicable":
                 applicable = (run.input_snapshot or {}).get("lead_identity_required")
                 if applicable is not False:

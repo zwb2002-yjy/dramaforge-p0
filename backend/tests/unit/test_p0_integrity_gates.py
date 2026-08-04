@@ -17,7 +17,12 @@ from app.delivery.export_service import build_project_export
 from app.events import models as _em  # noqa: F401
 from app.execution import models as _xm  # noqa: F401
 from app.execution.models import Artifact, GraphNode, NodeRun
-from app.execution.shot_review import approve_shot, assert_shot_approvable, upload_manual_media
+from app.execution.shot_review import (
+    REQUIRED_APPROVE_NODES,
+    approve_shot,
+    assert_shot_approvable,
+    upload_manual_media,
+)
 from app.production import models as _pm  # noqa: F401
 from app.production.models import GraphVersion, ProductionGraph, definition_hash
 from app.shared.base import Base
@@ -378,3 +383,114 @@ async def test_assert_approvable_requires_required_nodes(session: AsyncSession) 
     _user, project, shot = await _seed(session)
     with pytest.raises(ValidationAppError):
         await assert_shot_approvable(session, project_id=project.id, shot_id=shot.id)
+
+
+async def _complete_approve_nodes(
+    session: AsyncSession,
+    user: User,
+    project: Project,
+    shot: Shot,
+    *,
+    drift_status: str,
+) -> NodeRun:
+    """Build a shot graph with completed runs for every approve-required node."""
+    from app.consistency.face_policy import approved_face_policy_snapshot
+    from app.execution.shot_pipeline import shot_pipeline_definition
+
+    g = ProductionGraph(
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        template_key="shot-p0-v1",
+        created_by=user.id,
+    )
+    session.add(g)
+    await session.flush()
+    body = shot_pipeline_definition()
+    gv = GraphVersion(
+        graph_id=g.id,
+        version_number=1,
+        status=GraphStatus.PUBLISHED.value,
+        definition_hash=definition_hash(body),
+        definition=body,
+    )
+    session.add(gv)
+    await session.flush()
+    g.current_version_id = gv.id
+    nodes: dict[str, GraphNode] = {}
+    for entry in body["nodes"]:
+        node = GraphNode(
+            graph_version_id=gv.id,
+            node_key=entry["key"],
+            node_type=entry["type"],
+            display_name=entry["display_name"],
+            cacheable=True,
+        )
+        session.add(node)
+        await session.flush()
+        nodes[entry["key"]] = node
+
+    media = ("keyframe", "video", "voice", "subtitle", "composite")
+    drift_run: NodeRun | None = None
+    for key in REQUIRED_APPROVE_NODES:
+        run = NodeRun(
+            project_id=project.id,
+            graph_version_id=gv.id,
+            graph_node_id=nodes[key].id,
+            attempt_no=1,
+            idempotency_key=f"seed:{key}:{shot.id}",
+            input_hash=key * 8,
+            status="completed",
+            input_snapshot={
+                "shot_id": str(shot.id),
+                "node_key": key,
+                "lead_identity_required": False,
+                "face_policy": approved_face_policy_snapshot(),
+            },
+            created_by=user.id,
+        )
+        session.add(run)
+        await session.flush()
+        if key in media:
+            run.result_artifact_id = uuid4()
+            run.output_summary = {"status": "passed"}
+        elif key == "face_review":
+            run.output_summary = {"status": "not_applicable"}
+        elif key == "video_drift_review":
+            run.output_summary = {"status": drift_status}
+            drift_run = run
+        elif key == "continuity_review":
+            run.output_summary = {"status": "passed"}
+    await session.flush()
+    assert drift_run is not None
+    return drift_run
+
+
+@pytest.mark.asyncio
+async def test_approve_requires_passed_video_drift_review(session: AsyncSession) -> None:
+    user, project, shot = await _seed(session)
+    drift_run = await _complete_approve_nodes(
+        session, user, project, shot, drift_status="not_applicable"
+    )
+
+    # not_applicable (lead_identity_required False) stays approvable.
+    await assert_shot_approvable(session, project_id=project.id, shot_id=shot.id)
+
+    # A blocked drift review must block approve even when composite/continuity pass.
+    drift_run.output_summary = {"status": "blocked", "drift_mean_score": 0.2}
+    await session.flush()
+    with pytest.raises(ValidationAppError) as ei:
+        await assert_shot_approvable(session, project_id=project.id, shot_id=shot.id)
+    assert "video_drift_review:blocked" in ei.value.message
+
+    # needs_human must also block approve (resolved by video re-run, not bypassed).
+    drift_run.output_summary = {"status": "needs_human"}
+    await session.flush()
+    with pytest.raises(ValidationAppError) as ei:
+        await assert_shot_approvable(session, project_id=project.id, shot_id=shot.id)
+    assert "video_drift_review:needs_human" in ei.value.message
+
+    # A passed drift review is required and approvable.
+    drift_run.output_summary = {"status": "passed", "drift_mean_score": 0.5}
+    await session.flush()
+    await assert_shot_approvable(session, project_id=project.id, shot_id=shot.id)
