@@ -464,6 +464,22 @@ class AgnesHubClient:
             }
         data = _json_object(response)
         if response.status_code >= 400:
+            # Transient provider throttle/unavailability during polling must not
+            # be terminal: the remote task already exists (plan §11.2). Keep the
+            # poll alive on the same task; only genuine 4xx (bad task id, revoked
+            # auth, permission) fail the node.
+            if response.status_code == 429 or response.status_code >= 500:
+                return {
+                    "status": "running",
+                    "http_status": response.status_code,
+                    "error_code": (
+                        "PROVIDER_RATE_LIMITED"
+                        if response.status_code == 429
+                        else "PROVIDER_POLL_TRANSIENT"
+                    ),
+                    "poll_error": f"http_{response.status_code}",
+                    "retry_after_seconds": _retry_after_seconds(response),
+                }
             return {
                 "status": "failed",
                 "http_status": response.status_code,

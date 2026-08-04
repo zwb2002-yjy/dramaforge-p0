@@ -331,6 +331,51 @@ async def test_agnes_video_rate_limit_is_not_reposted_and_keeps_retry_after() ->
 
 
 @pytest.mark.asyncio
+async def test_agnes_video_poll_rate_limit_keeps_polling_same_task() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/videos/video-123"
+        return httpx.Response(
+            429,
+            headers={"Retry-After": "17"},
+            json={"error": "rate limited"},
+        )
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.poll_video("video-123", query_kind="task_id")
+
+    assert result["status"] == "running"
+    assert result["poll_error"] == "http_429"
+    assert result["error_code"] == "PROVIDER_RATE_LIMITED"
+    assert result["retry_after_seconds"] == 17.0
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_poll_server_error_is_transient_not_terminal() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "overloaded"})
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.poll_video("video-123", query_kind="task_id")
+
+    assert result["status"] == "running"
+    assert result["error_code"] == "PROVIDER_POLL_TRANSIENT"
+    assert result["poll_error"] == "http_503"
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_poll_not_found_remains_terminal() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "not found"})
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.poll_video("video-123", query_kind="task_id")
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "PROVIDER_REQUEST_FAILED"
+    assert "error" in result
+
+
+@pytest.mark.asyncio
 async def test_agnes_video_invalid_shape_fails_before_network() -> None:
     calls = 0
 
@@ -455,6 +500,46 @@ async def test_video_poll_transport_error_keeps_remote_task_and_retries(
     assert op.provider_operation_id == "provider-video-1"
     assert op.status == "succeeded"
     assert op.response_summary["poll_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_video_poll_throttle_is_not_terminal_and_honors_retry_after(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await _video_run(session)
+
+    class PollThrottleThenSuccessAdapter(DelayedVideoAdapter):
+        async def poll(self, remote_task_id: str) -> dict[str, Any]:
+            self.poll_count += 1
+            if self.poll_count == 1:
+                return {
+                    "status": "running",
+                    "poll_error": "http_429",
+                    "error_code": "PROVIDER_RATE_LIMITED",
+                    "retry_after_seconds": 12.0,
+                }
+            return {"status": "succeeded", "artifact_uri": "fake://provider-video-1"}
+
+    adapter = PollThrottleThenSuccessAdapter([])
+    slept: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr("app.execution.product_path.asyncio.sleep", record_sleep)
+    result = await execute_media_node_run(session, node_run_id=run.id, flux=adapter)  # type: ignore[arg-type]
+
+    assert result.node_type == "video"
+    assert adapter.poll_count == 2
+    assert slept == [12.0]  # max(5s interval, Retry-After 12s), not the raw interval
+    op = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalar_one()
+    assert op.status == "succeeded"
+    assert op.response_summary["last_poll_error"] == "http_429"
+    assert op.response_summary["poll_error_count"] == 1
 
 
 @pytest.mark.asyncio

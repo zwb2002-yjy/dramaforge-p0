@@ -1193,6 +1193,19 @@ async def execute_media_node_run(
         status = str(poll.get("status", "failed"))
         op.last_polled_at = datetime.now(UTC)
         op.status = "running"
+        poll_error = poll.get("poll_error")
+        if poll_error:
+            # Plan §11.2: transient poll errors are recorded, never terminal.
+            summary = dict(op.response_summary or {})
+            summary["last_poll_error"] = str(poll_error)[:200]
+            prior_count = summary.get("poll_error_count")
+            summary["poll_error_count"] = (
+                int(prior_count) if isinstance(prior_count, int) else 0
+            ) + 1
+            http_status = poll.get("http_status")
+            if isinstance(http_status, int):
+                summary["last_poll_http_status"] = http_status
+            op.response_summary = summary
         if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
             break
         remaining = deadline - asyncio.get_running_loop().time()
@@ -1202,12 +1215,21 @@ async def execute_media_node_run(
             op.error_summary = (
                 f"remote task still pending after {poll_timeout_s:.0f}s; resume polling"
             )
+            poll_trail = dict(op.response_summary or {})
             op.response_summary = {
                 "create_status": str(create.get("status", "unknown")),
                 "final_status": "running",
                 "poll_count": poll_count,
-                "query_kind": (op.response_summary or {}).get("query_kind"),
+                "query_kind": poll_trail.get("query_kind"),
             }
+            if poll_trail.get("poll_error_count"):
+                # Keep transient poll-error bookkeeping visible on a pending task.
+                op.response_summary["last_poll_error"] = poll_trail.get("last_poll_error")
+                op.response_summary["poll_error_count"] = poll_trail["poll_error_count"]
+                if poll_trail.get("last_poll_http_status"):
+                    op.response_summary["last_poll_http_status"] = poll_trail[
+                        "last_poll_http_status"
+                    ]
             run.status = "queued"
             run.error_code = "PROVIDER_TASK_PENDING"
             run.error_summary = "Remote Provider task is still running"
@@ -1217,18 +1239,28 @@ async def execute_media_node_run(
             }
             await session.commit()
             raise ProviderTaskPendingError()
-        await asyncio.sleep(min(poll_interval_s, remaining))
+        poll_retry_after = poll.get("retry_after_seconds")
+        sleep_s = poll_interval_s
+        if isinstance(poll_retry_after, int | float) and poll_retry_after > 0:
+            sleep_s = max(sleep_s, float(poll_retry_after))
+        await asyncio.sleep(min(sleep_s, remaining))
 
     cost = await adapter.fetch_cost(remote)
     status = str(poll.get("status", "failed"))
     op.provider_cost = Decimal(str(cost.get("amount", 0.0)))
     op.currency = str(cost.get("currency", "USD"))
+    poll_trail = dict(op.response_summary or {})
     op.response_summary = {
         "create_status": str(create.get("status", "unknown")),
         "final_status": status,
         "poll_count": poll_count,
-        "query_kind": (op.response_summary or {}).get("query_kind"),
+        "query_kind": poll_trail.get("query_kind"),
     }
+    if poll_trail.get("poll_error_count"):
+        op.response_summary["last_poll_error"] = poll_trail.get("last_poll_error")
+        op.response_summary["poll_error_count"] = poll_trail["poll_error_count"]
+        if poll_trail.get("last_poll_http_status"):
+            op.response_summary["last_poll_http_status"] = poll_trail["last_poll_http_status"]
     if status not in {"succeeded", "completed", "success"}:
         error_summary = str(poll.get("error") or status)[:500]
         op.status = "failed"
