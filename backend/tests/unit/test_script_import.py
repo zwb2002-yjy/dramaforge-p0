@@ -216,7 +216,7 @@ async def test_import_reconciles_materialized_agent_plan_shots(session: AsyncSes
     ).scalars().all()
     assert len(shots) == 10
     assert scenes[next(shot.scene_id for shot in shots if shot.shot_number == 4)] == 2
-    assert "tracking Lin Xia through underpass" in next(
+    assert "tracking Lin Xia as she walks toward camera" in next(
         shot.visual_description for shot in shots if shot.shot_number == 4
     )
 

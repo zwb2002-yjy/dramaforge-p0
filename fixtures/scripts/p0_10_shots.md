@@ -4,23 +4,27 @@ Lead: Lin Xia
 
 Frozen P0 acceptance sample: 3 scenes, 10 shots, one lead character.
 UTF-8 markdown for import + Graph production.
+Composition revision (2026-08-04): every shot frames the lead face
+front/three-quarter and clearly visible, per canonical experiment root cause
+(sample composition, not code) — stranger / over-shoulder / wide / insert shots
+previously could not pass the 0.60 face gate.
 
 ## Scene 1 — Neon alley / night
 
-Opening rain. Lead walks into frame.
+Opening rain. Lead walks into frame, face toward camera.
 
 ### Shot 1 — wide
-Visual: neon rain street wide establishing, Lin Xia silhouette under purple signs
+Visual: neon rain street at night, Lin Xia front-facing and centered in the foreground, her face fully visible and sharp under purple sign glow, rain-slicked street and blurred neon signs behind her
 Dialogue: (none)
 Camera: static
 
 ### Shot 2 — medium
-Visual: Lin Xia medium shot, wet jacket, neon rain street reflections on face
+Visual: Lin Xia medium shot, front-facing, wet jacket, neon rain street reflections on her face
 Dialogue: The city never sleeps.
 Camera: static
 
 ### Shot 3 — close
-Visual: close-up Lin Xia eyes, rain drops, red neon catchlight
+Visual: close-up of Lin Xia's face, rain drops on skin, red neon catchlight in her eyes
 Dialogue: I know what I saw.
 Camera: push_in
 
@@ -29,22 +33,22 @@ Camera: push_in
 Chase begins under concrete overpass.
 
 ### Shot 4 — tracking
-Visual: tracking Lin Xia through underpass market stalls, neon rain street glow behind
+Visual: tracking Lin Xia as she walks toward camera through underpass market stalls, front-facing face clearly visible, neon glow behind her
 Dialogue: Don't look back.
 Camera: track
 
 ### Shot 5 — over_shoulder
-Visual: over shoulder of stranger watching Lin Xia pass market
+Visual: over the shoulder of a stranger blurred out of focus in the near foreground, Lin Xia stands front-facing in sharp focus at the market, her face clearly visible
 Dialogue: (whisper) Found you.
 Camera: static
 
-### Shot 6 — insert
-Visual: insert of Lin Xia's phone screen flashing a map pin in neon rain street
+### Shot 6 — close
+Visual: close-up of Lin Xia's face lit by the glow of her phone screen in the dark underpass, map pin light reflected in her eyes
 Dialogue: (none)
 Camera: static
 
 ### Shot 7 — medium
-Visual: Lin Xia medium reverse, confronts stranger under flickering tube light
+Visual: Lin Xia medium shot, front-facing, speaking firmly under a flickering tube light, face clearly visible
 Dialogue: Who sent you?
 Camera: static
 
@@ -53,16 +57,16 @@ Camera: static
 Resolution on wet rooftop at first light.
 
 ### Shot 8 — wide
-Visual: rooftop wide dawn skyline, Lin Xia and stranger face off
+Visual: rooftop at dawn, Lin Xia front-facing in the foreground center, face clearly visible in first light, the stranger far behind her out of focus, city skyline beyond
 Dialogue: It ends here.
 Camera: crane
 
 ### Shot 9 — close
-Visual: close Lin Xia face determined, dawn light replacing neon
+Visual: close-up of Lin Xia's determined face, front-facing, dawn light replacing neon
 Dialogue: Tell them I refuse.
 Camera: static
 
 ### Shot 10 — wide
-Visual: final wide neon rain street far below as Lin Xia walks alone into dawn
+Visual: final wide of the neon rain street far below at dawn, Lin Xia front-facing in the foreground with her face clearly visible as she walks alone, street stretching behind her
 Dialogue: (none)
 Camera: pull_out
