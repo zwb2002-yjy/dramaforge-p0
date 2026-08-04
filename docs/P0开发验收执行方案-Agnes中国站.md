@@ -1239,13 +1239,15 @@ cd D:\dramaforge\backend
 
 ```text
 IMPLEMENTED SCOPE: PASS（Graph、Agnes Adapter、Connection/Reference、Face 血缘、UI、Mock E2E）
-OPEN DEVELOPMENT ITEMS: 部分解除（Canonical 审计父级、全历史 Ruff 已修复；Video Drift 策略批准仍 BLOCKED）
-AUTOMATED VERIFICATION: PASS（含全历史 migration Ruff）
-REAL AGNES PROVIDER PROOF: 部分 PASS（鉴权、T2I、Canonical、10 keyframe、真实 Face >=0.60、5 条 video+drift 垂直链已 `account_verified`；10 全量受内容过滤与 face 分上限限制）
-CURRENT COMMIT FORMAL PROOF: BLOCKED（候选 commit cee5306 已形成，栈已绑定 339569c，待 Face/Video 证据）
+OPEN DEVELOPMENT ITEMS: 已解除（Canonical 审计父级、全历史 Ruff、样本构图、poll-429 瞬时、Video Drift 策略批准）
+AUTOMATED VERIFICATION: PASS（含全历史 migration Ruff；unit 277 + PG integration 12）
+REAL AGNES PROVIDER PROOF: PASS（10/10 keyframe、10/10 face 首轮 >=0.60、10/10 video、9/10 drift、9/10 全链绿；shot 6 drift 阻断记人工复核）
+CURRENT COMMIT FORMAL PROOF: 部分（绑定 `211ecaa` 的干净 10 Shot 证据已在项目 `20cbccec`；正式 Gate/导出/运维证据待跑）
 MANUAL ACCEPTANCE: BLOCKED
-FINAL VERDICT: BLOCKED / NOT ACCEPTED
+FINAL VERDICT: BLOCKED / NOT ACCEPTED（自动证据大幅完成，剩正式 Gate、交付导出、人工验收与运维签字）
 ```
+
+2026-08-04 晚些更新：样本构图根因已确认并修复（`eb35fdb`），poll 429/5xx 瞬时处理已修（`9d49f67`），Video Drift 策略经用户批准 `mean >= 0.40`（`P0-VIDEO-DRIFT-2026-08-04`，`bee7ace`），shot 3/shot 10 文案修复（`bee7ace`/`211ecaa`）。新栈（绑定 `211ecaa`）干净 10 Shot：10/10 keyframe、10/10 face 首轮 passed（0.68-0.92）、10/10 video、9/10 drift、9/10 全链绿；shot 6（暗光手机特写）两次独立 video 均 drift 0.31 阻断，按 §12.3 记人工复核项。剩余阻断为正式 Gate/交付导出、shot 6 人审、人工验收与运维签字（备份恢复、Key 轮换、Outbox/死信、取消、SSE、冷存储）。
 
 2026-08-04 更新：候选 commit `cee5306` 形成（63 条脏工作树已提交），`9191b6a` 修复 Canonical 审计父级缺口（ProviderOperation XOR 合同满足），`82c320f` 清零全历史 Ruff（`ruff check app tests alembic` 通过），`a18655c`、`84cce3c`、`afe73c9`、`c6d85fb` 更新并校准验收记录。用户明确 Agnes 免费、不考虑费用，费用授权不再作为阻断；但真实 Image Probe 返回 401（“无效的令牌”），因此账户合同与 I2I/I2V 证据仍 `BLOCKED`。剩余阻断为公网 Reference origin、有效 Agnes Key、Video Drift 策略批准、真实 I2I/I2V Probe、10 Shot 正式证据与人工/运维签字。
 
@@ -1271,6 +1273,10 @@ FINAL VERDICT: BLOCKED / NOT ACCEPTED
 | §3.1 Gate（绑定候选 339569c） | `20 PASS / 0 FAIL / 4 BLOCKED`：Agent brief/plan 真实文本、10 Shot 物化、Canonical 真实 I2I 生成（`3.1.9` 不再是 fail-closed）；`3.1.10/3.1.11/3.1.18` BLOCKED 因 gate 不跑完整媒体管线 | `PASS`（栈验证） |
 | 真实 10 Shot 图片链（proof，绑定 26fa8d6） | 10 keyframe + 10 face_review + prompt/subtitle/voice 全部真实 completed；真实 Face 双源评分：多个 shot `passed >= 0.60`（0.6556/0.6680/0.6865/0.7011），blocked 正确 fail-closed（0.5569/0.5928/0.0243）；`probe_content_hash` 显式绑定；face rework 机制真实重生成 keyframe | `PASS`（图片链）/ `BLOCKED`（video） |
 | 真实 10 Shot 全链（冻结样本，绑定 a2977cc） | `run_frozen_sample_proof.py` 驱动 + bound rework：**5 条完整垂直链**（canonical->keyframe->face>=0.60->video->drift review）真实跑通，6 个 face passed；21 个返工周期把 4->5 提升；429 重试 + ProviderOperation 幂等生效 | `PASS`（垂直链）/ `BLOCKED`（10 全量） |
+| 冻结样本文案重写（2026-08-04，绑定 `eb35fdb`） | canonical 实验确认根因是**样本构图**而非代码：5 个不以主角脸为主体的 shot（wide 剪影/陌生人过肩/手机特写/wide 对峙/final wide）全部重写为正面清晰露脸，保留 3 场 10 Shot 剧情/Dialogue/Camera。live 跑首轮 8/10 face passed（0.636-0.934），另 shot 6 返工后 9/10 | `CONFIRMED`（根因修复） |
+| poll 429/5xx 瞬时处理（2026-08-04，绑定 `9d49f67`） | 视频 **poll** 429/503 原先被终态标为 `PROVIDER_FAILED` 并丢失 resume 路径、孤立远端任务；改为 record `poll_error` + 遵循 Retry-After + 同任务续查，仅真 4xx 终态失败。新增 4 条 adapter + 1 条 poll-loop 回归，unit 277 全绿 | `PASS` |
+| Video Drift 策略批准（2026-08-04，绑定 `bee7ace`） | 用户批准 `mean >= 0.40`，policy `P0-VIDEO-DRIFT-2026-08-04`；真实 6 视频分布：identity 保持 0.416-0.605，drift 视频 0.179。`decide_video_drift` 上线，drift review 可从恒 `needs_human` 改为 passed/blocked；composite/quality-gated gate 已接受 passed + approval_id。shot 3 文案去掉 rain-on-skin 一并提交 | `PASS`（已批准） |
+| 干净 10 Shot 全链（2026-08-04，绑定 `211ecaa`，项目 `20cbccec`） | 新栈（poll 修复 + drift gate + 新文案）：**10/10 keyframe**、**10/10 face 首轮 passed（0.68-0.92）**、**10/10 video completed**、**9/10 drift passed**、**9/10 全链绿**（video->drift->composite->continuity）。shot 4 经局部 video 返工清除 drift（2 次独立视频 0.26->passed）；**shot 6 两次独立 video 均 drift 0.31 阻断**，按 §12.3 记为人工复核项 | `PASS`（9/10 全链）/ `BLOCKED`（shot 6 人审） |
 | Canonical 质量实验（更强正面 canonical，2026-08-04） | 3 shot：2 passed（0.613/0.742）+ 2 video 完成，1 blocked（-0.094）；结果与基线一致 —— **canonical 不是杠杆**。blocked shot 的构图不以主角脸为主体（stranger/over-shoulder/wide），样本文案需改写 | `CONFIRMED`（根因） |
 | 真实 Video I2V | **已解除公网 origin 依赖**：2026-08-04 实测 Agnes `/v1/videos` 接受 base64 Data URI 首帧（真实视频任务 `queued->in_progress->completed` 端到端成功），计划 §6.4/§9.2 假设的公网 HTTPS 前置不成立。代码已改 I2V 走 `image_bytes` Data URI（`agnes.py`/`product_path.py`）。冻结样本驱动跑通垂直链：canonical->keyframe->face>=0.60->video(Data URI)->drift review（1 shot 完整，3 个 face passed 0.6144/0.8978/0.9049）；其余 9 shot 因 429 免费层限流 + keyframe 400 内容过滤 + face blocked 级联失败 | `PASS`（机制）/ `BLOCKED`（10 视频全量） |
 | Agnes 真实 Image Probe（旧 Key） | 2026-08-04 早前：`/v1/models`、`image_t2i`、`image_i2i` 均 `401 / PROVIDER_AUTH_FAILED`（Connection 与 `.env` 存的是旧 Key）；已更新为有效 Key | 已解除 |
@@ -1294,8 +1300,8 @@ Playwright 使用 DOM、可访问名称、网络失败、console、page error �
 | `P0-AGNES-02` | 单 POST、未知提交、remote ID 持久化、恢复续查已实现 | worker restart 测试证明同一 ProviderOperation、不二次 create | 未做付费真实重启演练 | `PASS`（实现）/ `BLOCKED`（真实演练） |
 | `P0-AGNES-03` | 四层 capability/model 状态机和 UI 已实现 | Connection unit + P0 E2E 独立状态断言通过 | I2I/I2V 尚未 `account_verified/quality_gated` | `PASS`（实现）/ `BLOCKED`（真实证据） |
 | `P0-FACE-01` | Canonical/probe 显式 Artifact/hash/attempt 血缘 | 两源、跨 Shot、hash/availability fail-closed 测试通过 | 当前候选真实 I2I Artifact 未生成 | `PASS`（实现）/ `BLOCKED`（真实链） |
-| `P0-FACE-02` | 固定 0.60、`needs_human`、有限返工；`run_frozen_sample_proof.py` 已含 bound face rework（3 候选 keyframe 重生成） | Face policy、返工和审核 Gate 测试通过；真实数据 4 个 lead shot `passed >= 0.60`（0.636/0.668/0.69/0.758） | 剩余 3 shot 内容过滤 400（Agnes CONTENT_POLICY，需改样本文案）与 3 shot face blocked（返工可继续） | `PASS`（实现+真实证据）/ `BLOCKED`（10 全量） |
-| `P0-VIDEO-01` | MP4 确定性抽帧、scene change、脱敏 evidence 已实现；离线校准 harness（`scripts/calibrate_video_drift.py`）已建并在合成样本上验证（5 帧评分 + 分布输出） | Video Drift unit 通过，不保存 embedding | 阈值和 approval ID 未校准/批准；需真实 Video 样本（依赖公网 origin）形成权威分布 | `BLOCKED` |
+| `P0-FACE-02` | 固定 0.60、`needs_human`、有限返工；`run_frozen_sample_proof.py` 已含 bound face rework（3 候选 keyframe 重生成） | Face policy、返工和审核 Gate 测试通过；**干净 10 Shot 全链 10/10 face 首轮 `passed`（0.68-0.92）**，shot 3（rain-on-skin）文案修复后 0.862 | 无剩余 face 阻断 | `PASS` |
+| `P0-VIDEO-01` | MP4 确定性抽帧、scene change、脱敏 evidence 已实现；离线校准 harness（`scripts/calibrate_video_drift.py`）已建并在合成样本上验证（5 帧评分 + 分布输出） | Video Drift unit 通过，不保存 embedding；`decide_video_drift` 决策测试覆盖 passed/blocked/needs_human/半数 unscorable 边界 | 阈值 `mean >= 0.40` 与 approval `P0-VIDEO-DRIFT-2026-08-04` 已由用户批准；干净 10 Shot 9/10 drift passed，shot 6 两次独立 video 均 0.31 阻断（按 §12.3 记人工复核） | `PASS`（已批准，shot 6 人审） |
 | `P0-UI-01` | Connection、轮换、Probe、四层状态和项目绑定 UI 已实现 | lint/typecheck/unit/P0 E2E 通过 | 真实账户 UI 验收未做 | `PASS`（实现）/ `BLOCKED`（人工） |
 | `P0-UI-02` | 9 节点 attempt/依赖/时间/费用/Artifact/错误建议已实现 | P0 E2E 覆盖 Provider pending、上游失败、Drift、预算等 | 真实运行现场未签字 | `PASS`（实现）/ `BLOCKED`（人工） |
 | `P0-E2E-01` | 旧 `api-status` 假设已删除，Mock 主业务流重写 | smoke 和 P0 mock 均通过，10 Shot 审核/返工/导出已执行 | Real Provider E2E 被明确分离且未执行 | `PASS`（Mock）/ `BLOCKED`（Real） |
@@ -1317,8 +1323,8 @@ Playwright 使用 DOM、可访问名称、网络失败、console、page error �
 1. ~~**候选源不成立**~~：已解除。工作树 63 条变更已形成候选 commit `cee5306`，并叠加 `9191b6a`（Canonical 审计父级）、`82c320f`（全历史 Ruff 清理）及后续验收记录提交。`git status` 干净；下一步按候选提交构建 Compose 并核对 `/health.source_commit`。
 2. ~~**公网 Reference 不成立**~~：已解除。2026-08-04 实测 Agnes China `/v1/videos` 接受 base64 Data URI 首帧（真实视频任务端到端完成），I2V 不再需要 `REFERENCE_PUBLIC_BASE_URL`。代码 `agnes.py`/`product_path.py` 已改 Data URI 路径。剩余 video 全量瓶颈为免费层 429 限流（并发视频）与 keyframe 400 内容过滤，非公网 origin。
 3. ~~**Agnes Key 未通过鉴权**~~：已解除。2026-08-04 更新为有效 Key 后，`auth_models` 与 `image_t2i` 均 `passed / account_verified`（HTTP 200、真实图片生成成功）；`AGNES_API_KEY`（`.env`）与 Connection 凭证均已更新为有效 Key。
-4. **真实 Provider 证据大幅完成**：垂直链 5 条完整真实跑通（face passed 0.636-0.904）；429 重试 + ProviderOperation 幂等已实现。**根因已确认**（canonical 实验）：剩余 5 shot 的构图不以主角脸为主体（stranger/over-shoulder/wide 场景），canonical/返工均无法让其通过 —— 需改写冻结样本中这些 shot 的文案。
-5. **Video Drift 未批准**：实现保持 `PROBE_REQUIRED`，固定样本分布、阈值和 approval ID 尚未批准。
+4. ~~**样本构图是 face 根因**~~：已解除。canonical 实验确认根因是**样本构图**（5 个 shot 不以主角脸为主体）而非代码；`eb35fdb` 重写样本后，干净 10 Shot 全链 **10/10 face 首轮 passed**（0.68-0.92），无返工。
+5. ~~**Video Drift 未批准**~~：已解除。2026-08-04 用户批准 `mean >= 0.40`（policy `P0-VIDEO-DRIFT-2026-08-04`），基于 6 条真实视频分布；干净 10 Shot **9/10 drift passed**。**已知人工复核项**：shot 6（暗光手机特写）两次独立 video 均 drift 0.31 < 0.40，按 §12.3 记人工复核，不自动交付。
 6. ~~**Canonical 审计父级缺口**~~：已解除。`9191b6a` 引入 `create_canonical_generation_run`（最小单节点 canonical graph + running NodeRun 作为审计父级）、`record_canonical_provider_operation`（ProviderOperation 挂 `node_run_id`），Artifact 经 `produced_by_run_id` 回链 Run；XOR 约束满足（单测 `test_canonical_generation_has_audit_parent_run` 断言 `node_run_id` 非空、`agent_run_id` 为空）。
 7. **当前候选 10 Shot 缺失**：没有当前 commit 的 10 Shot x 9 Node、真实 Face/Drift/Continuity、个人审核、字幕局部返工和四项交付证明。
 8. **人工与运维未签字**：备份恢复、Key 轮换、Outbox/死信、取消、SSE、冷存储演练和验收人/费用摘要均未记录。
