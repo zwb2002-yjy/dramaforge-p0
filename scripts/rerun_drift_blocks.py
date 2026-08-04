@@ -13,7 +13,6 @@ import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
 
 import httpx
 
@@ -22,6 +21,40 @@ TERMINAL = {
     "completed", "cached", "failed", "cancelled",
     "completed_after_cancel", "blocked_budget",
 }
+# Nodes re-created by a video re-run (shot_pipeline edges from "video").
+RE_RUN_NODES = {"video", "video_drift_review", "composite", "continuity_review"}
+
+
+def _latest_target_runs(
+    runs: list[dict[str, object]], shot_ids: list[str]
+) -> dict[tuple[str, str], dict[str, object]]:
+    """Latest attempt per (shot_id, node_key) among the re-run nodes.
+
+    A force re-run creates a fresh attempt with a higher attempt_no; always
+    selecting the latest attempt stops stale earlier-attempt runs (e.g. a
+    previously passed drift review) from masking the re-run verdict.
+    """
+    latest: dict[tuple[str, str], dict[str, object]] = {}
+    for run in runs:
+        shot_id = str((run.get("input_snapshot") or {}).get("shot_id") or "")
+        if shot_id not in shot_ids:
+            continue
+        key = str((run.get("input_snapshot") or {}).get("node_key") or "?")
+        if key not in RE_RUN_NODES:
+            continue
+        rank = (
+            int(run.get("attempt_no") or 0),
+            str(run.get("started_at") or ""),
+            str(run.get("id") or ""),
+        )
+        slot = latest.get((shot_id, key))
+        if slot is None or rank > (
+            int(slot.get("attempt_no") or 0),
+            str(slot.get("started_at") or ""),
+            str(slot.get("id") or ""),
+        ):
+            latest[(shot_id, key)] = run
+    return latest
 
 
 def main() -> int:
@@ -95,41 +128,41 @@ def main() -> int:
                 break
         report["steps"]["rework"] = reworked
 
-        deadline = time.time() + args.timeout_seconds
-        last_snapshot: dict[str, object] = {}
-        while time.time() < deadline:
-            snap = get(f"/api/v1/projects/{args.project_id}/snapshot")
-            if snap.status_code != 200:
-                report["error"] = f"snapshot {snap.status_code}"
-                break
-            last_snapshot = snap.json()
-            runs = last_snapshot.get("node_runs", [])
-            if not runs:
+        if "error" not in report:
+            deadline = time.time() + args.timeout_seconds
+            last_snapshot: dict[str, object] = {}
+            while time.time() < deadline:
+                snap = get(f"/api/v1/projects/{args.project_id}/snapshot")
+                if snap.status_code != 200:
+                    report["error"] = f"snapshot {snap.status_code}"
+                    break
+                last_snapshot = snap.json()
+                runs = last_snapshot.get("node_runs", [])
+                latest = _latest_target_runs(runs, args.shot_ids)
+                missing = {
+                    (shot_id, node_key)
+                    for shot_id in args.shot_ids
+                    for node_key in RE_RUN_NODES
+                } - set(latest)
+                pending = [r for r in latest.values() if r.get("status") not in TERMINAL]
+                if not pending and not missing:
+                    break
                 time.sleep(args.poll)
-                continue
-            pending = [r for r in runs if r.get("status") not in TERMINAL]
-            if not pending:
-                break
-            time.sleep(args.poll)
 
         runs = last_snapshot.get("node_runs", []) if last_snapshot else []
+        latest = _latest_target_runs(runs, args.shot_ids)
         rows: list[dict[str, object]] = []
-        for run in runs:
-            shot_id = str((run.get("input_snapshot") or {}).get("shot_id") or "")
-            if shot_id not in args.shot_ids:
-                continue
-            key = str((run.get("input_snapshot") or {}).get("node_key") or "?")
-            if key in {"video", "video_drift_review", "composite", "continuity_review"}:
-                out_sum = run.get("output_summary") or {}
-                rows.append({
-                    "shot": shot_id[:8],
-                    "node": key,
-                    "attempt": run.get("attempt_no"),
-                    "status": run.get("status"),
-                    "review_status": out_sum.get("status"),
-                    "drift_mean": out_sum.get("drift_mean_score"),
-                    "error_code": run.get("error_code"),
-                })
+        for (shot_id, key), run in sorted(latest.items()):
+            out_sum = run.get("output_summary") or {}
+            rows.append({
+                "shot": shot_id[:8],
+                "node": key,
+                "attempt": run.get("attempt_no"),
+                "status": run.get("status"),
+                "review_status": out_sum.get("status"),
+                "drift_mean": out_sum.get("drift_mean_score"),
+                "error_code": run.get("error_code"),
+            })
         report["steps"]["result"] = rows
         report["finished_at"] = datetime.now(UTC).isoformat()
         out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
