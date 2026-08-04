@@ -1588,8 +1588,11 @@ async def _complete_pure_node(
         mime, ext, art_type = "application/json", "json", "document"
     elif key == "video_drift_review" or node_type == "video_review":
         from app.consistency.video_drift import (
+            VIDEO_DRIFT_POLICY_ID,
             VIDEO_DRIFT_POLICY_STATUS,
             VIDEO_DRIFT_SAMPLING_VERSION,
+            VIDEO_DRIFT_THRESHOLD,
+            decide_video_drift,
             extract_video_samples,
             score_video_samples,
         )
@@ -1628,21 +1631,25 @@ async def _complete_pure_node(
                     extract_video_samples(video),
                     canonical_image_bytes=canonical,
                 )
-                review_status = "needs_human"
+                decision = decide_video_drift(samples)
+                review_status = str(decision["status"])
                 payload.update(
                     {
                         "status": review_status,
-                        "review_rule": "threshold_not_approved",
+                        "review_rule": decision["reason"],
                         "canonical_artifact_id": str(canonical_artifact.id),
                         "canonical_content_hash": canonical_artifact.content_hash,
                         "video_artifact_id": str(video_artifact.id),
                         "video_content_hash": video_artifact.content_hash,
                         "samples": samples,
+                        "drift_mean_score": decision.get("mean_score"),
+                        "drift_scored_frames": decision.get("scored_frames"),
+                        "drift_unscorable_frames": decision.get("unscorable_frames"),
                         "video_drift_policy": {
                             "status": VIDEO_DRIFT_POLICY_STATUS,
                             "sampling_version": VIDEO_DRIFT_SAMPLING_VERSION,
-                            "threshold": None,
-                            "approval_id": None,
+                            "threshold": VIDEO_DRIFT_THRESHOLD,
+                            "approval_id": VIDEO_DRIFT_POLICY_ID,
                         },
                     }
                 )
@@ -1661,8 +1668,8 @@ async def _complete_pure_node(
                         "video_drift_policy": {
                             "status": VIDEO_DRIFT_POLICY_STATUS,
                             "sampling_version": VIDEO_DRIFT_SAMPLING_VERSION,
-                            "threshold": None,
-                            "approval_id": None,
+                            "threshold": VIDEO_DRIFT_THRESHOLD,
+                            "approval_id": VIDEO_DRIFT_POLICY_ID,
                         },
                     }
                 )

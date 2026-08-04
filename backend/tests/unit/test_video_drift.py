@@ -9,8 +9,11 @@ import numpy as np
 import pytest
 from app.consistency import video_drift
 from app.consistency.video_drift import (
+    VIDEO_DRIFT_POLICY_ID,
     VIDEO_DRIFT_POLICY_STATUS,
     VIDEO_DRIFT_SAMPLING_VERSION,
+    VIDEO_DRIFT_THRESHOLD,
+    decide_video_drift,
     extract_video_samples,
     score_video_samples,
 )
@@ -54,7 +57,7 @@ def test_video_samples_include_stable_anchors_and_scene_roles(tmp_path: Path) ->
     assert all(sample.image_bytes.startswith(b"\x89PNG") for sample in first)
 
 
-def test_video_scores_are_desensitized_and_policy_remains_probe_required(
+def test_video_scores_are_desensitized_and_policy_is_approved(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     samples = [
@@ -74,4 +77,60 @@ def test_video_scores_are_desensitized_and_policy_remains_probe_required(
     assert all(row["score"] == pytest.approx(0.8) for row in rows)
     assert all(row["rule_version"] == VIDEO_DRIFT_SAMPLING_VERSION for row in rows)
     assert all("embedding" not in row for row in rows)
-    assert VIDEO_DRIFT_POLICY_STATUS == "PROBE_REQUIRED"
+    assert VIDEO_DRIFT_POLICY_STATUS == "APPROVED"
+    assert VIDEO_DRIFT_POLICY_ID == "P0-VIDEO-DRIFT-2026-08-04"
+    assert VIDEO_DRIFT_THRESHOLD == 0.40
+
+
+def _scored(score: float) -> dict[str, object]:
+    return {"status": "scored", "score": score}
+
+
+def _unscorable() -> dict[str, object]:
+    return {"status": "unscorable", "score": None}
+
+
+def test_drift_mean_at_or_above_threshold_passes() -> None:
+    rows = [_scored(0.5), _scored(0.35), _scored(0.4)]  # mean = 0.4167
+    decision = decide_video_drift(rows)
+    assert decision["status"] == "passed"
+    assert decision["mean_score"] == pytest.approx(0.4167, abs=1e-3)
+    assert decision["policy_id"] == VIDEO_DRIFT_POLICY_ID
+
+
+def test_drift_mean_below_threshold_blocks() -> None:
+    rows = [_scored(0.5), _scored(0.2), _scored(0.3)]  # mean = 0.333
+    decision = decide_video_drift(rows)
+    assert decision["status"] == "blocked"
+
+
+def test_drift_no_scored_frames_needs_human() -> None:
+    decision = decide_video_drift([_unscorable(), _unscorable()])
+    assert decision["status"] == "needs_human"
+    assert decision["reason"] == "insufficient_scored_frames"
+
+
+def test_drift_majority_unscorable_needs_human() -> None:
+    rows = [_scored(0.9), _unscorable(), _unscorable()]  # 2/3 unscorable > half
+    decision = decide_video_drift(rows)
+    assert decision["status"] == "needs_human"
+
+
+def test_drift_exactly_half_unscorable_uses_scored_mean() -> None:
+    rows = [_scored(0.9), _scored(0.9), _unscorable(), _unscorable()]  # exactly half
+    decision = decide_video_drift(rows)
+    assert decision["status"] == "passed"
+
+
+def test_drift_real_sample_distribution_separates_drifting_video() -> None:
+    # Approved on 2026-08-04 from 6 real frozen-sample videos: the identity
+    # preserving videos (shot 1/4/5/8/9) mean 0.416-0.605; the drifting video
+    # (shot 10) mean 0.179. Rule mean >= 0.40 passes the former, blocks the latter.
+    preserving = decide_video_drift(
+        [_scored(0.679), _scored(0.348), _scored(0.363), _scored(0.289), _scored(0.403)]
+    )
+    drifting = decide_video_drift(
+        [_scored(0.583), _scored(0.184), _scored(0.152), _scored(-0.004), _scored(-0.021)]
+    )
+    assert preserving["status"] == "passed"  # shot 4, mean 0.416
+    assert drifting["status"] == "blocked"  # shot 10, mean 0.179

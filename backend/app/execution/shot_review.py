@@ -702,7 +702,7 @@ def _retry_suggestion(code: str) -> str:
         "FACE_BELOW_THRESHOLD": "保持 0.60 阈值，从 Keyframe 返工，最多使用批准的有限次数",
         "FACE_PROBE_UNAVAILABLE": "检查两源 Artifact、InsightFace 和画面清晰度后进入人工复核",
         "VIDEO_DRIFT_BLOCKED": "查看抽样时间点和分数，从 Video 及下游重跑",
-        "VIDEO_DRIFT_POLICY_UNAPPROVED": "等待 Video Drift 策略校准和批准，不把 needs_human 当通过",
+        "VIDEO_DRIFT_POLICY_UNAPPROVED": "Video Drift 未通过（均值 < 0.40）阻断交付",
         "blocked_budget": "增加或调整项目预算后重试原节点，不创建 ProviderOperation",
         "PROVIDER_FAILED": "检查 Provider 状态后重试该节点及正确下游",
         "QUEUE_UNAVAILABLE": "启动 Redis 与 Arq Worker 后 dispatch/enqueue",

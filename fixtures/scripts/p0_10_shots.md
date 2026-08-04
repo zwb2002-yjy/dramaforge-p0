@@ -24,7 +24,7 @@ Dialogue: The city never sleeps.
 Camera: static
 
 ### Shot 3 — close
-Visual: close-up of Lin Xia's face, rain drops on skin, red neon catchlight in her eyes
+Visual: close-up of Lin Xia's face, front-facing and unobstructed, sharp focus, red neon catchlight in her eyes, rain visible behind her on the street
 Dialogue: I know what I saw.
 Camera: push_in
 

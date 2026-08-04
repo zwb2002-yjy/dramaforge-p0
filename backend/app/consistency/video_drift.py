@@ -12,7 +12,13 @@ import cv2
 from app.consistency.image_embed import embedding_from_image_bytes
 
 VIDEO_DRIFT_SAMPLING_VERSION = "opencv-start-mid-end-scene-v1"
-VIDEO_DRIFT_POLICY_STATUS = "PROBE_REQUIRED"
+# Approved 2026-08-04 on 6 real frozen-sample videos (P0-VIDEO-01 §12.3).
+# Decision rule: mean of scored frames >= 0.40 -> passed; otherwise blocked;
+# no scored frames or >half unscorable -> needs_human. Real distribution:
+# identity-preserving videos 0.416-0.605, drifting video (shot 10) 0.179.
+VIDEO_DRIFT_POLICY_STATUS = "APPROVED"
+VIDEO_DRIFT_POLICY_ID = "P0-VIDEO-DRIFT-2026-08-04"
+VIDEO_DRIFT_THRESHOLD = 0.40
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +101,44 @@ def extract_video_samples(video_bytes: bytes) -> list[VideoFrameSample]:
             return samples
         finally:
             capture.release()
+
+
+def decide_video_drift(rows: list[dict[str, object]]) -> dict[str, object]:
+    """Approved Video Drift decision (P0-VIDEO-DRIFT-2026-08-04, §12.3).
+
+    passed:      mean of scored frames >= 0.40
+    blocked:     mean of scored frames < 0.40
+    needs_human: no scored frames, or more than half the sampled frames are
+                 unscorable (no detectable face / embedding failure)
+    """
+    scored: list[float] = []
+    for row in rows:
+        if row.get("status") == "scored":
+            value = row.get("score")
+            if isinstance(value, int | float):
+                scored.append(float(value))
+    total = len(rows)
+    unscorable = sum(1 for row in rows if row.get("status") != "scored")
+    base: dict[str, object] = {
+        "scored_frames": len(scored),
+        "total_frames": total,
+        "unscorable_frames": unscorable,
+    }
+    if not scored or (total and unscorable > total / 2):
+        return {
+            "status": "needs_human",
+            "reason": "insufficient_scored_frames",
+            **base,
+        }
+    mean = sum(scored) / len(scored)
+    return {
+        "status": "passed" if mean >= VIDEO_DRIFT_THRESHOLD else "blocked",
+        "reason": "drift_mean_gate",
+        "mean_score": round(mean, 6),
+        "threshold": VIDEO_DRIFT_THRESHOLD,
+        "policy_id": VIDEO_DRIFT_POLICY_ID,
+        **base,
+    }
 
 
 def score_video_samples(
