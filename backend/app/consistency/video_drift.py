@@ -109,7 +109,14 @@ def decide_video_drift(rows: list[dict[str, object]]) -> dict[str, object]:
     passed:      mean of scored frames >= 0.40
     blocked:     mean of scored frames < 0.40
     needs_human: no scored frames, or more than half the sampled frames are
-                 unscorable (no detectable face / embedding failure)
+                 unscorable (no detectable face / embedding failure). Fail-closed:
+                 a needs_human review blocks downstream and approve; the intended
+                 human path is re-running the video (or manual media), never an
+                 approve-time override (P0 decision 2026-08-04).
+
+    The returned evidence includes the scored-frame distribution (min/max and
+    count above threshold) so a single high frame masking a mostly-drifting
+    video is visible to a human reviewer without changing the decision rule.
     """
     scored: list[float] = []
     for row in rows:
@@ -118,7 +125,9 @@ def decide_video_drift(rows: list[dict[str, object]]) -> dict[str, object]:
             if isinstance(value, int | float):
                 scored.append(float(value))
     total = len(rows)
-    unscorable = sum(1 for row in rows if row.get("status") != "scored")
+    # A "scored" row whose score is non-numeric carries no usable evidence; count
+    # it as unscorable so scored_frames + unscorable_frames always equals total.
+    unscorable = total - len(scored)
     base: dict[str, object] = {
         "scored_frames": len(scored),
         "total_frames": total,
@@ -137,6 +146,9 @@ def decide_video_drift(rows: list[dict[str, object]]) -> dict[str, object]:
         "mean_score": round(mean, 6),
         "threshold": VIDEO_DRIFT_THRESHOLD,
         "policy_id": VIDEO_DRIFT_POLICY_ID,
+        "min_score": round(min(scored), 6),
+        "max_score": round(max(scored), 6),
+        "frames_above_threshold": sum(1 for s in scored if s >= VIDEO_DRIFT_THRESHOLD),
         **base,
     }
 

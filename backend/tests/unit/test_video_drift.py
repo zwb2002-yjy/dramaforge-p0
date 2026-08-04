@@ -96,12 +96,28 @@ def test_drift_mean_at_or_above_threshold_passes() -> None:
     assert decision["status"] == "passed"
     assert decision["mean_score"] == pytest.approx(0.4167, abs=1e-3)
     assert decision["policy_id"] == VIDEO_DRIFT_POLICY_ID
+    assert decision["min_score"] == pytest.approx(0.35)
+    assert decision["max_score"] == pytest.approx(0.5)
+    assert decision["frames_above_threshold"] == 2
 
 
 def test_drift_mean_below_threshold_blocks() -> None:
     rows = [_scored(0.5), _scored(0.2), _scored(0.3)]  # mean = 0.333
     decision = decide_video_drift(rows)
     assert decision["status"] == "blocked"
+    assert decision["min_score"] == pytest.approx(0.2)
+    assert decision["frames_above_threshold"] == 1
+
+
+def test_drift_mean_pass_surfaces_distribution_for_human_review() -> None:
+    # [0.90, 0.20, 0.20] passes on mean (0.433) yet two of three frames sit near
+    # the drifting range; the compact distribution must make that visible.
+    decision = decide_video_drift([_scored(0.9), _scored(0.2), _scored(0.2)])
+    assert decision["status"] == "passed"
+    assert decision["mean_score"] == pytest.approx(0.4333, abs=1e-3)
+    assert decision["min_score"] == pytest.approx(0.2)
+    assert decision["max_score"] == pytest.approx(0.9)
+    assert decision["frames_above_threshold"] == 1
 
 
 def test_drift_no_scored_frames_needs_human() -> None:
@@ -120,6 +136,17 @@ def test_drift_exactly_half_unscorable_uses_scored_mean() -> None:
     rows = [_scored(0.9), _scored(0.9), _unscorable(), _unscorable()]  # exactly half
     decision = decide_video_drift(rows)
     assert decision["status"] == "passed"
+
+
+def test_drift_scored_row_with_non_numeric_score_counts_as_unscorable() -> None:
+    rows = [_scored(0.9), {"status": "scored", "score": None}, _unscorable()]
+    decision = decide_video_drift(rows)
+    assert decision["scored_frames"] == 1
+    assert decision["unscorable_frames"] == 2
+    assert decision["total_frames"] == 3
+    # Invariant: every sampled frame is either scored or unscorable, never both.
+    assert decision["scored_frames"] + decision["unscorable_frames"] == decision["total_frames"]
+    assert decision["status"] == "needs_human"
 
 
 def test_drift_real_sample_distribution_separates_drifting_video() -> None:
