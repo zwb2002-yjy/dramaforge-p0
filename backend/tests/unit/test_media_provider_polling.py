@@ -543,6 +543,40 @@ async def test_video_poll_throttle_is_not_terminal_and_honors_retry_after(
 
 
 @pytest.mark.asyncio
+async def test_video_poll_error_evidence_survives_crash_before_terminal(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = await _video_run(session)
+
+    class PollThenCrashAdapter(DelayedVideoAdapter):
+        async def poll(self, remote_task_id: str) -> dict[str, Any]:
+            self.poll_count += 1
+            if self.poll_count == 1:
+                return {"status": "running", "poll_error": "http_503", "http_status": 503}
+            raise RuntimeError("worker killed mid-poll")
+
+    adapter = PollThenCrashAdapter([])
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.execution.product_path.asyncio.sleep", no_sleep)
+    with pytest.raises(RuntimeError, match="worker killed mid-poll"):
+        await execute_media_node_run(session, node_run_id=run.id, flux=adapter)  # type: ignore[arg-type]
+
+    # The transient poll-error bookkeeping was committed inside the loop, so it
+    # survives the crash even though no terminal/timeout path ever ran.
+    op = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalar_one()
+    assert op.response_summary["poll_error_count"] == 1
+    assert op.response_summary["last_poll_error"] == "http_503"
+    assert op.response_summary["last_poll_http_status"] == 503
+
+
+@pytest.mark.asyncio
 async def test_agnes_video_worker_restart_resumes_persisted_operation_without_create(
     session: AsyncSession,
 ) -> None:

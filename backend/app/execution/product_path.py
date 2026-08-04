@@ -1206,6 +1206,11 @@ async def execute_media_node_run(
             if isinstance(http_status, int):
                 summary["last_poll_http_status"] = http_status
             op.response_summary = summary
+            # Persist transient poll-error evidence immediately. Without this a
+            # worker crash mid-poll rolls back the in-loop mutation and the 429/5xx
+            # bookkeeping is silently lost even though the remote task survives.
+            await session.commit()
+            await set_node_run_rls_context(session, node_run_id=run.id)
         if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
             break
         remaining = deadline - asyncio.get_running_loop().time()
@@ -1645,6 +1650,9 @@ async def _complete_pure_node(
                         "drift_mean_score": decision.get("mean_score"),
                         "drift_scored_frames": decision.get("scored_frames"),
                         "drift_unscorable_frames": decision.get("unscorable_frames"),
+                        "drift_min_score": decision.get("min_score"),
+                        "drift_max_score": decision.get("max_score"),
+                        "drift_frames_above_threshold": decision.get("frames_above_threshold"),
                         "video_drift_policy": {
                             "status": VIDEO_DRIFT_POLICY_STATUS,
                             "sampling_version": VIDEO_DRIFT_SAMPLING_VERSION,
