@@ -40,9 +40,17 @@ def main() -> int:
     ap.add_argument("--poll", type=float, default=5.0)
     ap.add_argument("--lead-name", default="Lin Xia")
     ap.add_argument("--lead-prompt", default=(
-        "Portrait reference sheet of Lin Xia, Chinese female lead, consistent "
-        "recognizable face, clean studio background, soft light, front view"
+        "Front-facing studio portrait reference sheet of Lin Xia, Chinese female "
+        "lead. Face perfectly centered, symmetrical, fully unobstructed, both eyes "
+        "visible, neutral expression, even soft lighting, sharp focus, high "
+        "resolution. This is the canonical identity reference."
     ))
+    ap.add_argument(
+        "--max-shots",
+        type=int,
+        default=10,
+        help="Start only the first N shots (cheaper canonical-quality experiment).",
+    )
     args = ap.parse_args()
     script_text = args.script.read_text(encoding="utf-8")
     base = args.base.rstrip("/")
@@ -157,8 +165,9 @@ def main() -> int:
             return 1
 
         # Start each shot (materialize graph + queue all 9 nodes).
+        started_shots = shot_ids[: max(1, args.max_shots)]
         run_ids: list[str] = []
-        for shot_id in shot_ids:
+        for shot_id in started_shots:
             r = post(f"/api/v1/projects/{project_id}/shots/{shot_id}/start", {})
             if r.status_code not in (200, 201):
                 report["error"] = f"shot start {shot_id} {r.status_code}: {r.text[:200]}"
@@ -288,7 +297,8 @@ def main() -> int:
             "face_passed": len(passed),
             "face_blocked": len(blocked),
         }
-        video_ok = node_summary.get("video", {}).get("completed", 0) >= 10
+        target_videos = len(started_shots)
+        video_ok = node_summary.get("video", {}).get("completed", 0) >= target_videos
         face_ok = len(passed) >= 1
         report["summary"] = {
             "image_chain_ok": bool(passed),
