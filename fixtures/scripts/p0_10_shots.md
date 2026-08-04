@@ -66,7 +66,7 @@ Visual: close-up of Lin Xia's determined face, front-facing, dawn light replacin
 Dialogue: Tell them I refuse.
 Camera: static
 
-### Shot 10 — wide
-Visual: final wide of the neon rain street far below at dawn, Lin Xia front-facing in the foreground with her face clearly visible as she walks alone, street stretching behind her
+### Shot 10 — medium
+Visual: Lin Xia medium close-up, front-facing, face clearly visible and centered at dawn, neon rain street behind her, walking slowly toward camera as dawn light replaces neon
 Dialogue: (none)
-Camera: pull_out
+Camera: static
