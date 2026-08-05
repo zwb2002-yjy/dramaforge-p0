@@ -452,9 +452,25 @@ def main() -> int:
             if initial_status in {"passed", "not_applicable"}:
                 continue
             if initial_status != "blocked":
+                # A "missing" face_review here is unexpected because the initial
+                # wait completed all 70 non-keyframe runs. Dump the snapshot's
+                # runs for this shot so a race or node_key mismatch is visible
+                # instead of guessed.
+                shot_runs = [
+                    {
+                        "node_key": (r.get("input_snapshot") or {}).get("node_key"),
+                        "status": r.get("status"),
+                        "attempt_no": r.get("attempt_no"),
+                        "out_status": (r.get("output_summary") or {}).get("status"),
+                        "run_id": r.get("id"),
+                    }
+                    for r in state.get("node_runs", [])
+                    if str((r.get("input_snapshot") or {}).get("shot_id") or "") == shot_id
+                ]
                 raise RuntimeError(
                     "face review is neither passed, not_applicable, nor a reworkable "
-                    f"block for shot={shot_id}: {initial_status}"
+                    f"block for shot={shot_id}: {initial_status}; shot_runs="
+                    f"{json.dumps(shot_runs, ensure_ascii=False)}"
                 )
 
             entry: dict[str, Any] = {
