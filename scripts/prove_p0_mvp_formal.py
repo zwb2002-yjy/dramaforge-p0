@@ -194,6 +194,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--max-drift-reworks",
+        type=int,
+        default=2,
+        help=(
+            "Maximum real video re-runs for each blocked video-drift review; "
+            "approval is never attempted unless a candidate passes."
+        ),
+    )
+    parser.add_argument(
         "--resume-project-id",
         help="Resume a timed-out formal proof from this existing project; never creates media.",
     )
@@ -231,6 +240,8 @@ def main() -> int:
         parser.error("--resume-project-id and --resume-email must be supplied together")
     if args.max_face_reworks < 0:
         parser.error("--max-face-reworks must be zero or greater")
+    if args.max_drift_reworks < 0:
+        parser.error("--max-drift-reworks must be zero or greater")
     if args.poll_interval_seconds <= 0:
         parser.error("--poll-interval-seconds must be greater than zero")
 
@@ -245,6 +256,8 @@ def main() -> int:
         str(args.poll_interval_seconds),
         "--max-face-reworks",
         str(args.max_face_reworks),
+        "--max-drift-reworks",
+        str(args.max_drift_reworks),
         "--idea-sha256",
         hashlib.sha256(idea.encode("utf-8")).hexdigest(),
         "--lead-name-sha256",
@@ -517,6 +530,92 @@ def main() -> int:
                     f"for shot={shot_id}; candidates={len(entry['candidates'])}"
                 )
 
+    def rework_blocked_drift_reviews(project_id: str, shot_ids: list[str]) -> None:
+        """Re-run video for drift-blocked shots up to --max-drift-reworks.
+
+        A blocked drift review means the video identity drifted below the
+        approved mean>=0.40 gate (plan §12.3). The video node (and its drift/
+        composite/continuity downstream) is re-run; the new drift review binds
+        to the new video at the same attempt. Downstream composite/continuity
+        fail fast with UPSTREAM_TERMINAL_FAILURE only while drift is still
+        blocked, so candidate waits tolerate that code and the verdict is read
+        from the drift review itself.
+        """
+        state = snapshot(project_id)
+        latest = latest_shot_node_runs(state, shot_ids=shot_ids)
+        report["drift_rework"] = []
+        for shot_id in shot_ids:
+            drift_run = latest.get((shot_id, "video_drift_review"))
+            initial_status, _ = review_status(drift_run)
+            if initial_status in {"passed", "not_applicable"}:
+                continue
+            if initial_status != "blocked":
+                raise RuntimeError(
+                    "video drift review is neither passed nor a reworkable block "
+                    f"for shot={shot_id}: {initial_status}"
+                )
+            entry: dict[str, Any] = {
+                "shot_id": shot_id,
+                "initial_status": initial_status,
+                "initial_mean_score": ((drift_run or {}).get("output_summary") or {}).get(
+                    "drift_mean_score"
+                ),
+                "max_candidates": args.max_drift_reworks,
+                "candidates": [],
+                "passed": False,
+            }
+            report["drift_rework"].append(entry)
+            for candidate_no in range(1, args.max_drift_reworks + 1):
+                video_rerun = post(
+                    f"/api/v1/projects/{project_id}/shots/{shot_id}/rerun",
+                    {"changed_node_key": "video"},
+                )
+                if video_rerun.status_code not in {200, 201}:
+                    raise RuntimeError(
+                        "video drift rework failed "
+                        f"{video_rerun.status_code}: {_problem(video_rerun)}"
+                    )
+                video_body = video_rerun.json()
+                video_run_ids = [str(value) for value in video_body.get("run_ids", [])]
+                if not video_run_ids:
+                    raise RuntimeError(
+                        "video drift rework returned no replacement NodeRuns"
+                    )
+                final_state = wait_for_runs(
+                    project_id,
+                    video_run_ids,
+                    tolerate_face_upstream=True,
+                )
+                latest2 = latest_shot_node_runs(final_state, shot_ids=[shot_id])
+                final_drift = latest2.get((shot_id, "video_drift_review"))
+                final_status, _ = review_status(final_drift)
+                drift_out = ((final_drift or {}).get("output_summary") or {})
+                candidate = {
+                    "candidate": candidate_no,
+                    "video_run_id": str(
+                        (latest2.get((shot_id, "video")) or {}).get("id") or ""
+                    ),
+                    "video_drift_review_run_id": str(
+                        (final_drift or {}).get("id") or ""
+                    ),
+                    "status": final_status,
+                    "drift_mean_score": drift_out.get("drift_mean_score"),
+                    "drift_scored_frames": drift_out.get("drift_scored_frames"),
+                    "drift_unscorable_frames": drift_out.get(
+                        "drift_unscorable_frames"
+                    ),
+                    "run_ids": video_run_ids,
+                }
+                entry["candidates"].append(candidate)
+                if final_status == "passed":
+                    entry["passed"] = True
+                    break
+            if not entry["passed"]:
+                raise RuntimeError(
+                    "real drift gate remained blocked after bounded video rework "
+                    f"for shot={shot_id}; candidates={len(entry['candidates'])}"
+                )
+
     try:
         assert client is not None
         health = client.get("/health")
@@ -769,6 +868,7 @@ def main() -> int:
             tolerate_face_upstream=True,
         )
         rework_blocked_face_reviews(project_id, shot_ids)
+        rework_blocked_drift_reviews(project_id, shot_ids)
 
         rejected_shot_id = shot_ids[0]
         rejected = post(
