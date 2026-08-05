@@ -162,21 +162,6 @@ def face_policy_errors(runs: list[dict[str, Any]]) -> list[str]:
     return errors
 
 
-def response_run_id_for_node(response: dict[str, Any], *, node_key: str) -> str:
-    """Resolve a re-run NodeRun from the API's ordered node/run response."""
-    nodes = [str(value) for value in response.get("stale_nodes", [])]
-    run_ids = [str(value) for value in response.get("run_ids", [])]
-    if len(nodes) != len(run_ids):
-        raise RuntimeError(
-            "rerun response has mismatched stale_nodes/run_ids "
-            f"({len(nodes)} != {len(run_ids)})"
-        )
-    try:
-        return run_ids[nodes.index(node_key)]
-    except ValueError as exc:
-        raise RuntimeError(f"rerun response omitted {node_key}") from exc
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://127.0.0.1:8000")
@@ -462,13 +447,27 @@ def main() -> int:
                         f"{keyframe_rerun.status_code}: {_problem(keyframe_rerun)}"
                     )
                 keyframe_body = keyframe_rerun.json()
-                keyframe_run_id = response_run_id_for_node(
-                    keyframe_body, node_key="keyframe"
+                keyframe_run_ids = [
+                    str(value) for value in keyframe_body.get("run_ids", [])
+                ]
+                if not keyframe_run_ids:
+                    raise RuntimeError(
+                        "keyframe face rework returned no replacement NodeRuns"
+                    )
+                # The keyframe re-run queues keyframe + face_review + video +
+                # drift + composite + continuity at ONE new attempt. Because the
+                # review binding gate is same-attempt, face_review N+1 binds the
+                # new keyframe N+1; downstream fails fast (tolerated) only while
+                # that face is still blocked. Deliberately re-running face_review
+                # here instead would create attempt N+2 with no same-attempt
+                # keyframe and fail with WORKER_ERROR.
+                final_state = wait_for_runs(
+                    project_id,
+                    keyframe_run_ids,
+                    tolerate_face_upstream=True,
                 )
-                keyframe_state = wait_for_runs(project_id, [keyframe_run_id])
-                new_keyframe = latest_shot_node_runs(
-                    keyframe_state, shot_ids=[shot_id]
-                ).get((shot_id, "keyframe"))
+                latest = latest_shot_node_runs(final_state, shot_ids=[shot_id])
+                new_keyframe = latest.get((shot_id, "keyframe"))
                 new_keyframe_artifact_id = str(
                     (new_keyframe or {}).get("result_artifact_id") or ""
                 )
@@ -476,24 +475,7 @@ def main() -> int:
                     raise RuntimeError(
                         f"keyframe face rework completed without Artifact for shot={shot_id}"
                     )
-
-                review_rerun = post(
-                    f"/api/v1/projects/{project_id}/shots/{shot_id}/rerun",
-                    {"changed_node_key": "face_review"},
-                )
-                if review_rerun.status_code not in {200, 201}:
-                    raise RuntimeError(
-                        "face review rework failed "
-                        f"{review_rerun.status_code}: {_problem(review_rerun)}"
-                    )
-                review_body = review_rerun.json()
-                review_ids = [str(value) for value in review_body.get("run_ids", [])]
-                if not review_ids:
-                    raise RuntimeError("face review rework returned no replacement NodeRuns")
-                final_state = wait_for_runs(project_id, review_ids)
-                final_face = latest_shot_node_runs(final_state, shot_ids=[shot_id]).get(
-                    (shot_id, "face_review")
-                )
+                final_face = latest.get((shot_id, "face_review"))
                 final_status, final_score = review_status(final_face)
                 review_probe_key = str(
                     ((final_face or {}).get("input_snapshot") or {}).get(
@@ -508,7 +490,7 @@ def main() -> int:
                 keyframe_artifact = artifacts.get(new_keyframe_artifact_id) or {}
                 candidate = {
                     "candidate": candidate_no,
-                    "keyframe_run_id": keyframe_run_id,
+                    "keyframe_run_id": str((new_keyframe or {}).get("id") or ""),
                     "keyframe_artifact_id": new_keyframe_artifact_id,
                     "keyframe_object_key": keyframe_artifact.get("object_key"),
                     "face_review_run_id": str((final_face or {}).get("id") or ""),
@@ -517,7 +499,7 @@ def main() -> int:
                     == str(keyframe_artifact.get("object_key") or ""),
                     "status": final_status,
                     "score": final_score,
-                    "review_run_ids": review_ids,
+                    "review_run_ids": keyframe_run_ids,
                 }
                 entry["candidates"].append(candidate)
                 if not candidate["face_review_bound_to_keyframe"]:
