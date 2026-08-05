@@ -4,9 +4,9 @@ DramaForge 是面向个人创作者私有化部署的镜头级 AI 短剧生产�
 
 ## 当前状态
 
-仓库当前处于 **P0 功能候选版**，已经具备账号与私有创作空间、同一 Project 的快速/专业双入口、受控 Brief/Plan、10 Shot Production Graph、ProviderOperation/Artifact 血缘、审核、局部返工、导出、RLS、Outbox/SSE 和 Docker Compose 正式运行栈。当前候选仍未关闭 Graph 依赖顺序、人脸一致性真实 Gate 和当前提交上的完整 10 Shot 交付证据，因此不得标记 P0 MVP 完成。证据化现状、优缺点和需求冲突见 [`docs/项目现状与需求对齐-20260801.md`](docs/项目现状与需求对齐-20260801.md)。
+仓库当前处于 **P0 功能候选版**，已经具备账号与私有创作空间、同一 Project 的快速/专业双入口、受控 Brief/Plan、持久化 Production Graph 依赖、0.60 人脸 Gate、真实图像/视频链、Video Drift、ProviderOperation/Artifact 血缘、审核、局部返工、四项交付、RLS、Outbox/SSE 和 Docker Compose 正式运行栈。最近 10 Shot 运行仍有 shot 6 的 Drift 阻断，且当前提交没有 formal、Playwright、Section 3.1 Gate 与 ops 同源全绿证据，因此不得标记 P0 MVP 完成。
 
-**状态语义：** 本地质量入口（`scripts/run_quality.ps1`，使用 `backend/.venv`）通过，**不等于** P0 MVP 已完成。Docker Compose 的 PostgreSQL、Redis、MinIO、API、dispatcher 与 Arq Worker 已完成本机启动验证；真实 Provider 与完整交付必须按候选提交重新形成正式证据。下一步工程主线和剩余 Gate 见 `docs/开发执行检查点.md`。
+**状态语义：** 本地质量入口（`scripts/run_quality.ps1`，使用 `backend/.venv`）通过，**不等于** P0 MVP 已完成。当前产品总规划见 [`AI短剧工作台完整实施规划.md`](AI短剧工作台完整实施规划.md)，文档职责与阅读顺序见 [`docs/README.md`](docs/README.md)，下一步工程主线和剩余 Gate 见 [`docs/开发执行检查点.md`](docs/开发执行检查点.md)。
 
 S0-A 已使用本地 InsightFace 1.0.1 / ONNX Runtime CPU 对 20 对同角色、20 对异角色和 10 个异常样本完成 FAR/FRR 校准，并有带审批标识的最终阈值；见 [`docs/spikes/s0a-face-consistency.md`](docs/spikes/s0a-face-consistency.md)。当前唯一执行任务、外部暂停项和后续 `READY` 队列以 [`docs/开发执行检查点.md`](docs/开发执行检查点.md) 为准。
 
@@ -206,14 +206,16 @@ git remote -v
 
 发布或 P0 tag 前，从候选 commit 的干净 worktree 运行 formal proof 和 §3.1 Gate。默认报告写入 `tmp/p0-evidence/<sha>/`，并携带 commit、dirty、UTC 起止时间、脱敏命令、环境摘要和 source 一致性；任何 `FAIL`、`BLOCKED`、dirty 或 source mismatch 都不能标记 P0 MVP 完成。
 
-Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在开发检查点定义可观察效果和验收证据；完成并合并后重算当前阶段 Gate，继续最高优先级的 `READY` Task。某个外部条件暂停时，只暂停依赖它的路径；P0 完成后按 `P1.1 -> P1.2 -> P1.3 -> P2` 自动建立阶段合同并继续开发，除非遇到需要用户账号、付费、受限数据、不可逆操作或会改变产品路线的真实阻塞。
+Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在开发检查点定义可观察效果和验收证据；完成并合并后重算当前阶段 Gate，继续最高优先级的 `READY` Task。某个外部条件暂停时，只暂停依赖它的路径；P0 完成后按个人创作者路线 `P1.1 -> P1.2 -> P1.3 -> P2` 建立阶段合同，除非遇到需要用户账号、付费、受限数据、不可逆操作或会改变产品路线的真实阻塞。
 
 ## 产品阶段
 
 - P0：内部试产的完整 MVP。
-- P1.1：候选结果治理。
-- P1.2：团队评论、指派和责任闭环。
-- P1.3：富故事板、受控精剪和条件性 OpenCut 适配。
+- P1.1：个人候选结果治理、选片与项目内复用。
+- P1.2：个人故事板、审核/返工队列、正式资产库与模板复用。
+- P1.3：版本化时间线、受控精剪和条件性后期工具适配。
 - P2：3D 导演台和高级专业后期互操作。
+
+成员、邀请、共享、评论和任务指派不在当前个人创作者路线中。
 
 详细效果和进入条件见 [`docs/产品阶段与效果路线图.md`](docs/产品阶段与效果路线图.md) 与 [`docs/MVP能力延期台账.md`](docs/MVP能力延期台账.md)。

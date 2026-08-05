@@ -8,28 +8,17 @@ DramaForge 是面向个人创作者的镜头级 AI 短剧生产工作台，私�
 
 P0 目标为可运行的 React/FastAPI/PostgreSQL/Redis/MinIO/Arq 应用 + 一份 3–5 场、至少 10 Shot、至少 1 名主角的冻结黄金样本，产出可重现的 MP4、SRT、素材包和 timeline JSON 交付。
 
-当前 `dev` 分支已从团队协作模型重构为个人创作空间模型（`docs/个人创作空间重构方案.md`），移除了 Organization、成员、角色等概念。`main` 分支仍保留重构前的团队向代码。
+当前产品已从团队协作模型收敛为个人创作空间模型（`docs/个人创作空间重构方案.md`），移除了 Organization、成员、角色等概念。个人创作者方向与阶段路线以 `AI短剧工作台完整实施规划.md` 为准。
 
 ### 当前完成度
 
-**标签：P0 功能候选版**（2026-07-23 标记）
+**标签：P0 功能候选版，发布验收未关闭。**
 
-已实现：
-- 应用骨架：FastAPI `/health`、Arq default/heavy Worker、React 工作台壳、Docker Compose 全栈
-- 个人创作空间模型：User → Workspace → Project，RLS 隔离，BYOK 凭证管理
-- Production Graph 完整链路：Brief/Plan → GraphVersion → NodeRun → ProviderOperation → Artifact → 审核 → 导出
-- 手工媒体路径：10 Shot 全必需节点、approve_ok=10、failed=0、package.zip 哈希一致、真实 MP4
-- FFmpeg 导出、缓存复用、幂等取消/补偿、Outbox/SSE/Redis Streams 事件流
-- 目录合规、Ruff/mypy/unit/integration/frontend/e2e CI 门禁全绿
-- Compose 镜像内 InsightFace 0.7.3 / ONNX Runtime CPU / buffalo_l 已完成构建期 `FaceAnalysis.prepare()` 与容器运行期 512-d smoke
-- 真实 Provider 全链（2026-07-31 于 `4792f29` 实测）：OpenAI 文本 Brief/Plan、Agnes 图像 10 次、Agnes 视频 10 次、本地 TTS 10 次，32 条 ProviderOperation 无失败；10 Shot × 9 节点 = 90 NodeRun / 90 独立 Artifact / 90 独立 object key，导出 ZIP 现场下载 39.5 MB 且 SHA-256 与记录一致
-
-P0 Gate 阻塞项（详见 `docs/开发执行检查点.md` §3.1）：
-1. **人脸一致性 Gate 未被证明**：模型与像素均正常（5/5 canonical、7/10 关键帧检出人脸，含全部 5 个主角分镜），但 10 个 `face_review` 的 `face_score` 全为 `null`（5 `not_applicable` + 5 `needs_human`），审核门禁不拦 `needs_human`。离线重放正确配对后，5 个主角分镜有 3 个应被拦截。
-2. **图依赖顺序未强制**：`graph_edges` 全库 0 行，Worker 仅 `composite` 等上游，实测 10/10 个 Shot 的 `face_review` 早于上游 `keyframe` 完成即启动——这正是第 1 项的运行期根因。单独修顺序会让当前黄金样本不通过，两项须一起处理。
-3. **已盖章阈值未落地**：已批 `final_threshold=0.60` 在运行期不存在，各处硬编码 `0.35`。
-4. `snapshot` API 不返回 NodeRun 时间戳，执行顺序无法在前端自证。
-5. 备份恢复、密钥轮换未在当前提交的正式栈留存端到端记录。
+GraphEdge 顺序、0.60 人脸 Gate、真实图像/视频链、Video Drift、审核阻断与四项交付主体
+已经实现。最近 10 Shot 运行中 10/10 keyframe、face 和 video 成功，9/10 drift 与下游
+通过；shot 6 两次 drift 约 0.31，仍按 fail-closed 阻断。之后又完成
+`needs_human/blocked` approve 阻断和 Drift 分布证据加固，因此历史全绿报告不能证明当前
+候选。最新候选、剩余 Gate 和唯一任务始终以 `docs/开发执行检查点.md` 为准。
 
 ## 技术栈（不可替换）
 
@@ -55,7 +44,8 @@ P0 Gate 阻塞项（详见 `docs/开发执行检查点.md` §3.1）：
 
 空间之间完全隔离，不可共享、转让或邀请成员。注册后自动创建默认空间。所有写入/审核/导出/凭证操作统一校验当前用户是否为 `owner_user_id`。
 
-已移除的概念：Organization、OrganizationMember、ProjectMember、MemberRole、成员邀请。`main` 分支仍保留团队协作模型。
+已移除的概念：Organization、OrganizationMember、ProjectMember、MemberRole、成员邀请。
+当前 P1 路线也不默认恢复这些概念。
 
 ## 后端目录架构（不可新建/移动/合并）
 
@@ -211,4 +201,4 @@ PR 合并到 `dev` 或 `main` 前必须通过 7 个 job（`.github/workflows/ci.
 - 冻结包（`01`–`06`）+ ADR 发生冲突时，先引用条款、记录检查点、停止冲突范围实现，其余工作继续
 - 本地编码/测试/迁移/依赖冲突/分支冲突/文档同步不属于人工审批事项
 
-P0 不开发：候选结果池（P1.1）、评论指派（P1.2）、富故事板/精剪/FCPXML（P1.3）、3D导演台（P2）、通用 NLE、插件市场、WebSocket、Adobe Premiere 兼容
+P0 不开发：候选结果池（P1.1）、个人故事板/返工队列/正式资产（P1.2）、精剪/FCPXML（P1.3）、3D 导演台（P2）、多人协作（未排期）、通用 NLE、插件市场、WebSocket、Adobe Premiere 兼容。

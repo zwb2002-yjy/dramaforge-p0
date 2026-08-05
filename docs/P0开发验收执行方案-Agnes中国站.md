@@ -1,5 +1,9 @@
 # DramaForge P0 开发验收执行方案（Agnes 中国站）
 
+> 本文定义 P0 验收方法和历史执行记录，不是当前状态入口。当前是否完成、最新候选提交和
+> 唯一执行任务以 [`开发执行检查点.md`](开发执行检查点.md) 为准；项目全路线以
+> [`../AI短剧工作台完整实施规划.md`](../AI短剧工作台完整实施规划.md) 为准。
+
 **状态：DEVELOPMENT VERIFICATION COMPLETE / FINAL ACCEPTANCE BLOCKED**
 
 **制定日期：2026-08-03**
