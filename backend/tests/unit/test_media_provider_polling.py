@@ -300,7 +300,7 @@ async def test_agnes_video_i2v_bare_base64_first_frame_without_data_url_prefix()
 
 
 @pytest.mark.asyncio
-async def test_agnes_video_i2v_data_uri_rejects_combined_image_sources() -> None:
+async def test_agnes_video_i2v_rejects_combined_image_sources() -> None:
     async def _never(request: httpx.Request) -> httpx.Response:
         raise AssertionError("network must not be reached for invalid source combination")
 
