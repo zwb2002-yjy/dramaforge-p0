@@ -95,6 +95,16 @@ def _problem(response: httpx.Response) -> str:
     )
 
 
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    raw = response.headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 def latest_shot_node_runs(
     state: dict[str, Any], *, shot_ids: list[str]
 ) -> dict[tuple[str, str], dict[str, Any]]:
@@ -358,6 +368,30 @@ def main() -> int:
             headers={"X-CSRF-Token": csrf(), "Content-Type": "application/json"},
         )
         cookies.update(response.cookies)
+        return response
+
+    def post_retry_429(
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        params: dict[str, str] | None = None,
+        max_attempts: int = 4,
+        base_wait_s: float = 10.0,
+    ) -> httpx.Response:
+        """POST with bounded retry on transient HTTP 429 (provider rate limit).
+
+        The text/video providers can transiently return 429; the Agent brief and
+        plan calls should not fail the whole proof on a transient throttle. Honor
+        Retry-After when the server sends it, capped by the proof budget.
+        """
+        response = post(path, body, params=params)
+        attempt = 1
+        while response.status_code == 429 and attempt < max_attempts:
+            retry_after = _retry_after_seconds(response)
+            wait = max(base_wait_s, retry_after) if retry_after else base_wait_s
+            time.sleep(min(wait, 30.0))
+            response = post(path, body, params=params)
+            attempt += 1
         return response
 
     def snapshot(project_id: str) -> dict[str, Any]:
@@ -770,7 +804,7 @@ def main() -> int:
             project_id = str(created.json()["project_id"])
             report["project_id"] = project_id
 
-            brief = post(
+            brief = post_retry_429(
                 f"/api/v1/projects/{project_id}/brief/generate",
                 {
                     "idea": idea,
@@ -808,7 +842,7 @@ def main() -> int:
                     f"formal face-review evidence: {_problem(canonical)}"
                 )
 
-            plan = post(
+            plan = post_retry_429(
                 f"/api/v1/projects/{project_id}/plans/generate",
                 {"brief_revision_id": brief_body["id"], "authorize": True},
             )
