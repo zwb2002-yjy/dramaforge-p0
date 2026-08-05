@@ -324,6 +324,10 @@ class AgnesHubClient:
             "prompt": prompt_value,
             "num_frames": num_frames,
             "frame_rate": frame_rate,
+            # Official Video V2.0 contract: default is 1152x768 landscape; the
+            # product is 9:16 portrait, so pass an explicit portrait size.
+            "height": 1280,
+            "width": 720,
         }
         operation = "video.i2v"
         reference_transport = "short_lived_https"
@@ -338,13 +342,16 @@ class AgnesHubClient:
             references = [_require_https_reference(image_url)]
             body["image"] = references[0]
         elif image_bytes is not None:
-            # Agnes China accepts a base64 Data URI for the first-frame image, so
-            # I2V does not require a public HTTPS origin (verified 2026-08-04:
-            # data URI -> video task completed end-to-end).
-            data_uri, _ = _reference_data_uri(data=image_bytes, mime_type=image_mime)
-            body["image"] = data_uri
-            references = [data_uri]
-            reference_transport = "data_uri"
+            # Official Video V2.0 contract (verified against the Agnes wiki and
+            # vendor support 2026-08-05): image accepts a public URL OR the raw
+            # Base64 image body — but NOT a "data:image/...;base64," Data URL
+            # prefix. Passing the prefixed form caused intermittent video.create
+            # failures while Image 2.x (which documents the prefixed data URI)
+            # stayed reliable. I2V therefore sends the bare Base64 body.
+            encoded = base64.b64encode(image_bytes).decode("ascii")
+            body["image"] = encoded
+            references = [encoded]
+            reference_transport = "base64_raw"
         else:
             raise ValueError("video I2V requires one first-frame reference")
         request_fingerprint = hashlib.sha256(

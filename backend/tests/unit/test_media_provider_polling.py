@@ -239,6 +239,8 @@ async def test_agnes_video_i2v_top_level_image_and_dual_remote_ids() -> None:
             "image": "https://references.example/opaque-token",
             "num_frames": 121,
             "frame_rate": 24,
+            "height": 1280,
+            "width": 720,
         }
         return httpx.Response(
             200,
@@ -261,14 +263,20 @@ async def test_agnes_video_i2v_top_level_image_and_dual_remote_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agnes_video_i2v_data_uri_first_frame_does_not_require_public_url() -> None:
-    """Agnes China accepts a base64 Data URI for the I2V first-frame (no public origin)."""
+async def test_agnes_video_i2v_bare_base64_first_frame_without_data_url_prefix() -> None:
+    """Official Video V2.0: image accepts public URL or raw Base64 body, NOT a
+    data:...;base64, prefix (verified against Agnes wiki + vendor support)."""
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/videos"
         body = json.loads(request.content)
-        assert body["image"].startswith("data:image/png;base64,")
+        assert "data:" not in body["image"]  # bare Base64 body, no Data URL prefix
+        import base64 as _b64
+
+        assert _b64.b64decode(body["image"]).startswith(b"\x89PNG")
         assert body["num_frames"] == 121
         assert body["frame_rate"] == 24
+        assert body["height"] == 1280
+        assert body["width"] == 720
         assert "image_url" not in body
         return httpx.Response(
             200,
@@ -286,9 +294,9 @@ async def test_agnes_video_i2v_data_uri_first_frame_does_not_require_public_url(
 
     assert result["remote_task_id"] == "video-duri"
     assert result["remote_secondary_id"] == "task-duri"
-    assert result["request_summary"]["reference_transport"] == "data_uri"
+    assert result["request_summary"]["reference_transport"] == "base64_raw"
     serialized = json.dumps(result["request_summary"])
-    assert "base64" not in serialized  # request summary never stores the Data URI
+    assert "data:image" not in serialized  # request summary never stores a Data URL
 
 
 @pytest.mark.asyncio
