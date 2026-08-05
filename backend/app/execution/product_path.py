@@ -701,6 +701,7 @@ async def enqueue_keyframe_after_plan(
         "artifact_id": str(prompt_artifact.id),
         "content_hash": prompt_artifact.content_hash,
         "byte_size": prompt_artifact.byte_size,
+        "source_commit": get_settings().source_commit,
     }
     prompt_node.latest_successful_run_id = prompt_run.id
 
