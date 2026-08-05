@@ -42,8 +42,10 @@ REQUIRED_NODES = (
 DONE_STATUSES = {"completed", "cached", "completed_after_cancel"}
 # The canonical-reference API deliberately permits 330 seconds for a live image
 # provider to recover from transient hub failures. The proof client must not
-# turn that valid server-side budget into a false negative.
-SYNC_PROVIDER_TIMEOUT_SECONDS = 600.0
+# turn that valid server-side budget into a false negative. A slow Agnes image
+# can exceed that window (observed >600s on 2026-08-05), so the client budget
+# is set above the plan §3.2 single-shot media target of 10 minutes.
+SYNC_PROVIDER_TIMEOUT_SECONDS = 900.0
 DEFAULT_MAX_FACE_REWORKS = 3
 DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 APPROVED_FACE_POLICY = {
