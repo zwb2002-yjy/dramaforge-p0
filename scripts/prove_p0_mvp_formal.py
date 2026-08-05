@@ -1046,7 +1046,11 @@ def main() -> int:
             "shots": len(shot_ids),
             "node_runs": len(all_runs),
             "artifacts": len(artifacts),
-            "failed_runs": len([run for run in all_runs if run.get("status") == "failed"]),
+            "failed_runs": sum(
+                1
+                for (shot_id, node_key), run in latest.items()
+                if run.get("status") == "failed"
+            ),
             "per_shot_full": sum(
                 all((shot_id, node_key) in latest for node_key in REQUIRED_NODES)
                 for shot_id in shot_ids
