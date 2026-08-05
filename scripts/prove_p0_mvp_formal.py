@@ -164,6 +164,21 @@ def face_policy_errors(runs: list[dict[str, Any]]) -> list[str]:
     return errors
 
 
+def response_run_id_for_node(response: dict[str, Any], *, node_key: str) -> str:
+    """Resolve a re-run NodeRun from the API's ordered node/run response."""
+    nodes = [str(value) for value in response.get("stale_nodes", [])]
+    run_ids = [str(value) for value in response.get("run_ids", [])]
+    if len(nodes) != len(run_ids):
+        raise RuntimeError(
+            "rerun response has mismatched stale_nodes/run_ids "
+            f"({len(nodes)} != {len(run_ids)})"
+        )
+    try:
+        return run_ids[nodes.index(node_key)]
+    except ValueError as exc:
+        raise RuntimeError(f"rerun response omitted {node_key}") from exc
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://127.0.0.1:8000")
