@@ -362,7 +362,12 @@ def main() -> int:
         if response.status_code != 200:
             raise RuntimeError(f"worker tick failed {response.status_code}: {_problem(response)}")
 
-    def wait_for_runs(project_id: str, run_ids: list[str]) -> dict[str, Any]:
+    def wait_for_runs(
+        project_id: str,
+        run_ids: list[str],
+        *,
+        tolerate_face_upstream: bool = False,
+    ) -> dict[str, Any]:
         deadline = time.monotonic() + max(1, args.timeout_seconds)
         expected = set(run_ids)
         while time.monotonic() < deadline:
@@ -370,12 +375,30 @@ def main() -> int:
             state = snapshot(project_id)
             runs = {str(run["id"]): run for run in state.get("node_runs", [])}
             observed = [runs.get(run_id) for run_id in expected]
-            if all(run is not None and run.get("status") in DONE_STATUSES for run in observed):
+
+            def _tolerable(run: Any) -> bool:
+                # With the enforced 0.60 face gate, a video (and its downstream
+                # drift/composite/continuity) fails fast with UPSTREAM_TERMINAL_FAILURE
+                # whenever its face_review is blocked. Those are exactly the runs
+                # rework_blocked_face_reviews re-runs next, so the initial wait must
+                # not abort on them.
+                return bool(
+                    tolerate_face_upstream
+                    and run is not None
+                    and run.get("status") == "failed"
+                    and run.get("error_code") == "UPSTREAM_TERMINAL_FAILURE"
+                )
+
+            if all(
+                run is not None
+                and (run.get("status") in DONE_STATUSES or _tolerable(run))
+                for run in observed
+            ):
                 return state
             failed = [
                 run
                 for run in observed
-                if run is not None and run.get("status") == "failed"
+                if run is not None and run.get("status") == "failed" and not _tolerable(run)
             ]
             if failed:
                 raise RuntimeError(
@@ -758,7 +781,11 @@ def main() -> int:
                     "(prompt+keyframe pre-created by materialization), "
                     f"got {len(remaining_run_ids)}"
                 )
-        wait_for_runs(project_id, remaining_run_ids)
+        wait_for_runs(
+            project_id,
+            remaining_run_ids,
+            tolerate_face_upstream=True,
+        )
         rework_blocked_face_reviews(project_id, shot_ids)
 
         rejected_shot_id = shot_ids[0]
