@@ -484,71 +484,71 @@ test("P0 mock business flow covers workspace, creation, Provider evidence, and r
 
   await page.goto("/");
   await expect(page.getByTestId("home-panel")).toBeVisible();
-  await page.getByLabel("Email").fill("creator@example.com");
-  await page.getByLabel("Password").fill("password123");
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel("邮箱").fill("creator@example.com");
+  await page.getByLabel("密码").fill("password123");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByRole("button", { name: "Private Workspace", exact: true })).toBeVisible();
   await expect(page.getByTestId("provider-config")).toBeVisible();
 
-  await page.getByLabel("Agnes API key").fill("e2e-write-only-key");
-  await page.getByRole("button", { name: "Save encrypted key", exact: true }).click();
-  await expect(page.getByTestId("provider-config-message")).toContainText("not readable");
-  await expect(page.getByLabel("Agnes API key")).toHaveValue("");
+  await page.getByLabel("Agnes API Key").fill("e2e-write-only-key");
+  await page.getByRole("button", { name: "保存加密 Key", exact: true }).click();
+  await expect(page.getByTestId("provider-config-message")).toContainText("不可读取");
+  await expect(page.getByLabel("Agnes API Key")).toHaveValue("");
   await expect(page.getByText("https://api.agnes-ai.cn", { exact: true })).toBeVisible();
   await expect(page.getByText("agnes_cn_v1", { exact: true })).toBeVisible();
 
-  await page.getByLabel("Agnes API key").fill("e2e-rotated-key");
-  await page.getByRole("button", { name: "Rotate key", exact: true }).click();
+  await page.getByLabel("Agnes API Key").fill("e2e-rotated-key");
+  await page.getByRole("button", { name: "轮换 Key", exact: true }).click();
   await expect(page.getByText("v2", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Agnes API key")).toHaveValue("");
+  await expect(page.getByLabel("Agnes API Key")).toHaveValue("");
 
-  await page.getByRole("button", { name: "Add keyframe model", exact: true }).click();
-  await page.getByRole("button", { name: "Add video model", exact: true }).click();
-  await expect(page.getByTestId("binding-states-keyframe")).toContainText("documented: pass");
-  await expect(page.getByTestId("binding-states-keyframe")).toContainText("contract_tested: pass");
-  await expect(page.getByTestId("binding-states-keyframe")).toContainText("account_verified: pending");
-  await expect(page.getByTestId("binding-states-video")).toContainText("quality_gated: pending");
+  await page.getByRole("button", { name: "添加关键帧模型", exact: true }).click();
+  await page.getByRole("button", { name: "添加视频模型", exact: true }).click();
+  await expect(page.getByTestId("binding-states-keyframe")).toContainText("已文档化：通过");
+  await expect(page.getByTestId("binding-states-keyframe")).toContainText("已合同测试：通过");
+  await expect(page.getByTestId("binding-states-keyframe")).toContainText("已账号验证：待定");
+  await expect(page.getByTestId("binding-states-video")).toContainText("已质量门禁：待定");
 
-  await page.getByLabel("Capability").selectOption("image_i2i");
-  await expect(page.getByLabel("Capability")).toHaveValue("image_i2i");
-  await expect(page.getByLabel("Explicit budget authorization")).toBeVisible();
-  const paidProbeButton = page.getByRole("button", { name: "Authorize and run paid Probe", exact: true });
+  await page.getByLabel("能力").selectOption("image_i2i");
+  await expect(page.getByLabel("能力")).toHaveValue("image_i2i");
+  await expect(page.getByLabel("预算授权金额")).toBeVisible();
+  const paidProbeButton = page.getByRole("button", { name: "授权并运行付费探测", exact: true });
   await expect(paidProbeButton).toBeEnabled();
   await paidProbeButton.click();
-  await expect(page.locator("[data-testid='provider-config-message'].flash.err")).toContainText("positive budget");
-  await page.getByLabel("Explicit budget authorization").fill("0.25");
-  await page.getByLabel("Reference Artifact ID").fill("artifact-keyframe");
-  await page.getByRole("button", { name: "Authorize and run paid Probe", exact: true }).click();
+  await expect(page.locator("[data-testid='provider-config-message'].flash.err")).toContainText("正预算");
+  await page.getByLabel("预算授权金额").fill("0.25");
+  await page.getByLabel("参考产物 ID").fill("artifact-keyframe");
+  await page.getByRole("button", { name: "授权并运行付费探测", exact: true }).click();
   await expect(page.getByTestId("provider-probes")).toContainText("account_verified");
-  await expect(page.getByTestId("binding-keyframe-account_verified")).toContainText("pass");
-  await expect(page.getByTestId("binding-video-account_verified")).toContainText("pending");
+  await expect(page.getByTestId("binding-keyframe-account_verified")).toContainText("通过");
+  await expect(page.getByTestId("binding-video-account_verified")).toContainText("待定");
 
-  const imageRunInput = page.getByLabel("keyframe quality NodeRun ID");
-  const imageArtifactInput = page.getByLabel("keyframe quality Artifact ID");
+  const imageRunInput = page.getByLabel("keyframe 质量 NodeRun ID");
+  const imageArtifactInput = page.getByLabel("keyframe 质量产物 ID");
   await imageRunInput.fill("run-face-1");
   await imageArtifactInput.fill("artifact-face-1");
-  await page.getByRole("button", { name: "Record quality evidence" }).first().click();
-  await expect(page.getByTestId("binding-keyframe-quality_gated")).toContainText("pass");
+  await page.getByRole("button", { name: "记录质量证据" }).first().click();
+  await expect(page.getByTestId("binding-keyframe-quality_gated")).toContainText("通过");
 
-  await page.getByLabel("Capability").selectOption("video_i2v");
-  await page.getByLabel("Explicit budget authorization").fill("0.25");
-  await page.getByLabel("Reference Artifact ID").fill("artifact-keyframe");
-  await page.getByRole("button", { name: "Authorize and run paid Probe", exact: true }).click();
-  await expect(page.getByTestId("binding-video-account_verified")).toContainText("pass");
+  await page.getByLabel("能力").selectOption("video_i2v");
+  await page.getByLabel("预算授权金额").fill("0.25");
+  await page.getByLabel("参考产物 ID").fill("artifact-keyframe");
+  await page.getByRole("button", { name: "授权并运行付费探测", exact: true }).click();
+  await expect(page.getByTestId("binding-video-account_verified")).toContainText("通过");
 
-  const videoRunInput = page.getByLabel("video quality NodeRun ID");
-  const videoArtifactInput = page.getByLabel("video quality Artifact ID");
+  const videoRunInput = page.getByLabel("video 质量 NodeRun ID");
+  const videoArtifactInput = page.getByLabel("video 质量产物 ID");
   await videoRunInput.fill("run-video-1");
   await videoArtifactInput.fill("artifact-video-1");
-  await page.getByRole("button", { name: "Record quality evidence" }).first().click();
-  await expect(page.getByTestId("binding-video-quality_gated")).toContainText("pass");
+  await page.getByRole("button", { name: "记录质量证据" }).first().click();
+  await expect(page.getByTestId("binding-video-quality_gated")).toContainText("通过");
 
-  await page.getByLabel("Project provider binding").selectOption(PROJECT_ID);
-  await expect(page.getByRole("button", { name: "Bind selected project" }).first()).toBeEnabled();
+  await page.getByLabel("项目 Provider 绑定").selectOption(PROJECT_ID);
+  await expect(page.getByRole("button", { name: "绑定所选项目" }).first()).toBeEnabled();
 
-  await page.getByLabel("Project name").fill("Rain Signal");
-  await page.getByLabel("Creative idea").fill("A reporter finds a signal in the rain.");
-  await page.getByRole("button", { name: "Create project", exact: true }).click();
+  await page.getByLabel("项目名").fill("Rain Signal");
+  await page.getByLabel("创意想法").fill("A reporter finds a signal in the rain.");
+  await page.getByRole("button", { name: "创建项目", exact: true }).click();
   await expect(page.getByTestId("quick-mode")).toBeVisible();
   await expect(page.getByTestId("mode-switch")).toBeVisible();
   await expect(page.getByTestId("agent-brief")).toBeVisible();
@@ -566,11 +566,11 @@ test("P0 mock business flow covers workspace, creation, Provider evidence, and r
   await expect(page.getByTestId("mode-switch")).toContainText("专业");
   await expect(page.getByTestId("shot-timeline").locator("button")).toHaveCount(10);
   await expect(page.getByTestId("shot-runtime-nodes").locator("article")).toHaveCount(NODE_KEYS.length);
-  await expect(page.getByTestId("shot-runtime-node-video")).toContainText("Provider pending");
-  await expect(page.getByTestId("shot-runtime-node-video_drift_review")).toContainText("VIDEO_DRIFT_BLOCKED");
+  await expect(page.getByTestId("shot-runtime-node-video")).toContainText("Provider 处理中");
+  await expect(page.getByTestId("shot-runtime-node-video_drift_review")).toContainText("视频漂移阻断");
   await expect(page.getByTestId("shot-runtime-node-subtitle")).toContainText("预算阻断");
-  await expect(page.getByTestId("shot-runtime-node-composite")).toContainText("UPSTREAM_TERMINAL_FAILURE");
-  await expect(page.getByTestId("shot-runtime-node-continuity_review")).toContainText("UPSTREAM_ARTIFACT_MISSING");
+  await expect(page.getByTestId("shot-runtime-node-composite")).toContainText("上游阻断失败");
+  await expect(page.getByTestId("shot-runtime-node-continuity_review")).toContainText("上游产物缺失");
 
   await page.getByTestId("shot-rerun-subtitle").click();
   await expect(page.getByTestId("production-msg")).toContainText("局部重跑字幕");

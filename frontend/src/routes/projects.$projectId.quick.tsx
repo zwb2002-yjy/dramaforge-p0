@@ -27,6 +27,7 @@ import {
 } from "../lib/quickWorkflow";
 import type { JsonObject } from "../lib/quickWorkflow";
 import { projectRoute } from "./projects.$projectId";
+import { zhStatus } from "../lib/zh";
 
 export const projectQuickRoute = createRoute({
   getParentRoute: () => projectRoute,
@@ -340,7 +341,7 @@ function QuickModePage() {
           <section className="panel" data-testid="step-idea">
             <h3>① 创意</h3>
             <label>
-              故事创意 / Idea
+              故事创意
               <textarea value={idea} onChange={(e) => setIdea(e.target.value)} rows={3} />
             </label>
             <div className="toolbar">
@@ -371,12 +372,12 @@ function QuickModePage() {
           <section className="panel" data-testid="step-brief">
             <h3>② Brief</h3>
             <label>
-              Logline
+              一句话梗概
               <textarea value={logline} onChange={(e) => setLogline(e.target.value)} rows={2} />
             </label>
             <div className="split-2">
               <label>
-                Tone
+                基调
                 <input
                   value={tone}
                   onChange={(e) => setTone(e.target.value)}
@@ -384,7 +385,7 @@ function QuickModePage() {
                 />
               </label>
               <label>
-                Audience
+                目标观众
                 <input
                   value={audience}
                   onChange={(e) => setAudience(e.target.value)}
@@ -461,17 +462,17 @@ function QuickModePage() {
               </p>
             )}
             <label>
-              首镜 Keyframe prompt
+              首镜关键帧提示词
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 readOnly={planSource === "agent"}
                 rows={3}
-                placeholder="cinematic keyframe, subject, action, and composition"
+                placeholder="cinematic keyframe, subject, action, composition"
               />
             </label>
             <label>
-              Plan notes
+              分镜说明
               <textarea
                 value={shotNotes}
                 onChange={(e) => setShotNotes(e.target.value)}
@@ -493,7 +494,7 @@ function QuickModePage() {
                 {planShots.map((shot, index) => (
                   <article className="plan-shot-row" key={`${asText(shot.shot_number)}-${index}`}>
                     <div className="plan-shot-heading">
-                      <strong>Shot {asText(shot.shot_number) || index + 1}</strong>
+                      <strong>分镜 {asText(shot.shot_number) || index + 1}</strong>
                       <span>
                         {[
                           asText(shot.location),
@@ -581,11 +582,11 @@ function QuickModePage() {
             <h3>⑤ 运行时</h3>
             <div className="status-grid" data-testid="quick-stats">
               <div className="status-card">
-                <span className="status-label">NodeRuns</span>
+                <span className="status-label">NodeRun 数</span>
                 <strong data-testid="quick-runs">{runs.length}</strong>
               </div>
               <div className="status-card">
-                <span className="status-label">Artifacts</span>
+                <span className="status-label">产物数</span>
                 <strong data-testid="quick-arts">{arts.length}</strong>
               </div>
             </div>
@@ -603,7 +604,7 @@ function QuickModePage() {
                             : "status-pending"
                       }
                     >
-                      {r.status}
+                      {zhStatus(r.status)}
                     </strong>
                   </li>
                 ))}

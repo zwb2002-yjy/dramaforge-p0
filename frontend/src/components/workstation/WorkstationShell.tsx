@@ -47,7 +47,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   return (
     <div className="workstation" data-testid="workstation-shell">
       <header className="workstation-topbar">
-        <button type="button" className="ghost" onClick={toggleLeft} aria-label="Toggle navigation">
+        <button type="button" className="ghost" onClick={toggleLeft} aria-label="切换导航">
           ☰
         </button>
         <Link to="/" className="brand">
@@ -139,7 +139,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 <strong title={projectId}>{projectId!.slice(0, 8)}…</strong>
               </div>
               <div className="inspector-stat">
-                <span>NodeRuns</span>
+                <span>NodeRun 数</span>
                 <strong data-testid="insp-runs">{runs.length}</strong>
               </div>
               <div className="inspector-stat">
@@ -155,7 +155,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 <strong className={failed ? "status-bad" : ""}>{failed}</strong>
               </div>
               <div className="inspector-stat">
-                <span>Artifacts</span>
+                <span>产物数</span>
                 <strong data-testid="insp-arts">{arts.length}</strong>
               </div>
               {snapshot.data?.name && (

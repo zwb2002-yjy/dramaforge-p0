@@ -39,12 +39,12 @@ function HomePage() {
   });
   const [email, setEmail] = useState("creator@example.com");
   const [password, setPassword] = useState("password123");
-  const [displayName, setDisplayName] = useState("Creator");
+  const [displayName, setDisplayName] = useState("创作者");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
     getSelectedWorkspaceId,
   );
   const [workspaceName, setWorkspaceName] = useState("");
-  const [projectName, setProjectName] = useState("New short drama");
+  const [projectName, setProjectName] = useState("新短剧");
   const [idea, setIdea] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -114,7 +114,7 @@ function HomePage() {
 
   const renameWorkspaceMutation = useMutation({
     mutationFn: async (workspace: WorkspaceRead) => {
-      const name = window.prompt("Workspace name", workspace.name)?.trim();
+      const name = window.prompt("空间名", workspace.name)?.trim();
       if (!name || name === workspace.name) return;
       await renameWorkspace(workspace.id, name);
     },
@@ -124,7 +124,7 @@ function HomePage() {
 
   const deleteWorkspaceMutation = useMutation({
     mutationFn: async (workspace: WorkspaceRead) => {
-      if (!window.confirm(`Delete workspace "${workspace.name}"?`)) return;
+      if (!window.confirm(`删除空间「${workspace.name}」？`)) return;
       await deleteWorkspace(workspace.id);
     },
     onSuccess: invalidateWorkspaceData,
@@ -133,7 +133,7 @@ function HomePage() {
 
   const createProjectMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedWorkspaceId) throw new Error("Select a workspace first");
+      if (!selectedWorkspaceId) throw new Error("请先选择一个空间");
       return startProject({ workspace_id: selectedWorkspaceId, name: projectName, aspect_ratio: "9:16", idea });
     },
     onSuccess: async (project) => {
@@ -157,22 +157,22 @@ function HomePage() {
     <div className="workspace-home" data-testid="home-panel">
       <section className="workspace-header">
         <div>
-          <h1>Personal creation workspace</h1>
-          <p className="muted">Keep each short-drama project in a workspace owned only by your account.</p>
+          <h1>个人创作空间</h1>
+          <p className="muted">每个短剧项目都放在仅由你账号拥有的独立空间内。</p>
         </div>
-        <span className={apiLive ? "status-ok" : "status-bad"}>{apiLive ? "API ready" : "API unavailable"}</span>
+        <span className={apiLive ? "status-ok" : "status-bad"}>{apiLive ? "API 就绪" : "API 不可用"}</span>
       </section>
 
       {!currentUser.data ? (
         <section className="panel auth-panel">
-          <h2>Sign in</h2>
+          <h2>登录</h2>
           <form className="auth-form" onSubmit={(event) => { event.preventDefault(); authenticate.mutate("login"); }}>
-            <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" /></label>
-            <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
-            <label>Display name<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label>
+            <label>邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" /></label>
+            <label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
+            <label>显示名<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label>
             <div className="toolbar">
-              <button className="primary" type="submit" disabled={authenticate.isPending || !apiLive}>Sign in</button>
-              <button type="button" onClick={() => authenticate.mutate("register")} disabled={authenticate.isPending || !apiLive}>Create account</button>
+              <button className="primary" type="submit" disabled={authenticate.isPending || !apiLive}>登录</button>
+              <button type="button" onClick={() => authenticate.mutate("register")} disabled={authenticate.isPending || !apiLive}>创建账号</button>
             </div>
           </form>
         </section>
@@ -182,21 +182,21 @@ function HomePage() {
             <div className="panel-header">
               <div><h2>{currentUser.data.display_name}</h2><p className="muted">{currentUser.data.email}</p></div>
               <form className="inline-form" onSubmit={submitWorkspace}>
-                <input aria-label="New workspace name" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="New workspace" />
-                <button type="submit" disabled={!workspaceName.trim() || createWorkspaceMutation.isPending}>Create workspace</button>
+                <input aria-label="新空间名" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="新空间名" />
+                <button type="submit" disabled={!workspaceName.trim() || createWorkspaceMutation.isPending}>创建空间</button>
               </form>
             </div>
-            <div className="workspace-list" role="list" aria-label="Your workspaces">
+            <div className="workspace-list" role="list" aria-label="我的空间">
               {workspaces.data?.map((workspace) => (
                 <div className={workspace.id === selectedWorkspaceId ? "workspace-row selected" : "workspace-row"} key={workspace.id} role="listitem">
                   <button className="workspace-select" type="button" onClick={() => setSelectedWorkspaceId(workspace.id)}>{workspace.name}</button>
                   <div className="workspace-actions">
-                    <button className="ghost" type="button" onClick={() => renameWorkspaceMutation.mutate(workspace)}>Rename</button>
-                    <button className="ghost danger" type="button" onClick={() => deleteWorkspaceMutation.mutate(workspace)} disabled={projects.data?.some((project) => project.workspace_id === workspace.id)}>Delete</button>
+                    <button className="ghost" type="button" onClick={() => renameWorkspaceMutation.mutate(workspace)}>重命名</button>
+                    <button className="ghost danger" type="button" onClick={() => deleteWorkspaceMutation.mutate(workspace)} disabled={projects.data?.some((project) => project.workspace_id === workspace.id)}>删除</button>
                   </div>
                 </div>
               ))}
-              {!workspaces.isLoading && !workspaces.data?.length && <p className="muted">Create a workspace to begin.</p>}
+              {!workspaces.isLoading && !workspaces.data?.length && <p className="muted">先创建一个空间开始。</p>}
             </div>
           </section>
 
@@ -206,11 +206,11 @@ function HomePage() {
           />
 
           <section className="panel project-manager">
-            <div className="panel-header"><div><h2>{selectedWorkspace?.name ?? "Select a workspace"}</h2><p className="muted">Projects are isolated to the selected workspace.</p></div></div>
+            <div className="panel-header"><div><h2>{selectedWorkspace?.name ?? "选择一个空间"}</h2><p className="muted">项目隔离在所选空间内。</p></div></div>
             <form className="inline-form project-create" onSubmit={(event) => { event.preventDefault(); createProjectMutation.mutate(); }}>
-              <input aria-label="Project name" value={projectName} onChange={(event) => setProjectName(event.target.value)} disabled={!selectedWorkspaceId} />
-              <input aria-label="Creative idea" value={idea} onChange={(event) => setIdea(event.target.value)} placeholder="Creative idea (optional)" disabled={!selectedWorkspaceId} />
-              <button className="primary" type="submit" disabled={!selectedWorkspaceId || createProjectMutation.isPending}>Create project</button>
+              <input aria-label="项目名" value={projectName} onChange={(event) => setProjectName(event.target.value)} disabled={!selectedWorkspaceId} />
+              <input aria-label="创意想法" value={idea} onChange={(event) => setIdea(event.target.value)} placeholder="创意想法（可选）" disabled={!selectedWorkspaceId} />
+              <button className="primary" type="submit" disabled={!selectedWorkspaceId || createProjectMutation.isPending}>创建项目</button>
             </form>
             <div className="project-list">
               {projects.data?.map((project) => (
@@ -218,7 +218,7 @@ function HomePage() {
                   <span>{project.name}</span><span className="muted">{project.stage} · {project.aspect_ratio}</span>
                 </button>
               ))}
-              {selectedWorkspaceId && !projects.isLoading && !projects.data?.length && <p className="muted">No projects yet.</p>}
+              {selectedWorkspaceId && !projects.isLoading && !projects.data?.length && <p className="muted">暂无项目。</p>}
             </div>
           </section>
         </>

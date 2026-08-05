@@ -144,30 +144,30 @@ test.describe("P0 real 10 Shot browser proof", () => {
       expect(health.db).toBe("up");
       expect(health.source_commit).toBe(sourceCommit);
 
-      await expect(page.getByText("API ready", { exact: true })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText("API 就绪", { exact: true })).toBeVisible({ timeout: 30_000 });
       const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
       const email = `p0-browser-${suffix}@example.com`;
       const workspaceName = `P0 Browser Workspace ${suffix}`;
-      await page.getByLabel("Email").fill(email);
-      await page.getByLabel("Password").fill("password123");
-      await page.getByLabel("Display name").fill("P0 Browser Proof");
-      await page.getByRole("button", { name: "Create account", exact: true }).click();
+      await page.getByLabel("邮箱").fill(email);
+      await page.getByLabel("密码").fill("password123");
+      await page.getByLabel("显示名").fill("P0 Browser Proof");
+      await page.getByRole("button", { name: "创建账号", exact: true }).click();
       await expect(
         page.getByRole("heading", { name: "P0 Browser Proof", exact: true }),
       ).toBeVisible({
         timeout: 60_000,
       });
 
-      await page.getByLabel("New workspace name").fill(workspaceName);
-      await page.getByRole("button", { name: "Create workspace", exact: true }).click();
+      await page.getByLabel("新空间名").fill(workspaceName);
+      await page.getByRole("button", { name: "创建空间", exact: true }).click();
       await expect(page.getByRole("button", { name: workspaceName, exact: true })).toBeVisible({
         timeout: 60_000,
       });
-      await page.getByLabel("Project name").fill(`P0 Real Browser ${suffix}`);
+      await page.getByLabel("项目名").fill(`P0 Real Browser ${suffix}`);
       await page
-        .getByLabel("Creative idea")
+        .getByLabel("创意想法")
         .fill("A reporter follows an encrypted message through an old city before dawn.");
-      await page.getByRole("button", { name: "Create project", exact: true }).click();
+      await page.getByRole("button", { name: "创建项目", exact: true }).click();
       await expect(page.getByTestId("quick-mode")).toBeVisible({ timeout: 60_000 });
       const match = page.url().match(/projects\/([^/]+)\/quick/);
       if (!match) throw new Error(`project route missing from ${page.url()}`);

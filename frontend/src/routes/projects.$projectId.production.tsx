@@ -26,6 +26,7 @@ import {
   shotKeyframeArtifact,
 } from "../lib/projectMedia";
 import { projectRoute } from "./projects.$projectId";
+import { zhErrorCode, zhErrorSummary, zhNode, zhStatus } from "../lib/zh";
 
 export const projectProductionRoute = createRoute({
   getParentRoute: () => projectRoute,
@@ -154,10 +155,10 @@ function nodeStatusLabel(run: ProjectSnapshot["node_runs"][number] | undefined, 
     const dependencies = NODE_DEPENDENCIES[node] ?? [];
     return dependencies.length ? "等待上游" : "未开始";
   }
-  if (run.status === "failed") return run.error_code || "Provider 失败";
+  if (run.status === "failed") return zhErrorCode(run.error_code) || "Provider 失败";
   if (run.status === "blocked_budget") return "预算阻断";
   if (run.status === "queued" || run.status === "running") {
-    if (run.output_summary?.status === "provider_pending") return "Provider pending";
+    if (run.output_summary?.status === "provider_pending") return "Provider 处理中";
     return run.status === "queued" ? "排队中" : "运行中";
   }
   if (run.status === "completed_after_cancel") return "取消后完成";
@@ -167,7 +168,7 @@ function nodeStatusLabel(run: ProjectSnapshot["node_runs"][number] | undefined, 
     if (reviewStatus === "blocked") return "质量阻断";
     return "已完成";
   }
-  return run.status;
+  return zhStatus(run.status);
 }
 
 function retrySuggestion(code: string | null): string {
@@ -350,14 +351,14 @@ function ProductionPage() {
       <div className="pipeline-rail" aria-label="shot-p0-v1">
         {NODES.map((n) => (
           <span key={n} className={`pipeline-node ${nodeRailClass[n] ?? ""}`}>
-            {n}
+            {zhNode(n)}
           </span>
         ))}
       </div>
 
       <div className="script-import-panel">
         <label>
-          Script file
+          剧本文件
           <input
             type="file"
             accept=".md,.txt,text/markdown,text/plain"
@@ -372,7 +373,7 @@ function ProductionPage() {
           />
         </label>
         <label>
-          Filename
+          文件名
           <input
             value={scriptFilename}
             onChange={(event) => setScriptFilename(event.target.value)}
@@ -380,7 +381,7 @@ function ProductionPage() {
           />
         </label>
         <label>
-          Script
+          剧本
           <textarea
             value={scriptText}
             onChange={(event) => setScriptText(event.target.value)}
@@ -521,7 +522,7 @@ function ProductionPage() {
                         </div>
                       </div>
                       <div className="body">
-                        <div className="title">Shot {s.shot_number || s.sort_order}</div>
+                        <div className="title">分镜 {s.shot_number || s.sort_order}</div>
                         <div className="meta">{s.visual_description.slice(0, 80)}</div>
                         {s.dialogue ? <div className="meta">「{s.dialogue}」</div> : null}
                         <div className="node-dots" title="shot-p0-v1">
@@ -529,7 +530,7 @@ function ProductionPage() {
                             <span
                               key={n}
                               className={`dot ${shotNodeRailClass[n] || ""}`}
-                              title={n}
+                              title={zhNode(n)}
                             />
                           ))}
                         </div>
@@ -571,8 +572,11 @@ function ProductionPage() {
                 {NODES.map((node) => {
                   const run = selectedShotByNode[node];
                   const dependencies = run?.upstream_dependencies?.length
-                    ? run.upstream_dependencies.map((dependency) => `${dependency.node_key}:${dependency.status}`)
-                    : (NODE_DEPENDENCIES[node] ?? []).map((dependency) => `${dependency}:—`);
+                    ? run.upstream_dependencies.map(
+                        (dependency) =>
+                          `${zhNode(dependency.node_key)}：${zhStatus(dependency.status)}`,
+                      )
+                    : (NODE_DEPENDENCIES[node] ?? []).map((dependency) => `${zhNode(dependency)}：—`);
                   const artifact = run?.result_artifact_id
                     ? arts.find((item) => item.id === run.result_artifact_id)
                     : null;
@@ -581,21 +585,21 @@ function ProductionPage() {
                   return (
                     <article className="node-runtime-row" key={node} data-testid={`shot-runtime-node-${node}`}>
                       <div className="node-runtime-heading">
-                        <strong>{node}</strong>
+                        <strong>{zhNode(node)}</strong>
                         <span className={`node-runtime-state ${stateClass}`}>{state}</span>
                       </div>
                       <dl className="node-runtime-meta">
-                        <dt>Attempt</dt>
+                        <dt>尝试</dt>
                         <dd>{run?.attempt_no ?? "—"}</dd>
-                        <dt>Dependencies</dt>
+                        <dt>依赖</dt>
                         <dd>{dependencies.length ? dependencies.join(" · ") : "—"}</dd>
-                        <dt>Started</dt>
+                        <dt>开始</dt>
                         <dd>{formatTimestamp(run?.started_at ?? null)}</dd>
-                        <dt>Finished</dt>
+                        <dt>结束</dt>
                         <dd>{formatTimestamp(run?.finished_at ?? null)}</dd>
-                        <dt>Provider cost</dt>
+                        <dt>Provider 成本</dt>
                         <dd>{run?.provider_cost ?? "0"}</dd>
-                        <dt>Artifact</dt>
+                        <dt>产物</dt>
                         <dd>
                           {artifact ? (
                             <a href={artifactContentUrl(projectId, artifact.id)} target="_blank" rel="noreferrer">
@@ -603,11 +607,13 @@ function ProductionPage() {
                             </a>
                           ) : "—"}
                         </dd>
-                        <dt>Error</dt>
+                        <dt>错误</dt>
                         <dd className={run?.error_code ? "status-bad" : undefined}>
-                          {run?.error_code ? `${run.error_code}: ${run.error_summary ?? ""}` : "—"}
+                          {run?.error_code
+                            ? zhErrorSummary(run.error_code, run.error_summary)
+                            : "—"}
                         </dd>
-                        <dt>Guidance</dt>
+                        <dt>处理建议</dt>
                         <dd>{retrySuggestion(run?.error_code ?? null)}</dd>
                       </dl>
                     </article>
@@ -616,11 +622,11 @@ function ProductionPage() {
               </div>
               {shotStatus.data && (
                   <div className="muted" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }} data-testid="shot-status">
-                  runs={shotStatus.data.node_run_count} failed={shotStatus.data.failed_count}{" "}
-                  locked={String(shotStatus.data.locked)}
+                  运行={shotStatus.data.node_run_count} 失败={shotStatus.data.failed_count}{" "}
+                  锁定={String(shotStatus.data.locked)}
                   {shotStatus.data.guidance ? (
                     <div className="status-bad">
-                      {shotStatus.data.guidance.error_code}: {shotStatus.data.guidance.retry_suggestion}
+                      {zhErrorCode(shotStatus.data.guidance.error_code)}：{shotStatus.data.guidance.retry_suggestion}
                     </div>
                   ) : null}
                 </div>
@@ -655,7 +661,7 @@ function ProductionPage() {
                   data-testid="shot-reject"
                   onClick={() =>
                     void runShotOp("驳回", () =>
-                      rejectShot(projectId, selectedShot.id, "needs rework"),
+                      rejectShot(projectId, selectedShot.id, "需要返工"),
                     )
                   }
                 >
@@ -706,23 +712,23 @@ function ProductionPage() {
               <h3>运行时 · {snapshot.data.name}</h3>
               <div className="split-2">
                 <div>
-                  <h4>最近 NodeRuns</h4>
+                  <h4>最近 NodeRun 记录</h4>
                   <ul className="dense">
                     {snapshot.data.node_runs.slice(0, 20).map((r) => (
                       <li key={r.id}>
                         <code>{r.id.slice(0, 8)}</code>
                         <strong className={statusClass(r.status) === "done" ? "status-ok" : statusClass(r.status) === "fail" ? "status-bad" : "status-pending"}>
-                          {r.status}
+                          {zhStatus(r.status)}
                         </strong>
                       </li>
                     ))}
                     {snapshot.data.node_runs.length === 0 && (
-                      <li className="muted">尚无 NodeRun</li>
+                      <li className="muted">尚无 NodeRun 记录</li>
                     )}
                   </ul>
                 </div>
                 <div>
-                  <h4>Artifacts</h4>
+                  <h4>产物列表</h4>
                   <ul className="dense">
                     {snapshot.data.artifacts.slice(0, 16).map((a) => (
                       <li key={a.id}>
