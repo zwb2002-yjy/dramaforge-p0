@@ -156,6 +156,38 @@ async def test_agnes_image_create_is_single_attempt_on_503() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agnes_image_create_transport_error_is_classified_unknown_submission() -> None:
+    """A transport-level failure (not an HTTP response) is fail-closed with the
+    exception class recorded, so the audit trail is diagnosable."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("connection lost mid-request")
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.create_image(prompt="cinematic archive room")
+
+    assert result["status"] == "unknown_submission"
+    assert result["error_code"] == "PROVIDER_SUBMISSION_UNKNOWN"
+    assert result["transport_error"] == "ReadError"
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_create_transport_error_is_classified_unknown_submission() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("tcp connect failed")
+
+    client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await client.create_video(
+        prompt="motion",
+        image_bytes=b"\x89PNG\r\n\x1a\nfake",
+    )
+
+    assert result["status"] == "unknown_submission"
+    assert result["error_code"] == "PROVIDER_SUBMISSION_UNKNOWN"
+    assert result["transport_error"] == "ConnectError"
+
+
+@pytest.mark.asyncio
 async def test_agnes_image_policy_refusal_is_not_hidden_rewritten_post() -> None:
     prompts: list[str] = []
 

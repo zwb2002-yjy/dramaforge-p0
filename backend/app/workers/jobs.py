@@ -140,7 +140,15 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                     if run2 is not None and run2.status in {"queued", "running"}:
                         run2.status = "failed"
                         run2.error_code = _worker_failure_code(exc)
-                        run2.error_summary = str(exc)[:500]
+                        # Some transport errors have an empty str() (e.g. a bare
+                        # TimeoutError). Record the exception class so a transient
+                        # network failure is diagnosable instead of an empty summary.
+                        message = str(exc).strip()
+                        run2.error_summary = (
+                            message[:500]
+                            if message
+                            else f"{type(exc).__name__} (no message)"
+                        )
                         from datetime import UTC, datetime
 
                         run2.finished_at = datetime.now(UTC)

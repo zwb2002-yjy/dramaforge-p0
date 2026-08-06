@@ -248,7 +248,7 @@ class AgnesHubClient:
                     headers=self._headers(),
                     json=body,
                 )
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
+        except httpx.TransportError as exc:
             return {
                 "status": "unknown_submission",
                 "error_code": "PROVIDER_SUBMISSION_UNKNOWN",
@@ -258,6 +258,7 @@ class AgnesHubClient:
                 "request_fingerprint": request_fingerprint,
                 "request_summary": summary,
                 "reference_fingerprints": reference_fingerprints,
+                "transport_error": type(exc).__name__,
             }
         data = _json_object(response)
         image_url = _image_result_url(data)
@@ -380,7 +381,7 @@ class AgnesHubClient:
                     headers=self._headers(),
                     json=body,
                 )
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
+        except httpx.TransportError as exc:
             return {
                 "status": "unknown_submission",
                 "error_code": "PROVIDER_SUBMISSION_UNKNOWN",
@@ -389,6 +390,7 @@ class AgnesHubClient:
                 "protocol_profile": AGNES_CN_PROFILE,
                 "request_fingerprint": request_fingerprint,
                 "request_summary": summary,
+                "transport_error": type(exc).__name__,
             }
         data = _json_object(response)
         video_id = data.get("video_id")
@@ -463,7 +465,7 @@ class AgnesHubClient:
                     params=params,
                     headers=self._headers(),
                 )
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+        except httpx.TransportError as exc:
             return {
                 "status": "running",
                 "poll_error": type(exc).__name__,
