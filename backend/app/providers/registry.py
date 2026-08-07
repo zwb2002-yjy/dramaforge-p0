@@ -104,6 +104,12 @@ def _agnes_hub_client(settings: Settings, host: str | None) -> Any:
     return AgnesHubClient(settings, host=host)
 
 
+def _ark_hub_client(settings: Settings, host: str | None) -> Any:
+    from app.providers.volcengine import ArkHubClient
+
+    return ArkHubClient(settings, host=host)
+
+
 def _register_defaults() -> None:
     from app.providers.agnes import AGNES_CN_HOST, AGNES_CN_PROFILE
 
@@ -126,15 +132,16 @@ def _register_defaults() -> None:
             client_factory=_agnes_hub_client,
         )
     )
-    # Catalog-only until the ark_cn_v1 adapter lands (Phase B). The model ids and
-    # model_list_path below are forward references to be contract-verified then.
+    # Ark data-plane contract (Seedream image + Seedance video) verified via
+    # arkcli +gen --dry-run and official Volcengine docs 2026-08-07. The host
+    # carries the /api/v3 prefix; wire paths are appended by the adapter.
     register_plugin(
         ProviderPlugin(
             provider_type="volcengine",
             protocol_profile="ark_cn_v1",
             display_name="火山方舟",
             default_base_url="https://ark.cn-beijing.volces.com/api/v3",
-            implemented=False,
+            implemented=True,
             settings_prefix="volcengine",
             credential_provider_key="volcengine",
             model_contracts={
@@ -143,7 +150,10 @@ def _register_defaults() -> None:
             },
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
-            model_list_path="/models",  # TODO(phase-b): verify Ark data-plane model list path
+            # TODO(phase-d): confirm whether the Ark data plane exposes a model
+            # list endpoint; the auth_models probe may need a different check.
+            model_list_path="/models",
+            client_factory=_ark_hub_client,
         )
     )
 

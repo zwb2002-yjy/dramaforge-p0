@@ -51,13 +51,17 @@ def test_agnes_plugin_is_implemented() -> None:
     assert plugin.capability_purposes == {"image_i2i": "keyframe", "video_i2v": "video"}
 
 
-def test_ark_plugin_is_catalog_only_until_adapter_lands() -> None:
+def test_ark_plugin_is_implemented() -> None:
+    from app.providers.volcengine import ArkHubClient
+
     plugin = get_plugin("volcengine", "ark_cn_v1")
-    assert plugin.implemented is False
+    assert plugin.implemented is True
     assert plugin.default_base_url == "https://ark.cn-beijing.volces.com/api/v3"
-    # Catalog-only plugin must refuse to build a client until Phase B lands.
-    with pytest.raises(NotImplementedError):
-        plugin.build_client(Settings())
+    assert plugin.model_contracts[("image", "keyframe")] == "doubao-seedream-4-0-250828"
+    assert plugin.model_contracts[("video", "video")] == "doubao-seedance-1-0-pro-250528"
+    # The implemented plugin must build a real Ark protocol client.
+    client = plugin.build_client(Settings())
+    assert isinstance(client, ArkHubClient)
     profiles = {p.protocol_profile for p in list_plugins()}
     assert {"agnes_cn_v1", "ark_cn_v1"} <= profiles
 
@@ -69,11 +73,11 @@ def test_unknown_plugin_is_rejected() -> None:
         _resolve_plugin("nope", "nope_v1")
 
 
-def test_catalog_plugin_is_rejected_until_implemented() -> None:
+def test_known_plugins_resolve() -> None:
     from app.providers.connection_service import _resolve_plugin
 
-    with pytest.raises(ValidationAppError):
-        _resolve_plugin("volcengine", "ark_cn_v1")
+    assert _resolve_plugin("agnes", "agnes_cn_v1").provider_type == "agnes"
+    assert _resolve_plugin("volcengine", "ark_cn_v1").provider_type == "volcengine"
 
 
 def test_plugin_registration_duplicate_is_rejected() -> None:
@@ -236,23 +240,25 @@ async def test_plugin_extension_needs_no_service_branch(
 
 
 @pytest.mark.asyncio
-async def test_ark_catalog_plugin_cannot_create_connection(
+async def test_ark_connection_creates_with_plugin_defaults(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _byok_env(monkeypatch)
     user, workspace = await _seed_owner(session)
     service = ProviderConnectionService(session)
-    with pytest.raises(ValidationAppError):
-        await service.create_connection(
-            workspace_id=workspace.id,
-            actor=user,
-            display_name="Ark",
-            api_key="secret",
-            enabled=True,
-            provider_type="volcengine",
-            protocol_profile="ark_cn_v1",
-        )
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="Ark",
+        api_key="ark-secret",
+        enabled=True,
+        provider_type="volcengine",
+        protocol_profile="ark_cn_v1",
+    )
+    assert connection.provider_type == "volcengine"
+    assert connection.protocol_profile == "ark_cn_v1"
+    assert connection.base_url == "https://ark.cn-beijing.volces.com/api/v3"
 
 
 def test_volcengine_settings_defaults() -> None:
