@@ -1,4 +1,4 @@
-"""Workspace Agnes Connection, capability Probe, and binding API."""
+"""Workspace Provider Connection, capability Probe, and binding API."""
 
 from __future__ import annotations
 
@@ -31,9 +31,10 @@ router = APIRouter(tags=["provider-connections"])
 
 
 class ConnectionCreate(BaseModel):
-    provider_type: Literal["agnes"]
-    display_name: str = Field(default="Agnes 中国站", min_length=1, max_length=120)
-    protocol_profile: Literal["agnes_cn_v1"]
+    provider_type: str = Field(default="agnes", min_length=1, max_length=40)
+    display_name: str = Field(default="", max_length=120)
+    protocol_profile: str = Field(default="agnes_cn_v1", min_length=1, max_length=80)
+    base_url: str | None = Field(default=None, max_length=240)
     api_key: SecretStr = Field(min_length=1, max_length=4096)
     enabled: bool = True
 
@@ -232,6 +233,9 @@ async def create_connection(
         display_name=body.display_name,
         api_key=body.api_key.get_secret_value(),
         enabled=body.enabled,
+        provider_type=body.provider_type,
+        protocol_profile=body.protocol_profile,
+        base_url=body.base_url,
     )
     await session.commit()
     return await _connection_read(service, connection)

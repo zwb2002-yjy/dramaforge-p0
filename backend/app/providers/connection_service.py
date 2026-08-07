@@ -20,7 +20,6 @@ from app.consistency.face_policy import (
     approved_face_threshold,
 )
 from app.execution.models import Artifact, GraphNode, NodeRun
-from app.providers.agnes import AGNES_CN_HOST, AGNES_CN_PROFILE, AgnesHubClient
 from app.providers.models import (
     ProjectProviderBinding,
     ProviderCapabilityEvidence,
@@ -29,6 +28,7 @@ from app.providers.models import (
     ProviderQualityEvidence,
 )
 from app.providers.reference_delivery import issue_artifact_reference
+from app.providers.registry import ProviderPlugin, get_plugin
 from app.providers.workspace_credentials import configured_byok_keyring
 from app.security.credentials import read_credential, store_credential
 from app.security.models import EncryptedProviderCredential
@@ -44,11 +44,22 @@ _CAPABILITIES = frozenset(
         "video_poll_download",
     }
 )
-_MODEL_CONTRACTS = {
-    ("image", "keyframe"): "agnes-image-2.1-flash",
-    ("video", "video"): "agnes-video-v2.0",
-}
-_PAID_PROBES = frozenset({"image_t2i", "image_i2i", "video_i2v"})
+
+
+def _resolve_plugin(provider_type: str, protocol_profile: str) -> ProviderPlugin:
+    try:
+        plugin = get_plugin(provider_type, protocol_profile)
+    except LookupError:
+        raise ValidationAppError(
+            "unknown provider plugin",
+            details={"code": "PROVIDER_PLUGIN_UNKNOWN"},
+        ) from None
+    if not plugin.implemented:
+        raise ValidationAppError(
+            "provider plugin is not implemented",
+            details={"code": "PROVIDER_PLUGIN_NOT_IMPLEMENTED"},
+        )
+    return plugin
 
 
 class ProviderConnectionService:
@@ -63,35 +74,42 @@ class ProviderConnectionService:
         display_name: str,
         api_key: str,
         enabled: bool,
+        provider_type: str = "agnes",
+        protocol_profile: str = "agnes_cn_v1",
+        base_url: str | None = None,
     ) -> ProviderConnection:
+        plugin = _resolve_plugin(provider_type, protocol_profile)
         secret = api_key.strip()
         if not secret:
             raise ValidationAppError("api_key must not be empty")
         existing = await self._session.scalar(
             select(ProviderConnection.id).where(
                 ProviderConnection.workspace_id == workspace_id,
-                ProviderConnection.provider_type == "agnes",
-                ProviderConnection.protocol_profile == AGNES_CN_PROFILE,
+                ProviderConnection.provider_type == provider_type,
+                ProviderConnection.protocol_profile == protocol_profile,
             )
         )
         if existing is not None:
             raise ConflictError(
-                "Agnes China connection already exists for this Workspace",
+                f"{plugin.display_name} connection already exists for this Workspace",
                 details={"code": "PROVIDER_CONNECTION_EXISTS"},
             )
+        host = (base_url or plugin.default_base_url).strip().rstrip("/")
+        if not host:
+            raise ValidationAppError("base_url must not be empty")
         credential = await store_credential(
             self._session,
             workspace_id=workspace_id,
-            provider="agnes",
+            provider=plugin.credential_key,
             plaintext=secret,
             keyring=configured_byok_keyring(),
         )
         connection = ProviderConnection(
             workspace_id=workspace_id,
-            provider_type="agnes",
-            display_name=display_name.strip() or "Agnes 中国站",
-            base_url=AGNES_CN_HOST,
-            protocol_profile=AGNES_CN_PROFILE,
+            provider_type=provider_type,
+            display_name=display_name.strip() or plugin.display_name,
+            base_url=host,
+            protocol_profile=protocol_profile,
             credential_id=credential.id,
             enabled=enabled,
             verification_status="unverified",
@@ -170,13 +188,14 @@ class ProviderConnectionService:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         secret = api_key.strip()
         if not secret:
             raise ValidationAppError("api_key must not be empty")
         credential = await store_credential(
             self._session,
             workspace_id=workspace_id,
-            provider="agnes",
+            provider=plugin.credential_key,
             plaintext=secret,
             keyring=configured_byok_keyring(),
         )
@@ -218,10 +237,11 @@ class ProviderConnectionService:
         return connection
 
     async def _connection_settings(self, connection: ProviderConnection) -> Settings:
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         secret = await read_credential(
             self._session,
             workspace_id=connection.workspace_id,
-            provider="agnes",
+            provider=plugin.credential_key,
             keyring=configured_byok_keyring(),
         )
         if not secret:
@@ -229,11 +249,12 @@ class ProviderConnectionService:
                 "provider credential is missing",
                 details={"code": "PROVIDER_NOT_CONFIGURED"},
             )
+        prefix = plugin.prefix
         return get_settings().model_copy(
             update={
-                "agnes_enabled": connection.enabled,
-                "agnes_api_key": secret,
-                "agnes_base_url": connection.base_url,
+                f"{prefix}_enabled": connection.enabled,
+                f"{prefix}_api_key": secret,
+                f"{prefix}_base_url": connection.base_url,
             }
         )
 
@@ -254,6 +275,7 @@ class ProviderConnectionService:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         if not connection.enabled:
             raise ValidationAppError(
                 "provider connection is disabled",
@@ -261,7 +283,7 @@ class ProviderConnectionService:
             )
         if budget_authorized < 0:
             raise ValidationAppError("budget_authorized must be >= 0")
-        if capability in _PAID_PROBES and budget_authorized <= 0:
+        if capability in plugin.paid_capabilities and budget_authorized <= 0:
             raise ValidationAppError(
                 "paid Probe requires an explicit budget authorization",
                 details={"code": "PROBE_BUDGET_REQUIRED"},
@@ -281,7 +303,7 @@ class ProviderConnectionService:
                 details={"code": "PROBE_RATE_LIMITED"},
             )
         cfg = await self._connection_settings(connection)
-        client = AgnesHubClient(cfg, host=connection.base_url)
+        client = plugin.build_client(cfg, host=connection.base_url)
         reference_artifact: Artifact | None = None
         reference_bytes: bytes | None = None
         reference_mime = "image/png"
@@ -336,8 +358,10 @@ class ProviderConnectionService:
             try:
                 async with httpx.AsyncClient(timeout=30.0) as http:
                     response = await http.get(
-                        f"{connection.base_url}/v1/models",
-                        headers={"Authorization": f"Bearer {cfg.agnes_api_key}"},
+                        f"{connection.base_url}{plugin.model_list_path}",
+                        headers={
+                            "Authorization": f"Bearer {getattr(cfg, f'{plugin.prefix}_api_key')}"
+                        },
                     )
                 http_status = response.status_code
                 status = "passed" if response.status_code < 400 else "failed"
@@ -350,7 +374,7 @@ class ProviderConnectionService:
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
                 error_code = "PROVIDER_UNAVAILABLE"
         elif capability == "image_t2i":
-            model_id = cfg.agnes_image_model
+            model_id = getattr(cfg, f"{plugin.prefix}_image_model")
             result = await client.create_image(
                 prompt="Cinematic portrait contract probe",
                 size="1024x768",
@@ -361,7 +385,7 @@ class ProviderConnectionService:
             http_status = int(result["http_status"]) if result.get("http_status") else None
             error_code = str(result.get("error_code") or "") or None
         elif capability == "image_i2i":
-            model_id = cfg.agnes_image_model
+            model_id = getattr(cfg, f"{plugin.prefix}_image_model")
             if reference_bytes is None:
                 error_code = "PROBE_REFERENCE_REQUIRED"
             else:
@@ -377,7 +401,7 @@ class ProviderConnectionService:
                 http_status = int(result["http_status"]) if result.get("http_status") else None
                 error_code = str(result.get("error_code") or "") or None
         elif capability == "video_i2v":
-            model_id = cfg.agnes_video_model
+            model_id = getattr(cfg, f"{plugin.prefix}_video_model")
             if reference_url is None:
                 error_code = "PROBE_REFERENCE_REQUIRED"
             else:
@@ -396,13 +420,13 @@ class ProviderConnectionService:
                 http_status = int(result["http_status"]) if result.get("http_status") else None
                 error_code = str(result.get("error_code") or "") or None
         else:
-            model_id = cfg.agnes_video_model
+            model_id = getattr(cfg, f"{plugin.prefix}_video_model")
             if remote_task_id is None or remote_query_kind not in {"video_id", "task_id"}:
                 error_code = "PROBE_REMOTE_TASK_REQUIRED"
             else:
                 poll = await client.poll_video(
                     remote_task_id,
-                    query_kind=remote_query_kind,  # type: ignore[arg-type]
+                    query_kind=remote_query_kind,
                 )
                 poll_status = str(poll.get("status") or "failed")
                 status = "passed" if poll_status == "succeeded" else poll_status
@@ -494,10 +518,13 @@ class ProviderConnectionService:
         capability: str,
         actor: User,
     ) -> None:
-        purpose = {
-            "image_i2i": "keyframe",
-            "video_i2v": "video",
-        }.get(capability)
+        connection = await self._session.scalar(
+            select(ProviderConnection).where(ProviderConnection.id == connection_id)
+        )
+        if connection is None:
+            return
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        purpose = plugin.capability_purposes.get(capability)
         if purpose is None:
             return
         bindings = list(
@@ -530,9 +557,12 @@ class ProviderConnectionService:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
-        expected_model = _MODEL_CONTRACTS.get((media_type, purpose))
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        expected_model = plugin.model_contracts.get((media_type, purpose))
         if expected_model is None or model_id != expected_model:
-            raise ValidationAppError("model binding does not match agnes_cn_v1 contract")
+            raise ValidationAppError(
+                f"model binding does not match {connection.protocol_profile} contract"
+            )
         duplicate = await self._session.scalar(
             select(ProviderModelBinding.id).where(
                 ProviderModelBinding.connection_id == connection.id,

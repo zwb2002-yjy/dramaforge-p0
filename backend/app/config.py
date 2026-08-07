@@ -97,6 +97,15 @@ class Settings(BaseSettings):
     agnes_base_url: str = Field(default="https://api.agnes-ai.cn/v1")
     agnes_image_model: str = Field(default="agnes-image-2.1-flash")
     agnes_video_model: str = Field(default="agnes-video-v2.0")
+
+    # Volcengine Ark profile (local BYOK). Never log the raw key.
+    volcengine_enabled: bool = False
+    volcengine_api_key: str = Field(default="", description="User BYOK for Volcengine Ark")
+    volcengine_base_url: str = Field(
+        default="https://ark.cn-beijing.volces.com/api/v3"
+    )
+    volcengine_image_model: str = Field(default="doubao-seedream-4-0-250828")
+    volcengine_video_model: str = Field(default="doubao-seedance-1-0-pro-250528")
     reference_public_base_url: str = Field(
         default="",
         description="Public HTTPS API origin used for short-lived Provider references",
@@ -133,6 +142,10 @@ class Settings(BaseSettings):
     def agnes_configured(self) -> bool:
         """True when BYOK is present and hub is enabled."""
         return bool(self.agnes_enabled and self.agnes_api_key.strip())
+
+    def volcengine_configured(self) -> bool:
+        """True when BYOK is present and Ark is enabled."""
+        return bool(self.volcengine_enabled and self.volcengine_api_key.strip())
 
     def text_llm_configured(self) -> bool:
         return bool(

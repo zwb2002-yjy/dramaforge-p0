@@ -60,4 +60,8 @@ async def settings_for_workspace_provider(
         return cfg.model_copy(update={"text_llm_enabled": True, "text_llm_api_key": credential})
     if provider == "agnes":
         return cfg.model_copy(update={"agnes_enabled": True, "agnes_api_key": credential})
+    if provider == "volcengine":
+        return cfg.model_copy(
+            update={"volcengine_enabled": True, "volcengine_api_key": credential}
+        )
     raise ValueError(f"unsupported workspace credential provider: {provider}")
