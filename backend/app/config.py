@@ -131,6 +131,12 @@ class Settings(BaseSettings):
     tts_voice: str = "zh"
     insightface_enabled: bool = True
 
+    # Stage A+B provider unification. All default OFF; each flips when the
+    # matching stage lands. Resume never reads these flags (persisted state wins).
+    provider_catalog_enabled: bool = False
+    provider_unified_shadow: bool = False
+    provider_unified_path_enabled: bool = False
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_cors(cls, value: object) -> object:

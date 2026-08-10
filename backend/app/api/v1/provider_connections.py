@@ -70,6 +70,7 @@ class ProbeRequest(BaseModel):
         "video_i2v",
         "video_poll_download",
     ]
+    model_binding_id: UUID | None = None
     reference_artifact_id: UUID | None = None
     remote_task_id: str | None = None
     remote_query_kind: Literal["video_id", "task_id"] | None = None
@@ -84,6 +85,7 @@ class ProbeRead(BaseModel):
     http_status: int | None
     provider_request_id: str | None
     reference_artifact_id: UUID | None
+    model_binding_id: UUID | None
     remote_query_kind: str | None
     request_fingerprint: str
     budget_authorized: Decimal
@@ -112,10 +114,16 @@ class ModelBindingRead(BaseModel):
     contract_tested: bool
     account_verified: bool
     quality_gated: bool
+    catalog_entry_id: UUID | None
+    capability_manifest_hash: str | None
+    remote_resource_kind: str | None
+    remote_resource_id: str | None
+    invoke_model_value: str | None
 
 
 class ProjectBindingWrite(BaseModel):
     model_binding_id: UUID
+    selection_strategy: Literal["explicit_binding"] = "explicit_binding"
     fallback_policy: Literal["none"] = "none"
 
 
@@ -124,6 +132,7 @@ class ProjectBindingRead(BaseModel):
     project_id: UUID
     purpose: str
     model_binding_id: UUID
+    selection_strategy: str
     fallback_policy: str
 
 
@@ -171,6 +180,7 @@ def _probe_read(evidence: ProviderCapabilityEvidence) -> ProbeRead:
         http_status=evidence.http_status,
         provider_request_id=evidence.provider_request_id,
         reference_artifact_id=evidence.reference_artifact_id,
+        model_binding_id=evidence.model_binding_id,
         remote_query_kind=evidence.remote_query_kind,
         request_fingerprint=evidence.request_fingerprint,
         budget_authorized=evidence.budget_authorized,
@@ -194,6 +204,11 @@ def _model_read(binding: ProviderModelBinding) -> ModelBindingRead:
         contract_tested=binding.contract_tested,
         account_verified=binding.account_verified,
         quality_gated=binding.quality_gated,
+        catalog_entry_id=binding.catalog_entry_id,
+        capability_manifest_hash=binding.capability_manifest_hash,
+        remote_resource_kind=binding.remote_resource_kind,
+        remote_resource_id=binding.remote_resource_id,
+        invoke_model_value=binding.invoke_model_value,
     )
 
 
@@ -351,6 +366,7 @@ async def run_probe(
         connection_id=connection_id,
         actor=user,
         capability=body.capability,
+        model_binding_id=body.model_binding_id,
         reference_artifact_id=body.reference_artifact_id,
         remote_task_id=body.remote_task_id,
         remote_query_kind=body.remote_query_kind,
@@ -478,6 +494,7 @@ async def put_project_binding(
         model_binding_id=body.model_binding_id,
         fallback_policy=body.fallback_policy,
         actor=user,
+        selection_strategy=body.selection_strategy,
     )
     await session.commit()
     return ProjectBindingRead(
@@ -485,5 +502,6 @@ async def put_project_binding(
         project_id=binding.project_id,
         purpose=binding.purpose,
         model_binding_id=binding.model_binding_id,
+        selection_strategy=binding.selection_strategy,
         fallback_policy=binding.fallback_policy,
     )

@@ -14,11 +14,12 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
+from pydantic import JsonValue
 
 from app.config import Settings, get_settings
 
@@ -158,6 +159,125 @@ def _video_result_url(data: dict[str, Any]) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Low-level transport and wire-body builders (single source of truth).
+# Both the legacy HubClient methods and the unified Compiler/Runtime go through
+# these, so there is exactly one wire contract and one HTTP send path.
+# ---------------------------------------------------------------------------
+
+
+async def _post_json(
+    host: str,
+    path: str,
+    *,
+    headers: dict[str, str],
+    body: dict[str, object],
+    timeout: float,
+    transport: httpx.AsyncBaseTransport | None,
+) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+        return await client.post(f"{host}{path}", headers=headers, json=body)
+
+
+async def _get_json(
+    host: str,
+    path: str,
+    *,
+    headers: dict[str, str],
+    params: dict[str, str] | None,
+    timeout: float,
+    transport: httpx.AsyncBaseTransport | None,
+) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+        return await client.get(f"{host}{path}", headers=headers, params=params)
+
+
+def _build_image_body(
+    model: str,
+    *,
+    prompt: str,
+    size: str,
+    canonical_image_bytes: bytes | None = None,
+    canonical_image_mime: str = "image/png",
+) -> tuple[dict[str, object], str, list[str]]:
+    """Construct the Image 2.x request body and derive operation + fingerprints."""
+    prompt_value = _require_prompt(prompt)
+    size_value = size.strip()
+    if not size_value:
+        raise ValueError("size must be non-empty")
+    extra_body: dict[str, object] = {"response_format": "url"}
+    reference_fingerprints: list[str] = []
+    if canonical_image_bytes is not None:
+        data_uri, fingerprint = _reference_data_uri(
+            data=canonical_image_bytes,
+            mime_type=canonical_image_mime,
+        )
+        extra_body["image"] = [data_uri]
+        reference_fingerprints.append(fingerprint)
+    body: dict[str, object] = {
+        "model": model,
+        "prompt": prompt_value,
+        "size": size_value,
+        "extra_body": extra_body,
+    }
+    operation = "image.i2i" if reference_fingerprints else "image.t2i"
+    return body, operation, reference_fingerprints
+
+
+def _build_video_body(
+    model: str,
+    *,
+    prompt: str,
+    image_url: str | None = None,
+    image_bytes: bytes | None = None,
+    image_mime: str = "image/png",
+    num_frames: int = 121,
+    frame_rate: int = 24,
+    keyframe_urls: list[str] | None = None,
+) -> tuple[dict[str, object], str, list[str], str]:
+    """Construct the Video V2.0 request body and derive operation/transport."""
+    prompt_value = _require_prompt(prompt)
+    _validate_video_shape(num_frames=num_frames, frame_rate=frame_rate)
+    if image_url and keyframe_urls:
+        raise ValueError("first-frame I2V and keyframes mode are mutually exclusive")
+    if image_bytes is not None and (image_url or keyframe_urls):
+        raise ValueError("image_bytes cannot be combined with image_url/keyframe_urls")
+    body: dict[str, object] = {
+        "model": model,
+        "prompt": prompt_value,
+        "num_frames": num_frames,
+        "frame_rate": frame_rate,
+        "height": 1280,
+        "width": 720,
+    }
+    operation = "video.i2v"
+    reference_transport = "short_lived_https"
+    references: list[str]
+    if keyframe_urls is not None:
+        if len(keyframe_urls) != 2:
+            raise ValueError("keyframes mode requires exactly two HTTPS images")
+        references = [_require_https_reference(item) for item in keyframe_urls]
+        body["extra_body"] = {"image": references, "mode": "keyframes"}
+        operation = "video.keyframes"
+    elif image_url is not None:
+        references = [_require_https_reference(image_url)]
+        body["image"] = references[0]
+    elif image_bytes is not None:
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        body["image"] = encoded
+        references = [encoded]
+        reference_transport = "base64_raw"
+    else:
+        raise ValueError("video I2V requires one first-frame reference")
+    return body, operation, references, reference_transport
+
+
+def _request_fingerprint(body: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 class AgnesHubClient:
     """Single-attempt Agnes China protocol client."""
 
@@ -203,35 +323,20 @@ class AgnesHubClient:
     ) -> dict[str, Any]:
         if not self.configured():
             raise RuntimeError("Agnes China connection is not configured")
-        prompt_value = _require_prompt(prompt)
-        size_value = size.strip()
-        if not size_value:
-            raise ValueError("size must be non-empty")
-        extra_body: dict[str, object] = {"response_format": "url"}
-        reference_fingerprints: list[str] = []
-        if canonical_image_bytes is not None:
-            data_uri, reference_fingerprint = _reference_data_uri(
-                data=canonical_image_bytes,
-                mime_type=canonical_image_mime,
-            )
-            extra_body["image"] = [data_uri]
-            reference_fingerprints.append(reference_fingerprint)
-        body: dict[str, object] = {
-            "model": self._image_model,
-            "prompt": prompt_value,
-            "size": size_value,
-            "extra_body": extra_body,
-        }
-        operation = "image.i2i" if reference_fingerprints else "image.t2i"
-        request_fingerprint = hashlib.sha256(
-            json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
+        body, operation, reference_fingerprints = _build_image_body(
+            self._image_model,
+            prompt=prompt,
+            size=size,
+            canonical_image_bytes=canonical_image_bytes,
+            canonical_image_mime=canonical_image_mime,
+        )
+        request_fingerprint = _request_fingerprint(body)
         summary: dict[str, object] = {
             "protocol_profile": AGNES_CN_PROFILE,
             "host": urlsplit(self._host).hostname or "",
             "operation": operation,
             "model": self._image_model,
-            "size": size_value,
+            "size": str(body.get("size", "")),
             "reference_count": len(reference_fingerprints),
             "reference_artifact_ids": ([reference_artifact_id] if reference_artifact_id else []),
             "reference_fingerprints": reference_fingerprints,
@@ -239,15 +344,14 @@ class AgnesHubClient:
             "request_schema_fingerprint": _schema_fingerprint(body),
         }
         try:
-            async with httpx.AsyncClient(
+            response = await _post_json(
+                self._host,
+                AGNES_IMAGE_PATH,
+                headers=self._headers(),
+                body=body,
                 timeout=self._IMAGE_REQUEST_TIMEOUT_S,
                 transport=self._transport,
-            ) as client:
-                response = await client.post(
-                    f"{self._host}{AGNES_IMAGE_PATH}",
-                    headers=self._headers(),
-                    json=body,
-                )
+            )
         except httpx.TransportError as exc:
             return {
                 "status": "unknown_submission",
@@ -314,50 +418,17 @@ class AgnesHubClient:
     ) -> dict[str, Any]:
         if not self.configured():
             raise RuntimeError("Agnes China connection is not configured")
-        prompt_value = _require_prompt(prompt)
-        _validate_video_shape(num_frames=num_frames, frame_rate=frame_rate)
-        if image_url and keyframe_urls:
-            raise ValueError("first-frame I2V and keyframes mode are mutually exclusive")
-        if image_bytes is not None and (image_url or keyframe_urls):
-            raise ValueError("image_bytes cannot be combined with image_url/keyframe_urls")
-        body: dict[str, object] = {
-            "model": self._video_model,
-            "prompt": prompt_value,
-            "num_frames": num_frames,
-            "frame_rate": frame_rate,
-            # Official Video V2.0 contract: default is 1152x768 landscape; the
-            # product is 9:16 portrait, so pass an explicit portrait size.
-            "height": 1280,
-            "width": 720,
-        }
-        operation = "video.i2v"
-        reference_transport = "short_lived_https"
-        references: list[str]
-        if keyframe_urls is not None:
-            if len(keyframe_urls) != 2:
-                raise ValueError("keyframes mode requires exactly two HTTPS images")
-            references = [_require_https_reference(item) for item in keyframe_urls]
-            body["extra_body"] = {"image": references, "mode": "keyframes"}
-            operation = "video.keyframes"
-        elif image_url is not None:
-            references = [_require_https_reference(image_url)]
-            body["image"] = references[0]
-        elif image_bytes is not None:
-            # Official Video V2.0 contract (verified against the Agnes wiki and
-            # vendor support 2026-08-05): image accepts a public URL OR the raw
-            # Base64 image body — but NOT a "data:image/...;base64," Data URL
-            # prefix. Passing the prefixed form caused intermittent video.create
-            # failures while Image 2.x (which documents the prefixed data URI)
-            # stayed reliable. I2V therefore sends the bare Base64 body.
-            encoded = base64.b64encode(image_bytes).decode("ascii")
-            body["image"] = encoded
-            references = [encoded]
-            reference_transport = "base64_raw"
-        else:
-            raise ValueError("video I2V requires one first-frame reference")
-        request_fingerprint = hashlib.sha256(
-            json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
+        body, operation, references, reference_transport = _build_video_body(
+            self._video_model,
+            prompt=prompt,
+            image_url=image_url,
+            image_bytes=image_bytes,
+            image_mime=image_mime,
+            num_frames=num_frames,
+            frame_rate=frame_rate,
+            keyframe_urls=keyframe_urls,
+        )
+        request_fingerprint = _request_fingerprint(body)
         summary: dict[str, object] = {
             "protocol_profile": AGNES_CN_PROFILE,
             "host": urlsplit(self._host).hostname or "",
@@ -372,15 +443,14 @@ class AgnesHubClient:
             "request_schema_fingerprint": _schema_fingerprint(body),
         }
         try:
-            async with httpx.AsyncClient(
+            response = await _post_json(
+                self._host,
+                AGNES_VIDEO_CREATE_PATH,
+                headers=self._headers(),
+                body=body,
                 timeout=self._VIDEO_REQUEST_TIMEOUT_S,
                 transport=self._transport,
-            ) as client:
-                response = await client.post(
-                    f"{self._host}{AGNES_VIDEO_CREATE_PATH}",
-                    headers=self._headers(),
-                    json=body,
-                )
+            )
         except httpx.TransportError as exc:
             return {
                 "status": "unknown_submission",
@@ -450,21 +520,20 @@ class AgnesHubClient:
         if selected_kind not in {"video_id", "task_id"}:
             raise ValueError("video poll query kind is required")
         if selected_kind == "video_id":
-            url = f"{self._host}{AGNES_VIDEO_BY_ID_PATH}"
+            path = AGNES_VIDEO_BY_ID_PATH
             params = {"video_id": remote_task_id}
         else:
-            url = f"{self._host}{AGNES_VIDEO_CREATE_PATH}/{remote_task_id}"
+            path = f"{AGNES_VIDEO_CREATE_PATH}/{remote_task_id}"
             params = None
         try:
-            async with httpx.AsyncClient(
+            response = await _get_json(
+                self._host,
+                path,
+                headers=self._headers(),
+                params=params,
                 timeout=60.0,
                 transport=self._transport,
-            ) as client:
-                response = await client.get(
-                    url,
-                    params=params,
-                    headers=self._headers(),
-                )
+            )
         except httpx.TransportError as exc:
             return {
                 "status": "running",
@@ -567,7 +636,6 @@ class AgnesHubClient:
 class AgnesImageAdapter:
     provider = "agnes"
     protocol_profile = AGNES_CN_PROFILE
-
     def __init__(
         self,
         settings: Settings | None = None,
@@ -662,3 +730,402 @@ class AgnesVideoAdapter:
 
     async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
         return await self._client.fetch_cost(remote_task_id)
+
+
+# ---------------------------------------------------------------------------
+# Stage B2: unified Compiler + Runtime (single wire owner).
+# Compilers validate against the catalog manifest and reuse the same body
+# builders as the HubClient; the Runtime sends CompiledRequest.wire_request
+# verbatim through the low-level transport.
+# ---------------------------------------------------------------------------
+
+
+def _compiled_summary(
+    *,
+    operation: str,
+    invoke_model_value: str,
+    reference_artifact_ids: list[str],
+    reference_fingerprints: list[str],
+    schema_version: str,
+) -> dict[str, object]:
+    return {
+        "operation": operation,
+        "model": invoke_model_value,
+        "reference_artifact_ids": reference_artifact_ids,
+        "reference_fingerprints": reference_fingerprints,
+        "request_schema_version": schema_version,
+    }
+
+
+class AgnesImageCompiler:
+    """Validates an image intent against the catalog manifest and compiles the
+    wire request using the same body builder as :class:`AgnesHubClient`."""
+
+    def validate(self, intent: Any, model: Any) -> None:
+        op = model.operations.get("image.generate")
+        if op is None:
+            raise ValueError("model does not support image.generate")
+        capabilities = set(op.capabilities)
+        required = "image.t2i"
+        if intent.reference_artifact_id is not None:
+            required = "image.i2i"
+        if required not in capabilities:
+            raise ValueError(f"model does not support {required}")
+        if intent.reference_artifact_id is not None:
+            constraint = op.reference_constraints.get("reference_image")
+            if constraint is None or constraint.max < 1:
+                raise ValueError("model does not accept a reference_image")
+
+    async def compile(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+    ) -> Any:
+        self.validate(intent, model)
+        resolved = {ref.role: ref for ref in references}
+        ref_image = resolved.get("reference_image")
+        body, operation, fingerprints = _build_image_body(
+            invoke_model_value,
+            prompt=intent.prompt,
+            size=intent.size or "1024x768",
+            canonical_image_bytes=ref_image.content_bytes if ref_image is not None else None,
+            canonical_image_mime=ref_image.mime_type if ref_image is not None else "image/png",
+        )
+        from app.providers.runtime import CompiledImageRequest
+
+        artifact_ids = [str(ref_image.artifact_id)] if ref_image is not None else []
+        fps = [ref_image.fingerprint] if ref_image is not None and ref_image.fingerprint else []
+        return CompiledImageRequest(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="image.generate",
+            wire_request=cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=cast(
+                dict[str, JsonValue],
+                _compiled_summary(
+                    operation=operation,
+                    invoke_model_value=invoke_model_value,
+                    reference_artifact_ids=artifact_ids,
+                    reference_fingerprints=fps,
+                    schema_version=model.manifest_version,
+                ),
+            ),
+            reference_artifact_ids=[ref_image.artifact_id] if ref_image is not None else [],
+            reference_fingerprints=fps,
+        )
+
+
+class AgnesVideoCompiler:
+    """Validates a video intent against the catalog manifest and compiles the
+    wire request (first-frame I2V) using the same body builder as the HubClient."""
+
+    def validate(self, intent: Any, model: Any) -> None:
+        op = model.operations.get("video.generate")
+        if op is None:
+            raise ValueError("model does not support video.generate")
+        capabilities = set(op.capabilities)
+        if "video.i2v" not in capabilities:
+            raise ValueError("model does not support video.i2v")
+        first_refs = [ref for ref in intent.references if ref.role == "first_frame"]
+        if not first_refs:
+            raise ValueError("video.generate requires a first_frame reference")
+        constraint = op.reference_constraints.get("first_frame")
+        if constraint is None or constraint.max < 1:
+            raise ValueError("model does not accept a first_frame reference")
+        if len(first_refs) > constraint.max:
+            raise ValueError("too many first_frame references")
+
+    async def compile(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+    ) -> Any:
+        self.validate(intent, model)
+        first = next(ref for ref in references if ref.role == "first_frame")
+        if first.content_bytes is not None:
+            body, operation, _refs, _transport = _build_video_body(
+                invoke_model_value,
+                prompt=intent.prompt,
+                image_bytes=first.content_bytes,
+                image_mime=first.mime_type,
+            )
+        elif first.content_url is not None:
+            body, operation, _refs, _transport = _build_video_body(
+                invoke_model_value,
+                prompt=intent.prompt,
+                image_url=first.content_url,
+            )
+        else:
+            raise ValueError("video first_frame reference has no bytes or URL")
+        from app.providers.runtime import CompiledVideoRequest
+
+        fps = [first.fingerprint] if first.fingerprint else []
+        return CompiledVideoRequest(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="video.generate",
+            wire_request=cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=cast(
+                dict[str, JsonValue],
+                _compiled_summary(
+                    operation=operation,
+                    invoke_model_value=invoke_model_value,
+                    reference_artifact_ids=[str(first.artifact_id)],
+                    reference_fingerprints=fps,
+                    schema_version=model.manifest_version,
+                ),
+            ),
+            reference_artifact_ids=[first.artifact_id],
+            reference_fingerprints=fps,
+        )
+
+
+class AgnesRuntime:
+    """Unified runtime. ``submit_*`` sends the compiled wire request verbatim;
+    polling uses the sanitized resume token's query kind."""
+
+    provider = "agnes"
+    protocol_profile = AGNES_CN_PROFILE
+
+    _VIDEO_REQUEST_TIMEOUT_S = 120.0
+    _IMAGE_REQUEST_TIMEOUT_S = 150.0
+
+    def __init__(
+        self,
+        *,
+        connection: Any | None = None,
+        settings: Settings | None = None,
+        host: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._settings = settings or get_settings()
+        self._transport = transport
+        self._host = normalize_agnes_host(host or self._settings.agnes_base_url)
+        self._key = self._settings.agnes_api_key.strip()
+        self._enabled = self._settings.agnes_enabled
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._key}",
+            "Content-Type": "application/json",
+        }
+
+    def _configured(self) -> bool:
+        return bool(self._key and self._enabled)
+
+    async def submit_image(self, request: Any) -> Any:
+        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+
+        if not self._configured():
+            raise RuntimeError("Agnes China connection is not configured")
+        try:
+            response = await _post_json(
+                self._host,
+                AGNES_IMAGE_PATH,
+                headers=self._headers(),
+                body=request.wire_request,
+                timeout=self._IMAGE_REQUEST_TIMEOUT_S,
+                transport=self._transport,
+            )
+        except httpx.TransportError as exc:
+            return SubmissionResult(
+                status="unknown_submission",
+                error_code="PROVIDER_SUBMISSION_UNKNOWN",
+                error=type(exc).__name__,
+                request_fingerprint=_request_fingerprint(request.wire_request),
+                request_summary=request.safe_request_summary,
+            )
+        data = _json_object(response)
+        image_url = _image_result_url(data)
+        if response.status_code >= 400 or not image_url:
+            return SubmissionResult(
+                status="failed",
+                error_code=(
+                    _error_code(response.status_code)
+                    if response.status_code >= 400
+                    else "PROVIDER_RESPONSE_INVALID"
+                ),
+                error=f"Agnes image request failed ({response.status_code})",
+                request_fingerprint=_request_fingerprint(request.wire_request),
+                request_summary=request.safe_request_summary,
+            )
+        remote_id = f"agnes-image-{uuid4()}"
+        token = ProviderResumeToken(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            remote_task_id=remote_id,
+        )
+        return SubmissionResult(
+            remote_task_id=remote_id,
+            status="succeeded",
+            request_fingerprint=_request_fingerprint(request.wire_request),
+            request_summary=request.safe_request_summary,
+            resume_token=token,
+        )
+
+    async def submit_video(self, request: Any) -> Any:
+        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+
+        if not self._configured():
+            raise RuntimeError("Agnes China connection is not configured")
+        try:
+            response = await _post_json(
+                self._host,
+                AGNES_VIDEO_CREATE_PATH,
+                headers=self._headers(),
+                body=request.wire_request,
+                timeout=self._VIDEO_REQUEST_TIMEOUT_S,
+                transport=self._transport,
+            )
+        except httpx.TransportError as exc:
+            return SubmissionResult(
+                status="unknown_submission",
+                error_code="PROVIDER_SUBMISSION_UNKNOWN",
+                error=type(exc).__name__,
+                request_fingerprint=_request_fingerprint(request.wire_request),
+                request_summary=request.safe_request_summary,
+            )
+        data = _json_object(response)
+        video_id = data.get("video_id")
+        task_id = data.get("task_id")
+        video_id_value = str(video_id) if video_id is not None and str(video_id) else None
+        task_id_value = str(task_id) if task_id is not None and str(task_id) else None
+        if response.status_code >= 400 or (video_id_value is None and task_id_value is None):
+            return SubmissionResult(
+                status="failed",
+                error_code=(
+                    _error_code(response.status_code)
+                    if response.status_code >= 400
+                    else "PROVIDER_RESPONSE_INVALID"
+                ),
+                error=f"Agnes video request failed ({response.status_code})",
+                request_fingerprint=_request_fingerprint(request.wire_request),
+                request_summary=request.safe_request_summary,
+            )
+        remote_id = video_id_value or task_id_value
+        assert remote_id is not None
+        remote_secondary_id = task_id_value if video_id_value else None
+        query_kind: str = "video_id" if video_id_value else "task_id"
+        token = ProviderResumeToken(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            remote_task_id=remote_id,
+            remote_secondary_id=remote_secondary_id,
+            query_kind=query_kind,
+        )
+        return SubmissionResult(
+            remote_task_id=remote_id,
+            remote_secondary_id=remote_secondary_id,
+            query_kind=query_kind,
+            status=str(data.get("status") or "queued"),
+            request_fingerprint=_request_fingerprint(request.wire_request),
+            request_summary=request.safe_request_summary,
+            resume_token=token,
+        )
+
+    async def poll_video(self, resume: Any) -> Any:
+        from app.providers.runtime import PollResult
+
+        if not self._configured():
+            raise RuntimeError("Agnes China connection is not configured")
+        query_kind = resume.query_kind
+        if query_kind not in {"video_id", "task_id"}:
+            raise ValueError("video poll query kind is required")
+        if query_kind == "video_id":
+            path = AGNES_VIDEO_BY_ID_PATH
+            params = {"video_id": resume.remote_task_id}
+        else:
+            path = f"{AGNES_VIDEO_CREATE_PATH}/{resume.remote_task_id}"
+            params = None
+        try:
+            response = await _get_json(
+                self._host,
+                path,
+                headers=self._headers(),
+                params=params,
+                timeout=60.0,
+                transport=self._transport,
+            )
+        except httpx.TransportError:
+            return PollResult(
+                status="running",
+                error_code="PROVIDER_POLL_TRANSIENT",
+            )
+        data = _json_object(response)
+        if response.status_code >= 400:
+            if response.status_code == 429 or response.status_code >= 500:
+                return PollResult(
+                    status="running",
+                    http_status=response.status_code,
+                    error_code=(
+                        "PROVIDER_RATE_LIMITED"
+                        if response.status_code == 429
+                        else "PROVIDER_POLL_TRANSIENT"
+                    ),
+                    retry_after_seconds=_retry_after_seconds(response),
+                )
+            return PollResult(
+                status="failed",
+                http_status=response.status_code,
+                error_code=_error_code(response.status_code),
+            )
+        raw_status = str(data.get("status") or "unknown").lower()
+        if raw_status in {"succeeded", "completed", "success", "done"}:
+            status = "succeeded"
+        elif raw_status in {"failed", "error", "cancelled"}:
+            status = "failed" if raw_status != "cancelled" else "cancelled"
+        elif raw_status in {"queued", "pending"}:
+            status = "queued"
+        else:
+            status = "running"
+        uri = _video_result_url(data)
+        progress_value = data.get("progress", 0)
+        try:
+            progress = float(progress_value or 0)
+        except (TypeError, ValueError):
+            progress = 0.0
+        if progress > 1:
+            progress /= 100.0
+        result = PollResult(status=status, progress=progress, artifact_uri=uri)
+        if status == "failed":
+            result = result.model_copy(update={"error_code": "PROVIDER_TASK_FAILED"})
+        return result
+
+    async def cancel_video(self, resume: Any) -> Any:
+        from app.providers.runtime import CancelResult
+
+        return CancelResult(status="cancelled")
+
+    async def fetch_cost(self, resume: Any) -> Any:
+        from app.providers.runtime import CostResult
+
+        return CostResult(amount=0.0, currency="USD", units=1.0)
+
+
+def _agnes_runtime_factory(
+    *,
+    connection: Any | None = None,
+    settings: Settings | None = None,
+    host: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> AgnesRuntime:
+    return AgnesRuntime(
+        connection=connection,
+        settings=settings,
+        host=host,
+        transport=transport,
+    )
+
+
+def _agnes_compiler_factory() -> tuple[AgnesImageCompiler, AgnesVideoCompiler]:
+    return AgnesImageCompiler(), AgnesVideoCompiler()

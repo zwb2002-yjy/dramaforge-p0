@@ -60,6 +60,7 @@ REQUIRED_TABLES = (
     "project_provider_bindings",
     "provider_quality_evidence",
     "artifact_reference_tokens",
+    "provider_model_catalog_entries",
 )
 
 

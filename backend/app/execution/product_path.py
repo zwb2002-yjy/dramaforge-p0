@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import ipaddress
+import json
 import socket
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -749,6 +750,582 @@ async def execute_keyframe_node_run(
     )
 
 
+async def _run_shadow_selection(
+    session: AsyncSession,
+    *,
+    project: Project,
+    node_type: str,
+    prompt: str,
+    first_frame: Artifact | None,
+    op: ProviderOperation,
+    legacy_provider: str,
+    legacy_model: str,
+) -> None:
+    """Stage B1: resolve the intent through the unified path and compare with the
+    legacy resolution. Pure observation — never submits to a Provider."""
+    try:
+        from app.providers.intents import (
+            ArtifactReferenceIntent,
+            ImageGenerationIntent,
+            ModelSelectionIntent,
+            VideoGenerationIntentV1,
+        )
+        from app.providers.selection import ModelSelectionService
+
+        service = ModelSelectionService(session)
+        selection = ModelSelectionIntent(mode="explicit_binding")
+        if node_type == "keyframe":
+            image_intent = ImageGenerationIntent(prompt=prompt, selection=selection)
+            plan = await service.select_image(project=project, intent=image_intent)
+        else:
+            references = []
+            if first_frame is not None:
+                references.append(
+                    ArtifactReferenceIntent(
+                        artifact_id=first_frame.id,
+                        role="first_frame",
+                        required=True,
+                    )
+                )
+            video_intent = VideoGenerationIntentV1(
+                prompt=prompt,
+                references=references,
+                selection=selection,
+            )
+            plan = await service.select_video(project=project, intent=video_intent)
+        summary = dict(op.request_summary or {})
+        summary["shadow_selection"] = {
+            "resolved": True,
+            "provider_type": plan.provider_type,
+            "protocol_profile": plan.protocol_profile,
+            "model_id": plan.model_id,
+            "invoke_model_value": plan.invoke_model_value,
+            "model_binding_id": str(plan.model_binding_id) if plan.model_binding_id else None,
+            "manifest_hash": plan.manifest_hash,
+            "legacy_provider": legacy_provider,
+            "legacy_model": legacy_model,
+            "matches_legacy": (
+                plan.provider_type == legacy_provider
+                and plan.invoke_model_value == legacy_model
+            ),
+        }
+        op.request_summary = summary
+        await session.flush()
+    except Exception as exc:  # noqa: BLE001 - shadow is observational, never blocks
+        summary = dict(op.request_summary or {})
+        summary["shadow_selection"] = {
+            "resolved": False,
+            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+        }
+        op.request_summary = summary
+        await session.flush()
+
+
+UNIFIED_PATH_VERSION = "unified-v1"
+
+
+async def _execute_unified_media_node_run(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    node: GraphNode,
+    node_type: str,
+    snap: dict[str, object],
+    obj_store: ObjectStore,
+    prompt: str,
+    canonical_image_bytes: bytes | None,
+    canonical_embedding: list[float] | None,
+    lead_identity_required: bool,
+    has_canonical_binding: bool,
+    face_threshold: float,
+) -> ExecuteNodeResult:
+    """Stage B4: binding-driven unified execution path.
+
+    Single-path submission: a persisted ``execution_path_version`` wins over any
+    flag; resume never re-creates a remote task; ``submission_started`` without a
+    remote id (crash between commit and response) is escalated to
+    ``unknown_submission`` for manual reconciliation instead of a duplicate POST.
+    """
+    from dataclasses import asdict
+    from datetime import UTC, datetime
+
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.intents import (
+        ArtifactReferenceIntent,
+        ImageGenerationIntent,
+        ModelSelectionIntent,
+        VideoGenerationIntentV1,
+    )
+    from app.providers.manifest import ModelCapabilityManifest
+    from app.providers.models import ProviderConnection, ProviderModelBinding
+    from app.providers.reference_delivery import approved_first_frame_for_video
+    from app.providers.registry import get_plugin
+    from app.providers.runtime import (
+        CompiledImageRequest,
+        CompiledVideoRequest,
+        PollResult,
+        ProviderResumeToken,
+        ProviderRuntime,
+        ProviderRuntimeResolver,
+        ResolvedReference,
+    )
+    from app.providers.selection import ModelSelectionService
+    from app.providers.workspace_credentials import runtime_connection_settings
+    from app.shared.errors import ProviderRateLimitedError, ProviderTaskPendingError
+
+    now = datetime.now(UTC)
+    project = await session.scalar(select(Project).where(Project.id == run.project_id))
+    if project is None:
+        raise ValidationAppError("project not found for node run")
+    if await set_node_run_rls_context(session, node_run_id=run.id) is None:
+        raise ValidationAppError("node_run ownership context unavailable")
+
+    op = await session.scalar(
+        select(ProviderOperation)
+        .where(
+            ProviderOperation.node_run_id == run.id,
+            ProviderOperation.execution_path_version == UNIFIED_PATH_VERSION,
+        )
+        .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
+        .limit(1)
+    )
+
+    create_status = "created"
+    remote = ""
+    runtime: ProviderRuntime | None = None
+    resume: ProviderResumeToken | None = None
+    initial_status = "queued"
+
+    if op is not None:
+        # A crash between the submission_started commit and the remote-id write
+        # leaves an op with no remote id. Its outcome is unknown; escalate to
+        # manual reconciliation instead of risking a duplicate POST.
+        if op.status == "submission_started" and not op.provider_operation_id:
+            op.status = "unknown_submission"
+            op.error_code = "PROVIDER_SUBMISSION_UNKNOWN"
+            op.error_summary = (
+                "submission_started with no remote id: outcome unknown; "
+                "manual reconciliation required"
+            )
+            op.completed_at = now
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code="PROVIDER_SUBMISSION_UNKNOWN",
+                error_summary=op.error_summary,
+            )
+            raise ValidationAppError("PROVIDER_SUBMISSION_UNKNOWN")
+        # Resume only. Never create a second remote task.
+        connection = (
+            await session.get(ProviderConnection, op.connection_id)
+            if op.connection_id is not None
+            else None
+        )
+        if connection is None:
+            raise ValidationAppError("unified operation connection is missing")
+        plugin = get_plugin(connection.provider_type, connection.protocol_profile)
+        cfg = await runtime_connection_settings(session, connection=connection)
+        runtime = await ProviderRuntimeResolver(session).resume_runtime(
+            plugin=plugin, connection=connection, settings=cfg
+        )
+        if op.resume_token is not None:
+            resume = ProviderResumeToken.model_validate(op.resume_token)
+        remote = str(op.provider_operation_id or "")
+        create_status = "resumed"
+        initial_status = "running"
+
+    if op is None:
+        # New submission. Resolve via the shared selection engine.
+        first_frame: Artifact | None = None
+        frame_bytes: bytes | None = None
+        image_intent: ImageGenerationIntent | None = None
+        video_intent: VideoGenerationIntentV1 | None = None
+        if node_type == "keyframe":
+            canonical_artifact_id = snap.get("canonical_artifact_id")
+            reference_uuid: UUID | None = None
+            if isinstance(canonical_artifact_id, str):
+                try:
+                    reference_uuid = UUID(canonical_artifact_id)
+                except ValueError:
+                    reference_uuid = None
+            image_intent = ImageGenerationIntent(
+                prompt=prompt,
+                size=None,
+                seed=None,
+                reference_artifact_id=reference_uuid,
+                reference_fingerprint=(
+                    hashlib.sha256(canonical_image_bytes).hexdigest()
+                    if canonical_image_bytes is not None
+                    else None
+                ),
+                reference_mime=str(snap.get("canonical_mime_type") or "image/png"),
+                selection=ModelSelectionIntent(mode="explicit_binding"),
+            )
+        else:
+            first_frame = await approved_first_frame_for_video(session, video_run=run)
+            try:
+                frame_bytes = await obj_store.get_bytes(object_key=first_frame.object_key)
+            except Exception:
+                frame_bytes = None
+            if not frame_bytes:
+                raise ValidationAppError(
+                    "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes unavailable "
+                    "for video I2V"
+                )
+            video_intent = VideoGenerationIntentV1(
+                prompt=prompt,
+                references=[
+                    ArtifactReferenceIntent(
+                        artifact_id=first_frame.id,
+                        role="first_frame",
+                        required=True,
+                    )
+                ],
+                selection=ModelSelectionIntent(mode="explicit_binding"),
+            )
+
+        service = ModelSelectionService(session)
+        if node_type == "keyframe":
+            assert image_intent is not None
+            plan = await service.select_image(project=project, intent=image_intent)
+        else:
+            assert video_intent is not None
+            plan = await service.select_video(project=project, intent=video_intent)
+        invoke_model_value = plan.invoke_model_value
+        provider_type = plan.provider_type
+        protocol_profile = plan.protocol_profile
+        if (
+            invoke_model_value is None
+            or provider_type is None
+            or protocol_profile is None
+        ):
+            raise ValidationAppError("unified selection has no model/provider identity")
+        connection = await session.get(ProviderConnection, plan.connection_id)
+        binding = await session.get(ProviderModelBinding, plan.model_binding_id)
+        entry = await session.get(ModelCatalogEntry, plan.catalog_entry_id)
+        if connection is None or binding is None or entry is None:
+            raise ValidationAppError(
+                "unified selection references missing connection/binding/catalog",
+                details={"code": "MODEL_BINDING_MISSING"},
+            )
+        plugin = get_plugin(provider_type, protocol_profile)
+        cfg = await runtime_connection_settings(session, connection=connection)
+        resolved = await ProviderRuntimeResolver(session).resolve(
+            plugin=plugin,
+            connection=connection,
+            binding=binding,
+            entry=entry,
+            settings=cfg,
+        )
+        runtime = resolved.runtime
+        manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        compiled: CompiledImageRequest | CompiledVideoRequest
+        if node_type == "keyframe":
+            image_compiler = resolved.image_compiler
+            if image_compiler is None:
+                raise ValidationAppError("unified plugin has no image compiler")
+            assert image_intent is not None
+            refs: list[ResolvedReference] = []
+            if has_canonical_binding and canonical_image_bytes is not None:
+                raw_canonical_id = snap.get("canonical_artifact_id")
+                try:
+                    canonical_uuid = (
+                        UUID(str(raw_canonical_id)) if isinstance(raw_canonical_id, str) else None
+                    )
+                except ValueError:
+                    canonical_uuid = None
+                refs.append(
+                    ResolvedReference(
+                        role="reference_image",
+                        artifact_id=canonical_uuid or UUID(int=0),
+                        content_bytes=canonical_image_bytes,
+                        mime_type=str(snap.get("canonical_mime_type") or "image/png"),
+                        fingerprint=hashlib.sha256(canonical_image_bytes).hexdigest(),
+                    )
+                )
+            compiled = await image_compiler.compile(
+                image_intent,
+                manifest,
+                refs,
+                invoke_model_value=invoke_model_value,
+            )
+        else:
+            assert first_frame is not None and frame_bytes is not None
+            assert video_intent is not None
+            video_compiler = resolved.video_compiler
+            if video_compiler is None:
+                raise ValidationAppError("unified plugin has no video compiler")
+            compiled = await video_compiler.compile(
+                video_intent,
+                manifest,
+                [
+                    ResolvedReference(
+                        role="first_frame",
+                        artifact_id=first_frame.id,
+                        content_bytes=frame_bytes,
+                        mime_type=first_frame.mime_type or "image/png",
+                        fingerprint=first_frame.content_hash,
+                    )
+                ],
+                invoke_model_value=invoke_model_value,
+            )
+
+        kind = node_type
+        fingerprint = hashlib.sha256(
+            f"{kind}:{prompt}:{compiled.model_dump_json()}".encode()
+        ).hexdigest()
+        op = ProviderOperation(
+            node_run_id=run.id,
+            attempt_no=run.attempt_no,
+            purpose="primary",
+            operation_kind=f"{node_type}.generate",
+            actual_provider=plan.provider_type,
+            actual_model=invoke_model_value,
+            protocol_profile=plan.protocol_profile,
+            request_fingerprint=fingerprint,
+            status="submission_started",
+            request_summary={"kind": kind, "execution_path": UNIFIED_PATH_VERSION},
+            response_summary={},
+            submitted_at=now,
+            connection_id=connection.id,
+            model_binding_id=binding.id,
+            catalog_entry_id=entry.id,
+            capability_manifest_hash=plan.manifest_hash,
+            selection_plan=json.loads(json.dumps(asdict(plan), default=str)),
+            execution_path_version=UNIFIED_PATH_VERSION,
+        )
+        session.add(op)
+        await session.flush()
+        await session.commit()
+        await set_node_run_rls_context(session, node_run_id=run.id)
+
+        if isinstance(compiled, CompiledImageRequest):
+            result = await resolved.runtime.submit_image(compiled)
+        else:
+            result = await resolved.runtime.submit_video(compiled)
+        if result.status == "unknown_submission":
+            op.status = "unknown_submission"
+            op.error_code = str(result.error_code or "PROVIDER_SUBMISSION_UNKNOWN")
+            op.error_summary = (
+                "Provider submission outcome is unknown; manual reconciliation required"
+            )
+            op.completed_at = now
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code="PROVIDER_SUBMISSION_UNKNOWN",
+                error_summary=op.error_summary,
+            )
+            raise ValidationAppError("PROVIDER_SUBMISSION_UNKNOWN")
+        if result.status in {"failed", "error", "cancelled"}:
+            error_text = str(result.error or "provider rejected task creation")[:500]
+            if result.error_code == "PROVIDER_RATE_LIMITED":
+                raw_retry_after = getattr(result, "retry_after_seconds", None)
+                try:
+                    retry_after = float(raw_retry_after) if raw_retry_after else 5.0
+                except (TypeError, ValueError):
+                    retry_after = 5.0
+                op.status = "failed"
+                op.error_code = "PROVIDER_RATE_LIMITED"
+                op.error_summary = error_text
+                op.completed_at = now
+                await session.flush()
+                raise ProviderRateLimitedError(retry_after_seconds=retry_after)
+            op.status = "failed"
+            op.error_code = "PROVIDER_CREATE_FAILED"
+            op.error_summary = error_text
+            op.response_summary = {"create_status": result.status, "create_error": error_text[:300]}
+            op.completed_at = now
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code="PROVIDER_CREATE_FAILED",
+                error_summary=error_text,
+            )
+            raise ValidationAppError(f"PROVIDER_CREATE_FAILED: {error_text}")
+        remote = str(result.remote_task_id or "")
+        if not remote:
+            op.status = "failed"
+            op.error_code = "PROVIDER_RESPONSE_INVALID"
+            op.error_summary = "provider create response has no remote task id"
+            op.completed_at = now
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code="PROVIDER_RESPONSE_INVALID",
+                error_summary=op.error_summary,
+            )
+            raise ValidationAppError("PROVIDER_RESPONSE_INVALID")
+        op.provider_operation_id = remote
+        op.remote_secondary_id = result.remote_secondary_id
+        op.status = "submitted"
+        if result.resume_token is not None:
+            op.resume_token = result.resume_token.model_dump(mode="json")
+            resume = result.resume_token
+        op.response_summary = {
+            "create_status": result.status,
+            "query_kind": result.query_kind,
+        }
+        op.request_summary = {**op.request_summary, **result.request_summary}
+        initial_status = str(result.status)
+        await session.flush()
+        await session.commit()
+        await set_node_run_rls_context(session, node_run_id=run.id)
+
+    if runtime is None:
+        raise ValidationAppError("unified runtime was not resolved")
+    if resume is None:
+        raise ValidationAppError("unified operation has no resume token")
+
+    # Poll loop (resume token driven; images are synchronous and already terminal).
+    poll_timeout_s = 1_620.0 if node_type in {"video", "video_review"} else 120.0
+    poll_interval_s = 5.0 if node_type in {"video", "video_review"} else 3.0
+    deadline = asyncio.get_running_loop().time() + poll_timeout_s
+    poll = PollResult(status=initial_status)
+    poll_count = 0
+    while True:
+        poll = await runtime.poll_video(resume)
+        poll_count += 1
+        status = str(poll.status)
+        op.last_polled_at = now
+        op.status = "running"
+        poll_error = poll.error_code
+        if poll.http_status is not None or poll_error:
+            summary = dict(op.response_summary or {})
+            summary["last_poll_error"] = str(poll_error or f"http_{poll.http_status}")[:200]
+            raw_count = summary.get("poll_error_count", 0) or 0
+            summary["poll_error_count"] = (raw_count if isinstance(raw_count, int) else 0) + 1
+            if poll.http_status is not None:
+                summary["last_poll_http_status"] = poll.http_status
+            op.response_summary = summary
+            await session.commit()
+            await set_node_run_rls_context(session, node_run_id=run.id)
+        if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
+            break
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            op.status = "timed_out"
+            op.error_code = "PROVIDER_POLL_TIMEOUT"
+            op.error_summary = (
+                f"remote task still pending after {poll_timeout_s:.0f}s; resume polling"
+            )
+            op.response_summary = {
+                "create_status": create_status,
+                "final_status": "running",
+                "poll_count": poll_count,
+                "query_kind": resume.query_kind,
+            }
+            run.status = "queued"
+            run.error_code = "PROVIDER_TASK_PENDING"
+            run.error_summary = "Remote Provider task is still running"
+            run.output_summary = {
+                "status": "provider_pending",
+                "provider_operation_id": str(op.id),
+            }
+            await session.commit()
+            raise ProviderTaskPendingError()
+        poll_retry_after = poll.retry_after_seconds
+        sleep_s = poll_interval_s
+        if isinstance(poll_retry_after, int | float) and poll_retry_after > 0:
+            sleep_s = max(sleep_s, float(poll_retry_after))
+        await asyncio.sleep(min(sleep_s, remaining))
+
+    cost = await runtime.fetch_cost(resume)
+    status = str(poll.status)
+    op.provider_cost = Decimal(str(getattr(cost, "amount", 0.0)))
+    op.currency = str(getattr(cost, "currency", "USD"))
+    op.response_summary = {
+        "create_status": create_status,
+        "final_status": status,
+        "poll_count": poll_count,
+        "query_kind": resume.query_kind,
+    }
+    if status not in {"succeeded", "completed", "success"}:
+        error_summary = str(getattr(poll, "error_code", None) or status)[:500]
+        op.status = "failed"
+        op.error_code = "PROVIDER_FAILED"
+        op.error_summary = error_summary
+        op.completed_at = now
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code="PROVIDER_FAILED",
+            error_summary=error_summary,
+        )
+        raise ValidationAppError(f"PROVIDER_FAILED: {error_summary}")
+
+    op.status = "succeeded"
+    op.completed_at = now
+    uri = poll.artifact_uri
+    data = await _resolve_media_bytes(
+        kind=node_type,
+        remote=remote,
+        prompt=prompt,
+        artifact_uri=uri,
+    )
+
+    mime, ext, art_type = _mime_for_node(node_type)
+    object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
+    stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
+    art = await get_or_create_artifact(
+        session,
+        project_id=run.project_id,
+        artifact_type=art_type,
+        object_key=stored.object_key,
+        content_hash=stored.content_hash,
+        mime_type=stored.mime_type,
+        byte_size=stored.byte_size,
+        produced_by_run_id=run.id,
+    )
+
+    face_status: str | None = None
+    face_score: float | None = None
+    if node_type in {"keyframe", "face_review"}:
+        if not lead_identity_required:
+            face_status = "not_applicable"
+        elif canonical_image_bytes is not None:
+            review = face_review_images(
+                probe_image_bytes=data,
+                canonical_image_bytes=canonical_image_bytes,
+                threshold=face_threshold,
+            )
+            face_status = review.status
+            face_score = review.score
+        else:
+            face_status = "needs_human"
+            face_score = None
+
+    run.status = "completed"
+    run.result_artifact_id = art.id
+    run.provider_cost = op.provider_cost or Decimal("0")
+    run.finished_at = now
+    run.output_summary = {
+        "artifact_id": str(art.id),
+        "node_type": node_type,
+        "face_review": face_status,
+        "face_score": face_score,
+        "byte_size": art.byte_size,
+        "content_hash": art.content_hash,
+        "source_commit": get_settings().source_commit,
+        "face_policy": approved_face_policy_snapshot(),
+        "face_threshold": face_threshold,
+        "execution_path": UNIFIED_PATH_VERSION,
+    }
+    node.latest_successful_run_id = run.id
+    await session.flush()
+    return ExecuteNodeResult(
+        node_run_id=run.id,
+        artifact_id=art.id,
+        object_key=art.object_key,
+        content_hash=art.content_hash,
+        byte_size=art.byte_size,
+        face_status=face_status,
+        face_score=face_score,
+        provider_operation_id=op.id,
+        node_type=node_type,
+    )
+
+
 async def execute_media_node_run(
     session: AsyncSession,
     *,
@@ -891,6 +1468,36 @@ async def execute_media_node_run(
     if await set_node_run_rls_context(session, node_run_id=run.id) is None:
         raise ValidationAppError("node_run ownership context unavailable")
 
+    # Stage B4: unified path is driven by persisted execution_path_version or the
+    # enable flag. A persisted unified op wins over any flag (single-path rule).
+    _unified_op = await session.scalar(
+        select(ProviderOperation)
+        .where(
+            ProviderOperation.node_run_id == run.id,
+            ProviderOperation.execution_path_version == UNIFIED_PATH_VERSION,
+        )
+        .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
+        .limit(1)
+    )
+    if _unified_op is not None or (
+        get_settings().provider_unified_path_enabled
+        and node_type in {"keyframe", "video", "video_review"}
+    ):
+        return await _execute_unified_media_node_run(
+            session,
+            run=run,
+            node=node,
+            node_type=node_type,
+            snap=snap,
+            obj_store=obj_store,
+            prompt=prompt,
+            canonical_image_bytes=canonical_image_bytes,
+            canonical_embedding=canonical_embedding,
+            lead_identity_required=lead_identity_required,
+            has_canonical_binding=has_canonical_binding,
+            face_threshold=face_threshold,
+        )
+
     # Select Adapter: real Agnes when configured. No silent Fake outside test.
     adapter = flux
     if adapter is None:
@@ -965,6 +1572,7 @@ async def execute_media_node_run(
     if op is None:
         create_request: dict[str, object] = {"prompt": prompt, "kind": kind}
         safe_request_summary: dict[str, object] = {"kind": kind}
+        first_frame = None
         if node_type == "keyframe" and lead_identity_required and has_canonical_binding:
             create_request["canonical_image_bytes"] = canonical_image_bytes
             create_request["canonical_image_mime"] = str(
@@ -1058,6 +1666,23 @@ async def execute_media_node_run(
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
+        if (
+            get_settings().provider_unified_shadow
+            and provider_name in {"agnes", "volcengine"}
+            and node_type in {"keyframe", "video"}
+        ):
+            # Stage B1: observe whether the unified path resolves to the same
+            # model before the legacy path pays for a submission.
+            await _run_shadow_selection(
+                session,
+                project=project,
+                node_type=node_type,
+                prompt=prompt,
+                first_frame=first_frame,
+                op=op,
+                legacy_provider=provider_name,
+                legacy_model=model_name,
+            )
         try:
             create = await adapter.create(create_request)
         except asyncio.CancelledError:

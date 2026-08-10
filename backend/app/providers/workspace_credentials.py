@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.providers.models import ProviderConnection
 from app.security.byok_keyring import ByokKeyring, KeyringConfigurationError, parse_keyring
 from app.security.credentials import has_credential, read_credential
 from app.shared.errors import AppError
@@ -65,3 +66,35 @@ async def settings_for_workspace_provider(
             update={"volcengine_enabled": True, "volcengine_api_key": credential}
         )
     raise ValueError(f"unsupported workspace credential provider: {provider}")
+
+
+async def runtime_connection_settings(
+    session: AsyncSession,
+    *,
+    connection: ProviderConnection,
+    settings: Settings | None = None,
+) -> Settings:
+    """Build runtime Settings from a ProviderConnection (BYOK credential slot +
+    connection host), used by the unified Provider runtime. Mirrors the legacy
+    ``settings_for_workspace_provider`` but keys off the connection's provider
+    type + protocol profile instead of a hardcoded provider name."""
+    from app.providers.registry import get_plugin
+
+    cfg = settings or get_settings()
+    plugin = get_plugin(connection.provider_type, connection.protocol_profile)
+    credential = await read_credential(
+        session,
+        workspace_id=connection.workspace_id,
+        provider=plugin.credential_key,
+        keyring=configured_byok_keyring(cfg),
+    )
+    if credential is None:
+        return cfg
+    prefix = plugin.prefix
+    return cfg.model_copy(
+        update={
+            f"{prefix}_enabled": True,
+            f"{prefix}_api_key": credential,
+            f"{prefix}_base_url": connection.base_url,
+        }
+    )

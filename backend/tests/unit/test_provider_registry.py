@@ -34,6 +34,29 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 FAKE_PROVIDER = "fakeprovider"
 FAKE_PROFILE = "fakeprofile"
 
+_FAKE_IMAGE_MANIFEST = {
+    "manifest_version": "2026-08-10",
+    "provider_type": FAKE_PROVIDER,
+    "protocol_profile": FAKE_PROFILE,
+    "model_id": "fake-img-model",
+    "model_revision": "v1",
+    "media_kind": "image",
+    "display_name": "Fake Image",
+    "lifecycle": "active",
+    "catalog_source": "official_static",
+    "documented_at": "2026-08-10",
+    "operations": {
+        "image.generate": {
+            "operation": "image.generate",
+            "capabilities": ["image.t2i", "image.i2i"],
+            "output_constraints": {},
+            "reference_constraints": {},
+            "exclusive_groups": [],
+        }
+    },
+    "option_schema": {"namespace": "", "options": {}},
+}
+
 
 def _byok_env(monkeypatch: pytest.MonkeyPatch) -> None:
     keyring_key = Fernet.generate_key().decode("ascii")
@@ -180,6 +203,11 @@ async def test_plugin_extension_needs_no_service_branch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _byok_env(monkeypatch)
+    from datetime import date
+
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.catalog_seed_data import hash_manifest
+
     user, workspace = await _seed_owner(session)
     service = ProviderConnectionService(session)
 
@@ -196,6 +224,25 @@ async def test_plugin_extension_needs_no_service_branch(
     assert connection.protocol_profile == FAKE_PROFILE
     assert connection.base_url == "https://fake.example.com"
 
+    # Seed the fake model's catalog entry (binding now requires one).
+    session.add(
+        ModelCatalogEntry(
+            provider_type=FAKE_PROVIDER,
+            protocol_profile=FAKE_PROFILE,
+            model_id="fake-img-model",
+            model_revision="v1",
+            display_name="Fake Image",
+            media_kind="image",
+            lifecycle="active",
+            catalog_source="official_static",
+            capability_manifest_json=_FAKE_IMAGE_MANIFEST,
+            option_schema_json={},
+            documented_at=date.fromisoformat("2026-08-10"),
+            contract_manifest_hash=hash_manifest(_FAKE_IMAGE_MANIFEST),
+        )
+    )
+    await session.flush()
+
     binding = await service.create_model_binding(
         workspace_id=workspace.id,
         connection_id=connection.id,
@@ -206,6 +253,8 @@ async def test_plugin_extension_needs_no_service_branch(
         enabled=True,
     )
     assert binding.model_id == "fake-img-model"
+    assert binding.invoke_model_value == "fake-img-model"
+    assert binding.catalog_entry_id is not None
     with pytest.raises(ValidationAppError):
         await service.create_model_binding(
             workspace_id=workspace.id,
@@ -237,6 +286,119 @@ async def test_plugin_extension_needs_no_service_branch(
     refreshed = await session.get(ProviderModelBinding, binding.id)
     assert refreshed is not None
     assert refreshed.account_verified is False  # image_t2i has no purpose mapping
+
+
+@pytest.mark.asyncio
+async def test_binding_scoped_probe_only_advances_probed_binding(
+    session: AsyncSession,
+    fake_registration: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review gate: a binding-scoped probe proves exactly one model. A sibling
+    binding on the same connection/purpose must stay unverified."""
+    import base64
+    import hashlib
+    from datetime import date
+
+    from app.access.models import Project
+    from app.execution.models import Artifact
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.catalog_seed_data import hash_manifest
+
+    _byok_env(monkeypatch)
+    png_bytes = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="Fake",
+        api_key="secret",
+        enabled=True,
+        provider_type=FAKE_PROVIDER,
+        protocol_profile=FAKE_PROFILE,
+    )
+    for model_id in ("fake-img-a", "fake-img-b"):
+        manifest = dict(_FAKE_IMAGE_MANIFEST)
+        manifest["model_id"] = model_id
+        session.add(
+            ModelCatalogEntry(
+                provider_type=FAKE_PROVIDER,
+                protocol_profile=FAKE_PROFILE,
+                model_id=model_id,
+                model_revision="v1",
+                display_name=f"Fake {model_id}",
+                media_kind="image",
+                lifecycle="active",
+                catalog_source="official_static",
+                capability_manifest_json=manifest,
+                option_schema_json={},
+                documented_at=date.fromisoformat("2026-08-10"),
+                contract_manifest_hash=hash_manifest(manifest),
+            )
+        )
+    await session.flush()
+    binding_a = await service.create_model_binding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        media_type="image",
+        model_id="fake-img-a",
+        purpose="keyframe",
+        enabled=True,
+    )
+    binding_b = await service.create_model_binding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        media_type="image",
+        model_id="fake-img-b",
+        purpose="keyframe",
+        enabled=True,
+    )
+    project = Project(workspace_id=workspace.id, name="P", aspect_ratio="9:16", budget_limit=0)
+    session.add(project)
+    await session.flush()
+    artifact = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key=f"projects/{project.id}/ref.png",
+        content_hash=hashlib.sha256(png_bytes).hexdigest(),
+        mime_type="image/png",
+        byte_size=len(png_bytes),
+    )
+    session.add(artifact)
+    await session.flush()
+
+    class _FakeStore:
+        async def get_bytes(self, *, object_key: str) -> bytes:
+            return png_bytes
+
+    monkeypatch.setattr(
+        "app.providers.connection_service.get_object_store", lambda: _FakeStore()
+    )
+
+    evidence = await service.probe(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        capability="image_i2i",
+        model_binding_id=binding_a.id,
+        reference_artifact_id=artifact.id,
+        budget_authorized=Decimal("1"),
+    )
+    assert evidence.status == "passed"
+    assert evidence.model_binding_id == binding_a.id
+    assert evidence.capability_manifest_hash == binding_a.capability_manifest_hash
+    assert evidence.credential_revision == connection.credential_revision
+
+    refreshed_a = await session.get(ProviderModelBinding, binding_a.id)
+    refreshed_b = await session.get(ProviderModelBinding, binding_b.id)
+    assert refreshed_a is not None and refreshed_a.account_verified is True
+    assert refreshed_b is not None and refreshed_b.account_verified is False
 
 
 @pytest.mark.asyncio

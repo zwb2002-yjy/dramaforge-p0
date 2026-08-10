@@ -39,6 +39,7 @@ class ProviderPlugin:
     # to provider_type.
     settings_prefix: str | None = None
     # (media_type, purpose) -> model id that this profile is allowed to bind.
+    # DEPRECATED in favor of catalog_manifests; retained for legacy validation.
     model_contracts: dict[tuple[str, str], str] = field(default_factory=dict)
     # capability -> purpose advanced by account verification (image_i2i->keyframe).
     capability_purposes: dict[str, str] = field(default_factory=dict)
@@ -47,6 +48,11 @@ class ProviderPlugin:
     # Path suffix (on default_base_url) used by the auth_models capability probe.
     model_list_path: str = "/v1/models"
     client_factory: ClientFactory | None = None
+    # Versioned capability manifests shipped with the plugin (current seed).
+    catalog_manifests: tuple[dict[str, Any], ...] = ()
+    # Factories for the unified runtime/compiler surface (stages B1-B3).
+    runtime_factory: Callable[..., Any] | None = None
+    compiler_factory: Callable[..., Any] | None = None
 
     @property
     def credential_key(self) -> str:
@@ -111,7 +117,13 @@ def _ark_hub_client(settings: Settings, host: str | None) -> Any:
 
 
 def _register_defaults() -> None:
-    from app.providers.agnes import AGNES_CN_HOST, AGNES_CN_PROFILE
+    from app.providers.agnes import (
+        AGNES_CN_HOST,
+        AGNES_CN_PROFILE,
+        _agnes_compiler_factory,
+        _agnes_runtime_factory,
+    )
+    from app.providers.catalog_seed_data import seed_manifests_for
 
     register_plugin(
         ProviderPlugin(
@@ -130,11 +142,19 @@ def _register_defaults() -> None:
             paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
             model_list_path="/v1/models",
             client_factory=_agnes_hub_client,
+            catalog_manifests=tuple(seed_manifests_for(provider_type="agnes")),
+            runtime_factory=_agnes_runtime_factory,
+            compiler_factory=_agnes_compiler_factory,
         )
     )
     # Ark data-plane contract (Seedream image + Seedance video) verified via
     # arkcli +gen --dry-run and official Volcengine docs 2026-08-07. The host
     # carries the /api/v3 prefix; wire paths are appended by the adapter.
+    from app.providers.volcengine import (
+        _ark_compiler_factory,
+        _ark_runtime_factory,
+    )
+
     register_plugin(
         ProviderPlugin(
             provider_type="volcengine",
@@ -154,6 +174,9 @@ def _register_defaults() -> None:
             # list endpoint; the auth_models probe may need a different check.
             model_list_path="/models",
             client_factory=_ark_hub_client,
+            catalog_manifests=tuple(seed_manifests_for(provider_type="volcengine")),
+            runtime_factory=_ark_runtime_factory,
+            compiler_factory=_ark_compiler_factory,
         )
     )
 

@@ -93,6 +93,7 @@ _provider_purpose = Enum(
 )
 _provider_status = Enum(
     "created",
+    "submission_started",
     "submitted",
     "running",
     "cancel_requested",
@@ -101,6 +102,7 @@ _provider_status = Enum(
     "failed",
     "timed_out",
     "unknown_submission",
+    "rejected",
     name="provider_operation_status",
     create_constraint=False,
     native_enum=True,
@@ -311,6 +313,28 @@ class ProviderOperation(Base):
     remote_secondary_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     protocol_profile: Mapped[str | None] = mapped_column(String(80), nullable=True)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Stage A+B: persisted execution provenance + resume context. Resume is
+    # driven by these snapshots, never by current Feature Flags or Project
+    # bindings. All snapshots are immutable once submission starts.
+    connection_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_connections.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    model_binding_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_model_bindings.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    catalog_entry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_model_catalog_entries.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    capability_manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    selection_plan: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    resume_token: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    execution_path_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(
         _provider_status.with_variant(String(40), "sqlite"),
         nullable=False,

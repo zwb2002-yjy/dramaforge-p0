@@ -84,6 +84,15 @@ class ProviderCapabilityEvidence(Base):
     )
     remote_query_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Binding-scoped probe evidence: exactly which model binding (and catalog
+    # revision) this capability proof belongs to. Never advances other bindings.
+    model_binding_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_model_bindings.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    capability_manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    credential_revision: Mapped[int | None] = mapped_column(nullable=True)
     budget_authorized: Mapped[Decimal] = mapped_column(
         Numeric(20, 6), nullable=False, default=Decimal("0")
     )
@@ -126,6 +135,19 @@ class ProviderModelBinding(Base):
     contract_tested: Mapped[bool] = mapped_column(nullable=False, default=True)
     account_verified: Mapped[bool] = mapped_column(nullable=False, default=False)
     quality_gated: Mapped[bool] = mapped_column(nullable=False, default=False)
+    # Immutable catalog snapshot: which catalog revision this binding uses and
+    # what value is actually written to the wire request ``model`` field.
+    catalog_entry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_model_catalog_entries.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    capability_manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    remote_resource_kind: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default="model"
+    )
+    remote_resource_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    invoke_model_value: Mapped[str | None] = mapped_column(String(160), nullable=True)
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -156,6 +178,10 @@ class ProjectProviderBinding(Base):
     purpose: Mapped[str] = mapped_column(String(40), nullable=False)
     model_binding_id: Mapped[UUID] = mapped_column(
         ForeignKey("provider_model_bindings.id", ondelete="RESTRICT"), nullable=False
+    )
+    # A+B scope: only explicit_binding is enabled (auto is not open yet).
+    selection_strategy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="explicit_binding"
     )
     fallback_policy: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
     updated_by: Mapped[UUID] = mapped_column(

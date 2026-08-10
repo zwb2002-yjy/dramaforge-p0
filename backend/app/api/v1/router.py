@@ -8,6 +8,7 @@ from app.api.v1 import (
     creation,
     credentials,
     events,
+    model_candidates,
     production,
     projects,
     provider_connections,
@@ -28,6 +29,7 @@ api_router.include_router(characters.router)
 api_router.include_router(credentials.router)
 api_router.include_router(provider_connections.router)
 api_router.include_router(provider_references.router)
+api_router.include_router(model_candidates.router)
 api_router.include_router(shot_ops.router)
 api_router.include_router(worker.router)
 api_router.include_router(events.router)

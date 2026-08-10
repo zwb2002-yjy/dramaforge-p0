@@ -118,6 +118,11 @@ async def test_credential_rotation_clears_capability_and_quality_flags(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from datetime import date
+
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
+
     keyring_key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
     monkeypatch.setenv("BYOK_KEYRING", f"v1:{keyring_key}")
@@ -131,6 +136,26 @@ async def test_credential_rotation_clears_capability_and_quality_flags(
         api_key="first-secret",
         enabled=True,
     )
+    manifest = next(
+        m for m in SEED_MANIFESTS if m["model_id"] == "agnes-image-2.1-flash"
+    )
+    session.add(
+        ModelCatalogEntry(
+            provider_type=manifest["provider_type"],
+            protocol_profile=manifest["protocol_profile"],
+            model_id=manifest["model_id"],
+            model_revision=manifest["model_revision"],
+            display_name=manifest["display_name"],
+            media_kind=manifest["media_kind"],
+            lifecycle="active",
+            catalog_source="official_static",
+            capability_manifest_json=manifest,
+            option_schema_json=manifest.get("option_schema") or {},
+            documented_at=date.fromisoformat(manifest["documented_at"]),
+            contract_manifest_hash=hash_manifest(manifest),
+        )
+    )
+    await session.flush()
     evidence = ProviderCapabilityEvidence(
         workspace_id=workspace.id,
         connection_id=connection.id,
