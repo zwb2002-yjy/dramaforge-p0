@@ -55,6 +55,35 @@ def _issues_add(issues: list[EligibilityIssue], code: str, detail: str = "") -> 
     issues.append(EligibilityIssue(code=code, detail=detail))
 
 
+def _capability_satisfied(required: str, declared: set[str]) -> bool:
+    """Exact capability match. Manifests declare the fine-grained capability
+    they actually support (e.g. ``video.i2v.first_frame``), so a coarse
+    declaration must NOT satisfy a sibling requirement such as
+    ``video.i2v.last_frame``."""
+    return required in declared
+
+
+def _evidence_dict(binding: ProviderModelBinding) -> dict[str, bool]:
+    return {
+        "documented": binding.documented,
+        "contract_tested": binding.contract_tested,
+        "account_verified": binding.account_verified,
+        "quality_gated": binding.quality_gated,
+    }
+
+
+def _early_ineligible(
+    binding: ProviderModelBinding,
+    issues: list[EligibilityIssue],
+) -> CandidateEvaluation:
+    return CandidateEvaluation(
+        binding_id=binding.id,
+        eligible=False,
+        issues=issues,
+        evidence=_evidence_dict(binding),
+    )
+
+
 async def evaluate_candidate(
     session: AsyncSession,
     *,
@@ -83,27 +112,47 @@ async def evaluate_candidate(
     if not binding.quality_gated:
         _issues_add(issues, "MODEL_QUALITY_GATE_MISSING")
 
+    # Catalog snapshot consistency (review gate 8): the binding must reference an
+    # active catalog revision of the same provider/profile/media with a complete
+    # invoke value and a matching manifest hash.
+    if binding.catalog_entry_id is None:
+        _issues_add(issues, "MODEL_NOT_IN_CATALOG")
+    if not binding.invoke_model_value:
+        _issues_add(issues, "MODEL_NO_INVOKE_VALUE")
+    if catalog_entry is None:
+        _issues_add(issues, "MODEL_NOT_IN_CATALOG")
+    else:
+        if catalog_entry.lifecycle != "active":
+            _issues_add(issues, "MODEL_LIFECYCLE_INACTIVE", catalog_entry.lifecycle)
+        if (
+            catalog_entry.provider_type != connection.provider_type
+            or catalog_entry.protocol_profile != connection.protocol_profile
+            or catalog_entry.media_kind != binding.media_type
+        ):
+            _issues_add(
+                issues,
+                "CATALOG_MISMATCH",
+                f"{catalog_entry.provider_type}/{catalog_entry.protocol_profile}/"
+                f"{catalog_entry.media_kind}",
+            )
+        if (
+            binding.capability_manifest_hash
+            and catalog_entry.contract_manifest_hash
+            and binding.capability_manifest_hash != catalog_entry.contract_manifest_hash
+        ):
+            _issues_add(issues, "MANIFEST_HASH_MISMATCH")
+
     operations: dict[str, Any] = {}
     if catalog_entry is not None:
         operations = catalog_entry.capability_manifest_json.get("operations") or {}
     op = operations.get(operation) if isinstance(operations, dict) else None
     if op is None:
         _issues_add(issues, "CAPABILITY_REQUIRED_MISSING", operation)
-        return CandidateEvaluation(
-            binding_id=binding.id,
-            eligible=False,
-            issues=issues,
-            evidence={
-                "documented": binding.documented,
-                "contract_tested": binding.contract_tested,
-                "account_verified": binding.account_verified,
-                "quality_gated": binding.quality_gated,
-            },
-        )
+        return _early_ineligible(binding, issues)
 
     capabilities = set(op.get("capabilities") or [])
     for capability in sorted(required_capabilities):
-        if capability not in capabilities:
+        if not _capability_satisfied(capability, capabilities):
             _issues_add(issues, "CAPABILITY_REQUIRED_MISSING", capability)
     reference_constraints = op.get("reference_constraints") or {}
     for role in sorted(reference_roles):
@@ -119,7 +168,9 @@ async def evaluate_candidate(
             _issues_add(issues, "REFERENCE_MODE_CONFLICT", group.get("name", ""))
 
     unmet_preferences = sorted(
-        capability for capability in preferred_capabilities if capability not in capabilities
+        capability
+        for capability in preferred_capabilities
+        if not _capability_satisfied(capability, capabilities)
     )
     supported_capabilities = sorted(capabilities)
 
@@ -129,11 +180,6 @@ async def evaluate_candidate(
         issues=issues,
         supported_capabilities=supported_capabilities,
         unmet_preferences=unmet_preferences,
-        evidence={
-            "documented": binding.documented,
-            "contract_tested": binding.contract_tested,
-            "account_verified": binding.account_verified,
-            "quality_gated": binding.quality_gated,
-        },
+        evidence=_evidence_dict(binding),
         estimated_cost=None,
     )

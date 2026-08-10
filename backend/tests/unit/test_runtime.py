@@ -10,6 +10,7 @@ import pytest
 from app.config import Settings
 from app.providers.agnes import AgnesRuntime
 from app.providers.runtime import (
+    CompiledImageRequest,
     CompiledVideoRequest,
     ProviderResumeToken,
 )
@@ -45,6 +46,37 @@ def _compiled_video() -> CompiledVideoRequest:
         reference_artifact_ids=[uuid4()],
         reference_fingerprints=["f" * 64],
     )
+
+
+def _compiled_image() -> CompiledImageRequest:
+    return CompiledImageRequest(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-image-2.1-flash",
+        operation="image.generate",
+        wire_request={
+            "model": "agnes-image-2.1-flash",
+            "prompt": "portrait",
+            "size": "1024x768",
+            "extra_body": {"response_format": "url"},
+        },
+        request_schema_version="2026-08-10",
+        safe_request_summary={"operation": "image.t2i", "model": "agnes-image-2.1-flash"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_submit_image_returns_synchronous_url() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"data": [{"url": "https://media.example/i.png"}]},
+        )
+
+    runtime = AgnesRuntime(settings=_settings(), transport=httpx.MockTransport(handler))
+    result = await runtime.submit_image(_compiled_image())
+    assert result.status == "succeeded"
+    assert result.artifact_uri == "https://media.example/i.png"
 
 
 @pytest.mark.asyncio

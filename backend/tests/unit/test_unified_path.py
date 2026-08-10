@@ -55,6 +55,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 FAKE_PROVIDER = "unified_test"
 FAKE_PROFILE = "u_test_v1"
 
+# Test-scoped behavior plan for submit_image outcomes ("PROVIDER_RATE_LIMITED"
+# marks one submission as a 429; anything else = success).
+_FAKE_IMAGE_PLAN: list[str] = []
+
+
 _FAKE_IMAGE_MANIFEST = {
     "manifest_version": "2026-08-10",
     "provider_type": FAKE_PROVIDER,
@@ -98,9 +103,21 @@ class FakeUnifiedRuntime:
     async def submit_image(self, request: CompiledImageRequest) -> SubmissionResult:
         self.submit_calls += 1
         remote = "uni-img-1"
+        if _FAKE_IMAGE_PLAN:
+            code = _FAKE_IMAGE_PLAN.pop(0)
+            if code == "PROVIDER_RATE_LIMITED":
+                return SubmissionResult(
+                    status="failed",
+                    error_code=code,
+                    error="rate limited",
+                    retry_after_seconds=5.0,
+                    request_fingerprint="f" * 64,
+                    request_summary={"operation": "image.t2i", "model": "uni-img-model"},
+                )
         return SubmissionResult(
             remote_task_id=remote,
             status="succeeded",
+            artifact_uri="fake://image-result",
             request_fingerprint="f" * 64,
             request_summary={"operation": "image.t2i", "model": "uni-img-model"},
             resume_token=self._token(remote),
@@ -216,6 +233,7 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture
 def fake_plugin() -> ProviderPlugin:
     _FAKE_RUNTIME_HOLDER.clear()
+    _FAKE_IMAGE_PLAN.clear()
     plugin = _fake_plugin()
     register_plugin(plugin)
     try:
@@ -223,6 +241,7 @@ def fake_plugin() -> ProviderPlugin:
     finally:
         registry_module._registry.pop((FAKE_PROVIDER, FAKE_PROFILE), None)
         _FAKE_RUNTIME_HOLDER.clear()
+        _FAKE_IMAGE_PLAN.clear()
 
 
 def _current_runtime() -> FakeUnifiedRuntime:
@@ -569,3 +588,74 @@ async def test_unbound_project_fails_closed_without_submit(
         await execute_media_node_run(session, node_run_id=run.id)
     assert exc_info.value.details["code"] == "MODEL_BINDING_MISSING"
     assert "runtime" not in _FAKE_RUNTIME_HOLDER
+
+
+@pytest.mark.asyncio
+async def test_unified_synchronous_image_skips_polling(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review gate 2: a synchronous image submission carries its result URL and
+    must NOT poll the (fake image) remote task id."""
+    _byok(monkeypatch)
+    _enable_unified(monkeypatch)
+    _user, _workspace, run = await _seed_project_chain(session)
+
+    result = await execute_media_node_run(session, node_run_id=run.id)
+    assert result.node_type == "keyframe"
+    # Polling was skipped entirely for the synchronous image.
+    assert _current_runtime().poll_calls == 0
+    assert _current_runtime().submit_calls == 1
+    op = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalar_one()
+    assert op.status == "succeeded"
+    assert op.provider_operation_id == "uni-img-1"
+
+
+@pytest.mark.asyncio
+async def test_unified_429_marks_rejected_and_retry_resubmits(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review gate 4: a 429 refusal is marked rejected (committed) and a retry
+    resubmits the SAME op instead of escalating to unknown_submission."""
+    from app.shared.errors import ProviderRateLimitedError
+
+    _byok(monkeypatch)
+    _enable_unified(monkeypatch)
+    _user, _workspace, run = await _seed_project_chain(session)
+
+    _FAKE_IMAGE_PLAN.append("PROVIDER_RATE_LIMITED")
+    with pytest.raises(ProviderRateLimitedError):
+        await execute_media_node_run(session, node_run_id=run.id)
+
+    op = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalar_one()
+    assert op.status == "rejected"
+    assert op.provider_operation_id is None
+
+    # Scheduler requeues the run; the retry resubmits the same op (no duplicate).
+    run.status = "queued"
+    await session.flush()
+    result = await execute_media_node_run(session, node_run_id=run.id)
+    assert result.node_type == "keyframe"
+    refreshed = await session.get(ProviderOperation, op.id)
+    assert refreshed is not None
+    assert refreshed.status == "succeeded"
+    assert refreshed.provider_operation_id == "uni-img-1"
+    # Exactly two submission attempts total (one refused, one accepted).
+    assert _current_runtime().submit_calls == 1
+    ops = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalars().all()
+    assert len(ops) == 1

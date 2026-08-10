@@ -15,10 +15,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
 from typing import Any
 
 MANIFEST_VERSION = "2026-08-10"
+
+# Fixed contract-verification date. NEVER derive from date.today(): the contract
+# hash includes documented_at, so a drifting date would break the frozen-migration
+# hash test every day.
+DOCUMENTED_AT = "2026-08-10"
 
 # ---------------------------------------------------------------------------
 # Contract hash: stable canonical JSON sha256. Order- and whitespace-insensitive.
@@ -73,7 +77,7 @@ def _manifest(
         "display_name": display_name,
         "lifecycle": "active",
         "catalog_source": "official_static",
-        "documented_at": date.today().isoformat(),
+        "documented_at": DOCUMENTED_AT,
         "operations": operations,
         "option_schema": option_schema
         or {"namespace": "", "options": {}},
@@ -112,8 +116,9 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
     ),
     # Agnes China video (Video V2.0). Wire: POST /v1/videos
     #   {model, prompt, num_frames, frame_rate, height, width, image|extra_body}.
-    # Only first-frame I2V is declared; keyframes / last_frame / audio have no
-    # accepted product-path contract evidence yet.
+    # Only first-frame I2V is declared (capability name matches the intent
+    # normalizer's derivation `first_frame -> video.i2v.first_frame`); keyframes /
+    # last_frame / audio have no accepted product-path contract evidence yet.
     _manifest(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -124,7 +129,7 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
         operations={
             "video.generate": _operation(
                 "video.generate",
-                capabilities=["video.i2v"],
+                capabilities=["video.i2v.first_frame"],
                 output_constraints={
                     "num_frames": {"allowed": [121]},
                     "frame_rate": {"allowed": [24]},
@@ -177,7 +182,7 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
         operations={
             "video.generate": _operation(
                 "video.generate",
-                capabilities=["video.i2v"],
+                capabilities=["video.i2v.first_frame"],
                 reference_constraints={
                     "first_frame": {"min": 1, "max": 1},
                 },

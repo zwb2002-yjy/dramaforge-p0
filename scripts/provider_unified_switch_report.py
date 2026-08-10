@@ -2,8 +2,8 @@
 """Stage B5 switchover coverage report for the unified provider path.
 
 Before flipping ``PROVIDER_UNIFIED_PATH_ENABLED=1`` every project that runs media
-nodes must have an explicit ``ProjectProviderBinding`` (keyframe + video) pointing
-at a fully verified Model Binding — the unified path fails closed with
+nodes must have an explicit ``ProjectProviderBinding`` for BOTH keyframe and video
+pointing at fully verified Model Bindings — the unified path fails closed with
 ``MODEL_BINDING_MISSING`` otherwise. This script reports coverage so operators
 can bind projects (via the existing provider-binding API) before enabling.
 
@@ -26,9 +26,14 @@ class ProjectCoverage:
     project_id: str
     project_name: str
     workspace_id: str
-    purpose: str
-    binding_count: int
-    verified_binding: bool
+    keyframe_verified: bool
+    video_verified: bool
+
+    @property
+    def covered(self) -> bool:
+        # A project is switchover-ready only when BOTH purposes are bound to a
+        # fully verified model binding. One verified purpose is NOT enough.
+        return self.keyframe_verified and self.video_verified
 
 
 def _sync_url() -> str:
@@ -48,19 +53,21 @@ def report_rows(engine: Any) -> list[ProjectCoverage]:
                   p.id::text AS project_id,
                   p.name AS project_name,
                   p.workspace_id::text AS workspace_id,
-                  pp.purpose,
-                  COUNT(b.id) AS binding_count,
-                  bool_and(
-                    b.enabled AND b.documented AND b.contract_tested
-                    AND b.account_verified AND b.quality_gated
-                  ) AS verified_binding
+                  bool_or(
+                    pp.purpose = 'keyframe' AND b.enabled AND b.documented
+                    AND b.contract_tested AND b.account_verified AND b.quality_gated
+                  ) AS keyframe_verified,
+                  bool_or(
+                    pp.purpose = 'video' AND b.enabled AND b.documented
+                    AND b.contract_tested AND b.account_verified AND b.quality_gated
+                  ) AS video_verified
                 FROM projects p
                 LEFT JOIN project_provider_bindings pp
                   ON pp.project_id = p.id
                 LEFT JOIN provider_model_bindings b
                   ON b.id = pp.model_binding_id
-                GROUP BY p.id, p.name, p.workspace_id, pp.purpose
-                ORDER BY p.name, pp.purpose
+                GROUP BY p.id, p.name, p.workspace_id
+                ORDER BY p.name
                 """
             )
         ).mappings().all()
@@ -69,9 +76,8 @@ def report_rows(engine: Any) -> list[ProjectCoverage]:
             project_id=r["project_id"],
             project_name=r["project_name"],
             workspace_id=r["workspace_id"],
-            purpose=r["purpose"],
-            binding_count=int(r["binding_count"] or 0),
-            verified_binding=bool(r["verified_binding"]),
+            keyframe_verified=bool(r["keyframe_verified"]),
+            video_verified=bool(r["video_verified"]),
         )
         for r in rows
     ]
@@ -84,28 +90,27 @@ def main() -> int:
     finally:
         engine.dispose()
 
-    total_projects = {r.project_id for r in rows}
-    bound = {r.project_id for r in rows if r.verified_binding}
     print("Stage B5 unified-path switchover coverage report")
-    print("=" * 72)
-    for row in sorted(rows, key=lambda r: (r.project_name, r.purpose)):
-        status = "VERIFIED" if row.verified_binding else "MISSING"
+    print("=" * 76)
+    for row in sorted(rows, key=lambda r: r.project_name):
+        status = "COVERED" if row.covered else "MISSING"
         print(
-            f"  {row.project_name:<28} purpose={row.purpose or '-':<10} "
-            f"bindings={row.binding_count} {status}"
+            f"  {row.project_name:<30} keyframe={'Y' if row.keyframe_verified else '-'} "
+            f"video={'Y' if row.video_verified else '-'} {status}"
         )
-    print("-" * 72)
-    print(
-        f"projects total={len(total_projects)} fully-bound={len(bound)} "
-        f"missing={len(total_projects - bound)}"
-    )
-    missing = sorted(total_projects - bound)
+    print("-" * 76)
+    covered = [r for r in rows if r.covered]
+    missing = [r for r in rows if not r.covered]
+    print(f"projects total={len(rows)} covered={len(covered)} missing={len(missing)}")
     if missing:
-        print("Projects missing a verified keyframe/video binding (must bind before switch):")
-        for project_id in missing:
-            print(f"  - {project_id}")
+        print("Projects missing a verified keyframe AND/OR video binding (bind before switch):")
+        for row in missing:
+            print(
+                f"  - {row.project_id} (keyframe={'Y' if row.keyframe_verified else '-'} "
+                f"video={'Y' if row.video_verified else '-'})"
+            )
         return 1
-    print("OK: every project has a verified binding.")
+    print("OK: every project has verified keyframe + video bindings.")
     return 0
 
 

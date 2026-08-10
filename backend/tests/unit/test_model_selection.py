@@ -11,6 +11,7 @@ from app.access.models import Project, User, Workspace
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.intents import (
+    ArtifactReferenceIntent,
     ModelSelectionIntent,
     VideoGenerationIntentV1,
 )
@@ -203,3 +204,36 @@ async def test_unsatisfiable_required_capability_is_fail_closed(
     with pytest.raises(ValidationAppError) as exc_info:
         await ModelSelectionService(session).select_video(project=project, intent=intent)
     assert "CAPABILITY_REQUIRED_MISSING" in exc_info.value.details["issues"]
+
+
+@pytest.mark.asyncio
+async def test_real_video_model_with_first_frame_is_selectable(
+    session: AsyncSession,
+) -> None:
+    """Review gate 1: the real Agnes video manifest declares
+    ``video.i2v.first_frame``; a video intent that carries a first_frame
+    reference must resolve (not MODEL_INELIGIBLE)."""
+    project, binding = await _seed(session)
+    session.add(
+        ProjectProviderBinding(
+            project_id=project.id,
+            workspace_id=project.workspace_id,
+            purpose="video",
+            model_binding_id=binding.id,
+            selection_strategy="explicit_binding",
+            fallback_policy="none",
+            updated_by=uuid4(),
+        )
+    )
+    await session.flush()
+    intent = VideoGenerationIntentV1(
+        prompt="p",
+        references=[
+            ArtifactReferenceIntent(artifact_id=uuid4(), role="first_frame", required=True)
+        ],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    plan = await ModelSelectionService(session).select_video(project=project, intent=intent)
+    assert plan.invoke_model_value == "agnes-video-v2.0"
+    assert "video.i2v.first_frame" in plan.supported_capabilities
+    assert plan.unmet_requirements == []

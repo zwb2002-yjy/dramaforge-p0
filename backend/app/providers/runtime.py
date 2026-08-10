@@ -63,7 +63,9 @@ class CompiledImageRequest(BaseModel):
 
 class SubmissionResult(BaseModel):
     """One create attempt outcome. ``status`` mirrors the provider_operation
-    status vocabulary so the caller can persist it directly."""
+    status vocabulary so the caller can persist it directly. Synchronous image
+    submissions carry the result URL in ``artifact_uri``; video submissions are
+    asynchronous and are polled via the resume token."""
 
     remote_task_id: str | None = None
     remote_secondary_id: str | None = None
@@ -72,8 +74,10 @@ class SubmissionResult(BaseModel):
     request_fingerprint: str | None = None
     request_summary: dict[str, JsonValue] = Field(default_factory=dict)
     resume_token: ProviderResumeToken | None = None
+    artifact_uri: str | None = None
     error_code: str | None = None
     error: str | None = None
+    retry_after_seconds: float | None = None
 
 
 class PollResult(BaseModel):

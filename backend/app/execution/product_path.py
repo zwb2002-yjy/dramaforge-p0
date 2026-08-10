@@ -10,6 +10,7 @@ import socket
 from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -49,6 +50,9 @@ from app.shared.errors import (
     ValidationAppError,
 )
 from app.storage.minio_store import ObjectStore, get_object_store
+
+if TYPE_CHECKING:
+    from app.providers.runtime import ResolvedReference
 
 _MAX_PROVIDER_MEDIA_BYTES = 512 * 1024 * 1024
 _MAX_PROVIDER_IMAGE_BYTES = 20 * 1024 * 1024
@@ -824,6 +828,57 @@ async def _run_shadow_selection(
 UNIFIED_PATH_VERSION = "unified-v1"
 
 
+async def _unified_resolved_reference(
+    session: AsyncSession,
+    *,
+    project: Project,
+    run: NodeRun,
+    role: str,
+    artifact: Artifact | None,
+    content_bytes: bytes | None,
+    mime_type: str,
+    fingerprint: str | None,
+    provider_type: str,
+) -> ResolvedReference:
+    """Resolve one artifact reference to the transport the selected Provider
+    requires: Ark references are short-lived public HTTPS URLs (issued through
+    the platform grant), Agnes references travel as bytes (data URI / raw
+    base64). A missing reference fails closed."""
+    from app.providers.reference_delivery import issue_artifact_reference
+
+    if provider_type == "volcengine":
+        if artifact is None:
+            raise ValidationAppError(
+                "Ark reference requires a bound image artifact",
+                details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
+            )
+        grant = await issue_artifact_reference(
+            session,
+            artifact=artifact,
+            workspace_id=project.workspace_id,
+            created_by_run_id=run.id,
+        )
+        return ResolvedReference(
+            role=role,
+            artifact_id=artifact.id,
+            content_url=grant.url,
+            mime_type=artifact.mime_type or mime_type,
+            fingerprint=artifact.content_hash,
+        )
+    if content_bytes is None:
+        raise ValidationAppError(
+            "reference bytes are required",
+            details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
+        )
+    return ResolvedReference(
+        role=role,
+        artifact_id=artifact.id if artifact is not None else UUID(int=0),
+        content_bytes=content_bytes,
+        mime_type=mime_type,
+        fingerprint=fingerprint,
+    )
+
+
 async def _execute_unified_media_node_run(
     session: AsyncSession,
     *,
@@ -838,6 +893,7 @@ async def _execute_unified_media_node_run(
     lead_identity_required: bool,
     has_canonical_binding: bool,
     face_threshold: float,
+    canonical_artifact: Artifact | None = None,
 ) -> ExecuteNodeResult:
     """Stage B4: binding-driven unified execution path.
 
@@ -867,7 +923,7 @@ async def _execute_unified_media_node_run(
         ProviderResumeToken,
         ProviderRuntime,
         ProviderRuntimeResolver,
-        ResolvedReference,
+        SubmissionResult,
     )
     from app.providers.selection import ModelSelectionService
     from app.providers.workspace_credentials import runtime_connection_settings
@@ -895,8 +951,15 @@ async def _execute_unified_media_node_run(
     runtime: ProviderRuntime | None = None
     resume: ProviderResumeToken | None = None
     initial_status = "queued"
+    synchronous_image = False
+    result: SubmissionResult | None = None
 
-    if op is not None:
+    resubmit = bool(
+        op is not None
+        and op.status == "rejected"
+        and not op.provider_operation_id
+    )
+    if op is not None and not resubmit:
         # A crash between the submission_started commit and the remote-id write
         # leaves an op with no remote id. Its outcome is unknown; escalate to
         # manual reconciliation instead of risking a duplicate POST.
@@ -934,7 +997,7 @@ async def _execute_unified_media_node_run(
         create_status = "resumed"
         initial_status = "running"
 
-    if op is None:
+    if op is None or resubmit:
         # New submission. Resolve via the shared selection engine.
         first_frame: Artifact | None = None
         frame_bytes: bytes | None = None
@@ -1027,20 +1090,17 @@ async def _execute_unified_media_node_run(
             assert image_intent is not None
             refs: list[ResolvedReference] = []
             if has_canonical_binding and canonical_image_bytes is not None:
-                raw_canonical_id = snap.get("canonical_artifact_id")
-                try:
-                    canonical_uuid = (
-                        UUID(str(raw_canonical_id)) if isinstance(raw_canonical_id, str) else None
-                    )
-                except ValueError:
-                    canonical_uuid = None
                 refs.append(
-                    ResolvedReference(
+                    await _unified_resolved_reference(
+                        session,
+                        project=project,
+                        run=run,
                         role="reference_image",
-                        artifact_id=canonical_uuid or UUID(int=0),
+                        artifact=canonical_artifact,
                         content_bytes=canonical_image_bytes,
                         mime_type=str(snap.get("canonical_mime_type") or "image/png"),
                         fingerprint=hashlib.sha256(canonical_image_bytes).hexdigest(),
+                        provider_type=provider_type,
                     )
                 )
             compiled = await image_compiler.compile(
@@ -1059,12 +1119,16 @@ async def _execute_unified_media_node_run(
                 video_intent,
                 manifest,
                 [
-                    ResolvedReference(
+                    await _unified_resolved_reference(
+                        session,
+                        project=project,
+                        run=run,
                         role="first_frame",
-                        artifact_id=first_frame.id,
+                        artifact=first_frame,
                         content_bytes=frame_bytes,
                         mime_type=first_frame.mime_type or "image/png",
                         fingerprint=first_frame.content_hash,
+                        provider_type=provider_type,
                     )
                 ],
                 invoke_model_value=invoke_model_value,
@@ -1074,27 +1138,39 @@ async def _execute_unified_media_node_run(
         fingerprint = hashlib.sha256(
             f"{kind}:{prompt}:{compiled.model_dump_json()}".encode()
         ).hexdigest()
-        op = ProviderOperation(
-            node_run_id=run.id,
-            attempt_no=run.attempt_no,
-            purpose="primary",
-            operation_kind=f"{node_type}.generate",
-            actual_provider=plan.provider_type,
-            actual_model=invoke_model_value,
-            protocol_profile=plan.protocol_profile,
-            request_fingerprint=fingerprint,
-            status="submission_started",
-            request_summary={"kind": kind, "execution_path": UNIFIED_PATH_VERSION},
-            response_summary={},
-            submitted_at=now,
-            connection_id=connection.id,
-            model_binding_id=binding.id,
-            catalog_entry_id=entry.id,
-            capability_manifest_hash=plan.manifest_hash,
-            selection_plan=json.loads(json.dumps(asdict(plan), default=str)),
-            execution_path_version=UNIFIED_PATH_VERSION,
-        )
-        session.add(op)
+        if op is None:
+            op = ProviderOperation(
+                node_run_id=run.id,
+                attempt_no=run.attempt_no,
+                purpose="primary",
+                operation_kind=f"{node_type}.generate",
+                actual_provider=provider_type,
+                actual_model=invoke_model_value,
+                protocol_profile=protocol_profile,
+                request_fingerprint=fingerprint,
+                status="submission_started",
+                request_summary={"kind": kind, "execution_path": UNIFIED_PATH_VERSION},
+                response_summary={},
+                submitted_at=now,
+                connection_id=connection.id,
+                model_binding_id=binding.id,
+                catalog_entry_id=entry.id,
+                capability_manifest_hash=plan.manifest_hash,
+                selection_plan=json.loads(json.dumps(asdict(plan), default=str)),
+                execution_path_version=UNIFIED_PATH_VERSION,
+            )
+            session.add(op)
+        else:
+            # Rejected earlier without a remote task: retry reuses the same op.
+            op.status = "submission_started"
+            op.error_code = None
+            op.error_summary = None
+            op.provider_operation_id = None
+            op.remote_secondary_id = None
+            op.request_fingerprint = fingerprint
+            op.response_summary = {}
+            op.completed_at = None
+            op.resume_token = None
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
@@ -1109,7 +1185,7 @@ async def _execute_unified_media_node_run(
             op.error_summary = (
                 "Provider submission outcome is unknown; manual reconciliation required"
             )
-            op.completed_at = now
+            op.completed_at = datetime.now(UTC)
             await _commit_terminal_failure(
                 session,
                 run=run,
@@ -1125,17 +1201,21 @@ async def _execute_unified_media_node_run(
                     retry_after = float(raw_retry_after) if raw_retry_after else 5.0
                 except (TypeError, ValueError):
                     retry_after = 5.0
-                op.status = "failed"
+                # The provider explicitly refused with 429 and did not create a
+                # remote task. Mark the op rejected and COMMIT so a worker
+                # rollback cannot leave it dangling as submission_started; the
+                # scheduler requeues the run and the retry resubmits.
+                op.status = "rejected"
                 op.error_code = "PROVIDER_RATE_LIMITED"
                 op.error_summary = error_text
-                op.completed_at = now
-                await session.flush()
+                op.completed_at = datetime.now(UTC)
+                await session.commit()
                 raise ProviderRateLimitedError(retry_after_seconds=retry_after)
             op.status = "failed"
             op.error_code = "PROVIDER_CREATE_FAILED"
             op.error_summary = error_text
             op.response_summary = {"create_status": result.status, "create_error": error_text[:300]}
-            op.completed_at = now
+            op.completed_at = datetime.now(UTC)
             await _commit_terminal_failure(
                 session,
                 run=run,
@@ -1148,7 +1228,7 @@ async def _execute_unified_media_node_run(
             op.status = "failed"
             op.error_code = "PROVIDER_RESPONSE_INVALID"
             op.error_summary = "provider create response has no remote task id"
-            op.completed_at = now
+            op.completed_at = datetime.now(UTC)
             await _commit_terminal_failure(
                 session,
                 run=run,
@@ -1166,6 +1246,12 @@ async def _execute_unified_media_node_run(
             "create_status": result.status,
             "query_kind": result.query_kind,
         }
+        # Synchronous image submissions already carry the result URL; no poll.
+        synchronous_image = (
+            isinstance(compiled, CompiledImageRequest)
+            and result.status == "succeeded"
+            and result.artifact_uri is not None
+        )
         op.request_summary = {**op.request_summary, **result.request_summary}
         initial_status = str(result.status)
         await session.flush()
@@ -1177,58 +1263,64 @@ async def _execute_unified_media_node_run(
     if resume is None:
         raise ValidationAppError("unified operation has no resume token")
 
-    # Poll loop (resume token driven; images are synchronous and already terminal).
-    poll_timeout_s = 1_620.0 if node_type in {"video", "video_review"} else 120.0
-    poll_interval_s = 5.0 if node_type in {"video", "video_review"} else 3.0
-    deadline = asyncio.get_running_loop().time() + poll_timeout_s
-    poll = PollResult(status=initial_status)
-    poll_count = 0
-    while True:
-        poll = await runtime.poll_video(resume)
-        poll_count += 1
-        status = str(poll.status)
-        op.last_polled_at = now
-        op.status = "running"
-        poll_error = poll.error_code
-        if poll.http_status is not None or poll_error:
-            summary = dict(op.response_summary or {})
-            summary["last_poll_error"] = str(poll_error or f"http_{poll.http_status}")[:200]
-            raw_count = summary.get("poll_error_count", 0) or 0
-            summary["poll_error_count"] = (raw_count if isinstance(raw_count, int) else 0) + 1
-            if poll.http_status is not None:
-                summary["last_poll_http_status"] = poll.http_status
-            op.response_summary = summary
-            await session.commit()
-            await set_node_run_rls_context(session, node_run_id=run.id)
-        if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
-            break
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            op.status = "timed_out"
-            op.error_code = "PROVIDER_POLL_TIMEOUT"
-            op.error_summary = (
-                f"remote task still pending after {poll_timeout_s:.0f}s; resume polling"
-            )
-            op.response_summary = {
-                "create_status": create_status,
-                "final_status": "running",
-                "poll_count": poll_count,
-                "query_kind": resume.query_kind,
-            }
-            run.status = "queued"
-            run.error_code = "PROVIDER_TASK_PENDING"
-            run.error_summary = "Remote Provider task is still running"
-            run.output_summary = {
-                "status": "provider_pending",
-                "provider_operation_id": str(op.id),
-            }
-            await session.commit()
-            raise ProviderTaskPendingError()
-        poll_retry_after = poll.retry_after_seconds
-        sleep_s = poll_interval_s
-        if isinstance(poll_retry_after, int | float) and poll_retry_after > 0:
-            sleep_s = max(sleep_s, float(poll_retry_after))
-        await asyncio.sleep(min(sleep_s, remaining))
+    # Poll loop (resume token driven). Synchronous image submissions already
+    # carry the result URL and skip polling entirely.
+    if not synchronous_image:
+        poll_timeout_s = 1_620.0 if node_type in {"video", "video_review"} else 120.0
+        poll_interval_s = 5.0 if node_type in {"video", "video_review"} else 3.0
+        deadline = asyncio.get_running_loop().time() + poll_timeout_s
+        poll = PollResult(status=initial_status)
+        poll_count = 0
+        while True:
+            poll = await runtime.poll_video(resume)
+            poll_count += 1
+            status = str(poll.status)
+            op.last_polled_at = datetime.now(UTC)
+            op.status = "running"
+            poll_error = poll.error_code
+            if poll.http_status is not None or poll_error:
+                summary = dict(op.response_summary or {})
+                summary["last_poll_error"] = str(poll_error or f"http_{poll.http_status}")[:200]
+                raw_count = summary.get("poll_error_count", 0) or 0
+                summary["poll_error_count"] = (raw_count if isinstance(raw_count, int) else 0) + 1
+                if poll.http_status is not None:
+                    summary["last_poll_http_status"] = poll.http_status
+                op.response_summary = summary
+                await session.commit()
+                await set_node_run_rls_context(session, node_run_id=run.id)
+            if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
+                break
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                op.status = "timed_out"
+                op.error_code = "PROVIDER_POLL_TIMEOUT"
+                op.error_summary = (
+                    f"remote task still pending after {poll_timeout_s:.0f}s; resume polling"
+                )
+                op.response_summary = {
+                    "create_status": create_status,
+                    "final_status": "running",
+                    "poll_count": poll_count,
+                    "query_kind": resume.query_kind,
+                }
+                run.status = "queued"
+                run.error_code = "PROVIDER_TASK_PENDING"
+                run.error_summary = "Remote Provider task is still running"
+                run.output_summary = {
+                    "status": "provider_pending",
+                    "provider_operation_id": str(op.id),
+                }
+                await session.commit()
+                raise ProviderTaskPendingError()
+            poll_retry_after = poll.retry_after_seconds
+            sleep_s = poll_interval_s
+            if isinstance(poll_retry_after, int | float) and poll_retry_after > 0:
+                sleep_s = max(sleep_s, float(poll_retry_after))
+            await asyncio.sleep(min(sleep_s, remaining))
+    else:
+        assert result is not None and result.artifact_uri is not None
+        poll = PollResult(status="succeeded", artifact_uri=result.artifact_uri)
+        poll_count = 0
 
     cost = await runtime.fetch_cost(resume)
     status = str(poll.status)
@@ -1245,7 +1337,7 @@ async def _execute_unified_media_node_run(
         op.status = "failed"
         op.error_code = "PROVIDER_FAILED"
         op.error_summary = error_summary
-        op.completed_at = now
+        op.completed_at = datetime.now(UTC)
         await _commit_terminal_failure(
             session,
             run=run,
@@ -1255,7 +1347,7 @@ async def _execute_unified_media_node_run(
         raise ValidationAppError(f"PROVIDER_FAILED: {error_summary}")
 
     op.status = "succeeded"
-    op.completed_at = now
+    op.completed_at = datetime.now(UTC)
     uri = poll.artifact_uri
     data = await _resolve_media_bytes(
         kind=node_type,
@@ -1298,7 +1390,7 @@ async def _execute_unified_media_node_run(
     run.status = "completed"
     run.result_artifact_id = art.id
     run.provider_cost = op.provider_cost or Decimal("0")
-    run.finished_at = now
+    run.finished_at = datetime.now(UTC)
     run.output_summary = {
         "artifact_id": str(art.id),
         "node_type": node_type,
@@ -1383,10 +1475,11 @@ async def execute_media_node_run(
     if node.node_key in {"face_review", "video_drift_review"}:
         snap = await _bind_review_input_artifacts(session, run=run, node=node)
     face_threshold = approved_face_threshold()
+    canonical_artifact: Artifact | None = None
     # Formal Worker path resolves canonical only from a complete Artifact binding.
     if canonical_image_bytes is None:
         try:
-            _, canonical_image_bytes = await _read_bound_artifact(
+            canonical_artifact, canonical_image_bytes = await _read_bound_artifact(
                 session,
                 run=run,
                 snapshot=snap,
@@ -1496,6 +1589,7 @@ async def execute_media_node_run(
             lead_identity_required=lead_identity_required,
             has_canonical_binding=has_canonical_binding,
             face_threshold=face_threshold,
+            canonical_artifact=canonical_artifact,
         )
 
     # Select Adapter: real Agnes when configured. No silent Fake outside test.

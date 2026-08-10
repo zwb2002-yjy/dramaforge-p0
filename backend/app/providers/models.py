@@ -111,12 +111,14 @@ class ProviderCapabilityEvidence(Base):
 class ProviderModelBinding(Base):
     __tablename__ = "provider_model_bindings"
     __table_args__ = (
+        # One binding per (connection, media, catalog revision, purpose): the
+        # same model may have multiple revisions coexist as distinct bindings.
         UniqueConstraint(
             "connection_id",
             "media_type",
-            "model_id",
+            "catalog_entry_id",
             "purpose",
-            name="uq_provider_model_binding",
+            name="uq_provider_model_binding_revision",
         ),
     )
 

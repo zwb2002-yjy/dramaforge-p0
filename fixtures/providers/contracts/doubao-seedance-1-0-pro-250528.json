@@ -50,7 +50,7 @@
     "operations": {
       "video.generate": {
         "capabilities": [
-          "video.i2v"
+          "video.i2v.first_frame"
         ],
         "exclusive_groups": [],
         "operation": "video.generate",
@@ -70,5 +70,5 @@
     "protocol_profile": "ark_cn_v1",
     "provider_type": "volcengine"
   },
-  "manifest_hash": "8e3e5b666b4afd1fd265dcca805b0697740876af395225e3e7ad5e66c4866ca4"
+  "manifest_hash": "2fdf987947919fd4d797b9c0a2cbbae165571d91054c1c1e87bd87b77dde6add"
 }

@@ -829,7 +829,7 @@ class AgnesVideoCompiler:
         if op is None:
             raise ValueError("model does not support video.generate")
         capabilities = set(op.capabilities)
-        if "video.i2v" not in capabilities:
+        if not ("video.i2v" in capabilities or "video.i2v.first_frame" in capabilities):
             raise ValueError("model does not support video.i2v")
         first_refs = [ref for ref in intent.references if ref.role == "first_frame"]
         if not first_refs:
@@ -956,6 +956,7 @@ class AgnesRuntime:
                     else "PROVIDER_RESPONSE_INVALID"
                 ),
                 error=f"Agnes image request failed ({response.status_code})",
+                retry_after_seconds=_retry_after_seconds(response),
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )
@@ -968,6 +969,7 @@ class AgnesRuntime:
         return SubmissionResult(
             remote_task_id=remote_id,
             status="succeeded",
+            artifact_uri=image_url,
             request_fingerprint=_request_fingerprint(request.wire_request),
             request_summary=request.safe_request_summary,
             resume_token=token,
@@ -1009,6 +1011,7 @@ class AgnesRuntime:
                     else "PROVIDER_RESPONSE_INVALID"
                 ),
                 error=f"Agnes video request failed ({response.status_code})",
+                retry_after_seconds=_retry_after_seconds(response),
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )

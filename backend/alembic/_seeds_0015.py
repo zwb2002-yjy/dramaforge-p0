@@ -1,11 +1,11 @@
 """FROZEN seed snapshot for migration 20260810_0015. DO NOT EDIT.
 
-This module mirrors app/providers/catalog_seed_data.py at migration time as
+This module mirrors ``app/providers/catalog_seed_data.py`` at migration time as
 a self-contained literal snapshot. Historical migrations must never import
 current runtime code: replaying history would otherwise depend on future edits.
 Adding a model revision requires a NEW migration; never rewrite this file.
 
-Tests assert hash_seed(FROZEN_0015[i]) equals the current catalog hash.
+Tests assert ``hash_seed(FROZEN_0015[i])`` equals the current catalog hash.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ FROZEN_0015 = [{'manifest_version': '2026-08-10',
   'catalog_source': 'official_static',
   'documented_at': '2026-08-10',
   'operations': {'video.generate': {'operation': 'video.generate',
-                                    'capabilities': ['video.i2v'],
+                                    'capabilities': ['video.i2v.first_frame'],
                                     'output_constraints': {'num_frames': {'allowed': [121]},
                                                            'frame_rate': {'allowed': [24]},
                                                            'height': 1280,
@@ -89,7 +89,7 @@ FROZEN_0015 = [{'manifest_version': '2026-08-10',
   'catalog_source': 'official_static',
   'documented_at': '2026-08-10',
   'operations': {'video.generate': {'operation': 'video.generate',
-                                    'capabilities': ['video.i2v'],
+                                    'capabilities': ['video.i2v.first_frame'],
                                     'output_constraints': {},
                                     'reference_constraints': {'first_frame': {'min': 1, 'max': 1}},
                                     'exclusive_groups': []}},

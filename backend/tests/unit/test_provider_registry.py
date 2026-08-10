@@ -271,6 +271,7 @@ async def test_plugin_extension_needs_no_service_branch(
         connection_id=connection.id,
         actor=user,
         capability="image_t2i",
+        model_binding_id=binding.id,
         budget_authorized=Decimal("1"),
     )
     assert evidence.status == "passed"

@@ -101,6 +101,16 @@ def _json_object(response: httpx.Response) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    retry_after = response.headers.get("Retry-After", "").strip()
+    if not retry_after:
+        return None
+    try:
+        return max(float(retry_after), 0.0)
+    except ValueError:
+        return None
+
+
 def _image_result_url(data: dict[str, Any]) -> str | None:
     items = data.get("data")
     if not isinstance(items, list) or not items or not isinstance(items[0], dict):
@@ -662,6 +672,10 @@ class ArkImageCompiler:
         self.validate(intent, model)
         resolved = {ref.role: ref for ref in references}
         ref_image = resolved.get("reference_image")
+        if ref_image is not None and ref_image.content_url is None:
+            # A declared reference must travel as an HTTPS URL for Ark; a missing
+            # transport must fail closed instead of silently degrading to T2I.
+            raise ValueError("Ark reference_image must be an HTTPS URL")
         body, operation, _refs = _build_image_body(
             invoke_model_value,
             prompt=intent.prompt,
@@ -708,7 +722,7 @@ class ArkVideoCompiler:
         if op is None:
             raise ValueError("model does not support video.generate")
         capabilities = set(op.capabilities)
-        if "video.i2v" not in capabilities:
+        if not ("video.i2v" in capabilities or "video.i2v.first_frame" in capabilities):
             raise ValueError("model does not support video.i2v")
         first_refs = [ref for ref in intent.references if ref.role == "first_frame"]
         if not first_refs:
@@ -831,6 +845,7 @@ class ArkRuntime:
                     else "PROVIDER_RESPONSE_INVALID"
                 ),
                 error=f"Ark image request failed ({response.status_code})",
+                retry_after_seconds=_retry_after_seconds(response),
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )
@@ -843,6 +858,7 @@ class ArkRuntime:
         return SubmissionResult(
             remote_task_id=remote_id,
             status="succeeded",
+            artifact_uri=image_url,
             request_fingerprint=_request_fingerprint(request.wire_request),
             request_summary=request.safe_request_summary,
             resume_token=token,
@@ -882,6 +898,7 @@ class ArkRuntime:
                     else "PROVIDER_RESPONSE_INVALID"
                 ),
                 error=f"Ark video request failed ({response.status_code})",
+                retry_after_seconds=_retry_after_seconds(response),
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )

@@ -6,6 +6,7 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import cast
 from uuid import UUID
 
 import httpx
@@ -19,7 +20,7 @@ from app.consistency.face_policy import (
     approved_face_policy_snapshot,
     approved_face_threshold,
 )
-from app.execution.models import Artifact, GraphNode, NodeRun
+from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.models import (
     ProjectProviderBinding,
@@ -309,6 +310,14 @@ class ProviderConnectionService:
     ) -> ProviderCapabilityEvidence:
         if capability not in _CAPABILITIES:
             raise ValidationAppError("unsupported Provider capability")
+        # Only auth_models is a connection-level probe. Every model capability
+        # probe must name a binding: proving one model must never advance a
+        # sibling binding on the same connection (review gate 5).
+        if capability != "auth_models" and model_binding_id is None:
+            raise ValidationAppError(
+                "model capability Probe requires a model_binding_id",
+                details={"code": "PROBE_BINDING_REQUIRED"},
+            )
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
@@ -586,9 +595,9 @@ class ProviderConnectionService:
         """Advance account_verified for the probed binding only.
 
         A binding-scoped probe proves exactly one model; it must never mark a
-        sibling binding on the same connection as verified. Connection-level
-        probes (``model_binding_id=None``) keep the legacy behavior for
-        backward compatibility.
+        sibling binding on the same connection as verified. Model-capability
+        probes require a binding (enforced in ``probe``); a missing binding here
+        therefore never spreads evidence.
         """
         connection = await self._session.scalar(
             select(ProviderConnection).where(ProviderConnection.id == connection_id)
@@ -597,32 +606,15 @@ class ProviderConnectionService:
             return
         plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         purpose = plugin.capability_purposes.get(capability)
-        if purpose is None:
+        if purpose is None or model_binding_id is None:
             return
-        if model_binding_id is not None:
-            binding = await self._session.scalar(
-                select(ProviderModelBinding).where(
-                    ProviderModelBinding.id == model_binding_id,
-                    ProviderModelBinding.connection_id == connection_id,
-                )
+        binding = await self._session.scalar(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.id == model_binding_id,
+                ProviderModelBinding.connection_id == connection_id,
             )
-            if binding is not None and binding.purpose == purpose:
-                binding.account_verified = True
-                binding.updated_by = actor.id
-            return
-        bindings = list(
-            (
-                await self._session.execute(
-                    select(ProviderModelBinding).where(
-                        ProviderModelBinding.connection_id == connection_id,
-                        ProviderModelBinding.purpose == purpose,
-                    )
-                )
-            )
-            .scalars()
-            .all()
         )
-        for binding in bindings:
+        if binding is not None and binding.purpose == purpose:
             binding.account_verified = True
             binding.updated_by = actor.id
 
@@ -667,7 +659,7 @@ class ProviderConnectionService:
             select(ProviderModelBinding.id).where(
                 ProviderModelBinding.connection_id == connection.id,
                 ProviderModelBinding.media_type == media_type,
-                ProviderModelBinding.model_id == model_id,
+                ProviderModelBinding.catalog_entry_id == entry.id,
                 ProviderModelBinding.purpose == purpose,
             )
         )
@@ -729,6 +721,77 @@ class ProviderConnectionService:
             .all()
         )
 
+    async def _quality_producer_operation(
+        self,
+        *,
+        review_run: NodeRun,
+    ) -> ProviderOperation | None:
+        """Find the ProviderOperation that produced the media this review gate
+        consumed (keyframe for face_review, video for video_drift_review), so the
+        quality evidence can be tied to the exact model binding (review gate 6)."""
+        node = await self._session.get(GraphNode, review_run.graph_node_id)
+        if node is None:
+            return None
+        upstream_key = {
+            "face_review": "keyframe",
+            "video_drift_review": "video",
+        }.get(node.node_key)
+        if upstream_key is None:
+            return None
+        upstream_node = await self._session.scalar(
+            select(GraphNode)
+            .join(GraphEdge, GraphEdge.upstream_node_id == GraphNode.id)
+            .where(
+                GraphEdge.graph_version_id == review_run.graph_version_id,
+                GraphEdge.downstream_node_id == node.id,
+                GraphEdge.required.is_(True),
+                GraphNode.node_key == upstream_key,
+            )
+        )
+        if upstream_node is None:
+            return None
+        shot_id = str((review_run.input_snapshot or {}).get("shot_id") or "")
+        candidates = list(
+            (
+                await self._session.execute(
+                    select(NodeRun).where(
+                        NodeRun.project_id == review_run.project_id,
+                        NodeRun.graph_version_id == review_run.graph_version_id,
+                        NodeRun.graph_node_id == upstream_node.id,
+                        NodeRun.attempt_no == review_run.attempt_no,
+                        NodeRun.status.in_({"completed", "cached"}),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        source = next(
+            (
+                candidate
+                for candidate in sorted(
+                    candidates,
+                    key=lambda item: (item.created_at, str(item.id)),
+                    reverse=True,
+                )
+                if str((candidate.input_snapshot or {}).get("shot_id") or "") == shot_id
+            ),
+            None,
+        )
+        if source is None:
+            return None
+        return cast(
+            ProviderOperation | None,
+            await self._session.scalar(
+                select(ProviderOperation)
+                .where(ProviderOperation.node_run_id == source.id)
+                .order_by(
+                    ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc()
+                )
+                .limit(1)
+            ),
+        )
+
     async def record_quality_evidence(
         self,
         *,
@@ -774,6 +837,26 @@ class ProviderConnectionService:
             or artifact.deleted_at is not None
         ):
             raise NotFoundError("quality evidence not found")
+        # Review gate 6: the media this gate consumed must have been produced by
+        # this exact model binding. A different model's合格 artifact must not be
+        # able to push this binding to quality_gated.
+        producer_op = await self._quality_producer_operation(review_run=run)
+        if producer_op is None:
+            raise ValidationAppError(
+                "quality Artifact producer has no ProviderOperation",
+                details={"code": "MODEL_BINDING_NOT_VERIFIED"},
+            )
+        if producer_op.model_binding_id is not None:
+            if producer_op.model_binding_id != binding.id:
+                raise ValidationAppError(
+                    "quality Artifact was produced by a different model binding",
+                    details={"code": "MODEL_BINDING_NOT_VERIFIED"},
+                )
+        elif producer_op.actual_model != binding.model_id:
+            raise ValidationAppError(
+                "quality Artifact producer model does not match binding",
+                details={"code": "MODEL_BINDING_NOT_VERIFIED"},
+            )
         summary = run.output_summary or {}
         score: Decimal | None = None
         if binding.purpose == "keyframe":
