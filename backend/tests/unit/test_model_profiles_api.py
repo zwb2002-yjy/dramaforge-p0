@@ -163,7 +163,7 @@ def test_workspace_profile_validation_rejects_capability_mismatch(
 
 
 def test_effective_bindings_and_generation_slot_resolution(
-    api: tuple[TestClient, Any],
+    api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, _ = api
     workspace_id = _register(client)
@@ -184,7 +184,16 @@ def test_effective_bindings_and_generation_slot_resolution(
     assert keyframe["model_id"] == "agnes/agnes-image-2.1-flash"
     assert keyframe["source"] == "workspace_profile"
 
-    # standalone image.generate without model_id resolves the visual.keyframe slot
+    # Standalone image.generate without model_id resolves the visual.keyframe
+    # slot. Patch the Arq enqueue (no Redis in CI unit job) like the generation
+    # API tests do.
+    async def fake_enqueue(self: object, node_run_id: Any) -> str:
+        return f"fake-{node_run_id}"
+
+    monkeypatch.setattr(
+        "app.providers.generation_service.AgentRunScheduler.enqueue_node_run_only",
+        fake_enqueue,
+    )
     gen = client.post(
         f"/api/v1/projects/{project_id}/generations",
         json={"capability": "image.generate", "input": {"prompt": "雨夜"}},
