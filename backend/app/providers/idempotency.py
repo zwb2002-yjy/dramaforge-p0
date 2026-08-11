@@ -65,16 +65,42 @@ def semantic_request_fingerprint(
 
 
 def _artifact_identity(value: Any) -> Any:
-    """Reduce an artifact reference to its stable identity only."""
+    """Reduce an artifact reference to its stable identity only (spec §48).
+
+    The identity is ``artifact_id`` + ``revision`` — never a signed URL, file
+    token, or local path. A revision change must change the fingerprint, so the
+    artifact_id is always returned together with the (possibly null) revision.
+    """
     if isinstance(value, dict):
         return {key: _artifact_identity(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_artifact_identity(item) for item in value]
-    # pydantic ArtifactRef-like objects expose artifact_id / revision.
-    for attr in ("artifact_id", "revision"):
-        if hasattr(value, attr):
-            return getattr(value, attr)
+    artifact_id = getattr(value, "artifact_id", None)
+    if artifact_id is not None:
+        revision = getattr(value, "revision", None)
+        return {
+            "artifact_id": str(artifact_id),
+            "revision": str(revision) if revision is not None else None,
+        }
     return value
+
+
+# Top-level fields that carry artifact references (reduced to identity in
+# ``inputs``) and the primary content field (kept as ``prompt``). Every other
+# top-level scalar field on the request contract lands in ``common_options`` —
+# so the fingerprint is driven by the Request Contract shape, never by a second
+# hardcoded option whitelist that can drift when a contract gains a field.
+_REFERENCE_FIELDS = frozenset(
+    {
+        "image",
+        "first_frame",
+        "last_frame",
+        "reference_images",
+        "reference_audio",
+        "reference_videos",
+    }
+)
+_CONTENT_FIELDS = frozenset({"prompt", "text"})
 
 
 def v3_request_fingerprint(
@@ -85,44 +111,30 @@ def v3_request_fingerprint(
 ) -> str:
     """Build the semantic fingerprint of a V3 capability request.
 
-    Inputs are reduced to artifact identity (prompt + artifact refs); common
-    options are the top-level option fields; native options pass through. The
-    result is deterministic across providers and free of secrets/URLs.
+    The serializer is contract-driven: it walks ``request.model_dump()`` and
+    classifies each field. Artifact references are reduced to ``artifact_id +
+    revision`` identity, the primary content field becomes ``inputs.prompt``,
+    and every other set top-level field becomes a common option. Adding a field
+    to a request contract automatically includes it in the fingerprint — there
+    is no separate option whitelist to keep in sync.
     """
-    inputs: dict[str, Any] = {"prompt": getattr(request, "prompt", "")}
-    option_fields = {
-        "duration_seconds",
-        "resolution",
-        "aspect_ratio",
-        "seed",
-        "size",
-        "max_tokens",
-        "system",
-        "voice",
-        "language",
-    }
-    common_options = {
-        key: value
-        for key, value in request.model_dump().items()
-        if key in option_fields and value is not None
-    }
-    native_options = dict(getattr(request, "native_options", {}) or {})
-    # Reference-bearing fields are included by artifact identity only.
-    for field in (
-        "image",
-        "first_frame",
-        "last_frame",
-        "reference_images",
-        "reference_audio",
-        "reference_videos",
-    ):
-        value = getattr(request, field, None)
-        if value is not None:
-            inputs[field] = _artifact_identity(value)
+    data = request.model_dump(mode="json")
+    inputs: dict[str, Any] = {}
+    common_options: dict[str, Any] = {}
+    for key, value in data.items():
+        if key == "native_options":
+            continue
+        if key in _REFERENCE_FIELDS:
+            if value is not None:
+                inputs[key] = _artifact_identity(value)
+        elif key in _CONTENT_FIELDS:
+            inputs["prompt"] = value
+        elif value is not None:
+            common_options[key] = value
     return semantic_request_fingerprint(
         capability=capability,
         requested_model=model_id,
         inputs=inputs,
         common_options=common_options,
-        native_options=native_options,
+        native_options=dict(getattr(request, "native_options", {}) or {}),
     )

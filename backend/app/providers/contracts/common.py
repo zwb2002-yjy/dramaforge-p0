@@ -39,7 +39,8 @@ class ArtifactRef(BaseModel):
 
 class ResolvedArtifact(BaseModel):
     """Internal resolution of an :class:`ArtifactRef` into concrete delivery
-    material. Not exposed to the public generation API (spec §13)."""
+    material. Not exposed to the public generation API (spec §13). At most one
+    of ``content_bytes`` / ``signed_url`` is set for a given transport."""
 
     artifact_id: str
     mime_type: str
@@ -48,6 +49,7 @@ class ResolvedArtifact(BaseModel):
     local_path: str | None = None
     signed_url: str | None = None
     provider_file_id: str | None = None
+    content_bytes: bytes | None = None
 
 
 class ExecutionContext(BaseModel):

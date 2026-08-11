@@ -37,6 +37,7 @@ from app.providers.contracts.video import (
     ImageToVideoRequest,
     ReferenceToVideoRequest,
 )
+from app.providers.errors import ProviderStateMappingError, ResumeTokenUnavailableError
 from app.providers.intent_bridge import request_to_intent
 from app.providers.manifest import ModelCapabilityManifest, ModelManifest
 from app.providers.runtime import (
@@ -49,19 +50,33 @@ from app.providers.translation import EffectiveRequest, TranslationReport, Trans
 
 _SUBMISSION_STATUS_TO_V3 = {
     "succeeded": GenerationStatus.SUCCEEDED,
+    "completed": GenerationStatus.SUCCEEDED,
+    "success": GenerationStatus.SUCCEEDED,
+    "done": GenerationStatus.SUCCEEDED,
     "queued": GenerationStatus.SUBMITTED,
     "pending": GenerationStatus.SUBMITTED,
+    "processing": GenerationStatus.SUBMITTED,
+    "submitted": GenerationStatus.SUBMITTED,
     "running": GenerationStatus.RUNNING,
+    "progress": GenerationStatus.RUNNING,
     "failed": GenerationStatus.FAILED,
     "error": GenerationStatus.FAILED,
-    "cancelled": GenerationStatus.CANCELLED,
-    "unknown_submission": GenerationStatus.SUBMIT_UNKNOWN,
     "rejected": GenerationStatus.FAILED,
+    "expired": GenerationStatus.FAILED,
+    "cancelled": GenerationStatus.CANCELLED,
+    "canceled": GenerationStatus.CANCELLED,
+    "unknown_submission": GenerationStatus.SUBMIT_UNKNOWN,
 }
 
 
 def submission_status_to_v3(status: str) -> GenerationStatus:
-    return _SUBMISSION_STATUS_TO_V3.get(status, GenerationStatus.SUBMITTED)
+    """Explicit status mapping (HIGH-1 / spec invariant 5). An unmapped provider
+    status is an explicit error, never a silent default to SUBMITTED — a missing
+    mapping could otherwise hide a terminal provider state behind a poll loop."""
+    try:
+        return _SUBMISSION_STATUS_TO_V3[status]
+    except KeyError as exc:
+        raise ProviderStateMappingError(status) from exc
 
 
 ArtifactResolver = Callable[[list[tuple[str, ResolvedArtifact]]], list[ResolvedReference]]
@@ -75,13 +90,14 @@ def _uuid(value: str) -> UUID:
 
 
 def _resolved_reference(role: str, artifact: ResolvedArtifact) -> ResolvedReference:
-    """Map a V3 ResolvedArtifact to the A+B ResolvedReference. URL when a signed
-    URL is available; bytes are supplied by the DB-bound create path."""
+    """Map a V3 ResolvedArtifact to the A+B ResolvedReference. URL and/or bytes
+    are passed through from the resolver (BLOCK-4): the compiler decides the
+    transport (Ark uses the URL, Agnes uses the bytes)."""
     return ResolvedReference(
         role=role,
         artifact_id=_uuid(artifact.artifact_id),
         content_url=artifact.signed_url,
-        content_bytes=None,
+        content_bytes=artifact.content_bytes,
         mime_type=artifact.mime_type,
         fingerprint=artifact.sha256,
     )
@@ -134,8 +150,17 @@ class LegacyAdapterBridge:
     """V3 ModelAdapter facade over one A+B model's compiler+runtime.
 
     ``invoke_model_value`` is the wire ``model`` field (from the catalog
-    binding). ``resolver`` (optional) resolves ArtifactRefs for the create path;
-    without it, ``create`` refuses rather than guessing reference transport.
+    binding). ``resolver`` (optional) resolves ArtifactRefs for the create path
+    and its :class:`ResolvedReference` output (URL/bytes/fingerprint) is what
+    the compiler receives; without it, a reference-bearing create refuses rather
+    than guessing reference transport.
+
+    Durable lifecycle: ``create`` returns the provider resume token in
+    ``provider_metadata`` for the Operation Service to persist on
+    ``ProviderOperation.resume_token``. ``poll``/``cancel``/``fetch_cost`` read
+    the token from ``token_provider`` (or raise
+    :class:`ResumeTokenUnavailableError`) — they never depend on process-local
+    memory, so a restart or another worker can resume the same remote task.
     """
 
     def __init__(
@@ -145,12 +170,13 @@ class LegacyAdapterBridge:
         *,
         invoke_model_value: str | None = None,
         resolver: ArtifactResolver | None = None,
+        token_provider: Callable[[str], ProviderResumeToken | None] | None = None,
     ) -> None:
         self._v3 = v3_manifest
         self._components = components
         self._invoke_model_value = invoke_model_value or v3_manifest.model_name
         self._resolver = resolver
-        self._tokens: dict[str, ProviderResumeToken] = {}
+        self._token_provider = token_provider
         self.provider_id = v3_manifest.provider_id
         self.model_id = v3_manifest.id
 
@@ -247,9 +273,21 @@ class LegacyAdapterBridge:
             role: artifact for role, artifact in _request_reference_roles(request)
         }
         if resolved and self._resolver is not None:
+            # BLOCK-4: the resolver's ResolvedReference is the source of the
+            # delivery material. Rebuild ResolvedArtifact from it so the URL /
+            # bytes / fingerprint actually reach the compiler — never fall back
+            # to the identity-only placeholder.
             resolved_refs = self._resolver(list(resolved.items()))
             resolved = {
-                ref.role: resolved[ref.role] for ref in resolved_refs if ref.role in resolved
+                ref.role: ResolvedArtifact(
+                    artifact_id=str(ref.artifact_id),
+                    mime_type=ref.mime_type,
+                    sha256=ref.fingerprint,
+                    signed_url=ref.content_url,
+                    content_bytes=ref.content_bytes,
+                )
+                for ref in resolved_refs
+                if ref.role in resolved
             }
         compiled, _translation = await self._compile(capability, request, resolved)
         runtime = self._components.runtime
@@ -257,27 +295,28 @@ class LegacyAdapterBridge:
             result = await runtime.submit_image(compiled)
         else:
             result = await runtime.submit_video(compiled)
-        if result.resume_token is not None and result.remote_task_id:
-            self._tokens[result.remote_task_id] = result.resume_token
+        metadata: dict[str, Any] = {
+            "request_fingerprint": result.request_fingerprint,
+            "request_summary": result.request_summary,
+            "error_code": result.error_code,
+        }
+        if result.resume_token is not None:
+            # The Operation Service persists this on ProviderOperation.resume_token
+            # so a later poll on any process can resume (HIGH-2).
+            metadata["resume_token"] = result.resume_token.model_dump(mode="json")
         return ProviderCreateResult(
             status=submission_status_to_v3(result.status),
             remote_task_id=result.remote_task_id,
             artifact_uri=result.artifact_uri,
-            provider_metadata={
-                "request_fingerprint": result.request_fingerprint,
-                "request_summary": result.request_summary,
-                "error_code": result.error_code,
-            },
+            provider_metadata=metadata,
         )
 
     def _require_token(self, remote_task_id: str) -> ProviderResumeToken:
-        token = self._tokens.get(remote_task_id)
-        if token is None:
-            raise RuntimeError(
-                "no resume token for remote task; durable resume requires the "
-                "persisted ProviderOperation resume_token"
-            )
-        return token
+        if self._token_provider is not None:
+            token = self._token_provider(remote_task_id)
+            if token is not None:
+                return token
+        raise ResumeTokenUnavailableError(remote_task_id)
 
     async def poll(
         self,

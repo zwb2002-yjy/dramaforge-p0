@@ -203,6 +203,96 @@ class TestValidator:
         )
 
 
+def _typed_native_manifest() -> ModelManifest:
+    """A manifest whose native options carry full ParameterSpec schemas so the
+    validator must actually enforce type / bounds / enum (BLOCK-3)."""
+    return ModelManifest(
+        manifest_version="1",
+        id="test/typed",
+        provider_id="test",
+        model_name="typed",
+        display_name="Typed",
+        capability_specs={
+            Capability.IMAGE_GENERATE: CapabilitySpec(
+                capability=Capability.IMAGE_GENERATE,
+                input_slots={},
+                common_options={},
+                native_options={
+                    "motion_strength": ParameterSpec(type="number", minimum=0, maximum=1),
+                    "style": ParameterSpec(type="string", enum=["anime", "realistic"]),
+                    "tags": ParameterSpec(type="array", min_items=1, max_items=3),
+                },
+                constraints=ConstraintSpec(),
+                transport_profile_id="t1",
+            ),
+        },
+        execution_mode="sync",
+        submission_semantics=SubmissionSemantics(),
+    )
+
+
+class TestValidatorParameterSchema:
+    """BLOCK-3: the manifest ParameterSpec is a runtime contract, not UI
+    metadata — native options must be validated on type/range/enum/items."""
+
+    def _spec(self) -> CapabilitySpec:
+        return _typed_native_manifest().capability_specs[Capability.IMAGE_GENERATE]
+
+    def test_native_option_wrong_type_rejected(self) -> None:
+        validator = CapabilityValidator()
+        with pytest.raises(UnsupportedOptionError):
+            validator.validate(
+                ImageGenerateRequest(prompt="p", native_options={"motion_strength": "hello"}),
+                self._spec(),
+            )
+
+    def test_native_option_out_of_range_rejected(self) -> None:
+        validator = CapabilityValidator()
+        with pytest.raises(UnsupportedOptionError):
+            validator.validate(
+                ImageGenerateRequest(prompt="p", native_options={"motion_strength": 999}),
+                self._spec(),
+            )
+
+    def test_native_option_enum_violation_rejected(self) -> None:
+        validator = CapabilityValidator()
+        with pytest.raises(UnsupportedOptionError):
+            validator.validate(
+                ImageGenerateRequest(prompt="p", native_options={"style": "pixel"}),
+                self._spec(),
+            )
+
+    def test_native_option_array_bounds_rejected(self) -> None:
+        validator = CapabilityValidator()
+        with pytest.raises(UnsupportedOptionError):
+            validator.validate(
+                ImageGenerateRequest(
+                    prompt="p",
+                    native_options={"tags": ["a", "b", "c", "d"]},
+                ),
+                self._spec(),
+            )
+        with pytest.raises(UnsupportedOptionError):
+            validator.validate(
+                ImageGenerateRequest(prompt="p", native_options={"tags": []}),
+                self._spec(),
+            )
+
+    def test_valid_native_values_accepted(self) -> None:
+        validator = CapabilityValidator()
+        validator.validate(
+            ImageGenerateRequest(
+                prompt="p",
+                native_options={
+                    "motion_strength": 0.5,
+                    "style": "anime",
+                    "tags": ["hero"],
+                },
+            ),
+            self._spec(),
+        )
+
+
 class TestRouter:
     def _router(self) -> tuple[CapabilityRouter, _RecorderAdapter]:
         registry = ModelRegistry()

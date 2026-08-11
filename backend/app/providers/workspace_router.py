@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.providers.adapters_v2 import BridgeComponents, LegacyAdapterBridge
+from app.providers.bootstrap import transport_profile_id_for
 from app.providers.catalog_seed_data import seed_manifests_for
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.providers.models import ProviderConnection
@@ -25,8 +26,23 @@ from app.providers.runtime import ProviderRuntimeResolver
 from app.providers.workspace_credentials import runtime_connection_settings
 from app.shared.errors import NotFoundError, ValidationAppError
 
-# (provider_type, media_kind) -> seed manifest index within the provider.
-_MEDIA_INDEX = {"image": 0, "video": 1}
+
+def select_seed_manifest(
+    manifests: list[dict[str, object]], media_kind: str
+) -> ModelCapabilityManifest:
+    """Pick the manifest for one media kind (HIGH-4).
+
+    Never rely on the seed list's array position — a provider may ship several
+    image/video models. Deterministic first match by ``media_kind``; fail closed
+    when the provider has no manifest for the requested media kind.
+    """
+    for item in manifests:
+        if item.get("media_kind") == media_kind:
+            return ModelCapabilityManifest.model_validate(item)
+    raise ValidationAppError(
+        f"no {media_kind} catalog manifest for provider",
+        details={"code": "PROVIDER_RUNTIME_UNAVAILABLE", "media_kind": media_kind},
+    )
 
 
 async def resolve_workspace_bridge(
@@ -70,9 +86,18 @@ async def resolve_workspace_bridge(
             f"no catalog manifest for provider {provider_type}",
             details={"code": "PROVIDER_RUNTIME_UNAVAILABLE"},
         )
-    index = _MEDIA_INDEX.get(media_kind, 0)
-    a_b = ModelCapabilityManifest.model_validate(manifests[index])
-    transport_profile_id = f"{provider_type}-{media_kind}-v1"
+    a_b = select_seed_manifest(manifests, media_kind=media_kind)
+    # HIGH-3: the transport identity must be the registered profile id, resolved
+    # from the connection's provider/profile/media — never a string guess.
+    transport_profile_id = transport_profile_id_for(
+        connection.provider_type, connection.protocol_profile, media_kind
+    )
+    if transport_profile_id is None:
+        raise ValidationAppError(
+            f"no registered transport for {connection.provider_type}/"
+            f"{connection.protocol_profile}/{media_kind}",
+            details={"code": "PROVIDER_RUNTIME_UNAVAILABLE"},
+        )
     v3 = to_v3_model_manifest(a_b, transport_profile_id=transport_profile_id)
     image_compiler = resolved.image_compiler if media_kind == "image" else None
     video_compiler = resolved.video_compiler if media_kind == "video" else None

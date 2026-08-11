@@ -214,3 +214,38 @@ class TestGenerationCreate:
         )
         assert second.status_code == 201, second.text
         assert first.json()["operation_id"] == second.json()["operation_id"]
+
+    def test_same_key_different_request_conflicts(
+        self, api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """BLOCK-1: same Idempotency-Key + different input is a 409
+        IDEMPOTENCY_KEY_REUSED, never a silent reuse of the first operation."""
+        client, _ = api
+        workspace_id = _register(client)
+        project_id = _create_project(client, workspace_id)
+        key = f"idem-{uuid4().hex}"
+
+        async def fake_enqueue(self: object, node_run_id: Any) -> str:
+            return f"fake-{node_run_id}"
+
+        monkeypatch.setattr(
+            "app.providers.generation_service.AgentRunScheduler.enqueue_node_run_only",
+            fake_enqueue,
+        )
+        headers = {CSRF_HEADER: _csrf(client), "Idempotency-Key": key}
+        first = client.post(
+            f"/api/v1/projects/{project_id}/generations",
+            json={"capability": "image.generate", "input": {"prompt": "女孩走路"}},
+            headers=headers,
+        )
+        assert first.status_code == 201, first.text
+        second = client.post(
+            f"/api/v1/projects/{project_id}/generations",
+            json={"capability": "image.generate", "input": {"prompt": "汽车行驶"}},
+            headers=headers,
+        )
+        assert second.status_code == 409, second.text
+        assert second.json()["details"]["code"] == "IDEMPOTENCY_KEY_REUSED"
+        # the second request must not have created a second operation
+        assert first.json()["operation_id"] != second.json()["operation_id"]
+        assert second.json()["detail"] is not None

@@ -25,6 +25,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
@@ -98,15 +99,25 @@ class GenerationService:
 
         fingerprint = v3_request_fingerprint(capability, request, model_id=model.manifest.id)
 
+        # Capture identity BEFORE the submission transaction: an IntegrityError
+        # rollback expires the caller's ORM objects, so the recovery path must
+        # never touch ``project``/``actor`` again (BLOCK-1 race handling).
+        project_id = project.id
+        user_id = actor.id
+
         # Intent idempotency: deterministic NodeRun key per (idempotency_key).
         if idempotency_key:
-            existing = await self._session.scalar(
-                select(NodeRun).where(
-                    NodeRun.project_id == project.id,
-                    NodeRun.idempotency_key == idempotency_key,
-                )
+            existing = await self._existing_by_key(
+                project_id=project_id, idempotency_key=idempotency_key
             )
             if existing is not None:
+                # BLOCK-1: same key + different request is a semantic conflict,
+                # not a silent reuse of the first operation.
+                if existing.input_hash != fingerprint:
+                    raise ConflictError(
+                        "idempotency key was reused with a different request",
+                        details={"code": "IDEMPOTENCY_KEY_REUSED"},
+                    )
                 return existing
 
         shot_id = uuid4()
@@ -129,17 +140,69 @@ class GenerationService:
             },
         }
 
-        run = await _create_generation_run(
-            self._session,
-            project=project,
-            user_id=actor.id,
-            node_type=node_type,
-            node_key=node_type,
-            snapshot=snapshot,
-            idempotency_key=idempotency_key or fingerprint,
-            input_hash=fingerprint,
+        try:
+            run = await _create_generation_run(
+                self._session,
+                project=project,
+                user_id=user_id,
+                node_type=node_type,
+                node_key=node_type,
+                snapshot=snapshot,
+                idempotency_key=idempotency_key or fingerprint,
+                input_hash=fingerprint,
+            )
+            return run
+        except IntegrityError as exc:
+            # BLOCK-1: a concurrent same-key request won the race. Roll back and
+            # return the winner instead of surfacing a 500. If the winner's
+            # input differs from ours, that is still a key-reuse conflict.
+            await self._session.rollback()
+            if idempotency_key is None:
+                raise exc from None
+            winner = await self._load_winner(
+                project_id=project_id, idempotency_key=idempotency_key
+            )
+            if winner is not None and winner.input_hash != fingerprint:
+                raise ConflictError(
+                    "idempotency key was reused with a different request",
+                    details={"code": "IDEMPOTENCY_KEY_REUSED"},
+                ) from exc
+            if winner is not None:
+                return winner
+            raise exc from None
+
+    async def _existing_by_key(
+        self, *, project_id: UUID, idempotency_key: str
+    ) -> NodeRun | None:
+        from typing import cast
+
+        return cast(
+            "NodeRun | None",
+            await self._session.scalar(
+                select(NodeRun).where(
+                    NodeRun.project_id == project_id,
+                    NodeRun.idempotency_key == idempotency_key,
+                )
+            ),
         )
-        return run
+
+    async def _load_winner(
+        self, *, project_id: UUID, idempotency_key: str
+    ) -> NodeRun | None:
+        """Direct re-select used by the IntegrityError recovery. Kept separate
+        from the patchable pre-check so the race recovery always reads the real
+        winner row."""
+        from typing import cast
+
+        return cast(
+            "NodeRun | None",
+            await self._session.scalar(
+                select(NodeRun).where(
+                    NodeRun.project_id == project_id,
+                    NodeRun.idempotency_key == idempotency_key,
+                )
+            ),
+        )
 
     async def enqueue(self, run: NodeRun) -> str:
         scheduler = AgentRunScheduler(self._session)

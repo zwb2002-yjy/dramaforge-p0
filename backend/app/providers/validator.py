@@ -22,7 +22,7 @@ from app.providers.errors import (
     InvalidOptionCombinationError,
     UnsupportedOptionError,
 )
-from app.providers.manifest import CapabilitySpec, InputSlotSpec
+from app.providers.manifest import CapabilitySpec, InputSlotSpec, ParameterSpec
 
 # Top-level request fields that count as "common options" for strict checking.
 # Artifact refs and prompt/inputs are validated separately (slots/contract).
@@ -104,14 +104,68 @@ def _validate_options(request: Any, spec: CapabilitySpec) -> None:
         declared = spec.common_options.get(option)
         if declared is None:
             raise UnsupportedOptionError(option)
-        if declared.enum and value not in declared.enum:
-            raise UnsupportedOptionError(
-                option,
-                message=f"{option}={value!r} is not one of {declared.enum}",
-            )
-    for option in dict(getattr(request, "native_options", {}) or {}):
-        if option not in spec.native_options:
+        validate_parameter(option, value, declared)
+    for option, value in dict(getattr(request, "native_options", {}) or {}).items():
+        declared = spec.native_options.get(option)
+        if declared is None:
             raise UnsupportedOptionError(option)
+        validate_parameter(option, value, declared)
+
+
+def validate_parameter(name: str, value: Any, spec: ParameterSpec) -> None:
+    """Validate one option value against its :class:`ParameterSpec`.
+
+    The manifest schema is a runtime contract, not just UI metadata (spec §16):
+    type, enum, numeric bounds and array bounds are all enforced here so an
+    unsupported native value never reaches the Provider as a 400. This is the
+    single validator used by both common and native options.
+    """
+    if value is None:
+        if spec.required:
+            raise InvalidOptionCombinationError(
+                f"option {name} is required",
+                details={"option": name},
+            )
+        return
+    if spec.type == "string" and not isinstance(value, str):
+        raise UnsupportedOptionError(name, message=f"{name} must be a string")
+    if spec.type == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+        raise UnsupportedOptionError(name, message=f"{name} must be an integer")
+    if spec.type == "number" and (not isinstance(value, int | float) or isinstance(value, bool)):
+        raise UnsupportedOptionError(name, message=f"{name} must be a number")
+    if spec.type == "boolean" and not isinstance(value, bool):
+        raise UnsupportedOptionError(name, message=f"{name} must be a boolean")
+    if spec.type == "array" and not isinstance(value, list):
+        raise UnsupportedOptionError(name, message=f"{name} must be an array")
+    if spec.type == "object" and not isinstance(value, dict):
+        raise UnsupportedOptionError(name, message=f"{name} must be an object")
+    if spec.enum is not None and value not in spec.enum:
+        raise UnsupportedOptionError(
+            name,
+            message=f"{name}={value!r} is not one of {spec.enum}",
+        )
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        if spec.minimum is not None and value < spec.minimum:
+            raise UnsupportedOptionError(
+                name,
+                message=f"{name}={value} is below minimum {spec.minimum}",
+            )
+        if spec.maximum is not None and value > spec.maximum:
+            raise UnsupportedOptionError(
+                name,
+                message=f"{name}={value} is above maximum {spec.maximum}",
+            )
+    if isinstance(value, list):
+        if spec.min_items is not None and len(value) < spec.min_items:
+            raise UnsupportedOptionError(
+                name,
+                message=f"{name} has fewer than {spec.min_items} items",
+            )
+        if spec.max_items is not None and len(value) > spec.max_items:
+            raise UnsupportedOptionError(
+                name,
+                message=f"{name} has more than {spec.max_items} items",
+            )
 
 
 def _validate_constraints(request: Any, spec: CapabilitySpec) -> None:

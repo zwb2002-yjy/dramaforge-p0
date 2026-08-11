@@ -92,6 +92,18 @@ _TRANSPORT_BY_KEY: dict[tuple[str, str, str], str] = {
 }
 
 
+def transport_profile_id_for(
+    provider_type: str, protocol_profile: str, media_kind: str
+) -> str | None:
+    """Resolve the registered transport profile id for a provider/profile/media.
+
+    Single source of truth (HIGH-3): never guess ``f"{provider_type}-{media}-v1"``
+    — e.g. volcengine uses ``ark-image-v1``, not ``volcengine-image-v1``. Returns
+    ``None`` when no transport is registered for the combination.
+    """
+    return _TRANSPORT_BY_KEY.get((provider_type, protocol_profile, media_kind))
+
+
 class UnavailableAdapter:
     """LEGACY_COMPAT: Phase 2 placeholder. Real ModelAdapter V2 bridges are
     registered by Phase 3 (:mod:`app.providers.adapters_v2`). This stub keeps

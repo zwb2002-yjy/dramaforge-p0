@@ -82,7 +82,8 @@ class TestV3RequestFingerprint:
 
     def test_reference_identity_not_url(self) -> None:
         """Changing the delivery URL must NOT change the semantic fingerprint —
-        artifact identity is the artifact id, never a signed URL (spec §48)."""
+        artifact identity is the artifact id + revision, never a signed URL
+        (spec §48)."""
         request = ImageToVideoRequest(
             prompt="p",
             image=ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001"),
@@ -90,15 +91,67 @@ class TestV3RequestFingerprint:
         fp = v3_request_fingerprint(
             Capability.VIDEO_IMAGE_TO_VIDEO, request, model_id="provider/model"
         )
-        # Signed URL would appear in the canonical JSON if it leaked into the
-        # fingerprint; artifact refs only carry artifact_id + revision.
+        # The reference is reduced to {artifact_id, revision} — no URL, no
+        # provider file token. The expected payload is the contract-driven
+        # serializer's exact output.
         assert fp == semantic_request_fingerprint(
             capability=Capability.VIDEO_IMAGE_TO_VIDEO,
             requested_model="provider/model",
-            inputs={"prompt": "p", "image": "00000000-0000-0000-0000-000000000001"},
+            inputs={
+                "prompt": "p",
+                "image": {
+                    "artifact_id": "00000000-0000-0000-0000-000000000001",
+                    "revision": None,
+                },
+            },
             common_options={},
             native_options={},
         )
+
+    def test_revision_distinguishes_fingerprints(self) -> None:
+        """BLOCK-2: artifact revision is part of the semantic identity. Two
+        requests referencing the same artifact id with different revisions must
+        produce different fingerprints."""
+        fp_v1 = v3_request_fingerprint(
+            Capability.VIDEO_IMAGE_TO_VIDEO,
+            ImageToVideoRequest(
+                prompt="p",
+                image=ArtifactRef(
+                    artifact_id="00000000-0000-0000-0000-000000000001", revision="v1"
+                ),
+            ),
+            model_id="m",
+        )
+        fp_v2 = v3_request_fingerprint(
+            Capability.VIDEO_IMAGE_TO_VIDEO,
+            ImageToVideoRequest(
+                prompt="p",
+                image=ArtifactRef(
+                    artifact_id="00000000-0000-0000-0000-000000000001", revision="v2"
+                ),
+            ),
+            model_id="m",
+        )
+        assert fp_v1 != fp_v2
+
+    def test_fingerprint_is_contract_driven_not_whitelist(self) -> None:
+        """BLOCK-2: the fingerprint must track the request contract, not a
+        hardcoded option whitelist. A field added to a contract (here a test-only
+        subclass) must change the fingerprint automatically."""
+        from app.providers.contracts import ImageToVideoRequest as BaseRequest
+
+        class _ExtendedRequest(BaseRequest):
+            fps: int | None = None  # a field a future provider contract might add
+
+        base = dict(
+            prompt="p",
+            image=ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001"),
+        )
+        without = _ExtendedRequest(**base)
+        with_fps = _ExtendedRequest(**base, fps=30)
+        assert v3_request_fingerprint(
+            Capability.VIDEO_IMAGE_TO_VIDEO, without, model_id="m"
+        ) != v3_request_fingerprint(Capability.VIDEO_IMAGE_TO_VIDEO, with_fps, model_id="m")
 
     def test_option_difference_changes_fingerprint(self) -> None:
         request = ImageToVideoRequest(

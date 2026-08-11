@@ -123,6 +123,40 @@ class ResumeNotSupportedError(ProviderError):
         )
 
 
+class ProviderStateMappingError(ProviderError):
+    """A provider returned a status the adapter has no explicit mapping for.
+
+    Unknown behavior must be explicit (spec invariant 5): never default an
+    unmapped provider status to SUBMITTED, or a contract drift could hide a
+    terminal state behind a poll loop. The adapter owner must add the mapping
+    (or normalize at the runtime boundary) instead.
+    """
+
+    def __init__(self, provider_status: str) -> None:
+        super().__init__(
+            ProviderErrorCode.UNKNOWN,
+            f"unknown provider status: {provider_status}",
+            status_code=502,
+            details={"provider_status": provider_status},
+        )
+
+
+class ResumeTokenUnavailableError(ProviderError):
+    """The adapter has no way to obtain the durable resume token for a remote
+    task. Durable poll/cancel/cost must be driven by the persisted
+    ``ProviderOperation.resume_token`` (Option A) or a wired token provider —
+    never by process-local memory."""
+
+    def __init__(self, remote_task_id: str) -> None:
+        super().__init__(
+            ProviderErrorCode.RESUME_NOT_SUPPORTED,
+            "durable resume requires a wired token provider or the persisted "
+            "ProviderOperation resume_token",
+            status_code=503,
+            details={"remote_task_id": remote_task_id},
+        )
+
+
 class TransportFailureKind(StrEnum):
     """Classification of a failed transport attempt (spec §50.3). Decides whether
     a create may be retried and under what submission semantics."""
