@@ -1,5 +1,7 @@
 import { Link, Outlet, createRoute, useRouterState } from "@tanstack/react-router";
 
+import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
+import { getSelectedWorkspaceId } from "../lib/api";
 import { rootRoute } from "./__root";
 
 export const projectRoute = createRoute({
@@ -82,6 +84,7 @@ function ProjectLayout() {
               </button>
             </Link>
           </div>
+          <ModelProfileSettings projectId={projectId} workspaceId={getSelectedWorkspaceId()} />
         </section>
       ) : (
         <Outlet />

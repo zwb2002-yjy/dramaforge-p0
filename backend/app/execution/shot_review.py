@@ -292,9 +292,12 @@ async def start_shot_nodes(
         if k not in SHOT_NODES:
             raise ValidationAppError(f"unknown node key: {k}")
 
+    from app.access.models import Project
     from app.production.models import GraphVersion, ProductionGraph
     from app.production.service import GraphService
 
+    project = await session.get(Project, project_id)
+    assert project is not None
     shot = await get_shot_or_404(session, project_id=project_id, shot_id=shot_id)
     graphs = GraphService(session)
     existing = (
@@ -439,6 +442,15 @@ async def start_shot_nodes(
                 prompt,
                 canonical_locked_prompt=canonical_locked_prompt,
             )
+        model_profile: dict[str, object] = {}
+        if key in {"keyframe", "video", "voice"}:
+            from app.providers.model_profiles.node_snapshot import (
+                planned_node_model_profile,
+            )
+
+            model_profile = await planned_node_model_profile(
+                session, project=project, node_key=key
+            )
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),
             "node_key": key,
@@ -455,6 +467,7 @@ async def start_shot_nodes(
             "subtitle": dialogue,
             "lead_identity_required": lead_identity_required,
             "face_policy": approved_face_policy_snapshot(),
+            "model_profile": model_profile,
         }
         snapshot.update(canonical_binding)
         if canonical_locked_prompt:

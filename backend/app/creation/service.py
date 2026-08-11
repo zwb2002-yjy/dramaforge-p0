@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, cast
@@ -24,6 +25,9 @@ from app.creation.models import (
 )
 from app.events.service import EventService
 from app.execution.models import ProviderOperation
+from app.providers.capabilities import Capability
+from app.providers.contracts.common import ExecutionContext, GenerationStatus
+from app.providers.contracts.text import TextGenerateRequest, TextMessage
 from app.providers.openai import get_openai_adapter
 from app.shared.db import set_rls_context
 from app.shared.enums import ExperienceMode
@@ -555,24 +559,6 @@ class CreationService:
         idea = (idea or "").strip()
         if not idea:
             raise ValidationAppError("idea required for Agent Brief")
-        from app.config import get_settings
-        settings = get_settings()
-        if settings.app_env == "test":
-            adapter = get_openai_adapter(allow_live=True)
-        else:
-            from app.providers.openai import get_openai_adapter_for_workspace
-
-            adapter = await get_openai_adapter_for_workspace(
-                self._session,
-                workspace_id=project.workspace_id,
-                allow_live=True,
-            )
-        # Product path: require live TEXT_LLM unless unit tests force Fake.
-        if settings.app_env != "test" and not adapter.configured():
-            raise ValidationAppError(
-                "TEXT_LLM not configured; use manual Brief path",
-                details={"code": "TEXT_LLM_NOT_CONFIGURED", "manual_ok": True},
-            )
         brief_row = (
             await self._session.execute(
                 select(CreativeBrief).where(CreativeBrief.project_id == project_id)
@@ -635,72 +621,20 @@ class CreationService:
                     "only. Do not explain the correction. Include every required top-level "
                     "field and protagonist.name, protagonist.profile, and protagonist.goal."
                 )
-            op = ProviderOperation(
-                agent_run_id=agent.id,
-                attempt_no=attempt_no,
-                purpose="primary",
-                operation_kind="text.brief.generate",
-                actual_provider="openai",
-                actual_model="text-llm",
-                request_fingerprint=_content_hash(
-                    {"prompt_chars": len(attempt_prompt), "attempt": attempt_no}
-                ),
-                status="submitted",
-                request_summary={
-                    "kind": "brief",
-                    "chars": len(attempt_prompt),
-                    "retry": attempt_no > 1,
-                },
-                response_summary={},
-                token_usage={},
-                submitted_at=datetime.now(UTC),
-            )
-            self._session.add(op)
-            await self._session.flush()
-            remote_id = ""
-            text_out = ""
             try:
-                created = await adapter.create(
-                    {
-                        "prompt": attempt_prompt,
-                        "kind": "brief",
-                        "idea": idea,
-                        "max_tokens": 2400,
-                    }
+                parsed, _provider, _model, _cost = await self._run_text_llm_attempt(
+                    workspace_id=project.workspace_id,
+                    project_id=project_id,
+                    agent=agent,
+                    attempt_no=attempt_no,
+                    prompt=attempt_prompt,
+                    kind="brief",
+                    max_tokens=2400,
+                    parse=lambda text: _parse_brief_json(text, idea),
                 )
-                remote_id = str(created.get("remote_task_id") or "")
-                op.provider_operation_id = remote_id or None
-                if created.get("status") == "failed":
-                    raise RuntimeError(str(created.get("error") or "text llm failed"))
-                text_out = str(created.get("text") or "")
-                if not text_out and hasattr(adapter, "poll"):
-                    polled = await adapter.poll(remote_id)
-                    text_out = str(polled.get("text") or "")
-                parsed = _parse_brief_json(text_out, idea)
             except Exception as exc:  # noqa: BLE001 - provider/schema boundary
                 last_error = exc
-                op.status = "failed"
-                op.completed_at = datetime.now(UTC)
-                op.response_summary = {
-                    "error": str(exc)[:160],
-                    "response_chars": len(text_out),
-                }
-                cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
-                op.provider_cost = Decimal(str(cost.get("amount") or 0))
-                op.token_usage = {
-                    "input_tokens": cost.get("input_tokens"),
-                    "output_tokens": cost.get("output_tokens"),
-                }
                 continue
-            op.status = "succeeded"
-            op.completed_at = datetime.now(UTC)
-            op.response_summary = {"logline_chars": len(str(parsed.get("logline", "")))}
-            cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
-            op.provider_cost = Decimal(str(cost.get("amount") or 0))
-            op.token_usage = {
-                "input_tokens": cost.get("input_tokens"),
-                "output_tokens": cost.get("output_tokens"),
-            }
             break
 
         if parsed is None:
@@ -794,25 +728,6 @@ class CreationService:
         ).one_or_none()
         canonical_lead_name = str(canonical_lead[0]).strip() if canonical_lead else ""
         canonical_lead_prompt = str(canonical_lead[1]).strip() if canonical_lead else ""
-        from app.config import get_settings
-
-        settings = get_settings()
-        if settings.app_env == "test":
-            adapter = get_openai_adapter(allow_live=True)
-        else:
-            from app.providers.openai import get_openai_adapter_for_workspace
-
-            adapter = await get_openai_adapter_for_workspace(
-                self._session,
-                workspace_id=project.workspace_id,
-                allow_live=True,
-            )
-        if settings.app_env != "test" and not adapter.configured():
-            raise ValidationAppError(
-                "TEXT_LLM not configured; use manual Plan path",
-                details={"code": "TEXT_LLM_NOT_CONFIGURED", "manual_ok": True},
-            )
-
         from datetime import UTC, datetime, timedelta
 
         auth = PlanningAuthorization(
@@ -889,72 +804,21 @@ class CreationService:
                     "only. Do not explain the correction. Verify that shots is an array of "
                     "exactly 10 objects before responding."
                 )
-            op = ProviderOperation(
-                agent_run_id=agent.id,
-                attempt_no=attempt_no,
-                purpose="primary",
-                operation_kind="text.plan.generate",
-                actual_provider="openai",
-                actual_model="text-llm",
-                request_fingerprint=_content_hash(
-                    {"prompt_chars": len(attempt_prompt), "attempt": attempt_no}
-                ),
-                status="submitted",
-                request_summary={
-                    "kind": "plan",
-                    "chars": len(attempt_prompt),
-                    "retry": attempt_no > 1,
-                },
-                response_summary={},
-                token_usage={},
-                submitted_at=datetime.now(UTC),
-            )
-            self._session.add(op)
-            await self._session.flush()
-            remote_id = ""
-            text_out = ""
             try:
-                created = await adapter.create(
-                    {
-                        "prompt": attempt_prompt,
-                        "kind": "plan",
-                        "brief": brief_body,
-                        "max_tokens": 6000,
-                    }
+                plan_body, _provider, _model, _cost = await self._run_text_llm_attempt(
+                    workspace_id=project.workspace_id,
+                    project_id=project_id,
+                    agent=agent,
+                    attempt_no=attempt_no,
+                    prompt=attempt_prompt,
+                    kind="plan",
+                    max_tokens=6000,
+                    brief=brief_body,
+                    parse=lambda text: _parse_plan_json(text, logline),
                 )
-                remote_id = str(created.get("remote_task_id") or "")
-                op.provider_operation_id = remote_id or None
-                if created.get("status") == "failed":
-                    raise RuntimeError(str(created.get("error") or "text llm failed"))
-                text_out = str(created.get("text") or "")
-                if not text_out and hasattr(adapter, "poll"):
-                    polled = await adapter.poll(remote_id)
-                    text_out = str(polled.get("text") or "")
-                plan_body = _parse_plan_json(text_out, logline)
             except Exception as exc:  # noqa: BLE001 - provider/schema boundary
                 last_error = exc
-                op.status = "failed"
-                op.completed_at = datetime.now(UTC)
-                op.response_summary = {
-                    "error": str(exc)[:160],
-                    "response_chars": len(text_out),
-                }
-                cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
-                op.provider_cost = Decimal(str(cost.get("amount") or 0))
-                op.token_usage = {
-                    "input_tokens": cost.get("input_tokens"),
-                    "output_tokens": cost.get("output_tokens"),
-                }
                 continue
-            op.status = "succeeded"
-            op.completed_at = datetime.now(UTC)
-            op.response_summary = {"prompt_chars": len(str(plan_body.get("prompt", "")))}
-            cost = await adapter.fetch_cost(remote_id) if remote_id else {"amount": 0}
-            op.provider_cost = Decimal(str(cost.get("amount") or 0))
-            op.token_usage = {
-                "input_tokens": cost.get("input_tokens"),
-                "output_tokens": cost.get("output_tokens"),
-            }
             break
 
         if plan_body is None:
@@ -992,6 +856,212 @@ class CreationService:
             )
         ).scalars().all()
         return (max(rows) if rows else 0) + 1
+
+    async def _run_text_llm_attempt(
+        self,
+        *,
+        workspace_id: UUID,
+        project_id: UUID,
+        agent: AgentRun,
+        attempt_no: int,
+        prompt: str,
+        kind: str,
+        max_tokens: int,
+        parse: Callable[[str], Any],
+        brief: dict[str, object] | None = None,
+        idea: str = "",
+    ) -> tuple[Any, str, str, dict[str, object]]:
+        """Run one text call, record its ProviderOperation, and parse the output
+        (spec §38/§39). Returns ``(parsed, provider, model, cost)``.
+
+        The call goes through ``ModelBindingResolver → CapabilityRouter →
+        LiteLLMModelAdapter`` when ``TEXT_V3_ROUTER_ENABLED`` is set
+        (spec §100–§101); otherwise the legacy OpenAI workspace adapter runs
+        (LEGACY_COMPAT). A transport or schema-parse failure is recorded as a
+        failed op before re-raising — the caller retries on any failure.
+        """
+        from datetime import UTC, datetime
+
+        from app.config import get_settings
+        from app.providers.model_profiles.resolver import ModelBindingResolver
+        from app.providers.model_profiles.slots import ModelSlot
+        from app.providers.router import CapabilityRouter
+
+        settings = get_settings()
+        request_summary: dict[str, object] = {
+            "kind": kind,
+            "chars": len(prompt),
+            "retry": attempt_no > 1,
+            "path": "v3_router" if settings.text_v3_router_enabled else "legacy",
+        }
+        op = ProviderOperation(
+            agent_run_id=agent.id,
+            attempt_no=attempt_no,
+            purpose="primary",
+            operation_kind=f"text.{kind}.generate",
+            actual_provider="openai",
+            actual_model="text-llm",
+            request_fingerprint=_content_hash(
+                {"prompt_chars": len(prompt), "attempt": attempt_no}
+            ),
+            status="submitted",
+            request_summary=request_summary,
+            response_summary={},
+            token_usage={},
+            submitted_at=datetime.now(UTC),
+        )
+        self._session.add(op)
+        await self._session.flush()
+        remote_id = ""
+        text_out = ""
+        provider = "openai"
+        model = "text-llm"
+        result: Any = None
+        adapter: Any = None
+        try:
+            if settings.text_v3_router_enabled:
+                # V3 path (spec §38/§39): slot → resolver → router → adapter.
+                resolver = ModelBindingResolver(self._session)
+                router = CapabilityRouter(registry=resolver._registry)
+                slot = (
+                    ModelSlot.PLANNING_BRIEF if kind == "brief" else ModelSlot.PLANNING_SCRIPT
+                )
+                resolved = await resolver.resolve(
+                    workspace_id=workspace_id,
+                    project_id=project_id,
+                    slot=slot,
+                    capability=Capability.TEXT_GENERATE,
+                )
+                provider = resolved.model_id.split("/", 1)[0]
+                model = resolved.model_id
+                op.actual_provider = provider
+                op.actual_model = model
+                request = TextGenerateRequest(
+                    messages=[TextMessage(role="user", content=prompt)],
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"},
+                )
+                result = await router.create(
+                    capability=Capability.TEXT_GENERATE,
+                    request=request,
+                    context=ExecutionContext(
+                        trace_id=str(agent.correlation_id),
+                        operation_id=str(op.id),
+                        project_id=str(project_id),
+                        workspace_id=str(workspace_id),
+                        user_id=str(agent.initiated_by),
+                    ),
+                    model_id=resolved.model_id,
+                )
+                if result.status is not GenerationStatus.SUCCEEDED:
+                    raise RuntimeError(
+                        str(result.provider_metadata.get("error") or "text llm failed")
+                    )
+                remote_id = str(result.remote_task_id or "")
+                text_out = str(result.provider_metadata.get("text") or "")
+                op.provider_operation_id = remote_id or None
+            else:
+                # LEGACY_COMPAT: workspace OpenAI adapter (pre-V3 text path).
+                if settings.app_env == "test":
+                    adapter = get_openai_adapter(allow_live=True)
+                else:
+                    from app.providers.openai import get_openai_adapter_for_workspace
+
+                    adapter = await get_openai_adapter_for_workspace(
+                        self._session,
+                        workspace_id=workspace_id,
+                        allow_live=True,
+                    )
+                if settings.app_env != "test" and not adapter.configured():
+                    raise ValidationAppError(
+                        f"TEXT_LLM not configured; use manual {kind} path",
+                        details={"code": "TEXT_LLM_NOT_CONFIGURED", "manual_ok": True},
+                    )
+                created = await adapter.create(
+                    {
+                        "prompt": prompt,
+                        "kind": kind,
+                        "idea": idea,
+                        "brief": brief,
+                        "max_tokens": max_tokens,
+                    }
+                )
+                remote_id = str(created.get("remote_task_id") or "")
+                op.provider_operation_id = remote_id or None
+                if created.get("status") == "failed":
+                    raise RuntimeError(str(created.get("error") or "text llm failed"))
+                text_out = str(created.get("text") or "")
+                if not text_out and hasattr(adapter, "poll"):
+                    polled = await adapter.poll(remote_id)
+                    text_out = str(polled.get("text") or "")
+            parsed = parse(text_out)
+            op.status = "succeeded"
+            op.completed_at = datetime.now(UTC)
+            op.response_summary = {"text_chars": len(text_out)}
+            cost = await _text_call_cost(
+                settings=settings,
+                result=result,
+                adapter=adapter,
+                remote_id=remote_id,
+            )
+            op.provider_cost = Decimal(str(cost.get("amount") or 0))
+            op.token_usage = {
+                "input_tokens": cost.get("input_tokens"),
+                "output_tokens": cost.get("output_tokens"),
+            }
+            return parsed, provider, model, cost
+        except Exception as exc:  # noqa: BLE001 - provider/schema boundary
+            op.status = "failed"
+            op.completed_at = datetime.now(UTC)
+            op.response_summary = {
+                "error": str(exc)[:160],
+                "response_chars": len(text_out),
+            }
+            cost = await _text_call_cost(
+                settings=settings,
+                result=result,
+                adapter=adapter,
+                remote_id=remote_id,
+            )
+            op.provider_cost = Decimal(str(cost.get("amount") or 0))
+            op.token_usage = {
+                "input_tokens": cost.get("input_tokens"),
+                "output_tokens": cost.get("output_tokens"),
+            }
+            raise
+
+
+async def _text_call_cost(
+    *,
+    settings: Any,
+    result: Any,
+    adapter: Any,
+    remote_id: str,
+) -> dict[str, object]:
+    """Cost + usage extraction for one text call. V3 path reads usage from the
+    router result; legacy path defers to the adapter's fetch_cost."""
+    if settings.text_v3_router_enabled:
+        metadata = dict(result.provider_metadata) if result is not None else {}
+        usage = metadata.get("usage") or {}
+        if isinstance(usage, dict):
+            in_tok = float(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+            out_tok = float(
+                usage.get("completion_tokens") or usage.get("output_tokens") or 0
+            )
+        else:
+            in_tok = out_tok = 0.0
+        return {
+            "amount": 0,
+            "currency": "USD",
+            "units": in_tok + out_tok,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+        }
+    if adapter is not None and remote_id:
+        fetched = await adapter.fetch_cost(remote_id)
+        if isinstance(fetched, dict):
+            return fetched
+    return {"amount": 0}
 
 
 def _parse_brief_json(text: str, idea: str) -> dict[str, object]:

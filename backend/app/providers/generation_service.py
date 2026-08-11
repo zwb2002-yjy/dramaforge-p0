@@ -44,6 +44,11 @@ _STANDALONE_NODE_TYPE: dict[Capability, str] = {
     Capability.IMAGE_GENERATE: "keyframe",
 }
 
+# Capability → default ModelSlot when the caller omits the slot (spec §41/§42).
+_DEFAULT_SLOT_BY_CAPABILITY: dict[Capability, str] = {
+    Capability.IMAGE_GENERATE: "visual.keyframe",
+}
+
 _GENERATION_TEMPLATE_KEY = "generation-v1"
 
 
@@ -61,6 +66,7 @@ class GenerationService:
         actor: User,
         capability: Capability,
         model_id: str | None,
+        slot: str | None = None,
         input_data: dict[str, Any],
         options: dict[str, Any],
         native_options: dict[str, Any],
@@ -82,11 +88,50 @@ class GenerationService:
             options=options,
             native_options=native_options,
         )
+        # Slot-driven model resolution (spec §41/§42, M9): when the caller gives
+        # a ModelSlot (or leaves it unset for a single-slot capability) and no
+        # explicit model_id, resolve through the project's ProductionModelProfile
+        # before falling to the system default. Explicit request model still wins.
+        from app.providers.model_profiles.resolver import ModelBindingResolver
+
+        resolved_model_id = model_id
+        resolved_profile: dict[str, object] | None = None
+        if resolved_model_id is None:
+            slot_value = slot or _DEFAULT_SLOT_BY_CAPABILITY.get(capability)
+            if slot_value is not None:
+                from app.providers.model_profiles.slots import ModelSlot
+
+                try:
+                    model_slot = ModelSlot(slot_value)
+                except ValueError as exc:
+                    from app.providers.model_profiles.errors import profile_slot_unknown
+
+                    raise profile_slot_unknown(slot_value) from exc
+                resolver = ModelBindingResolver(
+                    self._session, registry=self._router.registry
+                )
+                resolved = await resolver.resolve(
+                    workspace_id=project.workspace_id,
+                    project_id=project.id,
+                    slot=model_slot,
+                    capability=capability,
+                )
+                resolved_model_id = resolved.model_id
+                resolved_profile = {
+                    "slot": str(resolved.slot),
+                    "model_id": resolved.model_id,
+                    "source": resolved.source,
+                    "profile_id": str(resolved.profile_id)
+                    if resolved.profile_id is not None
+                    else None,
+                    "profile_version": resolved.profile_version,
+                    "native_options": resolved.native_options,
+                }
         # Resolve + validate through the CapabilityRouter (spec §33/§58). The
         # manifest is also needed to seed the run snapshot.
         model = self._router.selector.select(
             capability=capability,
-            requested_model=model_id,
+            requested_model=resolved_model_id,
             registry=self._router.registry,
         )
         spec = model.manifest.capability_specs.get(capability)
@@ -139,6 +184,8 @@ class GenerationService:
                 "request_fingerprint": fingerprint,
             },
         }
+        if resolved_profile is not None:
+            snapshot["model_profile"] = resolved_profile
 
         try:
             run = await _create_generation_run(

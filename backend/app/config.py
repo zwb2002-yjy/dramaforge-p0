@@ -125,6 +125,20 @@ class Settings(BaseSettings):
     )
     text_llm_api_style: Literal["anthropic", "openai"] = "anthropic"
 
+    # LiteLLM Gateway backend (spec §24–§26, §113). Text models registered in
+    # the V3 registry with ``backend.kind="litellm"`` submit through this
+    # OpenAI-compatible gateway.
+    litellm_gateway_url: str = Field(
+        default="",
+        description="LiteLLM Gateway base URL, e.g. https://gateway.example",
+    )
+    litellm_api_key: str = Field(default="", description="LiteLLM Gateway API key")
+    # text.generate V3 router migration flag (spec §100–§101). When enabled,
+    # Agent Brief/Plan resolve through ModelBindingResolver + CapabilityRouter.
+    # Default OFF so the legacy OpenAI adapter path stays the production path
+    # until the router path is stable.
+    text_v3_router_enabled: bool = False
+
     # Local TTS is opt-in for formal development verification.
     tts_enabled: bool = False
     tts_engine: str = "espeak-ng"

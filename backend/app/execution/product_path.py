@@ -581,6 +581,15 @@ async def enqueue_keyframe_after_plan(
         or plan.plan.get("prompt")
         or "Cinematic keyframe, 9:16"
     )
+    from app.access.models import Project
+
+    project = await session.get(Project, project_id)
+    assert project is not None
+    from app.providers.model_profiles.node_snapshot import planned_node_model_profile
+
+    model_profile = await planned_node_model_profile(
+        session, project=project, node_key="keyframe"
+    )
     graph = await graphs.create_graph(
         project_id=project_id,
         scope_type="shot",
@@ -592,6 +601,7 @@ async def enqueue_keyframe_after_plan(
             plan_id=str(plan.id),
             shot_id=str(shot_id),
             shot=shot_body,
+            model_profile=model_profile,
         ),
     )
     assert graph.current_version_id is not None
@@ -641,6 +651,7 @@ async def enqueue_keyframe_after_plan(
         "materialization": materialization_ops,
         "lead_identity_required": lead_identity_required,
         "face_policy": approved_face_policy_snapshot(),
+        "model_profile": model_profile,
     }
     if canonical_artifact is not None:
         snapshot.update(_artifact_snapshot(canonical_artifact, prefix="canonical"))
@@ -657,6 +668,8 @@ async def enqueue_keyframe_after_plan(
     prompt_snapshot: dict[str, object] = {
         **snapshot,
         "node_key": "prompt",
+        # prompt_compose has no model slot; drop the keyframe slot's profile.
+        "model_profile": {},
     }
     prompt_hash = _input_hash(prompt_snapshot)
     now = datetime.now(UTC)

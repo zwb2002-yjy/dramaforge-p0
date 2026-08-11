@@ -26,11 +26,23 @@ from app.providers.contracts.common import (
     ProviderPollResult,
     ResolvedArtifact,
 )
-from app.providers.manifest import ModelCapabilityManifest, ModelManifest, to_v3_model_manifest
+from app.providers.manifest import (
+    CapabilitySpec,
+    ModelCapabilityManifest,
+    ModelManifest,
+    ParameterSpec,
+    SubmissionSemantics,
+    to_v3_model_manifest,
+)
 from app.providers.registry import ModelRegistry
 from app.providers.translation import TranslationResult
 from app.providers.transport import AuthSpec, PollSpec, TransportProfile
 from app.providers.transport_registry import TransportRegistry
+
+# The LiteLLM text model registered in the default V3 registry (M7/M8). The
+# manifest carries a ``ModelBackendBinding`` so the generic adapter knows which
+# gateway model to send. P0 exposes ``text.generate`` through the gateway.
+LITELLM_TEXT_MODEL_ID = "litellm/text-llm"
 
 # Transport profiles. One profile per wire endpoint family; a model's
 # CapabilitySpec picks its profile via ``transport_profile_id``.
@@ -224,6 +236,69 @@ def build_v3_registry(
     return model_registry, transport_registry
 
 
+def litellm_text_manifest() -> ModelManifest:
+    """V3 manifest for the generic LiteLLM text model (spec §113/§114).
+
+    The ``gateway_model`` defaults to the configured text LLM model so the
+    gateway can serve the current BYOK text path before per-model gateway
+    deployments are added."""
+    from app.config import get_settings
+    from app.providers.model_profiles.models import ModelBackendBinding
+
+    settings = get_settings()
+    backend = ModelBackendBinding(
+        kind="litellm",
+        gateway_model=settings.text_llm_model or "deepseek-v4-flash",
+        api_mode="chat",
+        provider_id="litellm",
+        model_family="litellm",
+    )
+    return ModelManifest(
+        schema_version="1",
+        manifest_version="1",
+        id=LITELLM_TEXT_MODEL_ID,
+        provider_id="litellm",
+        model_name="text-llm",
+        display_name="LiteLLM 文本模型",
+        model_family="litellm",
+        capability_specs={
+            Capability.TEXT_GENERATE: CapabilitySpec(
+                capability=Capability.TEXT_GENERATE,
+                common_options={
+                    "max_tokens": ParameterSpec(type="integer", ui_component="number"),
+                    "system": ParameterSpec(type="string", ui_component="textarea"),
+                    "temperature": ParameterSpec(type="number", ui_component="number"),
+                },
+                native_options={},
+                transport_profile_id="litellm-chat-v1",
+            )
+        },
+        execution_mode="sync",
+        supports_cancel=False,
+        submission_semantics=SubmissionSemantics(),
+        metadata={"backend": backend.model_dump(mode="json")},
+    )
+
+
+def register_litellm_text_models(
+    model_registry: ModelRegistry,
+    *,
+    adapter_factory: Callable[[ModelManifest], ModelAdapter] | None = None,
+) -> None:
+    """Register the LiteLLM text model(s) in a V3 registry (M7)."""
+    from app.providers.litellm_adapter import LiteLLMModelAdapter
+
+    manifest = litellm_text_manifest()
+    if model_registry.get_or_none(manifest.id) is not None:
+        return
+    adapter = (
+        adapter_factory(manifest)
+        if adapter_factory is not None
+        else LiteLLMModelAdapter(manifest)
+    )
+    model_registry.register(manifest, adapter)
+
+
 def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
     """Module-level singleton used by API endpoints / routers. Adapters are
     real V2 bridges over the unified A+B runtime: one bridge per seeded model,
@@ -267,4 +342,6 @@ def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
         build(manifest_dict["media_kind"], manifest_dict)
     for manifest_dict in seed_manifests_for(provider_type="volcengine"):
         build(manifest_dict["media_kind"], manifest_dict)
-    return build_v3_registry(adapter_factories=factories)
+    registry, transport_registry = build_v3_registry(adapter_factories=factories)
+    register_litellm_text_models(registry)
+    return registry, transport_registry

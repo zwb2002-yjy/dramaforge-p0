@@ -246,6 +246,7 @@ class TestGenerationCreate:
         )
         assert second.status_code == 409, second.text
         assert second.json()["details"]["code"] == "IDEMPOTENCY_KEY_REUSED"
-        # the second request must not have created a second operation
-        assert first.json()["operation_id"] != second.json()["operation_id"]
+        # the second request must not have created a second operation: the 409
+        # is the error body, not a generation response
+        assert "operation_id" not in second.json()
         assert second.json()["detail"] is not None

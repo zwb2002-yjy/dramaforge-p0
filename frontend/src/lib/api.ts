@@ -291,6 +291,163 @@ export async function bindProjectProvider(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Production Model Profiles (model role configuration, V3 spec §34–§37).
+// ---------------------------------------------------------------------------
+
+export type ModelSlotRead = {
+  id: string;
+  display_name: string;
+  capabilities: string[];
+  description: string;
+  p0_scope: boolean;
+};
+
+export type ProfileBindingInput = {
+  model_id: string;
+  native_options?: Record<string, unknown>;
+  enabled?: boolean;
+};
+
+export type ProfileBindingRead = {
+  slot: string;
+  model_id: string;
+  native_options: Record<string, unknown>;
+  enabled: boolean;
+  provider_id: string;
+  display_name: string;
+  configured: boolean;
+};
+
+export type ModelProfileRead = {
+  id: string;
+  workspace_id: string;
+  project_id: string | null;
+  name: string;
+  version: number;
+  is_default: boolean;
+  bindings: Record<string, ProfileBindingRead>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ModelProfileSummary = {
+  id: string;
+  workspace_id: string;
+  project_id: string | null;
+  name: string;
+  version: number;
+  is_default: boolean;
+  binding_slots: string[];
+  updated_at: string;
+};
+
+export type EffectiveBindingRead = {
+  slot: string;
+  capability: string;
+  model_id: string;
+  source: string;
+  profile_id: string | null;
+  profile_version: number | null;
+  native_options: Record<string, unknown>;
+};
+
+export function listModelSlots(): Promise<ModelSlotRead[]> {
+  return apiGet<ModelSlotRead[]>("/api/v1/model-slots");
+}
+
+export function listWorkspaceModelProfiles(
+  workspaceId: string,
+): Promise<ModelProfileSummary[]> {
+  return apiGet(`/api/v1/workspaces/${workspaceId}/model-profiles`);
+}
+
+export async function createWorkspaceModelProfile(
+  workspaceId: string,
+  body: {
+    name: string;
+    bindings: Record<string, ProfileBindingInput>;
+    is_default?: boolean;
+    copy_from?: string;
+  },
+): Promise<ModelProfileRead> {
+  const csrf = await fetchCsrf();
+  return apiSend("POST", `/api/v1/workspaces/${workspaceId}/model-profiles`, body, csrf);
+}
+
+export async function updateWorkspaceModelProfile(
+  workspaceId: string,
+  profileId: string,
+  body: {
+    name?: string;
+    bindings?: Record<string, ProfileBindingInput>;
+    is_default?: boolean;
+    expected_version?: number;
+  },
+): Promise<ModelProfileRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "PUT",
+    `/api/v1/workspaces/${workspaceId}/model-profiles/${profileId}`,
+    body,
+    csrf,
+  );
+}
+
+export async function applySimpleMode(
+  workspaceId: string,
+  profileId: string,
+  body: {
+    llm_model_id?: string;
+    image_model_id?: string;
+    video_model_id?: string;
+    expected_version?: number;
+  },
+): Promise<ModelProfileRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/workspaces/${workspaceId}/model-profiles/${profileId}/simple-mode`,
+    body,
+    csrf,
+  );
+}
+
+export async function deleteWorkspaceModelProfile(
+  workspaceId: string,
+  profileId: string,
+): Promise<void> {
+  const csrf = await fetchCsrf();
+  await apiSend<void>(
+    "DELETE",
+    `/api/v1/workspaces/${workspaceId}/model-profiles/${profileId}`,
+    undefined,
+    csrf,
+  );
+}
+
+export function getProjectModelProfile(projectId: string): Promise<ModelProfileRead> {
+  return apiGet(`/api/v1/projects/${projectId}/model-profile`);
+}
+
+export async function putProjectModelProfile(
+  projectId: string,
+  body: {
+    name?: string;
+    bindings?: Record<string, ProfileBindingInput>;
+    expected_version?: number;
+  },
+): Promise<ModelProfileRead> {
+  const csrf = await fetchCsrf();
+  return apiSend("PUT", `/api/v1/projects/${projectId}/model-profile`, body, csrf);
+}
+
+export function getEffectiveBindings(
+  projectId: string,
+): Promise<EffectiveBindingRead[]> {
+  return apiGet(`/api/v1/projects/${projectId}/model-bindings/effective`);
+}
+
 export type ProjectRead = {
   id: string;
   workspace_id: string;

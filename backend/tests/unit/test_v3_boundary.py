@@ -121,3 +121,36 @@ def test_providers_layer_never_imports_api_routes() -> None:
         for line in path.read_text(encoding="utf-8").splitlines():
             for parent in forbidden_parents:
                 assert parent not in line, f"providers/{path.name} imports {parent}: {line}"
+
+
+# Spec §126: business code must never *branch* on a concrete provider name.
+# The provider-management surface (credentials / provider-connections / config
+# settings) legitimately names providers; legacy product_path is already pinned
+# as LEGACY_COMPAT. Everything else must route through Capability + ModelSlot.
+_PROVIDER_BRANCH_RE = re.compile(
+    r"(if |elif |\band\b|\bor\b|\bnot\b|\bin\b).*"
+    r"(minimax|volcengine|agnes|kling|jimeng|seedance|seedream)"
+)
+_PROVIDER_BRANCH_ALLOWLIST = {
+    "config.py",
+    "execution/product_path.py",  # LEGACY_COMPAT (B6)
+}
+
+
+def test_business_code_never_branches_on_provider_names() -> None:
+    violations: dict[str, list[str]] = {}
+    for path in _business_files():
+        rel = _rel(path)
+        if rel in _PROVIDER_BRANCH_ALLOWLIST:
+            continue
+        hits = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if _PROVIDER_BRANCH_RE.search(line)
+        ]
+        if hits:
+            violations[rel] = hits
+    assert not violations, (
+        "business code branches on provider names: "
+        + "; ".join(f"{path}: {lines[0]}" for path, lines in sorted(violations.items()))
+    )

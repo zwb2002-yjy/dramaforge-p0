@@ -148,7 +148,7 @@ async def test_migration_0015_backfills_and_rolls_back_on_isolated_db() -> None:
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar()
-            assert head == "20260810_0016"
+            assert head == "20260811_0017"
             rows = conn.execute(
                 text(
                     "select provider_type, model_id, model_revision "

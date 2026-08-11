@@ -60,6 +60,7 @@ class ManifestRead(BaseModel):
 class GenerationCreateBody(BaseModel):
     capability: str = Field(min_length=1)
     model_id: str | None = None
+    slot: str | None = None
     input: dict[str, Any] = Field(default_factory=dict)
     options: dict[str, Any] = Field(default_factory=dict)
     native_options: dict[str, Any] = Field(default_factory=dict)
@@ -223,6 +224,7 @@ async def create_generation(
         actor=user,
         capability=capability,
         model_id=body.model_id,
+        slot=body.slot,
         input_data=body.input,
         options=body.options,
         native_options=body.native_options,
@@ -230,11 +232,18 @@ async def create_generation(
     )
     await service.enqueue(run)
     await session.commit()
+    snapshot = dict(run.input_snapshot or {})
+    generation = snapshot.get("generation") or {}
+    resolved_model = None
+    if isinstance(generation, dict):
+        resolved_model = (
+            str(generation["requested_model"]) if generation.get("requested_model") else None
+        )
     return GenerationCreateResponse(
         operation_id=run.id,
         status=run.status,
         requested_capability=body.capability,
-        requested_model=body.model_id,
+        requested_model=resolved_model,
     )
 
 
