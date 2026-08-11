@@ -18,6 +18,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import Settings
+from app.providers.adapter import ModelAdapter
+from app.providers.capabilities import Capability, capability_satisfied
+from app.providers.manifest import ModelManifest
 
 # (settings, host) -> protocol client. The client exposes the create/poll surface
 # used by capability probes (create_image / create_video / poll_video).
@@ -182,3 +185,78 @@ def _register_defaults() -> None:
 
 
 _register_defaults()
+
+
+# ---------------------------------------------------------------------------
+# V3 model registry (spec §30).
+# Distinct from the ProviderPlugin registry above: plugins describe one
+# (provider_type, protocol_profile) — connections, credentials, probes. The
+# ModelRegistry is the model-level capability+adapter index that the
+# CapabilityRouter resolves against. RegisteredModel bundles the V3 manifest
+# with the adapter that speaks for that model.
+# ---------------------------------------------------------------------------
+
+
+class DuplicateModelError(ValueError):
+    def __init__(self, model_id: str) -> None:
+        super().__init__(f"model already registered: {model_id}")
+
+
+class UnknownModelError(LookupError):
+    def __init__(self, model_id: str) -> None:
+        super().__init__(f"unknown model: {model_id}")
+
+
+@dataclass(frozen=True)
+class RegisteredModel:
+    manifest: ModelManifest
+    adapter: ModelAdapter
+
+
+class ModelRegistry:
+    """In-memory model index (P0 static plugins; spec §32.1). All methods are
+    synchronous — registration happens once at bootstrap."""
+
+    def __init__(self) -> None:
+        self._models: dict[str, RegisteredModel] = {}
+
+    def register(self, manifest: ModelManifest, adapter: ModelAdapter) -> None:
+        if manifest.id in self._models:
+            raise DuplicateModelError(manifest.id)
+        self._models[manifest.id] = RegisteredModel(manifest=manifest, adapter=adapter)
+
+    def get(self, model_id: str) -> RegisteredModel:
+        model = self._models.get(model_id)
+        if model is None:
+            raise UnknownModelError(model_id)
+        return model
+
+    def get_or_none(self, model_id: str) -> RegisteredModel | None:
+        return self._models.get(model_id)
+
+    def list_models(self) -> list[RegisteredModel]:
+        return sorted(self._models.values(), key=lambda item: item.manifest.id)
+
+    def find_by_capability(self, capability: Capability) -> list[RegisteredModel]:
+        return [
+            model
+            for model in sorted(self._models.values(), key=lambda item: item.manifest.id)
+            if capability in model.manifest.capability_specs
+            or capability_satisfied(
+                capability,
+                _declared_fine_grained(model.manifest),
+            )
+        ]
+
+
+def _declared_fine_grained(manifest: ModelManifest) -> set[str]:
+    """Best-effort fine-grained capability set from a V3 manifest. V3 manifests
+    built from the A+B catalog carry the fine-grained names inside
+    ``metadata``; the capability_specs keys remain the source of truth."""
+    declared: set[str] = set()
+    for spec in manifest.capability_specs.values():
+        declared.add(str(spec.capability))
+    raw = manifest.metadata.get("fine_grained_capabilities")
+    if isinstance(raw, list):
+        declared.update(str(item) for item in raw)
+    return declared

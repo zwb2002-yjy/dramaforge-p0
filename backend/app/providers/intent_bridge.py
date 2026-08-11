@@ -1,0 +1,118 @@
+"""V3 capability request → A+B domain intent bridge (pure).
+
+The A+B engine speaks ``ImageGenerationIntent`` / ``VideoGenerationIntentV1``.
+The V3 layer speaks coarse :class:`Capability` contracts. This module converts
+one into the other so a V3 :class:`ModelAdapter` can drive the existing
+Compiler/Runtime path unchanged. Pure — no DB, no I/O.
+"""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from app.providers.capabilities import Capability
+from app.providers.contracts.common import ArtifactRef
+from app.providers.contracts.image import ImageGenerateRequest
+from app.providers.contracts.video import (
+    FirstLastFrameVideoRequest,
+    ImageToVideoRequest,
+    ReferenceToVideoRequest,
+    TextToVideoRequest,
+)
+from app.providers.intents import (
+    ArtifactReferenceIntent,
+    ImageGenerationIntent,
+    ModelSelectionIntent,
+    VideoGenerationIntentV1,
+)
+
+
+class CapabilityNotSupportedError(ValueError):
+    def __init__(self, capability: str) -> None:
+        super().__init__(f"no intent bridge for capability: {capability}")
+
+
+def _ref(artifact: ArtifactRef, role: str) -> ArtifactReferenceIntent:
+    try:
+        artifact_id = UUID(str(artifact.artifact_id))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"artifact id must be a UUID string, got: {artifact.artifact_id!r}"
+        ) from exc
+    return ArtifactReferenceIntent(artifact_id=artifact_id, role=role, required=True)  # type: ignore[arg-type]
+
+
+def video_request_to_intent(
+    capability: Capability,
+    request: object,
+) -> VideoGenerationIntentV1:
+    """Convert a V3 video contract into the A+B video intent. The selection mode
+    is explicit_binding (P0 scope); the binding is resolved by the service layer
+    before submission, so none is carried here."""
+    selection = ModelSelectionIntent(mode="explicit_binding")
+    if isinstance(request, TextToVideoRequest):
+        return VideoGenerationIntentV1(
+            prompt=request.prompt,
+            references=[],
+            selection=selection,
+        )
+    if isinstance(request, ImageToVideoRequest):
+        return VideoGenerationIntentV1(
+            prompt=request.prompt,
+            references=[_ref(request.image, "first_frame")],
+            selection=selection,
+        )
+    if isinstance(request, FirstLastFrameVideoRequest):
+        return VideoGenerationIntentV1(
+            prompt=request.prompt,
+            references=[
+                _ref(request.first_frame, "first_frame"),
+                _ref(request.last_frame, "last_frame"),
+            ],
+            selection=selection,
+        )
+    if isinstance(request, ReferenceToVideoRequest):
+        references = [
+            _ref(ref, "reference_image") for ref in request.reference_images
+        ] + [_ref(ref, "reference_audio") for ref in request.reference_audio] + [
+            _ref(ref, "reference_video") for ref in request.reference_videos
+        ]
+        return VideoGenerationIntentV1(
+            prompt=request.prompt,
+            references=references,
+            selection=selection,
+        )
+    raise CapabilityNotSupportedError(str(capability))
+
+
+def image_request_to_intent(
+    capability: Capability,
+    request: object,
+) -> ImageGenerationIntent:
+    selection = ModelSelectionIntent(mode="explicit_binding")
+    if isinstance(request, ImageGenerateRequest):
+        reference = request.reference_images[0] if request.reference_images else None
+        return ImageGenerationIntent(
+            prompt=request.prompt,
+            size=request.size,
+            seed=request.seed,
+            reference_artifact_id=(
+                UUID(str(reference.artifact_id)) if reference is not None else None
+            ),
+            selection=selection,
+        )
+    raise CapabilityNotSupportedError(str(capability))
+
+
+def request_to_intent(capability: Capability, request: object) -> object:
+    """Dispatch a V3 capability contract to the A+B intent it maps to."""
+    if capability in {
+        Capability.VIDEO_TEXT_TO_VIDEO,
+        Capability.VIDEO_IMAGE_TO_VIDEO,
+        Capability.VIDEO_FIRST_LAST_FRAME,
+        Capability.VIDEO_REFERENCE_TO_VIDEO,
+    }:
+        return video_request_to_intent(capability, request)
+    if capability in {Capability.IMAGE_GENERATE, Capability.IMAGE_EDIT}:
+        return image_request_to_intent(capability, request)
+    raise CapabilityNotSupportedError(str(capability))
