@@ -156,8 +156,11 @@ class TestDefaultRegistryRealAdapters:
         ]
         assert len(text_models) == 1
         assert isinstance(text_models[0].adapter, LiteLLMModelAdapter)
+        # Logical aliases (litellm/script-fast, litellm/script-quality) are also
+        # generic gateway adapters — not V2 bridges (fix spec §34/§104).
         for model in model_registry.list_models():
-            if model.manifest.id == "litellm/text-llm":
+            if model.manifest.provider_id == "litellm":
+                assert isinstance(model.adapter, LiteLLMModelAdapter)
                 continue
             assert isinstance(model.adapter, LegacyAdapterBridge)
             assert model.adapter.provider_id == model.manifest.provider_id

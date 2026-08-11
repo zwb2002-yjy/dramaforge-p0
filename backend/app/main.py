@@ -69,6 +69,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "env": cfg.app_env,
             "db": "up" if db_ok else "down",
             "source_commit": cfg.source_commit,
+            "dependencies": {
+                "litellm": await _litellm_dependency_status(cfg),
+            },
         }
         if db_error:
             body["db_error"] = db_error
@@ -86,6 +89,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     return app
+
+
+async def _litellm_dependency_status(cfg: Settings) -> dict[str, str]:
+    """LiteLLM availability is advisory — never makes the API unhealthy (fix
+    spec §77/§122). Unset URL fails fast; a configured-but-down gateway is
+    reported as ``unavailable`` while local/media models stay usable."""
+    if not cfg.litellm_gateway_url.strip():
+        return {"status": "unavailable"}
+    from app.providers.litellm_gateway.client import LiteLLMGatewayClient
+
+    client = LiteLLMGatewayClient(settings=cfg, timeout_s=2.0)
+    try:
+        return {"status": "up" if await client.readiness() else "unavailable"}
+    except Exception:  # noqa: BLE001 - readiness never raises by contract
+        return {"status": "unavailable"}
 
 
 app = create_app()

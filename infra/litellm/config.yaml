@@ -1,0 +1,53 @@
+# LiteLLM Proxy configuration for DramaForge (fix spec §15/§75/§89).
+#
+# This file defines LOGICAL MODEL ALIASES only. DramaForge requests a logical
+# group (e.g. ``script-quality``); the LiteLLM Router picks the deployment
+# (load balancing / retry / fallback / cooldown). DramaForge never sees the
+# upstream provider model (fix spec §16/§42).
+#
+# Secrets use litellm's ``os.environ/<KEY>`` substitution — never write real
+# keys here (fix spec §75). Empty values are valid; an alias becomes usable
+# only when its api_base+api_key (or mock_response) are provided. For a local
+# demo without provider keys, set ``*_MOCK_RESPONSE`` to a canned text; the
+# proxy then serves that text without calling an upstream provider.
+
+model_list:
+  - model_name: script-quality
+    litellm_params:
+      model: openai/script-quality-deployment
+      api_base: os.environ/LITELLM_SCRIPT_QUALITY_API_BASE
+      api_key: os.environ/LITELLM_SCRIPT_QUALITY_API_KEY
+      mock_response: os.environ/LITELLM_SCRIPT_QUALITY_MOCK_RESPONSE
+
+  - model_name: script-fast
+    litellm_params:
+      model: openai/script-fast-deployment
+      api_base: os.environ/LITELLM_SCRIPT_FAST_API_BASE
+      api_key: os.environ/LITELLM_SCRIPT_FAST_API_KEY
+      mock_response: os.environ/LITELLM_SCRIPT_FAST_MOCK_RESPONSE
+
+  # Bootstrap bridge target for ``litellm/text-llm`` (fix spec §32/§33).
+  - model_name: legacy-text
+    litellm_params:
+      model: openai/legacy-text-deployment
+      api_base: os.environ/LITELLM_LEGACY_TEXT_API_BASE
+      api_key: os.environ/LITELLM_LEGACY_TEXT_API_KEY
+      mock_response: os.environ/LITELLM_LEGACY_TEXT_MOCK_RESPONSE
+
+router_settings:
+  routing_strategy: simple-shuffle
+  # A deployment is cooled down after this many consecutive failures; Router
+  # handles provider-level retry so DramaForge does not (fix spec §4.4/§5).
+  num_retries: 2
+  request_timeout: 120
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Strict (spec §62): never silently drop unsupported params.
+  drop_params: false
+  # Emit cost headers so DramaForge can record x-litellm-response-cost (spec §43).
+  enable_response_cost_headers: true
+  # Do not use the LiteLLM DB for spend if we can avoid it in P0 — but the
+  # compose stack wires a dedicated litellm-db (spec §9/§10) for master keys,
+  # virtual keys and spend once enabled.
+  database_connection_pool_limit: 10

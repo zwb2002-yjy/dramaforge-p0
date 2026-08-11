@@ -56,7 +56,7 @@ def _text_result(payload: dict[str, Any]) -> httpx.Response:
             "usage": {"prompt_tokens": 10, "completion_tokens": 5},
             "model": "deepseek-v4-flash",
         },
-        request=payload and httpx.Request("POST", "https://gateway.example/chat/completions"),
+        request=payload and httpx.Request("POST", "https://gateway.example/v1/chat/completions"),
     )
 
 
@@ -101,7 +101,7 @@ async def test_litellm_adapter_builds_chat_contract() -> None:
     assert result.status == GenerationStatus.SUCCEEDED
     assert result.provider_metadata["text"] == "hello from gateway"
     assert len(requests) == 1
-    assert requests[0].url.path == "/chat/completions"
+    assert requests[0].url.path == "/v1/chat/completions"
     payload = json.loads(requests[0].content)
     backend = manifest.metadata["backend"]
     assert payload["model"] == backend["gateway_model"]
@@ -127,16 +127,105 @@ async def test_litellm_adapter_unconfigured_fails_closed() -> None:
     assert exc_info.value.details["code"] == MODEL_PROFILE_MODEL_NOT_CONFIGURED
 
 
-async def test_litellm_adapter_retries_transient_failure() -> None:
+async def test_litellm_adapter_single_attempt_on_gateway_503() -> None:
+    """DramaForge does ONE POST — LiteLLM Router owns retry (fix spec §5/§95)."""
     calls = {"n": 0}
 
     async def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
-        if calls["n"] < 3:
-            return httpx.Response(502, json={"error": "upstream"})
+        return httpx.Response(503, json={"error": {"message": "upstream down"}})
+
+    manifest = litellm_text_manifest()
+    adapter = LiteLLMModelAdapter(
+        manifest,
+        settings=_gateway_settings(),
+        transport=httpx.MockTransport(handler),
+    )
+    result = await adapter.create(
+        Capability.TEXT_GENERATE,
+        TextGenerateRequest(prompt="hi"),
+        ExecutionContext(trace_id="t"),
+    )
+    assert result.status == GenerationStatus.FAILED
+    assert calls["n"] == 1
+    assert result.provider_metadata["error_code"] == "provider_unavailable"
+
+
+async def test_litellm_adapter_classifies_gateway_errors() -> None:
+    """401→auth, unknown-model-400→model_unavailable, 429→rate_limited
+    (fix spec §63/§98)."""
+    cases = [
+        (401, {"error": {"message": "Unauthorized"}}, "auth_failed"),
+        (400, {"error": {"message": "Invalid model name passed in model=nope"}}, "model_unavailable"),
+        (429, {"error": {"message": "rate limit"}}, "rate_limited"),
+    ]
+
+    for status, body, expected_code in cases:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status, json=body)
+
+        manifest = litellm_text_manifest()
+        adapter = LiteLLMModelAdapter(
+            manifest,
+            settings=_gateway_settings(),
+            transport=httpx.MockTransport(handler),
+        )
+        result = await adapter.create(
+            Capability.TEXT_GENERATE,
+            TextGenerateRequest(prompt="hi"),
+            ExecutionContext(trace_id="t"),
+        )
+        assert result.status == GenerationStatus.FAILED, status
+        assert result.provider_metadata["error_code"] == expected_code, status
+
+
+async def test_litellm_adapter_read_timeout_returns_submit_unknown() -> None:
+    """Read timeout after POST is SUBMISSION_AMBIGUOUS — may be billed, never
+    auto re-POST (fix spec §64/§65)."""
+    calls = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ReadTimeout("timed out reading response", request=request)
+
+    manifest = litellm_text_manifest()
+    adapter = LiteLLMModelAdapter(
+        manifest,
+        settings=_gateway_settings(),
+        transport=httpx.MockTransport(handler),
+    )
+    result = await adapter.create(
+        Capability.TEXT_GENERATE,
+        TextGenerateRequest(prompt="hi"),
+        ExecutionContext(trace_id="t"),
+    )
+    assert result.status == GenerationStatus.SUBMIT_UNKNOWN
+    assert result.provider_metadata["error_code"] == "submission_outcome_unknown"
+    assert calls["n"] == 1
+
+
+async def test_litellm_adapter_records_allowlisted_metadata() -> None:
+    """x-litellm-* cost/retry/fallback/latency headers land in provider_metadata;
+    secrets never do (fix spec §47/§48/§100/§121)."""
+    requests_seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
         return httpx.Response(
             200,
-            json={"choices": [{"message": {"content": "ok"}}]},
+            headers={
+                "x-litellm-response-cost": "0.00123",
+                "x-litellm-attempted-retries": "1",
+                "x-litellm-attempted-fallbacks": "0",
+                "x-litellm-response-duration-ms": "42.5",
+                "x-litellm-call-id": "req-123",
+                "x-litellm-model-name": "openai/script-quality-deployment",
+            },
+            json={
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+                "model": "script-quality",
+            },
         )
 
     manifest = litellm_text_manifest()
@@ -151,8 +240,15 @@ async def test_litellm_adapter_retries_transient_failure() -> None:
         ExecutionContext(trace_id="t"),
     )
     assert result.status == GenerationStatus.SUCCEEDED
-    assert result.provider_metadata["text"] == "ok"
-    assert calls["n"] == 3
+    md = result.provider_metadata
+    assert str(md["litellm_response_cost"]) == "0.00123"
+    assert md["litellm_attempted_retries"] == 1
+    assert md["litellm_attempted_fallbacks"] == 0
+    assert md["litellm_response_duration_ms"] == 42.5
+    assert md["request_id"] == "req-123"
+    # Authorization is never reflected into metadata.
+    assert "authorization" not in {str(k).lower() for k in md}
+    assert md["usage"] == {"prompt_tokens": 5, "completion_tokens": 2}
 
 
 async def test_router_routes_text_generate_through_litellm_model() -> None:

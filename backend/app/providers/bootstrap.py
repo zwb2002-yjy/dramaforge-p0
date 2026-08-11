@@ -42,6 +42,10 @@ from app.providers.transport_registry import TransportRegistry
 # The LiteLLM text model registered in the default V3 registry (M7/M8). The
 # manifest carries a ``ModelBackendBinding`` so the generic adapter knows which
 # gateway model to send. P0 exposes ``text.generate`` through the gateway.
+# The text-llm model is a *bootstrap bridge* (fix spec §34/§103): it maps to the
+# configurable ``legacy-text`` logical alias so the gateway can serve the legacy
+# BYOK text path while logical aliases (script-quality / script-fast) are
+# registered separately by :func:`register_litellm_logical_models`.
 LITELLM_TEXT_MODEL_ID = "litellm/text-llm"
 
 # Transport profiles. One profile per wire endpoint family; a model's
@@ -176,7 +180,7 @@ class UnavailableAdapter:
 LITELLM_CHAT_TRANSPORT = TransportProfile(
     id="litellm-chat-v1",
     method="POST",
-    path_template="/chat/completions",
+    path_template="/v1/chat/completions",
     auth=AuthSpec(scheme="bearer"),
     content_type="application/json",
     request_encoding="json",
@@ -251,16 +255,19 @@ def build_v3_registry(
 def litellm_text_manifest() -> ModelManifest:
     """V3 manifest for the generic LiteLLM text model (spec §113/§114).
 
-    The ``gateway_model`` defaults to the configured text LLM model so the
-    gateway can serve the current BYOK text path before per-model gateway
-    deployments are added."""
+    LEGACY_COMPAT bootstrap bridge (fix spec §34/§103): the ``gateway_model``
+    is the configurable ``legacy-text`` logical alias, NOT an upstream provider
+    model (fix spec §32/§33 — DramaForge requests a logical group; LiteLLM's
+    Router picks the deployment). Prefer ``litellm/<logical-alias>`` models
+    registered by :func:`register_litellm_logical_models` in new profiles.
+    """
     from app.config import get_settings
     from app.providers.model_profiles.models import ModelBackendBinding
 
     settings = get_settings()
     backend = ModelBackendBinding(
         kind="litellm",
-        gateway_model=settings.text_llm_model or "deepseek-v4-flash",
+        gateway_model=settings.litellm_text_gateway_model or "legacy-text",
         api_mode="chat",
         provider_id="litellm",
         model_family="litellm",
@@ -271,7 +278,7 @@ def litellm_text_manifest() -> ModelManifest:
         id=LITELLM_TEXT_MODEL_ID,
         provider_id="litellm",
         model_name="text-llm",
-        display_name="LiteLLM 文本模型",
+        display_name="LiteLLM 文本模型（legacy bridge）",
         model_family="litellm",
         capability_specs={
             Capability.TEXT_GENERATE: CapabilitySpec(
@@ -288,7 +295,11 @@ def litellm_text_manifest() -> ModelManifest:
         execution_mode="sync",
         supports_cancel=False,
         submission_semantics=SubmissionSemantics(),
-        metadata={"backend": backend.model_dump(mode="json")},
+        metadata={
+            "backend": backend.model_dump(mode="json"),
+            "legacy_compat": True,
+            "bootstrap_bridge": True,
+        },
     )
 
 
@@ -356,4 +367,11 @@ def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
         build(manifest_dict["media_kind"], manifest_dict)
     registry, transport_registry = build_v3_registry(adapter_factories=factories)
     register_litellm_text_models(registry)
+    # Static logical aliases (script-quality / script-fast, fix spec §34/§104).
+    # Discovery sync (F8) can add more aliases from GET /v1/models later.
+    from app.providers.litellm_gateway.model_catalog import (
+        register_litellm_logical_models,
+    )
+
+    register_litellm_logical_models(registry)
     return registry, transport_registry

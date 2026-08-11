@@ -1,4 +1,4 @@
-"""Generic LiteLLM ModelAdapter (spec §24–§28, §113).
+"""Generic LiteLLM ModelAdapter (spec §24–§28, §113; fix spec §66–§71).
 
 A single adapter that submits any capability through a LiteLLM Gateway's
 OpenAI-compatible HTTP surface. It is *generic*: the wire behavior comes from the
@@ -7,15 +7,21 @@ manifest metadata — there is one adapter, not per-provider text/image/video
 adapters. P0 wires ``text.generate`` (``api_mode="chat"``); image/video gateway
 modes are reserved for the LiteLLM media plan.
 
-No ``litellm`` pip dependency: the gateway is a separate process (like the
-existing hub adapters) and the app talks to it over httpx.
+The adapter is a V3 *semantic* adapter: it maps ``TextGenerateRequest`` →
+OpenAI-compatible payload → ``ProviderCreateResult``. ALL HTTP to the official
+LiteLLM Proxy runs through :class:`LiteLLMGatewayClient` (spec §67) — the
+adapter never opens an httpx session and never retries: LiteLLM's Router owns
+provider/deployment retry/fallback/cooldown (spec §5/§95), and a read timeout
+after submit escalates to ``SUBMIT_UNKNOWN`` because the request may have been
+billed (spec §64/§65).
+
+No ``litellm`` pip dependency: the gateway is a separate process and the app
+talks to it over HTTP.
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-import httpx
 
 from app.config import Settings, get_settings
 from app.providers.capabilities import Capability
@@ -29,6 +35,8 @@ from app.providers.contracts.common import (
     ResolvedArtifact,
 )
 from app.providers.contracts.text import TextGenerateRequest
+from app.providers.errors import ProviderError, ProviderErrorCode
+from app.providers.litellm_gateway.client import LiteLLMGatewayClient
 from app.providers.manifest import ModelManifest
 from app.providers.model_profiles.models import ModelBackendBinding
 from app.providers.translation import (
@@ -36,10 +44,6 @@ from app.providers.translation import (
     TranslationReport,
     TranslationResult,
 )
-
-_DEFAULT_TIMEOUT_S = 120.0
-_RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
-_MAX_ATTEMPTS = 3
 
 
 class LiteLLMModelAdapter:
@@ -52,11 +56,13 @@ class LiteLLMModelAdapter:
         manifest: ModelManifest,
         *,
         settings: Settings | None = None,
-        transport: httpx.AsyncBaseTransport | None = None,
+        transport: Any = None,
+        client: LiteLLMGatewayClient | None = None,
     ) -> None:
         self._manifest = manifest
         self._settings_override = settings
         self._transport = transport
+        self._client_override = client
         raw_backend = manifest.metadata.get("backend") or {}
         self._backend = ModelBackendBinding.model_validate(raw_backend)
         self.model_id = manifest.id
@@ -66,6 +72,15 @@ class LiteLLMModelAdapter:
     def _settings(self) -> Settings:
         # Read lazily so tests can flip env vars + clear the settings cache.
         return self._settings_override or get_settings()
+
+    @property
+    def _client(self) -> LiteLLMGatewayClient:
+        if self._client_override is None:
+            self._client_override = LiteLLMGatewayClient(
+                settings=self._settings_override,
+                transport=self._transport,
+            )
+        return self._client_override
 
     @property
     def manifest(self) -> ModelManifest:
@@ -134,57 +149,63 @@ class LiteLLMModelAdapter:
 
             raise profile_model_not_configured(self.model_id)
         payload, _ = self._build_payload(capability, request)
-        url = self._chat_url()
-        headers = {
-            "Authorization": f"Bearer {self._settings.litellm_api_key.strip()}",
-            "Content-Type": "application/json",
-        }
-        async with httpx.AsyncClient(
-            timeout=_DEFAULT_TIMEOUT_S,
-            transport=self._transport,
-            proxy=None,
-            trust_env=False,
-        ) as client:
-            last_error = "litellm request failed"
-            for attempt in range(1, _MAX_ATTEMPTS + 1):
-                self.calls.append(
-                    {"op": "create", "capability": str(capability), "attempt": attempt}
-                )
-                try:
-                    resp = await client.post(url, headers=headers, json=payload)
-                    try:
-                        data = resp.json()
-                    except Exception:
-                        data = {"raw_status": resp.status_code, "text": resp.text[:200]}
-                    if resp.status_code < 400:
-                        text_out = _extract_completion_text(data)
-                        return ProviderCreateResult(
-                            status=GenerationStatus.SUCCEEDED,
-                            provider_metadata={
-                                "text": text_out,
-                                "usage": data.get("usage") if isinstance(data, dict) else {},
-                                "model": (
-                                    str(data.get("model") or "") if isinstance(data, dict) else ""
-                                ),
-                            },
-                        )
-                    last_error = f"litellm http {resp.status_code}: {str(data)[:160]}"
-                    if resp.status_code not in _RETRYABLE_STATUSES:
-                        break
-                except (
-                    httpx.TimeoutException,
-                    httpx.NetworkError,
-                    httpx.RemoteProtocolError,
-                ) as exc:
-                    last_error = f"litellm {type(exc).__name__}: {exc}"
-                if attempt < _MAX_ATTEMPTS:
-                    import asyncio
+        self.calls.append(
+            {"op": "create", "capability": str(capability), "attempt": 1}
+        )
+        try:
+            response = await self._client.chat_completion(
+                model=self._backend.gateway_model,
+                payload=payload,
+            )
+        except Exception as exc:  # noqa: BLE001 - classified below
+            # SUBMIT_UNKNOWN must win over the generic ProviderError branch:
+            # SubmissionOutcomeUnknownError IS a ProviderError, but the request
+            # may have been billed — surface the ambiguous state (spec §64/§65).
+            from app.providers.errors import (
+                ProviderErrorCode,
+                SubmissionOutcomeUnknownError,
+            )
 
-                    await asyncio.sleep(min(2.0 ** (attempt - 1), 4.0))
+            if isinstance(exc, SubmissionOutcomeUnknownError):
+                return ProviderCreateResult(
+                    status=GenerationStatus.SUBMIT_UNKNOWN,
+                    provider_metadata={
+                        "error_code": str(ProviderErrorCode.SUBMISSION_OUTCOME_UNKNOWN),
+                        "error": exc.message,
+                    },
+                )
+            if isinstance(exc, ProviderError):
+                # Classified gateway failure (spec §63): 401→auth, 404→model,
+                # 429→rate limit, 5xx/connect→gateway unavailable, 400 heuristics.
+                return ProviderCreateResult(
+                    status=GenerationStatus.FAILED,
+                    provider_metadata={
+                        "error_code": str(exc.code),
+                        "error": exc.message,
+                    },
+                )
             return ProviderCreateResult(
                 status=GenerationStatus.FAILED,
-                provider_metadata={"error": last_error},
+                provider_metadata={
+                    "error_code": str(ProviderErrorCode.UNKNOWN),
+                    "error": f"litellm {type(exc).__name__}: {exc}",
+                },
             )
+        text_out = _extract_completion_text(response.data)
+        metadata: dict[str, Any] = {
+            "text": text_out,
+            "usage": (
+                response.data.get("usage") if isinstance(response.data, dict) else {}
+            ),
+            "model": (
+                str(response.data.get("model") or "") if isinstance(response.data, dict) else ""
+            ),
+            **response.metadata,
+        }
+        return ProviderCreateResult(
+            status=GenerationStatus.SUCCEEDED,
+            provider_metadata=metadata,
+        )
 
     async def poll(
         self,
@@ -206,6 +227,8 @@ class LiteLLMModelAdapter:
         remote_task_id: str,
         context: ExecutionContext,
     ) -> ProviderCostResult:
+        # Sync text carries cost in the create result metadata (spec §45);
+        # there is no remote task to fetch cost for.
         return ProviderCostResult(currency="USD", amount=None)
 
     # ------------------------------------------------------------------
@@ -238,7 +261,6 @@ class LiteLLMModelAdapter:
         if not messages:
             messages.append({"role": "user", "content": ""})
         payload: dict[str, Any] = {
-            "model": self._backend.gateway_model,
             "messages": messages,
         }
         if request.max_tokens is not None:
@@ -250,13 +272,10 @@ class LiteLLMModelAdapter:
         if request.response_format:
             payload["response_format"] = request.response_format
         payload.update(request.native_options)
+        # The gateway model comes from the manifest's ModelBackendBinding; the
+        # client injects it as the wire ``model`` (spec §71). DramaForge never
+        # hardcodes an upstream provider model here.
         return payload, "chat"
-
-    def _chat_url(self) -> str:
-        base = self._settings.litellm_gateway_url.rstrip("/")
-        if base.endswith("/chat/completions"):
-            return base
-        return f"{base}/chat/completions"
 
 
 def _extract_completion_text(data: Any) -> str:

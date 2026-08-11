@@ -42,6 +42,58 @@ services:
       timeout: 5s
       retries: 10
 
+  # LiteLLM Proxy (fix spec §4.1/§6/§11). Official BerriAI image, pinned. The
+  # Proxy is DramaForge's unified LLM scheduler: it owns Router load-balancing /
+  # retry / fallback / cost / virtual keys. DramaForge talks to it over HTTP
+  # (never installs the litellm SDK). LiteLLM down does NOT block DramaForge
+  # startup (fix spec §13/§122) — api/workers have no hard depends_on here.
+  litellm-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:-litellm}
+      POSTGRES_DB: litellm
+    volumes:
+      - litellm_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  litellm:
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0}
+    environment:
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm}@litellm-db:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-dev-change-me}
+      # Deployment env for the logical aliases in infra/litellm/config.yaml.
+      # Empty values are valid (config loads); an alias is usable only when its
+      # api_base+api_key (or mock_response) are set. Never commit real keys.
+      LITELLM_SCRIPT_QUALITY_API_BASE: ${LITELLM_SCRIPT_QUALITY_API_BASE:-}
+      LITELLM_SCRIPT_QUALITY_API_KEY: ${LITELLM_SCRIPT_QUALITY_API_KEY:-}
+      LITELLM_SCRIPT_QUALITY_MOCK_RESPONSE: ${LITELLM_SCRIPT_QUALITY_MOCK_RESPONSE:-}
+      LITELLM_SCRIPT_FAST_API_BASE: ${LITELLM_SCRIPT_FAST_API_BASE:-}
+      LITELLM_SCRIPT_FAST_API_KEY: ${LITELLM_SCRIPT_FAST_API_KEY:-}
+      LITELLM_SCRIPT_FAST_MOCK_RESPONSE: ${LITELLM_SCRIPT_FAST_MOCK_RESPONSE:-}
+      LITELLM_LEGACY_TEXT_API_BASE: ${LITELLM_LEGACY_TEXT_API_BASE:-}
+      LITELLM_LEGACY_TEXT_API_KEY: ${LITELLM_LEGACY_TEXT_API_KEY:-}
+      LITELLM_LEGACY_TEXT_MOCK_RESPONSE: ${LITELLM_LEGACY_TEXT_MOCK_RESPONSE:-}
+    volumes:
+      - ./infra/litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      - "4000:4000"
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    healthcheck:
+      # liveliness only — never probe /health (may hit models + cost, §12).
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   migrate:
     build:
       context: ./backend
@@ -80,12 +132,15 @@ services:
       REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio,litellm,litellm-db}
       TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
       TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
       TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
       TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
       TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
+      LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      TEXT_V3_ROUTER_ENABLED: ${TEXT_V3_ROUTER_ENABLED:-false}
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}
@@ -154,12 +209,15 @@ services:
       REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio,litellm,litellm-db}
       TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
       TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
       TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
       TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
       TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
+      LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      TEXT_V3_ROUTER_ENABLED: ${TEXT_V3_ROUTER_ENABLED:-false}
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}
@@ -201,12 +259,15 @@ services:
       REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio,litellm,litellm-db}
       TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
       TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
       TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
       TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
       TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
+      LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      TEXT_V3_ROUTER_ENABLED: ${TEXT_V3_ROUTER_ENABLED:-false}
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}
@@ -226,3 +287,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  litellm_db_data:

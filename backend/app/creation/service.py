@@ -953,10 +953,30 @@ class CreationService:
                     ),
                     model_id=resolved.model_id,
                 )
+                if result.status is GenerationStatus.SUBMIT_UNKNOWN:
+                    # The gateway may have accepted and billed the request
+                    # (read timeout after submit, fix spec §64/§65). Persist the
+                    # ambiguous state and never auto re-POST.
+                    op.status = "unknown_submission"
+                    op.completed_at = datetime.now(UTC)
+                    op.error_code = "submission_outcome_unknown"
+                    op.error_summary = str(
+                        result.provider_metadata.get("error")
+                        or "submission outcome unknown"
+                    )[:200]
+                    from app.providers.errors import SubmissionOutcomeUnknownError
+
+                    raise SubmissionOutcomeUnknownError(op.error_summary)
                 if result.status is not GenerationStatus.SUCCEEDED:
-                    raise RuntimeError(
-                        str(result.provider_metadata.get("error") or "text llm failed")
-                    )
+                    op.status = "failed"
+                    op.completed_at = datetime.now(UTC)
+                    op.error_code = str(
+                        result.provider_metadata.get("error_code") or "provider_error"
+                    )[:100]
+                    op.error_summary = str(
+                        result.provider_metadata.get("error") or "text llm failed"
+                    )[:200]
+                    raise RuntimeError(op.error_summary)
                 remote_id = str(result.remote_task_id or "")
                 text_out = str(result.provider_metadata.get("text") or "")
                 op.provider_operation_id = remote_id or None
@@ -1011,7 +1031,10 @@ class CreationService:
             }
             return parsed, provider, model, cost
         except Exception as exc:  # noqa: BLE001 - provider/schema boundary
-            op.status = "failed"
+            if op.status != "unknown_submission":
+                # A submit-unknown path was already recorded as ambiguous above;
+                # do not downgrade it to a plain failure (fix spec §64/§65).
+                op.status = "failed"
             op.completed_at = datetime.now(UTC)
             op.response_summary = {
                 "error": str(exc)[:160],
@@ -1050,8 +1073,14 @@ async def _text_call_cost(
             )
         else:
             in_tok = out_tok = 0.0
+        # Cost comes from the gateway's response headers (fix spec §43–§46):
+        # LiteLLM computes the provider request cost; DramaForge records it.
+        amount = (
+            metadata.get("litellm_response_cost")
+            or metadata.get("litellm_response_cost_original")
+        )
         return {
-            "amount": 0,
+            "amount": str(amount) if amount is not None else 0,
             "currency": "USD",
             "units": in_tok + out_tok,
             "input_tokens": in_tok,

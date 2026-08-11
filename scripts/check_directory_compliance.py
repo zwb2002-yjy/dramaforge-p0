@@ -34,6 +34,7 @@ ALLOWED_ROOT = {
     "DramaForge_Model_Plugin_Architecture_V3_Full_Development_Spec.md",
     "dramaforge_model_plugin_development_spec_for_dsv4flash.md",
     "DramaForge_Multi_Model_Production_Profile_LiteLLM_DS_Development_Spec.md",
+    "DramaForge_LiteLLM_Proxy_Current_Dev_Fix_Spec_for_DS.md",
     "README.md",
     "CLAUDE.md",
     "AGENTS.md",

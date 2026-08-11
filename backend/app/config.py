@@ -125,12 +125,17 @@ class Settings(BaseSettings):
     )
     text_llm_api_style: Literal["anthropic", "openai"] = "anthropic"
 
-    # LiteLLM Gateway backend (spec §24–§26, §113). Text models registered in
-    # the V3 registry with ``backend.kind="litellm"`` submit through this
-    # OpenAI-compatible gateway.
+    # LiteLLM Gateway backend (spec §24–§26, §113; fix spec §3/§22). Text models
+    # registered in the V3 registry with ``backend.kind="litellm"`` submit
+    # through this OpenAI-compatible gateway. ``LITELLM_API_KEY`` is the
+    # DramaForge Virtual/Master key used to call the gateway — NOT an upstream
+    # provider key (fix spec §22/§57).
     litellm_gateway_url: str = Field(
         default="",
-        description="LiteLLM Gateway base URL, e.g. https://gateway.example",
+        description=(
+            "LiteLLM Gateway base URL; canonical dev value http://litellm:4000 "
+            "(fix spec §19/§20 — adapter always appends /v1/chat/completions)"
+        ),
     )
     litellm_api_key: str = Field(default="", description="LiteLLM Gateway API key")
     # text.generate V3 router migration flag (spec §100–§101). When enabled,
@@ -138,6 +143,24 @@ class Settings(BaseSettings):
     # Default OFF so the legacy OpenAI adapter path stays the production path
     # until the router path is stable.
     text_v3_router_enabled: bool = False
+    # Logical alias the ``litellm/text-llm`` bootstrap bridge sends to the
+    # gateway (fix spec §32/§33). Decoupled from TEXT_LLM_MODEL — DramaForge
+    # requests the logical group, the LiteLLM Router picks the deployment.
+    litellm_text_gateway_model: str = Field(
+        default="legacy-text",
+        description="Logical gateway model alias used by the litellm/text-llm bridge",
+    )
+    # Static logical aliases registered as ``litellm/<alias>`` text models
+    # (fix spec §34/§41/§104). Profile slots (planning.brief/script/storyboard)
+    # can bind these even before discovery runs.
+    litellm_logical_models: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["script-quality", "script-fast"],
+        description="Comma-separated LiteLLM logical aliases registered at bootstrap",
+    )
+    # Best-effort startup sync of ``GET /v1/models`` into the default registry
+    # (fix spec §36/§37). Default OFF keeps app boot fast and gateway-independent;
+    # admin refresh / tests call the sync service explicitly.
+    litellm_discovery_startup: bool = False
 
     # Local TTS is opt-in for formal development verification.
     tts_enabled: bool = False
