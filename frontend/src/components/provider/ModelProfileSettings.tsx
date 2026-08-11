@@ -99,28 +99,46 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
     },
   });
 
+  const existingInputs = (): Record<string, ProfileBindingInput> => {
+    const out: Record<string, ProfileBindingInput> = {};
+    for (const [slotId, read] of Object.entries(projectProfile.data?.bindings ?? {})) {
+      out[slotId] = {
+        model_id: read.model_id,
+        native_options: read.native_options,
+        enabled: read.enabled,
+      };
+    }
+    return out;
+  };
+
   const saveSimple = () => {
-    const bindings = simpleModeToBindings({
+    const patch = simpleModeToBindings({
       llm: simple.llm || undefined,
       image: simple.image || undefined,
       video: simple.video || undefined,
     });
-    if (Object.keys(bindings).length === 0) {
+    if (Object.keys(patch).length === 0) {
       setError("请至少选择一个模型。");
       return;
     }
-    save.mutate(bindings);
+    // Merge over the existing bindings so untouched slots are preserved
+    // (the PUT replaces the whole map; the patch must carry the full set).
+    save.mutate({ ...existingInputs(), ...patch });
   };
 
   const saveAdvanced = () => {
-    const bindings: Record<string, ProfileBindingInput> = {};
+    const patch: Record<string, ProfileBindingInput> = {};
     for (const slot of slots.data ?? []) {
       const modelId = advancedChoices[slot.id] ?? effectiveSlotModel(slot.id);
       if (modelId) {
-        bindings[slot.id] = { model_id: modelId };
+        patch[slot.id] = { model_id: modelId };
       }
     }
-    save.mutate(bindings);
+    if (Object.keys(patch).length === 0 && !projectProfile.data) {
+      setError("没有可保存的模型选择。");
+      return;
+    }
+    save.mutate({ ...existingInputs(), ...patch });
   };
 
   const modelsForCapability = (slot: ModelSlotRead) =>

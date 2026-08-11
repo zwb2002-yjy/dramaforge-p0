@@ -162,6 +162,86 @@ async def test_missing_project_binding_is_fail_closed(session: AsyncSession) -> 
 
 
 @pytest.mark.asyncio
+async def test_profile_binding_drives_media_selection_without_project_binding(
+    session: AsyncSession,
+) -> None:
+    """M9/M1-fix: a workspace-default model profile binding video.shot to the
+    seeded agnes model resolves the A+B selection even without a
+    ProjectProviderBinding (spec §134 rule 6 — profile is the driver)."""
+    project, binding = await _seed(session)
+    from app.providers.model_profiles.models import ModelSlotBinding
+    from app.providers.model_profiles.service import ProductionModelProfileService
+    from app.providers.model_profiles.slots import ModelSlot
+
+    service = ProductionModelProfileService(session)
+    await service.create(
+        workspace_id=project.workspace_id,
+        actor_id=binding.created_by,
+        name="默认方案",
+        bindings={
+            ModelSlot.VIDEO_SHOT: ModelSlotBinding(
+                slot=ModelSlot.VIDEO_SHOT,
+                model_id="agnes/agnes-video-v2.0",
+            )
+        },
+        is_default=True,
+    )
+    await session.flush()
+    plan = await ModelSelectionService(session).select_video(
+        project=project, intent=_intent()
+    )
+    assert plan.model_binding_id == binding.id
+    assert plan.invoke_model_value == "agnes-video-v2.0"
+    assert plan.protocol_profile == "agnes_cn_v1"
+
+
+@pytest.mark.asyncio
+async def test_profile_binding_without_credential_falls_back_to_project_binding(
+    session: AsyncSession,
+) -> None:
+    """A profile model with no matching credentialed ProviderModelBinding falls
+    back to the project binding (fix for finding #1)."""
+    project, binding = await _seed(session)
+    from app.providers.model_profiles.models import ModelSlotBinding
+    from app.providers.model_profiles.service import ProductionModelProfileService
+    from app.providers.model_profiles.slots import ModelSlot
+    from app.providers.models import ProjectProviderBinding
+
+    service = ProductionModelProfileService(session)
+    await service.create(
+        workspace_id=project.workspace_id,
+        actor_id=binding.created_by,
+        name="默认方案",
+        bindings={
+            ModelSlot.VIDEO_SHOT: ModelSlotBinding(
+                slot=ModelSlot.VIDEO_SHOT,
+                # A registered model with no credentialed binding in this
+                # workspace (only agnes is connected) → fall back.
+                model_id="volcengine/doubao-seedance-1-0-pro-250528",
+            )
+        },
+        is_default=True,
+    )
+    session.add(
+        ProjectProviderBinding(
+            project_id=project.id,
+            workspace_id=project.workspace_id,
+            purpose="video",
+            model_binding_id=binding.id,
+            selection_strategy="explicit_binding",
+            fallback_policy="none",
+            updated_by=uuid4(),
+        )
+    )
+    await session.flush()
+    plan = await ModelSelectionService(session).select_video(
+        project=project, intent=_intent()
+    )
+    assert plan.model_binding_id == binding.id
+    assert plan.invoke_model_value == "agnes-video-v2.0"
+
+
+@pytest.mark.asyncio
 async def test_unverified_binding_is_fail_closed(session: AsyncSession) -> None:
     project, binding = await _seed(session, account_verified=False, quality_gated=False)
     session.add(

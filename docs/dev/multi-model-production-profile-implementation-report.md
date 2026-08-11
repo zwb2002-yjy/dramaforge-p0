@@ -116,12 +116,33 @@ ModelRegistry → ModelManifest → BackendBinding
 ## 6. Remaining risks / 未做项
 
 1. **完整 Playwright E2E 未跑**：API 级 E2E + PG 迁移已验证；spec §117 的「LLM A → Image B → Video C」浏览器全流程（Idea → Brief → Script → Storyboard → Keyframe → Video）需要运行栈 + 真实/mock provider，作为发布验收项。
-2. **视频 slot 执行级集成未完成**：`video.shot` 的 derived capability 校验在 resolver 层已 fail-fast（spec §122），但媒体执行仍由 A+B binding 决定模型；Profile 的 video.shot 与 A+B 的 purpose=video binding 是两套选择，需后续打通（spec §115「逐步切」）。
-3. **`visual.character` / `visual.storyboard` / `visual.image_edit` / `audio.tts` 为扩展 Slot**：可配置但不驱动执行（P0 只接 keyframe/video/文本三路）。
-4. **LiteLLM 媒体能力（image/video gateway modes）未接**：`ModelBackendBinding` 预留 `api_mode=image_generation/video_generation`，本次只实现 chat；图片/视频仍走 native（A+B）。
-5. **R1 TranslationReport 仍为空壳**（V3 遗留，P1）：`LegacyAdapterBridge` 的 effective==requested。
+2. **`visual.character` / `visual.storyboard` / `visual.image_edit` / `audio.tts` 为扩展 Slot**：可配置但不驱动执行（P0 只接 keyframe/video/文本三路）。
+3. **LiteLLM 媒体能力（image/video gateway modes）未接**：`ModelBackendBinding` 预留 `api_mode=image_generation/video_generation`，本次只实现 chat；图片/视频仍走 native（A+B）。
+4. **LiteLLM 文本成本为 0**：`_text_call_cost` 对 V3 路径记 amount=0（usage tokens 已记录）；精确定价随 CostLedger P1。
+5. **R1 TranslationReport 仍为空壳**（V3 遗留，P1）。
 6. **CI 7-job 未在干净候选重跑**：`postgres-integration` 本地 14 passed；远端 CI 与完整 formal Gate 待发布。
 7. **旧 ProviderOperation 独立列迁移**（L7，P1）：slot/model 暂存于 `request_summary` JSON。
+
+---
+
+## 6.1 评审修复（2026-08-11 第二轮）
+
+针对 `/code-review` 的 10 项发现，已修复 8 项，2 项评估为可接受/延后：
+
+| 发现 | 处置 |
+|---|---|
+| #1 Profile 未被媒体执行消费（最严重） | ✅ **A+B selection 打通**：`ModelSelectionService._resolve_binding` 在无项目 binding 时优先按 `keyframe→visual.keyframe`、`video→video.shot` 从项目有效 Profile 解析模型，匹配 workspace 内已认证的 `ProviderModelBinding`（provider/model 对齐）；无认证匹配则回退项目 binding（test：`test_profile_binding_drives_media_selection_without_project_binding` / `..._falls_back_to_project_binding`）。Profile 现在真正驱动媒体模型选择。 |
+| #2 Profile native_options 未应用 | ✅ 生成服务解析后合并 profile options 进请求（request 优先）并过 validator；指纹改用 client 请求模型保证幂等身份稳定。 |
+| #3 前端保存整表替换（数据丢失） | ✅ `saveSimple`/`saveAdvanced` 改为在现有 bindings 上打 patch（`existingInputs()`），未触槽位保留；空 patch 拒绝保存。 |
+| #4 乐观锁 check-then-act 竞态 | ✅ `update`/`apply_simple_mode` 用 `_get_for_update()`（SELECT … FOR UPDATE）串行化并发写。 |
+| #5 effective 预览用错 video capability | ✅ 预览按 `planned_capability_for_slot`（video→i2v）解析，回退首个声明的 capability；不可服务时跳过而非 500。 |
+| #6 text 成本记 0 | 延后：usage tokens 已记录；精确定价属 CostLedger P1（报告 §6 项 4）。 |
+| #7 litellm transport 未注册 | ✅ 注册 `litellm-chat-v1` TransportProfile。 |
+| #8 litellm 文本模型恒显示「未配置」 | ✅ `binding_reads` 对 provider=`litellm` 用 gateway settings 判定 configured。 |
+| #9 幂等指纹含解析后模型 | ✅ 指纹改用 client 请求的 `model_id`（请求后 Profile 变化仍复用原操作）。 |
+| #10 video 快照硬编码 i2v + derive_video_capability 死代码 | ✅ `start_shot_nodes` 对 video 用 `derive_video_capability` 推导并传入快照解析（P0 首帧=keyframe → i2v），helper 进入生产路径。 |
+
+修复后质量：backend unit **514 passed**、PG integration **14 passed**、ruff + mypy 149 源码全绿；frontend typecheck/lint/vitest 26 passed。
 
 ---
 

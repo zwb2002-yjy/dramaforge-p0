@@ -36,6 +36,15 @@ def node_slot_for(node_key: str) -> tuple[ModelSlot, Capability] | None:
     return NODE_SLOT_MAP.get(node_key)
 
 
+def planned_capability_for_slot(slot: ModelSlot) -> Capability | None:
+    """Capability a node plans for a slot (video.shot → image_to_video), used
+    by previews that need the capability the pipeline will actually exercise."""
+    for _node_key, (mapped_slot, capability) in NODE_SLOT_MAP.items():
+        if mapped_slot == slot:
+            return capability
+    return None
+
+
 def derive_video_capability(
     *,
     first_frame: bool,
@@ -62,12 +71,19 @@ async def planned_node_model_profile(
     project: Project,
     node_key: str,
     registry: Any | None = None,
+    video_capability: Capability | None = None,
 ) -> dict[str, Any]:
-    """Best-effort planned model for a node's slot. Never raises."""
+    """Best-effort planned model for a node's slot. Never raises.
+
+    ``video_capability`` lets callers pass the capability derived from the
+    shot's actual inputs (spec §43); defaulting to i2v (P0 shots always have a
+    keyframe as the first frame)."""
     pair = node_slot_for(node_key)
     if pair is None:
         return {}
     slot, capability = pair
+    if node_key == "video" and video_capability is not None:
+        capability = video_capability
     resolver = ModelBindingResolver(session, registry=registry)
     try:
         resolved = await resolver.resolve(

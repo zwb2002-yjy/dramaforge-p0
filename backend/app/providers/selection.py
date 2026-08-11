@@ -30,6 +30,8 @@ from app.providers.intents import (
     VideoGenerationIntentV1,
 )
 from app.providers.manifest import ModelCapabilityManifest
+from app.providers.model_profiles.models import ModelSlotBinding
+from app.providers.model_profiles.slots import ModelSlot
 from app.providers.models import (
     ProjectProviderBinding,
     ProviderConnection,
@@ -44,6 +46,12 @@ from app.shared.errors import NotFoundError, ValidationAppError
 _OPERATION_PURPOSE = {
     IMAGE_GENERATE: "keyframe",
     VIDEO_GENERATE: "video",
+}
+
+# A+B media purpose → Production Model Profile slot (spec §134 rule 6).
+_PURPOSE_SLOT: dict[str, ModelSlot] = {
+    "keyframe": ModelSlot.VISUAL_KEYFRAME,
+    "video": ModelSlot.VIDEO_SHOT,
 }
 
 
@@ -211,6 +219,31 @@ class ModelSelectionService:
     ) -> ProviderModelBinding:
         binding_id = requested_binding_id
         if binding_id is None:
+            # Profile-driven (spec §134 rule 6): if the project's
+            # ProductionModelProfile binds a model to this purpose's slot, prefer
+            # the matching credentialed ProviderModelBinding. Fall back to the
+            # project binding when no credentialed match exists (the profile
+            # model may lack a connection for its provider).
+            profile_binding = await self._profile_binding_for_purpose(project, purpose)
+            if profile_binding is not None:
+                provider_type, sep, model_name = profile_binding.model_id.partition("/")
+                if sep and provider_type and model_name:
+                    matching = await self._session.scalar(
+                        select(ProviderModelBinding)
+                        .join(
+                            ProviderConnection,
+                            ProviderConnection.id == ProviderModelBinding.connection_id,
+                        )
+                        .where(
+                            ProviderModelBinding.workspace_id == project.workspace_id,
+                            ProviderModelBinding.enabled.is_(True),
+                            ProviderModelBinding.model_id == model_name,
+                            ProviderConnection.provider_type == provider_type,
+                        )
+                        .order_by(ProviderModelBinding.updated_at.desc())
+                    )
+                    if matching is not None:
+                        return matching
             project_binding = await self._session.scalar(
                 select(ProjectProviderBinding).where(
                     ProjectProviderBinding.project_id == project.id,
@@ -235,4 +268,35 @@ class ModelSelectionService:
         )
         if binding is None:
             raise NotFoundError("model binding not found")
+        return binding
+
+    async def _profile_binding_for_purpose(
+        self, project: Project, purpose: str
+    ) -> ModelSlotBinding | None:
+        """The project's effective model-profile binding for a media purpose, or
+        None. Project profile wins over the workspace default (spec §15)."""
+        from app.providers.model_profiles.orm import ProductionModelProfile
+        from app.providers.model_profiles.service import parse_bindings
+
+        slot = _PURPOSE_SLOT.get(purpose)
+        if slot is None:
+            return None
+        profile = await self._session.scalar(
+            select(ProductionModelProfile).where(
+                ProductionModelProfile.project_id == project.id,
+            )
+        )
+        if profile is None:
+            profile = await self._session.scalar(
+                select(ProductionModelProfile).where(
+                    ProductionModelProfile.workspace_id == project.workspace_id,
+                    ProductionModelProfile.project_id.is_(None),
+                    ProductionModelProfile.is_default.is_(True),
+                )
+            )
+        if profile is None:
+            return None
+        binding = parse_bindings(profile.bindings).get(slot)
+        if binding is None or not binding.enabled:
+            return None
         return binding

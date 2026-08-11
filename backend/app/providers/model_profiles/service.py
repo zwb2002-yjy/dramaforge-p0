@@ -155,6 +155,25 @@ class ProductionModelProfileService:
             raise profile_not_found()
         return profile
 
+    async def _get_for_update(self, *, profile_id: UUID) -> ProductionModelProfile:
+        """Row-locked read for version-check-then-write (optimistic lock, spec
+        §72–§73). Serializes concurrent updates so two writers with the same
+        ``expected_version`` cannot both pass the check (PG FOR UPDATE; SQLite
+        ignores the lock but the partial default index still fails closed)."""
+        from typing import cast
+
+        profile = cast(
+            "ProductionModelProfile | None",
+            await self._session.scalar(
+                select(ProductionModelProfile)
+                .where(ProductionModelProfile.id == profile_id)
+                .with_for_update()
+            ),
+        )
+        if profile is None:
+            raise profile_not_found()
+        return profile
+
     async def list_workspace_profiles(
         self, *, workspace_id: UUID
     ) -> list[ProductionModelProfile]:
@@ -272,7 +291,7 @@ class ProductionModelProfileService:
         is_default: bool | None = None,
         expected_version: int | None = None,
     ) -> ProductionModelProfile:
-        profile = await self.get(profile_id=profile_id)
+        profile = await self._get_for_update(profile_id=profile_id)
         if expected_version is not None and profile.version != expected_version:
             raise profile_version_conflict(expected_version, profile.version)
         if name is not None:
@@ -305,7 +324,7 @@ class ProductionModelProfileService:
     ) -> ProductionModelProfile:
         """Simple-mode batch patch (spec §30/§77/§78): LLM / Image / Video map to
         slot groups. ``bindings`` stays the single source of truth."""
-        profile = await self.get(profile_id=profile_id)
+        profile = await self._get_for_update(profile_id=profile_id)
         if expected_version is not None and profile.version != expected_version:
             raise profile_version_conflict(expected_version, profile.version)
         bindings = parse_bindings(profile.bindings)
@@ -499,11 +518,22 @@ class ProductionModelProfileService:
             .all()
         )
         configured: set[str] = set(rows)
+        # The LiteLLM gateway is configured via settings, not a ProviderConnection
+        # (spec §113), so its text model must not display as unconfigured.
+        from app.config import get_settings
+
+        settings = get_settings()
+        litellm_configured = bool(
+            settings.litellm_gateway_url.strip() and settings.litellm_api_key.strip()
+        )
         result: dict[str, BindingRead] = {}
         for slot, binding in bindings.items():
             model = self._registry.get_or_none(binding.model_id)
             provider_id = model.manifest.provider_id if model is not None else ""
             display_name = model.manifest.display_name if model is not None else binding.model_id
+            is_configured = (
+                litellm_configured if provider_id == "litellm" else provider_id in configured
+            )
             result[str(slot)] = BindingRead(
                 slot=str(slot),
                 model_id=binding.model_id,
@@ -511,7 +541,7 @@ class ProductionModelProfileService:
                 enabled=binding.enabled,
                 provider_id=provider_id,
                 display_name=display_name,
-                configured=provider_id in configured,
+                configured=is_configured,
             )
         return result
 

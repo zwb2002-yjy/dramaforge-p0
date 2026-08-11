@@ -445,11 +445,23 @@ async def start_shot_nodes(
         model_profile: dict[str, object] = {}
         if key in {"keyframe", "video", "voice"}:
             from app.providers.model_profiles.node_snapshot import (
+                derive_video_capability,
                 planned_node_model_profile,
             )
 
+            video_capability = None
+            if key == "video":
+                # P0 shots always carry a keyframe as the video's first frame.
+                # Extend here when shots declare last-frame / reference inputs
+                # (spec §43 derivation order).
+                video_capability = derive_video_capability(
+                    first_frame=True, last_frame=False, references=False
+                )
             model_profile = await planned_node_model_profile(
-                session, project=project, node_key=key
+                session,
+                project=project,
+                node_key=key,
+                video_capability=video_capability,
             )
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),

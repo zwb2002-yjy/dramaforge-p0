@@ -26,6 +26,8 @@ def _manifest(
     native_options: dict[str, ParameterSpec] = {}
     if Capability.TEXT_GENERATE in capabilities:
         native_options["temperature"] = ParameterSpec(type="number")
+    if Capability.IMAGE_GENERATE in capabilities:
+        native_options["size"] = ParameterSpec(type="string", enum=["9:16", "1:1"])
     return ModelManifest(
         manifest_version="1",
         id=model_id,

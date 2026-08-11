@@ -173,12 +173,24 @@ class UnavailableAdapter:
         raise NotImplementedError("V2 adapter is not wired yet (Phase 3)")
 
 
+LITELLM_CHAT_TRANSPORT = TransportProfile(
+    id="litellm-chat-v1",
+    method="POST",
+    path_template="/chat/completions",
+    auth=AuthSpec(scheme="bearer"),
+    content_type="application/json",
+    request_encoding="json",
+    response_mode="sync",
+)
+
+
 def _register_transports(registry: TransportRegistry) -> None:
     for profile in (
         AGNES_IMAGE_TRANSPORT,
         AGNES_VIDEO_TRANSPORT,
         ARK_IMAGE_TRANSPORT,
         ARK_VIDEO_TRANSPORT,
+        LITELLM_CHAT_TRANSPORT,
     ):
         if registry.get_or_none(profile.id) is None:
             registry.register(profile)

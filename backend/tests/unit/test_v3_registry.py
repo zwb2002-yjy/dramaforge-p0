@@ -117,6 +117,7 @@ class TestModelRegistry:
             "agnes-video-v1",
             "ark-image-v1",
             "ark-video-v1",
+            "litellm-chat-v1",
         }
 
     def test_duplicate_model_rejected(self) -> None:

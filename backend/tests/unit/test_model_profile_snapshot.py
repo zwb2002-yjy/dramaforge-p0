@@ -207,6 +207,44 @@ async def test_generation_service_explicit_model_wins(
     assert run.input_snapshot["generation"]["requested_model"] == "test/image-a"
 
 
+async def test_profile_native_options_reach_generation_request(
+    session: AsyncSession, world, registry
+) -> None:
+    """Fix (finding #2): profile native options are carried into the generation
+    (snapshot + validated request) so they actually reach the provider."""
+    service = ProductionModelProfileService(session, registry=registry)
+    await service.create(
+        workspace_id=world["workspace"].id,
+        actor_id=world["user"].id,
+        name="方案",
+        bindings={
+            ModelSlot.VISUAL_KEYFRAME: ModelSlotBinding(
+                slot=ModelSlot.VISUAL_KEYFRAME,
+                model_id=TEST_IMAGE_A,
+                native_options={"size": "9:16"},
+            )
+        },
+        is_default=True,
+    )
+    await session.flush()
+    router = CapabilityRouter(registry=registry)
+    gen = GenerationService(session, router)
+    run = await gen.create_generation(
+        project=world["project"],
+        actor=world["user"],
+        capability=Capability.IMAGE_GENERATE,
+        model_id=None,
+        slot=None,
+        input_data={"prompt": "雨夜"},
+        options={},
+        native_options={},
+        idempotency_key=None,
+    )
+    assert run.status == "queued"
+    mp = (run.input_snapshot or {}).get("model_profile") or {}
+    assert mp.get("native_options") == {"size": "9:16"}
+
+
 async def test_text_slot_snapshots_round_trip(
     session: AsyncSession, world, registry
 ) -> None:

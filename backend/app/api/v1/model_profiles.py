@@ -380,17 +380,26 @@ async def get_effective_bindings(
     for slot, binding in parse_bindings(profile.bindings).items():
         if not binding.enabled:
             continue
-        first_capability = slot_definition(slot).required_capabilities[0]
+        # Preview resolves each slot with the capability the pipeline will
+        # actually exercise (video.shot → image_to_video for P0), falling back
+        # to the slot's first declared capability.
+        from app.providers.model_profiles.node_snapshot import (
+            planned_capability_for_slot,
+        )
+
+        preview_capability = planned_capability_for_slot(slot) or slot_definition(
+            slot
+        ).required_capabilities[0]
         try:
             resolved = await resolver.resolve(
                 workspace_id=project.workspace_id,
                 project_id=project.id,
                 slot=slot,
-                capability=first_capability,
+                capability=preview_capability,
             )
         except Exception:
-            # Preview only: a slot whose bound model cannot serve the first
-            # capability (e.g. an i2v-only video model) is skipped, not 500.
+            # Preview only: a slot whose bound model cannot serve the planned
+            # capability (e.g. a t2v-only video model) is skipped, not 500.
             continue
         result.append(
             EffectiveBindingRead(

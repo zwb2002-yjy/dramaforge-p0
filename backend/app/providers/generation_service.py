@@ -94,9 +94,11 @@ class GenerationService:
         # before falling to the system default. Explicit request model still wins.
         from app.providers.model_profiles.resolver import ModelBindingResolver
 
+        requested_model_id = model_id
         resolved_model_id = model_id
         resolved_profile: dict[str, object] | None = None
-        if resolved_model_id is None:
+        resolved_native_options: dict[str, Any] = {}
+        if requested_model_id is None:
             slot_value = slot or _DEFAULT_SLOT_BY_CAPABILITY.get(capability)
             if slot_value is not None:
                 from app.providers.model_profiles.slots import ModelSlot
@@ -117,6 +119,7 @@ class GenerationService:
                     capability=capability,
                 )
                 resolved_model_id = resolved.model_id
+                resolved_native_options = resolved.native_options
                 resolved_profile = {
                     "slot": str(resolved.slot),
                     "model_id": resolved.model_id,
@@ -140,9 +143,18 @@ class GenerationService:
                 f"model does not support capability: {capability}",
                 details={"code": "UNSUPPORTED_CAPABILITY", "capability": str(capability)},
             )
+        # Idempotency identity is the CLIENT's request (capability + input +
+        # requested model), not the server-side resolved model — a retry of the
+        # same key after a profile change must reuse the original operation.
+        fingerprint = v3_request_fingerprint(
+            capability, request, model_id=requested_model_id or ""
+        )
+        # Merge profile native options into the request (request body wins) and
+        # validate the merged set, so profile-level options actually reach the
+        # provider (spec §46 priority: request > project profile > manifest).
+        if resolved_native_options:
+            request.native_options = {**resolved_native_options, **request.native_options}
         self._router.validator.validate(request, spec)
-
-        fingerprint = v3_request_fingerprint(capability, request, model_id=model.manifest.id)
 
         # Capture identity BEFORE the submission transaction: an IntegrityError
         # rollback expires the caller's ORM objects, so the recovery path must
