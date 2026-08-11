@@ -35,7 +35,7 @@ from app.providers.contracts.common import (
     ResolvedArtifact,
 )
 from app.providers.contracts.text import TextGenerateRequest
-from app.providers.errors import ProviderError, ProviderErrorCode
+from app.providers.errors import ProviderError
 from app.providers.litellm_gateway.client import LiteLLMGatewayClient
 from app.providers.manifest import ModelManifest
 from app.providers.model_profiles.models import ModelBackendBinding

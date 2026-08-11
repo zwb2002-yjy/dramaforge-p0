@@ -141,6 +141,7 @@ services:
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       TEXT_V3_ROUTER_ENABLED: ${TEXT_V3_ROUTER_ENABLED:-false}
+      LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}
@@ -218,6 +219,7 @@ services:
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       TEXT_V3_ROUTER_ENABLED: ${TEXT_V3_ROUTER_ENABLED:-false}
+      LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}
@@ -268,6 +270,7 @@ services:
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       TEXT_V3_ROUTER_ENABLED: ${TEXT_V3_ROUTER_ENABLED:-false}
+      LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}

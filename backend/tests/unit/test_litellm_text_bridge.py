@@ -156,12 +156,18 @@ async def test_litellm_adapter_classifies_gateway_errors() -> None:
     (fix spec §63/§98)."""
     cases = [
         (401, {"error": {"message": "Unauthorized"}}, "auth_failed"),
-        (400, {"error": {"message": "Invalid model name passed in model=nope"}}, "model_unavailable"),
+        (
+            400,
+            {"error": {"message": "Invalid model name passed in model=nope"}},
+            "model_unavailable",
+        ),
         (429, {"error": {"message": "rate limit"}}, "rate_limited"),
     ]
 
     for status, body, expected_code in cases:
-        async def handler(request: httpx.Request) -> httpx.Response:
+        async def handler(
+            request: httpx.Request, status=status, body=body
+        ) -> httpx.Response:
             return httpx.Response(status, json=body)
 
         manifest = litellm_text_manifest()

@@ -235,6 +235,23 @@ class TestCatalogSync:
         assert await service.sync() == []
 
 
+class TestNoSdkDependency:
+    def test_backend_never_imports_litellm_sdk(self) -> None:
+        """DramaForge backend must not import the ``litellm`` pip package — the
+        Proxy is a separate runtime (fix spec §128-1/§116)."""
+        from pathlib import Path
+
+        backend = Path(__file__).resolve().parents[2]
+        offenders: list[str] = []
+        for path in (backend / "app").rglob("*.py"):
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith(("import litellm", "from litellm")):
+                    offenders.append(f"{path}:{line}")
+        assert not offenders, f"backend imports litellm SDK:\n{chr(10).join(offenders)}"
+
+
 class TestProfileLogicalAliasRouting:
     async def test_planning_script_binds_script_quality_alias(self) -> None:
         """planning.script → litellm/script-quality → gateway payload model
