@@ -138,3 +138,18 @@ class TestDefaultRegistryQueryable:
         # Phase 3 wires real adapters; until then capability queries work
         models = model_registry.find_by_capability(Capability.VIDEO_IMAGE_TO_VIDEO)
         assert len(models) == 2
+
+
+class TestDefaultRegistryRealAdapters:
+    def test_default_registry_wires_v2_bridges(self) -> None:
+        """Phase 8/9: the default registry's adapters are real V2 bridges over
+        the unified runtime (translate works), not query-only placeholders."""
+        from app.providers.adapters_v2 import LegacyAdapterBridge
+        from app.providers.bootstrap import default_v3_registry
+
+        model_registry, _ = default_v3_registry()
+        for model in model_registry.list_models():
+            assert isinstance(model.adapter, LegacyAdapterBridge)
+            assert model.adapter.provider_id == model.manifest.provider_id
+            assert model.adapter.model_id == model.manifest.id
+

@@ -158,6 +158,11 @@ class LegacyAdapterBridge:
     def manifest(self) -> ModelManifest:
         return self._v3
 
+    @property
+    def protocol_profile(self) -> str:
+        raw = self._v3.metadata.get("protocol_profile")
+        return str(raw) if raw else ""
+
     def _compiler_for(self, capability: Capability) -> Any:
         if capability in {Capability.IMAGE_GENERATE, Capability.IMAGE_EDIT}:
             if self._components.image_compiler is None:

@@ -386,7 +386,7 @@ def to_v3_model_manifest(
         provider_id=manifest.provider_type,
         model_name=manifest.model_id,
         display_name=manifest.display_name,
-        model_family=manifest.model_revision,
+        model_family=None,
         capability_specs=capability_specs,
         execution_mode=execution_mode_value,
         supports_cancel=False,

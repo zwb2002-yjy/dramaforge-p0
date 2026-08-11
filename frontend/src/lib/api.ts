@@ -768,3 +768,129 @@ export async function registerLeadCharacter(
     csrf,
   );
 }
+
+// ---------------------------------------------------------------------------
+// V3 model capability / unified generation API (spec §58).
+// ---------------------------------------------------------------------------
+
+export interface CapabilityRead {
+  id: string;
+  display_name: string;
+}
+
+export interface ModelRead {
+  id: string;
+  provider_id: string;
+  display_name: string;
+  enabled: boolean;
+  configured: boolean;
+  available: boolean;
+  capabilities: string[];
+}
+
+export interface ParameterSpecRead {
+  type: "string" | "integer" | "number" | "boolean" | "array" | "object";
+  title?: string | null;
+  description?: string | null;
+  required?: boolean;
+  default?: unknown;
+  enum?: unknown[];
+  minimum?: number | null;
+  maximum?: number | null;
+  ui_component?:
+    | "switch"
+    | "select"
+    | "number"
+    | "slider"
+    | "input"
+    | "textarea"
+    | "multi_select"
+    | null;
+}
+
+export interface InputSlotSpecRead {
+  required: boolean;
+  minimum: number;
+  maximum?: number | null;
+  media_types: string[];
+  description?: string | null;
+}
+
+export interface ConditionalConstraintRead {
+  when: Record<string, unknown>;
+  require: string[];
+  forbid: string[];
+  allowed: Record<string, unknown[]>;
+}
+
+export interface CapabilitySpecRead {
+  capability: string;
+  input_slots: Record<string, InputSlotSpecRead>;
+  common_options: Record<string, ParameterSpecRead>;
+  native_options: Record<string, ParameterSpecRead>;
+  constraints: {
+    mutually_exclusive: string[][];
+    requires: Record<string, string[]>;
+    conditional: ConditionalConstraintRead[];
+  };
+  transport_profile_id: string;
+}
+
+export interface ModelManifestRead {
+  id: string;
+  provider_id: string;
+  model_name: string;
+  display_name: string;
+  execution_mode: string;
+  supports_cancel: boolean;
+  capability_specs: Record<string, CapabilitySpecRead>;
+}
+
+export async function listCapabilities(): Promise<CapabilityRead[]> {
+  return apiGet<CapabilityRead[]>("/api/v1/capabilities");
+}
+
+export async function listModels(capability?: string): Promise<ModelRead[]> {
+  const query = capability ? `?capability=${encodeURIComponent(capability)}` : "";
+  return apiGet<ModelRead[]>(`/api/v1/models${query}`);
+}
+
+export async function getModelManifest(modelId: string): Promise<ModelManifestRead> {
+  return apiGet<ModelManifestRead>(`/api/v1/models/${modelId}`);
+}
+
+export interface GenerationCreateResult {
+  operation_id: string;
+  status: string;
+  requested_capability: string;
+  requested_model?: string | null;
+}
+
+export async function createGeneration(
+  projectId: string,
+  body: {
+    capability: string;
+    model_id?: string | null;
+    input: Record<string, unknown>;
+    options: Record<string, unknown>;
+    native_options: Record<string, unknown>;
+  },
+  idempotencyKey?: string,
+): Promise<GenerationCreateResult> {
+  const csrf = await fetchCsrf();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-CSRF-Token": csrf,
+    ...workspaceHeaders(),
+  };
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  const response = await fetch(`${API_BASE}/api/v1/projects/${projectId}/generations`, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw await parseError(response);
+  return (await response.json()) as GenerationCreateResult;
+}

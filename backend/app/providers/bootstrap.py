@@ -214,5 +214,45 @@ def build_v3_registry(
 
 def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
     """Module-level singleton used by API endpoints / routers. Adapters are
-    query-only placeholders until Phase 3 upgrades the default registry."""
-    return build_v3_registry()
+    real V2 bridges over the unified A+B runtime: one bridge per seeded model,
+    built from the provider plugin's compiler + runtime factories. A bridge
+    submits only when the underlying provider is configured (settings key);
+    otherwise it fails closed exactly like the runtime does."""
+    from app.config import get_settings
+    from app.providers.adapters_v2 import BridgeComponents, LegacyAdapterBridge
+    from app.providers.catalog_seed_data import seed_manifests_for
+    from app.providers.registry import get_plugin
+
+    factories: dict[str, Callable[[ModelManifest], ModelAdapter]] = {}
+
+    def build(media_kind: str, manifest_dict: dict[str, Any]) -> None:
+        a_b = ModelCapabilityManifest.model_validate(manifest_dict)
+        v3_id = f"{a_b.provider_type}/{a_b.model_id}"
+        plugin = get_plugin(a_b.provider_type, a_b.protocol_profile)
+        if plugin.runtime_factory is None or plugin.compiler_factory is None:
+            return
+        image_compiler, video_compiler = plugin.compiler_factory()
+        runtime = plugin.runtime_factory(
+            settings=get_settings(),
+            host=plugin.default_base_url,
+        )
+
+        def factory(v3_manifest: ModelManifest) -> ModelAdapter:
+            return LegacyAdapterBridge(
+                v3_manifest,
+                BridgeComponents(
+                    a_b_manifest=a_b,
+                    image_compiler=image_compiler if media_kind == "image" else None,
+                    video_compiler=video_compiler if media_kind == "video" else None,
+                    runtime=runtime,
+                ),
+                invoke_model_value=a_b.model_id,
+            )
+
+        factories[v3_id] = factory
+
+    for manifest_dict in seed_manifests_for(provider_type="agnes"):
+        build(manifest_dict["media_kind"], manifest_dict)
+    for manifest_dict in seed_manifests_for(provider_type="volcengine"):
+        build(manifest_dict["media_kind"], manifest_dict)
+    return build_v3_registry(adapter_factories=factories)

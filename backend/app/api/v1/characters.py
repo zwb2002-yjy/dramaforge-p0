@@ -14,8 +14,6 @@ from app.assets.characters import (
     record_canonical_provider_operation,
     register_lead_character,
 )
-from app.config import get_settings
-from app.providers.flux import get_flux_adapter_for_workspace
 from app.storage.minio_store import get_object_store
 
 router = APIRouter(tags=["characters"], dependencies=[Depends(require_selected_workspace)])
@@ -56,7 +54,6 @@ async def register_project_lead(
         project_id=project_id,
         actor=user,
     )
-    settings = get_settings()
     prompt = body.locked_prompt.strip() or (
         f"portrait reference sheet of {body.name}, consistent face, clean background, studio light"
     )
@@ -83,45 +80,49 @@ async def register_project_lead(
     try:
         import asyncio
 
-        # Formal path: live only when configured; no silent Fake outside test
-        adapter = await get_flux_adapter_for_workspace(
+        # Formal path: route through the V3 CapabilityRouter → workspace bridge.
+        # Live only when the workspace BYOK credential is configured; no Fake.
+        from app.providers.capabilities import Capability
+        from app.providers.contracts import ExecutionContext, ImageGenerateRequest
+        from app.providers.workspace_router import resolve_workspace_bridge
+
+        bridge = await resolve_workspace_bridge(
             session,
             workspace_id=project.workspace_id,
-            allow_live=settings.app_env != "test",
-            allow_fake=settings.app_env == "test",
+            provider_type="agnes",
+            media_kind="image",
         )
-        provider_name = str(getattr(adapter, "provider", type(adapter).__name__))
-        model_name = str(getattr(adapter, "model", "") or provider_name)
+        provider_name = bridge.provider_id
+        model_name = bridge.manifest.model_name
         created = await asyncio.wait_for(
-            adapter.create({"prompt": prompt, "kind": "keyframe"}),
+            bridge.create(
+                Capability.IMAGE_GENERATE,
+                ImageGenerateRequest(prompt=prompt),
+                ExecutionContext(trace_id=f"canonical-{run.id}"),
+            ),
             timeout=330.0,
         )
-        remote = str(created.get("remote_task_id") or "")
-        poll = await asyncio.wait_for(adapter.poll(remote), timeout=30.0)
-        status = str(poll.get("status", created.get("status", "")))
-        if status in {"failed", "error"} or (
-            status and status not in {"succeeded", "completed", "success", "queued", "running", ""}
-        ):
-            err = str(poll.get("error") or status or "provider_failed")
+        status = str(created.status.value)
+        remote = str(created.remote_task_id or "")
+        if status in {"failed", "error"} or status != "succeeded":
+            err = str(created.provider_metadata.get("error_code") or status)
             _fail_run("CANONICAL_PROVIDER_FAILED", err)
             raise ValidationAppError(
                 f"provider_not_configured or provider failed: {err}",
             )
-        adapter_blobs = getattr(adapter, "blobs", {})
-        if remote in adapter_blobs:
-            blob = adapter_blobs[remote]
-        else:
-            from app.execution.product_path import _resolve_media_bytes
-
-            uri = poll.get("artifact_uri") or created.get("artifact_uri")
-            if not uri and status == "failed":
-                _fail_run("CANONICAL_PROVIDER_FAILED", str(poll.get("error")))
-                raise ValidationAppError(
-                    f"provider_not_configured or provider failed: {poll.get('error')}"
-                )
-            blob = await _resolve_media_bytes(
-                kind="keyframe", remote=remote, prompt=prompt, artifact_uri=uri
+        if not created.artifact_uri:
+            _fail_run("CANONICAL_PROVIDER_FAILED", "no artifact uri from provider")
+            raise ValidationAppError(
+                "provider_not_configured or provider failed: no artifact uri",
             )
+        from app.execution.product_path import _resolve_media_bytes
+
+        blob = await _resolve_media_bytes(
+            kind="keyframe",
+            remote=remote,
+            prompt=prompt,
+            artifact_uri=created.artifact_uri,
+        )
         if not blob:
             _fail_run("CANONICAL_PROVIDER_FAILED", "empty canonical image")
             raise ValidationAppError(
@@ -130,7 +131,7 @@ async def register_project_lead(
         await record_canonical_provider_operation(
             session,
             run=run,
-            adapter=adapter,
+            adapter=bridge,
             provider_name=provider_name,
             model_name=model_name,
             prompt=prompt,
@@ -148,12 +149,6 @@ async def register_project_lead(
             "或改用受审计手工上传 canonical。"
         ) from exc
     except Exception as exc:  # noqa: BLE001 — surface provider failure without killing API
-        from app.providers.flux import ProviderNotConfiguredError
-
-        if isinstance(exc, ProviderNotConfiguredError):
-            _fail_run("PROVIDER_NOT_CONFIGURED", str(exc))
-            await session.flush()
-            raise
         from app.shared.errors import AppError
 
         if isinstance(exc, AppError):
@@ -193,7 +188,7 @@ async def register_project_lead(
     }
     run.finished_at = datetime.now(UTC)
     await session.commit()
-    provider = str(getattr(adapter, "provider", type(adapter).__name__))
+    provider = provider_name
     return RegisterLeadResponse(
         character_id=char.character_id,
         asset_id=char.asset_id,
