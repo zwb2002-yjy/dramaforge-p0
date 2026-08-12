@@ -230,6 +230,16 @@ class NodeRun(Base):
     graph_node_id: Mapped[UUID] = mapped_column(
         ForeignKey("graph_nodes.id", ondelete="RESTRICT"), nullable=False
     )
+    production_batch_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("production_batches.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    budget_reservation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("budget_reservations.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     parent_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)

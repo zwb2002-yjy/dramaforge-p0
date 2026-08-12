@@ -14,6 +14,7 @@ from app.assets.characters import (
     record_canonical_provider_operation,
     register_lead_character,
 )
+from app.director.legacy_guard import require_legacy_execution_allowed
 from app.storage.minio_store import get_object_store
 
 router = APIRouter(tags=["characters"], dependencies=[Depends(require_selected_workspace)])
@@ -53,6 +54,9 @@ async def register_project_lead(
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id,
         actor=user,
+    )
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="direct_canonical_generation"
     )
     prompt = body.locked_prompt.strip() or (
         f"portrait reference sheet of {body.name}, consistent face, clean background, studio light"

@@ -132,16 +132,19 @@ async def test_reference_head_get_hash_length_and_one_artifact_binding(
     second_token = urlsplit(second_grant.url).path.rsplit("/", 1)[-1]
     assert first_token != second_token
 
-    from app.api.v1.provider_references import provider_reference
+    from app.api.v1.provider_references import (
+        provider_reference_get,
+        provider_reference_head,
+    )
 
-    get_response = await provider_reference(first_token, _request("GET"), session)
+    get_response = await provider_reference_get(first_token, _request("GET"), session)
     assert get_response.status_code == 200
     assert get_response.body == first_bytes
     assert get_response.headers["content-type"] == "image/png"
     assert get_response.headers["content-length"] == str(len(first_bytes))
     assert get_response.headers["x-content-sha256"] == hashlib.sha256(first_bytes).hexdigest()
 
-    head_response = await provider_reference(first_token, _request("HEAD"), session)
+    head_response = await provider_reference_head(first_token, _request("HEAD"), session)
     assert head_response.status_code == 200
     assert head_response.body == b""
     assert head_response.headers["content-length"] == str(len(first_bytes))

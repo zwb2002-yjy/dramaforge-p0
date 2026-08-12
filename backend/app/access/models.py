@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -79,6 +80,30 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+class InstanceBootstrapState(Base):
+    """Non-sensitive singleton tracking the first self-hosted Owner.
+
+    This table intentionally has no user-scoped RLS: unauthenticated bootstrap
+    must be able to answer only whether an Owner already exists. User records
+    remain protected by their existing FORCE RLS policy.
+    """
+
+    __tablename__ = "instance_bootstrap_state"
+    __table_args__ = (
+        CheckConstraint(
+            "singleton_id = 1", name="ck_instance_bootstrap_state_singleton"
+        ),
+    )
+
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    owner_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class Project(Base):

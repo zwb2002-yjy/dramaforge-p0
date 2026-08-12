@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from app.config import Settings, clear_settings_cache, project_env_file
+from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
 
@@ -21,6 +22,9 @@ def test_default_settings_load() -> None:
     assert settings.arq_default_queue_name
     assert settings.arq_heavy_queue_name
     assert settings.arq_heavy_max_jobs == 4
+    assert Settings.model_fields["public_registration_enabled"].default is False
+    assert settings.insightface_enabled is False
+    assert settings.worker_token == ""
 
 
 def test_cors_origins_from_csv(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -36,6 +40,21 @@ def test_cors_origins_from_csv(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_session_secret_min_length() -> None:
     with pytest.raises(ValidationError):
         Settings(session_secret="short", byok_fernet_key="test-byok-fernet-key-replace==")
+
+
+def test_production_rejects_published_or_missing_secrets() -> None:
+    with pytest.raises(ValidationError):
+        Settings(app_env="production")
+
+
+def test_production_accepts_generated_secrets() -> None:
+    settings = Settings(
+        app_env="production",
+        session_secret="s" * 48,
+        worker_token="w" * 48,
+        byok_fernet_key=Fernet.generate_key().decode(),
+    )
+    assert settings.app_env == "production"
 
 
 def test_project_env_file_does_not_depend_on_working_directory(

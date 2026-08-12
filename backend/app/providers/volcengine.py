@@ -732,6 +732,17 @@ class ArkVideoCompiler:
             raise ValueError("model does not accept a first_frame reference")
         if len(first_refs) > constraint.max:
             raise ValueError("too many first_frame references")
+        if any(
+            value is not None
+            for value in (
+                intent.output.aspect_ratio,
+                intent.output.duration_seconds,
+                intent.output.generate_audio,
+            )
+        ):
+            raise ValueError(
+                "Ark video catalog revision cannot express duration, ratio, or audio"
+            )
 
     async def compile(
         self,

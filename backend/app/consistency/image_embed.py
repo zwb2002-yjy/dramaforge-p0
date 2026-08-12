@@ -10,6 +10,7 @@ import hashlib
 import struct
 from importlib import import_module
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
@@ -32,10 +33,21 @@ def insightface_available() -> bool:
         return False
     _INSIGHT_TRIED = True
     try:
+        settings = get_settings()
+        model_name = settings.insightface_model_name.strip()
+        model_root = Path(settings.insightface_model_root).expanduser()
+        model_dir = model_root / "models" / model_name
+        if not model_name or not model_dir.is_dir() or not any(model_dir.glob("*.onnx")):
+            _INSIGHT_ERROR = (
+                "licensed model files are not installed; configure "
+                "INSIGHTFACE_MODEL_ROOT and INSIGHTFACE_MODEL_NAME"
+            )
+            return False
         FaceAnalysis = import_module("insightface.app").FaceAnalysis
 
         app = FaceAnalysis(
-            name="buffalo_l",
+            name=model_name,
+            root=str(model_root),
             providers=["CPUExecutionProvider"],
         )
         app.prepare(ctx_id=-1, det_size=(640, 640))

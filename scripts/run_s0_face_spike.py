@@ -37,6 +37,7 @@ from app.consistency.face import (  # noqa: E402
     recommend_threshold,
     threshold_candidates,
 )
+from app.config import get_settings  # noqa: E402
 
 FIXTURE_DIR = REPO_ROOT / "fixtures" / "images" / "character_canonical"
 MANIFEST_PATH = FIXTURE_DIR / "manifest.json"
@@ -110,6 +111,17 @@ def probe_insightface() -> dict[str, Any]:
 
 def try_build_face_app() -> tuple[Any | None, str | None]:
     """Build InsightFace FaceAnalysis on CPU, or return error string."""
+    settings = get_settings()
+    if not settings.insightface_enabled:
+        return None, "InsightFace disabled by INSIGHTFACE_ENABLED=false"
+    model_name = settings.insightface_model_name.strip()
+    model_root = Path(settings.insightface_model_root).expanduser()
+    model_dir = model_root / "models" / model_name
+    if not model_name or not model_dir.is_dir() or not any(model_dir.glob("*.onnx")):
+        return None, (
+            "licensed model files are not installed; configure "
+            "INSIGHTFACE_MODEL_ROOT and INSIGHTFACE_MODEL_NAME"
+        )
     try:
         from insightface.app import FaceAnalysis  # type: ignore[import-untyped]
     except Exception as exc:  # noqa: BLE001
@@ -117,7 +129,8 @@ def try_build_face_app() -> tuple[Any | None, str | None]:
 
     try:
         app = FaceAnalysis(
-            name="buffalo_l",
+            name=model_name,
+            root=str(model_root),
             providers=["CPUExecutionProvider"],
         )
         app.prepare(ctx_id=-1, det_size=(640, 640))

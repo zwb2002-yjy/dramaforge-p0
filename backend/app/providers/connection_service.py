@@ -135,6 +135,49 @@ class ProviderConnectionService:
             .all()
         )
 
+    async def set_binding_pricing(
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        model_binding_id: UUID,
+        actor: User,
+        unit_amount: Decimal,
+        currency: str,
+        billing_unit: str,
+        source_note: str,
+    ) -> ProviderModelBinding:
+        await self.get_connection(
+            workspace_id=workspace_id, connection_id=connection_id
+        )
+        binding = await self._session.scalar(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.id == model_binding_id,
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.connection_id == connection_id,
+            )
+        )
+        if binding is None:
+            raise NotFoundError("model binding not found")
+        if unit_amount < 0 or len(currency.strip()) != 3 or not billing_unit.strip():
+            raise ValidationAppError("invalid binding pricing snapshot")
+        binding.pricing_snapshot_json = {
+            "unit_amount": str(unit_amount),
+            "currency": currency.upper(),
+            "billing_unit": billing_unit.strip(),
+            "source": "workspace_owner_verified",
+            "source_note": source_note.strip(),
+            "verified_at": datetime.now(UTC).isoformat(),
+            "verified_by": str(actor.id),
+            "catalog_entry_id": (
+                str(binding.catalog_entry_id) if binding.catalog_entry_id else None
+            ),
+            "capability_manifest_hash": binding.capability_manifest_hash,
+        }
+        binding.updated_by = actor.id
+        await self._session.flush()
+        return binding
+
     async def get_connection(
         self, *, workspace_id: UUID, connection_id: UUID
     ) -> ProviderConnection:

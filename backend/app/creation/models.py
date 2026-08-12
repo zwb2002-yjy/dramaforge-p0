@@ -48,6 +48,7 @@ _agent_operation = Enum(
     "draft_brief",
     "refine_brief",
     "draft_plan",
+    "skill_execute",
     name="agent_operation",
     create_constraint=False,
     native_enum=True,

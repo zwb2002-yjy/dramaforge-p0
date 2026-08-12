@@ -10,7 +10,7 @@ import socket
 from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -52,6 +52,7 @@ from app.shared.errors import (
 from app.storage.minio_store import ObjectStore, get_object_store
 
 if TYPE_CHECKING:
+    from app.director.execution_guard import DirectorMediaExecutionContext
     from app.providers.runtime import ResolvedReference
 
 _MAX_PROVIDER_MEDIA_BYTES = 512 * 1024 * 1024
@@ -472,6 +473,70 @@ async def _read_bound_artifact(
     return artifact, data
 
 
+async def _bind_director_canonical_source(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    snapshot: dict[str, object],
+) -> dict[str, object]:
+    """Resolve the Director's frozen canonical source without a silent fallback."""
+
+    raw_source_id = snapshot.get("canonical_source_run_id")
+    if raw_source_id is None or snapshot.get("canonical_artifact_id") is not None:
+        return snapshot
+    try:
+        source_id = UUID(str(raw_source_id))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValidationAppError(
+            "canonical source NodeRun binding is invalid",
+            details={"code": "CANONICAL_SOURCE_RUN_INVALID"},
+        ) from exc
+    source = await session.get(NodeRun, source_id)
+    if (
+        source is None
+        or source.project_id != run.project_id
+        or run.production_batch_id is None
+        or source.production_batch_id != run.production_batch_id
+    ):
+        raise ValidationAppError(
+            "canonical source NodeRun is outside this Director production batch",
+            details={"code": "CANONICAL_SOURCE_RUN_INVALID"},
+        )
+    if (
+        source.status not in {"completed", "cached", "completed_after_cancel"}
+        or source.result_artifact_id is None
+    ):
+        raise ValidationAppError(
+            "canonical source NodeRun has not completed with an image",
+            details={"code": "CANONICAL_SOURCE_NOT_READY"},
+        )
+    artifact = await session.get(Artifact, source.result_artifact_id)
+    origin = (
+        await session.get(NodeRun, source.reused_from_run_id)
+        if source.reused_from_run_id is not None
+        else source
+    )
+    if (
+        artifact is None
+        or artifact.project_id != run.project_id
+        or artifact.artifact_type != "image"
+        or artifact.storage_state != "available"
+        or artifact.deleted_at is not None
+        or origin is None
+        or artifact.produced_by_run_id != origin.id
+    ):
+        raise ValidationAppError(
+            "canonical source NodeRun image Artifact is missing",
+            details={"code": "CANONICAL_SOURCE_ARTIFACT_MISSING"},
+        )
+    resolved = {
+        **snapshot,
+        **_artifact_snapshot(artifact, prefix="canonical"),
+        "canonical_source_run_id": str(source.id),
+    }
+    return resolved
+
+
 def identity_priority_keyframe_prompt(
     prompt: str,
     *,
@@ -496,11 +561,12 @@ async def _commit_terminal_failure(
     run: NodeRun,
     error_code: str,
     error_summary: str,
+    status: str = "failed",
 ) -> None:
     """Commit a terminal state before the Worker exception boundary rolls back."""
     from datetime import UTC, datetime
 
-    run.status = "failed"
+    run.status = status
     run.error_code = error_code
     run.error_summary = error_summary[:500]
     run.finished_at = datetime.now(UTC)
@@ -511,6 +577,48 @@ async def _commit_terminal_failure(
     await session.flush()
     await session.commit()
     await set_node_run_rls_context(session, node_run_id=run.id)
+
+
+async def _validate_director_submission_or_block(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    node: GraphNode,
+    provider_operation: ProviderOperation | None = None,
+) -> DirectorMediaExecutionContext | None:
+    from datetime import UTC, datetime
+
+    from app.director.execution_guard import (
+        DirectorExecutionGuardError,
+        validate_director_media_submission,
+    )
+
+    try:
+        return await validate_director_media_submission(
+            session,
+            run=run,
+            node=node,
+        )
+    except DirectorExecutionGuardError as exc:
+        if provider_operation is not None:
+            provider_operation.status = "rejected"
+            provider_operation.error_code = exc.code
+            provider_operation.error_summary = exc.message[:500]
+            provider_operation.completed_at = datetime.now(UTC)
+        blocked_budget = exc.code in {
+            "DIRECTOR_PRODUCTION_CONTEXT_REQUIRED",
+            "DIRECTOR_BUDGET_RESERVATION_INVALID",
+            "DIRECTOR_BUDGET_AUTHORIZATION_INACTIVE",
+            "DIRECTOR_BUDGET_AUTHORIZATION_EXCEEDED",
+        }
+        await _commit_terminal_failure(
+            session,
+            run=run,
+            error_code=exc.code,
+            error_summary=exc.message,
+            status="blocked_budget" if blocked_budget else "failed",
+        )
+        raise
 
 
 async def claim_media_node_run(
@@ -858,6 +966,7 @@ async def _unified_resolved_reference(
     the platform grant), Agnes references travel as bytes (data URI / raw
     base64). A missing reference fails closed."""
     from app.providers.reference_delivery import issue_artifact_reference
+    from app.providers.runtime import ResolvedReference
 
     if provider_type == "volcengine":
         if artifact is None:
@@ -924,6 +1033,7 @@ async def _execute_unified_media_node_run(
         ImageGenerationIntent,
         ModelSelectionIntent,
         VideoGenerationIntentV1,
+        VideoOutputIntent,
     )
     from app.providers.manifest import ModelCapabilityManifest
     from app.providers.models import ProviderConnection, ProviderModelBinding
@@ -966,6 +1076,7 @@ async def _execute_unified_media_node_run(
     initial_status = "queued"
     synchronous_image = False
     result: SubmissionResult | None = None
+    director_context: DirectorMediaExecutionContext | None = None
 
     resubmit = bool(
         op is not None
@@ -1012,6 +1123,22 @@ async def _execute_unified_media_node_run(
 
     if op is None or resubmit:
         # New submission. Resolve via the shared selection engine.
+        director_context = await _validate_director_submission_or_block(
+            session,
+            run=run,
+            node=node,
+        )
+        frozen_binding_id = (
+            director_context.model_binding_id if director_context is not None else None
+        )
+        if frozen_binding_id is None and snap.get("model_binding_id") is not None:
+            try:
+                frozen_binding_id = UUID(str(snap["model_binding_id"]))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ValidationAppError(
+                    "frozen model binding is invalid",
+                    details={"code": "MODEL_BINDING_INVALID"},
+                ) from exc
         first_frame: Artifact | None = None
         frame_bytes: bytes | None = None
         image_intent: ImageGenerationIntent | None = None
@@ -1024,9 +1151,19 @@ async def _execute_unified_media_node_run(
                     reference_uuid = UUID(canonical_artifact_id)
                 except ValueError:
                     reference_uuid = None
+            raw_ratio = str(snap.get("aspect_ratio") or project.aspect_ratio or "")
+            image_size = {
+                "9:16": "1080x1920",
+                "16:9": "1920x1080",
+            }.get(raw_ratio)
+            if image_size is None:
+                raise ValidationAppError(
+                    "Director image request has an unsupported aspect ratio",
+                    details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
+                )
             image_intent = ImageGenerationIntent(
                 prompt=prompt,
-                size=None,
+                size=image_size,
                 seed=None,
                 reference_artifact_id=reference_uuid,
                 reference_fingerprint=(
@@ -1035,7 +1172,10 @@ async def _execute_unified_media_node_run(
                     else None
                 ),
                 reference_mime=str(snap.get("canonical_mime_type") or "image/png"),
-                selection=ModelSelectionIntent(mode="explicit_binding"),
+                selection=ModelSelectionIntent(
+                    mode="explicit_binding",
+                    model_binding_id=frozen_binding_id,
+                ),
             )
         else:
             first_frame = await approved_first_frame_for_video(session, video_run=run)
@@ -1048,8 +1188,32 @@ async def _execute_unified_media_node_run(
                     "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes unavailable "
                     "for video I2V"
                 )
+            raw_duration = snap.get("duration_seconds")
+            try:
+                duration_seconds = round(float(str(raw_duration)))
+            except (TypeError, ValueError):
+                duration_seconds = 0
+            if duration_seconds <= 0:
+                raise ValidationAppError(
+                    "Director video request has no valid duration",
+                    details={"code": "DURATION_REQUIRED"},
+                )
+            raw_ratio = str(snap.get("aspect_ratio") or project.aspect_ratio or "")
+            video_ratio: Literal["9:16", "16:9"] | None = (
+                "9:16" if raw_ratio == "9:16" else "16:9" if raw_ratio == "16:9" else None
+            )
+            if video_ratio is None:
+                raise ValidationAppError(
+                    "Director video request has an unsupported aspect ratio",
+                    details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
+                )
             video_intent = VideoGenerationIntentV1(
                 prompt=prompt,
+                output=VideoOutputIntent(
+                    aspect_ratio=video_ratio,
+                    duration_seconds=duration_seconds,
+                    generate_audio=False,
+                ),
                 references=[
                     ArtifactReferenceIntent(
                         artifact_id=first_frame.id,
@@ -1057,7 +1221,10 @@ async def _execute_unified_media_node_run(
                         required=True,
                     )
                 ],
-                selection=ModelSelectionIntent(mode="explicit_binding"),
+                selection=ModelSelectionIntent(
+                    mode="explicit_binding",
+                    model_binding_id=frozen_binding_id,
+                ),
             )
 
         service = ModelSelectionService(session)
@@ -1067,6 +1234,11 @@ async def _execute_unified_media_node_run(
         else:
             assert video_intent is not None
             plan = await service.select_video(project=project, intent=video_intent)
+        if frozen_binding_id is not None and plan.model_binding_id != frozen_binding_id:
+            raise ValidationAppError(
+                "unified selection changed the frozen model binding",
+                details={"code": "MODEL_BINDING_SNAPSHOT_MISMATCH"},
+            )
         invoke_model_value = plan.invoke_model_value
         provider_type = plan.provider_type
         protocol_profile = plan.protocol_profile
@@ -1151,6 +1323,14 @@ async def _execute_unified_media_node_run(
         fingerprint = hashlib.sha256(
             f"{kind}:{prompt}:{compiled.model_dump_json()}".encode()
         ).hexdigest()
+        # Revalidate after request compilation, immediately before persisting
+        # the submission marker and making the paid call.
+        if director_context is not None:
+            await _validate_director_submission_or_block(
+                session,
+                run=run,
+                node=node,
+            )
         if op is None:
             op = ProviderOperation(
                 node_run_id=run.id,
@@ -1162,7 +1342,24 @@ async def _execute_unified_media_node_run(
                 protocol_profile=protocol_profile,
                 request_fingerprint=fingerprint,
                 status="submission_started",
-                request_summary={"kind": kind, "execution_path": UNIFIED_PATH_VERSION},
+                request_summary={
+                    "kind": kind,
+                    "execution_path": UNIFIED_PATH_VERSION,
+                    "intent": (
+                        image_intent.model_dump(mode="json")
+                        if image_intent is not None
+                        else video_intent.model_dump(mode="json")
+                        if video_intent is not None
+                        else {}
+                    ),
+                    "compiled_request": compiled.safe_request_summary,
+                    "reference_artifact_ids": [
+                        str(value) for value in compiled.reference_artifact_ids
+                    ],
+                    "reference_fingerprints": list(compiled.reference_fingerprints),
+                    "frozen_model_binding_id": str(binding.id),
+                    "capability_manifest_hash": plan.manifest_hash,
+                },
                 response_summary={},
                 submitted_at=now,
                 connection_id=connection.id,
@@ -1187,6 +1384,14 @@ async def _execute_unified_media_node_run(
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
+
+        if director_context is not None:
+            await _validate_director_submission_or_block(
+                session,
+                run=run,
+                node=node,
+                provider_operation=op,
+            )
 
         if isinstance(compiled, CompiledImageRequest):
             result = await resolved.runtime.submit_image(compiled)
@@ -1345,6 +1550,10 @@ async def _execute_unified_media_node_run(
         "poll_count": poll_count,
         "query_kind": resume.query_kind,
     }
+    if run.production_batch_id is not None and run.budget_reservation_id is not None:
+        from app.director.execution_guard import settle_director_media_cost
+
+        await settle_director_media_cost(session, run=run, operation=op)
     if status not in {"succeeded", "completed", "success"}:
         error_summary = str(getattr(poll, "error_code", None) or status)[:500]
         op.status = "failed"
@@ -1487,6 +1696,22 @@ async def execute_media_node_run(
     snap = dict(run.input_snapshot or {})
     if node.node_key in {"face_review", "video_drift_review"}:
         snap = await _bind_review_input_artifacts(session, run=run, node=node)
+    if snap.get("canonical_source_run_id") is not None:
+        try:
+            snap = await _bind_director_canonical_source(
+                session,
+                run=run,
+                snapshot=snap,
+            )
+        except ValidationAppError as exc:
+            error_code = str(exc.details.get("code") or "CANONICAL_REFERENCE_REQUIRED")
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code=error_code,
+                error_summary=exc.message,
+            )
+            raise
     face_threshold = approved_face_threshold()
     canonical_artifact: Artifact | None = None
     # Formal Worker path resolves canonical only from a complete Artifact binding.
@@ -1677,6 +1902,11 @@ async def execute_media_node_run(
     )
     create: dict[str, object]
     if op is None:
+        director_context = await _validate_director_submission_or_block(
+            session,
+            run=run,
+            node=node,
+        )
         create_request: dict[str, object] = {"prompt": prompt, "kind": kind}
         safe_request_summary: dict[str, object] = {"kind": kind}
         first_frame = None
@@ -1735,6 +1965,12 @@ async def execute_media_node_run(
         initial_fingerprint = hashlib.sha256(
             f"{kind}:{prompt}:{safe_request_summary}".encode()
         ).hexdigest()
+        if director_context is not None:
+            await _validate_director_submission_or_block(
+                session,
+                run=run,
+                node=node,
+            )
         # Idempotent: a 429 requeue re-executes this node_run; reuse the single
         # ProviderOperation row (uq_provider_operations_node_run) instead of
         # inserting a duplicate.
@@ -1773,6 +2009,13 @@ async def execute_media_node_run(
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
+        if director_context is not None:
+            await _validate_director_submission_or_block(
+                session,
+                run=run,
+                node=node,
+                provider_operation=op,
+            )
         if (
             get_settings().provider_unified_shadow
             and provider_name in {"agnes", "volcengine"}
@@ -1999,6 +2242,10 @@ async def execute_media_node_run(
         op.response_summary["poll_error_count"] = poll_trail["poll_error_count"]
         if poll_trail.get("last_poll_http_status"):
             op.response_summary["last_poll_http_status"] = poll_trail["last_poll_http_status"]
+    if run.production_batch_id is not None and run.budget_reservation_id is not None:
+        from app.director.execution_guard import settle_director_media_cost
+
+        await settle_director_media_cost(session, run=run, operation=op)
     if status not in {"succeeded", "completed", "success"}:
         error_summary = str(poll.get("error") or status)[:500]
         op.status = "failed"

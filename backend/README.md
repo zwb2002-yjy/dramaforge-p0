@@ -5,24 +5,26 @@ FastAPI API and Arq workers for DramaForge P0.
 ## Container Runtime
 
 The supported service runtime is the repository Docker Compose stack. Its
-`Dockerfile` builds InsightFace 0.7.3 for CPython 3.12, includes the buffalo_l
-ONNX model set, and validates `FaceAnalysis` with `CPUExecutionProvider` while
-building the image. Model loading is therefore offline at container runtime.
+`Dockerfile` builds the optional InsightFace 0.7.3 Python runtime for CPython
+3.12, but it does not download or bundle pretrained weights. InsightFace stays
+disabled unless a deployer separately obtains appropriately licensed model
+files, mounts them under the configured model root, and explicitly enables it.
 
 ```powershell
 cd ..
 docker compose build api worker-heavy
-docker run --rm --entrypoint python dramaforge-api:latest -c "import json; from app.consistency.image_embed import insightface_status; print(json.dumps(insightface_status(), sort_keys=True))"
+docker compose exec api python -c "import json; from app.consistency.image_embed import insightface_status; print(json.dumps(insightface_status(), sort_keys=True))"
 ```
 
 Expected status:
 
 ```json
-{"available": true, "backend": "insightface+onnx", "embedding_dim": 512, "error": null}
+{"available": false, "backend": "hash_placeholder", "embedding_dim": 512, "error": "disabled by INSIGHTFACE_ENABLED=false"}
 ```
 
-The local venv workflow below is for application debugging. It does not copy
-the container model cache or replace the Compose image validation.
+The hash placeholder is diagnostic fallback data, never release-grade evidence
+of face or character consistency. The local venv workflow below is for
+application debugging and does not change the licensed-weight boundary.
 
 ## Local setup
 

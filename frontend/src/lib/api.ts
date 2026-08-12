@@ -97,6 +97,16 @@ export function fetchHealth(): Promise<HealthResponse> {
   return apiGet<HealthResponse>("/health");
 }
 
+export type BootstrapStatusRead = {
+  owner_initialized: boolean;
+  registration_available: boolean;
+  public_registration_enabled: boolean;
+};
+
+export function fetchBootstrapStatus(): Promise<BootstrapStatusRead> {
+  return apiGet<BootstrapStatusRead>("/api/v1/auth/bootstrap-status");
+}
+
 export type CsrfResponse = { csrf_token: string };
 export type UserRead = {
   id: string;
@@ -153,6 +163,7 @@ export type ProviderModelBindingRead = {
   contract_tested: boolean;
   account_verified: boolean;
   quality_gated: boolean;
+  pricing_snapshot: Record<string, unknown>;
 };
 
 export type ProviderQualityEvidenceRead = {
@@ -258,6 +269,27 @@ export async function createProviderModelBinding(
     "POST",
     `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/model-bindings`,
     { ...input, enabled: true },
+    csrf,
+  );
+}
+
+export async function setProviderModelBindingPricing(
+  workspaceId: string,
+  connectionId: string,
+  modelBindingId: string,
+  input: {
+    unit_amount: string;
+    currency: string;
+    billing_unit: string;
+    source_note: string;
+    owner_verified: true;
+  },
+): Promise<ProviderModelBindingRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "PUT",
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/model-bindings/${modelBindingId}/pricing`,
+    input,
     csrf,
   );
 }

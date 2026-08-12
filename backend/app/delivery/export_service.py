@@ -83,6 +83,8 @@ async def build_project_export(
     graph_version_id: UUID | None = None,
     approved_shot_ids: list[UUID] | None = None,
     require_approved: bool = True,
+    exact_artifact_ids: list[UUID] | None = None,
+    exact_node_run_ids: list[UUID] | None = None,
 ) -> ExportResult:
     """Export deliverables.
 
@@ -91,8 +93,26 @@ async def build_project_export(
     """
     from app.assets.models import Shot
 
+    exact = exact_artifact_ids is not None or exact_node_run_ids is not None
+    if exact_artifact_ids is None or exact_node_run_ids is None:
+        if exact:
+            raise ValidationAppError(
+                "exact export requires paired artifact and NodeRun identifiers"
+            )
+    elif (
+        not exact_artifact_ids
+        or len(exact_artifact_ids) != len(exact_node_run_ids)
+        or len(set(exact_artifact_ids)) != len(exact_artifact_ids)
+        or len(set(exact_node_run_ids)) != len(exact_node_run_ids)
+    ):
+        raise ValidationAppError("exact export lineage is empty, duplicated, or unpaired")
+    if exact and (graph_version_id is not None or approved_shot_ids is not None):
+        raise ValidationAppError("exact export cannot be combined with legacy export filters")
+
     approved_ids: set[UUID] | None = None
-    if approved_shot_ids is not None:
+    if exact:
+        approved_ids = None
+    elif approved_shot_ids is not None:
         approved_ids = set(approved_shot_ids)
         if require_approved and not approved_ids:
             raise ValidationAppError(
@@ -119,14 +139,31 @@ async def build_project_export(
             )
         approved_ids = {s.id for s in approved_rows}
 
-    run_q = (
-        select(NodeRun)
-        .where(NodeRun.project_id == project_id)
-        .where(NodeRun.status.in_(("completed", "cached", "completed_after_cancel")))
-    )
-    if graph_version_id is not None:
-        run_q = run_q.where(NodeRun.graph_version_id == graph_version_id)
-    runs = list((await session.execute(run_q)).scalars().all())
+    run_q = select(NodeRun).where(NodeRun.project_id == project_id)
+    if exact:
+        assert exact_node_run_ids is not None
+        run_q = run_q.where(NodeRun.id.in_(exact_node_run_ids))
+    else:
+        run_q = run_q.where(
+            NodeRun.status.in_(("completed", "cached", "completed_after_cancel"))
+        )
+        if graph_version_id is not None:
+            run_q = run_q.where(NodeRun.graph_version_id == graph_version_id)
+    raw_runs = list((await session.execute(run_q)).scalars().all())
+    if exact:
+        assert exact_node_run_ids is not None
+        run_by_id = {run.id: run for run in raw_runs}
+        missing_runs = [value for value in exact_node_run_ids if value not in run_by_id]
+        if missing_runs:
+            raise ValidationAppError("exact export NodeRun lineage is incomplete")
+        runs = [run_by_id[value] for value in exact_node_run_ids]
+        if any(
+            run.status not in {"completed", "cached", "completed_after_cancel"}
+            for run in runs
+        ):
+            raise ValidationAppError("exact export contains a non-terminal NodeRun")
+    else:
+        runs = raw_runs
 
     if approved_ids is not None:
         filtered_runs: list[NodeRun] = []
@@ -143,18 +180,40 @@ async def build_project_export(
         runs = filtered_runs
 
     run_ids = {r.id for r in runs}
-    arts = list(
+    art_q = (
+        select(Artifact)
+        .where(Artifact.project_id == project_id)
+        .where(Artifact.storage_state == "available")
+        .where(Artifact.deleted_at.is_(None))
+        .where(Artifact.artifact_type != "export_package")
+    )
+    if exact:
+        assert exact_artifact_ids is not None
+        art_q = art_q.where(Artifact.id.in_(exact_artifact_ids))
+    raw_arts = list(
         (
-            await session.execute(
-                select(Artifact)
-                .where(Artifact.project_id == project_id)
-                .where(Artifact.storage_state == "available")
-                .where(Artifact.artifact_type != "export_package")
-            )
+            await session.execute(art_q)
         )
         .scalars()
         .all()
     )
+    if exact:
+        assert exact_artifact_ids is not None
+        assert exact_node_run_ids is not None
+        artifact_by_id = {artifact.id: artifact for artifact in raw_arts}
+        missing_artifacts = [
+            value for value in exact_artifact_ids if value not in artifact_by_id
+        ]
+        if missing_artifacts:
+            raise ValidationAppError("exact export artifact lineage is incomplete")
+        arts = [artifact_by_id[value] for value in exact_artifact_ids]
+        if any(
+            artifact.produced_by_run_id != run_id
+            for artifact, run_id in zip(arts, exact_node_run_ids, strict=True)
+        ):
+            raise ValidationAppError("exact export artifact/NodeRun lineage does not match")
+    else:
+        arts = raw_arts
     if approved_ids is not None:
         # Keep artifacts from approved-shot NodeRuns + audited manual uploads for those shots
         kept: list[Artifact] = []

@@ -5,6 +5,7 @@
 .idea/
 .vscode/
 .playwright-mcp/
+.claude/*.lock
 
 # Local development-agent progress and parallel worktrees
 .agent-control/PROGRESS.jsonl
@@ -45,6 +46,8 @@ data/
 tmp/
 tmp/pytest-basetemp/
 tmp/pytest-work/
+frontend/tmp/
+backend/tmp/
 logs/
 dump.rdb
 production-ui-demo.png

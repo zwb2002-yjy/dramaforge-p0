@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import Project, User, Workspace
+from app.access.models import InstanceBootstrapState, Project, User, Workspace
 
 
 class AccessRepository:
@@ -26,6 +26,15 @@ class AccessRepository:
         self._session.add(user)
         await self._session.flush()
         return user
+
+    async def get_bootstrap_state(self) -> InstanceBootstrapState | None:
+        return await self._session.get(InstanceBootstrapState, 1)
+
+    async def set_bootstrap_owner(self, owner_user_id: UUID) -> None:
+        self._session.add(
+            InstanceBootstrapState(singleton_id=1, owner_user_id=owner_user_id)
+        )
+        await self._session.flush()
 
     async def add_workspace(self, workspace: Workspace) -> Workspace:
         self._session.add(workspace)

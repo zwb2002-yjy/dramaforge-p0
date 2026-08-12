@@ -8,8 +8,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
+from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.creation.service import CreationService
+from app.director.legacy_guard import require_legacy_execution_allowed
 from app.shared.enums import ExperienceMode
 
 router = APIRouter(
@@ -256,6 +258,10 @@ async def confirm_plan(
     session: SessionDep,
     _: CsrfDep,
 ) -> ConfirmPlanResponse:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="legacy_confirm_plan_media"
+    )
     result = await CreationService(session).confirm_plan_and_materialize(
         project_id=project_id,
         plan_id=plan_id,

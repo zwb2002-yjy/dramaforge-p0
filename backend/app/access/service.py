@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User, Workspace
 from app.access.repository import AccessRepository
 from app.shared.db import set_rls_context
-from app.shared.errors import ForbiddenError, NotFoundError, UnauthorizedError, ValidationAppError
+from app.shared.errors import (
+    AppError,
+    ForbiddenError,
+    NotFoundError,
+    UnauthorizedError,
+    ValidationAppError,
+)
 from app.shared.security import hash_password, verify_password
 
 DEFAULT_WORKSPACE_NAME = "我的创作空间"
@@ -20,7 +27,40 @@ class AccessService:
         self._session = session
         self._repo = AccessRepository(session)
 
-    async def register(self, *, email: str, password: str, display_name: str) -> User:
+    async def registration_status(
+        self, *, public_registration_enabled: bool
+    ) -> tuple[bool, bool]:
+        owner_initialized = await self._repo.get_bootstrap_state() is not None
+        return owner_initialized, (not owner_initialized or public_registration_enabled)
+
+    async def register(
+        self,
+        *,
+        email: str,
+        password: str,
+        display_name: str,
+        public_registration_enabled: bool = False,
+    ) -> User:
+        # Serialize first-Owner creation on PostgreSQL. The transaction-scoped
+        # advisory lock prevents two different emails from both observing an
+        # empty users table during a clean-instance bootstrap race.
+        bind = self._session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            await self._session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext('dramaforge-first-owner'))")
+            )
+        owner_initialized, registration_available = await self.registration_status(
+            public_registration_enabled=public_registration_enabled
+        )
+        if owner_initialized and not registration_available:
+            raise AppError(
+                code="REGISTRATION_CLOSED",
+                message=(
+                    "This single-user instance already has an Owner; "
+                    "public registration is closed"
+                ),
+                status_code=403,
+            )
         if await self._repo.get_user_by_email(email.lower()):
             raise ValidationAppError("email already registered")
         user = await self._repo.add_user(
@@ -35,6 +75,8 @@ class AccessService:
         await self._repo.add_workspace(
             Workspace(owner_user_id=user.id, name=DEFAULT_WORKSPACE_NAME)
         )
+        if not owner_initialized:
+            await self._repo.set_bootstrap_owner(user.id)
         await self._session.commit()
         await self._session.refresh(user)
         return user

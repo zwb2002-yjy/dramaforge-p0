@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+from app.config import clear_settings_cache
 from app.shared.security import CSRF_HEADER
 from fastapi.testclient import TestClient
 
@@ -25,6 +27,43 @@ def test_me_unauthenticated_returns_401(client: TestClient) -> None:
     response = client.get("/api/v1/auth/me")
     assert response.status_code == 401
     assert response.json()["code"] == "UNAUTHORIZED"
+
+
+def test_clean_instance_bootstraps_one_owner_then_closes_registration(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PUBLIC_REGISTRATION_ENABLED", "false")
+    clear_settings_cache()
+
+    before = client.get("/api/v1/auth/bootstrap-status")
+    assert before.status_code == 200
+    assert before.json() == {
+        "owner_initialized": False,
+        "registration_available": True,
+        "public_registration_enabled": False,
+    }
+
+    owner = _register(client, "first-owner@example.com")
+    assert owner["email"] == "first-owner@example.com"
+
+    after = client.get("/api/v1/auth/bootstrap-status")
+    assert after.status_code == 200
+    assert after.json() == {
+        "owner_initialized": True,
+        "registration_available": False,
+        "public_registration_enabled": False,
+    }
+
+    rejected = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "second-owner@example.com",
+            "password": "password123",
+            "display_name": "second",
+        },
+    )
+    assert rejected.status_code == 403
+    assert rejected.json()["code"] == "REGISTRATION_CLOSED"
 
 
 def test_register_creates_one_owned_default_workspace_and_login_roundtrip(
@@ -100,7 +139,13 @@ def test_access_migration_contains_owned_workspaces_only() -> None:
         path.read_text(encoding="utf-8-sig")
         for path in versions.glob("*.py")
     ).lower()
-    for name in ("workspaces", "users", "owner_user_id", "password_hash"):
+    for name in (
+        "workspaces",
+        "users",
+        "instance_bootstrap_state",
+        "owner_user_id",
+        "password_hash",
+    ):
         assert name in migration_text
     for name in (
         "organizations",

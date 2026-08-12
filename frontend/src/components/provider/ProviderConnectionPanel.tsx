@@ -10,6 +10,7 @@ import {
   listProviderProbes,
   recordProviderQualityEvidence,
   runProviderProbe,
+  setProviderModelBindingPricing,
   updateProviderConnectionCredential,
   type ProjectRead,
   type ProviderModelBindingRead,
@@ -43,6 +44,9 @@ export function ProviderConnectionPanel({
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [qualityRunIds, setQualityRunIds] = useState<Record<string, string>>({});
   const [qualityArtifactIds, setQualityArtifactIds] = useState<Record<string, string>>({});
+  const [pricingAmounts, setPricingAmounts] = useState<Record<string, string>>({});
+  const [pricingCurrency, setPricingCurrency] = useState("USD");
+  const [pricingConfirmed, setPricingConfirmed] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -149,6 +153,28 @@ export function ProviderConnectionPanel({
     onSuccess: async () => {
       setMessage("质量证据已记录，绑定现可被项目使用。");
       await queryClient.invalidateQueries({ queryKey: ["provider-bindings", workspaceId] });
+    },
+    onError: (cause: Error) => setError(cause.message),
+  });
+
+  const pricingMutation = useMutation({
+    mutationFn: async (binding: ProviderModelBindingRead) => {
+      if (!workspaceId || !connection) throw new Error("请先配置生成服务");
+      const amount = pricingAmounts[binding.id]?.trim();
+      if (!amount || Number(amount) < 0) throw new Error("请输入非负单次估算价格");
+      if (!pricingConfirmed[binding.id]) throw new Error("请确认价格来自你的供应商账户或合同");
+      return setProviderModelBindingPricing(workspaceId, connection.id, binding.id, {
+        unit_amount: amount,
+        currency: pricingCurrency,
+        billing_unit: binding.media_type === "video" ? "per_generated_clip" : "per_generated_image",
+        source_note: "由工作区所有者根据当前供应商账户价格确认；实际账单以供应商为准",
+        owner_verified: true,
+      });
+    },
+    onMutate: resetFeedback,
+    onSuccess: async () => {
+      setMessage("价格快照已记录。重新生成拍摄方案后会按此估算并冻结预算。");
+      await queryClient.invalidateQueries({ queryKey: ["provider-bindings", workspaceId, connection?.id] });
     },
     onError: (cause: Error) => setError(cause.message),
   });
@@ -284,6 +310,29 @@ export function ProviderConnectionPanel({
                           </button>
                         </div>
                       )}
+                      <div className="quality-evidence-form">
+                        <input
+                          aria-label={`${binding.purpose} 单次价格`}
+                          type="number"
+                          min="0"
+                          step="0.000001"
+                          placeholder="单次估算价格"
+                          value={pricingAmounts[binding.id] ?? String(binding.pricing_snapshot.unit_amount ?? "")}
+                          onChange={(event) => setPricingAmounts((current) => ({ ...current, [binding.id]: event.target.value }))}
+                        />
+                        <select aria-label="价格币种" value={pricingCurrency} onChange={(event) => setPricingCurrency(event.target.value)}>
+                          <option value="USD">USD</option><option value="CNY">CNY</option>
+                        </select>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(pricingConfirmed[binding.id])}
+                            onChange={(event) => setPricingConfirmed((current) => ({ ...current, [binding.id]: event.target.checked }))}
+                          />
+                          我已核对当前账户价格
+                        </label>
+                        <button type="button" disabled={pricingMutation.isPending} onClick={() => pricingMutation.mutate(binding)}>保存价格快照</button>
+                      </div>
                     </div>
                     <button
                       type="button"

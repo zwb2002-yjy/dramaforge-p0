@@ -215,3 +215,73 @@ async def test_credential_rotation_clears_capability_and_quality_flags(
             workspace_id=other_workspace.id,
             connection_id=connection.id,
         )
+
+
+@pytest.mark.asyncio
+async def test_owner_can_freeze_account_pricing_on_exact_binding(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import date
+    from decimal import Decimal
+
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
+
+    keyring_key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{keyring_key}")
+    clear_settings_cache()
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="Agnes China",
+        api_key="secret",
+        enabled=True,
+    )
+    manifest = next(
+        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+    )
+    session.add(
+        ModelCatalogEntry(
+            provider_type=manifest["provider_type"],
+            protocol_profile=manifest["protocol_profile"],
+            model_id=manifest["model_id"],
+            model_revision=manifest["model_revision"],
+            display_name=manifest["display_name"],
+            media_kind=manifest["media_kind"],
+            lifecycle="active",
+            catalog_source="official_static",
+            capability_manifest_json=manifest,
+            option_schema_json=manifest.get("option_schema") or {},
+            documented_at=date.fromisoformat(manifest["documented_at"]),
+            contract_manifest_hash=hash_manifest(manifest),
+        )
+    )
+    await session.flush()
+    binding = await service.create_model_binding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        media_type="image",
+        model_id="agnes-image-2.1-flash",
+        purpose="keyframe",
+        enabled=True,
+    )
+
+    frozen = await service.set_binding_pricing(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        model_binding_id=binding.id,
+        actor=user,
+        unit_amount=Decimal("0.125"),
+        currency="usd",
+        billing_unit="per_generated_image",
+        source_note="account console price",
+    )
+
+    assert frozen.pricing_snapshot_json["unit_amount"] == "0.125"
+    assert frozen.pricing_snapshot_json["currency"] == "USD"
+    assert frozen.pricing_snapshot_json["verified_by"] == str(user.id)

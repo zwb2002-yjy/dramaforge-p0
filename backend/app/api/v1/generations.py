@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CurrentUser, SelectedWorkspace, SessionDep, require_selected_workspace
+from app.director.legacy_guard import require_legacy_execution_allowed
 from app.providers.bootstrap import default_v3_registry
 from app.providers.capabilities import Capability
 from app.providers.generation_service import GenerationService
@@ -210,6 +211,9 @@ async def create_generation(
 ) -> GenerationCreateResponse:
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=user
+    )
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="direct_media_generation"
     )
     try:
         capability = Capability(body.capability)

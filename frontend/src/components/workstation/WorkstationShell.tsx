@@ -184,10 +184,10 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
             </p>
           )}
           <div style={{ marginTop: "0.85rem" }}>
-            <span className="pill">Brief/Plan</span>
-            <span className="pill">Canonical</span>
-            <span className="pill">shot-p0-v1</span>
-            <span className="pill">Audit</span>
+            <span className="pill">四阶段导演流程</span>
+            <span className="pill">角色视觉锚点</span>
+            <span className="pill">局部修复</span>
+            <span className="pill">质量证据</span>
           </div>
           <p className="muted" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
             假 Adapter 仅 pytest；不得作为 §3.1 验收主路径。

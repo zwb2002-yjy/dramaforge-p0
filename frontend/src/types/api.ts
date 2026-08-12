@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/auth/bootstrap-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bootstrap Status */
+        get: operations["bootstrap_status_api_v1_auth_bootstrap_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/register": {
         parameters: {
             query?: never;
@@ -336,6 +353,347 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/director/workflow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Workflow */
+        get: operations["get_workflow_api_v1_projects__project_id__director_workflow_get"];
+        put?: never;
+        /** Start Workflow */
+        post: operations["start_workflow_api_v1_projects__project_id__director_workflow_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/workspace-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Director Workspace Snapshot */
+        get: operations["get_director_workspace_snapshot_api_v1_projects__project_id__director_workspace_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/artifact-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Artifact Version */
+        post: operations["publish_artifact_version_api_v1_projects__project_id__director_artifact_versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/budget-authorizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Authorize Budget */
+        post: operations["authorize_budget_api_v1_projects__project_id__director_budget_authorizations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve */
+        post: operations["approve_api_v1_projects__project_id__director_approvals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/change-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Propose Change */
+        post: operations["propose_change_api_v1_projects__project_id__director_change_proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/change-proposals/{proposal_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Change */
+        post: operations["apply_change_api_v1_projects__project_id__director_change_proposals__proposal_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/creative/concepts/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Concepts */
+        post: operations["generate_concepts_api_v1_projects__project_id__director_creative_concepts_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/creative/preferences/interpret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Interpret Preferences */
+        post: operations["interpret_preferences_api_v1_projects__project_id__director_creative_preferences_interpret_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/creative/package/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Creative Package */
+        post: operations["generate_creative_package_api_v1_projects__project_id__director_creative_package_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/shooting/package/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Shooting Package */
+        post: operations["generate_shooting_package_api_v1_projects__project_id__director_shooting_package_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/trial/materialize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Materialize Trial */
+        post: operations["materialize_trial_api_v1_projects__project_id__director_trial_materialize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/trial/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Inspect Trial */
+        post: operations["inspect_trial_api_v1_projects__project_id__director_trial_inspect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/trial/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review Trial */
+        post: operations["review_trial_api_v1_projects__project_id__director_trial_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/production/materialize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Materialize Production */
+        post: operations["materialize_production_api_v1_projects__project_id__director_production_materialize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/production/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Inspect Production */
+        post: operations["inspect_production_api_v1_projects__project_id__director_production_inspect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/production/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review Production */
+        post: operations["review_production_api_v1_projects__project_id__director_production_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/production/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Export Production */
+        post: operations["export_production_api_v1_projects__project_id__director_production_export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/repairs/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan Repairs */
+        post: operations["plan_repairs_api_v1_projects__project_id__director_repairs_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/repairs/{repair_option_id}/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Authorize Repair */
+        post: operations["authorize_repair_api_v1_projects__project_id__director_repairs__repair_option_id__authorize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/artifacts/{artifact_id}/content": {
         parameters: {
             query?: never;
@@ -567,6 +925,410 @@ export interface paths {
         };
         /** Get Workspace Provider Credential Status */
         get: operations["get_workspace_provider_credential_status_api_v1_workspaces__workspace_id__provider_credentials__provider__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Connections */
+        get: operations["list_connections_api_v1_workspaces__workspace_id__provider_connections_get"];
+        put?: never;
+        /** Create Connection */
+        post: operations["create_connection_api_v1_workspaces__workspace_id__provider_connections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Connection */
+        get: operations["get_connection_api_v1_workspaces__workspace_id__provider_connections__connection_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Connection */
+        patch: operations["patch_connection_api_v1_workspaces__workspace_id__provider_connections__connection_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Connection Credential */
+        put: operations["put_connection_credential_api_v1_workspaces__workspace_id__provider_connections__connection_id__credential_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/probes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Probes */
+        get: operations["list_probes_api_v1_workspaces__workspace_id__provider_connections__connection_id__probes_get"];
+        put?: never;
+        /** Run Probe */
+        post: operations["run_probe_api_v1_workspaces__workspace_id__provider_connections__connection_id__probes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/model-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Model Bindings */
+        get: operations["list_model_bindings_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings_get"];
+        put?: never;
+        /** Create Model Binding */
+        post: operations["create_model_binding_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/model-bindings/{model_binding_id}/pricing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Model Binding Pricing */
+        put: operations["set_model_binding_pricing_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings__model_binding_id__pricing_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/model-bindings/{model_binding_id}/quality-evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Quality Evidence */
+        post: operations["record_quality_evidence_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings__model_binding_id__quality_evidence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/provider-bindings/{purpose}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Project Binding */
+        put: operations["put_project_binding_api_v1_projects__project_id__provider_bindings__purpose__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/provider-references/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Provider Reference Get */
+        get: operations["provider_reference_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        /** Provider Reference Head */
+        head: operations["provider_reference_head"];
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/model-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Model Candidates */
+        get: operations["list_model_candidates_api_v1_projects__project_id__model_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Capabilities */
+        get: operations["list_capabilities_api_v1_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Models */
+        get: operations["list_models_api_v1_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Model Manifest */
+        get: operations["get_model_manifest_api_v1_models__model_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Generation */
+        post: operations["create_generation_api_v1_projects__project_id__generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/generations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Generation */
+        get: operations["get_generation_api_v1_projects__project_id__generations__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/generations/{operation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Generation */
+        post: operations["cancel_generation_api_v1_projects__project_id__generations__operation_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Model Slots */
+        get: operations["list_model_slots_api_v1_model_slots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/model-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Workspace Profiles */
+        get: operations["list_workspace_profiles_api_v1_workspaces__workspace_id__model_profiles_get"];
+        put?: never;
+        /** Create Workspace Profile */
+        post: operations["create_workspace_profile_api_v1_workspaces__workspace_id__model_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/model-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Workspace Profile */
+        get: operations["get_workspace_profile_api_v1_workspaces__workspace_id__model_profiles__profile_id__get"];
+        /** Update Workspace Profile */
+        put: operations["update_workspace_profile_api_v1_workspaces__workspace_id__model_profiles__profile_id__put"];
+        post?: never;
+        /** Delete Workspace Profile */
+        delete: operations["delete_workspace_profile_api_v1_workspaces__workspace_id__model_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/model-profiles/{profile_id}/simple-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Simple Mode */
+        post: operations["apply_simple_mode_api_v1_workspaces__workspace_id__model_profiles__profile_id__simple_mode_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/model-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Project Profile */
+        get: operations["get_project_profile_api_v1_projects__project_id__model_profile_get"];
+        /** Put Project Profile */
+        put: operations["put_project_profile_api_v1_projects__project_id__model_profile_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-profiles/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate Profile */
+        post: operations["validate_profile_api_v1_model_profiles_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/model-bindings/effective": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Effective Bindings
+         * @description Preview the effective slot→model map for a project (spec §37). This is
+         *     resolution preview only — it never calls a Provider.
+         */
+        get: operations["get_effective_bindings_api_v1_projects__project_id__model_bindings_effective_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -862,6 +1624,66 @@ export interface components {
              */
             source: string;
         };
+        /** ApprovalCreate */
+        ApprovalCreate: {
+            approval_kind: components["schemas"]["ApprovalKind"];
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason?: string | null;
+            /** Budget Authorization Id */
+            budget_authorization_id?: string | null;
+        };
+        /**
+         * ApprovalKind
+         * @enum {string}
+         */
+        ApprovalKind: "creative_plan" | "shooting_plan" | "trial_budget" | "production_budget" | "repair_budget" | "subjective_gate_override";
+        /** ApprovalRead */
+        ApprovalRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Workflow Run Id
+             * Format: uuid
+             */
+            workflow_run_id: string;
+            /** Approval Kind */
+            approval_kind: string;
+            /** Approved Artifact Versions */
+            approved_artifact_versions: {
+                [key: string]: string;
+            };
+            /** Budget Authorization Id */
+            budget_authorization_id: string | null;
+            /** Reason */
+            reason: string | null;
+            /**
+             * Approved At
+             * Format: date-time
+             */
+            approved_at: string;
+            /** Invalidated At */
+            invalidated_at: string | null;
+        };
+        /** ApprovalResult */
+        ApprovalResult: {
+            approval: components["schemas"]["ApprovalRead"];
+            workflow: components["schemas"]["WorkflowRead"];
+        };
+        /**
+         * ArtifactKind
+         * @enum {string}
+         */
+        ArtifactKind: "preference_understanding" | "concept_set" | "story_core" | "season_plan" | "episode_script" | "story_review" | "character_bible" | "visual_bible" | "voice_bible" | "storyboard_plan" | "risk_report" | "selection_plan" | "cost_estimate" | "trial_plan" | "trial_review" | "production_review" | "quality_report" | "repair_plan";
         /** ArtifactRead */
         ArtifactRead: {
             /**
@@ -882,6 +1704,105 @@ export interface components {
             /** Produced By Run Id */
             produced_by_run_id: string | null;
         };
+        /** ArtifactVersionCreate */
+        ArtifactVersionCreate: {
+            artifact_kind: components["schemas"]["ArtifactKind"];
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Source Kind
+             * @default user
+             */
+            source_kind: string;
+        };
+        /** ArtifactVersionRead */
+        ArtifactVersionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Workflow Run Id
+             * Format: uuid
+             */
+            workflow_run_id: string;
+            /** Artifact Kind */
+            artifact_kind: string;
+            /** Revision No */
+            revision_no: number;
+            /** Supersedes Version Id */
+            supersedes_version_id: string | null;
+            /** Source Kind */
+            source_kind: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Content Hash */
+            content_hash: string;
+            /** Status */
+            status: string;
+        };
+        /** BindingInput */
+        BindingInput: {
+            /** Model Id */
+            model_id: string;
+            /** Native Options */
+            native_options?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /** BindingPricingWrite */
+        BindingPricingWrite: {
+            /** Unit Amount */
+            unit_amount: number | string;
+            /** Currency */
+            currency: string;
+            /** Billing Unit */
+            billing_unit: string;
+            /** Source Note */
+            source_note: string;
+            /**
+             * Owner Verified
+             * @constant
+             */
+            owner_verified: true;
+        };
+        /** BindingRead */
+        BindingRead: {
+            /** Slot */
+            slot: string;
+            /** Model Id */
+            model_id: string;
+            /** Native Options */
+            native_options?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Provider Id */
+            provider_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Configured */
+            configured: boolean;
+        };
         /** Body_manual_media_api_v1_projects__project_id__shots__shot_id__manual_media_post */
         Body_manual_media_api_v1_projects__project_id__shots__shot_id__manual_media_post: {
             /** Node Key */
@@ -896,6 +1817,15 @@ export interface components {
              * Format: binary
              */
             file: string;
+        };
+        /** BootstrapStatusRead */
+        BootstrapStatusRead: {
+            /** Owner Initialized */
+            owner_initialized: boolean;
+            /** Registration Available */
+            registration_available: boolean;
+            /** Public Registration Enabled */
+            public_registration_enabled: boolean;
         };
         /** BriefRevisionResponse */
         BriefRevisionResponse: {
@@ -932,6 +1862,180 @@ export interface components {
              * @default
              */
             audience: string;
+        };
+        /** BudgetAuthorizationCreate */
+        BudgetAuthorizationCreate: {
+            authorization_kind: components["schemas"]["ApprovalKind"];
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Pricing Snapshot Id */
+            pricing_snapshot_id: string;
+            /** Limit Amount */
+            limit_amount: number | string;
+            /** Currency */
+            currency: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** BudgetAuthorizationRead */
+        BudgetAuthorizationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Workflow Run Id
+             * Format: uuid
+             */
+            workflow_run_id: string;
+            /** Authorization Kind */
+            authorization_kind: string;
+            /** Pricing Snapshot Id */
+            pricing_snapshot_id: string;
+            /** Limit Amount */
+            limit_amount: string;
+            /** Consumed Amount */
+            consumed_amount: string;
+            /** Currency */
+            currency: string;
+            /** Status */
+            status: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** BudgetReservationRead */
+        BudgetReservationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /**
+             * Authorization Id
+             * Format: uuid
+             */
+            authorization_id: string;
+            /** Node Run Id */
+            node_run_id: string | null;
+            /** Reserved Amount */
+            reserved_amount: string;
+            /** Actual Amount */
+            actual_amount: string | null;
+            /** Currency */
+            currency: string;
+            /** Status */
+            status: string;
+        };
+        /** CandidateIssueRead */
+        CandidateIssueRead: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+        };
+        /** CapabilityRead */
+        CapabilityRead: {
+            /** Id */
+            id: string;
+            /** Display Name */
+            display_name: string;
+        };
+        /** ChangeProposalCreate */
+        ChangeProposalCreate: {
+            /** Idempotency Key */
+            idempotency_key: string;
+            target_artifact_kind: components["schemas"]["ArtifactKind"];
+            /** Summary */
+            summary: string;
+            /** Replacement Payload */
+            replacement_payload: {
+                [key: string]: unknown;
+            };
+        };
+        /** ChangeProposalRead */
+        ChangeProposalRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Workflow Run Id
+             * Format: uuid
+             */
+            workflow_run_id: string;
+            /** Target Artifact Kind */
+            target_artifact_kind: string;
+            /** Base Version Id */
+            base_version_id: string | null;
+            /** Summary */
+            summary: string;
+            /** Replacement Payload */
+            replacement_payload: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string;
+        };
+        /** ChangeProposalResult */
+        ChangeProposalResult: {
+            proposal: components["schemas"]["ChangeProposalRead"];
+            impact: components["schemas"]["ImpactReportRead"];
+        };
+        /** ConceptGenerateRequest */
+        ConceptGenerateRequest: {
+            /** Entry Mode */
+            entry_mode: string;
+            /** Creation Goal */
+            creation_goal?: string | null;
+            /**
+             * Idea
+             * @default
+             */
+            idea: string;
+            /**
+             * Script Text
+             * @default
+             */
+            script_text: string;
+            /** Adaptation Mode */
+            adaptation_mode?: string | null;
+            /**
+             * Source Rights Confirmed
+             * @default false
+             */
+            source_rights_confirmed: boolean;
+            /** Confirmed Preference Version Id */
+            confirmed_preference_version_id?: string | null;
+            /**
+             * Authorize Text Call
+             * @default false
+             */
+            authorize_text_call: boolean;
+            /** Idempotency Key */
+            idempotency_key: string;
         };
         /** ConfirmPlanRequest */
         ConfirmPlanRequest: {
@@ -970,6 +2074,74 @@ export interface components {
             shot_ids: string[];
             /** Materialization Ops */
             materialization_ops: string[];
+        };
+        /** ConnectionCreate */
+        ConnectionCreate: {
+            /**
+             * Provider Type
+             * @default agnes
+             */
+            provider_type: string;
+            /**
+             * Display Name
+             * @default
+             */
+            display_name: string;
+            /**
+             * Protocol Profile
+             * @default agnes_cn_v1
+             */
+            protocol_profile: string;
+            /** Base Url */
+            base_url?: string | null;
+            /**
+             * Api Key
+             * Format: password
+             */
+            api_key: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /** ConnectionPatch */
+        ConnectionPatch: {
+            /** Display Name */
+            display_name?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /** ConnectionRead */
+        ConnectionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Provider Type */
+            provider_type: string;
+            /** Display Name */
+            display_name: string;
+            /** Base Url */
+            base_url: string;
+            /** Protocol Profile */
+            protocol_profile: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Credential Configured */
+            credential_configured: boolean;
+            /** Credential Key Version */
+            credential_key_version: string | null;
+            /** Verification Status */
+            verification_status: string;
+            /** Verified At */
+            verified_at: string | null;
         };
         /** CreationStateBriefResponse */
         CreationStateBriefResponse: {
@@ -1024,10 +2196,126 @@ export interface components {
             brief: components["schemas"]["CreationStateBriefResponse"] | null;
             plan: components["schemas"]["CreationStatePlanResponse"] | null;
         };
+        /** CreativePackageGenerateRequest */
+        CreativePackageGenerateRequest: {
+            /**
+             * Concept Version Id
+             * Format: uuid
+             */
+            concept_version_id: string;
+            /** Selected Concept Id */
+            selected_concept_id: string;
+            /** Theme */
+            theme: string;
+            /** Core Conflict */
+            core_conflict: string;
+            /** Emotional Direction */
+            emotional_direction: string;
+            /** Ending */
+            ending: string;
+            /**
+             * Authorize Text Call
+             * @default false
+             */
+            authorize_text_call: boolean;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** CreativePackageResult */
+        CreativePackageResult: {
+            story_core: components["schemas"]["ArtifactVersionRead"];
+            episode_script: components["schemas"]["ArtifactVersionRead"];
+            story_review: components["schemas"]["ArtifactVersionRead"];
+        };
+        /** CredentialWrite */
+        CredentialWrite: {
+            /**
+             * Api Key
+             * Format: password
+             */
+            api_key: string;
+        };
         /** CsrfRead */
         CsrfRead: {
             /** Csrf Token */
             csrf_token: string;
+        };
+        /** DeliveryItemRead */
+        DeliveryItemRead: {
+            /** Kind */
+            kind: string;
+            /** Object Key */
+            object_key: string;
+            /** Content Hash */
+            content_hash: string;
+            /** Byte Size */
+            byte_size: number;
+        };
+        /** DirectorIssueRead */
+        DirectorIssueRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Issue Type */
+            issue_type: string;
+            /** Source Stage */
+            source_stage: string;
+            /** Responsible Stage */
+            responsible_stage: string;
+            /** Severity */
+            severity: string;
+            /** Status */
+            status: string;
+            /** Evidence */
+            evidence: {
+                [key: string]: unknown;
+            }[];
+            /** Suggested Actions */
+            suggested_actions: string[];
+            /** Affected Version Refs */
+            affected_version_refs: string[];
+            /** Resolution */
+            resolution: {
+                [key: string]: unknown;
+            };
+        };
+        /** DirectorWorkspaceSnapshot */
+        DirectorWorkspaceSnapshot: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Project Name */
+            project_name: string;
+            /** Aspect Ratio */
+            aspect_ratio: string;
+            workflow: components["schemas"]["WorkflowRead"];
+            /** Current Artifacts */
+            current_artifacts: {
+                [key: string]: components["schemas"]["ArtifactVersionRead"];
+            };
+            /** Approvals */
+            approvals: components["schemas"]["ApprovalRead"][];
+            /** Budget Authorizations */
+            budget_authorizations: components["schemas"]["BudgetAuthorizationRead"][];
+            /** Pending Changes */
+            pending_changes: components["schemas"]["ChangeProposalResult"][];
+            /** Issues */
+            issues: components["schemas"]["DirectorIssueRead"][];
+            /** Step Runs */
+            step_runs: components["schemas"]["WorkflowStepRunRead"][];
+            /** Production Batches */
+            production_batches: components["schemas"]["ProductionBatchRead"][];
+            /** Budget Reservations */
+            budget_reservations: components["schemas"]["BudgetReservationRead"][];
+            latest_delivery?: components["schemas"]["LatestDeliveryRead"] | null;
+            /** Allowed Actions */
+            allowed_actions: string[];
+            /** Next Action */
+            next_action: string;
         };
         /** DispatchResponse */
         DispatchResponse: {
@@ -1049,6 +2337,25 @@ export interface components {
             token: string;
             /** Expires At */
             expires_at: number;
+        };
+        /** EffectiveBindingRead */
+        EffectiveBindingRead: {
+            /** Slot */
+            slot: string;
+            /** Capability */
+            capability: string;
+            /** Model Id */
+            model_id: string;
+            /** Source */
+            source: string;
+            /** Profile Id */
+            profile_id?: string | null;
+            /** Profile Version */
+            profile_version?: number | null;
+            /** Native Options */
+            native_options?: {
+                [key: string]: unknown;
+            };
         };
         /** EnqueueResponse */
         EnqueueResponse: {
@@ -1097,6 +2404,60 @@ export interface components {
             /** Export Item Count */
             export_item_count: number;
         };
+        /** GenerationCreateBody */
+        GenerationCreateBody: {
+            /** Capability */
+            capability: string;
+            /** Model Id */
+            model_id?: string | null;
+            /** Slot */
+            slot?: string | null;
+            /** Input */
+            input?: {
+                [key: string]: unknown;
+            };
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /** Native Options */
+            native_options?: {
+                [key: string]: unknown;
+            };
+        };
+        /** GenerationCreateResponse */
+        GenerationCreateResponse: {
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /** Status */
+            status: string;
+            /** Requested Capability */
+            requested_capability: string;
+            /** Requested Model */
+            requested_model: string | null;
+        };
+        /** GenerationOperationRead */
+        GenerationOperationRead: {
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /** Status */
+            status: string;
+            /** Requested Capability */
+            requested_capability: string;
+            /** Requested Model */
+            requested_model: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Result Artifact Id */
+            result_artifact_id: string | null;
+            provider_operation: components["schemas"]["ProviderOperationRead"];
+        };
         /** GoldenProduceResponse */
         GoldenProduceResponse: {
             /** Shot Count */
@@ -1131,6 +2492,67 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImpactReportRead */
+        ImpactReportRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Change Proposal Id
+             * Format: uuid
+             */
+            change_proposal_id: string;
+            /** Invalidated Version Ids */
+            invalidated_version_ids: string[];
+            /** Affected Shot Ids */
+            affected_shot_ids: string[];
+            /** Reusable Artifact Ids */
+            reusable_artifact_ids: string[];
+            /** Estimated Added Cost */
+            estimated_added_cost: string | null;
+            /** Estimated Added Time Seconds */
+            estimated_added_time_seconds: number | null;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+        };
+        /** InspectProductionRequest */
+        InspectProductionRequest: {
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** InspectTrialRequest */
+        InspectTrialRequest: {
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** LatestDeliveryRead */
+        LatestDeliveryRead: {
+            /**
+             * Export Id
+             * Format: uuid
+             */
+            export_id: string;
+            /** Status */
+            status: string;
+            /** Items */
+            items: components["schemas"]["DeliveryItemRead"][];
+            /** Program Mp4 Error */
+            program_mp4_error: string | null;
+        };
         /** LoginRequest */
         LoginRequest: {
             /**
@@ -1140,6 +2562,25 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** ManifestRead */
+        ManifestRead: {
+            /** Id */
+            id: string;
+            /** Provider Id */
+            provider_id: string;
+            /** Model Name */
+            model_name: string;
+            /** Display Name */
+            display_name: string;
+            /** Execution Mode */
+            execution_mode: string;
+            /** Supports Cancel */
+            supports_cancel: boolean;
+            /** Capability Specs */
+            capability_specs: {
+                [key: string]: unknown;
+            };
         };
         /** ManualUploadResponse */
         ManualUploadResponse: {
@@ -1159,6 +2600,176 @@ export interface components {
             /** Delete Reason */
             delete_reason?: string | null;
         };
+        /** MaterializeBatchRequest */
+        MaterializeBatchRequest: {
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** MaterializeBatchResult */
+        MaterializeBatchResult: {
+            batch: components["schemas"]["ProductionBatchRead"];
+            /** Node Runs */
+            node_runs: components["schemas"]["MaterializedNodeRunRead"][];
+        };
+        /** MaterializedNodeRunRead */
+        MaterializedNodeRunRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Graph Version Id
+             * Format: uuid
+             */
+            graph_version_id: string;
+            /**
+             * Graph Node Id
+             * Format: uuid
+             */
+            graph_node_id: string;
+            /**
+             * Production Batch Id
+             * Format: uuid
+             */
+            production_batch_id: string;
+            /**
+             * Budget Reservation Id
+             * Format: uuid
+             */
+            budget_reservation_id: string;
+            /** Status */
+            status: string;
+            /** Input Hash */
+            input_hash: string;
+        };
+        /** ModelBindingCreate */
+        ModelBindingCreate: {
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "image" | "video";
+            /** Model Id */
+            model_id: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "keyframe" | "video";
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /** ModelBindingRead */
+        ModelBindingRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /** Media Type */
+            media_type: string;
+            /** Model Id */
+            model_id: string;
+            /** Purpose */
+            purpose: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Documented */
+            documented: boolean;
+            /** Contract Tested */
+            contract_tested: boolean;
+            /** Account Verified */
+            account_verified: boolean;
+            /** Quality Gated */
+            quality_gated: boolean;
+            /** Catalog Entry Id */
+            catalog_entry_id: string | null;
+            /** Capability Manifest Hash */
+            capability_manifest_hash: string | null;
+            /** Remote Resource Kind */
+            remote_resource_kind: string | null;
+            /** Remote Resource Id */
+            remote_resource_id: string | null;
+            /** Invoke Model Value */
+            invoke_model_value: string | null;
+            /** Pricing Snapshot */
+            pricing_snapshot: {
+                [key: string]: unknown;
+            };
+        };
+        /** ModelCandidateRead */
+        ModelCandidateRead: {
+            /**
+             * Model Binding Id
+             * Format: uuid
+             */
+            model_binding_id: string;
+            /** Provider */
+            provider: string;
+            /** Profile */
+            profile: string;
+            /** Model Id */
+            model_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Purpose */
+            purpose: string;
+            /** Eligible */
+            eligible: boolean;
+            /** Supported Capabilities */
+            supported_capabilities: string[];
+            /** Unmet Preferences */
+            unmet_preferences: string[];
+            /** Evidence */
+            evidence: {
+                [key: string]: boolean;
+            };
+            /** Issues */
+            issues: components["schemas"]["CandidateIssueRead"][];
+            /** Estimated Cost */
+            estimated_cost: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** ModelRead */
+        ModelRead: {
+            /** Id */
+            id: string;
+            /** Provider Id */
+            provider_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Configured */
+            configured: boolean;
+            /** Available */
+            available: boolean;
+            /** Capabilities */
+            capabilities: string[];
+        };
+        /** ModelSlotRead */
+        ModelSlotRead: {
+            /** Id */
+            id: string;
+            /** Display Name */
+            display_name: string;
+            /** Capabilities */
+            capabilities: string[];
+            /** Description */
+            description: string;
+            /** P0 Scope */
+            p0_scope: boolean;
+        };
         /** NodeRunRead */
         NodeRunRead: {
             /**
@@ -1170,6 +2781,8 @@ export interface components {
             attempt_no: number;
             /** Status */
             status: string;
+            /** Node Key */
+            node_key: string;
             /** Input Hash */
             input_hash: string;
             /** Result Artifact Id */
@@ -1189,6 +2802,16 @@ export interface components {
              * @default
              */
             idempotency_key: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Summary */
+            error_summary?: string | null;
+            /** Upstream Dependencies */
+            upstream_dependencies?: components["schemas"]["UpstreamDependencyRead"][];
         };
         /** PlanRequest */
         PlanRequest: {
@@ -1219,6 +2842,23 @@ export interface components {
             /** Context Hash */
             context_hash: string;
         };
+        /** PreferenceInterpretRequest */
+        PreferenceInterpretRequest: {
+            /**
+             * Source Concept Version Id
+             * Format: uuid
+             */
+            source_concept_version_id: string;
+            /** Feedback */
+            feedback: string;
+            /**
+             * Authorize Text Call
+             * @default false
+             */
+            authorize_text_call: boolean;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
         /** PreferenceRead */
         PreferenceRead: {
             /**
@@ -1234,6 +2874,303 @@ export interface components {
             experience_mode: components["schemas"]["ExperienceMode"];
             /** Last Guided Step */
             last_guided_step: string | null;
+        };
+        /** ProbeRead */
+        ProbeRead: {
+            /**
+             * Probe Id
+             * Format: uuid
+             */
+            probe_id: string;
+            /** Capability */
+            capability: string;
+            /** Status */
+            status: string;
+            /** Evidence Level */
+            evidence_level: string;
+            /** Http Status */
+            http_status: number | null;
+            /** Provider Request Id */
+            provider_request_id: string | null;
+            /** Reference Artifact Id */
+            reference_artifact_id: string | null;
+            /** Model Binding Id */
+            model_binding_id: string | null;
+            /** Remote Query Kind */
+            remote_query_kind: string | null;
+            /** Request Fingerprint */
+            request_fingerprint: string;
+            /** Budget Authorized */
+            budget_authorized: string;
+            /** Provider Cost */
+            provider_cost: string | null;
+            /** Currency */
+            currency: string;
+            /** Cost Status */
+            cost_status: string;
+            /**
+             * Tested At
+             * Format: date-time
+             */
+            tested_at: string;
+            /** Error Code */
+            error_code: string | null;
+        };
+        /** ProbeRequest */
+        ProbeRequest: {
+            /**
+             * Capability
+             * @enum {string}
+             */
+            capability: "auth_models" | "image_t2i" | "image_i2i" | "video_i2v" | "video_poll_download";
+            /** Model Binding Id */
+            model_binding_id?: string | null;
+            /** Reference Artifact Id */
+            reference_artifact_id?: string | null;
+            /** Remote Task Id */
+            remote_task_id?: string | null;
+            /** Remote Query Kind */
+            remote_query_kind?: ("video_id" | "task_id") | null;
+            /**
+             * Budget Authorized
+             * @default 0
+             */
+            budget_authorized: number | string;
+        };
+        /** ProductionBatchRead */
+        ProductionBatchRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Batch Kind */
+            batch_kind: string;
+            /** Status */
+            status: string;
+            /**
+             * Budget Authorization Id
+             * Format: uuid
+             */
+            budget_authorization_id: string;
+            /** Locked Version Refs */
+            locked_version_refs: {
+                [key: string]: string;
+            };
+            /** Selected Shot Ids */
+            selected_shot_ids: string[];
+            /** Template Keys */
+            template_keys: string[];
+            /** Quality Policy Id */
+            quality_policy_id: string;
+            /** Selection Snapshot */
+            selection_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Semantic Hash */
+            semantic_hash: string;
+        };
+        /** ProductionExportRead */
+        ProductionExportRead: {
+            /**
+             * Export Id
+             * Format: uuid
+             */
+            export_id: string;
+            /** Export Status */
+            export_status: string;
+            /** Mp4 Object Key */
+            mp4_object_key: string | null;
+            /** Mp4 Hash */
+            mp4_hash: string | null;
+            /** Mp4 Error */
+            mp4_error: string | null;
+            /** Timeline Hash */
+            timeline_hash: string;
+            /** Srt Hash */
+            srt_hash: string;
+            /** Package Hash */
+            package_hash: string;
+            /** Source Artifact Ids */
+            source_artifact_ids: string[];
+            /** Source Node Run Ids */
+            source_node_run_ids: string[];
+            /** Export Item Count */
+            export_item_count: number;
+        };
+        /** ProductionExportRequest */
+        ProductionExportRequest: {
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /**
+             * Try Ffmpeg
+             * @default true
+             */
+            try_ffmpeg: boolean;
+        };
+        /** ProfileCreate */
+        ProfileCreate: {
+            /** Name */
+            name: string;
+            /** Bindings */
+            bindings?: {
+                [key: string]: components["schemas"]["BindingInput"];
+            };
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+            /** Copy From */
+            copy_from?: string | null;
+        };
+        /** ProfileRead */
+        ProfileRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Project Id */
+            project_id: string | null;
+            /** Name */
+            name: string;
+            /** Version */
+            version: number;
+            /** Is Default */
+            is_default: boolean;
+            /** Bindings */
+            bindings?: {
+                [key: string]: components["schemas"]["BindingRead"];
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ProfileSummaryRead */
+        ProfileSummaryRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Project Id */
+            project_id: string | null;
+            /** Name */
+            name: string;
+            /** Version */
+            version: number;
+            /** Is Default */
+            is_default: boolean;
+            /** Binding Slots */
+            binding_slots?: string[];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ProfileUpdate */
+        ProfileUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Bindings */
+            bindings?: {
+                [key: string]: components["schemas"]["BindingInput"];
+            } | null;
+            /** Is Default */
+            is_default?: boolean | null;
+            /** Expected Version */
+            expected_version?: number | null;
+        };
+        /** ProfileValidateRequest */
+        ProfileValidateRequest: {
+            /** Bindings */
+            bindings?: {
+                [key: string]: components["schemas"]["BindingInput"];
+            };
+        };
+        /** ProfileValidateResponse */
+        ProfileValidateResponse: {
+            /** Valid */
+            valid: boolean;
+            /** Issues */
+            issues?: components["schemas"]["ProfileValidationIssue"][];
+        };
+        /** ProfileValidationIssue */
+        ProfileValidationIssue: {
+            /** Code */
+            code: string;
+            /** Slot */
+            slot: string;
+            /** Model Id */
+            model_id: string;
+            /** Message */
+            message: string;
+        };
+        /** ProjectBindingRead */
+        ProjectBindingRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Purpose */
+            purpose: string;
+            /**
+             * Model Binding Id
+             * Format: uuid
+             */
+            model_binding_id: string;
+            /** Selection Strategy */
+            selection_strategy: string;
+            /** Fallback Policy */
+            fallback_policy: string;
+        };
+        /** ProjectBindingWrite */
+        ProjectBindingWrite: {
+            /**
+             * Model Binding Id
+             * Format: uuid
+             */
+            model_binding_id: string;
+            /**
+             * Selection Strategy
+             * @default explicit_binding
+             * @constant
+             */
+            selection_strategy: "explicit_binding";
+            /**
+             * Fallback Policy
+             * @default none
+             * @constant
+             */
+            fallback_policy: "none";
         };
         /** ProjectCreate */
         ProjectCreate: {
@@ -1309,6 +3246,69 @@ export interface components {
          * @enum {string}
          */
         ProjectStage: "draft" | "planning" | "production" | "review" | "delivering" | "archived";
+        /** ProviderOperationRead */
+        ProviderOperationRead: {
+            /** Provider Operation Id */
+            provider_operation_id: string | null;
+            /** Provider */
+            provider: string | null;
+            /** Model */
+            model: string | null;
+            /** Remote Task Id */
+            remote_task_id: string | null;
+        };
+        /** QualityEvidenceRead */
+        QualityEvidenceRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Model Binding Id
+             * Format: uuid
+             */
+            model_binding_id: string;
+            /**
+             * Node Run Id
+             * Format: uuid
+             */
+            node_run_id: string;
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /** Evidence Kind */
+            evidence_kind: string;
+            /** Policy Id */
+            policy_id: string;
+            /** Score */
+            score: string | null;
+            /**
+             * Approved By
+             * Format: uuid
+             */
+            approved_by: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** QualityEvidenceWrite */
+        QualityEvidenceWrite: {
+            /**
+             * Node Run Id
+             * Format: uuid
+             */
+            node_run_id: string;
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+        };
         /** RegisterLeadBody */
         RegisterLeadBody: {
             /** Name */
@@ -1335,6 +3335,13 @@ export interface components {
             name: string;
             /** Canonical Object Key */
             canonical_object_key: string;
+            /**
+             * Canonical Artifact Id
+             * Format: uuid
+             */
+            canonical_artifact_id: string;
+            /** Canonical Content Hash */
+            canonical_content_hash: string;
             /** Provider */
             provider: string;
             /** Byte Size */
@@ -1351,6 +3358,80 @@ export interface components {
             password: string;
             /** Display Name */
             display_name: string;
+        };
+        /** RepairAuthorizeRequest */
+        RepairAuthorizeRequest: {
+            /** Repair Option Id */
+            repair_option_id: string;
+            /**
+             * Budget Authorization Id
+             * Format: uuid
+             */
+            budget_authorization_id: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** RepairPlanRequest */
+        RepairPlanRequest: {
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /**
+             * Quality Report Version Id
+             * Format: uuid
+             */
+            quality_report_version_id: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** RepairPlanResult */
+        RepairPlanResult: {
+            repair_plan_version: components["schemas"]["ArtifactVersionRead"];
+            /** Options */
+            options: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** ReviewProductionRequest */
+        ReviewProductionRequest: {
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /** Decisions */
+            decisions: {
+                [key: string]: "accept" | "repair" | "stop";
+            };
+            /**
+             * User Note
+             * @default
+             */
+            user_note: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** ReviewTrialRequest */
+        ReviewTrialRequest: {
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "accept" | "repair" | "stop";
+            /**
+             * User Note
+             * @default
+             */
+            user_note: string;
+            /** Idempotency Key */
+            idempotency_key: string;
         };
         /** ScriptImportBody */
         ScriptImportBody: {
@@ -1390,6 +3471,27 @@ export interface components {
             character_id?: string | null;
             /** Canonical Object Key */
             canonical_object_key?: string | null;
+        };
+        /** ShootingPackageGenerateRequest */
+        ShootingPackageGenerateRequest: {
+            /**
+             * Authorize Text Calls
+             * @default false
+             */
+            authorize_text_calls: boolean;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** ShootingPackageResult */
+        ShootingPackageResult: {
+            character_bible: components["schemas"]["ArtifactVersionRead"];
+            visual_bible: components["schemas"]["ArtifactVersionRead"];
+            voice_bible: components["schemas"]["ArtifactVersionRead"];
+            storyboard_plan: components["schemas"]["ArtifactVersionRead"];
+            risk_report: components["schemas"]["ArtifactVersionRead"];
+            selection_plan: components["schemas"]["ArtifactVersionRead"];
+            cost_estimate: components["schemas"]["ArtifactVersionRead"];
+            trial_plan: components["schemas"]["ArtifactVersionRead"];
         };
         /** ShotActionBody */
         ShotActionBody: {
@@ -1482,6 +3584,20 @@ export interface components {
             /** Pipeline */
             pipeline: string[];
         };
+        /**
+         * SimpleModeApply
+         * @description Simple-mode batch patch (spec §30/§77). ``bindings`` stays the truth.
+         */
+        SimpleModeApply: {
+            /** Llm Model Id */
+            llm_model_id?: string | null;
+            /** Image Model Id */
+            image_model_id?: string | null;
+            /** Video Model Id */
+            video_model_id?: string | null;
+            /** Expected Version */
+            expected_version?: number | null;
+        };
         /** StartProjectRequest */
         StartProjectRequest: {
             /**
@@ -1532,6 +3648,30 @@ export interface components {
             /** Text Provider Operations */
             text_provider_operations: number;
         };
+        /** StartWorkflowRequest */
+        StartWorkflowRequest: {
+            /**
+             * Template Id
+             * @default live_action_dialogue_short
+             */
+            template_id: string;
+            /**
+             * Template Version
+             * @default 1.0.0
+             */
+            template_version: string;
+        };
+        /** UpstreamDependencyRead */
+        UpstreamDependencyRead: {
+            /** Node Key */
+            node_key: string;
+            /** Run Id */
+            run_id: string | null;
+            /** Status */
+            status: string;
+            /** Result Artifact Id */
+            result_artifact_id: string | null;
+        };
         /** UserRead */
         UserRead: {
             /**
@@ -1576,6 +3716,57 @@ export interface components {
              * @default worker
              */
             role: string;
+        };
+        /** WorkflowRead */
+        WorkflowRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Template Id */
+            template_id: string;
+            /** Template Version */
+            template_version: string;
+            /** Status */
+            status: string;
+            /** Current Stage */
+            current_stage: string;
+            /** Current Artifact Versions */
+            current_artifact_versions: {
+                [key: string]: string;
+            };
+            /** Version */
+            version: number;
+        };
+        /** WorkflowStepRunRead */
+        WorkflowStepRunRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Step Key */
+            step_key: string;
+            /** Skill Id */
+            skill_id: string;
+            /** Skill Version */
+            skill_version: string;
+            /** Execution Kind */
+            execution_kind: string;
+            /** Status */
+            status: string;
+            /** Input Version Refs */
+            input_version_refs: string[];
+            /** Output Version Refs */
+            output_version_refs: string[];
+            /** Error Code */
+            error_code: string | null;
         };
         /** WorkspaceCreate */
         WorkspaceCreate: {
@@ -1642,6 +3833,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    bootstrap_status_api_v1_auth_bootstrap_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BootstrapStatusRead"];
+                };
+            };
+        };
+    };
     register_api_v1_auth_register_post: {
         parameters: {
             query?: never;
@@ -2445,6 +4656,895 @@ export interface operations {
             };
         };
     };
+    get_workflow_api_v1_projects__project_id__director_workflow_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_workflow_api_v1_projects__project_id__director_workflow_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_director_workspace_snapshot_api_v1_projects__project_id__director_workspace_snapshot_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorWorkspaceSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_artifact_version_api_v1_projects__project_id__director_artifact_versions_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtifactVersionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    authorize_budget_api_v1_projects__project_id__director_budget_authorizations_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BudgetAuthorizationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetAuthorizationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_api_v1_projects__project_id__director_approvals_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    propose_change_api_v1_projects__project_id__director_change_proposals_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeProposalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeProposalResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_change_api_v1_projects__project_id__director_change_proposals__proposal_id__confirm_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                proposal_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_concepts_api_v1_projects__project_id__director_creative_concepts_generate_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConceptGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    interpret_preferences_api_v1_projects__project_id__director_creative_preferences_interpret_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreferenceInterpretRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_creative_package_api_v1_projects__project_id__director_creative_package_generate_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreativePackageGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreativePackageResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_shooting_package_api_v1_projects__project_id__director_shooting_package_generate_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShootingPackageGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShootingPackageResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    materialize_trial_api_v1_projects__project_id__director_trial_materialize_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MaterializeBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaterializeBatchResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_trial_api_v1_projects__project_id__director_trial_inspect_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InspectTrialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_trial_api_v1_projects__project_id__director_trial_review_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewTrialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    materialize_production_api_v1_projects__project_id__director_production_materialize_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MaterializeBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaterializeBatchResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_production_api_v1_projects__project_id__director_production_inspect_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InspectProductionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_production_api_v1_projects__project_id__director_production_review_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewProductionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_production_api_v1_projects__project_id__director_production_export_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionExportRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_repairs_api_v1_projects__project_id__director_repairs_plan_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairPlanResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    authorize_repair_api_v1_projects__project_id__director_repairs__repair_option_id__authorize_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                repair_option_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairAuthorizeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaterializeBatchResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_artifact_content_api_v1_projects__project_id__artifacts__artifact_id__content_get: {
         parameters: {
             query?: {
@@ -2949,6 +6049,1273 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceCredentialRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_connections_api_v1_workspaces__workspace_id__provider_connections_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_connection_api_v1_workspaces__workspace_id__provider_connections_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_connection_api_v1_workspaces__workspace_id__provider_connections__connection_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_connection_api_v1_workspaces__workspace_id__provider_connections__connection_id__patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_connection_credential_api_v1_workspaces__workspace_id__provider_connections__connection_id__credential_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_probes_api_v1_workspaces__workspace_id__provider_connections__connection_id__probes_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_probe_api_v1_workspaces__workspace_id__provider_connections__connection_id__probes_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProbeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_model_bindings_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelBindingRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_model_binding_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelBindingCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelBindingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_model_binding_pricing_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings__model_binding_id__pricing_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+                model_binding_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindingPricingWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelBindingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_quality_evidence_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings__model_binding_id__quality_evidence_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+                model_binding_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualityEvidenceWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityEvidenceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_project_binding_api_v1_projects__project_id__provider_bindings__purpose__put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                purpose: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectBindingWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectBindingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    provider_reference_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    provider_reference_head: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_model_candidates_api_v1_projects__project_id__model_candidates_get: {
+        parameters: {
+            query: {
+                operation: "image.generate" | "video.generate";
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCandidateRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_capabilities_api_v1_capabilities_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_models_api_v1_models_get: {
+        parameters: {
+            query?: {
+                capability?: string | null;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_model_manifest_api_v1_models__model_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                model_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManifestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_generation_api_v1_projects__project_id__generations_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "Idempotency-Key"?: string | null;
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerationCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_generation_api_v1_projects__project_id__generations__operation_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                operation_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationOperationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_generation_api_v1_projects__project_id__generations__operation_id__cancel_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                operation_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationOperationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_model_slots_api_v1_model_slots_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSlotRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_profiles_api_v1_workspaces__workspace_id__model_profiles_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileSummaryRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workspace_profile_api_v1_workspaces__workspace_id__model_profiles_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workspace_profile_api_v1_workspaces__workspace_id__model_profiles__profile_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_workspace_profile_api_v1_workspaces__workspace_id__model_profiles__profile_id__put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_workspace_profile_api_v1_workspaces__workspace_id__model_profiles__profile_id__delete: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_simple_mode_api_v1_workspaces__workspace_id__model_profiles__profile_id__simple_mode_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimpleModeApply"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_project_profile_api_v1_projects__project_id__model_profile_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_project_profile_api_v1_projects__project_id__model_profile_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_profile_api_v1_model_profiles_validate_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileValidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileValidateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_effective_bindings_api_v1_projects__project_id__model_bindings_effective_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectiveBindingRead"][];
                 };
             };
             /** @description Validation Error */

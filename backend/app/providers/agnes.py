@@ -839,6 +839,14 @@ class AgnesVideoCompiler:
             raise ValueError("model does not accept a first_frame reference")
         if len(first_refs) > constraint.max:
             raise ValueError("too many first_frame references")
+        output = intent.output
+        if output.aspect_ratio not in {None, "9:16"}:
+            raise ValueError("Agnes Video V2.0 catalog revision only supports 9:16")
+        if output.generate_audio not in {None, False}:
+            raise ValueError("Agnes Video V2.0 compiler cannot request native audio")
+        if output.duration_seconds is not None:
+            frames = output.duration_seconds * 24 + 1
+            _validate_video_shape(num_frames=frames, frame_rate=24)
 
     async def compile(
         self,
@@ -850,24 +858,46 @@ class AgnesVideoCompiler:
     ) -> Any:
         self.validate(intent, model)
         first = next(ref for ref in references if ref.role == "first_frame")
+        duration_seconds = intent.output.duration_seconds or 5
+        num_frames = duration_seconds * 24 + 1
         if first.content_bytes is not None:
             body, operation, _refs, _transport = _build_video_body(
                 invoke_model_value,
                 prompt=intent.prompt,
                 image_bytes=first.content_bytes,
                 image_mime=first.mime_type,
+                num_frames=num_frames,
+                frame_rate=24,
             )
         elif first.content_url is not None:
             body, operation, _refs, _transport = _build_video_body(
                 invoke_model_value,
                 prompt=intent.prompt,
                 image_url=first.content_url,
+                num_frames=num_frames,
+                frame_rate=24,
             )
         else:
             raise ValueError("video first_frame reference has no bytes or URL")
         from app.providers.runtime import CompiledVideoRequest
 
         fps = [first.fingerprint] if first.fingerprint else []
+        summary = _compiled_summary(
+            operation=operation,
+            invoke_model_value=invoke_model_value,
+            reference_artifact_ids=[str(first.artifact_id)],
+            reference_fingerprints=fps,
+            schema_version=model.manifest_version,
+        )
+        summary.update(
+            {
+                "aspect_ratio": "9:16",
+                "duration_seconds": duration_seconds,
+                "num_frames": num_frames,
+                "frame_rate": 24,
+                "native_audio": False,
+            }
+        )
         return CompiledVideoRequest(
             provider_type="agnes",
             protocol_profile=AGNES_CN_PROFILE,
@@ -875,16 +905,7 @@ class AgnesVideoCompiler:
             operation="video.generate",
             wire_request=cast(dict[str, JsonValue], body),
             request_schema_version=model.manifest_version,
-            safe_request_summary=cast(
-                dict[str, JsonValue],
-                _compiled_summary(
-                    operation=operation,
-                    invoke_model_value=invoke_model_value,
-                    reference_artifact_ids=[str(first.artifact_id)],
-                    reference_fingerprints=fps,
-                    schema_version=model.manifest_version,
-                ),
-            ),
+            safe_request_summary=cast(dict[str, JsonValue], summary),
             reference_artifact_ids=[first.artifact_id],
             reference_fingerprints=fps,
         )

@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.config import get_settings
+from app.director.legacy_guard import require_legacy_execution_allowed
 from app.execution.models import GraphNode, NodeRun
 from app.providers.capabilities import Capability
 from app.providers.contracts import ArtifactRef, ImageGenerateRequest
@@ -72,6 +73,11 @@ class GenerationService:
         native_options: dict[str, Any],
         idempotency_key: str | None,
     ) -> NodeRun:
+        await require_legacy_execution_allowed(
+            self._session,
+            project_id=project.id,
+            action="direct_media_generation_service",
+        )
         node_type = _STANDALONE_NODE_TYPE.get(capability)
         if node_type is None:
             raise ValidationAppError(

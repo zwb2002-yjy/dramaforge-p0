@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ArtifactStage } from "../lib/artifactStage";
 import {
   approveShot,
+  ApiError,
   artifactContentUrl,
   exportDownloadUrl,
   exportProject,
@@ -14,7 +15,6 @@ import {
   grantExportDownload,
   importScript,
   lockShot,
-  produceGolden,
   rejectShot,
   rerunShot,
   startShot,
@@ -27,6 +27,9 @@ import {
 } from "../lib/projectMedia";
 import { projectRoute } from "./projects.$projectId";
 import { zhErrorCode, zhErrorSummary, zhNode, zhStatus } from "../lib/zh";
+import { fetchDirectorWorkspace } from "../features/director/api";
+import { directorWorkspaceKey } from "../features/director/useDirectorWorkspace";
+import type { DirectorWorkspaceSnapshot } from "../features/director/types";
 
 export const projectProductionRoute = createRoute({
   getParentRoute: () => projectRoute,
@@ -176,9 +179,102 @@ function retrySuggestion(code: string | null): string {
   return RETRY_SUGGESTIONS[code] ?? "查看错误摘要后局部重跑失败节点";
 }
 
+function compactId(value: string): string {
+  return value.length > 12 ? `${value.slice(0, 8)}…` : value;
+}
+
+function DirectorSharedFacts({ snapshot }: { snapshot: DirectorWorkspaceSnapshot }) {
+  const artifacts = Object.values(snapshot.current_artifacts);
+  return (
+    <section className="panel director-professional-facts" data-testid="director-shared-facts">
+      <div className="panel-header">
+        <div>
+          <span className="director-stage-kicker">Director 共享项目事实</span>
+          <h3>锁定版本、生产批次与证据</h3>
+        </div>
+        <strong>{snapshot.workflow.status}</strong>
+      </div>
+      <p className="muted">
+        快速创作与专业生产板读取同一 workflow 快照；专业模式只展开证据，不能绕过确认、预算或局部修复命令。
+      </p>
+      <dl className="director-fact-grid">
+        <dt>工作流</dt><dd data-testid="director-workflow-id"><code>{compactId(snapshot.workflow.id)}</code> · {snapshot.workflow.template_version}</dd>
+        <dt>当前阶段</dt><dd>{snapshot.workflow.current_stage}</dd>
+        <dt>下一动作</dt><dd>{snapshot.next_action}</dd>
+        <dt>画幅</dt><dd>{snapshot.aspect_ratio}</dd>
+      </dl>
+      <div className="director-professional-columns">
+        <section>
+          <h4>当前锁定版本</h4>
+          <ul className="dense">
+            {artifacts.map((artifact) => (
+              <li key={artifact.id}>
+                <span>{artifact.artifact_kind}</span>
+                <span>第 {artifact.revision_no} 版 · <code>{compactId(artifact.id)}</code></span>
+              </li>
+            ))}
+            {artifacts.length === 0 && <li className="muted">尚无已发布版本</li>}
+          </ul>
+        </section>
+        <section>
+          <h4>受控生产批次</h4>
+          <ul className="dense">
+            {snapshot.production_batches.map((batch) => (
+              <li key={batch.id}>
+                <span data-testid={`director-batch-${batch.id}`}>{batch.batch_kind} · {batch.status}</span>
+                <span>{batch.selected_shot_ids.length} 镜 · <code>{compactId(batch.id)}</code></span>
+              </li>
+            ))}
+            {snapshot.production_batches.length === 0 && <li className="muted">尚未物化试拍或正式生产批次</li>}
+          </ul>
+        </section>
+        <section>
+          <h4>预算保留</h4>
+          <ul className="dense">
+            {snapshot.budget_reservations.map((reservation) => (
+              <li key={reservation.id}>
+                <span data-testid={`director-reservation-${reservation.id}`}>{reservation.status} · {reservation.reserved_amount} {reservation.currency}</span>
+                <span>批次 <code>{compactId(reservation.batch_id)}</code></span>
+              </li>
+            ))}
+            {snapshot.budget_reservations.length === 0 && <li className="muted">尚无媒体预算保留</li>}
+          </ul>
+        </section>
+        <section>
+          <h4>步骤与质量问题</h4>
+          <ul className="dense">
+            {snapshot.step_runs.map((step) => (
+              <li key={step.id}><span>{step.step_key}</span><span>{step.status}</span></li>
+            ))}
+            {snapshot.issues.map((issue) => (
+              <li key={issue.id}><span>{issue.issue_type}</span><span>{issue.severity}</span></li>
+            ))}
+            {snapshot.step_runs.length === 0 && snapshot.issues.length === 0 && (
+              <li className="muted">尚无步骤运行或质量问题</li>
+            )}
+          </ul>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function ProductionPage() {
   const { projectId } = projectProductionRoute.useParams();
   const qc = useQueryClient();
+  const director = useQuery({
+    queryKey: directorWorkspaceKey(projectId),
+    queryFn: async () => {
+      try {
+        return await fetchDirectorWorkspace(projectId);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return null;
+        throw error;
+      }
+    },
+    enabled: Boolean(projectId && projectId !== "demo"),
+  });
+  const directorControlled = Boolean(director.data?.workflow.id);
   const [msg, setMsg] = useState<string | null>(null);
   const [lastExportId, setLastExportId] = useState<string | null>(null);
   const [downloadHint, setDownloadHint] = useState<string | null>(null);
@@ -230,22 +326,6 @@ function ProductionPage() {
           ? `MP4：${r.mp4_error}（仍可下载 timeline/SRT）`
           : "可申请 timeline 下载授权",
       );
-    },
-    onError: (e: Error) => setMsg(e.message),
-  });
-
-  const goldenMut = useMutation({
-    mutationFn: async () => {
-      if (projectId === "demo") throw new Error("请从大厅创建真实项目");
-      return produceGolden(projectId);
-    },
-    onSuccess: async (r) => {
-      setMsg(
-        `[夹具] 黄金批处理 shots=${r.shot_count} face=${r.face_checked} cont=${r.continuity_checked} — 非 §3.1 验收主证据`,
-      );
-      setLastExportId(r.export_id);
-      await qc.invalidateQueries({ queryKey: ["shots", projectId] });
-      await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
     },
     onError: (e: Error) => setMsg(e.message),
   });
@@ -348,6 +428,19 @@ function ProductionPage() {
         。正式路径：导入剧本 → 逐 Shot 生产/审核 → 导出可校验交付。
       </div>
 
+      {directorControlled && (
+        <>
+          <div className="callout" data-testid="director-production-handoff">
+            此项目由 AI 导演流程控制。启动生成、局部返工和正式导出必须回到
+            <Link to="/projects/$projectId/quick" params={{ projectId }}>
+              快速创作的 AI 导演
+            </Link>
+            ，完成预算授权或选择修复方案后再回来查看逐镜证据。
+          </div>
+          <DirectorSharedFacts snapshot={director.data!} />
+        </>
+      )}
+
       <div className="pipeline-rail" aria-label="shot-p0-v1">
         {NODES.map((n) => (
           <span key={n} className={`pipeline-node ${nodeRailClass[n] ?? ""}`}>
@@ -356,7 +449,7 @@ function ProductionPage() {
         ))}
       </div>
 
-      <div className="script-import-panel">
+      {!directorControlled && <div className="script-import-panel">
         <label>
           剧本文件
           <input
@@ -389,9 +482,9 @@ function ProductionPage() {
             spellCheck={false}
           />
         </label>
-      </div>
+      </div>}
 
-      <div className="toolbar">
+      {!directorControlled && <div className="toolbar">
         <button
           type="button"
           className="primary"
@@ -406,7 +499,8 @@ function ProductionPage() {
           className="accent"
           data-testid="export-project"
           onClick={() => exportMut.mutate()}
-          disabled={exportMut.isPending}
+          disabled={exportMut.isPending || directorControlled}
+          title={directorControlled ? "请通过 AI 导演导出已验收的正式生产批次" : undefined}
         >
           {exportMut.isPending ? "导出中…" : "② 导出 timeline / SRT / 包"}
         </button>
@@ -418,17 +512,7 @@ function ProductionPage() {
         >
           ③ 授权下载 timeline
         </button>
-        <button
-          type="button"
-          className="ghost"
-          data-testid="produce-golden"
-          onClick={() => goldenMut.mutate()}
-          disabled={goldenMut.isPending}
-          title="仅开发夹具"
-        >
-          {goldenMut.isPending ? "夹具跑批中…" : "〔夹具〕假 Adapter 批处理（非验收）"}
-        </button>
-      </div>
+      </div>}
 
       {msg && (
         <div className="flash ok" data-testid="production-msg">
@@ -631,15 +715,16 @@ function ProductionPage() {
                   ) : null}
                 </div>
               )}
-              <div className="toolbar" data-testid="shot-ops">
+              {!directorControlled && <div className="toolbar" data-testid="shot-ops">
                 <button
                   type="button"
                   className="primary"
-                  disabled={opBusy}
+                  disabled={opBusy || directorControlled}
                   data-testid="shot-start"
                   onClick={() =>
                     void runShotOp("启动", () => startShot(projectId, selectedShot.id))
                   }
+                  title={directorControlled ? "请通过 AI 导演的预算授权启动生产" : undefined}
                 >
                   启动生产
                 </button>
@@ -689,17 +774,18 @@ function ProductionPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={opBusy}
+                  disabled={opBusy || directorControlled}
                   data-testid="shot-rerun-subtitle"
                   onClick={() =>
                     void runShotOp("局部重跑字幕", () =>
                       rerunShot(projectId, selectedShot.id, "subtitle"),
                     )
                   }
+                  title={directorControlled ? "请通过 AI 导演选择定向修复方案" : undefined}
                 >
                   字幕局部重跑
                 </button>
-              </div>
+              </div>}
               <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }}>
                 真实路径：NodeRun → Outbox → Arq → Worker → Artifact → 审核。假黄金批处理仅夹具。
                 手工媒体：POST …/manual-media（受审计上传）。

@@ -19,6 +19,12 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class BootstrapStatusRead(BaseModel):
+    owner_initialized: bool
+    registration_available: bool
+    public_registration_enabled: bool
+
+
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

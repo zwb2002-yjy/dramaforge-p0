@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Response, status
 
 from app.access.schemas import (
+    BootstrapStatusRead,
     CsrfRead,
     LoginRequest,
     RegisterRequest,
@@ -42,13 +43,28 @@ def _set_csrf_cookie(response: Response, *, token: str, secure: bool) -> None:
     )
 
 
+@router.get("/auth/bootstrap-status", response_model=BootstrapStatusRead)
+async def bootstrap_status(session: SessionDep, settings: SettingsDep) -> BootstrapStatusRead:
+    owner_initialized, registration_available = await AccessService(
+        session
+    ).registration_status(public_registration_enabled=settings.public_registration_enabled)
+    return BootstrapStatusRead(
+        owner_initialized=owner_initialized,
+        registration_available=registration_available,
+        public_registration_enabled=settings.public_registration_enabled,
+    )
+
+
 @router.post("/auth/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register(
     body: RegisterRequest, response: Response,
     session: SessionDep, settings: SettingsDep,
 ) -> UserRead:
     user = await AccessService(session).register(
-        email=str(body.email), password=body.password, display_name=body.display_name
+        email=str(body.email),
+        password=body.password,
+        display_name=body.display_name,
+        public_registration_enabled=settings.public_registration_enabled,
     )
     secure = settings.app_env == "production"
     _set_session_cookie(

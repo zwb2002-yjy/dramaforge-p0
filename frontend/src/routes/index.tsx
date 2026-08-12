@@ -6,6 +6,7 @@ import {
   ApiError,
   createWorkspace,
   deleteWorkspace,
+  fetchBootstrapStatus,
   fetchCurrentUser,
   fetchHealth,
   getSelectedWorkspaceId,
@@ -31,6 +32,11 @@ function HomePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, refetchInterval: 8_000, retry: 1 });
+  const bootstrapStatus = useQuery({
+    queryKey: ["bootstrap-status"],
+    queryFn: fetchBootstrapStatus,
+    retry: 1,
+  });
   const currentUser = useQuery({ queryKey: ["current-user"], queryFn: fetchCurrentUser, retry: false });
   const workspaces = useQuery({
     queryKey: ["workspaces"],
@@ -46,6 +52,7 @@ function HomePage() {
   const [workspaceName, setWorkspaceName] = useState("");
   const [projectName, setProjectName] = useState("新短剧");
   const [idea, setIdea] = useState("");
+  const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9">("9:16");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -98,6 +105,7 @@ function HomePage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["current-user"] });
       await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      await queryClient.invalidateQueries({ queryKey: ["bootstrap-status"] });
     },
     onError: (cause: Error) => setError(cause.message),
   });
@@ -134,7 +142,7 @@ function HomePage() {
   const createProjectMutation = useMutation({
     mutationFn: async () => {
       if (!selectedWorkspaceId) throw new Error("请先选择一个空间");
-      return startProject({ workspace_id: selectedWorkspaceId, name: projectName, aspect_ratio: "9:16", idea });
+      return startProject({ workspace_id: selectedWorkspaceId, name: projectName, aspect_ratio: aspectRatio, idea });
     },
     onSuccess: async (project) => {
       await invalidateWorkspaceData();
@@ -145,6 +153,7 @@ function HomePage() {
 
   const dbUp = health.data?.db === "up" || (health.data?.status === "ok" && !health.data?.db);
   const apiLive = Boolean(health.data && !health.isError && health.data.status === "ok" && dbUp);
+  const registrationAvailable = bootstrapStatus.data?.registration_available === true;
   const selectedWorkspace = workspaces.data?.find((workspace) => workspace.id === selectedWorkspaceId);
   const workspacesError = workspaces.error instanceof ApiError ? workspaces.error.message : null;
 
@@ -165,15 +174,22 @@ function HomePage() {
 
       {!currentUser.data ? (
         <section className="panel auth-panel">
-          <h2>登录</h2>
+          <h2>{bootstrapStatus.data?.owner_initialized === false ? "初始化 Owner" : "登录"}</h2>
           <form className="auth-form" onSubmit={(event) => { event.preventDefault(); authenticate.mutate("login"); }}>
             <label>邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" /></label>
             <label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
-            <label>显示名<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label>
+            {registrationAvailable && <label>显示名<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label>}
             <div className="toolbar">
               <button className="primary" type="submit" disabled={authenticate.isPending || !apiLive}>登录</button>
-              <button type="button" onClick={() => authenticate.mutate("register")} disabled={authenticate.isPending || !apiLive}>创建账号</button>
+              {registrationAvailable && (
+                <button type="button" onClick={() => authenticate.mutate("register")} disabled={authenticate.isPending || !apiLive || bootstrapStatus.isLoading}>
+                  {bootstrapStatus.data?.owner_initialized ? "创建账号" : "初始化 Owner"}
+                </button>
+              )}
             </div>
+            {bootstrapStatus.data?.owner_initialized && !registrationAvailable && (
+              <p className="muted">此实例已完成 Owner 初始化，公共注册已关闭。</p>
+            )}
           </form>
         </section>
       ) : (
@@ -210,6 +226,10 @@ function HomePage() {
             <form className="inline-form project-create" onSubmit={(event) => { event.preventDefault(); createProjectMutation.mutate(); }}>
               <input aria-label="项目名" value={projectName} onChange={(event) => setProjectName(event.target.value)} disabled={!selectedWorkspaceId} />
               <input aria-label="创意想法" value={idea} onChange={(event) => setIdea(event.target.value)} placeholder="创意想法（可选）" disabled={!selectedWorkspaceId} />
+              <select aria-label="画幅" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as "9:16" | "16:9")} disabled={!selectedWorkspaceId}>
+                <option value="9:16">9:16 竖屏</option>
+                <option value="16:9">16:9 横屏</option>
+              </select>
               <button className="primary" type="submit" disabled={!selectedWorkspaceId || createProjectMutation.isPending}>创建项目</button>
             </form>
             <div className="project-list">

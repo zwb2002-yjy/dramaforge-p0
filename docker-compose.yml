@@ -2,23 +2,19 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: dramaforge
-      POSTGRES_PASSWORD: dramaforge
-      POSTGRES_DB: dramaforge
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-dramaforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}
+      POSTGRES_DB: ${POSTGRES_DB:-dramaforge}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dramaforge -d dramaforge"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -29,11 +25,8 @@ services:
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
     volumes:
       - minio_data:/data
     healthcheck:
@@ -51,7 +44,7 @@ services:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:-litellm}
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?Run python scripts/init_env.py first}
       POSTGRES_DB: litellm
     volumes:
       - litellm_db_data:/var/lib/postgresql/data
@@ -64,8 +57,8 @@ services:
   litellm:
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0}
     environment:
-      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm}@litellm-db:5432/litellm
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-dev-change-me}
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?Run python scripts/init_env.py first}@litellm-db:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Run python scripts/init_env.py first}
       # Deployment env for the logical aliases in infra/litellm/config.yaml.
       # Empty values are valid (config loads); an alias is usable only when its
       # api_base+api_key (or mock_response) are set. Never commit real keys.
@@ -81,8 +74,6 @@ services:
     volumes:
       - ./infra/litellm/config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
-    ports:
-      - "4000:4000"
     depends_on:
       litellm-db:
         condition: service_healthy
@@ -95,34 +86,49 @@ services:
     restart: unless-stopped
 
   migrate:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   api:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
       MINIO_BUCKET: dramaforge
-      SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:-dev-only-fernet-key-replace-in-prod==}
-      CORS_ORIGINS: http://localhost:5173
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
+      PUBLIC_REGISTRATION_ENABLED: ${PUBLIC_REGISTRATION_ENABLED:-false}
+      CORS_ORIGINS: ${DRAMAFORGE_PUBLIC_ORIGIN:-http://localhost:8080}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
       AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
@@ -145,8 +151,6 @@ services:
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}
-    ports:
-      - "8000:8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -154,6 +158,10 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -162,44 +170,87 @@ services:
     restart: unless-stopped
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
 
+  frontend:
+    image: ${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:local}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${DRAMAFORGE_BIND_ADDRESS:-127.0.0.1}:${DRAMAFORGE_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/gateway-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   dispatcher:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
       MINIO_BUCKET: dramaforge
-      SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:-dev-only-fernet-key-replace-in-prod==}
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
       OUTBOX_DISPATCH_INTERVAL_SECONDS: ${OUTBOX_DISPATCH_INTERVAL_SECONDS:-1}
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     command: ["python", "-m", "app.workers.dispatcher"]
 
   worker-default:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:-dev-only-fernet-key-replace-in-prod==}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
       WORKER_KIND: default
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
@@ -228,6 +279,15 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     command:
       [
         "sh",
@@ -237,19 +297,26 @@ services:
     restart: unless-stopped
 
   worker-heavy:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:-dev-only-fernet-key-replace-in-prod==}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
+      INSIGHTFACE_ENABLED: ${INSIGHTFACE_ENABLED:-false}
+      INSIGHTFACE_MODEL_NAME: ${INSIGHTFACE_MODEL_NAME:-buffalo_l}
+      INSIGHTFACE_MODEL_ROOT: ${INSIGHTFACE_MODEL_ROOT:-/models/insightface}
       WORKER_KIND: heavy
       ARQ_HEAVY_MAX_JOBS: ${ARQ_HEAVY_MAX_JOBS:-4}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
@@ -279,6 +346,15 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     command:
       [
         "sh",

@@ -65,3 +65,12 @@ def test_docker_build_context_editable_install_succeeds(tmp_path: Path) -> None:
     assert (stage / readme).is_file()
     assert packages == ["app"]
     assert all((stage / package).is_dir() for package in packages)
+
+
+def test_dockerignore_excludes_local_heavy_and_sensitive_paths() -> None:
+    backend_ignore = (BACKEND / ".dockerignore").read_text(encoding="utf-8")
+    root_ignore = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8")
+    for required in (".env", ".venv", "**/__pycache__", "*.onnx"):
+        assert required in backend_ignore
+    for required in (".env", "**/.venv", "**/node_modules", "*.onnx"):
+        assert required in root_ignore

@@ -87,3 +87,17 @@ def test_pair_score_via_spike_import_path() -> None:
     a = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
     assert mod.pair_score is pair_score
     assert pair_score(a, a) == pytest.approx(1.0)
+
+
+def test_spike_does_not_implicitly_download_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    mod = _load_spike_module()
+    monkeypatch.setenv("INSIGHTFACE_ENABLED", "true")
+    monkeypatch.setenv("INSIGHTFACE_MODEL_ROOT", str(tmp_path))
+    mod.get_settings.cache_clear()
+
+    app, error = mod.try_build_face_app()
+
+    assert app is None
+    assert error is not None and "licensed model files are not installed" in error

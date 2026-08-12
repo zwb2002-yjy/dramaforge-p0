@@ -14,8 +14,9 @@ from app.providers.reference_delivery import (
 router = APIRouter(tags=["provider-references"])
 
 
-@router.api_route("/provider-references/{token}", methods=["HEAD", "GET"])
-async def provider_reference(token: str, request: Request, session: SessionDep) -> Response:
+async def _provider_reference_response(
+    token: str, request: Request, session: SessionDep
+) -> Response:
     reference = await resolve_public_reference(session, token=token)
     data = await read_public_reference_bytes(reference)
     return Response(
@@ -28,3 +29,23 @@ async def provider_reference(token: str, request: Request, session: SessionDep) 
             "X-Content-SHA256": reference.content_hash,
         },
     )
+
+
+@router.get(
+    "/provider-references/{token}",
+    operation_id="provider_reference_get",
+)
+async def provider_reference_get(
+    token: str, request: Request, session: SessionDep
+) -> Response:
+    return await _provider_reference_response(token, request, session)
+
+
+@router.head(
+    "/provider-references/{token}",
+    operation_id="provider_reference_head",
+)
+async def provider_reference_head(
+    token: str, request: Request, session: SessionDep
+) -> Response:
+    return await _provider_reference_response(token, request, session)

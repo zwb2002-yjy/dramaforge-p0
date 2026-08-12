@@ -7,6 +7,7 @@ from app.api.v1 import (
     characters,
     creation,
     credentials,
+    director,
     events,
     generations,
     model_candidates,
@@ -25,6 +26,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(projects.router)
 api_router.include_router(creation.router)
+api_router.include_router(director.router)
 api_router.include_router(production.router)
 api_router.include_router(scripts.router)
 api_router.include_router(characters.router)

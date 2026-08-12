@@ -45,74 +45,80 @@ D:\dramaforge
 | PostgreSQL 15 | 主数据库 |
 | Redis 7 | 任务队列（Arq） |
 | MinIO | S3 兼容对象存储 |
-| API (FastAPI) | `:8000`，后端服务 |
+| API (FastAPI) | Compose 内网 `:8000`，后端服务 |
 | Dispatcher / Worker (default + heavy) | Outbox 派发与 Arq 异步任务消费 |
-| 前端 (Vite + React) | `:5173`，浏览器打开 |
+| 前端网关 (React + Nginx) | 默认唯一入口 `127.0.0.1:8080` |
 
-`docker-compose.yml` 是唯一的服务端部署方式：它启动 PostgreSQL、Redis、MinIO、迁移、API、常驻 Outbox dispatcher 与两类 Arq Worker。前端使用本机 Vite 提供 HMR；它通过 `http://127.0.0.1:8000` 访问 Compose API。
+`docker-compose.yml` 是完整发布拓扑：它构建前端静态产物与非特权 Nginx 网关，并启动
+PostgreSQL、Redis、MinIO、LiteLLM、迁移、API、常驻 Outbox dispatcher 与两类 Arq Worker。
+只有前端网关发布宿主端口，其他服务保留在 Compose 内网。
 
 ---
 
 ### Docker Compose
 
-把所有后端服务跑在 Docker 容器内，网络在容器内网打通，最稳定。
+把完整应用跑在 Docker 容器内，网络在容器内网打通。
 
 **前置条件**：Docker Compose v2。
 
 **1. 准备环境文件**
 
 ```powershell
-Copy-Item .env.example .env
+python scripts/init_env.py
 ```
 
-`.env.example` 是假值，本地开发可以直接用；如果需要非假密钥：
+该命令从 `.env.example` 创建本地 `.env`，为 Session、Worker、BYOK Fernet 和
+LiteLLM 分别生成唯一密钥，且不会把密钥值打印到终端。为避免误覆盖，`.env` 已存在时命令会
+直接拒绝；需要保留的 Provider BYOK 应继续只写入本地 `.env`。Compose 对这些必需密钥
+采用 fail-fast 校验，空值或缺失时不会启动。
+
+默认部署为单用户模式（`PUBLIC_REGISTRATION_ENABLED=false`）：干净数据库允许在登录页创建
+第一个 Owner；创建成功后后端 `/api/v1/auth/register` 返回 `REGISTRATION_CLOSED`，前端也会
+隐藏初始化入口。不要为了“修复登录”删除数据库。只有明确需要多账号实验时，才在受控环境将
+该变量改为 `true`。
+
+> 如果旧 `.env` 来自早期版本，请先备份并手工补齐
+> `POSTGRES_PASSWORD`、`MINIO_ROOT_PASSWORD`、`LITELLM_DB_PASSWORD`、`SESSION_SECRET`、
+> `WORKER_TOKEN`、`BYOK_FERNET_KEY`、`LITELLM_MASTER_KEY`；不要用仓库
+> 文档里的公共固定值。已经加密保存 BYOK 后不得随意替换 Fernet key，应按密钥轮换工具操作。
+
+**2. 启动完整应用**
 
 ```powershell
-# SESSION_SECRET
--join ((48..57) + (65..90) + (97..122) | Get-Random -Count 48 | ForEach-Object { [char]$_ })
-
-# BYOK_FERNET_KEY
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-**2. 启动后端容器**
-
-```powershell
-docker compose up -d
+docker compose up -d --build
 ```
 
 Compose 会从本地忽略的 `.env` 读取 `AGNES_*`、`TEXT_LLM_*` 和可选的 `TTS_*`，
 并仅注入 API 与 Worker 容器；未配置时保持 fail-closed。不要把真实密钥写入
 `docker-compose.yml` 或提交到 Git。
 
-> 这会启动 **所有** 服务（postgres、redis、minio、migrate、api、dispatcher、worker-default、worker-heavy）。首次运行会构建 `backend/Dockerfile` 镜像，其中包含 FFmpeg、eSpeak NG、InsightFace 0.7.3、ONNX Runtime CPU 与预下载的 buffalo_l 模型。构建会执行 `FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"]).prepare(ctx_id=-1)`；初始化失败时不会生成服务镜像。
+> 这会启动 **所有** 服务（postgres、redis、minio、litellm、migrate、api、frontend、dispatcher、worker-default、worker-heavy）。首次运行会构建前后端镜像。后端包含 FFmpeg、eSpeak NG 和可选的 InsightFace Python 运行时代码，但不包含、下载或初始化任何 InsightFace 预训练权重。
 
-**3. 启动前端**
-
-```powershell
-cd frontend
-npm.cmd install
-npm.cmd run dev
-```
-
-浏览器打开 `http://localhost:5173`。
-
-**4. 验证**
+**3. 验证**
 
 ```powershell
-curl http://localhost:8000/health
+curl http://localhost:8080/gateway-health
+curl http://localhost:8080/health
 # → {"status":"ok","db":"up"}
 ```
 
-验证镜像内的人脸一致性运行时，不依赖宿主机 Python 或模型下载：
+浏览器打开 `http://localhost:8080`。默认只绑定回环地址，不提供 TLS；公网或局域网部署必须
+明确配置入口与 HTTPS 边界，详见
+[`docs/runbooks/docker-deployment.md`](docs/runbooks/docker-deployment.md)。
+
+默认镜像应明确报告 InsightFace 未启用：
 
 ```powershell
-docker compose build api worker-heavy
-docker run --rm --entrypoint python dramaforge-api:latest -c "import json; from app.consistency.image_embed import insightface_status; print(json.dumps(insightface_status(), sort_keys=True))"
-# → {"available": true, "backend": "insightface+onnx", "embedding_dim": 512, "error": null}
+docker compose exec api python -c "import json; from app.consistency.image_embed import insightface_status; print(json.dumps(insightface_status(), sort_keys=True))"
+# → {"available": false, "backend": "hash_placeholder", ...}
 ```
 
-`insightface_status()` 的 `available=true` 只证明镜像内的 CPU 初始化与 512 维 embedding 运行时可用；它不替代 S0-A 的 FAR/FRR 校准，也不关闭 P0 的正式证据 Gate。
+DramaForge 不分发或自动下载 `buffalo_l`。只有在部署者自行确认模型文件的来源、许可和用途，
+把模型目录只读挂载到容器，并设置 `INSIGHTFACE_ENABLED=true`、
+`INSIGHTFACE_MODEL_ROOT=/models/insightface` 后才会尝试加载。预期目录结构为
+`/models/insightface/models/<INSIGHTFACE_MODEL_NAME>/*.onnx`；缺少文件时保持 fail-closed，
+不会触发库的隐式联网下载。即使 `available=true`，它也只证明人脸 embedding 运行时可用，
+不等于人物一致性已解决，也不能单独作为发布 Gate。
 
 **GPU / ComfyUI（可选）**：
 
@@ -126,7 +132,14 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gpu up 
 
 当你需要在宿主机打断点调试 Python 代码时。
 
-先启动 Docker 基础设施：`docker compose up -d postgres redis minio`。原生调试不提供另一套部署模式；数据库、队列和对象存储仍由 Compose 管理。
+先用开发 override 启动 Docker 基础设施：
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis minio
+```
+
+`docker-compose.dev.yml` 会显式开放调试端口，不得用于不受信网络。原生调试不提供另一套部署
+模式；数据库、队列和对象存储仍由 Compose 管理。
 
 **后端**（Python 3.12 + venv）：
 
@@ -231,3 +244,13 @@ Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在�
 成员、邀请、共享、评论和任务指派不在当前个人创作者路线中。
 
 详细效果和进入条件见 [`docs/产品阶段与效果路线图.md`](docs/产品阶段与效果路线图.md) 与 [`docs/MVP能力延期台账.md`](docs/MVP能力延期台账.md)。
+
+## 开源治理
+
+DramaForge 以 [Apache License 2.0](LICENSE) 开源。提交代码前请阅读
+[贡献指南](CONTRIBUTING.md)、[安全策略](SECURITY.md)、
+[社区行为准则](CODE_OF_CONDUCT.md) 与 [第三方声明](THIRD_PARTY_NOTICES.md)。
+
+仓库提供 AIOS/AISphere 的 Compose 交接描述，但尚未在真实 AIOS 环境验证，也没有冒充平台
+官方 manifest；边界与集成验收见
+[`docs/runbooks/docker-deployment.md`](docs/runbooks/docker-deployment.md)。

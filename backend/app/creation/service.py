@@ -23,6 +23,7 @@ from app.creation.models import (
     CreativeBriefRevision,
     PlanningAuthorization,
 )
+from app.director.legacy_guard import require_legacy_execution_allowed
 from app.events.service import EventService
 from app.execution.models import ProviderOperation
 from app.providers.capabilities import Capability
@@ -364,6 +365,11 @@ class CreationService:
         materialization_ops: list[str] | None = None,
     ) -> ConfirmPlanResult:
         """Confirm Plan and materialize real Shots plus queued keyframe NodeRuns."""
+        await require_legacy_execution_allowed(
+            self._session,
+            project_id=project_id,
+            action="legacy_confirm_plan_service",
+        )
         from datetime import UTC, datetime
 
         from app.execution.models import NodeRun

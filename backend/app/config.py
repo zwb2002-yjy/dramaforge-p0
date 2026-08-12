@@ -2,9 +2,9 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:5173"]
     )
+    public_registration_enabled: bool = Field(
+        default=False,
+        description=(
+            "Allow account creation after the first Owner bootstrap. Keep false for "
+            "the default single-user self-hosted deployment."
+        ),
+    )
 
     database_url: str = Field(
         default="postgresql+asyncpg://dramaforge:dramaforge@localhost:5432/dramaforge",
@@ -59,13 +66,13 @@ class Settings(BaseSettings):
     minio_region: str = Field(default="us-east-1")
 
     session_secret: str = Field(
-        default="dev-only-change-me-to-a-long-random-string",
+        default="",
         min_length=16,
     )
     byok_fernet_key: str = Field(
-        default="dev-only-fernet-key-replace-in-prod==",
+        default="",
         min_length=16,
-        description="Fernet key material for encrypting user BYOK; replace in production",
+        description="Generated Fernet key material for encrypting user BYOK",
     )
     byok_primary_key_version: str = Field(
         default="legacy",
@@ -87,7 +94,7 @@ class Settings(BaseSettings):
     )
     worker_kind: Literal["default", "heavy"] = "default"
     worker_token: str = Field(
-        default="dev-worker-token",
+        default="",
         description="Shared secret for /api/v1/worker/tick (local Worker substitute)",
     )
 
@@ -166,7 +173,9 @@ class Settings(BaseSettings):
     tts_enabled: bool = False
     tts_engine: str = "espeak-ng"
     tts_voice: str = "zh"
-    insightface_enabled: bool = True
+    insightface_enabled: bool = False
+    insightface_model_name: str = "buffalo_l"
+    insightface_model_root: str = "/models/insightface"
 
     # Stage A+B provider unification. All default OFF; each flips when the
     # matching stage lands. Resume never reads these flags (persisted state wins).
@@ -181,6 +190,31 @@ class Settings(BaseSettings):
             items = [part.strip() for part in value.split(",") if part.strip()]
             return items
         return value
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> Self:
+        """Reject known development secrets before a production process starts."""
+        if self.app_env != "production":
+            return self
+        unsafe = {
+            "",
+            "dev-only-change-me-to-a-long-random-string",
+            "dev-only-fernet-key-replace-in-prod==",
+            "dev-worker-token",
+        }
+        if self.session_secret.strip() in unsafe or len(self.session_secret.strip()) < 32:
+            raise ValueError("SESSION_SECRET must be a generated production secret")
+        if self.worker_token.strip() in unsafe or len(self.worker_token.strip()) < 32:
+            raise ValueError("WORKER_TOKEN must be a generated production secret")
+        try:
+            from cryptography.fernet import Fernet
+
+            Fernet(self.byok_fernet_key.strip().encode("ascii"))
+        except (TypeError, ValueError, UnicodeEncodeError) as exc:
+            raise ValueError("BYOK_FERNET_KEY must be a valid generated Fernet key") from exc
+        if self.byok_fernet_key.strip() in unsafe:
+            raise ValueError("BYOK_FERNET_KEY must not use the published example key")
+        return self
 
     def agnes_configured(self) -> bool:
         """True when BYOK is present and hub is enabled."""

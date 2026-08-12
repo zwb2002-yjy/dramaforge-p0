@@ -119,6 +119,15 @@ class ModelBindingRead(BaseModel):
     remote_resource_kind: str | None
     remote_resource_id: str | None
     invoke_model_value: str | None
+    pricing_snapshot: dict[str, object]
+
+
+class BindingPricingWrite(BaseModel):
+    unit_amount: Decimal = Field(ge=0, decimal_places=6)
+    currency: str = Field(min_length=3, max_length=3)
+    billing_unit: str = Field(min_length=1, max_length=80)
+    source_note: str = Field(min_length=1, max_length=500)
+    owner_verified: Literal[True]
 
 
 class ProjectBindingWrite(BaseModel):
@@ -209,6 +218,7 @@ def _model_read(binding: ProviderModelBinding) -> ModelBindingRead:
         remote_resource_kind=binding.remote_resource_kind,
         remote_resource_id=binding.remote_resource_id,
         invoke_model_value=binding.invoke_model_value,
+        pricing_snapshot=dict(binding.pricing_snapshot_json or {}),
     )
 
 
@@ -440,6 +450,39 @@ async def list_model_bindings(
         workspace_id=workspace_id, connection_id=connection_id
     )
     return [_model_read(binding) for binding in bindings]
+
+
+@router.put(
+    (
+        "/workspaces/{workspace_id}/provider-connections/{connection_id}"
+        "/model-bindings/{model_binding_id}/pricing"
+    ),
+    response_model=ModelBindingRead,
+)
+async def set_model_binding_pricing(
+    workspace_id: UUID,
+    connection_id: UUID,
+    model_binding_id: UUID,
+    body: BindingPricingWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ModelBindingRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    binding = await ProviderConnectionService(session).set_binding_pricing(
+        workspace_id=workspace_id,
+        connection_id=connection_id,
+        model_binding_id=model_binding_id,
+        actor=user,
+        unit_amount=body.unit_amount,
+        currency=body.currency,
+        billing_unit=body.billing_unit,
+        source_note=body.source_note,
+    )
+    await session.commit()
+    return _model_read(binding)
 
 
 @router.post(

@@ -491,6 +491,16 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
         raise CompositeRenderError("ffmpeg test failure")
 
     monkeypatch.setenv("APP_ENV", app_env)
+    if app_env == "production":
+        monkeypatch.setenv(
+            "SESSION_SECRET", "test-production-session-secret-32-characters"
+        )
+        monkeypatch.setenv(
+            "WORKER_TOKEN", "test-production-worker-token-32-characters"
+        )
+        monkeypatch.setenv(
+            "BYOK_FERNET_KEY", "v0v3D-eSZ4JB_qjFNWVlfYUUKulGroB1bVVa8Seifqc="
+        )
     clear_settings_cache()
     monkeypatch.setattr("app.execution.composite_media._render_with_ffmpeg", failing_ffmpeg)
     try:

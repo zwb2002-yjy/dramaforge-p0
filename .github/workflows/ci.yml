@@ -14,6 +14,57 @@ permissions:
   contents: read
 
 jobs:
+  platform-baseline:
+    name: platform-baseline-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Sync backend dependencies
+        working-directory: backend
+        run: uv sync --locked --extra dev
+      - name: Cross-platform configuration contracts
+        working-directory: backend
+        run: >-
+          uv run pytest
+          tests/unit/test_config.py
+          tests/unit/test_init_env.py
+          tests/unit/test_dockerfile_context.py
+          tests/unit/test_compose_contract.py
+          -q
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Validate release Compose model
+        if: runner.os == 'Linux'
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password-not-for-deployment
+          MINIO_ROOT_PASSWORD: ci-minio-password-not-for-deployment
+          LITELLM_DB_PASSWORD: ci-litellm-db-password-not-for-deployment
+          LITELLM_MASTER_KEY: ci-litellm-master-key-not-for-deployment
+          SESSION_SECRET: ci-session-secret-not-for-deployment-1234567890
+          WORKER_TOKEN: ci-worker-token-not-for-deployment-1234567890
+          BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+        run: docker compose config --quiet
+
   policy:
     name: policy
     runs-on: ubuntu-latest

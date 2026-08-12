@@ -17,6 +17,9 @@ from app.delivery.download import (
     verify_download_token,
 )
 from app.delivery.export_service import build_project_export
+from app.director.legacy_guard import require_legacy_execution_allowed
+from app.director.models import DirectorWorkflowRun
+from app.events.models import OutboxEvent
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.runtime.scheduler import AgentRunScheduler
 from app.shared.errors import ForbiddenError
@@ -230,6 +233,30 @@ async def dispatch_project_work(
 ) -> DispatchResponse:
     """Publish Outbox + enqueue Arq jobs only — does not run Adapters."""
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    director = await session.scalar(
+        select(DirectorWorkflowRun.id).where(
+            DirectorWorkflowRun.project_id == project_id
+        )
+    )
+    if director is not None:
+        unauthorized_run = await session.scalar(
+            select(NodeRun.id).where(
+                NodeRun.project_id == project_id,
+                NodeRun.status == "queued",
+                NodeRun.production_batch_id.is_(None),
+            )
+        )
+        unauthorized_outbox = await session.scalar(
+            select(OutboxEvent.id).where(
+                OutboxEvent.project_id == project_id,
+                OutboxEvent.status == "pending",
+                OutboxEvent.topic == "node_run.enqueue",
+            )
+        )
+        if unauthorized_run is not None or unauthorized_outbox is not None:
+            await require_legacy_execution_allowed(
+                session, project_id=project_id, action="legacy_project_dispatch"
+            )
     sched = AgentRunScheduler(session)
     n = await sched.dispatch_pending(
         worker_id=f"api-enqueue:{user.id}",
@@ -256,6 +283,10 @@ async def enqueue_node_run(
         from app.shared.errors import NotFoundError
 
         raise NotFoundError("node_run not found")
+    if run.production_batch_id is None:
+        await require_legacy_execution_allowed(
+            session, project_id=project_id, action="legacy_node_run_enqueue"
+        )
     job_id = await AgentRunScheduler(session).enqueue_node_run_only(node_run_id)
     await session.refresh(run)
     return EnqueueResponse(node_run_id=run.id, status=run.status, job_id=job_id)
@@ -269,6 +300,9 @@ async def export_project(
     _: CsrfDep,
 ) -> ExportResponse:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="legacy_project_export"
+    )
     result = await build_project_export(
         session,
         project_id=project_id,
@@ -325,6 +359,9 @@ async def produce_golden_path(
     from app.execution.golden_path import run_golden_p0_path
 
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="legacy_produce_golden"
+    )
     result = await run_golden_p0_path(
         session,
         project_id=project_id,

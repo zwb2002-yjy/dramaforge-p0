@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.assets.models import Shot
 from app.config import get_settings
 from app.consistency.face_policy import approved_face_policy_snapshot, approved_face_threshold
+from app.director.legacy_guard import require_legacy_execution_allowed
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import Artifact, NodeRun
 from app.execution.product_path import identity_priority_keyframe_prompt
@@ -279,6 +280,9 @@ async def start_shot_nodes(
     node_keys: list[str] | None = None,
     force: bool = False,
 ) -> list[UUID]:
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="legacy_shot_media_service"
+    )
     """Queue missing shot-pipeline nodes with persisted Plan and Shot context.
 
     A normal start is idempotent: already queued or successful nodes are left
@@ -515,6 +519,9 @@ async def local_rerun_from_node(
     user_id: UUID,
     changed_node_key: str,
 ) -> tuple[list[str], list[UUID]]:
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="legacy_shot_rerun_service"
+    )
     """Mark correct downstream stale and return (keys, run_ids) that must re-run."""
     if await is_shot_locked(session, project_id=project_id, shot_id=shot_id):
         raise ValidationAppError("shot is human-locked")

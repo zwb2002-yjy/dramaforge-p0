@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.director.legacy_guard import require_legacy_execution_allowed
 from app.execution import shot_review
 from app.runtime.scheduler import AgentRunScheduler
 from app.shared.errors import ValidationAppError
@@ -94,6 +95,9 @@ async def _run_shot_action(
 ) -> ShotActionResponse:
     """Authorize, run a shot-review handler, commit, and build the response."""
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="legacy_shot_review"
+    )
     r = await handler(session, project_id=project_id, shot_id=shot_id, user_id=user.id)
     await session.commit()
     return ShotActionResponse(
@@ -116,6 +120,9 @@ async def _run_shot_action_with_enqueue(
 ) -> ShotActionResponse:
     """Authorize, run a handler that returns new run_ids, enqueue them."""
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="legacy_shot_media"
+    )
     if changed_node_key:
         result = await handler(
             session,
@@ -291,6 +298,9 @@ async def manual_media(
     file: UploadFile = File(...),  # noqa: B008
 ) -> ManualUploadResponse:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    await require_legacy_execution_allowed(
+        session, project_id=project_id, action="legacy_manual_media"
+    )
     data = await file.read()
     mime = file.content_type or "application/octet-stream"
     art = await shot_review.upload_manual_media(
