@@ -241,6 +241,8 @@ def test_natural_language_change_never_applies_before_confirmation(
             ],
         },
     )
+    _artifact(client, project_id, "episode_script")
+    _artifact(client, project_id, "story_review")
     proposal = client.post(
         f"/api/v1/projects/{project_id}/director/change-proposals",
         json={
@@ -268,8 +270,12 @@ def test_natural_language_change_never_applies_before_confirmation(
     assert proposal.status_code == 201, proposal.text
     body = proposal.json()
     assert body["proposal"]["status"] == "awaiting_confirmation"
-    assert body["impact"]["invalidated_version_ids"] == [original["id"]]
     snapshot = client.get(f"/api/v1/projects/{project_id}/director/workflow")
+    assert body["impact"]["invalidated_version_ids"] == [
+        original["id"],
+        snapshot.json()["current_artifact_versions"]["episode_script"],
+        snapshot.json()["current_artifact_versions"]["story_review"],
+    ]
     assert snapshot.json()["current_artifact_versions"]["story_core"] == original["id"]
 
     applied = client.post(
@@ -281,6 +287,134 @@ def test_natural_language_change_never_applies_before_confirmation(
     assert applied.json()["payload"]["ending"] == "open"
     changed_snapshot = client.get(f"/api/v1/projects/{project_id}/director/workflow").json()
     assert changed_snapshot["current_artifact_versions"] == {"story_core": applied.json()["id"]}
+
+
+def test_change_proposal_requires_current_artifact_and_confirmation_state(
+    client: TestClient,
+) -> None:
+    project_id = _project(client, "change-state@example.com")
+    _start(client, project_id)
+    rejected = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals",
+        json={
+            "idempotency_key": "change-too-early",
+            "target_artifact_kind": "story_core",
+            "summary": "提前修改",
+            "replacement_payload": {},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["details"]["code"] == "CHANGE_PROPOSAL_NOT_ALLOWED"
+
+    for kind in ("story_core", "episode_script", "story_review"):
+        _artifact(client, project_id, kind)
+    missing = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals",
+        json={
+            "idempotency_key": "change-missing-target",
+            "target_artifact_kind": "storyboard_plan",
+            "summary": "没有当前版本",
+            "replacement_payload": {},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert missing.status_code == 422
+    assert missing.json()["details"]["code"] == "CHANGE_TARGET_NOT_CURRENT"
+
+
+def test_pending_change_blocks_stage_approval_until_confirmed(client: TestClient) -> None:
+    project_id = _project(client, "change-approval@example.com")
+    _start(client, project_id)
+    original = _artifact(client, project_id, "story_core")
+    _artifact(client, project_id, "episode_script")
+    _artifact(client, project_id, "story_review")
+    proposal = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals",
+        json={
+            "idempotency_key": "change-before-approval",
+            "target_artifact_kind": "story_core",
+            "summary": "调整结局",
+            "replacement_payload": {
+                **original["payload"],
+                "ending": "主角选择留下来面对真相",
+            },
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert proposal.status_code == 201, proposal.text
+    blocked = _approve(client, project_id, "creative_plan", "approval-with-pending-change")
+    assert blocked.status_code == 422
+    assert blocked.json()["details"]["code"] == "PENDING_CHANGE_REQUIRES_CONFIRMATION"
+    blocked_write = client.post(
+        f"/api/v1/projects/{project_id}/director/artifact-versions",
+        json={
+            "artifact_kind": "episode_script",
+            "payload": {
+                "title": "不会写入",
+                "target_duration_seconds": 20,
+                "setup": "开始",
+                "turn": "转折",
+                "ending": "结局",
+                "dialogue": [{"speaker": "林夏", "text": "等一下。", "emotion": "克制"}],
+            },
+            "source_kind": "user",
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert blocked_write.status_code == 422
+    assert blocked_write.json()["details"]["code"] == "PENDING_CHANGE_REQUIRES_CONFIRMATION"
+
+
+def test_locked_creative_change_is_available_after_creative_approval(
+    client: TestClient,
+) -> None:
+    project_id = _project(client, "locked-change@example.com")
+    _start(client, project_id)
+    original = _artifact(client, project_id, "story_core")
+    _artifact(client, project_id, "episode_script")
+    _artifact(client, project_id, "story_review")
+    approved = _approve(client, project_id, "creative_plan", "lock-creative-plan")
+    assert approved.status_code == 201, approved.text
+    assert approved.json()["workflow"]["status"] == "drafting_shooting_plan"
+
+    proposal = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals",
+        json={
+            "idempotency_key": "locked-story-change",
+            "target_artifact_kind": "story_core",
+            "summary": "调整已锁定结局",
+            "replacement_payload": {
+                **original["payload"],
+                "ending": "主角留下来面对真相",
+            },
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert proposal.status_code == 201, proposal.text
+    proposal_body = proposal.json()
+    assert proposal_body["proposal"]["base_version_id"] == original["id"]
+
+    workspace = client.get(
+        f"/api/v1/projects/{project_id}/director/workspace-snapshot"
+    ).json()
+    assert workspace["current_artifacts"]["story_core"]["status"] == "locked"
+    assert workspace["allowed_actions"] == ["confirm_change"]
+
+    applied = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals/"
+        f"{proposal_body['proposal']['id']}/confirm",
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert applied.status_code == 200, applied.text
+    changed_workspace = client.get(
+        f"/api/v1/projects/{project_id}/director/workspace-snapshot"
+    ).json()
+    assert changed_workspace["workflow"]["status"] == "awaiting_creative_confirmation"
+    assert changed_workspace["workflow"]["current_artifact_versions"] == {
+        "story_core": applied.json()["id"]
+    }
+    assert changed_workspace["approvals"][0]["invalidated_at"] is not None
 
 
 def test_browser_cannot_forge_agent_artifact_source(client: TestClient) -> None:

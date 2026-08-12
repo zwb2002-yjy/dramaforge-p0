@@ -47,7 +47,10 @@ _ALLOWED_ACTIONS: dict[WorkflowStatus, list[str]] = {
         "propose_change",
         "confirm_creative_plan",
     ],
-    WorkflowStatus.DRAFTING_SHOOTING_PLAN: ["generate_shooting_package"],
+    WorkflowStatus.DRAFTING_SHOOTING_PLAN: [
+        "propose_change",
+        "generate_shooting_package",
+    ],
     WorkflowStatus.AWAITING_SHOOTING_CONFIRMATION: [
         "propose_change",
         "confirm_shooting_plan",
@@ -272,6 +275,11 @@ class DirectorSnapshotService:
                 ),
             )
         workflow_status = WorkflowStatus(workflow.status)
+        allowed_actions = list(_ALLOWED_ACTIONS[workflow_status])
+        next_action = _NEXT_ACTION[workflow_status]
+        if pending:
+            allowed_actions = ["confirm_change"]
+            next_action = "Review the change impact and explicitly confirm or leave it unapplied."
         return DirectorWorkspaceSnapshot(
             project_id=project.id,
             project_name=project.name,
@@ -290,6 +298,6 @@ class DirectorSnapshotService:
                 BudgetReservationRead.model_validate(item) for item in reservations
             ],
             latest_delivery=latest_delivery,
-            allowed_actions=list(_ALLOWED_ACTIONS[workflow_status]),
-            next_action=_NEXT_ACTION[workflow_status],
+            allowed_actions=allowed_actions,
+            next_action=next_action,
         )

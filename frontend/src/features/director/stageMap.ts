@@ -80,6 +80,7 @@ export const ACTION_ZH: Record<string, string> = {
   import_script: "导入有权使用的剧本",
   propose_change: "提出修改并查看影响",
   confirm_creative_plan: "确认创作方案",
+  confirm_change: "确认变更预览",
   generate_shooting_package: "生成拍摄方案",
   confirm_shooting_plan: "确认拍摄方案",
   authorize_trial_budget: "授权试拍预算",

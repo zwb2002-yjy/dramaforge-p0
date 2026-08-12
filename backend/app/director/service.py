@@ -34,6 +34,12 @@ from app.director.registry import get_template
 from app.director.state_machine import status_after_approval
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
+_CHANGE_PROPOSAL_STATUSES = {
+    WorkflowStatus.AWAITING_CREATIVE_CONFIRMATION.value,
+    WorkflowStatus.DRAFTING_SHOOTING_PLAN.value,
+    WorkflowStatus.AWAITING_SHOOTING_CONFIRMATION.value,
+}
+
 
 def content_hash(payload: object) -> str:
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -105,6 +111,7 @@ class DirectorService:
         if source_kind not in {"user", "agent", "imported", "service"}:
             raise ValidationAppError("unsupported artifact source_kind")
         if not confirmed_change:
+            await self._assert_no_pending_changes(workflow)
             self._assert_artifact_allowed(workflow, artifact_kind)
         payload = validate_creative_artifact_payload(artifact_kind.value, payload)
         digest = content_hash(payload)
@@ -218,6 +225,7 @@ class DirectorService:
             if existing.approval_kind != approval_kind.value:
                 raise ConflictError("idempotency key was reused for another approval")
             return existing, workflow
+        await self._assert_no_pending_changes(workflow)
         self._assert_required_artifacts(workflow, approval_kind)
         next_status = status_after_approval(workflow.status, approval_kind)
         if approval_kind in {
@@ -295,6 +303,7 @@ class DirectorService:
                     "authorization_kind": authorization_kind.value,
                 },
             )
+        await self._assert_no_pending_changes(workflow)
         existing = (
             await self._session.execute(
                 select(BudgetAuthorization).where(
@@ -355,8 +364,21 @@ class DirectorService:
                 )
             ).scalar_one()
             return existing, report
+        self._assert_change_allowed(workflow, action="proposal")
+        await self._assert_no_pending_changes(workflow)
         base_text = workflow.current_artifact_versions.get(target_artifact_kind.value)
-        base_id = UUID(base_text) if base_text else None
+        if base_text is None:
+            raise ValidationAppError(
+                "change proposals require a current artifact version",
+                details={
+                    "code": "CHANGE_TARGET_NOT_CURRENT",
+                    "artifact_kind": target_artifact_kind.value,
+                },
+            )
+        replacement_payload = validate_creative_artifact_payload(
+            target_artifact_kind.value, replacement_payload
+        )
+        base_id = UUID(base_text)
         invalidated = self._downstream_version_ids(
             workflow.current_artifact_versions, target_artifact_kind
         )
@@ -411,6 +433,7 @@ class DirectorService:
             return version
         if proposal.status != ProposalStatus.AWAITING_CONFIRMATION.value:
             raise ConflictError("change proposal is not awaiting confirmation")
+        self._assert_change_allowed(workflow, action="confirmation")
         if workflow.current_artifact_versions.get(proposal.target_artifact_kind) != (
             str(proposal.base_version_id) if proposal.base_version_id else None
         ):
@@ -538,6 +561,36 @@ class DirectorService:
         for row in rows:
             row.status = "locked"
             row.locked_at = now
+
+    async def _assert_no_pending_changes(self, workflow: DirectorWorkflowRun) -> None:
+        pending = await self._session.scalar(
+            select(func.count(ChangeProposal.id)).where(
+                ChangeProposal.workflow_run_id == workflow.id,
+                ChangeProposal.status == ProposalStatus.AWAITING_CONFIRMATION.value,
+            )
+        )
+        if pending:
+            raise ValidationAppError(
+                "pending change proposals must be confirmed before approval",
+                details={
+                    "code": "PENDING_CHANGE_REQUIRES_CONFIRMATION",
+                    "pending_change_count": int(pending),
+                },
+            )
+
+    @staticmethod
+    def _assert_change_allowed(workflow: DirectorWorkflowRun, *, action: str) -> None:
+        if workflow.status in _CHANGE_PROPOSAL_STATUSES:
+            return
+        code = (
+            "CHANGE_PROPOSAL_NOT_ALLOWED"
+            if action == "proposal"
+            else "CHANGE_CONFIRMATION_NOT_ALLOWED"
+        )
+        raise ValidationAppError(
+            f"change {action} is not allowed in the current workflow state",
+            details={"code": code, "current_status": workflow.status},
+        )
 
 
     async def _require_active_authorization(

@@ -1294,6 +1294,10 @@ code {
 .director-cost-grid ul li { justify-content: space-between; }
 .director-confirm-actions { display: flex; flex-direction: column; gap: .45rem; }
 .director-hard-confirm > .callout { grid-column: 1 / -1; margin: 0; }
+.director-change-panel h3 { margin: .15rem 0 0; }
+.director-change-preview { display: grid; gap: .6rem; margin-top: .8rem; padding: .85rem; border: 1px solid rgba(250, 204, 21, .48); border-radius: 8px; background: rgba(250, 204, 21, .06); }
+.director-change-preview h4, .director-change-preview p { margin: 0; }
+.director-change-preview button { justify-self: start; }
 .director-budget-panel label { margin: .75rem 0; }
 .director-budget-panel .dense { margin: .75rem 0; padding: 0; list-style: none; }
 .director-budget-panel .dense li { display: flex; justify-content: space-between; gap: 1rem; padding: .42rem 0; border-bottom: 1px solid var(--border); }

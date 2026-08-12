@@ -263,7 +263,7 @@ export function ShootingStage({ projectId, snapshot, refresh, onMessage, onError
       {risk && trial && <Risks risk={risk} trial={trial} />}
       {selection && <ModelSelection selection={selection} projectId={projectId} />}
       {cost && <Costs cost={cost} />}
-      {hasPackage && snapshot.workflow.status === "awaiting_shooting_confirmation" && (
+      {hasPackage && snapshot.workflow.status === "awaiting_shooting_confirmation" && snapshot.allowed_actions.includes("confirm_shooting_plan") && (
         <section className="panel director-hard-confirm" data-testid="shooting-hard-confirmation">
           <div><span>硬确认 2 / 4</span><h3>这套人物、声音、分镜和风险方案可以开始试拍</h3><p>确认只锁定拍摄方案，不会生成媒体。下一阶段仍要先查看价格快照并单独授权试拍预算。</p></div>
           <div className="director-confirm-actions">

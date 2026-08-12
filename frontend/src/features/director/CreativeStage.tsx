@@ -322,6 +322,7 @@ export function CreativeStage({
   const editable = ["drafting_creative", "awaiting_creative_confirmation"].includes(
     snapshot.workflow.status,
   );
+  const canConfirmCreative = snapshot.allowed_actions.includes("confirm_creative_plan");
 
   return (
     <section data-testid="creative-stage">
@@ -441,7 +442,7 @@ export function CreativeStage({
               </button>
             </section>
           )}
-          {snapshot.workflow.status === "awaiting_creative_confirmation" && (
+          {snapshot.workflow.status === "awaiting_creative_confirmation" && canConfirmCreative && (
             <section className="panel director-hard-confirm" data-testid="creative-hard-confirmation">
               <div><span>硬确认 1 / 4</span><h3>这是我想表达的故事</h3><p>确认后将锁定故事内核、角色动机和完整对白。之后任何自然语言修改都会先展示影响范围，再由你确认。</p></div>
               <button type="button" className="accent" disabled={busy || storyReview.status !== "passed"} onClick={() => approvalMutation.mutate()}>{approvalMutation.isPending ? "正在锁定…" : "确认创作方案，进入拍摄方案"}</button>

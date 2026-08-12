@@ -42,6 +42,7 @@ type MockState = {
   batches: Array<Record<string, unknown>>;
   runtimeRuns: Array<Record<string, unknown>>;
   latestDelivery: Record<string, unknown> | null;
+  pendingChanges: Array<Record<string, unknown>>;
   mediaRequests: string[];
   requests: Array<{ method: string; path: string; body: Record<string, unknown> }>;
   createdAspects: string[];
@@ -121,14 +122,14 @@ function baseCreativeArtifacts(aspectRatio: "9:16" | "16:9") {
 }
 
 function newState(): MockState {
-  return { status: "drafting_creative", aspectRatio: "9:16", artifacts: {}, stepRuns: [], approvals: [], budgets: [], batches: [], runtimeRuns: [], latestDelivery: null, mediaRequests: [], requests: [], createdAspects: [] };
+  return { status: "drafting_creative", aspectRatio: "9:16", artifacts: {}, stepRuns: [], approvals: [], budgets: [], batches: [], runtimeRuns: [], latestDelivery: null, pendingChanges: [], mediaRequests: [], requests: [], createdAspects: [] };
 }
 
 function allowedActions(status: Status) {
   const byStatus: Partial<Record<Status, string[]>> = {
     drafting_creative: ["generate_concepts", "import_script"],
-    awaiting_creative_confirmation: ["confirm_creative_plan"],
-    drafting_shooting_plan: ["generate_shooting_package"],
+    awaiting_creative_confirmation: ["propose_change", "confirm_creative_plan"],
+    drafting_shooting_plan: ["propose_change", "generate_shooting_package"],
     awaiting_shooting_confirmation: ["confirm_shooting_plan"],
     awaiting_trial_authorization: ["authorize_trial_budget"],
     trial_running: ["view_trial_progress"],
@@ -153,13 +154,13 @@ function workspaceSnapshot(state: MockState) {
     current_artifacts: state.artifacts,
     approvals: state.approvals,
     budget_authorizations: state.budgets,
-    pending_changes: [],
+    pending_changes: state.pendingChanges,
     issues: [],
     step_runs: state.stepRuns,
     production_batches: state.batches,
     budget_reservations: [],
     latest_delivery: state.latestDelivery,
-    allowed_actions: allowedActions(state.status),
+    allowed_actions: state.pendingChanges.length > 0 ? ["confirm_change"] : allowedActions(state.status),
     next_action: "mock next action",
   };
 }
@@ -208,6 +209,7 @@ async function installDirectorMock(page: Page, initial?: (state: MockState) => v
       return json(route, { project_id: PROJECT_ID, experience_mode: "quick", text_provider_operations: 0 });
     }
     if (method === "GET" && path === `/api/v1/projects/${PROJECT_ID}/snapshot`) return json(route, runtimeSnapshot(state));
+    if (method === "GET" && path === `/api/v1/projects/${PROJECT_ID}/shots`) return json(route, []);
     if (method === "GET" && path === `/api/v1/projects/${PROJECT_ID}/director/workspace-snapshot`) return json(route, workspaceSnapshot(state));
 
     if (method === "POST" && path.endsWith("/creative/concepts/generate")) {
@@ -230,6 +232,41 @@ async function installDirectorMock(page: Page, initial?: (state: MockState) => v
       state.artifacts.story_review = seeded.story_review;
       state.status = "awaiting_creative_confirmation";
       return json(route, { story_core: seeded.story_core, episode_script: seeded.episode_script, story_review: seeded.story_review }, 201);
+    }
+    if (method === "POST" && /\/change-proposals\/[^/]+\/confirm$/.test(path)) {
+      const pending = state.pendingChanges[0];
+      const proposal = pending?.proposal as Record<string, unknown> | undefined;
+      if (!proposal) return json(route, { detail: "No pending change" }, 409);
+      const previous = state.artifacts.story_core;
+      state.artifacts.story_core = artifact("story_core", proposal.replacement_payload as Record<string, unknown>, (previous?.revision_no ?? 1) + 1);
+      state.artifacts.story_core.supersedes_version_id = previous?.id ?? null;
+      delete state.artifacts.episode_script;
+      delete state.artifacts.story_review;
+      state.pendingChanges = [];
+      state.status = "awaiting_creative_confirmation";
+      return json(route, state.artifacts.story_core);
+    }
+    if (method === "POST" && path.endsWith("/change-proposals")) {
+      const original = state.artifacts.story_core;
+      if (!original) return json(route, { detail: "No current story core" }, 422);
+      const proposal = {
+        id: "change-story-core-1",
+        target_artifact_kind: "story_core",
+        summary: body.summary,
+        replacement_payload: body.replacement_payload,
+        status: "awaiting_confirmation",
+      };
+      const impact = {
+        id: "impact-story-core-1",
+        invalidated_version_ids: [original.id, state.artifacts.episode_script?.id, state.artifacts.story_review?.id].filter(Boolean),
+        affected_shot_ids: [],
+        reusable_artifact_ids: [],
+        estimated_added_cost: null,
+        estimated_added_time_seconds: null,
+        details: { requires_confirmation: true },
+      };
+      state.pendingChanges = [{ proposal, impact }];
+      return json(route, { proposal, impact }, 201);
     }
     if (method === "POST" && path.endsWith("/shooting/package/generate")) {
       state.artifacts = { ...state.artifacts, ...baseCreativeArtifacts(state.aspectRatio) };
@@ -371,6 +408,41 @@ test("Director creation supports all three entries and restores confirmed prefer
     expect(state.mediaRequests).toEqual([]);
     await page.reload();
     await expect(page.getByRole("button", { name: "开始代表镜头试拍" })).toBeVisible();
+    expect(state.mediaRequests).toEqual([]);
+  });
+});
+
+test("locked creative changes show an impact preview before confirmation and update both workspaces", async ({ page }) => {
+  const state = await installDirectorMock(page, (value) => {
+    const seeded = baseCreativeArtifacts(value.aspectRatio);
+    value.artifacts = {
+      story_core: seeded.story_core,
+      episode_script: seeded.episode_script,
+      story_review: seeded.story_review,
+    };
+    value.status = "awaiting_creative_confirmation";
+  });
+  await expectCleanRuntime(page, async () => {
+    await page.goto(`/projects/${PROJECT_ID}/quick`);
+    await expect(page.getByTestId("locked-creative-change")).toBeVisible();
+    await page.getByLabel("结局落点").last().fill("她没有离开，而是留下来面对真相。");
+    await page.getByTestId("propose-locked-creative-change").click();
+
+    const preview = page.getByTestId("change-preview-change-story-core-1");
+    await expect(preview).toContainText("3 个后续版本");
+    await expect(preview).toContainText("待重新生成选模方案后计算");
+    await expect(page.getByRole("button", { name: "确认创作方案，进入拍摄方案" })).toHaveCount(0);
+    expect(state.mediaRequests).toEqual([]);
+
+    await page.getByTestId("confirm-change-change-story-core-1").click();
+    await expect(page.getByTestId("director-message")).toContainText("新版本已确认");
+    await expect(page.getByTestId("creative-package-review")).toHaveCount(0);
+    expect(state.artifacts.story_core.revision_no).toBe(2);
+    expect(state.mediaRequests).toEqual([]);
+
+    await page.goto(`/projects/${PROJECT_ID}/production`);
+    await expect(page.getByTestId("director-shared-facts")).toContainText("story_core");
+    await expect(page.getByTestId("director-shared-facts")).toContainText("第 2 版");
     expect(state.mediaRequests).toEqual([]);
   });
 });

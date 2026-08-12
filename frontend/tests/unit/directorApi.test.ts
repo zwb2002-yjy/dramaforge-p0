@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authorizeDirectorBudget,
   authorizeAndMaterializeRepair,
+  confirmDirectorChange,
   ensureDirectorWorkspace,
   generateConcepts,
   inspectTrial,
@@ -11,6 +12,7 @@ import {
   materializeProduction,
   exportProduction,
   planRepairs,
+  proposeDirectorChange,
   reviewProduction,
   reviewTrial,
 } from "../../src/features/director/api";
@@ -69,6 +71,32 @@ describe("Director HTTP client", () => {
       authorize_text_call: true,
       idempotency_key: "concepts:1",
     });
+  });
+
+  it("uses controlled proposal and confirmation commands for a locked-content change", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response(200, { csrf_token: "csrf-proposal" }))
+      .mockResolvedValueOnce(response(201, { proposal: { id: "proposal-1" }, impact: {} }))
+      .mockResolvedValueOnce(response(200, { csrf_token: "csrf-confirm" }))
+      .mockResolvedValueOnce(response(200, { id: "story-core-v2" }));
+
+    await proposeDirectorChange("project-1", {
+      idempotency_key: "change:key",
+      target_artifact_kind: "story_core",
+      summary: "调整结局",
+      replacement_payload: { selected_concept_id: "concept-1" },
+    });
+    await confirmDirectorChange("project-1", "proposal-1");
+
+    const calls = vi.mocked(globalThis.fetch).mock.calls;
+    expect(calls[1][0]).toBe("/api/v1/projects/project-1/director/change-proposals");
+    expect(JSON.parse(String(calls[1][1]?.body))).toMatchObject({
+      target_artifact_kind: "story_core",
+      summary: "调整结局",
+    });
+    expect(calls[3][0]).toBe(
+      "/api/v1/projects/project-1/director/change-proposals/proposal-1/confirm",
+    );
   });
 
   it("uses only the real trial endpoints for budget, materialization, inspection, and review", async () => {

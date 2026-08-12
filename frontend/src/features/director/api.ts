@@ -18,6 +18,8 @@ import type {
   ProductionQualityReportPayload,
   ProductionReviewPayload,
   RepairOptionContract,
+  ChangeProposalResult,
+  DirectorArtifactKind,
 } from "./types";
 
 const directorPath = (projectId: string, suffix: string) =>
@@ -110,6 +112,32 @@ export async function authorizeDirectorBudget(
 ): Promise<BudgetAuthorization> {
   const csrf = await fetchCsrf();
   return apiSend("POST", directorPath(projectId, "/budget-authorizations"), input, csrf);
+}
+
+export async function proposeDirectorChange(
+  projectId: string,
+  input: {
+    idempotency_key: string;
+    target_artifact_kind: DirectorArtifactKind;
+    summary: string;
+    replacement_payload: Record<string, unknown>;
+  },
+): Promise<ChangeProposalResult> {
+  const csrf = await fetchCsrf();
+  return apiSend("POST", directorPath(projectId, "/change-proposals"), input, csrf);
+}
+
+export async function confirmDirectorChange(
+  projectId: string,
+  proposalId: string,
+): Promise<DirectorArtifactVersion<Record<string, unknown>>> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    directorPath(projectId, `/change-proposals/${encodeURIComponent(proposalId)}/confirm`),
+    {},
+    csrf,
+  );
 }
 
 export async function materializeTrial(
