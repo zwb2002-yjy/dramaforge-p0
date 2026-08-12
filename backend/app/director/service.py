@@ -57,7 +57,7 @@ _STATIC_BATCH_STATUSES = {
     "completed",
     "superseded_by_change",
 }
-_ACTIVE_NODE_RUN_STATUSES = {"queued", "leased", "running"}
+_ACTIVE_NODE_RUN_STATUSES = {"queued", "running"}
 
 
 def content_hash(payload: object) -> str:
