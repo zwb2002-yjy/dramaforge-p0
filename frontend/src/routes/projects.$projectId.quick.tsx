@@ -174,6 +174,9 @@ function LockedCreativeChangePanel({
   const [emotionalDirection, setEmotionalDirection] = useState(payload?.emotional_direction ?? "");
   const [ending, setEnding] = useState(payload?.ending ?? "");
   const pending = snapshot.pending_changes;
+  const historicalBatches = snapshot.production_batches.filter(
+    (batch) => !["materializing", "authorized", "running"].includes(batch.status),
+  );
 
   useEffect(() => {
     if (!payload || pending.length > 0) return;
@@ -228,7 +231,15 @@ function LockedCreativeChangePanel({
       <div className="panel-header"><div><span className="director-stage-kicker">锁定内容修改</span><h3>先预览，再确认</h3></div></div>
       {pending.length === 0 ? (
         <>
-          <p className="muted">调整会先生成不可变的变更预览，列出会失效的后续版本；确认前不会替换当前故事，也不会产生媒体费用。</p>
+          <p className="muted">
+            调整会先生成不可变的变更预览，列出会失效的后续版本；确认前不会替换当前故事，也不会产生媒体费用。
+          </p>
+          {historicalBatches.length > 0 && (
+            <div className="callout warn" data-testid="post-media-change-notice">
+              已有 {historicalBatches.length} 个静止媒体批次。确认修改后，旧批次和已发生的成本会保留为历史血缘，
+              未结算预留会释放；新的拍摄方案、预算和媒体请求必须重新确认。
+            </div>
+          )}
           <div className="form-grid">
             <label>主题<input value={theme} onChange={(event) => setTheme(event.target.value)} /></label>
             <label>核心冲突<textarea value={coreConflict} onChange={(event) => setCoreConflict(event.target.value)} rows={2} /></label>
@@ -247,6 +258,18 @@ function LockedCreativeChangePanel({
             <dt>将替换</dt><dd>当前锁定的 {change.proposal.target_artifact_kind}</dd>
             <dt>失效版本</dt><dd>{change.impact.invalidated_version_ids.length ? `${change.impact.invalidated_version_ids.length} 个后续版本` : "无"}</dd>
             <dt>受影响镜头</dt><dd>{change.impact.affected_shot_ids.length ? change.impact.affected_shot_ids.join("、") : "尚未物化镜头"}</dd>
+            {Array.isArray(change.impact.details.affected_batch_ids) && (
+              <><dt>历史批次</dt><dd>{change.impact.details.affected_batch_ids.length ? `${change.impact.details.affected_batch_ids.length} 个批次将标记为已被修订取代` : "无"}</dd></>
+            )}
+            {Array.isArray(change.impact.details.releasable_reservation_ids) && (
+              <><dt>释放预留</dt><dd>{change.impact.details.releasable_reservation_ids.length ? `${change.impact.details.releasable_reservation_ids.length} 笔未结算预留` : "无"}</dd></>
+            )}
+            {typeof change.impact.details.historical_settled_amount === "string" && (
+              <><dt>已发生历史成本</dt><dd>{change.impact.details.historical_settled_amount} {Array.isArray(change.impact.details.historical_currencies) ? change.impact.details.historical_currencies.join("/") : ""}</dd></>
+            )}
+            {change.impact.details.media_reuse_policy === "none_until_regenerated_and_reapproved" && (
+              <><dt>媒体复用</dt><dd>本次故事改动后不自动复用，须重新生成并确认</dd></>
+            )}
             <dt>新增费用</dt><dd>{change.impact.estimated_added_cost ?? "待重新生成选模方案后计算"}</dd>
           </dl>
           <button type="button" className="accent" data-testid={`confirm-change-${change.proposal.id}`} disabled={confirm.isPending} onClick={() => confirm.mutate(change.proposal.id)}>

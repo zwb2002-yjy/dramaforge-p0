@@ -273,7 +273,9 @@ async def validate_director_media_submission(
     if node.node_type not in {"keyframe", "video", "voice"}:
         return None
     workflow = await session.scalar(
-        select(DirectorWorkflowRun).where(DirectorWorkflowRun.project_id == run.project_id)
+        select(DirectorWorkflowRun)
+        .where(DirectorWorkflowRun.project_id == run.project_id)
+        .with_for_update()
     )
     if workflow is None:
         return None
@@ -283,8 +285,16 @@ async def validate_director_media_submission(
             "DIRECTOR_PRODUCTION_CONTEXT_REQUIRED",
             "Director paid media NodeRun requires a production batch and budget reservation",
         )
-    batch = await session.get(ProductionBatch, run.production_batch_id)
-    reservation = await session.get(BudgetReservation, run.budget_reservation_id)
+    batch = await session.scalar(
+        select(ProductionBatch)
+        .where(ProductionBatch.id == run.production_batch_id)
+        .with_for_update()
+    )
+    reservation = await session.scalar(
+        select(BudgetReservation)
+        .where(BudgetReservation.id == run.budget_reservation_id)
+        .with_for_update()
+    )
     if batch is None or reservation is None:
         _reject(
             "DIRECTOR_PRODUCTION_CONTEXT_INVALID",
@@ -329,7 +339,11 @@ async def validate_director_media_submission(
             reservation_status=reservation.status,
         )
 
-    authorization = await session.get(BudgetAuthorization, batch.budget_authorization_id)
+    authorization = await session.scalar(
+        select(BudgetAuthorization)
+        .where(BudgetAuthorization.id == batch.budget_authorization_id)
+        .with_for_update()
+    )
     current_time = now or datetime.now(UTC)
     expected_kind = _expected_authorization_kind(batch.batch_kind)
     if (

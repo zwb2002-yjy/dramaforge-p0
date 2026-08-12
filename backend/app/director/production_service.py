@@ -68,7 +68,9 @@ class DirectorProductionService:
         idempotency_key: str,
     ) -> tuple[ProductionBatch, list[NodeRun]]:
         project = await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
-        workflow = await self._director.get_workflow(project_id=project_id, actor=actor)
+        workflow = await self._director.get_workflow(
+            project_id=project_id, actor=actor, for_update=True
+        )
         existing = await self._batch_by_key(project_id, idempotency_key)
         if existing is not None:
             return existing, await self._batch_runs(existing.id)
@@ -256,7 +258,9 @@ class DirectorProductionService:
         persisted into the batch before any NodeRun can be queued.
         """
         project = await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
-        workflow = await self._director.get_workflow(project_id=project_id, actor=actor)
+        workflow = await self._director.get_workflow(
+            project_id=project_id, actor=actor, for_update=True
+        )
         existing = await self._batch_by_key(project_id, idempotency_key)
         if existing is not None:
             if existing.batch_kind != "production":

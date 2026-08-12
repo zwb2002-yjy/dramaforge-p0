@@ -43,6 +43,7 @@ type MockState = {
   runtimeRuns: Array<Record<string, unknown>>;
   latestDelivery: Record<string, unknown> | null;
   pendingChanges: Array<Record<string, unknown>>;
+  reservations: Array<Record<string, unknown>>;
   mediaRequests: string[];
   requests: Array<{ method: string; path: string; body: Record<string, unknown> }>;
   createdAspects: string[];
@@ -122,7 +123,7 @@ function baseCreativeArtifacts(aspectRatio: "9:16" | "16:9") {
 }
 
 function newState(): MockState {
-  return { status: "drafting_creative", aspectRatio: "9:16", artifacts: {}, stepRuns: [], approvals: [], budgets: [], batches: [], runtimeRuns: [], latestDelivery: null, pendingChanges: [], mediaRequests: [], requests: [], createdAspects: [] };
+  return { status: "drafting_creative", aspectRatio: "9:16", artifacts: {}, stepRuns: [], approvals: [], budgets: [], batches: [], runtimeRuns: [], latestDelivery: null, pendingChanges: [], reservations: [], mediaRequests: [], requests: [], createdAspects: [] };
 }
 
 function allowedActions(status: Status) {
@@ -134,13 +135,13 @@ function allowedActions(status: Status) {
     awaiting_trial_authorization: ["authorize_trial_budget"],
     trial_running: ["view_trial_progress"],
     awaiting_trial_review: ["review_trial"],
-    awaiting_production_authorization: ["authorize_production_budget"],
+    awaiting_production_authorization: ["propose_change", "authorize_production_budget"],
     production_running: ["view_production_progress"],
-    final_review: ["review_evidence"],
-    repair_proposed: ["select_repair_option"],
-    awaiting_repair_authorization: ["authorize_repair_budget"],
+    final_review: ["propose_change", "review_evidence"],
+    repair_proposed: ["propose_change", "select_repair_option"],
+    awaiting_repair_authorization: ["propose_change", "authorize_repair_budget"],
     assembling: ["view_assembly_progress"],
-    completed: ["download_delivery"],
+    completed: ["propose_change", "download_delivery"],
   };
   return byStatus[status] ?? [];
 }
@@ -158,7 +159,7 @@ function workspaceSnapshot(state: MockState) {
     issues: [],
     step_runs: state.stepRuns,
     production_batches: state.batches,
-    budget_reservations: [],
+    budget_reservations: state.reservations,
     latest_delivery: state.latestDelivery,
     allowed_actions: state.pendingChanges.length > 0 ? ["confirm_change"] : allowedActions(state.status),
     next_action: "mock next action",
@@ -242,6 +243,8 @@ async function installDirectorMock(page: Page, initial?: (state: MockState) => v
       state.artifacts.story_core.supersedes_version_id = previous?.id ?? null;
       delete state.artifacts.episode_script;
       delete state.artifacts.story_review;
+      state.batches = state.batches.map((batch) => ({ ...batch, status: "superseded_by_change" }));
+      state.reservations = state.reservations.map((reservation) => ({ ...reservation, status: "released" }));
       state.pendingChanges = [];
       state.status = "awaiting_creative_confirmation";
       return json(route, state.artifacts.story_core);
@@ -259,11 +262,18 @@ async function installDirectorMock(page: Page, initial?: (state: MockState) => v
       const impact = {
         id: "impact-story-core-1",
         invalidated_version_ids: [original.id, state.artifacts.episode_script?.id, state.artifacts.story_review?.id].filter(Boolean),
-        affected_shot_ids: [],
+        affected_shot_ids: state.batches.flatMap((batch) => (batch.selected_shot_ids as string[]) ?? []),
         reusable_artifact_ids: [],
         estimated_added_cost: null,
         estimated_added_time_seconds: null,
-        details: { requires_confirmation: true },
+        details: {
+          requires_confirmation: true,
+          affected_batch_ids: state.batches.map((batch) => batch.id),
+          releasable_reservation_ids: state.reservations.filter((reservation) => reservation.status === "reserved").map((reservation) => reservation.id),
+          historical_settled_amount: "0",
+          historical_currencies: ["CNY"],
+          media_reuse_policy: state.batches.length ? "none_until_regenerated_and_reapproved" : "not_applicable",
+        },
       };
       state.pendingChanges = [{ proposal, impact }];
       return json(route, { proposal, impact }, 201);
@@ -444,6 +454,42 @@ test("locked creative changes show an impact preview before confirmation and upd
     await expect(page.getByTestId("director-shared-facts")).toContainText("story_core");
     await expect(page.getByTestId("director-shared-facts")).toContainText("第 2 版");
     expect(state.mediaRequests).toEqual([]);
+  });
+});
+
+test("post-media changes preserve visible batch lineage and require a fresh plan", async ({ page }) => {
+  const state = await installDirectorMock(page, (value) => {
+    const seeded = baseCreativeArtifacts(value.aspectRatio);
+    value.artifacts = {
+      story_core: seeded.story_core,
+      episode_script: seeded.episode_script,
+      story_review: seeded.story_review,
+      trial_review: artifact("trial_review", { batch_id: "trial-batch", quality_report_version_id: "trial-quality", decision: "accept", accepted_quality: true, user_note: "试拍通过", evidence_refs: [] }),
+    };
+    value.status = "awaiting_production_authorization";
+    value.batches = [{ ...batch("trial", "trial-batch"), status: "accepted" }];
+    value.reservations = [{ id: "trial-reservation", batch_id: "trial-batch", authorization_id: "budget-trial", node_run_id: null, reserved_amount: "1.00", actual_amount: null, currency: "CNY", status: "reserved" }];
+  });
+  await expectCleanRuntime(page, async () => {
+    await page.goto(`/projects/${PROJECT_ID}/quick`);
+    await expect(page.getByTestId("post-media-change-notice")).toContainText("1 个静止媒体批次");
+    await page.getByTestId("propose-locked-creative-change").click();
+
+    const preview = page.getByTestId("change-preview-change-story-core-1");
+    await expect(preview).toContainText("1 个批次将标记为已被修订取代");
+    await expect(preview).toContainText("1 笔未结算预留");
+    await expect(preview).toContainText("本次故事改动后不自动复用");
+    expect(state.mediaRequests).toEqual([]);
+
+    await page.getByTestId("confirm-change-change-story-core-1").click();
+    await expect(page.getByTestId("director-message")).toContainText("新版本已确认");
+    expect(state.batches[0].status).toBe("superseded_by_change");
+    expect(state.reservations[0].status).toBe("released");
+    expect(state.mediaRequests).toEqual([]);
+
+    await page.goto(`/projects/${PROJECT_ID}/production`);
+    await expect(page.getByTestId("director-batch-trial-batch")).toContainText("trial · superseded_by_change");
+    await expect(page.getByTestId("director-reservation-trial-reservation")).toContainText("released · 1.00 CNY");
   });
 });
 

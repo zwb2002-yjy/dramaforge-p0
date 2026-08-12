@@ -269,6 +269,30 @@ async def test_director_paid_run_rejects_expired_authorization_and_binding_drift
 
 
 @pytest.mark.asyncio
+async def test_director_paid_run_rejects_superseded_change_lineage(
+    session: AsyncSession,
+) -> None:
+    user, run, node = await _base_run(session)
+    _workflow, batch, reservation = await _attach_director_context(
+        session,
+        user=user,
+        run=run,
+    )
+    authorization = await session.get(BudgetAuthorization, batch.budget_authorization_id)
+    assert authorization is not None
+    batch.status = "superseded_by_change"
+    reservation.status = "released"
+    authorization.status = "revoked"
+    await session.flush()
+
+    with pytest.raises(DirectorExecutionGuardError) as caught:
+        await validate_director_media_submission(session, run=run, node=node)
+
+    assert caught.value.code == "DIRECTOR_PRODUCTION_CONTEXT_INVALID"
+    assert caught.value.details["batch_status"] == "superseded_by_change"
+
+
+@pytest.mark.asyncio
 async def test_canonical_source_must_be_completed_image_in_same_batch(
     session: AsyncSession,
 ) -> None:

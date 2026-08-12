@@ -61,7 +61,7 @@ class DirectorRepairExecutionService:
             project_id=project_id, actor=actor
         )
         workflow = await self._director.get_workflow(
-            project_id=project_id, actor=actor
+            project_id=project_id, actor=actor, for_update=True
         )
         existing = await self._production._batch_by_key(project_id, idempotency_key)
         if existing is not None:
@@ -78,7 +78,7 @@ class DirectorRepairExecutionService:
                 budget_authorization_id=budget_authorization_id,
             )
             workflow = await self._director.get_workflow(
-                project_id=project_id, actor=actor
+                project_id=project_id, actor=actor, for_update=True
             )
         if workflow.status != WorkflowStatus.PRODUCTION_RUNNING.value:
             raise ValidationAppError(

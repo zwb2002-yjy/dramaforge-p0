@@ -6,6 +6,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -24,21 +25,39 @@ from app.director.enums import (
 from app.director.models import (
     ApprovalRecord,
     BudgetAuthorization,
+    BudgetReservation,
     ChangeProposal,
     CreativeArtifactVersion,
     DirectorWorkflowRun,
     ImpactReport,
+    ProductionBatch,
     WorkflowStepRun,
 )
 from app.director.registry import get_template
 from app.director.state_machine import status_after_approval
+from app.execution.models import NodeRun
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 _CHANGE_PROPOSAL_STATUSES = {
     WorkflowStatus.AWAITING_CREATIVE_CONFIRMATION.value,
     WorkflowStatus.DRAFTING_SHOOTING_PLAN.value,
     WorkflowStatus.AWAITING_SHOOTING_CONFIRMATION.value,
+    WorkflowStatus.AWAITING_PRODUCTION_AUTHORIZATION.value,
+    WorkflowStatus.REPAIR_PROPOSED.value,
+    WorkflowStatus.AWAITING_REPAIR_AUTHORIZATION.value,
+    WorkflowStatus.FINAL_REVIEW.value,
+    WorkflowStatus.COMPLETED.value,
 }
+
+_STATIC_BATCH_STATUSES = {
+    "accepted",
+    "awaiting_review",
+    "repair_requested",
+    "stopped",
+    "completed",
+    "superseded_by_change",
+}
+_ACTIVE_NODE_RUN_STATUSES = {"queued", "leased", "running"}
 
 
 def content_hash(payload: object) -> str:
@@ -88,9 +107,15 @@ class DirectorService:
         await self._session.refresh(workflow)
         return workflow
 
-    async def get_workflow(self, *, project_id: UUID, actor: User) -> DirectorWorkflowRun:
+    async def get_workflow(
+        self, *, project_id: UUID, actor: User, for_update: bool = False
+    ) -> DirectorWorkflowRun:
         await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
-        workflow = await self._workflow_or_none(project_id)
+        workflow = (
+            await self._locked_workflow(project_id=project_id)
+            if for_update
+            else await self._workflow_or_none(project_id)
+        )
         if workflow is None:
             raise NotFoundError("director workflow not found")
         return workflow
@@ -107,7 +132,7 @@ class DirectorService:
         commit: bool = True,
         confirmed_change: bool = False,
     ) -> CreativeArtifactVersion:
-        workflow = await self.get_workflow(project_id=project_id, actor=actor)
+        workflow = await self.get_workflow(project_id=project_id, actor=actor, for_update=True)
         if source_kind not in {"user", "agent", "imported", "service"}:
             raise ValidationAppError("unsupported artifact source_kind")
         if not confirmed_change:
@@ -212,7 +237,7 @@ class DirectorService:
     ) -> tuple[ApprovalRecord, DirectorWorkflowRun]:
         if not idempotency_key.strip():
             raise ValidationAppError("idempotency_key is required")
-        workflow = await self.get_workflow(project_id=project_id, actor=actor)
+        workflow = await self.get_workflow(project_id=project_id, actor=actor, for_update=True)
         existing = (
             await self._session.execute(
                 select(ApprovalRecord).where(
@@ -288,7 +313,7 @@ class DirectorService:
             raise ValidationAppError("limit_amount must be greater than zero")
         if expires_at <= datetime.now(UTC):
             raise ValidationAppError("budget authorization must expire in the future")
-        workflow = await self.get_workflow(project_id=project_id, actor=actor)
+        workflow = await self.get_workflow(project_id=project_id, actor=actor, for_update=True)
         allowed_status = {
             ApprovalKind.TRIAL_BUDGET: WorkflowStatus.AWAITING_TRIAL_AUTHORIZATION,
             ApprovalKind.PRODUCTION_BUDGET: WorkflowStatus.AWAITING_PRODUCTION_AUTHORIZATION,
@@ -348,7 +373,7 @@ class DirectorService:
         summary: str,
         replacement_payload: dict[str, object],
     ) -> tuple[ChangeProposal, ImpactReport]:
-        workflow = await self.get_workflow(project_id=project_id, actor=actor)
+        workflow = await self.get_workflow(project_id=project_id, actor=actor, for_update=True)
         existing = (
             await self._session.execute(
                 select(ChangeProposal).where(
@@ -366,6 +391,10 @@ class DirectorService:
             return existing, report
         self._assert_change_allowed(workflow, action="proposal")
         await self._assert_no_pending_changes(workflow)
+        batches, reservations = await self._assert_post_media_change_safe(
+            project_id=project_id,
+            workflow=workflow,
+        )
         base_text = workflow.current_artifact_versions.get(target_artifact_kind.value)
         if base_text is None:
             raise ValidationAppError(
@@ -382,6 +411,18 @@ class DirectorService:
         invalidated = self._downstream_version_ids(
             workflow.current_artifact_versions, target_artifact_kind
         )
+        affected_shot_ids = sorted(
+            {shot_id for batch in batches for shot_id in batch.selected_shot_ids}
+        )
+        settled_amount = sum(
+            (Decimal(str(reservation.actual_amount or 0)) for reservation in reservations),
+            Decimal("0"),
+        )
+        releasable = [
+            str(reservation.id)
+            for reservation in reservations
+            if reservation.status == "reserved" and reservation.actual_amount is None
+        ]
         proposal = ChangeProposal(
             project_id=project_id,
             workflow_run_id=workflow.id,
@@ -400,14 +441,29 @@ class DirectorService:
             workflow_run_id=workflow.id,
             change_proposal_id=proposal.id,
             invalidated_version_ids=invalidated,
-            affected_shot_ids=[],
+            affected_shot_ids=affected_shot_ids,
             reusable_artifact_ids=[],
             estimated_added_cost=None,
             estimated_added_time_seconds=None,
             details={
                 "requires_confirmation": True,
                 "cost_status": "unknown_until_selection_plan",
-                "scope_status": "project_artifact_dependencies_only",
+                "scope_status": (
+                    "historical_media_lineage_will_be_superseded"
+                    if batches
+                    else "project_artifact_dependencies_only"
+                ),
+                "affected_batch_ids": [str(batch.id) for batch in batches],
+                "releasable_reservation_ids": releasable,
+                "historical_settled_amount": str(settled_amount),
+                "historical_currencies": sorted(
+                    {reservation.currency.upper() for reservation in reservations}
+                ),
+                "media_reuse_policy": (
+                    "none_until_regenerated_and_reapproved"
+                    if batches
+                    else "not_applicable"
+                ),
             },
         )
         self._session.add(report)
@@ -419,8 +475,12 @@ class DirectorService:
     async def apply_change(
         self, *, project_id: UUID, proposal_id: UUID, actor: User
     ) -> CreativeArtifactVersion:
-        workflow = await self.get_workflow(project_id=project_id, actor=actor)
-        proposal = await self._session.get(ChangeProposal, proposal_id)
+        workflow = await self.get_workflow(project_id=project_id, actor=actor, for_update=True)
+        proposal = await self._session.scalar(
+            select(ChangeProposal)
+            .where(ChangeProposal.id == proposal_id)
+            .with_for_update()
+        )
         if proposal is None or proposal.project_id != project_id:
             raise NotFoundError("change proposal not found")
         if proposal.status == ProposalStatus.APPLIED.value:
@@ -434,6 +494,11 @@ class DirectorService:
         if proposal.status != ProposalStatus.AWAITING_CONFIRMATION.value:
             raise ConflictError("change proposal is not awaiting confirmation")
         self._assert_change_allowed(workflow, action="confirmation")
+        batches, reservations = await self._assert_post_media_change_safe(
+            project_id=project_id,
+            workflow=workflow,
+            lock=True,
+        )
         if workflow.current_artifact_versions.get(proposal.target_artifact_kind) != (
             str(proposal.base_version_id) if proposal.base_version_id else None
         ):
@@ -481,6 +546,13 @@ class DirectorService:
                 for kind, version_id in workflow.current_artifact_versions.items()
                 if version_id not in invalidated_set
             }
+        if batches:
+            await self._supersede_static_media_lineage(
+                proposal=proposal,
+                batches=batches,
+                reservations=reservations,
+                now=now,
+            )
         version = await self.publish_artifact_version(
             project_id=project_id,
             actor=actor,
@@ -546,6 +618,16 @@ class DirectorService:
             )
         ).scalar_one_or_none()
 
+    async def _locked_workflow(self, *, project_id: UUID) -> DirectorWorkflowRun | None:
+        return cast(
+            DirectorWorkflowRun | None,
+            await self._session.scalar(
+                select(DirectorWorkflowRun)
+                .where(DirectorWorkflowRun.project_id == project_id)
+                .with_for_update()
+            ),
+        )
+
     async def _lock_current_versions(self, workflow: DirectorWorkflowRun) -> None:
         ids = [UUID(value) for value in workflow.current_artifact_versions.values()]
         if not ids:
@@ -577,6 +659,119 @@ class DirectorService:
                     "pending_change_count": int(pending),
                 },
             )
+
+    async def _assert_post_media_change_safe(
+        self,
+        *,
+        project_id: UUID,
+        workflow: DirectorWorkflowRun,
+        lock: bool = False,
+    ) -> tuple[list[ProductionBatch], list[BudgetReservation]]:
+        batch_query = (
+            select(ProductionBatch)
+            .where(ProductionBatch.workflow_run_id == workflow.id)
+            .order_by(ProductionBatch.created_at)
+        )
+        if lock:
+            batch_query = batch_query.with_for_update()
+        batches = list(
+            (
+                await self._session.execute(batch_query)
+            ).scalars()
+        )
+        non_static = [batch for batch in batches if batch.status not in _STATIC_BATCH_STATUSES]
+        if non_static:
+            raise ValidationAppError(
+                "content changes are blocked while media batches are active",
+                details={
+                    "code": "POST_MEDIA_CHANGE_ACTIVE_BATCH",
+                    "batch_ids": [str(batch.id) for batch in non_static],
+                    "batch_statuses": [batch.status for batch in non_static],
+                },
+            )
+        batch_ids = [batch.id for batch in batches]
+        if batch_ids:
+            run_query = select(NodeRun).where(
+                NodeRun.production_batch_id.in_(batch_ids),
+                NodeRun.status.in_(_ACTIVE_NODE_RUN_STATUSES),
+            )
+            if lock:
+                run_query = run_query.with_for_update()
+            active_runs = list(
+                (
+                    await self._session.execute(run_query)
+                ).scalars()
+            )
+            if active_runs:
+                raise ValidationAppError(
+                    "content changes are blocked while media nodes are active",
+                    details={
+                        "code": "POST_MEDIA_CHANGE_ACTIVE_NODE_RUN",
+                        "node_run_ids": [str(run.id) for run in active_runs],
+                    },
+                )
+        if not batches:
+            return batches, []
+        reservation_query = (
+            select(BudgetReservation)
+            .where(
+                BudgetReservation.project_id == project_id,
+                BudgetReservation.batch_id.in_(batch_ids),
+            )
+            .order_by(BudgetReservation.created_at)
+        )
+        if lock:
+            reservation_query = reservation_query.with_for_update()
+        reservations = list((await self._session.execute(reservation_query)).scalars())
+        return batches, reservations
+
+    async def _supersede_static_media_lineage(
+        self,
+        *,
+        proposal: ChangeProposal,
+        batches: list[ProductionBatch],
+        reservations: list[BudgetReservation],
+        now: datetime,
+    ) -> None:
+        batch_ids = {batch.id for batch in batches}
+        authorization_ids = {batch.budget_authorization_id for batch in batches}
+        for batch in batches:
+            batch.status = "superseded_by_change"
+            batch.finished_at = batch.finished_at or now
+        for reservation in reservations:
+            if (
+                reservation.batch_id in batch_ids
+                and reservation.status == "reserved"
+                and reservation.actual_amount is None
+            ):
+                reservation.status = "released"
+                reservation.settled_at = now
+        authorizations = list(
+            (
+                await self._session.execute(
+                    select(BudgetAuthorization)
+                    .where(BudgetAuthorization.id.in_(authorization_ids))
+                    .with_for_update()
+                )
+            ).scalars()
+        )
+        for authorization in authorizations:
+            if authorization.status == AuthorizationStatus.ACTIVE.value:
+                authorization.status = AuthorizationStatus.REVOKED.value
+        approvals = list(
+            (
+                await self._session.execute(
+                    select(ApprovalRecord).where(
+                        ApprovalRecord.workflow_run_id == proposal.workflow_run_id,
+                        ApprovalRecord.invalidated_at.is_(None),
+                    ).with_for_update()
+                )
+            ).scalars()
+        )
+        for approval in approvals:
+            if approval.budget_authorization_id in authorization_ids:
+                approval.invalidated_at = now
+                approval.invalidated_by_proposal_id = proposal.id
 
     @staticmethod
     def _assert_change_allowed(workflow: DirectorWorkflowRun, *, action: str) -> None:
