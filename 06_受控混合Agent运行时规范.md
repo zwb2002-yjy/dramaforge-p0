@@ -1,6 +1,8 @@
 # DramaForge 受控混合 Agent 运行时规范（P0）
 
-**状态：FROZEN / P0 Agent 运行时唯一事实源**  
+**状态：HISTORICAL / SUPERSEDED（旧 P0 Agent 运行时）**
+
+> 当前 AI 导演、Skill 和双层工作流的唯一合同是 `docs/current/02-运行时与领域架构.md`。
 **生效日期：2026-07-14**  
 **同步基线：2026-07-14**  
 **决策：P0 采用“受控混合编排”**

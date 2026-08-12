@@ -1,6 +1,6 @@
 # DramaForge Agnes-first 通用 Provider 适配规划
 
-> 文档状态：待评审
+> 文档状态：HISTORICAL / 旧 Provider 专题规划，不作为当前执行入口
 >
 > 核验日期：2026-08-03
 >

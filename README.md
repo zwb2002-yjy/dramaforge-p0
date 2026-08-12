@@ -1,29 +1,28 @@
 # DramaForge
 
-DramaForge 是面向高频多模型的独立 AI 短剧主创或小型工作室单一制作操作者的镜头级生产
-工作台。它以受控 Production Graph 管理剧本、资产、生成、连续性检查、审核、成本、局部
-返工和可追溯交付，当前首先提供私有化部署和 BYOK。
+DramaForge 是面向零基础个人创作者的开源 AI 导演工作台。首版聚焦从一个想法完成一部
+15–30 秒、真人写实风格、角色对白驱动的多镜头短剧：生成前确认创作与拍摄方案，用代表
+镜头试拍降低盲抽成本，失败后提供有证据和成本范围的局部修复，并保留完整产物血缘。
 
 ## 当前状态
 
-仓库当前处于 **P0 功能候选版**。账号与私有创作空间、同一 Project 的快速/专业双入口、
-受控 Brief/Plan、持久化 Production Graph、0.60 人脸 Gate、真实图像/视频链、Video Drift、
-ProviderOperation/Artifact 血缘、模型插件与 Production Model Profile、真实 LiteLLM Proxy、
-审核、局部返工和四项交付均已有实现。2026-08-05 的旧提交曾完成静态构图黄金样本 10/10
-全链，但当前 `dev@9e79ba4` 已包含 Provider 执行架构迁移，尚无同源 formal、Playwright、
-Section 3.1 Gate 与 ops 全绿证据，因此不得标记 P0 MVP 完成。产品也尚未经过真实用户和付费验证。
+仓库当前处于 **产品架构重置期**。旧 P0 已有 Production Graph、异步任务、Provider 插件、
+Artifact 血缘、审核、局部返工和交付等可复用底座，但快速流程、固定 10 Shot 和单一人脸
+阈值不代表新产品已经完成。2026-08-12 起按首版 AI 导演体验重构；在同一发布提交通过真实
+作品、三名目标用户、质量校准和跨平台部署 Gate 前，不得标记核心体验稳定。
 
-**状态语义：** 本地质量或专题测试通过，**不等于** P0 MVP 或产品价值已完成。唯一产品总纲见
+**状态语义：** 历史测试或专题实现通过，**不等于** 新版产品或用户价值已完成。唯一产品总纲见
 [`DramaForge总开发文档.md`](DramaForge总开发文档.md)，文档职责与阅读顺序见
-[`docs/README.md`](docs/README.md)，下一步工程主线和剩余 Gate 见
+[`docs/README.md`](docs/README.md)，当前执行合同见 [`docs/current/`](docs/current/)，实时工程状态见
 [`docs/开发执行检查点.md`](docs/开发执行检查点.md)。
 
-S0-A 已使用本地 InsightFace 1.0.1 / ONNX Runtime CPU 对 20 对同角色、20 对异角色和 10 个
-异常样本完成有界校准，最终阈值为 0.60；这只证明人脸检测门可运行，不等于人物一致性已解决。
-技术边界和扩展评估计划见总开发文档第 4 节，原始结果见
+历史 S0-A 使用本地 InsightFace / ONNX Runtime 得到过 `0.60` 实验阈值；这只证明人脸信号可运行，
+不等于人物一致性已解决，也不再是发布级唯一 Gate。新质量体系要求先验证参考资产进入有效请求，
+再以多信号、真实校准集和人工验收判断。历史原始结果见
 [`docs/spikes/s0a-face-consistency.md`](docs/spikes/s0a-face-consistency.md)。
 
-P0 完成标准是使用一份 3-5 场、至少 10 Shot、至少 1 名主角的冻结样本，完成从正式 Project、Brief/Plan、资产和参考，到图像、视频、语音、字幕、合成、审核和 `MP4 + SRT + 素材包 + timeline_json` 的可追溯交付。
+2026-09-15 首版发布标准见 [`docs/current/01-产品与发布契约.md`](docs/current/01-产品与发布契约.md)；
+不再以固定 10 Shot 作为产品完成条件。
 
 ## 开发目录
 
