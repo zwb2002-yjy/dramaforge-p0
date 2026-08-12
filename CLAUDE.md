@@ -8,7 +8,7 @@ DramaForge 是面向个人创作者的镜头级 AI 短剧生产工作台，私�
 
 P0 目标为可运行的 React/FastAPI/PostgreSQL/Redis/MinIO/Arq 应用 + 一份 3–5 场、至少 10 Shot、至少 1 名主角的冻结黄金样本，产出可重现的 MP4、SRT、素材包和 timeline JSON 交付。
 
-当前产品已从团队协作模型收敛为个人创作空间模型（`docs/个人创作空间重构方案.md`），移除了 Organization、成员、角色等概念。个人创作者方向与阶段路线以 `AI短剧工作台完整实施规划.md` 为准。
+当前产品已从团队协作模型收敛为个人创作空间模型（`docs/个人创作空间重构方案.md`），移除了 Organization、成员、角色等概念。目标用户、产品方向与阶段路线以 `DramaForge总开发文档.md` 为准。
 
 ### 当前完成度
 

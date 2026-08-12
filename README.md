@@ -1,14 +1,27 @@
 # DramaForge
 
-DramaForge 是面向个人创作者私有化部署的镜头级 AI 短剧生产工作台。项目以受控 Production Graph 管理剧本、资产、生成、连续性检查、审核、成本、局部返工和可追溯交付。
+DramaForge 是面向高频多模型的独立 AI 短剧主创或小型工作室单一制作操作者的镜头级生产
+工作台。它以受控 Production Graph 管理剧本、资产、生成、连续性检查、审核、成本、局部
+返工和可追溯交付，当前首先提供私有化部署和 BYOK。
 
 ## 当前状态
 
-仓库当前处于 **P0 功能候选版**，已经具备账号与私有创作空间、同一 Project 的快速/专业双入口、受控 Brief/Plan、持久化 Production Graph 依赖、0.60 人脸 Gate、真实图像/视频链、Video Drift、ProviderOperation/Artifact 血缘、审核、局部返工、四项交付、RLS、Outbox/SSE 和 Docker Compose 正式运行栈。最近 10 Shot 运行仍有 shot 6 的 Drift 阻断，且当前提交没有 formal、Playwright、Section 3.1 Gate 与 ops 同源全绿证据，因此不得标记 P0 MVP 完成。
+仓库当前处于 **P0 功能候选版**。账号与私有创作空间、同一 Project 的快速/专业双入口、
+受控 Brief/Plan、持久化 Production Graph、0.60 人脸 Gate、真实图像/视频链、Video Drift、
+ProviderOperation/Artifact 血缘、模型插件与 Production Model Profile、真实 LiteLLM Proxy、
+审核、局部返工和四项交付均已有实现。2026-08-05 的旧提交曾完成静态构图黄金样本 10/10
+全链，但当前 `dev@9e79ba4` 已包含 Provider 执行架构迁移，尚无同源 formal、Playwright、
+Section 3.1 Gate 与 ops 全绿证据，因此不得标记 P0 MVP 完成。产品也尚未经过真实用户和付费验证。
 
-**状态语义：** 本地质量入口（`scripts/run_quality.ps1`，使用 `backend/.venv`）通过，**不等于** P0 MVP 已完成。当前产品总规划见 [`AI短剧工作台完整实施规划.md`](AI短剧工作台完整实施规划.md)，文档职责与阅读顺序见 [`docs/README.md`](docs/README.md)，下一步工程主线和剩余 Gate 见 [`docs/开发执行检查点.md`](docs/开发执行检查点.md)。
+**状态语义：** 本地质量或专题测试通过，**不等于** P0 MVP 或产品价值已完成。唯一产品总纲见
+[`DramaForge总开发文档.md`](DramaForge总开发文档.md)，文档职责与阅读顺序见
+[`docs/README.md`](docs/README.md)，下一步工程主线和剩余 Gate 见
+[`docs/开发执行检查点.md`](docs/开发执行检查点.md)。
 
-S0-A 已使用本地 InsightFace 1.0.1 / ONNX Runtime CPU 对 20 对同角色、20 对异角色和 10 个异常样本完成 FAR/FRR 校准，并有带审批标识的最终阈值；见 [`docs/spikes/s0a-face-consistency.md`](docs/spikes/s0a-face-consistency.md)。当前唯一执行任务、外部暂停项和后续 `READY` 队列以 [`docs/开发执行检查点.md`](docs/开发执行检查点.md) 为准。
+S0-A 已使用本地 InsightFace 1.0.1 / ONNX Runtime CPU 对 20 对同角色、20 对异角色和 10 个
+异常样本完成有界校准，最终阈值为 0.60；这只证明人脸检测门可运行，不等于人物一致性已解决。
+技术边界和扩展评估计划见总开发文档第 4 节，原始结果见
+[`docs/spikes/s0a-face-consistency.md`](docs/spikes/s0a-face-consistency.md)。
 
 P0 完成标准是使用一份 3-5 场、至少 10 Shot、至少 1 名主角的冻结样本，完成从正式 Project、Brief/Plan、资产和参考，到图像、视频、语音、字幕、合成、审核和 `MP4 + SRT + 素材包 + timeline_json` 的可追溯交付。
 

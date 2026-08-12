@@ -30,6 +30,7 @@ ALLOWED_ROOT = {
     "DramaForge双模式产品与架构汇报方案.md",
     "Agnes-first通用Provider适配规划.md",
     "AI短剧工作台完整实施规划.md",
+    "DramaForge总开发文档.md",
     "DramaForge 模型能力插件化架构设计与开发规范.md",
     "DramaForge_Model_Plugin_Architecture_V3_Full_Development_Spec.md",
     "dramaforge_model_plugin_development_spec_for_dsv4flash.md",

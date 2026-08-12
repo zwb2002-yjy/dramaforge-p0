@@ -2,7 +2,7 @@
 
 > 本文定义 P0 验收方法和历史执行记录，不是当前状态入口。当前是否完成、最新候选提交和
 > 唯一执行任务以 [`开发执行检查点.md`](开发执行检查点.md) 为准；项目全路线以
-> [`../AI短剧工作台完整实施规划.md`](../AI短剧工作台完整实施规划.md) 为准。
+> [`../DramaForge总开发文档.md`](../DramaForge总开发文档.md) 为准。
 
 **状态：DEVELOPMENT VERIFICATION COMPLETE / FINAL ACCEPTANCE BLOCKED**
 
