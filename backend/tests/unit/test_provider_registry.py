@@ -86,7 +86,20 @@ def test_ark_plugin_is_implemented() -> None:
     client = plugin.build_client(Settings())
     assert isinstance(client, ArkHubClient)
     profiles = {p.protocol_profile for p in list_plugins()}
-    assert {"agnes_cn_v1", "ark_cn_v1"} <= profiles
+    assert {"agnes_cn_v1", "ark_cn_v1", "minimax_cn_v1"} <= profiles
+
+
+def test_minimax_plugin_is_implemented() -> None:
+    from app.providers.minimax import MiniMaxHubClient
+
+    plugin = get_plugin("minimax", "minimax_cn_v1")
+    assert plugin.implemented is True
+    assert plugin.default_base_url == "https://api.minimaxi.com"
+    assert plugin.model_contracts[("image", "keyframe")] == "image-01"
+    assert plugin.model_contracts[("video", "video")] == "MiniMax-H3"
+    assert plugin.capability_purposes == {"image_i2i": "keyframe", "video_i2v": "video"}
+    assert plugin.image_i2i_probe_transport == "public_url"
+    assert isinstance(plugin.build_client(Settings()), MiniMaxHubClient)
 
 
 def test_unknown_plugin_is_rejected() -> None:
@@ -101,6 +114,7 @@ def test_known_plugins_resolve() -> None:
 
     assert _resolve_plugin("agnes", "agnes_cn_v1").provider_type == "agnes"
     assert _resolve_plugin("volcengine", "ark_cn_v1").provider_type == "volcengine"
+    assert _resolve_plugin("minimax", "minimax_cn_v1").provider_type == "minimax"
 
 
 def test_plugin_registration_duplicate_is_rejected() -> None:
@@ -378,9 +392,7 @@ async def test_binding_scoped_probe_only_advances_probed_binding(
         async def get_bytes(self, *, object_key: str) -> bytes:
             return png_bytes
 
-    monkeypatch.setattr(
-        "app.providers.connection_service.get_object_store", lambda: _FakeStore()
-    )
+    monkeypatch.setattr("app.providers.connection_service.get_object_store", lambda: _FakeStore())
 
     evidence = await service.probe(
         workspace_id=workspace.id,
@@ -424,6 +436,28 @@ async def test_ark_connection_creates_with_plugin_defaults(
     assert connection.base_url == "https://ark.cn-beijing.volces.com/api/v3"
 
 
+@pytest.mark.asyncio
+async def test_minimax_connection_creates_with_plugin_defaults(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _byok_env(monkeypatch)
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="MiniMax",
+        api_key="minimax-secret",
+        enabled=True,
+        provider_type="minimax",
+        protocol_profile="minimax_cn_v1",
+    )
+    assert connection.provider_type == "minimax"
+    assert connection.protocol_profile == "minimax_cn_v1"
+    assert connection.base_url == "https://api.minimaxi.com"
+
+
 def test_volcengine_settings_defaults() -> None:
     settings = Settings()
     assert settings.volcengine_base_url == "https://ark.cn-beijing.volces.com/api/v3"
@@ -433,6 +467,18 @@ def test_volcengine_settings_defaults() -> None:
         update={"volcengine_enabled": True, "volcengine_api_key": "ark-secret"}
     )
     assert enabled.volcengine_configured() is True
+
+
+def test_minimax_settings_defaults() -> None:
+    settings = Settings()
+    assert settings.minimax_base_url == "https://api.minimaxi.com"
+    assert settings.minimax_image_model == "image-01"
+    assert settings.minimax_video_model == "MiniMax-H3"
+    assert settings.minimax_configured() is False
+    enabled = settings.model_copy(
+        update={"minimax_enabled": True, "minimax_api_key": "minimax-secret"}
+    )
+    assert enabled.minimax_configured() is True
 
 
 @pytest.mark.asyncio
@@ -456,3 +502,26 @@ async def test_volcengine_workspace_credential_branch(
     )
     assert cfg.volcengine_enabled is True
     assert cfg.volcengine_api_key == "ark-secret"
+
+
+@pytest.mark.asyncio
+async def test_minimax_workspace_credential_branch(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _byok_env(monkeypatch)
+    user, workspace = await _seed_owner(session)
+    await store_credential(
+        session,
+        workspace_id=workspace.id,
+        provider="minimax",
+        plaintext="minimax-secret",
+        keyring=configured_byok_keyring(),
+    )
+    cfg = await settings_for_workspace_provider(
+        session,
+        workspace_id=workspace.id,
+        provider="minimax",
+    )
+    assert cfg.minimax_enabled is True
+    assert cfg.minimax_api_key == "minimax-secret"

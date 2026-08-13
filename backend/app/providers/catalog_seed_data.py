@@ -24,6 +24,9 @@ MANIFEST_VERSION = "2026-08-10"
 # hash test every day.
 DOCUMENTED_AT = "2026-08-10"
 
+MINIMAX_MANIFEST_VERSION = "2026-08-13"
+MINIMAX_DOCUMENTED_AT = "2026-08-13"
+
 # ---------------------------------------------------------------------------
 # Contract hash: stable canonical JSON sha256. Order- and whitespace-insensitive.
 # ---------------------------------------------------------------------------
@@ -66,9 +69,11 @@ def _manifest(
     display_name: str,
     operations: dict[str, dict[str, Any]],
     option_schema: dict[str, Any] | None = None,
+    manifest_version: str = MANIFEST_VERSION,
+    documented_at: str = DOCUMENTED_AT,
 ) -> dict[str, Any]:
     return {
-        "manifest_version": MANIFEST_VERSION,
+        "manifest_version": manifest_version,
         "provider_type": provider_type,
         "protocol_profile": protocol_profile,
         "model_id": model_id,
@@ -77,7 +82,7 @@ def _manifest(
         "display_name": display_name,
         "lifecycle": "active",
         "catalog_source": "official_static",
-        "documented_at": DOCUMENTED_AT,
+        "documented_at": documented_at,
         "operations": operations,
         "option_schema": option_schema
         or {"namespace": "", "options": {}},
@@ -186,6 +191,58 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
                 reference_constraints={
                     "first_frame": {"min": 1, "max": 1},
                 },
+            )
+        },
+    ),
+    # MiniMax image-01. Official I2I schema accepts character subject_reference
+    # URLs. The first-launch compiler intentionally exposes one reference and a
+    # fixed 1:1 response; other image controls stay outside the contract.
+    _manifest(
+        provider_type="minimax",
+        protocol_profile="minimax_cn_v1",
+        model_id="image-01",
+        model_revision="v1",
+        media_kind="image",
+        display_name="MiniMax Image 01",
+        manifest_version=MINIMAX_MANIFEST_VERSION,
+        documented_at=MINIMAX_DOCUMENTED_AT,
+        operations={
+            "image.generate": _operation(
+                "image.generate",
+                capabilities=["image.i2i"],
+                output_constraints={
+                    "size": "1024x1024",
+                    "aspect_ratio": "1:1",
+                    "response_format": "url",
+                    "n": 1,
+                },
+                reference_constraints={"reference_image": {"min": 1, "max": 1}},
+            )
+        },
+    ),
+    # MiniMax-H3 Video V2. First-launch scope is one first frame only. H3's
+    # documented last-frame and multimodal-reference modes are deliberately not
+    # declared until they receive their own product/quality contract.
+    _manifest(
+        provider_type="minimax",
+        protocol_profile="minimax_cn_v1",
+        model_id="MiniMax-H3",
+        model_revision="v1",
+        media_kind="video",
+        display_name="MiniMax H3",
+        manifest_version=MINIMAX_MANIFEST_VERSION,
+        documented_at=MINIMAX_DOCUMENTED_AT,
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.i2v.first_frame"],
+                output_constraints={
+                    "resolution": "768P",
+                    "duration_seconds": 5,
+                    "aspect_ratio": "adaptive",
+                    "native_audio": False,
+                },
+                reference_constraints={"first_frame": {"min": 1, "max": 1}},
             )
         },
     ),

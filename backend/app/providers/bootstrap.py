@@ -99,12 +99,38 @@ ARK_VIDEO_TRANSPORT = TransportProfile(
     cancel_path_template="/contents/generations/tasks/{id}",
 )
 
+MINIMAX_IMAGE_TRANSPORT = TransportProfile(
+    id="minimax-image-v1",
+    method="POST",
+    path_template="/v1/image_generation",
+    auth=AuthSpec(scheme="bearer"),
+    content_type="application/json",
+    request_encoding="json",
+    response_mode="sync",
+)
+
+MINIMAX_VIDEO_TRANSPORT = TransportProfile(
+    id="minimax-video-v2",
+    method="POST",
+    path_template="/v2/video_generation",
+    auth=AuthSpec(scheme="bearer"),
+    content_type="application/json",
+    request_encoding="json",
+    response_mode="async_poll",
+    poll=PollSpec(
+        method="GET", path_template="/v2/query/video_generation/{id}", default_interval_seconds=5.0
+    ),
+    cancel_path_template="/v2/video_generation/{id}",
+)
+
 # (provider_type, protocol_profile, media_kind) -> transport profile id.
 _TRANSPORT_BY_KEY: dict[tuple[str, str, str], str] = {
     ("agnes", "agnes_cn_v1", "image"): AGNES_IMAGE_TRANSPORT.id,
     ("agnes", "agnes_cn_v1", "video"): AGNES_VIDEO_TRANSPORT.id,
     ("volcengine", "ark_cn_v1", "image"): ARK_IMAGE_TRANSPORT.id,
     ("volcengine", "ark_cn_v1", "video"): ARK_VIDEO_TRANSPORT.id,
+    ("minimax", "minimax_cn_v1", "image"): MINIMAX_IMAGE_TRANSPORT.id,
+    ("minimax", "minimax_cn_v1", "video"): MINIMAX_VIDEO_TRANSPORT.id,
 }
 
 
@@ -141,9 +167,7 @@ class UnavailableAdapter:
         request: Any,
         resolved_artifacts: dict[str, ResolvedArtifact],
     ) -> TranslationResult:
-        raise NotImplementedError(
-            "V2 adapter is not wired yet (Phase 3); registry is query-only"
-        )
+        raise NotImplementedError("V2 adapter is not wired yet (Phase 3); registry is query-only")
 
     async def create(
         self,
@@ -151,9 +175,7 @@ class UnavailableAdapter:
         request: Any,
         context: ExecutionContext,
     ) -> ProviderCreateResult:
-        raise NotImplementedError(
-            "V2 adapter is not wired yet (Phase 3); registry is query-only"
-        )
+        raise NotImplementedError("V2 adapter is not wired yet (Phase 3); registry is query-only")
 
     async def poll(
         self,
@@ -194,6 +216,8 @@ def _register_transports(registry: TransportRegistry) -> None:
         AGNES_VIDEO_TRANSPORT,
         ARK_IMAGE_TRANSPORT,
         ARK_VIDEO_TRANSPORT,
+        MINIMAX_IMAGE_TRANSPORT,
+        MINIMAX_VIDEO_TRANSPORT,
         LITELLM_CHAT_TRANSPORT,
     ):
         if registry.get_or_none(profile.id) is None:
@@ -243,6 +267,7 @@ def build_v3_registry(
         for item in (
             list(seed_manifests_for(provider_type="agnes"))
             + list(seed_manifests_for(provider_type="volcengine"))
+            + list(seed_manifests_for(provider_type="minimax"))
         )
     ]
     for manifest in manifests:
@@ -315,9 +340,7 @@ def register_litellm_text_models(
     if model_registry.get_or_none(manifest.id) is not None:
         return
     adapter = (
-        adapter_factory(manifest)
-        if adapter_factory is not None
-        else LiteLLMModelAdapter(manifest)
+        adapter_factory(manifest) if adapter_factory is not None else LiteLLMModelAdapter(manifest)
     )
     model_registry.register(manifest, adapter)
 
@@ -364,6 +387,8 @@ def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
     for manifest_dict in seed_manifests_for(provider_type="agnes"):
         build(manifest_dict["media_kind"], manifest_dict)
     for manifest_dict in seed_manifests_for(provider_type="volcengine"):
+        build(manifest_dict["media_kind"], manifest_dict)
+    for manifest_dict in seed_manifests_for(provider_type="minimax"):
         build(manifest_dict["media_kind"], manifest_dict)
     registry, transport_registry = build_v3_registry(adapter_factories=factories)
     register_litellm_text_models(registry)

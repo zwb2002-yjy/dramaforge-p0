@@ -65,6 +65,8 @@ async def settings_for_workspace_provider(
         return cfg.model_copy(
             update={"volcengine_enabled": True, "volcengine_api_key": credential}
         )
+    if provider == "minimax":
+        return cfg.model_copy(update={"minimax_enabled": True, "minimax_api_key": credential})
     raise ValueError(f"unsupported workspace credential provider: {provider}")
 
 

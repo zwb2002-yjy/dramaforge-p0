@@ -53,7 +53,7 @@ def _load_frozen() -> object:
 
 
 def test_all_seed_manifests_parse() -> None:
-    assert len(SEED_MANIFESTS) == 4
+    assert len(SEED_MANIFESTS) == 6
     for manifest in SEED_MANIFESTS:
         parsed = ModelCapabilityManifest.model_validate(manifest)
         assert parsed.model_revision == "v1"
@@ -73,17 +73,20 @@ def test_contract_hash_is_deterministic_and_order_insensitive() -> None:
 def test_seed_manifests_match_registry_plugins() -> None:
     agnes = registry_module.get_plugin("agnes", "agnes_cn_v1")
     ark = registry_module.get_plugin("volcengine", "ark_cn_v1")
+    minimax = registry_module.get_plugin("minimax", "minimax_cn_v1")
     agnes_ids = [m["model_id"] for m in agnes.catalog_manifests]
     ark_ids = [m["model_id"] for m in ark.catalog_manifests]
+    minimax_ids = [m["model_id"] for m in minimax.catalog_manifests]
     assert agnes_ids == ["agnes-image-2.1-flash", "agnes-video-v2.0"]
     assert ark_ids == ["doubao-seedream-4-0-250828", "doubao-seedance-1-0-pro-250528"]
-    for model_id in agnes_ids + ark_ids:
+    assert minimax_ids == ["image-01", "MiniMax-H3"]
+    for model_id in agnes_ids + ark_ids + minimax_ids:
         assert any(m["model_id"] == model_id for m in SEED_MANIFESTS)
 
 
 def test_contract_fixtures_match_current_seed_hash() -> None:
     fixture_files = sorted(CONTRACTS_DIR.glob("*.json"))
-    assert len(fixture_files) == 4
+    assert len(fixture_files) == 6
     manifest_by_id = {m["model_id"]: m for m in SEED_MANIFESTS}
     for fixture_path in fixture_files:
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
@@ -97,7 +100,7 @@ def test_contract_fixtures_match_current_seed_hash() -> None:
 def test_frozen_migration_snapshot_matches_current_seed_hash() -> None:
     frozen = _load_frozen()
     frozen_manifests = frozen.FROZEN_0015
-    assert len(frozen_manifests) == len(SEED_MANIFESTS)
+    assert len(frozen_manifests) == 4
     by_id = {m["model_id"]: m for m in SEED_MANIFESTS}
     for frozen_manifest in frozen_manifests:
         current = by_id[frozen_manifest["model_id"]]

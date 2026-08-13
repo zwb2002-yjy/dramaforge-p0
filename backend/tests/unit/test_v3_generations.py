@@ -101,11 +101,12 @@ class TestReadSurface:
         response = client.get("/api/v1/models", params={"capability": "image.generate"})
         assert response.status_code == 200
         models = response.json()
-        assert len(models) == 2
+        assert len(models) == 3
         ids = {item["id"] for item in models}
         assert "agnes/agnes-image-2.1-flash" in ids
         assert "volcengine/doubao-seedream-4-0-250828" in ids
-        assert all(item["provider_id"] in {"agnes", "volcengine"} for item in models)
+        assert "minimax/image-01" in ids
+        assert all(item["provider_id"] in {"agnes", "minimax", "volcengine"} for item in models)
 
     def test_get_model_manifest(self, api: tuple[TestClient, Any]) -> None:
         client, _ = api

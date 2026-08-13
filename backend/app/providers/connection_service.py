@@ -147,9 +147,7 @@ class ProviderConnectionService:
         billing_unit: str,
         source_note: str,
     ) -> ProviderModelBinding:
-        await self.get_connection(
-            workspace_id=workspace_id, connection_id=connection_id
-        )
+        await self.get_connection(workspace_id=workspace_id, connection_id=connection_id)
         binding = await self._session.scalar(
             select(ProviderModelBinding).where(
                 ProviderModelBinding.id == model_binding_id,
@@ -408,7 +406,9 @@ class ProviderConnectionService:
                 artifact_id=reference_artifact_id,
             )
             reference_mime = reference_artifact.mime_type
-            if capability == "video_i2v":
+            if capability == "video_i2v" or (
+                capability == "image_i2i" and plugin.image_i2i_probe_transport == "public_url"
+            ):
                 grant = await issue_artifact_reference(
                     self._session,
                     artifact=reference_artifact,
@@ -491,17 +491,39 @@ class ProviderConnectionService:
             if reference_bytes is None:
                 error_code = "PROBE_REFERENCE_REQUIRED"
             else:
-                result = await client.create_image(
-                    prompt="Preserve the supplied character identity",
-                    size="1024x768",
-                    canonical_image_bytes=reference_bytes,
-                    canonical_image_mime=reference_mime,
-                )
-                result_status = str(result.get("status") or "failed")
-                status = "passed" if result_status == "succeeded" else result_status
-                provider_request_id = str(result.get("remote_task_id") or "") or None
-                http_status = int(result["http_status"]) if result.get("http_status") else None
-                error_code = str(result.get("error_code") or "") or None
+                if plugin.image_i2i_probe_transport == "public_url":
+                    if reference_url is None:
+                        error_code = "PROBE_REFERENCE_REQUIRED"
+                    else:
+                        result = await client.create_image(
+                            prompt="Preserve the supplied character identity",
+                            reference_url=reference_url,
+                            reference_artifact_id=str(reference_artifact_id),
+                            reference_fingerprint=(
+                                reference_artifact.content_hash
+                                if reference_artifact is not None
+                                else None
+                            ),
+                        )
+                        result_status = str(result.get("status") or "failed")
+                        status = "passed" if result_status == "succeeded" else result_status
+                        provider_request_id = str(result.get("remote_task_id") or "") or None
+                        http_status = (
+                            int(result["http_status"]) if result.get("http_status") else None
+                        )
+                        error_code = str(result.get("error_code") or "") or None
+                else:
+                    result = await client.create_image(
+                        prompt="Preserve the supplied character identity",
+                        size="1024x768",
+                        canonical_image_bytes=reference_bytes,
+                        canonical_image_mime=reference_mime,
+                    )
+                    result_status = str(result.get("status") or "failed")
+                    status = "passed" if result_status == "succeeded" else result_status
+                    provider_request_id = str(result.get("remote_task_id") or "") or None
+                    http_status = int(result["http_status"]) if result.get("http_status") else None
+                    error_code = str(result.get("error_code") or "") or None
         elif capability == "video_i2v":
             model_id = (
                 binding.invoke_model_value
@@ -828,9 +850,7 @@ class ProviderConnectionService:
             await self._session.scalar(
                 select(ProviderOperation)
                 .where(ProviderOperation.node_run_id == source.id)
-                .order_by(
-                    ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc()
-                )
+                .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
                 .limit(1)
             ),
         )

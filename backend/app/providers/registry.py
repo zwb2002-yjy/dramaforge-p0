@@ -48,6 +48,10 @@ class ProviderPlugin:
     capability_purposes: dict[str, str] = field(default_factory=dict)
     # Capabilities that spend real budget and require an explicit authorization.
     paid_capabilities: frozenset[str] = frozenset()
+    # How an image I2I capability probe carries its canonical artifact. The
+    # connection service routes by this declared protocol contract, never by
+    # supplier name.
+    image_i2i_probe_transport: str = "bytes"
     # Path suffix (on default_base_url) used by the auth_models capability probe.
     model_list_path: str = "/v1/models"
     client_factory: ClientFactory | None = None
@@ -87,9 +91,7 @@ def register_plugin(plugin: ProviderPlugin) -> None:
 def get_plugin(provider_type: str, protocol_profile: str) -> ProviderPlugin:
     plugin = _registry.get((provider_type, protocol_profile))
     if plugin is None:
-        raise LookupError(
-            f"unknown provider plugin: {provider_type}/{protocol_profile}"
-        )
+        raise LookupError(f"unknown provider plugin: {provider_type}/{protocol_profile}")
     return plugin
 
 
@@ -117,6 +119,12 @@ def _ark_hub_client(settings: Settings, host: str | None) -> Any:
     from app.providers.volcengine import ArkHubClient
 
     return ArkHubClient(settings, host=host)
+
+
+def _minimax_hub_client(settings: Settings, host: str | None) -> Any:
+    from app.providers.minimax import MiniMaxHubClient
+
+    return MiniMaxHubClient(settings, host=host)
 
 
 def _register_defaults() -> None:
@@ -148,6 +156,36 @@ def _register_defaults() -> None:
             catalog_manifests=tuple(seed_manifests_for(provider_type="agnes")),
             runtime_factory=_agnes_runtime_factory,
             compiler_factory=_agnes_compiler_factory,
+        )
+    )
+    from app.providers.minimax import (
+        MINIMAX_CN_HOST,
+        MINIMAX_CN_PROFILE,
+        _minimax_compiler_factory,
+        _minimax_runtime_factory,
+    )
+
+    register_plugin(
+        ProviderPlugin(
+            provider_type="minimax",
+            protocol_profile=MINIMAX_CN_PROFILE,
+            display_name="MiniMax",
+            default_base_url=MINIMAX_CN_HOST,
+            implemented=True,
+            settings_prefix="minimax",
+            credential_provider_key="minimax",
+            model_contracts={
+                ("image", "keyframe"): "image-01",
+                ("video", "video"): "MiniMax-H3",
+            },
+            capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
+            paid_capabilities=frozenset({"image_i2i", "video_i2v"}),
+            image_i2i_probe_transport="public_url",
+            model_list_path="/v1/models",
+            client_factory=_minimax_hub_client,
+            catalog_manifests=tuple(seed_manifests_for(provider_type="minimax")),
+            runtime_factory=_minimax_runtime_factory,
+            compiler_factory=_minimax_compiler_factory,
         )
     )
     # Ark data-plane contract (Seedream image + Seedance video) verified via

@@ -113,6 +113,13 @@ class Settings(BaseSettings):
     )
     volcengine_image_model: str = Field(default="doubao-seedream-4-0-250828")
     volcengine_video_model: str = Field(default="doubao-seedance-1-0-pro-250528")
+
+    # MiniMax China profile (local BYOK). Never log the raw key.
+    minimax_enabled: bool = False
+    minimax_api_key: str = Field(default="", description="User BYOK for MiniMax")
+    minimax_base_url: str = Field(default="https://api.minimaxi.com")
+    minimax_image_model: str = Field(default="image-01")
+    minimax_video_model: str = Field(default="MiniMax-H3")
     reference_public_base_url: str = Field(
         default="",
         description="Public HTTPS API origin used for short-lived Provider references",
@@ -223,6 +230,10 @@ class Settings(BaseSettings):
     def volcengine_configured(self) -> bool:
         """True when BYOK is present and Ark is enabled."""
         return bool(self.volcengine_enabled and self.volcengine_api_key.strip())
+
+    def minimax_configured(self) -> bool:
+        """True when MiniMax BYOK is present and its profile is enabled."""
+        return bool(self.minimax_enabled and self.minimax_api_key.strip())
 
     def text_llm_configured(self) -> bool:
         return bool(

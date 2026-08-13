@@ -148,14 +148,14 @@ async def test_migration_0015_backfills_and_rolls_back_on_isolated_db() -> None:
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar()
-            assert head == "20260813_0020"
+            assert head == "20260813_0021"
             rows = conn.execute(
                 text(
                     "select provider_type, model_id, model_revision "
                     "from provider_model_catalog_entries order by model_id"
                 )
             ).fetchall()
-            assert len(rows) == 4
+            assert len(rows) == 6
             binding = conn.execute(
                 text(
                     "select catalog_entry_id, capability_manifest_hash, "
@@ -217,7 +217,7 @@ async def test_migration_0015_backfills_and_rolls_back_on_isolated_db() -> None:
                 conn.execute(
                     text("select count(*) from provider_model_catalog_entries")
                 ).scalar()
-                == 4
+                == 6
             )
         engine.dispose()
     finally:
