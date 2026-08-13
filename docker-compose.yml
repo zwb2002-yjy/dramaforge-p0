@@ -90,6 +90,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
+        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
@@ -113,10 +116,13 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
+        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -157,7 +163,7 @@ services:
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}
     depends_on:
-      migrate:
+      database-bootstrap:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -180,6 +186,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
+        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
     ports:
       - "${DRAMAFORGE_BIND_ADDRESS:-127.0.0.1}:${DRAMAFORGE_PORT:-8080}:8080"
     depends_on:
@@ -201,15 +210,79 @@ services:
       retries: 10
     restart: unless-stopped
 
+  database-bootstrap:
+    image: postgres:15-alpine
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-dramaforge}
+      PGUSER: ${POSTGRES_USER:-dramaforge}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-dramaforge_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -ec
+      - |
+        psql --set=ON_ERROR_STOP=1 --set=app_user="$$POSTGRES_APP_USER" --set=app_password="$$POSTGRES_APP_PASSWORD" <<'SQL'
+        SELECT format('ALTER ROLE %I LOGIN NOINHERIT NOBYPASSRLS PASSWORD %L', :'app_user', :'app_password') \gexec
+        SQL
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  maintenance:
+    profiles: ["maintenance"]
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
+        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace:ro
+      - ./tmp:/workspace/tmp
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
+      MINIO_BUCKET: dramaforge
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      P0_BACKUP_FERNET_KEY: ${P0_BACKUP_FERNET_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["python", "/workspace/scripts/p0_backup_restore.py"]
+
   dispatcher:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
+        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -222,7 +295,7 @@ services:
       BYOK_KEYRING: ${BYOK_KEYRING:-}
       OUTBOX_DISPATCH_INTERVAL_SECONDS: ${OUTBOX_DISPATCH_INTERVAL_SECONDS:-1}
     depends_on:
-      migrate:
+      database-bootstrap:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -243,10 +316,13 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
+        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -285,7 +361,7 @@ services:
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}
     depends_on:
-      migrate:
+      database-bootstrap:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -311,10 +387,13 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
+        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -357,7 +436,7 @@ services:
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
       TTS_VOICE: ${TTS_VOICE:-zh}
     depends_on:
-      migrate:
+      database-bootstrap:
         condition: service_completed_successfully
       redis:
         condition: service_healthy

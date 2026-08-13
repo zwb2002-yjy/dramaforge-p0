@@ -9,11 +9,13 @@ flat body vs Ark content[]), and the Adapter layer owns every difference.
 from __future__ import annotations
 
 import base64
+from types import SimpleNamespace
 
 import pytest
 from app.providers.adapters_v2 import (
     BridgeComponents,
     LegacyAdapterBridge,
+    _compiler_translation_evidence,
     submission_status_to_v3,
 )
 from app.providers.capabilities import Capability
@@ -68,16 +70,22 @@ def _bridge_for(provider_type: str, media: str) -> LegacyAdapterBridge:
     )
     transport_id = "ark-image-v1" if provider_type == "volcengine" and media == "image" else (
         "ark-video-v1" if provider_type == "volcengine" else (
+            "minimax-cn-v1" if provider_type == "minimax" else (
             "agnes-image-v1" if media == "image" else "agnes-video-v1"
+            )
         )
     )
     v3 = to_v3_model_manifest(manifest, transport_profile_id=transport_id)
     from app.providers.agnes import AgnesImageCompiler, AgnesVideoCompiler
+    from app.providers.minimax import MiniMaxImageCompiler, MiniMaxVideoCompiler
     from app.providers.volcengine import ArkImageCompiler, ArkVideoCompiler
 
     if provider_type == "agnes":
         image_compiler: object = AgnesImageCompiler()
         video_compiler: object = AgnesVideoCompiler()
+    elif provider_type == "minimax":
+        image_compiler = MiniMaxImageCompiler()
+        video_compiler = MiniMaxVideoCompiler()
     else:
         image_compiler = ArkImageCompiler()
         video_compiler = ArkVideoCompiler()
@@ -164,6 +172,66 @@ class TestTranslationArk:
         ).native_request
         assert set(agnes_body) != set(ark_body)
         assert agnes_body["image"] == ark_body["content"][1]["image_url"]["url"]
+
+
+class TestTranslationMiniMax:
+    async def test_adaptive_wire_ratio_is_audited_as_first_frame_inheritance(self) -> None:
+        bridge = _bridge_for("minimax", "video")
+        request = ImageToVideoRequest(
+            prompt="dialogue close-up",
+            image=ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001"),
+            duration_seconds=5,
+            resolution="768P",
+            aspect_ratio="9:16",
+        )
+        result = await bridge.translate(
+            Capability.VIDEO_IMAGE_TO_VIDEO,
+            request,
+            {"first_frame": _frame()},
+        )
+
+        assert result.native_request["ratio"] == "adaptive"
+        assert result.native_request["duration"] == 5
+        assert result.effective_request.common_options == {
+            "aspect_ratio": "9:16",
+            "duration_seconds": 5,
+            "resolution": "768P",
+            "generate_audio": False,
+        }
+        assert result.translation_report.effective_options == (
+            result.effective_request.common_options
+        )
+        assert result.translation_report.transformations[0].model_dump() == {
+            "field": "aspect_ratio",
+            "from_value": "9:16",
+            "to_value": "adaptive",
+            "reason": "provider_inherits_aspect_ratio_from_first_frame",
+        }
+
+    async def test_missing_project_ratio_fails_closed(self) -> None:
+        bridge = _bridge_for("minimax", "video")
+        request = ImageToVideoRequest(
+            prompt="dialogue close-up",
+            image=ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001"),
+            duration_seconds=5,
+        )
+        with pytest.raises(ValueError, match="first-frame-inherited ratio"):
+            await bridge.translate(
+                Capability.VIDEO_IMAGE_TO_VIDEO,
+                request,
+                {"first_frame": _frame()},
+            )
+
+
+def test_compiler_translation_evidence_rejects_unallowlisted_secret_field() -> None:
+    compiled = SimpleNamespace(
+        safe_request_summary={
+            "effective_common_options": {"api_key": "must-not-be-trusted"},
+            "translation_transformations": [],
+        }
+    )
+    with pytest.raises(ValueError, match="safe common options"):
+        _compiler_translation_evidence(compiled)
 
 
 class TestBridgeRefusesWithoutRuntime:

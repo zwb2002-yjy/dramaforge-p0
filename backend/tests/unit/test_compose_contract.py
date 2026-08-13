@@ -25,6 +25,8 @@ def test_compose_defines_required_boot0_services() -> None:
         "worker-default",
         "worker-heavy",
         "frontend",
+        "database-bootstrap",
+        "maintenance",
     ):
         assert name in services, f"missing service: {name}"
     assert "healthcheck" in services["postgres"]
@@ -70,7 +72,7 @@ def test_compose_defines_required_boot0_services() -> None:
     assert services["frontend"]["read_only"] is True
     assert services["frontend"]["cap_drop"] == ["ALL"]
     for name in ("api", "dispatcher", "worker-default", "worker-heavy"):
-        condition = services[name]["depends_on"]["migrate"]["condition"]
+        condition = services[name]["depends_on"]["database-bootstrap"]["condition"]
         assert condition == "service_completed_successfully"
         assert services[name]["security_opt"] == ["no-new-privileges:true"]
         assert services[name]["cap_drop"] == ["ALL"]
@@ -78,6 +80,18 @@ def test_compose_defines_required_boot0_services() -> None:
         assert services[name]["image"] == (
             "${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}"
         )
+    maintenance = services["maintenance"]
+    assert maintenance["profiles"] == ["maintenance"]
+    assert maintenance["entrypoint"] == [
+        "python",
+        "/workspace/scripts/p0_backup_restore.py",
+    ]
+    assert maintenance["environment"]["DATABASE_URL"].startswith(
+        "postgresql+asyncpg://${POSTGRES_USER"
+    )
+    assert "postgresql-client" in (REPO_ROOT / "backend" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
     # GPU/ComfyUI must not be in the default compose file.
     assert "comfyui" not in services
 
@@ -102,7 +116,8 @@ def test_backend_image_declares_formal_media_and_face_runtime() -> None:
     dockerfile = (REPO_ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
     pyproject = (REPO_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8")
     for required in ("espeak-ng", "ffmpeg", "insightface==0.7.3"):
-        assert required in dockerfile
+        assert required in (dockerfile + pyproject)
+    assert "postgresql-client" in dockerfile
     assert "github.com/deepinsight/insightface/releases" not in dockerfile
     assert "w600k_r50.onnx" not in dockerfile
     assert "FaceAnalysis(name=" not in dockerfile
@@ -148,6 +163,18 @@ def test_compose_requires_unique_runtime_secrets_and_disables_public_registratio
     assert services["postgres"]["environment"]["POSTGRES_PASSWORD"].startswith(
         "${POSTGRES_PASSWORD:?"
     )
+    bootstrap = services["database-bootstrap"]
+    assert bootstrap["depends_on"]["migrate"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert bootstrap["environment"]["POSTGRES_APP_PASSWORD"].startswith(
+        "${POSTGRES_APP_PASSWORD:?"
+    )
+    for name in ("api", "dispatcher", "worker-default", "worker-heavy"):
+        dsn = services[name]["environment"]["DATABASE_URL"]
+        assert "POSTGRES_APP_USER" in dsn
+        assert "POSTGRES_APP_PASSWORD" in dsn
+        assert "POSTGRES_PASSWORD" not in dsn
     assert services["minio"]["environment"]["MINIO_ROOT_PASSWORD"].startswith(
         "${MINIO_ROOT_PASSWORD:?"
     )

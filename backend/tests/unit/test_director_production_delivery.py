@@ -161,11 +161,22 @@ def _shooting_payloads(binding_id: str) -> dict[ArtifactKind, dict[str, object]]
         ArtifactKind.COST_ESTIMATE: {
             "pricing_snapshot_id": "verified-price-v1",
             "currency": "CNY",
-            "trial": [known_line],
-            "production": [{**known_line, "quantity": 3, "estimated_amount": "3"}],
+            "trial": [
+                {**known_line, "purpose": purpose}
+                for purpose in ("character_reference", "keyframe", "video", "voice")
+            ],
+            "production": [
+                {
+                    **known_line,
+                    "purpose": purpose,
+                    "quantity": 3,
+                    "estimated_amount": "3",
+                }
+                for purpose in ("character_reference", "keyframe", "video", "voice")
+            ],
             "repair": [known_line],
-            "trial_total": "1",
-            "production_total": "3",
+            "trial_total": "4",
+            "production_total": "12",
             "repair_total": "1",
             "requires_user_budget_limit": True,
             "disclaimer": "Provider price snapshot is frozen for this batch.",
@@ -237,7 +248,7 @@ async def test_materialize_production_reuses_only_identical_accepted_trial(
         authorization_kind="production_budget",
         idempotency_key="formal-budget",
         pricing_snapshot_id="verified-price-v1",
-        limit_amount=Decimal("10"),
+        limit_amount=Decimal("20"),
         consumed_amount=Decimal("0"),
         currency="CNY",
         status="active",
@@ -461,6 +472,7 @@ async def test_materialize_production_reuses_only_identical_accepted_trial(
     by_logical_id = {str(row["logical_shot_id"]): row for row in shots}
     assert by_logical_id["shot-1"]["status"] == "accepted"
     assert by_logical_id["shot-1"]["accepted_artifact_id"] == artifact.id
+    assert by_logical_id["shot-1"]["semantic_hash"] == trial_semantic
     assert by_logical_id["shot-1"]["graph_version_id"] is None
     assert {str(run.input_snapshot["logical_shot_id"]) for run in runs} == {
         "shot-2",
@@ -492,6 +504,10 @@ async def test_materialize_production_reuses_only_identical_accepted_trial(
         run.input_snapshot.get("locked_version_refs") == batch.locked_version_refs
         for run in media_runs
     )
+
+    # The authorization is tied to the exact frozen price snapshot, not just
+    # to an arbitrary amount/currency pair supplied by the client.
+    assert batch.selection_snapshot["accepted_trial_batch_id"] == str(trial_batch.id)
 
 
 @pytest.mark.asyncio

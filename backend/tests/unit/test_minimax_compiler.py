@@ -66,8 +66,7 @@ async def test_image_compiler_requires_one_https_reference_and_builds_native_bod
     assert "image-token" not in json.dumps(compiled.safe_request_summary)
 
 
-@pytest.mark.asyncio
-async def test_video_compiler_rejects_unsupported_outputs_and_roles() -> None:
+def test_video_compiler_rejects_unsupported_outputs_and_roles() -> None:
     artifact_id = uuid4()
     intent = VideoGenerationIntentV1(
         prompt="motion",
@@ -89,6 +88,81 @@ async def test_video_compiler_rejects_unsupported_outputs_and_roles() -> None:
     )
     with pytest.raises(ValueError, match="no other reference roles"):
         MiniMaxVideoCompiler().validate(invalid_roles, _manifest("MiniMax-H3"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("aspect_ratio", ["9:16", "16:9"])
+async def test_video_compiler_inherits_supported_project_ratio_from_first_frame(
+    aspect_ratio: str,
+) -> None:
+    artifact_id = uuid4()
+    intent = VideoGenerationIntentV1(
+        prompt="motion",
+        output=VideoOutputIntent(
+            aspect_ratio=aspect_ratio,  # type: ignore[arg-type]
+            duration_seconds=5,
+            resolution="768P",
+            generate_audio=False,
+        ),
+        references=[ArtifactReferenceIntent(artifact_id=artifact_id, role="first_frame")],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    compiled = await MiniMaxVideoCompiler().compile(
+        intent,
+        _manifest("MiniMax-H3"),
+        [
+            ResolvedReference(
+                role="first_frame",
+                artifact_id=artifact_id,
+                content_url="https://cdn.example.com/first.png",
+                fingerprint="b" * 64,
+            )
+        ],
+        invoke_model_value="MiniMax-H3",
+    )
+
+    assert compiled.wire_request["ratio"] == "adaptive"
+    assert compiled.wire_request["duration"] == 5
+    assert compiled.safe_request_summary["effective_common_options"] == {
+        "aspect_ratio": aspect_ratio,
+        "duration_seconds": 5,
+        "resolution": "768P",
+        "generate_audio": False,
+    }
+    assert compiled.safe_request_summary["translation_transformations"] == [
+        {
+            "field": "aspect_ratio",
+            "from_value": aspect_ratio,
+            "to_value": "adaptive",
+            "reason": "provider_inherits_aspect_ratio_from_first_frame",
+        }
+    ]
+
+
+@pytest.mark.parametrize("aspect_ratio", [None, "1:1", "adaptive"])
+def test_video_compiler_rejects_missing_or_unsupported_project_ratio(
+    aspect_ratio: str | None,
+) -> None:
+    artifact_id = uuid4()
+    intent = VideoGenerationIntentV1(
+        prompt="motion",
+        output=VideoOutputIntent(aspect_ratio=aspect_ratio),  # type: ignore[arg-type]
+        references=[ArtifactReferenceIntent(artifact_id=artifact_id, role="first_frame")],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="first-frame-inherited ratio"):
+        MiniMaxVideoCompiler().validate(intent, _manifest("MiniMax-H3"))
+
+
+def test_video_compiler_rejects_missing_first_frame() -> None:
+    intent = VideoGenerationIntentV1(
+        prompt="motion",
+        output=VideoOutputIntent(aspect_ratio="9:16", duration_seconds=5),
+        references=[],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="exactly one first_frame"):
+        MiniMaxVideoCompiler().validate(intent, _manifest("MiniMax-H3"))
 
 
 @pytest.mark.asyncio

@@ -148,7 +148,7 @@ async def test_migration_0015_backfills_and_rolls_back_on_isolated_db() -> None:
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar()
-            assert head == "20260813_0021"
+            assert head == "20260813_0022"
             rows = conn.execute(
                 text(
                     "select provider_type, model_id, model_revision "
@@ -183,6 +183,16 @@ async def test_migration_0015_backfills_and_rolls_back_on_isolated_db() -> None:
                 ).scalar()
                 is False
             )
+            runtime_role = conn.execute(
+                text(
+                    "select rolcanlogin, rolbypassrls, rolsuper, rolpassword "
+                    "from pg_authid where rolname='dramaforge_app'"
+                )
+            ).one()
+            assert runtime_role.rolcanlogin is False
+            assert runtime_role.rolbypassrls is False
+            assert runtime_role.rolsuper is False
+            assert runtime_role.rolpassword is None
         engine.dispose()
 
         # Downgrade drops the new schema; upgrade re-creates it idempotently.

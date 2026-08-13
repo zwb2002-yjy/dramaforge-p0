@@ -129,7 +129,7 @@ async def test_model_profiles_migration_and_rls_on_isolated_db() -> None:
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar()
-            assert head == "20260813_0021"
+            assert head == "20260813_0022"
             # Table + RLS policy exist.
             assert (
                 conn.execute(

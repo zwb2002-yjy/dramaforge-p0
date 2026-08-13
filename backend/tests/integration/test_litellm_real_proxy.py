@@ -45,8 +45,20 @@ MASTER_KEY = "sk-integration-test-master-key"
 # master key (probe-verified 2026-08-11); with the compose litellm-db you would
 # mint a dedicated Virtual Key instead (fix spec §57).
 API_KEY = MASTER_KEY
-PORT = int(os.environ.get("LITELLM_INTEGRATION_PORT", "4066"))
+PORT_OVERRIDE = os.environ.get("LITELLM_INTEGRATION_PORT", "").strip()
 REQUIRED = os.environ.get("LITELLM_INTEGRATION_REQUIRED") == "1"
+
+
+def _available_loopback_port() -> int:
+    """Ask the OS for an unused port instead of making local runs share 4066.
+
+    CI can still pin ``LITELLM_INTEGRATION_PORT`` when it owns the runner.  A
+    dynamic default prevents parallel test sessions and recently stopped
+    Windows containers from colliding with this integration fixture.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
 
 def _config_template() -> str:
     """Generate the mock config. ``legacy-text`` returns a valid brief JSON so
@@ -133,7 +145,7 @@ def _wait_ready(base_url: str, timeout_s: float = 90.0) -> bool:
     return False
 
 
-def _start_container() -> str:
+def _start_container(port: int) -> str:
     """Start the official litellm container with a mock config. Returns base URL."""
     tmpdir = tempfile.mkdtemp(prefix="litellm-int-")
     config_path = Path(tmpdir) / "config.yaml"
@@ -148,7 +160,7 @@ def _start_container() -> str:
         "--name",
         name,
         "-p",
-        f"{PORT}:4000",
+        f"127.0.0.1:{port}:4000",
         "-v",
         f"{host_volume}:/app/config.yaml:ro",
         "-e",
@@ -182,8 +194,9 @@ def real_proxy() -> Iterator[str]:
 
     container: str | None = None
     try:
-        container = _start_container()
-        base_url = f"http://127.0.0.1:{PORT}"
+        port = int(PORT_OVERRIDE) if PORT_OVERRIDE else _available_loopback_port()
+        container = _start_container(port)
+        base_url = f"http://127.0.0.1:{port}"
         if not _wait_ready(base_url):
             if REQUIRED:
                 raise RuntimeError("litellm container never became ready")

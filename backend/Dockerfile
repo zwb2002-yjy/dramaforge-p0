@@ -1,10 +1,19 @@
 FROM python:3.12-slim
 
+ARG DRAMAFORGE_VERSION=0.1.0
+ARG DRAMAFORGE_SOURCE_COMMIT=local
+
+LABEL org.opencontainers.image.title="DramaForge backend" \
+      org.opencontainers.image.version=$DRAMAFORGE_VERSION \
+      org.opencontainers.image.revision=$DRAMAFORGE_SOURCE_COMMIT \
+      org.opencontainers.image.source="https://github.com/zwb2002-yjy/DramaForge"
+
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    DRAMAFORGE_SOURCE_COMMIT=$DRAMAFORGE_SOURCE_COMMIT
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -12,6 +21,7 @@ RUN apt-get update \
         curl \
         espeak-ng \
         ffmpeg \
+        postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 10001 dramaforge \
@@ -19,19 +29,15 @@ RUN groupadd --gid 10001 dramaforge \
         --home-dir /home/dramaforge --shell /usr/sbin/nologin dramaforge
 
 # Keep COPY list in sync with tests/unit/test_dockerfile_context.py
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
 
-# Keep dependency installation independent from application source changes.
-# The final editable install below is no-deps, so changing app code does not
-# redownload Python packages or optional InsightFace code.
-RUN python -c "import tomllib; from pathlib import Path; deps = tomllib.loads(Path('pyproject.toml').read_text())['project']['dependencies']; Path('/tmp/requirements.txt').write_text('\\n'.join(deps) + '\\n')" \
-    && pip install --upgrade pip \
+# Export exact versions and hashes from the committed lock.  Application source
+# changes then reuse this dependency layer, while release images cannot drift to
+# newer packages merely because a version range still matches.
+RUN pip install --upgrade pip "uv==0.12.0" \
+    && uv export --frozen --no-dev --no-emit-project --output-file /tmp/requirements.txt \
     && pip install -r /tmp/requirements.txt \
-    && pip install "requests>=2.28,<3" "tqdm>=4.66,<5"
-
-# InsightFace does not publish a CPython 3.12 wheel. Build the official source
-# distribution so FaceAnalysis can import its bundled Cython face3d extension.
-RUN pip install --no-deps insightface==0.7.3
+    && pip uninstall -y uv
 
 # Compilers are build-time tools only; keep them out of the runtime image.
 RUN apt-get purge -y --auto-remove build-essential \

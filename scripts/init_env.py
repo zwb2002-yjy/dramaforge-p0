@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import base64
 import secrets
+import subprocess
 from pathlib import Path
 
 GENERATORS = {
     "POSTGRES_PASSWORD": lambda: secrets.token_urlsafe(32),
+    "POSTGRES_APP_PASSWORD": lambda: secrets.token_urlsafe(32),
     "MINIO_ROOT_PASSWORD": lambda: secrets.token_urlsafe(32),
     "LITELLM_DB_PASSWORD": lambda: secrets.token_urlsafe(32),
     "SESSION_SECRET": lambda: secrets.token_urlsafe(48),
@@ -21,10 +23,20 @@ GENERATORS = {
 def render_env(template: str) -> str:
     generated = {name: factory() for name, factory in GENERATORS.items()}
     generated["DATABASE_URL"] = (
-        "postgresql+asyncpg://dramaforge:"
-        f"{generated['POSTGRES_PASSWORD']}@localhost:5432/dramaforge"
+        "postgresql+asyncpg://dramaforge_app:"
+        f"{generated['POSTGRES_APP_PASSWORD']}@localhost:5432/dramaforge"
     )
     generated["MINIO_SECRET_KEY"] = generated["MINIO_ROOT_PASSWORD"]
+    source_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if source_commit.returncode != 0 or not source_commit.stdout.strip():
+        raise RuntimeError("cannot resolve DRAMAFORGE_SOURCE_COMMIT from git HEAD")
+    generated["DRAMAFORGE_SOURCE_COMMIT"] = source_commit.stdout.strip()
     seen: set[str] = set()
     output: list[str] = []
     for line in template.splitlines():

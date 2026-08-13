@@ -99,7 +99,7 @@ class DirectorRepairService:
                 affected=affected,
                 reports=report_by_shot,
                 strategy=strategy,
-                estimated_cost=cost.repair_total * len(affected),
+                cost=cost,
                 currency=cost.currency,
             )
             for strategy in ("prompt_reference", "model_parameter", "storyboard_simplify")
@@ -154,7 +154,7 @@ class DirectorRepairService:
         affected: list[str],
         reports: dict[str, QualityReportPayload],
         strategy: str,
-        estimated_cost: Decimal,
+        cost: CostEstimatePayload,
         currency: str,
     ) -> RepairOptionPayload:
         digest = hashlib.sha256(
@@ -177,18 +177,62 @@ class DirectorRepairService:
             "；".join(dict.fromkeys(summaries))[:2000]
             or "质量证据需要定向复核。"
         )
+        invalidated_by_strategy = {
+            "prompt_reference": [
+                "keyframe",
+                "face_review",
+                "video",
+                "video_drift_review",
+                "composite",
+                "continuity_review",
+            ],
+            "model_parameter": [
+                "keyframe",
+                "face_review",
+                "video",
+                "video_drift_review",
+                "composite",
+                "continuity_review",
+            ],
+            "storyboard_simplify": [
+                "prompt",
+                "keyframe",
+                "face_review",
+                "video",
+                "video_drift_review",
+                "subtitle",
+                "composite",
+                "continuity_review",
+            ],
+        }
+        invalidated = invalidated_by_strategy[strategy]
+        paid_purposes = {
+            key
+            for key in invalidated
+            if key in {"keyframe", "video", "voice"}
+        }
+        repair_prices = {line.purpose: line for line in cost.repair}
+        missing_prices = sorted(paid_purposes - set(repair_prices))
+        if missing_prices:
+            raise ValidationAppError(
+                "repair price snapshot does not cover the invalidated media nodes",
+                details={
+                    "code": "REPAIR_PRICE_UNKNOWN",
+                    "purposes": missing_prices,
+                },
+            )
+        estimated_cost = sum(
+            (
+                repair_prices[purpose].unit_amount or Decimal("0")
+                for purpose in paid_purposes
+            ),
+            start=Decimal("0"),
+        ) * len(affected)
         if strategy == "prompt_reference":
             return RepairOptionPayload(
                 repair_option_id=f"repair-{digest}",
                 title="强化角色锚点并重写镜头提示",
-                invalidated_node_keys=[
-                    "keyframe",
-                    "face_review",
-                    "video",
-                    "video_drift_review",
-                    "composite",
-                    "continuity_review",
-                ],
+                invalidated_node_keys=invalidated,
                 changes=[
                     RepairChange(
                         target="reference", summary="重新注入已锁定的虚构角色参考图"
@@ -209,14 +253,7 @@ class DirectorRepairService:
             return RepairOptionPayload(
                 repair_option_id=f"repair-{digest}",
                 title="更换已验证模型或保守参数",
-                invalidated_node_keys=[
-                    "keyframe",
-                    "face_review",
-                    "video",
-                    "video_drift_review",
-                    "composite",
-                    "continuity_review",
-                ],
+                invalidated_node_keys=invalidated,
                 changes=[
                     RepairChange(
                         target="model",
@@ -237,16 +274,7 @@ class DirectorRepairService:
         return RepairOptionPayload(
             repair_option_id=f"repair-{digest}",
             title="简化高风险分镜",
-            invalidated_node_keys=[
-                "prompt",
-                "keyframe",
-                "face_review",
-                "video",
-                "video_drift_review",
-                "subtitle",
-                "composite",
-                "continuity_review",
-            ],
+            invalidated_node_keys=invalidated,
             changes=[
                 RepairChange(
                     target="storyboard",

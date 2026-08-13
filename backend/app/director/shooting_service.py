@@ -42,6 +42,77 @@ from app.providers.models import ProjectProviderBinding, ProviderConnection, Pro
 from app.shared.errors import ConflictError, ValidationAppError
 
 
+def _discrete_duration_values(raw: object) -> set[Decimal] | None:
+    values: object = raw
+    if isinstance(raw, dict):
+        if set(raw) != {"allowed"}:
+            return None
+        values = raw.get("allowed")
+    if not isinstance(values, list):
+        values = [values]
+    result: set[Decimal] = set()
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, int | float | Decimal):
+            return None
+        try:
+            duration = Decimal(str(value))
+        except (ArithmeticError, ValueError):
+            return None
+        if not duration.is_finite() or duration <= 0:
+            return None
+        result.add(duration)
+    return result or None
+
+
+def _video_preflight_blockers(
+    *,
+    operation_manifest: dict[str, object],
+    project_aspect_ratio: str,
+    requested_durations: frozenset[Decimal],
+) -> list[str]:
+    """Validate semantic video outputs against one selected model contract."""
+    raw_constraints = operation_manifest.get("output_constraints")
+    constraints = raw_constraints if isinstance(raw_constraints, dict) else {}
+    blockers: list[str] = []
+
+    declared_ratio = constraints.get("aspect_ratio")
+    if declared_ratio == "adaptive":
+        capabilities = operation_manifest.get("capabilities")
+        raw_references = operation_manifest.get("reference_constraints")
+        references = raw_references if isinstance(raw_references, dict) else {}
+        first_frame = references.get("first_frame")
+        inherits_from_exactly_one_first_frame = (
+            isinstance(capabilities, list)
+            and "video.i2v.first_frame" in capabilities
+            and isinstance(first_frame, dict)
+            and first_frame.get("min") == 1
+            and first_frame.get("max") == 1
+        )
+        if (
+            project_aspect_ratio not in {"9:16", "16:9"}
+            or not inherits_from_exactly_one_first_frame
+        ):
+            blockers.append("MODEL_ASPECT_RATIO_INHERITANCE_UNVERIFIED")
+    elif declared_ratio is None:
+        blockers.append("MODEL_ASPECT_RATIO_UNVERIFIED")
+    elif str(declared_ratio) != project_aspect_ratio:
+        blockers.append("MODEL_ASPECT_RATIO_UNSUPPORTED")
+
+    if "duration_seconds" in constraints:
+        supported_durations = _discrete_duration_values(constraints["duration_seconds"])
+        if supported_durations is None:
+            blockers.append("MODEL_DURATION_UNVERIFIED")
+        elif (
+            not requested_durations
+            or any(value != value.to_integral_value() for value in requested_durations)
+            or not requested_durations <= supported_durations
+        ):
+            blockers.append("MODEL_DURATION_UNSUPPORTED")
+    elif not ("num_frames" in constraints and "frame_rate" in constraints):
+        blockers.append("MODEL_DURATION_UNVERIFIED")
+    return blockers
+
+
 class DirectorShootingService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -191,11 +262,12 @@ class DirectorShootingService:
         validate_storyboard_against_story(story=story, script=script, storyboard=storyboard)
 
         risk = build_risk_report(storyboard, character_count=len(story.characters))
-        selection = await self._build_selection_plan(project=project)
+        selection = await self._build_selection_plan(project=project, storyboard=storyboard)
         cost = self._build_cost_estimate(
             project=project,
             storyboard=storyboard,
             selection=selection,
+            representative_shot_id=risk.representative_shot_id,
         )
         trial = TrialPlanPayload(
             representative_shot_id=risk.representative_shot_id,
@@ -292,7 +364,9 @@ class DirectorShootingService:
             )
         return row
 
-    async def _build_selection_plan(self, *, project: Project) -> SelectionPlanPayload:
+    async def _build_selection_plan(
+        self, *, project: Project, storyboard: StoryboardPlanPayload
+    ) -> SelectionPlanPayload:
         plans = [
             await self._purpose_plan(
                 project=project,
@@ -314,6 +388,9 @@ class DirectorShootingService:
                 binding_purpose="video",
                 operation="video.generate",
                 required={"video.i2v.first_frame"},
+                requested_video_durations=frozenset(
+                    shot.duration_seconds for shot in storyboard.shots
+                ),
             ),
             self._voice_plan(),
         ]
@@ -362,6 +439,7 @@ class DirectorShootingService:
         binding_purpose: str,
         operation: str,
         required: set[str],
+        requested_video_durations: frozenset[Decimal] = frozenset(),
     ) -> SelectedModelPlan:
         project_binding = await self._session.scalar(
             select(ProjectProviderBinding).where(
@@ -417,20 +495,15 @@ class DirectorShootingService:
             if isinstance(raw_operation_manifest, dict)
             else {}
         )
-        output_constraints = operation_manifest.get("output_constraints")
-        output_constraints = (
-            output_constraints if isinstance(output_constraints, dict) else {}
-        )
         if public_purpose == "video":
-            fixed_ratio = output_constraints.get("aspect_ratio")
-            if fixed_ratio is not None and str(fixed_ratio) != project.aspect_ratio:
-                blockers.append("MODEL_ASPECT_RATIO_UNSUPPORTED")
-            if fixed_ratio is None:
-                blockers.append("MODEL_ASPECT_RATIO_UNVERIFIED")
-            if not (
-                "num_frames" in output_constraints and "frame_rate" in output_constraints
-            ):
-                blockers.append("MODEL_DURATION_UNVERIFIED")
+            blockers.extend(
+                _video_preflight_blockers(
+                    operation_manifest=operation_manifest,
+                    project_aspect_ratio=project.aspect_ratio,
+                    requested_durations=requested_video_durations,
+                )
+            )
+        blockers = list(dict.fromkeys(blockers))
         configuration_codes = {
             "MODEL_BINDING_DISABLED",
             "PROVIDER_CONNECTION_DISABLED",
@@ -441,7 +514,7 @@ class DirectorShootingService:
         }
         plan_status: Literal["ready", "configuration_required", "unsupported"] = (
             "ready"
-            if evaluation.eligible
+            if not blockers
             else "configuration_required"
             if blockers and set(blockers) <= configuration_codes
             else "unsupported"
@@ -474,6 +547,7 @@ class DirectorShootingService:
         project: Project,
         storyboard: StoryboardPlanPayload,
         selection: SelectionPlanPayload,
+        representative_shot_id: str,
     ) -> CostEstimatePayload:
         currency = project.budget_currency.upper()
         model_status: dict[str, str] = {item.purpose: item.status for item in selection.plans}
@@ -508,13 +582,23 @@ class DirectorShootingService:
             )
 
         count = len(storyboard.shots)
+        representative = next(
+            shot
+            for shot in storyboard.shots
+            if shot.shot_id == representative_shot_id
+        )
+        trial_reference_count = len(set(representative.characters))
+        production_reference_count = sum(
+            len(set(shot.characters)) for shot in storyboard.shots
+        )
         trial = [
-            line("character_reference", 1),
+            line("character_reference", trial_reference_count),
             line("keyframe", 1),
             line("video", 1),
             line("voice", 1),
         ]
         production = [
+            line("character_reference", production_reference_count),
             line("keyframe", count),
             line("video", count),
             line("voice", count),

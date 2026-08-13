@@ -24,6 +24,7 @@ from app.providers.intents import (
     ImageGenerationIntent,
     ModelSelectionIntent,
     VideoGenerationIntentV1,
+    VideoOutputIntent,
 )
 
 
@@ -42,6 +43,23 @@ def _ref(artifact: ArtifactRef, role: str) -> ArtifactReferenceIntent:
     return ArtifactReferenceIntent(artifact_id=artifact_id, role=role, required=True)  # type: ignore[arg-type]
 
 
+def _video_output(request: object) -> VideoOutputIntent:
+    """Carry semantic common options into the A+B intent without rounding.
+
+    ``VideoOutputIntent`` owns the strict enum/integer validation.  In
+    particular, a fractional duration or an unknown aspect ratio is rejected
+    instead of being silently altered before a provider compiler sees it.
+    """
+    return VideoOutputIntent.model_validate(
+        {
+            "duration_seconds": getattr(request, "duration_seconds", None),
+            "resolution": getattr(request, "resolution", None),
+            "aspect_ratio": getattr(request, "aspect_ratio", None),
+            "seed": getattr(request, "seed", None),
+        }
+    )
+
+
 def video_request_to_intent(
     capability: Capability,
     request: object,
@@ -53,18 +71,21 @@ def video_request_to_intent(
     if isinstance(request, TextToVideoRequest):
         return VideoGenerationIntentV1(
             prompt=request.prompt,
+            output=_video_output(request),
             references=[],
             selection=selection,
         )
     if isinstance(request, ImageToVideoRequest):
         return VideoGenerationIntentV1(
             prompt=request.prompt,
+            output=_video_output(request),
             references=[_ref(request.image, "first_frame")],
             selection=selection,
         )
     if isinstance(request, FirstLastFrameVideoRequest):
         return VideoGenerationIntentV1(
             prompt=request.prompt,
+            output=_video_output(request),
             references=[
                 _ref(request.first_frame, "first_frame"),
                 _ref(request.last_frame, "last_frame"),
@@ -79,6 +100,7 @@ def video_request_to_intent(
         ]
         return VideoGenerationIntentV1(
             prompt=request.prompt,
+            output=_video_output(request),
             references=references,
             selection=selection,
         )

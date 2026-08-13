@@ -13,6 +13,7 @@ CapabilityRouter path fully owns submission (Phase 11/12).
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
@@ -46,7 +47,12 @@ from app.providers.runtime import (
     ProviderRuntime,
     ResolvedReference,
 )
-from app.providers.translation import EffectiveRequest, TranslationReport, TranslationResult
+from app.providers.translation import (
+    EffectiveRequest,
+    RequestTransformation,
+    TranslationReport,
+    TranslationResult,
+)
 
 _SUBMISSION_STATUS_TO_V3 = {
     "succeeded": GenerationStatus.SUCCEEDED,
@@ -80,6 +86,96 @@ def submission_status_to_v3(status: str) -> GenerationStatus:
 
 
 ArtifactResolver = Callable[[list[tuple[str, ResolvedArtifact]]], list[ResolvedReference]]
+
+_COMPILER_AUDIT_OPTION_FIELDS = frozenset(
+    {"aspect_ratio", "duration_seconds", "resolution", "generate_audio", "seed"}
+)
+_COMPILER_AUDIT_REASON_CODES = frozenset(
+    {
+        "provider_inherits_aspect_ratio_from_first_frame",
+        "provider_applies_documented_default",
+    }
+)
+
+
+def _compiler_translation_evidence(
+    compiled: object,
+) -> tuple[dict[str, Any] | None, list[RequestTransformation]]:
+    """Read a deliberately small, secret-free compiler audit envelope.
+
+    Existing compilers which do not publish the envelope retain their current
+    translation behavior.  A compiler which does publish it must conform to
+    this allowlisted scalar schema; malformed or unexpected data fails closed.
+    """
+    summary = getattr(compiled, "safe_request_summary", None)
+    if not isinstance(summary, dict):
+        return None, []
+    has_effective = "effective_common_options" in summary
+    has_transformations = "translation_transformations" in summary
+    if not has_effective and not has_transformations:
+        return None, []
+    if not has_effective or not has_transformations:
+        raise ValueError("compiler translation evidence is incomplete")
+
+    raw_effective = summary["effective_common_options"]
+    raw_transformations = summary["translation_transformations"]
+    if not isinstance(raw_effective, dict) or not isinstance(raw_transformations, list):
+        raise ValueError("compiler translation evidence has an invalid schema")
+
+    def safe_value(field: str, value: object) -> bool:
+        if value is None:
+            return True
+        if field in {"aspect_ratio", "resolution"}:
+            return isinstance(value, str) and 0 < len(value) <= 32
+        if field == "duration_seconds":
+            return (
+                not isinstance(value, bool)
+                and isinstance(value, int | float)
+                and math.isfinite(value)
+                and 0 < value <= 3600
+            )
+        if field == "generate_audio":
+            return isinstance(value, bool)
+        if field == "seed":
+            return (
+                not isinstance(value, bool)
+                and isinstance(value, int)
+                and -(2**63) <= value < 2**63
+            )
+        return False
+
+    effective: dict[str, Any] = {}
+    for key, value in raw_effective.items():
+        if (
+            not isinstance(key, str)
+            or key not in _COMPILER_AUDIT_OPTION_FIELDS
+            or not safe_value(key, value)
+        ):
+            raise ValueError("compiler effective options are not safe common options")
+        effective[key] = value
+
+    transformations: list[RequestTransformation] = []
+    for raw in raw_transformations:
+        if not isinstance(raw, dict) or set(raw) != {
+            "field",
+            "from_value",
+            "to_value",
+            "reason",
+        }:
+            raise ValueError("compiler transformation has an invalid schema")
+        field = raw["field"]
+        reason = raw["reason"]
+        if (
+            not isinstance(field, str)
+            or field not in _COMPILER_AUDIT_OPTION_FIELDS
+            or not isinstance(reason, str)
+            or reason not in _COMPILER_AUDIT_REASON_CODES
+            or not safe_value(field, raw["from_value"])
+            or not safe_value(field, raw["to_value"])
+        ):
+            raise ValueError("compiler transformation is not safe audit evidence")
+        transformations.append(RequestTransformation.model_validate(raw))
+    return effective, transformations
 
 
 def _uuid(value: str) -> UUID:
@@ -232,19 +328,24 @@ class LegacyAdapterBridge:
                     "reference_videos",
                 }
             )
+        compiler_effective, compiler_transformations = _compiler_translation_evidence(compiled)
+        effective_options = (
+            compiler_effective if compiler_effective is not None else requested_options
+        )
         translation = TranslationResult(
             capability=capability,
             effective_request=EffectiveRequest(
                 capability=capability,
                 model_id=self.model_id,
                 inputs={"prompt": getattr(request, "prompt", "")},
-                common_options=requested_options,
+                common_options=effective_options,
                 native_options=dict(getattr(request, "native_options", {}) or {}),
             ),
             native_request=dict(getattr(compiled, "wire_request", {}) or {}),
             translation_report=TranslationReport(
                 requested_options=requested_options,
-                effective_options=requested_options,
+                effective_options=effective_options,
+                transformations=compiler_transformations,
             ),
         )
         return compiled, translation

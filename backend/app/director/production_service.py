@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
 
@@ -99,6 +100,14 @@ class DirectorProductionService:
         cost = CostEstimatePayload.model_validate(artifacts[ArtifactKind.COST_ESTIMATE].payload)
         trial = TrialPlanPayload.model_validate(artifacts[ArtifactKind.TRIAL_PLAN].payload)
         self._assert_media_preflight(selection=selection, cost=cost, stage="trial")
+        self._assert_frozen_cost_contract(
+            cost=cost,
+            selection=selection,
+            storyboard=storyboard,
+            representative_shot_id=trial.representative_shot_id,
+            stage="trial",
+            authorization=authorization,
+        )
         shot = next(
             (item for item in storyboard.shots if item.shot_id == trial.representative_shot_id),
             None,
@@ -291,6 +300,14 @@ class DirectorProductionService:
         cost = CostEstimatePayload.model_validate(artifacts[ArtifactKind.COST_ESTIMATE].payload)
         trial_plan = TrialPlanPayload.model_validate(artifacts[ArtifactKind.TRIAL_PLAN].payload)
         self._assert_media_preflight(selection=selection, cost=cost, stage="production")
+        self._assert_frozen_cost_contract(
+            cost=cost,
+            selection=selection,
+            storyboard=storyboard,
+            representative_shot_id=trial_plan.representative_shot_id,
+            stage="production",
+            authorization=authorization,
+        )
         estimated_production = cost.production_total
         if (
             estimated_production is None
@@ -349,7 +366,10 @@ class DirectorProductionService:
             }
         }
         locked_refs[ArtifactKind.TRIAL_REVIEW.value] = str(trial_review_row.id)
-        selection_snapshot = selection.model_dump(mode="json")
+        selection_snapshot = {
+            **selection.model_dump(mode="json"),
+            "accepted_trial_batch_id": str(trial_review.batch_id),
+        }
         logical_shot_ids = [shot.shot_id for shot in storyboard.shots]
         batch_hash = content_hash(
             {
@@ -399,6 +419,8 @@ class DirectorProductionService:
             workflow_id=workflow.id,
             batch_id=trial_review.batch_id,
             logical_shot_id=trial_plan.representative_shot_id,
+            expected_locked_refs=locked_refs,
+            expected_selection_snapshot=selection_snapshot,
         )
         runs: list[NodeRun] = []
         for shot in storyboard.shots:
@@ -416,7 +438,6 @@ class DirectorProductionService:
                 reusable_trial
                 if reusable_trial is not None
                 and shot.shot_id == trial_plan.representative_shot_id
-                and reusable_trial.semantic_hash == semantic
                 else None
             )
             batch_shot = ProductionBatchShot(
@@ -425,7 +446,7 @@ class DirectorProductionService:
                 logical_shot_id=shot.shot_id,
                 shot_id=shot_row.id,
                 status="accepted" if reuse is not None else "materializing",
-                semantic_hash=semantic,
+                semantic_hash=(reuse.semantic_hash if reuse is not None else semantic),
                 accepted_artifact_id=(
                     reuse.accepted_artifact_id if reuse is not None else None
                 ),
@@ -662,8 +683,18 @@ class DirectorProductionService:
             raise ConflictError("reused composite lineage is not accepted")
         if source_batch.batch_kind == "repair" and str(
             (source_batch.selection_snapshot or {}).get("root_source_batch_id") or ""
-        ) != str(production_batch.id):
-            raise ConflictError("accepted repair does not belong to this production batch")
+        ) not in {
+            str(production_batch.id),
+            str(
+                (production_batch.selection_snapshot or {}).get(
+                    "accepted_trial_batch_id"
+                )
+                or ""
+            ),
+        }:
+            raise ConflictError(
+                "accepted repair does not belong to this production or its accepted trial"
+            )
         return run, artifact
 
     async def _materialize_shot_graph(
@@ -991,6 +1022,8 @@ class DirectorProductionService:
         workflow_id: UUID,
         batch_id: UUID,
         logical_shot_id: str,
+        expected_locked_refs: dict[str, str] | None = None,
+        expected_selection_snapshot: dict[str, object] | None = None,
     ) -> ProductionBatchShot | None:
         batch = await self._session.get(ProductionBatch, batch_id)
         if (
@@ -999,6 +1032,32 @@ class DirectorProductionService:
             or batch.workflow_run_id != workflow_id
             or batch.batch_kind != "trial"
             or batch.status != "accepted"
+        ):
+            return None
+        creative_keys = {
+            ArtifactKind.CHARACTER_BIBLE.value,
+            ArtifactKind.VISUAL_BIBLE.value,
+            ArtifactKind.VOICE_BIBLE.value,
+            ArtifactKind.STORYBOARD_PLAN.value,
+            ArtifactKind.RISK_REPORT.value,
+            ArtifactKind.SELECTION_PLAN.value,
+            ArtifactKind.COST_ESTIMATE.value,
+            ArtifactKind.TRIAL_PLAN.value,
+        }
+        if expected_locked_refs is not None and {
+            key: value
+            for key, value in expected_locked_refs.items()
+            if key in creative_keys
+        } != {
+            key: value
+            for key, value in batch.locked_version_refs.items()
+            if key in creative_keys
+        }:
+            return None
+        if (
+            expected_selection_snapshot is not None
+            and self._selection_semantic_snapshot(expected_selection_snapshot)
+            != self._selection_semantic_snapshot(batch.selection_snapshot)
         ):
             return None
         batch_shot = await self._session.scalar(
@@ -1019,7 +1078,6 @@ class DirectorProductionService:
         if (
             run is None
             or run.project_id != project_id
-            or run.production_batch_id != batch.id
             or run.result_artifact_id != batch_shot.accepted_artifact_id
             or run.status not in {"completed", "cached", "completed_after_cancel"}
             or artifact is None
@@ -1028,6 +1086,32 @@ class DirectorProductionService:
             or artifact.deleted_at is not None
             or artifact.produced_by_run_id != run.id
             or not artifact.mime_type.startswith("video/")
+        ):
+            return None
+        if run.production_batch_id == batch.id:
+            return batch_shot
+        source_batch = await self._session.get(ProductionBatch, run.production_batch_id)
+        source_shot = await self._session.scalar(
+            select(ProductionBatchShot).where(
+                ProductionBatchShot.batch_id == run.production_batch_id,
+                ProductionBatchShot.logical_shot_id == logical_shot_id,
+                ProductionBatchShot.status == "accepted",
+                ProductionBatchShot.accepted_artifact_id == artifact.id,
+                ProductionBatchShot.accepted_node_run_id == run.id,
+            )
+        )
+        if (
+            source_batch is None
+            or source_batch.project_id != project_id
+            or source_batch.workflow_run_id != workflow_id
+            or source_batch.batch_kind != "repair"
+            or source_batch.status != "accepted"
+            or source_shot is None
+            or str(
+                (source_batch.selection_snapshot or {}).get("root_source_batch_id")
+                or ""
+            )
+            != str(batch.id)
         ):
             return None
         return batch_shot
@@ -1118,10 +1202,31 @@ class DirectorProductionService:
                     for key, value in locked_refs.items()
                     if key in creative_keys
                 },
-                "selection": selection_snapshot,
+                "selection": DirectorProductionService._selection_semantic_snapshot(
+                    selection_snapshot
+                ),
                 "quality_policy_id": QUALITY_POLICY_V1,
             }
         )
+
+    @staticmethod
+    def _selection_semantic_snapshot(
+        selection_snapshot: dict[str, object],
+    ) -> dict[str, object]:
+        """Exclude lineage annotations from the executable model-selection hash."""
+
+        return {
+            key: value
+            for key, value in selection_snapshot.items()
+            if key
+            in {
+                "policy_id",
+                "status",
+                "plans",
+                "fallback_allowed",
+                "advanced_parameters_hidden_in_quick_mode",
+            }
+        }
 
     @staticmethod
     def _assert_media_preflight(
@@ -1147,6 +1252,141 @@ class DirectorProductionService:
             raise ValidationAppError(
                 "provider pricing is not verified; paid media calls remain blocked",
                 details={"code": "PRICING_NOT_VERIFIED", "purposes": unknown},
+            )
+
+    @staticmethod
+    def _assert_frozen_cost_contract(
+        *,
+        cost: CostEstimatePayload,
+        selection: SelectionPlanPayload,
+        storyboard: StoryboardPlanPayload,
+        representative_shot_id: str,
+        stage: Literal["trial", "production"],
+        authorization: BudgetAuthorization,
+    ) -> None:
+        """Verify that the authorized snapshot covers every planned paid call.
+
+        This is intentionally repeated at materialization time.  A historical
+        or hand-authored estimate must not under-count character-reference
+        image calls and then rely on the post-call ledger to discover an
+        overrun after money has already been spent.
+        """
+
+        representative = next(
+            (
+                shot
+                for shot in storyboard.shots
+                if shot.shot_id == representative_shot_id
+            ),
+            None,
+        )
+        if representative is None:
+            raise ValidationAppError(
+                "cost estimate references an unknown representative shot",
+                details={"code": "COST_OPERATION_COUNT_MISMATCH"},
+            )
+        shot_count = len(storyboard.shots)
+        expected = (
+            {
+                "character_reference": len(set(representative.characters)),
+                "keyframe": 1,
+                "video": 1,
+                "voice": 1,
+            }
+            if stage == "trial"
+            else {
+                "character_reference": sum(
+                    len(set(shot.characters)) for shot in storyboard.shots
+                ),
+                "keyframe": shot_count,
+                "video": shot_count,
+                "voice": shot_count,
+            }
+        )
+        lines = getattr(cost, stage)
+        by_purpose = {line.purpose: line for line in lines}
+        duplicate_purposes = len(by_purpose) != len(lines)
+        mismatched = {
+            purpose: {
+                "expected": quantity,
+                "estimated": (
+                    by_purpose[purpose].quantity if purpose in by_purpose else None
+                ),
+            }
+            for purpose, quantity in expected.items()
+            if purpose not in by_purpose or by_purpose[purpose].quantity != quantity
+        }
+        unexpected = sorted(set(by_purpose) - set(expected))
+        if duplicate_purposes or mismatched or unexpected:
+            raise ValidationAppError(
+                "cost estimate does not cover the materialized media operations",
+                details={
+                    "code": "COST_OPERATION_COUNT_MISMATCH",
+                    "stage": stage,
+                    "mismatched": mismatched,
+                    "unexpected": unexpected,
+                    "duplicate_purposes": duplicate_purposes,
+                },
+            )
+        invalid_amounts = sorted(
+            line.purpose
+            for line in lines
+            if line.unit_amount is None
+            or line.estimated_amount is None
+            or line.estimated_amount != line.unit_amount * line.quantity
+        )
+        declared_total = getattr(cost, f"{stage}_total")
+        calculated_total = sum(
+            (line.estimated_amount for line in lines if line.estimated_amount is not None),
+            start=Decimal("0"),
+        )
+        if invalid_amounts or declared_total != calculated_total:
+            raise ValidationAppError(
+                "cost estimate arithmetic is not internally consistent",
+                details={
+                    "code": "COST_ESTIMATE_INVALID",
+                    "stage": stage,
+                    "invalid_purposes": invalid_amounts,
+                    "declared_total": (
+                        str(declared_total) if declared_total is not None else None
+                    ),
+                    "calculated_total": str(calculated_total),
+                },
+            )
+        frozen_prices = {
+            plan.purpose: plan.pricing_snapshot for plan in selection.plans
+        }
+        price_mismatches: list[str] = []
+        for line in lines:
+            snapshot = frozen_prices.get(line.purpose) or {}
+            try:
+                snapshot_unit = Decimal(str(snapshot.get("unit_amount")))
+            except (ArithmeticError, TypeError, ValueError):
+                price_mismatches.append(line.purpose)
+                continue
+            snapshot_currency = str(snapshot.get("currency") or cost.currency).upper()
+            if snapshot_currency == "LOCAL":
+                snapshot_currency = cost.currency.upper()
+            if (
+                line.unit_amount != snapshot_unit
+                or line.currency.upper() != snapshot_currency
+            ):
+                price_mismatches.append(line.purpose)
+        if price_mismatches:
+            raise ValidationAppError(
+                "cost estimate differs from the frozen provider prices",
+                details={
+                    "code": "COST_PRICING_SNAPSHOT_MISMATCH",
+                    "purposes": sorted(set(price_mismatches)),
+                },
+            )
+        if (
+            authorization.pricing_snapshot_id != cost.pricing_snapshot_id
+            or authorization.currency.upper() != cost.currency.upper()
+        ):
+            raise ValidationAppError(
+                "budget authorization does not match the frozen cost estimate",
+                details={"code": "BUDGET_PRICING_SNAPSHOT_MISMATCH"},
             )
 
     async def _active_budget_approval(

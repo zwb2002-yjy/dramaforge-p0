@@ -32,6 +32,12 @@ from app.shared.errors import ConflictError, ValidationAppError
 _SUCCESS = frozenset({"completed", "cached", "completed_after_cancel"})
 
 
+def _identity_evidence_status(face_status: str) -> Literal["passed", "needs_human"]:
+    """Map an advisory identity signal without turning it into a hard gate."""
+
+    return "passed" if face_status == "passed" else "needs_human"
+
+
 class DirectorQualityService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -783,13 +789,12 @@ class DirectorQualityService:
             else "blocked"
         )
         face_signal = dict(face.output_summary or {}) if face else {}
-        identity_status: Literal["passed", "warning", "blocked"] = (
-            "blocked"
-            if face_status in {"blocked", "failed"}
-            else "warning"
-            if face_status == "needs_human"
-            else "passed"
-        )
+        # Face similarity is a triage signal, never an objective release gate.
+        # A low score, a missing detector, or a conflicting visual signal must
+        # be shown to the creator for comparison; it cannot make an otherwise
+        # valid artifact impossible to accept.  Missing/corrupt source media is
+        # already covered by the immutable request/artifact hard gates above.
+        identity_status = _identity_evidence_status(face_status)
         drift = by_key.get("video_drift_review")
         drift_status = (
             str((drift.output_summary or {}).get("status") or "needs_human")
@@ -831,6 +836,7 @@ class DirectorQualityService:
                 evidence_refs=[f"node-run:{face.id}"] if face else [],
                 signals={
                     "insightface_is_one_signal_only": True,
+                    "raw_face_status": face_status,
                     "face_score": face_signal.get("face_score"),
                     "backend": face_signal.get("insightface_backend"),
                 },

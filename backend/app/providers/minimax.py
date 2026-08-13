@@ -499,16 +499,25 @@ class MiniMaxVideoCompiler:
             raise ValueError("MiniMax video generation requires exactly one first_frame")
         if any(ref.role != "first_frame" for ref in intent.references):
             raise ValueError("MiniMax video catalog revision supports no other reference roles")
+        constraints = operation.output_constraints
+        if (
+            constraints.get("duration_seconds") != 5
+            or constraints.get("resolution") != "768P"
+            or constraints.get("aspect_ratio") != "adaptive"
+            or constraints.get("native_audio") is not False
+        ):
+            raise ValueError("MiniMax H3 output capability contract is unsupported")
         output = intent.output
         if (
             output.duration_seconds not in {None, 5}
             or output.resolution not in {None, "768P"}
-            or output.aspect_ratio not in {None, "adaptive"}
+            or output.aspect_ratio not in {"9:16", "16:9"}
             or output.generate_audio not in {None, False}
+            or output.seed is not None
         ):
             raise ValueError(
                 "MiniMax H3 catalog revision only supports 768P, 5 seconds, "
-                "adaptive ratio, no audio"
+                "a 9:16 or 16:9 first-frame-inherited ratio, no seed, and no audio"
             )
 
     async def compile(
@@ -524,6 +533,38 @@ class MiniMaxVideoCompiler:
         from app.providers.runtime import CompiledVideoRequest
 
         fingerprints = [ref.fingerprint] if ref.fingerprint else []
+        effective_options: dict[str, object] = {
+            "aspect_ratio": intent.output.aspect_ratio,
+            "duration_seconds": 5,
+            "resolution": "768P",
+            "generate_audio": False,
+        }
+        transformations: list[dict[str, object]] = [
+            {
+                "field": "aspect_ratio",
+                "from_value": intent.output.aspect_ratio,
+                "to_value": "adaptive",
+                "reason": "provider_inherits_aspect_ratio_from_first_frame",
+            }
+        ]
+        if intent.output.duration_seconds is None:
+            transformations.append(
+                {
+                    "field": "duration_seconds",
+                    "from_value": None,
+                    "to_value": 5,
+                    "reason": "provider_applies_documented_default",
+                }
+            )
+        summary = _summary(
+            operation="video.i2v.first_frame",
+            model=invoke_model_value,
+            artifact_ids=[str(ref.artifact_id)],
+            fingerprints=fingerprints,
+            schema_version=model.manifest_version,
+        )
+        summary["effective_common_options"] = effective_options
+        summary["translation_transformations"] = transformations
         return CompiledVideoRequest(
             provider_type="minimax",
             protocol_profile=MINIMAX_CN_PROFILE,
@@ -533,13 +574,7 @@ class MiniMaxVideoCompiler:
             request_schema_version=model.manifest_version,
             safe_request_summary=cast(
                 dict[str, JsonValue],
-                _summary(
-                    operation="video.i2v.first_frame",
-                    model=invoke_model_value,
-                    artifact_ids=[str(ref.artifact_id)],
-                    fingerprints=fingerprints,
-                    schema_version=model.manifest_version,
-                ),
+                summary,
             ),
             reference_artifact_ids=[ref.artifact_id],
             reference_fingerprints=fingerprints,
