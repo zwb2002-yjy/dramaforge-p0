@@ -12,6 +12,7 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.director.enums import ArtifactKind, WorkflowStatus
 from app.director.models import (
+    ApprovalRecord,
     BudgetAuthorization,
     CreativeArtifactVersion,
     DirectorWorkflowRun,
@@ -20,7 +21,9 @@ from app.director.models import (
 )
 from app.director.quality_service import DirectorQualityService
 from app.shared.base import Base
+from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -247,3 +250,62 @@ async def test_accepting_repair_propagates_exact_composite_to_root_batch(
         assert trial_review.payload["batch_id"] == str(root.id)
         assert trial_review.payload["accepted_quality"] is True
         assert trial_review.payload["quality_report_version_id"] == str(quality.id)
+
+
+@pytest.mark.asyncio
+async def test_subjective_accept_requires_reason_and_records_override(
+    session: AsyncSession,
+) -> None:
+    user, project, workflow, root, root_shot, repair, repair_shot, quality = (
+        await _seed_repair_review(session, root_kind="production")
+    )
+    payload = dict(quality.payload)
+    shot_report = dict(payload["shot_reports"][0])
+    dimensions = [dict(item) for item in shot_report["dimensions"]]
+    dimensions[1]["status"] = "needs_human"
+    shot_report["dimensions"] = dimensions
+    shot_report["overall_status"] = "needs_human"
+    shot_report["recommended_action"] = "review"
+    payload["shot_reports"] = [shot_report]
+    payload["overall_status"] = "needs_human"
+    quality.payload = payload
+    await session.commit()
+    project_id = project.id
+    repair_id = repair.id
+    quality_id = quality.id
+    user_id = user.id
+
+    with pytest.raises(ValidationAppError) as caught:
+        await DirectorQualityService(session).review_production(
+            project_id=project_id,
+            batch_id=repair_id,
+            decisions={"shot-1": "accept"},
+            user_note="",
+            actor=user,
+            idempotency_key="subjective-without-reason",
+        )
+    assert caught.value.details["code"] == "SUBJECTIVE_OVERRIDE_REASON_REQUIRED"
+    await session.rollback()
+    user = await session.get(User, user_id)
+    assert user is not None
+
+    await DirectorQualityService(session).review_production(
+        project_id=project_id,
+        batch_id=repair_id,
+        decisions={"shot-1": "accept"},
+        user_note="The identity and performance are acceptable for this story.",
+        actor=user,
+        idempotency_key="subjective-with-reason",
+    )
+    override = await session.scalar(
+        select(ApprovalRecord).where(
+            ApprovalRecord.project_id == project_id,
+            ApprovalRecord.approval_kind == "subjective_gate_override",
+        )
+    )
+    assert override is not None
+    assert override.approved_artifact_versions == {"quality_report": str(quality_id)}
+    assert override.approved_by == user_id
+    assert "The identity and performance are acceptable" in (override.reason or "")
+    assert "Scope:" in (override.reason or "")
+    assert "shot-1" in (override.reason or "")

@@ -1,3 +1,6 @@
+x-dramaforge-release:
+  version: ${DRAMAFORGE_VERSION:-0.1.0}
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -62,15 +65,21 @@ services:
       # Deployment env for the logical aliases in infra/litellm/config.yaml.
       # Empty values are valid (config loads); an alias is usable only when its
       # api_base+api_key (or mock_response) are set. Never commit real keys.
+      LITELLM_SCRIPT_QUALITY_MODEL: ${LITELLM_SCRIPT_QUALITY_MODEL:-openai/script-quality-deployment}
       LITELLM_SCRIPT_QUALITY_API_BASE: ${LITELLM_SCRIPT_QUALITY_API_BASE:-}
       LITELLM_SCRIPT_QUALITY_API_KEY: ${LITELLM_SCRIPT_QUALITY_API_KEY:-}
       LITELLM_SCRIPT_QUALITY_MOCK_RESPONSE: ${LITELLM_SCRIPT_QUALITY_MOCK_RESPONSE:-}
+      LITELLM_SCRIPT_FAST_MODEL: ${LITELLM_SCRIPT_FAST_MODEL:-openai/script-fast-deployment}
       LITELLM_SCRIPT_FAST_API_BASE: ${LITELLM_SCRIPT_FAST_API_BASE:-}
       LITELLM_SCRIPT_FAST_API_KEY: ${LITELLM_SCRIPT_FAST_API_KEY:-}
       LITELLM_SCRIPT_FAST_MOCK_RESPONSE: ${LITELLM_SCRIPT_FAST_MOCK_RESPONSE:-}
+      LITELLM_LEGACY_TEXT_MODEL: ${LITELLM_LEGACY_TEXT_MODEL:-openai/legacy-text-deployment}
       LITELLM_LEGACY_TEXT_API_BASE: ${LITELLM_LEGACY_TEXT_API_BASE:-}
       LITELLM_LEGACY_TEXT_API_KEY: ${LITELLM_LEGACY_TEXT_API_KEY:-}
       LITELLM_LEGACY_TEXT_MOCK_RESPONSE: ${LITELLM_LEGACY_TEXT_MOCK_RESPONSE:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
     volumes:
       - ./infra/litellm/config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
@@ -86,13 +95,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
-        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
@@ -112,13 +115,7 @@ services:
       - ALL
 
   api:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
-        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
@@ -134,6 +131,7 @@ services:
       BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
       BYOK_KEYRING: ${BYOK_KEYRING:-}
       PUBLIC_REGISTRATION_ENABLED: ${PUBLIC_REGISTRATION_ENABLED:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       CORS_ORIGINS: ${DRAMAFORGE_PUBLIC_ORIGIN:-http://localhost:8080}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
@@ -149,7 +147,7 @@ services:
       REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio,litellm,litellm-db}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
       TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
       TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
       TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
@@ -182,13 +180,7 @@ services:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
 
   frontend:
-    image: ${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:local}
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
-        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+    image: ${DRAMAFORGE_FRONTEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-frontend:v0.1.0}
     ports:
       - "${DRAMAFORGE_BIND_ADDRESS:-127.0.0.1}:${DRAMAFORGE_PORT:-8080}:8080"
     depends_on:
@@ -237,13 +229,7 @@ services:
 
   maintenance:
     profiles: ["maintenance"]
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
-        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     working_dir: /workspace
     volumes:
       - ./:/workspace:ro
@@ -272,13 +258,7 @@ services:
     entrypoint: ["python", "/workspace/scripts/p0_backup_restore.py"]
 
   dispatcher:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
-        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
@@ -312,13 +292,7 @@ services:
     command: ["python", "-m", "app.workers.dispatcher"]
 
   worker-default:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
-        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
@@ -347,7 +321,7 @@ services:
       REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio,litellm,litellm-db}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
       TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
       TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
       TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
@@ -383,13 +357,7 @@ services:
     restart: unless-stopped
 
   worker-heavy:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
-        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
@@ -403,9 +371,6 @@ services:
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
       BYOK_KEYRING: ${BYOK_KEYRING:-}
-      INSIGHTFACE_ENABLED: ${INSIGHTFACE_ENABLED:-false}
-      INSIGHTFACE_MODEL_NAME: ${INSIGHTFACE_MODEL_NAME:-buffalo_l}
-      INSIGHTFACE_MODEL_ROOT: ${INSIGHTFACE_MODEL_ROOT:-/models/insightface}
       WORKER_KIND: heavy
       ARQ_HEAVY_MAX_JOBS: ${ARQ_HEAVY_MAX_JOBS:-4}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
@@ -422,7 +387,7 @@ services:
       REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio,litellm,litellm-db}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
       TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
       TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
       TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}

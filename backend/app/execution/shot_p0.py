@@ -1,4 +1,4 @@
-"""S4 10-shot: Worker media path + two-source face review + durable locks."""
+﻿"""S4 10-shot: Worker media path + two-source face review + durable locks."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.consistency.continuity import continuity_four_layers
-from app.consistency.face_policy import approved_face_policy_snapshot, approved_face_threshold
-from app.consistency.face_review import face_review_images
+from app.consistency.identity_policy import identity_evidence_policy_snapshot
+from app.consistency.identity_review import identity_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ShotHumanLock
 from app.execution.product_path import execute_media_node_run
 from app.execution.runtime_invariants import mark_stale_downstream
@@ -41,9 +41,8 @@ class ShotRecord:
     lead_name: str | None = None
     locked: bool = False
     status: str = "pending"
-    face_checked: bool = False
-    face_status: str | None = None
-    face_score: float | None = None
+    identity_reviewed: bool = False
+    identity_status: str | None = None
     continuity_checked: bool = False
     continuity_status: str | None = None
     canonical_object_key: str | None = None
@@ -150,7 +149,7 @@ async def _queue_node_run(
         "plan": {"prompt": prompt},
         "node_key": key,
         "source_commit": get_settings().source_commit,
-        "face_policy": approved_face_policy_snapshot(),
+        "identity_evidence_policy": identity_evidence_policy_snapshot(),
     }
     if canonical_object_key:
         snap["canonical_object_key"] = canonical_object_key
@@ -208,7 +207,7 @@ async def _queue_and_run(
             session,
             node_run_id=run.id,
             store=store,
-            require_canonical=key in {"keyframe", "face_review"},
+            require_canonical=key in {"keyframe", "identity_review"},
             canonical_image_bytes=canonical_image_bytes,
         )
     out = await session.get(NodeRun, run.id)
@@ -225,7 +224,6 @@ async def produce_shots_p0(
     budget: Decimal = Decimal("1000"),
     store: ObjectStore | None = None,
     run_keyframe_via_worker: bool = True,
-    mismatch_face_on_shot: int | None = None,
     shot_specs: list[tuple[UUID, str, str]] | None = None,
     lead_name: str | None = None,
     shared_canonical_object_key: str | None = None,
@@ -347,21 +345,16 @@ async def produce_shots_p0(
                     rec.artifact_ids[key] = run.result_artifact_id
                 continue
 
-            if key == "face_review":
+            if key == "identity_review":
                 if execute_inline and keyframe_bytes is None:
-                    raise RuntimeError("keyframe bytes required before face_review")
+                    raise RuntimeError("keyframe bytes required before identity_review")
                 # TWO-SOURCE ONLY when inline (test); Worker path uses store canonical
                 if execute_inline:
-                    if mismatch_face_on_shot == i:
-                        probe = await _make_canonical_bytes(f"wrong-character-{i}")
-                    else:
-                        assert keyframe_bytes is not None
-                        probe = keyframe_bytes
-                    assert probe is not canon_bytes or mismatch_face_on_shot == i
-                    review = face_review_images(
+                    assert keyframe_bytes is not None
+                    probe = keyframe_bytes
+                    review = identity_review_images(
                         probe_image_bytes=probe,
                         canonical_image_bytes=canon_bytes,
-                        threshold=approved_face_threshold(),
                     )
                 else:
                     review = None
@@ -373,7 +366,7 @@ async def produce_shots_p0(
                     user_id=user_id,
                     shot_id=shot_id,
                     key=key,
-                    prompt=f"face_review:{shot_id}:{visual}",
+                    prompt=f"identity_review:{shot_id}:{visual}",
                     store=obj_store,
                     canonical_object_key=canon_key,
                     canonical_image_bytes=canon_bytes if execute_inline else None,
@@ -382,19 +375,21 @@ async def produce_shots_p0(
                 if review is not None and execute_inline:
                     run.output_summary = {
                         **(run.output_summary or {}),
-                        "review": review.status,
-                        "score": review.score,
+                        "status": review.status,
+                        "identity_review_status": review.status,
                         "rule": review.rule,
-                        "embedding_source": "probe_vs_canonical_images",
+                        "evidence_source": "probe_and_canonical_artifacts",
+                        "automatic_identity_decision": False,
+                        "human_review_required": review.status == "needs_human",
                         "keyframe_artifact_id": str(keyframe_artifact_id)
                         if keyframe_artifact_id
                         else None,
+                        "identity_evidence_policy": identity_evidence_policy_snapshot(),
                     }
-                    rec.face_checked = True
-                    rec.face_status = review.status
-                    rec.face_score = review.score
+                    rec.identity_reviewed = True
+                    rec.identity_status = review.status
                     if review.status == "blocked":
-                        rec.status = "face_blocked"
+                        rec.status = "identity_evidence_blocked"
                 rec.run_ids[key] = run.id
                 if run.result_artifact_id:
                     rec.artifact_ids[key] = run.result_artifact_id

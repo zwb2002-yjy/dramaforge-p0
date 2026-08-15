@@ -239,7 +239,7 @@ async def main() -> int:
                 "node_run_id": str(result.node_run_id),
                 "artifact_id": str(result.artifact_id),
                 "object_key": short_uri(art.object_key if art else None),
-                "face_review": result.face_review.status,
+                "identity_review": result.identity_review.status,
                 "provider_ops": len(result.provider_operation_ids),
                 "brief": result.brief_text[:80],
             }

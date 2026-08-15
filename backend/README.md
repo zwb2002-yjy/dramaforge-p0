@@ -4,27 +4,16 @@ FastAPI API and Arq workers for DramaForge P0.
 
 ## Container Runtime
 
-The supported service runtime is the repository Docker Compose stack. Its
-`Dockerfile` builds the optional InsightFace 0.7.3 Python runtime for CPython
-3.12, but it does not download or bundle pretrained weights. InsightFace stays
-disabled unless a deployer separately obtains appropriately licensed model
-files, mounts them under the configured model root, and explicitly enables it.
+The supported service runtime is the repository Docker Compose stack. The
+first release has no biometric embedding or face-similarity runtime. Character
+identity evidence is built from Canonical reference binding, the effective
+Provider request, immutable Artifacts, sampled video frames and audited human
+trial review.
 
 ```powershell
 cd ..
-docker compose build api worker-heavy
-docker compose exec api python -c "import json; from app.consistency.image_embed import insightface_status; print(json.dumps(insightface_status(), sort_keys=True))"
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
-
-Expected status:
-
-```json
-{"available": false, "backend": "hash_placeholder", "embedding_dim": 512, "error": "disabled by INSIGHTFACE_ENABLED=false"}
-```
-
-The hash placeholder is diagnostic fallback data, never release-grade evidence
-of face or character consistency. The local venv workflow below is for
-application debugging and does not change the licensed-weight boundary.
 
 ## Local setup
 

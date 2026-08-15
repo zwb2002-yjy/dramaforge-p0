@@ -34,7 +34,8 @@ async def get_or_create_artifact(
     ).scalar_one_or_none()
     if existing is not None:
         if (
-            produced_by_run_id is not None
+            artifact_type != "document"
+            and produced_by_run_id is not None
             and existing.produced_by_run_id is not None
             and existing.produced_by_run_id != produced_by_run_id
         ):

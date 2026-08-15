@@ -105,16 +105,12 @@ def test_runtime_evidence_scripts_do_not_persist_credentials_or_prompts() -> Non
     formal_probe = (REPO / "scripts" / "prove_formal_live_chain.py").read_text(
         encoding="utf-8"
     )
-    worker_probe = (REPO / "scripts" / "prove_multi_shot_worker.py").read_text(
-        encoding="utf-8"
-    )
 
     assert '"key_prefix"' not in agnes_smoke
     assert 'REPO / "docs" / "acceptance"' not in agnes_smoke
     assert 'REPO / "tmp" / "provider-smoke"' in agnes_smoke
     assert '"idea": idea' not in agnes_smoke
     assert '"inputs": {"idea_length": len(idea), "script_file": script_file.name}' in formal_probe
-    assert '"idea_length": len(idea),' in worker_probe
     assert '"body": g.text[:300]' not in formal_probe
     assert '"body": g2.text[:300]' not in formal_probe
     assert "def summarize_download_grant" in formal_probe

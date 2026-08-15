@@ -46,6 +46,13 @@ class Settings(BaseSettings):
             "the default single-user self-hosted deployment."
         ),
     )
+    session_cookie_secure: bool = Field(
+        default=False,
+        description=(
+            "Mark session and CSRF cookies Secure. Enable only when the public "
+            "origin is HTTPS; the loopback HTTP installer must keep this false."
+        ),
+    )
 
     database_url: str = Field(
         default="postgresql+asyncpg://dramaforge:dramaforge@localhost:5432/dramaforge",
@@ -180,9 +187,6 @@ class Settings(BaseSettings):
     tts_enabled: bool = False
     tts_engine: str = "espeak-ng"
     tts_voice: str = "zh"
-    insightface_enabled: bool = False
-    insightface_model_name: str = "buffalo_l"
-    insightface_model_root: str = "/models/insightface"
 
     # Stage A+B provider unification. All default OFF; each flips when the
     # matching stage lands. Resume never reads these flags (persisted state wins).
@@ -190,9 +194,9 @@ class Settings(BaseSettings):
     provider_unified_shadow: bool = False
     provider_unified_path_enabled: bool = False
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "litellm_logical_models", mode="before")
     @classmethod
-    def split_cors(cls, value: object) -> object:
+    def split_csv_lists(cls, value: object) -> object:
         if isinstance(value, str):
             items = [part.strip() for part in value.split(",") if part.strip()]
             return items

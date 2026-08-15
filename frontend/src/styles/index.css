@@ -133,14 +133,35 @@ select {
 
 .workstation-body {
   display: grid;
-  grid-template-columns: 200px 1fr 300px;
+  grid-template-columns: 0 minmax(0, 1fr) 300px;
   min-height: calc(100vh - 48px);
+  transition: grid-template-columns 160ms ease;
+}
+
+.workstation-body.nav-open {
+  grid-template-columns: 200px minmax(0, 1fr) 300px;
 }
 
 .nav {
   border-right: 1px solid var(--border);
   background: var(--bg-elevated);
   padding: 0.85rem 0.65rem;
+  min-width: 0;
+  overflow: hidden;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, visibility 120ms ease;
+}
+
+.nav.open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nav-scrim {
+  display: none;
 }
 
 .nav nav {
@@ -527,11 +548,41 @@ select {
 @media (max-width: 1100px) {
   .workstation-body {
     grid-template-columns: 1fr;
+    position: relative;
   }
-  .nav,
+
   .inspector {
     display: none;
   }
+
+  .nav {
+    display: block;
+    position: fixed;
+    top: 48px;
+    bottom: 0;
+    left: 0;
+    width: min(280px, 84vw);
+    z-index: 30;
+    box-shadow: 18px 0 36px rgba(0, 0, 0, 0.35);
+    transform: translateX(-100%);
+    transition: transform 160ms ease, visibility 160ms ease;
+  }
+
+  .nav.open {
+    transform: translateX(0);
+  }
+
+  .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 48px 0 0;
+    z-index: 20;
+    border: 0;
+    border-radius: 0;
+    background: rgba(0, 0, 0, 0.45);
+    cursor: default;
+  }
+
   .hero-home {
     grid-template-columns: 1fr;
   }
@@ -582,6 +633,39 @@ select {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
+}
+
+.auth-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.auth-heading h2,
+.auth-heading p {
+  margin: 0;
+}
+
+.auth-heading p {
+  margin-top: 0.3rem;
+}
+
+.auth-mode-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  padding: 0.25rem 0.45rem;
+}
+
+.auth-loading {
+  margin: 0;
+  min-height: 2.5rem;
+  display: flex;
+  align-items: center;
 }
 
 label {

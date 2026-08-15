@@ -19,15 +19,94 @@ from app.api.deps import (
     require_selected_workspace,
 )
 from app.providers.connection_service import ProviderConnectionService
+from app.providers.catalog_service import ModelCatalogService
 from app.providers.models import (
     ProviderCapabilityEvidence,
     ProviderConnection,
     ProviderModelBinding,
     ProviderQualityEvidence,
 )
+from app.providers.registry import list_plugins
 from app.shared.errors import NotFoundError
 
 router = APIRouter(tags=["provider-connections"])
+
+
+class ProviderPluginModelRead(BaseModel):
+    model_id: str
+    display_name: str
+    media_type: str
+    model_revision: str
+    lifecycle: str
+    catalog_source: str
+    capabilities: list[str]
+    option_schema: dict[str, object]
+
+
+class ProviderPluginRead(BaseModel):
+    provider_type: str
+    protocol_profile: str
+    display_name: str
+    default_base_url: str
+    implemented: bool
+    paid_capabilities: list[str]
+    capabilities: list[str]
+    model_list_path: str
+    models: list[ProviderPluginModelRead]
+
+
+@router.get("/provider-plugins", response_model=list[ProviderPluginRead])
+async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]:
+    """Return the installed plugin contracts and catalog models.
+
+    This is deliberately metadata-only: credentials and workspace connections
+    remain private. The frontend uses this response to render provider setup,
+    capability probes, and model binding choices without hard-coded supplier
+    names or model ids.
+    """
+    entries = await ModelCatalogService(session).list_entries(lifecycle="active")
+    by_plugin: dict[tuple[str, str], list[ProviderPluginModelRead]] = {}
+    for entry in entries:
+        operations = entry.capability_manifest_json.get("operations") or {}
+        capabilities = sorted(
+            {
+                str(capability)
+                for operation in operations.values()
+                if isinstance(operation, dict)
+                for capability in (operation.get("capabilities") or [])
+            }
+        )
+        by_plugin.setdefault((entry.provider_type, entry.protocol_profile), []).append(
+            ProviderPluginModelRead(
+                model_id=entry.model_id,
+                display_name=entry.display_name,
+                media_type=entry.media_kind,
+                model_revision=entry.model_revision,
+                lifecycle=entry.lifecycle,
+                catalog_source=entry.catalog_source,
+                capabilities=capabilities,
+                option_schema=dict(entry.option_schema_json or {}),
+            )
+        )
+    result: list[ProviderPluginRead] = []
+    for plugin in list_plugins():
+        models = by_plugin.get((plugin.provider_type, plugin.protocol_profile), [])
+        result.append(
+            ProviderPluginRead(
+                provider_type=plugin.provider_type,
+                protocol_profile=plugin.protocol_profile,
+                display_name=plugin.display_name,
+                default_base_url=plugin.default_base_url,
+                implemented=plugin.implemented,
+                paid_capabilities=sorted(plugin.paid_capabilities),
+                capabilities=sorted(
+                    set(plugin.capability_purposes) | set(plugin.paid_capabilities) | {"auth_models"}
+                ),
+                model_list_path=plugin.model_list_path,
+                models=models,
+            )
+        )
+    return result
 
 
 class ConnectionCreate(BaseModel):
@@ -41,6 +120,7 @@ class ConnectionCreate(BaseModel):
 
 class ConnectionPatch(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    base_url: str | None = Field(default=None, min_length=1, max_length=240)
     enabled: bool | None = None
 
 
@@ -325,6 +405,7 @@ async def patch_connection(
         actor=user,
         display_name=body.display_name,
         enabled=body.enabled,
+        base_url=body.base_url,
     )
     await session.commit()
     return await _connection_read(service, connection)

@@ -280,7 +280,7 @@ async def main() -> int:
         lines.append(
             f"keyframe status={run2.status if run2 else None} "
             f"bytes={art.byte_size if art else 0} "
-            f"face={(run2.output_summary or {}).get('face_review') if run2 else None}"
+            f"identity={(run2.output_summary or {}).get('identity_review_status') if run2 else None}"
         )
         if art:
             try:
@@ -367,7 +367,8 @@ async def main() -> int:
             await asyncio.sleep(2.0)
             await session.commit()
         lines.append(
-            f"produce_shots n={len(shots)} face_checked={sum(1 for s in shots if s.face_checked)} "
+            f"produce_shots n={len(shots)} identity_reviewed="
+            f"{sum(1 for s in shots if s.identity_reviewed)} "
             f"continuity={sum(1 for s in shots if s.continuity_checked)} "
             f"status={[s.status for s in shots[:3]]}"
         )

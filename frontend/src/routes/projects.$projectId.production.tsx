@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
@@ -40,7 +40,7 @@ export const projectProductionRoute = createRoute({
 const NODES = [
   "prompt",
   "keyframe",
-  "face_review",
+  "identity_review",
   "video",
   "video_drift_review",
   "voice",
@@ -52,12 +52,12 @@ const NODES = [
 const NODE_DEPENDENCIES: Record<string, string[]> = {
   prompt: [],
   keyframe: ["prompt"],
-  face_review: ["keyframe"],
-  video: ["face_review"],
+  identity_review: ["keyframe"],
+  video: ["keyframe"],
   video_drift_review: ["video"],
   voice: [],
   subtitle: [],
-  composite: ["video_drift_review", "voice", "subtitle"],
+  composite: ["video", "voice", "subtitle"],
   continuity_review: ["composite"],
 };
 
@@ -73,8 +73,8 @@ const RETRY_SUGGESTIONS: Record<string, string> = {
   PROVIDER_CREATE_FAILED: "检查 Provider 错误和请求合同，只重试当前节点",
   PROVIDER_TASK_FAILED: "检查远端任务错误，再重跑当前节点及下游",
   PROVIDER_MEDIA_DOWNLOAD_FAILED: "续查同一任务或结果 URL，修复后再入库",
-  FACE_BELOW_THRESHOLD: "保持 0.60 阈值，从 Keyframe 返工",
-  FACE_PROBE_UNAVAILABLE: "检查两源 Artifact 和人脸检测后人工复核",
+  IDENTITY_EVIDENCE_INCOMPLETE: "核对角色参考、有效请求和生成产物后局部返工",
+  IDENTITY_REVIEW_REQUIRED: "对比角色参考与试拍结果，选择接受或局部返工",
   VIDEO_DRIFT_BLOCKED: "查看抽样时间点，从 Video 及下游重跑",
   blocked_budget: "调整项目预算后重试原节点",
   QUEUE_UNAVAILABLE: "恢复 Redis/Worker 后重新 enqueue",

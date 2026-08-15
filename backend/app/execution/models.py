@@ -1,4 +1,4 @@
-"""Execution-layer models field-faithful to `04` (graph_nodes/node_runs/artifacts/ops).
+﻿"""Execution-layer models field-faithful to `04` (graph_nodes/node_runs/artifacts/ops).
 
 RLS policies land in S1-RLS-0.1. Product path must use Worker, not request-thread spike.
 """
@@ -29,7 +29,7 @@ from app.shared.base import Base
 _node_type = Enum(
     "prompt_compose",
     "keyframe",
-    "face_review",
+    "identity_review",
     "video",
     "video_review",
     "voice",

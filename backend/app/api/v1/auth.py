@@ -66,7 +66,7 @@ async def register(
         display_name=body.display_name,
         public_registration_enabled=settings.public_registration_enabled,
     )
-    secure = settings.app_env == "production"
+    secure = settings.session_cookie_secure
     _set_session_cookie(
         response,
         token=issue_session_token(
@@ -90,7 +90,7 @@ async def login(
     user = await AccessService(session).authenticate(
         email=str(body.email), password=body.password,
     )
-    secure = settings.app_env == "production"
+    secure = settings.session_cookie_secure
     _set_session_cookie(
         response,
         token=issue_session_token(
@@ -122,7 +122,7 @@ async def me(user: CurrentUser) -> UserRead:
 @router.get("/auth/csrf", response_model=CsrfRead)
 async def csrf_token(response: Response, settings: SettingsDep) -> CsrfRead:
     token = issue_csrf_token(secret=settings.session_secret)
-    _set_csrf_cookie(response, token=token, secure=settings.app_env == "production")
+    _set_csrf_cookie(response, token=token, secure=settings.session_cookie_secure)
     return CsrfRead(csrf_token=token)
 
 

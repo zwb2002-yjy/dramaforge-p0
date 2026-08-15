@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeTree } from "../../src/routeTree.gen";
+import { useUiStore } from "../../src/stores/uiStore";
 
 function renderApp(initialPath = "/") {
   const history = createMemoryHistory({ initialEntries: [initialPath] });
@@ -23,7 +24,31 @@ function json(body: unknown): Promise<Response> {
   }));
 }
 
+function mockHomeAuth(ownerInitialized: boolean) {
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = String(input);
+    if (url.endsWith("/health")) return json({ status: "ok", db: "up" });
+    if (url.endsWith("/api/v1/auth/bootstrap-status")) {
+      return json({
+        owner_initialized: ownerInitialized,
+        registration_available: !ownerInitialized,
+        public_registration_enabled: false,
+      });
+    }
+    if (url.endsWith("/api/v1/auth/me")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ code: "UNAUTHORIZED", detail: "authentication required" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+    return json({});
+  });
+}
+
 afterEach(() => vi.restoreAllMocks());
+beforeEach(() => useUiStore.setState({ leftNavOpen: true, selectedShotId: null }));
 
 describe("Workstation shell", () => {
   it("renders the three-pane workstation layout on home", async () => {
@@ -35,6 +60,45 @@ describe("Workstation shell", () => {
     // Brand is split across elements: Drama<span>Forge</span>
     const brand = screen.getByRole("link", { name: /Drama\s*Forge/i });
     expect(brand).toBeInTheDocument();
+  });
+
+  it("toggles the navigation state from the menu button", async () => {
+    renderApp("/");
+    const navigation = await screen.findByTestId("workstation-nav");
+    const toggle = screen.getByRole("button", { name: "收起导航" });
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(navigation).toHaveClass("open");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "展开导航" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(navigation).not.toHaveClass("open");
+    expect(navigation).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("shows a blank login form after the single Owner is initialized", async () => {
+    mockHomeAuth(true);
+    renderApp("/");
+
+    expect(await screen.findByRole("heading", { name: "Owner 登录" })).toBeInTheDocument();
+    expect(screen.getByText("这是单用户实例，已关闭后续注册。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "初始化 Owner" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("邮箱")).toHaveValue("");
+    expect(screen.getByLabelText("密码")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "登录" })).toBeDisabled();
+  });
+
+  it("shows first-Owner registration on a clean instance", async () => {
+    mockHomeAuth(false);
+    renderApp("/");
+
+    expect(await screen.findByRole("heading", { name: "初始化 Owner" })).toBeInTheDocument();
+    expect(screen.getByText("首次使用需要创建唯一的 Owner 账号。")).toBeInTheDocument();
+    expect(await screen.findByLabelText("显示名")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "登录" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "初始化 Owner" })).toBeDisabled();
   });
 
   it("opens the production route for a project", async () => {

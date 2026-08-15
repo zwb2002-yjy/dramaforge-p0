@@ -177,12 +177,12 @@ function Risks({ risk, trial }: { risk: RiskReportPayload; trial: TrialPlanPaylo
 function ModelSelection({ selection, projectId }: { selection: SelectionPlanPayload; projectId: string }) {
   return (
     <section className="panel" data-testid="shooting-selection">
-      <div className="panel-header"><div><h3>推荐模型与能力核对</h3><p className="muted">快速模式不暴露供应商原始 JSON；但不会隐藏能力缺口。</p></div><strong className={selection.status === "ready" ? "status-ok" : "status-bad"}>{selection.status === "ready" ? "全部能力已验证" : selection.status === "unsupported" ? "当前组合不支持" : "需要完成配置"}</strong></div>
+      <div className="panel-header"><div><h3>推荐模型与能力核对</h3><p className="muted">快速模式不暴露供应商原始 JSON；但不会隐藏能力缺口。</p></div><strong className={selection.status === "ready" ? "status-ok" : "status-bad"}>{selection.status === "ready" ? "试拍能力已验证" : selection.status === "unsupported" ? "当前组合不支持" : "需要完成配置"}</strong></div>
       <div className="director-model-plan-list">
         {selection.plans.map((plan) => (
           <article key={plan.purpose}>
             <div><strong>{PURPOSE_ZH[plan.purpose] ?? plan.purpose}</strong><span>{plan.model_id ?? "尚未选定模型"}</span></div>
-            <span className={plan.status === "ready" ? "status-ok" : "status-bad"}>{plan.status === "ready" ? "可用" : plan.status === "unsupported" ? "不支持" : "待配置"}</span>
+            <span className={plan.status === "ready" ? "status-ok" : "status-bad"}>{plan.status === "ready" ? (plan.evidence.trial_only_until_quality_gated ? "可试拍 · 待作品验证" : "可用") : plan.status === "unsupported" ? "不支持" : "待配置"}</span>
             {plan.blockers.length > 0 && <ul>{plan.blockers.map((blocker) => <li key={blocker}>{displayBlocker(blocker)}</li>)}</ul>}
           </article>
         ))}

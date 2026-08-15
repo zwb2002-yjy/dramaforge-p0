@@ -23,7 +23,7 @@ def test_default_settings_load() -> None:
     assert settings.arq_heavy_queue_name
     assert settings.arq_heavy_max_jobs == 4
     assert Settings.model_fields["public_registration_enabled"].default is False
-    assert settings.insightface_enabled is False
+    assert settings.session_cookie_secure is False
     assert settings.worker_token == ""
 
 
@@ -35,6 +35,16 @@ def test_cors_origins_from_csv(monkeypatch: pytest.MonkeyPatch) -> None:
         byok_fernet_key="test-byok-fernet-key-replace==",
     )
     assert settings.cors_origins == ["http://a.local", "http://b.local"]
+
+
+def test_litellm_logical_models_from_compose_csv(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LITELLM_LOGICAL_MODELS", "script-quality, script-fast")
+    clear_settings_cache()
+    settings = Settings(
+        session_secret="test-session-secret-32chars-min",
+        byok_fernet_key="test-byok-fernet-key-replace==",
+    )
+    assert settings.litellm_logical_models == ["script-quality", "script-fast"]
 
 
 def test_session_secret_min_length() -> None:

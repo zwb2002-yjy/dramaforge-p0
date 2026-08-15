@@ -97,7 +97,7 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                 "object_key": result.object_key,
                 "content_hash": result.content_hash,
                 "byte_size": result.byte_size,
-                "face_status": result.face_status,
+                "identity_status": result.identity_status,
                 "node_type": result.node_type,
             }
         except NodeRunAlreadyClaimedError:

@@ -10,6 +10,7 @@ import pytest
 from app.access.models import Project
 from app.director.models import BudgetAuthorization
 from app.director.production_service import DirectorProductionService
+from app.director.production_templates import dialogue_post_dub_definition
 from app.director.quality_service import _identity_evidence_status
 from app.director.shooting import (
     CostEstimatePayload,
@@ -170,9 +171,25 @@ def test_materialization_rejects_legacy_under_count_before_media_queueing() -> N
     "raw_status",
     ["blocked", "failed", "needs_human", "warning", "not_applicable"],
 )
-def test_insightface_failure_is_advisory_not_a_hard_gate(raw_status: str) -> None:
+def test_automatic_identity_status_requires_human_review(raw_status: str) -> None:
     assert _identity_evidence_status(raw_status) == "needs_human"
 
 
 def test_passing_identity_evidence_remains_passed() -> None:
     assert _identity_evidence_status("passed") == "passed"
+
+
+def test_current_shot_template_excludes_legacy_face_gate() -> None:
+    definition = dialogue_post_dub_definition(
+        character_reference_keys=["character-lead"],
+        primary_character_reference_key="character-lead",
+        context={"logical_shot_id": "shot-1"},
+    )
+    nodes = {str(node["key"]): str(node["type"]) for node in definition["nodes"]}
+    edges = {tuple(edge) for edge in definition["edges"]}
+
+    assert "identity_review" in nodes
+    assert "face_review" not in nodes
+    assert ("keyframe", "identity_review") in edges
+    assert ("keyframe", "video") in edges
+    assert ("identity_review", "video") not in edges

@@ -239,4 +239,4 @@ async def test_canonical_required_for_shot(session: AsyncSession) -> None:
     ref = await require_canonical_for_shot(session, project_id=project.id)
     assert ref.is_canonical
     assert ref.object_key == char.canonical_object_key
-    assert len(ref.face_embedding) == 512
+    assert ref.artifact_id == char.canonical_artifact_id

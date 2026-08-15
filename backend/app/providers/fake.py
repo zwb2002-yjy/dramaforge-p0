@@ -1,4 +1,4 @@
-"""In-process fake Adapters for local product path (no paid BYOK)."""
+﻿"""In-process fake Adapters for local product path (no paid BYOK)."""
 
 from __future__ import annotations
 
@@ -415,7 +415,7 @@ class FakeFluxAdapter:
         # Minimal PNG for image-like kinds so PIL can decode embeddings
         if kind in {
             "keyframe",
-            "face_review",
+            "identity_review",
             "image",
             "prompt",
             "prompt_compose",

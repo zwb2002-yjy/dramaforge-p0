@@ -1,6 +1,6 @@
-"""LEGACY helper — not the S2 product path (no Outbox/Arq).
+﻿"""LEGACY helper — not the S2 product path (no Outbox/Arq).
 
-Still must use two-source face review from image bytes (never self-match).
+Still must use independent Canonical and generated image evidence (never self-match).
 Product path: AgentRunScheduler enqueue + WorkerRuntime + product_path.
 """
 
@@ -14,8 +14,8 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.consistency.face_policy import approved_face_policy_snapshot, approved_face_threshold
-from app.consistency.face_review import FaceReviewResult, face_review_hook, face_review_images
+from app.consistency.identity_policy import identity_evidence_policy_snapshot
+from app.consistency.identity_review import IdentityReviewResult, identity_review_images
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.service import GraphService
 from app.providers.base import ProviderAdapter
@@ -27,11 +27,10 @@ LEGACY_FIRST_FRAME_TEMPLATE_KEY = "legacy-first-frame-v1"
 
 # Re-export for existing tests/imports
 __all__ = [
-    "FaceReviewResult",
+    "IdentityReviewResult",
     "FirstFrameResult",
     "FirstFramePipeline",
     "MaterializationWhitelist",
-    "face_review_hook",
     "get_node_run",
 ]
 
@@ -45,7 +44,7 @@ class FirstFrameResult:
     node_run_id: UUID
     provider_operation_ids: list[UUID]
     artifact_id: UUID
-    face_review: FaceReviewResult
+    identity_review: IdentityReviewResult
     materialization_ops: list[str]
 
 
@@ -143,7 +142,7 @@ class FirstFramePipeline:
             "brief": brief,
             "plan": plan,
             "materialization": applied,
-            "face_policy": approved_face_policy_snapshot(),
+            "identity_evidence_policy": identity_evidence_policy_snapshot(),
         }
         ih = _input_hash(snapshot)
         node_run = NodeRun(
@@ -245,25 +244,25 @@ class FirstFramePipeline:
         self._session.add(artifact)
         await self._session.flush()
 
-        # Two-source face review only (never identity match of same vector)
-        face_out = face_review_images(
+        # Independent two-source evidence only; visual identity remains a human decision.
+        review = identity_review_images(
             probe_image_bytes=probe_bytes,
             canonical_image_bytes=canon_bytes,
-            threshold=approved_face_threshold(),
         )
-        review = FaceReviewResult(status=face_out.status, score=face_out.score, rule=face_out.rule)
 
         node_run.status = "completed"
         node_run.result_artifact_id = artifact.id
         node_run.provider_cost = img_op.provider_cost or Decimal("0")
         node_run.output_summary = {
             "artifact_id": str(artifact.id),
-            "face_review": review.status,
-            "face_score": review.score,
+            "status": review.status,
+            "identity_review_status": review.status,
+            "identity_review_rule": review.rule,
             "canonical_object_key": canon_key,
-            "embedding_source": "probe_vs_canonical_images",
-            "face_policy": approved_face_policy_snapshot(),
-            "face_threshold": approved_face_threshold(),
+            "evidence_source": "probe_and_canonical_artifacts",
+            "automatic_identity_decision": False,
+            "human_review_required": review.status == "needs_human",
+            "identity_evidence_policy": identity_evidence_policy_snapshot(),
         }
         node.latest_successful_run_id = node_run.id
         await self._session.commit()
@@ -276,7 +275,7 @@ class FirstFramePipeline:
             node_run_id=node_run.id,
             provider_operation_ids=[img_op.id],
             artifact_id=artifact.id,
-            face_review=review,
+            identity_review=review,
             materialization_ops=applied,
         )
 

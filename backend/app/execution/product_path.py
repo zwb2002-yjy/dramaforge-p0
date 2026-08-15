@@ -1,4 +1,4 @@
-"""Product execution path: enqueue NodeRun for Worker (no Adapter in request thread)."""
+﻿"""Product execution path: enqueue NodeRun for Worker (no Adapter in request thread)."""
 
 from __future__ import annotations
 
@@ -26,12 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
 from app.config import get_settings
-from app.consistency.face_policy import (
-    approved_face_policy_snapshot,
-    approved_face_threshold,
-    approved_face_threshold_from_snapshot,
+from app.consistency.identity_policy import (
+    identity_evidence_policy_snapshot,
+    validate_identity_evidence_policy,
 )
-from app.consistency.face_review import face_review_images
+from app.consistency.identity_review import identity_review_images
 from app.creation.models import CreationPlan
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
@@ -294,8 +293,7 @@ class ExecuteNodeResult:
     object_key: str
     content_hash: str
     byte_size: int
-    face_status: str | None
-    face_score: float | None
+    identity_status: str | None
     provider_operation_id: UUID | None
     node_type: str
 
@@ -335,9 +333,14 @@ async def _bind_review_input_artifacts(
     run: NodeRun,
     node: GraphNode,
 ) -> dict[str, object]:
-    """Freeze the direct same-Shot, same-attempt media input into a Review snapshot."""
+    """Freeze the direct same-Shot media input into a Review snapshot.
+
+    A local repair may reuse a successful upstream from an earlier attempt.
+    The exact source Run and attempt are frozen below so lineage remains
+    reproducible without forcing unrelated nodes to share one attempt number.
+    """
     upstream_key = {
-        "face_review": "keyframe",
+        "identity_review": "keyframe",
         "video_drift_review": "video",
     }.get(node.node_key)
     if upstream_key is None:
@@ -365,7 +368,6 @@ async def _bind_review_input_artifacts(
                     NodeRun.project_id == run.project_id,
                     NodeRun.graph_version_id == run.graph_version_id,
                     NodeRun.graph_node_id == upstream_node.id,
-                    NodeRun.attempt_no == run.attempt_no,
                     NodeRun.status.in_({"completed", "cached"}),
                 )
             )
@@ -387,7 +389,7 @@ async def _bind_review_input_artifacts(
     )
     if source is None:
         raise ValidationAppError(
-            f"same-attempt {upstream_key} Run is missing",
+            f"successful {upstream_key} Run is missing",
             details={"code": "UPSTREAM_RUN_MISSING"},
         )
     artifact = (
@@ -397,7 +399,7 @@ async def _bind_review_input_artifacts(
     )
     if artifact is None or artifact.project_id != run.project_id:
         raise ValidationAppError(
-            f"same-attempt {upstream_key} Artifact is missing",
+            f"successful {upstream_key} Artifact is missing",
             details={"code": "UPSTREAM_ARTIFACT_MISSING"},
         )
     snapshot = {
@@ -414,7 +416,7 @@ async def _bind_review_input_artifacts(
     ):
         if field in source_snapshot:
             snapshot[field] = source_snapshot[field]
-    prefix = "probe" if node.node_key == "face_review" else "video"
+    prefix = "probe" if node.node_key == "identity_review" else "video"
     snapshot.update(_artifact_snapshot(artifact, prefix=prefix))
     run.input_snapshot = snapshot
     await session.flush()
@@ -542,7 +544,7 @@ def identity_priority_keyframe_prompt(
     *,
     canonical_locked_prompt: str,
 ) -> str:
-    """Preserve the planned beat while making a two-source face review feasible."""
+    """Preserve the planned beat while keeping Canonical evidence reviewable."""
     return (
         f"{prompt}\n"
         f"Canonical lead identity: {canonical_locked_prompt}\n"
@@ -717,7 +719,7 @@ async def enqueue_keyframe_after_plan(
     version = await graphs.publish(version_id=materialized.version.id, published_by=user_id)
     nodes = materialized.nodes
     node = nodes["keyframe"]
-    # Attach project lead canonical if registered (P0 face gate / consistency).
+    # Attach the registered project Canonical for request lineage and creator review.
     from sqlalchemy import select
 
     from app.assets.models import Asset, Character, CharacterReference
@@ -758,7 +760,7 @@ async def enqueue_keyframe_after_plan(
         "prompt": prompt,
         "materialization": materialization_ops,
         "lead_identity_required": lead_identity_required,
-        "face_policy": approved_face_policy_snapshot(),
+        "identity_evidence_policy": identity_evidence_policy_snapshot(),
         "model_profile": model_profile,
     }
     if canonical_artifact is not None:
@@ -860,17 +862,15 @@ async def execute_keyframe_node_run(
     store: ObjectStore | None = None,
     flux: ProviderAdapter | None = None,
     require_canonical: bool = False,
-    canonical_embedding: list[float] | None = None,
     canonical_image_bytes: bytes | None = None,
 ) -> ExecuteNodeResult:
-    """Worker: Adapter → ObjectStore → Artifact → face review from *image bytes*."""
+    """Worker: Adapter → ObjectStore → Artifact with optional Canonical binding."""
     return await execute_media_node_run(
         session,
         node_run_id=node_run_id,
         store=store,
         flux=flux,
         require_canonical=require_canonical,
-        canonical_embedding=canonical_embedding,
         canonical_image_bytes=canonical_image_bytes,
     )
 
@@ -1011,10 +1011,8 @@ async def _execute_unified_media_node_run(
     obj_store: ObjectStore,
     prompt: str,
     canonical_image_bytes: bytes | None,
-    canonical_embedding: list[float] | None,
     lead_identity_required: bool,
     has_canonical_binding: bool,
-    face_threshold: float,
     canonical_artifact: Artifact | None = None,
 ) -> ExecuteNodeResult:
     """Stage B4: binding-driven unified execution path.
@@ -1592,23 +1590,6 @@ async def _execute_unified_media_node_run(
         produced_by_run_id=run.id,
     )
 
-    face_status: str | None = None
-    face_score: float | None = None
-    if node_type in {"keyframe", "face_review"}:
-        if not lead_identity_required:
-            face_status = "not_applicable"
-        elif canonical_image_bytes is not None:
-            review = face_review_images(
-                probe_image_bytes=data,
-                canonical_image_bytes=canonical_image_bytes,
-                threshold=face_threshold,
-            )
-            face_status = review.status
-            face_score = review.score
-        else:
-            face_status = "needs_human"
-            face_score = None
-
     run.status = "completed"
     run.result_artifact_id = art.id
     run.provider_cost = op.provider_cost or Decimal("0")
@@ -1616,13 +1597,10 @@ async def _execute_unified_media_node_run(
     run.output_summary = {
         "artifact_id": str(art.id),
         "node_type": node_type,
-        "face_review": face_status,
-        "face_score": face_score,
         "byte_size": art.byte_size,
         "content_hash": art.content_hash,
         "source_commit": get_settings().source_commit,
-        "face_policy": approved_face_policy_snapshot(),
-        "face_threshold": face_threshold,
+        "identity_evidence_policy": identity_evidence_policy_snapshot(),
         "execution_path": UNIFIED_PATH_VERSION,
     }
     node.latest_successful_run_id = run.id
@@ -1633,8 +1611,7 @@ async def _execute_unified_media_node_run(
         object_key=art.object_key,
         content_hash=art.content_hash,
         byte_size=art.byte_size,
-        face_status=face_status,
-        face_score=face_score,
+        identity_status=None,
         provider_operation_id=op.id,
         node_type=node_type,
     )
@@ -1647,7 +1624,6 @@ async def execute_media_node_run(
     store: ObjectStore | None = None,
     flux: ProviderAdapter | None = None,
     require_canonical: bool = False,
-    canonical_embedding: list[float] | None = None,
     canonical_image_bytes: bytes | None = None,
     already_claimed: bool = False,
 ) -> ExecuteNodeResult:
@@ -1694,7 +1670,7 @@ async def execute_media_node_run(
         )
 
     snap = dict(run.input_snapshot or {})
-    if node.node_key in {"face_review", "video_drift_review"}:
+    if node.node_key in {"identity_review", "video_drift_review"}:
         snap = await _bind_review_input_artifacts(session, run=run, node=node)
     if snap.get("canonical_source_run_id") is not None:
         try:
@@ -1712,7 +1688,6 @@ async def execute_media_node_run(
                 error_summary=exc.message,
             )
             raise
-    face_threshold = approved_face_threshold()
     canonical_artifact: Artifact | None = None
     # Formal Worker path resolves canonical only from a complete Artifact binding.
     if canonical_image_bytes is None:
@@ -1727,7 +1702,7 @@ async def execute_media_node_run(
             )
         except ValidationAppError:
             canonical_image_bytes = None
-    if require_canonical and canonical_embedding is None and canonical_image_bytes is None:
+    if require_canonical and canonical_image_bytes is None:
         await _commit_terminal_failure(
             session,
             run=run,
@@ -1762,7 +1737,7 @@ async def execute_media_node_run(
 
     # Pure review / compose nodes: no Provider, zero cost, document/image result.
     PURE_NODES = {
-        "face_review",
+        "identity_review",
         "video_review",
         "continuity_review",
         "prompt_compose",
@@ -1770,17 +1745,17 @@ async def execute_media_node_run(
         "subtitle",
     }
     if node_type in PURE_NODES or node.node_key in {
-        "face_review",
+        "identity_review",
         "video_drift_review",
         "continuity_review",
         "prompt",
         "subtitle",
     }:
-        if node.node_key in {"face_review", "video_drift_review"} or node_type in {
-            "face_review",
+        if node.node_key in {"identity_review", "video_drift_review"} or node_type in {
+            "identity_review",
             "video_review",
         }:
-            face_threshold = approved_face_threshold_from_snapshot(snap)
+            validate_identity_evidence_policy(snap)
         return await _complete_pure_node(
             session,
             run=run,
@@ -1789,7 +1764,6 @@ async def execute_media_node_run(
             snap=snap,
             obj_store=obj_store,
             canonical_image_bytes=canonical_image_bytes,
-            face_threshold=face_threshold,
             prompt=prompt,
         )
 
@@ -1823,10 +1797,8 @@ async def execute_media_node_run(
             obj_store=obj_store,
             prompt=prompt,
             canonical_image_bytes=canonical_image_bytes,
-            canonical_embedding=canonical_embedding,
             lead_identity_required=lead_identity_required,
             has_canonical_binding=has_canonical_binding,
-            face_threshold=face_threshold,
             canonical_artifact=canonical_artifact,
         )
 
@@ -2285,25 +2257,6 @@ async def execute_media_node_run(
         produced_by_run_id=run.id,
     )
 
-    face_status: str | None = None
-    face_score: float | None = None
-    if node_type in {"keyframe", "face_review"}:
-        # Two-source review only. Never self-match probe to itself.
-        lead_identity_required = snap.get("lead_identity_required") is True
-        if not lead_identity_required:
-            face_status = "not_applicable"
-        elif canonical_image_bytes is not None:
-            review = face_review_images(
-                probe_image_bytes=data,
-                canonical_image_bytes=canonical_image_bytes,
-                threshold=face_threshold,
-            )
-            face_status = review.status
-            face_score = review.score
-        else:
-            face_status = "needs_human"
-            face_score = None
-
     run.status = "completed"
     run.result_artifact_id = art.id
     run.provider_cost = op.provider_cost or Decimal("0")
@@ -2311,13 +2264,10 @@ async def execute_media_node_run(
     run.output_summary = {
         "artifact_id": str(art.id),
         "node_type": node_type,
-        "face_review": face_status,
-        "face_score": face_score,
         "byte_size": art.byte_size,
         "content_hash": art.content_hash,
         "source_commit": _settings.source_commit,
-        "face_policy": approved_face_policy_snapshot(),
-        "face_threshold": face_threshold,
+        "identity_evidence_policy": identity_evidence_policy_snapshot(),
     }
     node.latest_successful_run_id = run.id
     await session.flush()
@@ -2327,8 +2277,7 @@ async def execute_media_node_run(
         object_key=art.object_key,
         content_hash=art.content_hash,
         byte_size=art.byte_size,
-        face_status=face_status,
-        face_score=face_score,
+        identity_status=None,
         provider_operation_id=op.id,
         node_type=node_type,
     )
@@ -2350,11 +2299,10 @@ async def _completed_result(
         object_key=art.object_key,
         content_hash=art.content_hash,
         byte_size=art.byte_size,
-        face_status=(
-            str(output.get("face_review")) if output.get("face_review") is not None else None
-        ),
-        face_score=(
-            float(str(output["face_score"])) if output.get("face_score") is not None else None
+        identity_status=(
+            str(output.get("identity_review_status"))
+            if output.get("identity_review_status") is not None
+            else None
         ),
         provider_operation_id=None,
         node_type=node_type,
@@ -2362,7 +2310,7 @@ async def _completed_result(
 
 
 def _mime_for_node(node_type: str) -> tuple[str, str, str]:
-    if node_type in {"keyframe", "face_review", "prompt_compose", "prompt"}:
+    if node_type in {"keyframe", "identity_review", "prompt_compose", "prompt"}:
         return "image/png", "png", "image"
     if node_type in {"video", "video_review", "composite"}:
         return "video/mp4", "mp4", "video"
@@ -2470,8 +2418,7 @@ async def _complete_composite_node(
         object_key=art.object_key,
         content_hash=art.content_hash,
         byte_size=art.byte_size,
-        face_status=None,
-        face_score=None,
+        identity_status=None,
         provider_operation_id=None,
         node_type="composite",
     )
@@ -2486,7 +2433,6 @@ async def _complete_pure_node(
     snap: dict[str, object],
     obj_store: ObjectStore,
     canonical_image_bytes: bytes | None,
-    face_threshold: float,
     prompt: str,
 ) -> ExecuteNodeResult:
     """Complete review/subtitle/prompt nodes without Provider (zero cost)."""
@@ -2495,10 +2441,7 @@ async def _complete_pure_node(
 
     from app.config import get_settings
     from app.consistency.continuity import continuity_four_layers
-    from app.consistency.image_embed import insightface_status
-
-    face_status: str | None = None
-    face_score: float | None = None
+    identity_status: str | None = None
     review_status = "passed"
     payload: dict[str, object] = {
         "run_id": str(run.id),
@@ -2509,10 +2452,9 @@ async def _complete_pure_node(
     }
 
     key = node.node_key
-    if key == "face_review" or node_type == "face_review":
+    if key == "identity_review" or node_type == "identity_review":
         if snap.get("lead_identity_required") is not True:
-            face_status = "not_applicable"
-            face_score = None
+            identity_status = "not_applicable"
             review_status = "not_applicable"
             payload["review_rule"] = "lead_identity_not_required"
         else:
@@ -2533,13 +2475,11 @@ async def _complete_pure_node(
                     store=obj_store,
                     artifact_type="image",
                 )
-                review = face_review_images(
+                review = identity_review_images(
                     probe_image_bytes=probe,
                     canonical_image_bytes=canonical,
-                    threshold=face_threshold,
                 )
-                face_status = review.status
-                face_score = review.score
+                identity_status = review.status
                 review_status = review.status
                 payload.update(
                     {
@@ -2551,7 +2491,7 @@ async def _complete_pure_node(
                     }
                 )
             except ValidationAppError as exc:
-                face_status = "blocked"
+                identity_status = "blocked"
                 review_status = "blocked"
                 payload.update(
                     {
@@ -2559,14 +2499,12 @@ async def _complete_pure_node(
                         "review_error_code": str(exc.details.get("code") or exc.code),
                     }
                 )
-        st = insightface_status()
         payload.update(
             {
                 "status": review_status,
-                "face_review": face_status,
-                "face_score": face_score,
-                "insightface_backend": st.get("backend"),
-                "insightface_available": st.get("available"),
+                "identity_review_status": identity_status,
+                "automatic_identity_decision": False,
+                "human_review_required": identity_status == "needs_human",
             }
         )
         data = json.dumps(payload, sort_keys=True).encode()
@@ -2576,7 +2514,6 @@ async def _complete_pure_node(
             VIDEO_DRIFT_POLICY_ID,
             VIDEO_DRIFT_POLICY_STATUS,
             VIDEO_DRIFT_SAMPLING_VERSION,
-            VIDEO_DRIFT_THRESHOLD,
             decide_video_drift,
             extract_video_samples,
             score_video_samples,
@@ -2627,17 +2564,11 @@ async def _complete_pure_node(
                         "video_artifact_id": str(video_artifact.id),
                         "video_content_hash": video_artifact.content_hash,
                         "samples": samples,
-                        "drift_mean_score": decision.get("mean_score"),
-                        "drift_scored_frames": decision.get("scored_frames"),
-                        "drift_unscorable_frames": decision.get("unscorable_frames"),
-                        "drift_min_score": decision.get("min_score"),
-                        "drift_max_score": decision.get("max_score"),
-                        "drift_frames_above_threshold": decision.get("frames_above_threshold"),
                         "video_drift_policy": {
                             "status": VIDEO_DRIFT_POLICY_STATUS,
                             "sampling_version": VIDEO_DRIFT_SAMPLING_VERSION,
-                            "threshold": VIDEO_DRIFT_THRESHOLD,
-                            "approval_id": VIDEO_DRIFT_POLICY_ID,
+                            "policy_id": VIDEO_DRIFT_POLICY_ID,
+                            "automatic_identity_decision": False,
                         },
                     }
                 )
@@ -2656,8 +2587,8 @@ async def _complete_pure_node(
                         "video_drift_policy": {
                             "status": VIDEO_DRIFT_POLICY_STATUS,
                             "sampling_version": VIDEO_DRIFT_SAMPLING_VERSION,
-                            "threshold": VIDEO_DRIFT_THRESHOLD,
-                            "approval_id": VIDEO_DRIFT_POLICY_ID,
+                            "policy_id": VIDEO_DRIFT_POLICY_ID,
+                            "automatic_identity_decision": False,
                         },
                     }
                 )
@@ -2713,17 +2644,15 @@ async def _complete_pure_node(
         "artifact_id": str(art.id),
         "status": (
             review_status
-            if key in {"face_review", "video_drift_review", "continuity_review"}
-            or node_type in {"face_review", "video_review", "continuity_review"}
+            if key in {"identity_review", "video_drift_review", "continuity_review"}
+            or node_type in {"identity_review", "video_review", "continuity_review"}
             else "passed"
         ),
-        "face_review": face_status,
-        "face_score": face_score,
+        "identity_review_status": identity_status,
         "byte_size": art.byte_size,
         "content_hash": art.content_hash,
         "source_commit": get_settings().source_commit,
-        "face_policy": approved_face_policy_snapshot(),
-        "face_threshold": face_threshold,
+        "identity_evidence_policy": identity_evidence_policy_snapshot(),
     }
     node.latest_successful_run_id = run.id
     await session.flush()
@@ -2733,8 +2662,7 @@ async def _complete_pure_node(
         object_key=art.object_key,
         content_hash=art.content_hash,
         byte_size=art.byte_size,
-        face_status=face_status,
-        face_score=face_score,
+        identity_status=identity_status,
         provider_operation_id=None,
         node_type=node_type,
     )

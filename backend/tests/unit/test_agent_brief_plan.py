@@ -594,10 +594,6 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "app.consistency.image_embed.insightface_status",
-        lambda: {"available": False, "backend": "not_provisioned"},
-    )
     user = User(
         email=f"agent-pipeline-{uuid4().hex[:8]}@example.com",
         display_name="Agent Pipeline",
@@ -709,7 +705,7 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
         ]
         by_key = {str((run.input_snapshot or {}).get("node_key")): run for run in shot_runs}
         assert set(SHOT_NODES).issubset(by_key)
-        for key in {"prompt", "keyframe", "face_review", "voice", "subtitle"}:
+        for key in {"prompt", "keyframe", "identity_review", "voice", "subtitle"}:
             run = by_key[key]
             assert run.status in done, (
                 f"shot={shot_id} node={key} status={run.status} "
@@ -722,18 +718,20 @@ async def test_agent_plan_materialization_runs_independent_ten_shot_pipeline(
             artifact_object_keys.add(artifact.object_key)
         expected_artifact_count += 5
         identity_required = (
-            by_key["face_review"].input_snapshot.get("lead_identity_required") is True
+            by_key["identity_review"].input_snapshot.get("lead_identity_required") is True
         )
         if identity_required:
-            assert by_key["face_review"].output_summary["status"] in {
-                "needs_human",
-                "blocked",
-            }
-            assert by_key["video"].status == "failed"
-            assert by_key["video"].error_code == "UPSTREAM_TERMINAL_FAILURE"
-            assert by_key["video"].result_artifact_id is None
+            assert by_key["identity_review"].output_summary["status"] == "needs_human"
+            for key in {"video", "video_drift_review", "composite", "continuity_review"}:
+                run = by_key[key]
+                assert run.status in done
+                assert run.result_artifact_id is not None
+                artifact = artifacts_by_id[run.result_artifact_id]
+                artifact_ids.add(artifact.id)
+                artifact_object_keys.add(artifact.object_key)
+                expected_artifact_count += 1
         else:
-            assert by_key["face_review"].output_summary["status"] == "not_applicable"
+            assert by_key["identity_review"].output_summary["status"] == "not_applicable"
             for key in {"video", "video_drift_review", "composite", "continuity_review"}:
                 run = by_key[key]
                 assert run.status in done
@@ -797,6 +795,58 @@ async def test_shot_artifact_content_reuse_is_rejected_across_node_runs(
             produced_by_run_id=second.id,
         )
     assert error.value.details["code"] == "ARTIFACT_NOT_INDEPENDENT"
+
+
+@pytest.mark.asyncio
+async def test_deterministic_prompt_document_can_be_reused_across_node_runs(
+    session: AsyncSession,
+) -> None:
+    project_id = uuid4()
+    user_id = uuid4()
+    first = NodeRun(
+        project_id=project_id,
+        graph_version_id=uuid4(),
+        graph_node_id=uuid4(),
+        idempotency_key=f"prompt-source:{uuid4()}",
+        input_hash="a" * 64,
+        input_snapshot={"shot_id": str(uuid4()), "node_key": "prompt"},
+        created_by=user_id,
+    )
+    second = NodeRun(
+        project_id=project_id,
+        graph_version_id=uuid4(),
+        graph_node_id=uuid4(),
+        idempotency_key=f"prompt-target:{uuid4()}",
+        input_hash="b" * 64,
+        input_snapshot={"shot_id": str(uuid4()), "node_key": "prompt"},
+        created_by=user_id,
+    )
+    session.add_all([first, second])
+    await session.flush()
+
+    original = await get_or_create_artifact(
+        session,
+        project_id=project_id,
+        artifact_type="document",
+        object_key=f"projects/{project_id}/nodes/prompt/{first.id}.json",
+        content_hash="c" * 64,
+        mime_type="application/json",
+        byte_size=12,
+        produced_by_run_id=first.id,
+    )
+    reused = await get_or_create_artifact(
+        session,
+        project_id=project_id,
+        artifact_type="document",
+        object_key=f"projects/{project_id}/nodes/prompt/{second.id}.json",
+        content_hash="c" * 64,
+        mime_type="application/json",
+        byte_size=12,
+        produced_by_run_id=second.id,
+    )
+
+    assert reused.id == original.id
+    assert reused.produced_by_run_id == first.id
 
 
 @pytest.mark.asyncio

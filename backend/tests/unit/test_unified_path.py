@@ -1,4 +1,4 @@
-"""Stage B4 unified execution path tests: single-path submission, resume-no-
+﻿"""Stage B4 unified execution path tests: single-path submission, resume-no-
 recreate, submission_started crash semantics, and unbound fail-closed.
 
 A fake provider plugin rides the whole unified chain (selection -> compiler ->
@@ -800,13 +800,6 @@ async def test_director_video_first_frame_ratio_duration_and_audio_reach_compile
     project_id = keyframe_run.project_id
     keyframe_node = await session.get(GraphNode, keyframe_run.graph_node_id)
     assert keyframe_node is not None
-    face_node = GraphNode(
-        graph_version_id=keyframe_run.graph_version_id,
-        node_key="face_review",
-        node_type="face_review",
-        display_name="Face review",
-        cacheable=False,
-    )
     video_node = GraphNode(
         graph_version_id=keyframe_run.graph_version_id,
         node_key="video",
@@ -814,7 +807,7 @@ async def test_director_video_first_frame_ratio_duration_and_audio_reach_compile
         display_name="Video",
         cacheable=True,
     )
-    session.add_all([face_node, video_node])
+    session.add(video_node)
     await session.flush()
     session.add_all(
         [
@@ -822,20 +815,11 @@ async def test_director_video_first_frame_ratio_duration_and_audio_reach_compile
                 graph_version_id=keyframe_run.graph_version_id,
                 upstream_node_id=keyframe_node.id,
                 output_port="image",
-                downstream_node_id=face_node.id,
-                input_port="image",
-                position=0,
-                required=True,
-            ),
-            GraphEdge(
-                graph_version_id=keyframe_run.graph_version_id,
-                upstream_node_id=face_node.id,
-                output_port="review",
                 downstream_node_id=video_node.id,
-                input_port="review",
+                input_port="first_frame",
                 position=0,
                 required=True,
-            ),
+            )
         ]
     )
     await session.flush()
@@ -888,20 +872,6 @@ async def test_director_video_first_frame_ratio_duration_and_audio_reach_compile
     keyframe_run.status = "completed"
     keyframe_run.result_artifact_id = first_frame.id
     keyframe_run.input_snapshot = {"shot_id": "shot-1", "node_key": "keyframe"}
-    face_run = NodeRun(
-        project_id=project_id,
-        graph_version_id=keyframe_run.graph_version_id,
-        graph_node_id=face_node.id,
-        production_batch_id=batch.id,
-        attempt_no=1,
-        idempotency_key=f"face-review:{uuid4()}",
-        input_hash="r" * 64,
-        status="completed",
-        input_snapshot={"shot_id": "shot-1", "node_key": "face_review"},
-        output_summary={"status": "passed"},
-        created_by=user.id,
-    )
-    session.add(face_run)
     video_run.input_snapshot = {
         **video_run.input_snapshot,
         "shot_id": "shot-1",

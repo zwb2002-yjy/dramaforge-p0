@@ -183,8 +183,14 @@ class AgentRunScheduler:
         from uuid import uuid4
 
         from app.events.models import OutboxEvent
+        from app.shared.db import set_node_run_rls_context
         from app.shared.enums import OutboxStatus
 
+        if await set_node_run_rls_context(
+            self._session,
+            node_run_id=node_run_id,
+        ) is None:
+            raise NotFoundError("node_run not found")
         run = await self._session.get(NodeRun, node_run_id)
         if run is None:
             raise NotFoundError("node_run not found")
@@ -220,8 +226,17 @@ class AgentRunScheduler:
         # COMMIT first — eliminate flush-then-Redis race
         await self._session.commit()
         try:
+            if await set_node_run_rls_context(
+                self._session,
+                node_run_id=node_run_id,
+            ) is None:
+                raise NotFoundError("node_run not found")
             job_id = await self._enqueue_node_run(node_run_id)
         except Exception as exc:
+            await set_node_run_rls_context(
+                self._session,
+                node_run_id=node_run_id,
+            )
             await self._mark_queue_failed(node_run_id, error=str(exc))
             raise
         return job_id

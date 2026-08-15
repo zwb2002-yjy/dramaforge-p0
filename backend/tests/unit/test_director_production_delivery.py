@@ -26,7 +26,10 @@ from app.director.shooting import SelectionPlanPayload, StoryboardPlanPayload
 from app.director.snapshot_service import DirectorSnapshotService
 from app.execution.models import Artifact, NodeRun
 from app.production.service import GraphService
+from app.providers.models import ProviderConnection, ProviderModelBinding
+from app.security.models import EncryptedProviderCredential
 from app.shared.base import Base
+from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import InMemoryObjectStore
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -225,7 +228,46 @@ async def test_materialize_production_reuses_only_identical_accepted_trial(
     )
     session.add(workflow)
     await session.flush()
-    binding_id = uuid4()
+    credential = EncryptedProviderCredential(
+        workspace_id=workspace.id,
+        provider="fake",
+        ciphertext="test-only",
+        key_version="test",
+    )
+    session.add(credential)
+    await session.flush()
+    connection = ProviderConnection(
+        workspace_id=workspace.id,
+        provider_type="fake",
+        display_name="Fake media",
+        base_url="https://example.invalid",
+        protocol_profile="fake-v1",
+        credential_id=credential.id,
+        enabled=True,
+        verification_status="verified",
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(connection)
+    await session.flush()
+    model_binding = ProviderModelBinding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        media_type="video",
+        model_id="fake-production",
+        purpose="video",
+        enabled=True,
+        documented=True,
+        contract_tested=True,
+        account_verified=True,
+        quality_gated=True,
+        invoke_model_value="fake-production",
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(model_binding)
+    await session.flush()
+    binding_id = model_binding.id
     locked_refs: dict[str, str] = {}
     for number, (kind, payload) in enumerate(_shooting_payloads(str(binding_id)).items(), 1):
         version = CreativeArtifactVersion(
@@ -453,6 +495,18 @@ async def test_materialize_production_reuses_only_identical_accepted_trial(
         locked_refs=formal_locked_refs,
         selection_snapshot=selection_payload,
     )
+
+    model_binding.quality_gated = False
+    await session.flush()
+    with pytest.raises(ValidationAppError) as exc_info:
+        await service.materialize_production(
+            project_id=project.id,
+            actor=user,
+            idempotency_key="formal-materialize-before-trial-acceptance",
+        )
+    assert exc_info.value.details["code"] == "MODEL_QUALITY_GATE_MISSING"
+    model_binding.quality_gated = True
+    await session.flush()
 
     batch, runs = await service.materialize_production(
         project_id=project.id,

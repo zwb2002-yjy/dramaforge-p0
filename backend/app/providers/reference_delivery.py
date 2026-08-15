@@ -89,59 +89,20 @@ async def approved_first_frame_for_video(
     video_node = await session.get(GraphNode, video_run.graph_node_id)
     if video_node is None or video_node.node_key != "video":
         raise ValidationAppError("reference delivery requires a video NodeRun")
-    face_row = (
-        await session.execute(
-            select(GraphEdge, GraphNode)
-            .join(GraphNode, GraphNode.id == GraphEdge.upstream_node_id)
-            .where(GraphEdge.graph_version_id == video_run.graph_version_id)
-            .where(GraphEdge.downstream_node_id == video_node.id)
-            .where(GraphEdge.required.is_(True))
-            .where(GraphNode.node_key == "face_review")
-        )
-    ).one_or_none()
-    if face_row is None:
-        raise ValidationAppError(
-            "video has no required face review edge",
-            details={"code": "UPSTREAM_RUN_MISSING"},
-        )
-    _, face_node = face_row
-    face_runs = list(
-        (
-            await session.execute(
-                select(NodeRun).where(
-                    NodeRun.project_id == video_run.project_id,
-                    NodeRun.graph_version_id == video_run.graph_version_id,
-                    NodeRun.graph_node_id == face_node.id,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    face_run = _latest_for_shot(face_runs, shot_id=shot_id)
-    if (
-        face_run is None
-        or face_run.status not in {"completed", "cached"}
-        or str((face_run.output_summary or {}).get("status")) not in {"passed", "not_applicable"}
-    ):
-        raise ValidationAppError(
-            "video first frame has not passed Face Gate",
-            details={"code": "UPSTREAM_TERMINAL_FAILURE"},
-        )
-
     keyframe_node = (
         await session.execute(
             select(GraphNode)
-            .join(GraphEdge, GraphEdge.upstream_node_id == GraphNode.id)
+            .select_from(GraphEdge)
+            .join(GraphNode, GraphNode.id == GraphEdge.upstream_node_id)
             .where(GraphEdge.graph_version_id == video_run.graph_version_id)
-            .where(GraphEdge.downstream_node_id == face_node.id)
+            .where(GraphEdge.downstream_node_id == video_node.id)
             .where(GraphEdge.required.is_(True))
             .where(GraphNode.node_key == "keyframe")
         )
     ).scalar_one_or_none()
     if keyframe_node is None:
         raise ValidationAppError(
-            "Face Gate has no required keyframe edge",
+            "video has no required keyframe edge",
             details={"code": "UPSTREAM_RUN_MISSING"},
         )
     keyframe_runs = list(
@@ -160,7 +121,7 @@ async def approved_first_frame_for_video(
     keyframe_run = _latest_for_shot(keyframe_runs, shot_id=shot_id)
     if keyframe_run is None or keyframe_run.result_artifact_id is None:
         raise ValidationAppError(
-            "approved keyframe Artifact is missing",
+            "keyframe Artifact is missing",
             details={"code": "UPSTREAM_ARTIFACT_MISSING"},
         )
     artifact = await session.get(Artifact, keyframe_run.result_artifact_id)
@@ -173,7 +134,7 @@ async def approved_first_frame_for_video(
         or not artifact.mime_type.startswith("image/")
     ):
         raise ValidationAppError(
-            "approved keyframe Artifact is unavailable",
+            "keyframe Artifact is unavailable",
             details={"code": "UPSTREAM_ARTIFACT_MISSING"},
         )
     return artifact

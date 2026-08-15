@@ -79,8 +79,17 @@ def test_dockerignore_excludes_local_heavy_and_sensitive_paths() -> None:
 
 def test_dockerfile_installs_only_locked_python_dependencies() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
+    assert "Acquire::Retries=10" in text
+    assert "Acquire::Queue-Mode=access" in text
+    assert "Acquire::http::Pipeline-Depth=0" in text
+    assert "https://deb.debian.org" in text
+    assert "type=cache,target=/var/cache/apt" in text
+    assert "type=cache,target=/var/lib/apt/lists" in text
     assert "uv export --frozen --no-dev --no-emit-project" in text
     assert "pip install --no-deps insightface" not in text
     assert 'pip install "requests' not in text
     assert "DRAMAFORGE_SOURCE_COMMIT" in text
     assert "org.opencontainers.image.revision" in text
+    assert text.index("org.opencontainers.image.revision") > text.index(
+        "uv export --frozen"
+    )

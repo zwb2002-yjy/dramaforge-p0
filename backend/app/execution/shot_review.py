@@ -1,4 +1,4 @@
-"""Per-shot review, lock, local re-run, and audited manual media (P0)."""
+﻿"""Per-shot review, lock, local re-run, and audited manual media (P0)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.models import Shot
 from app.config import get_settings
-from app.consistency.face_policy import approved_face_policy_snapshot, approved_face_threshold
+from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.director.legacy_guard import require_legacy_execution_allowed
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import Artifact, NodeRun
@@ -29,10 +29,11 @@ from app.shared.errors import NotFoundError, ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
 
 # Nodes that must be completed (with artifact for media) before human approve.
-# Review nodes need completed status; face/continuity must not be blocked.
+# Review nodes need completed status; unresolved human-review evidence cannot be
+# silently converted into a legacy approval.
 REQUIRED_APPROVE_NODES: tuple[str, ...] = (
     "keyframe",
-    "face_review",
+    "identity_review",
     "video",
     "video_drift_review",
     "voice",
@@ -86,6 +87,49 @@ def _latest_by_node_key(runs: list[NodeRun]) -> dict[str, NodeRun]:
     return by_key
 
 
+def _missing_required_prerequisites(
+    *,
+    requested_keys: list[str],
+    latest_by_key: dict[str, NodeRun],
+) -> list[str]:
+    """Return absent/failed ancestors needed to make a partial rerun executable.
+
+    A local rerun invalidates the changed node and its real downstream, but a
+    downstream node can also have independent required inputs.  For example,
+    ``composite`` needs ``video_drift_review``, ``voice`` and ``subtitle``.
+    Reusing a completed/queued/running ancestor is correct; silently omitting an
+    ancestor that has never been materialized (or has terminally failed) is not.
+    """
+    requested = set(requested_keys)
+    required: set[str] = set()
+    visited: set[str] = set()
+    upstream_by_downstream: dict[str, list[str]] = {}
+    for upstream, downstream in SHOT_EDGES:
+        upstream_by_downstream.setdefault(downstream, []).append(upstream)
+
+    def visit(node_key: str) -> None:
+        if node_key in visited:
+            return
+        visited.add(node_key)
+        for upstream in upstream_by_downstream.get(node_key, []):
+            if upstream in requested:
+                visit(upstream)
+                continue
+            latest = latest_by_key.get(upstream)
+            if latest is not None and latest.status in {
+                *DONE_STATUSES,
+                "queued",
+                "running",
+            }:
+                continue
+            required.add(upstream)
+            visit(upstream)
+
+    for key in requested_keys:
+        visit(key)
+    return [key for key in SHOT_NODES if key in required and key not in requested]
+
+
 async def assert_shot_approvable(session: AsyncSession, *, project_id: UUID, shot_id: UUID) -> None:
     """Fail closed: empty shots or incomplete/blocked pipelines cannot review_passed."""
     runs = list(
@@ -119,49 +163,41 @@ async def assert_shot_approvable(session: AsyncSession, *, project_id: UUID, sho
             )
             if not manual:
                 no_artifact.append(key)
-        if key in {"face_review", "video_drift_review", "continuity_review"}:
+        if key in {"identity_review", "video_drift_review", "continuity_review"}:
             summary = run.output_summary or {}
             status = str(
                 summary.get("status")
                 or summary.get("review_status")
-                or summary.get("face_review")
+                or summary.get("identity_review")
                 or ""
             )
             if key == "video_drift_review":
-                # Drift gate is passed-only: blocked/needs_human must be resolved
-                # by re-running the video, never bypassed by approve.
                 if status == "not_applicable":
                     applicable = (run.input_snapshot or {}).get("lead_identity_required")
                     if applicable is not False:
                         blocked.append("video_drift_review:invalid_not_applicable")
                     continue
-                if status != "passed":
+                if status not in {"passed", "not_applicable"}:
                     blocked.append(f"video_drift_review:{status}")
                 continue
-            if key == "face_review" and status == "not_applicable":
+            if key == "identity_review" and status == "not_applicable":
                 applicable = (run.input_snapshot or {}).get("lead_identity_required")
                 if applicable is not False:
-                    blocked.append("face_review:invalid_not_applicable")
+                    blocked.append("identity_review:invalid_not_applicable")
                 continue
-            # Manual audited completion stores status=passed
-            if status in {"blocked", "fail", "failed", "reject"}:
+            # Legacy approval is deliberately fail-closed. The Director path
+            # records a subjective_gate_override with report version and scope.
+            if status in {"blocked", "needs_human", "fail", "failed", "reject"}:
                 blocked.append(f"{key}:{status}")
             if (
-                key == "face_review"
+                key == "identity_review"
                 and (run.input_snapshot or {}).get("lead_identity_required") is True
             ):
-                policy = approved_face_policy_snapshot()
-                if (run.input_snapshot or {}).get("face_policy") != policy:
-                    blocked.append("face_review:policy_mismatch")
-                score = summary.get("face_score")
-                try:
-                    if not isinstance(score, int | float | str):
-                        raise TypeError("face score is not numeric")
-                    score_ok = float(score) >= approved_face_threshold()
-                except (TypeError, ValueError):
-                    score_ok = False
-                if status != "passed" or not score_ok:
-                    blocked.append("face_review:score_below_approved_threshold")
+                policy = identity_evidence_policy_snapshot()
+                if (run.input_snapshot or {}).get("identity_evidence_policy") != policy:
+                    blocked.append("identity_review:policy_mismatch")
+                if status not in {"passed", "not_applicable"}:
+                    blocked.append("identity_review:human_review_required")
 
     if missing or incomplete or blocked or no_artifact:
         parts = []
@@ -279,6 +315,7 @@ async def start_shot_nodes(
     user_id: UUID,
     node_keys: list[str] | None = None,
     force: bool = False,
+    include_missing_dependencies: bool = False,
 ) -> list[UUID]:
     await require_legacy_execution_allowed(
         session, project_id=project_id, action="legacy_shot_media_service"
@@ -364,6 +401,14 @@ async def start_shot_nodes(
         .all()
     )
     latest_by_key = _latest_by_node_key(_shot_runs(existing_runs, shot_id))
+    if include_missing_dependencies:
+        keys = [
+            *keys,
+            *_missing_required_prerequisites(
+                requested_keys=keys,
+                latest_by_key=latest_by_key,
+            ),
+        ]
     canonical_binding: dict[str, object] = {}
     canonical_locked_prompt = ""
     prior_keyframe = latest_by_key.get("keyframe")
@@ -435,11 +480,13 @@ async def start_shot_nodes(
             if key == "keyframe"
             else f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}"
         )
-        lead_identity_required = shot_plan.get("lead_identity_required") is True
+        lead_identity_value = shot_plan.get("lead_identity_required")
+        lead_identity_required = lead_identity_value is True
         # A project with a registered lead canonical is single-lead in P0. Script
-        # imports carry no per-shot lead flag, so default lead shots to identity
-        # required when a canonical exists (face gate applies).
-        if not lead_identity_required and canonical_binding:
+        # imports may carry no per-shot lead flag, so infer identity only when the
+        # field is absent. An explicit false marks inserts/establishing shots that
+        # must not be forced through a lead-face Gate.
+        if not isinstance(lead_identity_value, bool) and canonical_binding:
             lead_identity_required = True
         if key == "keyframe" and lead_identity_required and canonical_locked_prompt:
             prompt = identity_priority_keyframe_prompt(
@@ -482,13 +529,13 @@ async def start_shot_nodes(
             "dialogue": dialogue,
             "subtitle": dialogue,
             "lead_identity_required": lead_identity_required,
-            "face_policy": approved_face_policy_snapshot(),
+            "identity_evidence_policy": identity_evidence_policy_snapshot(),
             "model_profile": model_profile,
         }
         snapshot.update(canonical_binding)
         if canonical_locked_prompt:
             snapshot["canonical_locked_prompt"] = canonical_locked_prompt
-        if key == "face_review":
+        if key == "identity_review":
             snapshot.update(probe_binding)
         run = NodeRun(
             project_id=project_id,
@@ -541,6 +588,7 @@ async def local_rerun_from_node(
         user_id=user_id,
         node_keys=to_run,
         force=True,
+        include_missing_dependencies=True,
     )
     return to_run, run_ids
 
@@ -648,7 +696,7 @@ async def upload_manual_media(
             "source_commit": get_settings().source_commit,
             "manual": True,
             "prompt": f"manual:{node_key}:{shot_id}",
-            "face_policy": approved_face_policy_snapshot(),
+            "identity_evidence_policy": identity_evidence_policy_snapshot(),
         },
         provider_cost=Decimal("0"),
         started_at=now,
@@ -743,13 +791,14 @@ def _retry_suggestion(code: str) -> str:
         "PROVIDER_CREATE_FAILED": "检查脱敏 Provider 错误和请求合同，只重试当前创建节点",
         "PROVIDER_TASK_FAILED": "检查远端任务错误；确认后只重跑当前 Provider 节点及下游",
         "PROVIDER_MEDIA_DOWNLOAD_FAILED": "续查同一远端任务或结果 URL，修复下载后再入库",
-        "FACE_BELOW_THRESHOLD": "保持 0.60 阈值，从 Keyframe 返工，最多使用批准的有限次数",
-        "FACE_PROBE_UNAVAILABLE": "检查两源 Artifact、InsightFace 和画面清晰度后进入人工复核",
-        "VIDEO_DRIFT_BLOCKED": "查看抽样时间点和分数，从 Video 及下游重跑",
-        "VIDEO_DRIFT_POLICY_UNAPPROVED": "Video Drift 未通过（均值 < 0.40）阻断交付",
+        "IDENTITY_EVIDENCE_POLICY_MISSING": "重新生成复核节点，绑定当前人物证据策略",
+        "IDENTITY_EVIDENCE_POLICY_MISMATCH": "按当前模板重新生成复核节点，禁止沿用旧策略结果",
+        "IDENTITY_EVIDENCE_INCOMPLETE": "核对 Canonical、Reference Binding、有效请求和产物血缘",
+        "IDENTITY_REVIEW_REQUIRED": "查看 Canonical 与生成结果，记录接受理由或定向返工",
+        "VIDEO_EVIDENCE_UNAVAILABLE": "核对视频产物及首、中、末帧证据后人工复核",
         "blocked_budget": "增加或调整项目预算后重试原节点，不创建 ProviderOperation",
         "PROVIDER_FAILED": "检查 Provider 状态后重试该节点及正确下游",
         "QUEUE_UNAVAILABLE": "启动 Redis 与 Arq Worker 后 dispatch/enqueue",
-        "APPROVE_GATE": "先完成必需节点与 face/continuity 审核",
+        "APPROVE_GATE": "先完成必需节点，并通过导演试拍验收记录主观接受理由",
     }
     return mapping.get(code, "查看 NodeRun error_summary 后局部重跑失败节点")

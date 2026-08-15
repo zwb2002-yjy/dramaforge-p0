@@ -1,4 +1,4 @@
-"""Review gate 6: quality evidence must prove the reviewed media was produced by
+﻿"""Review gate 6: quality evidence must prove the reviewed media was produced by
 the exact model binding being gated — not by a sibling binding."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from app.access.models import User, Workspace
 from app.access.projects import ProjectService
-from app.consistency.face_policy import approved_face_policy_snapshot
+from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
 from app.production import models as _pm  # noqa: F401
 from app.production.service import GraphService
@@ -23,8 +23,6 @@ from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-DECIMAL_0_80 = 0.80
 
 
 @pytest.fixture
@@ -64,21 +62,21 @@ async def _seed_chain(
         display_name="Keyframe",
         cacheable=True,
     )
-    face_node = GraphNode(
+    identity_node = GraphNode(
         graph_version_id=graph.current_version_id,
-        node_key="face_review",
-        node_type="face_review",
-        display_name="Face Review",
+        node_key="identity_review",
+        node_type="identity_review",
+        display_name="Identity Review",
         cacheable=True,
     )
-    session.add_all([keyframe_node, face_node])
+    session.add_all([keyframe_node, identity_node])
     await session.flush()
     session.add(
         GraphEdge(
             graph_version_id=graph.current_version_id,
             upstream_node_id=keyframe_node.id,
             output_port="media",
-            downstream_node_id=face_node.id,
+            downstream_node_id=identity_node.id,
             input_port="input",
             required=True,
         )
@@ -92,7 +90,7 @@ async def _seed_chain(
         mime_type="image/png",
         byte_size=12,
     )
-    face_art = Artifact(
+    identity_art = Artifact(
         project_id=project.id,
         artifact_type="document",
         storage_state="available",
@@ -101,12 +99,12 @@ async def _seed_chain(
         mime_type="application/json",
         byte_size=10,
     )
-    session.add_all([keyframe_art, face_art])
+    session.add_all([keyframe_art, identity_art])
     await session.flush()
     shot_snapshot = {
         "shot_id": "shot-ql",
         "lead_identity_required": True,
-        "face_policy": approved_face_policy_snapshot(),
+        "identity_evidence_policy": identity_evidence_policy_snapshot(),
     }
     keyframe_run = NodeRun(
         project_id=project.id,
@@ -138,26 +136,26 @@ async def _seed_chain(
         model_binding_id=producer_binding.id,
     )
     session.add(keyframe_op)
-    face_run = NodeRun(
+    identity_run = NodeRun(
         project_id=project.id,
         graph_version_id=graph.current_version_id,
-        graph_node_id=face_node.id,
+        graph_node_id=identity_node.id,
         attempt_no=1,
         idempotency_key=f"ql:{uuid4()}",
         input_hash="b" * 64,
         status="completed",
         input_snapshot=shot_snapshot,
-        result_artifact_id=face_art.id,
+        result_artifact_id=identity_art.id,
         output_summary={
             "status": "passed",
-            "face_score": DECIMAL_0_80,
-            "face_review": "passed",
+            "identity_review_status": "passed",
+            "human_approved": True,
         },
         created_by=user.id,
     )
-    session.add(face_run)
+    session.add(identity_run)
     await session.flush()
-    return producer_binding, face_run
+    return producer_binding, identity_run
 
 
 async def _seed_binding(
@@ -275,7 +273,7 @@ async def test_quality_evidence_requires_matching_producer_binding(
         artifact_id=face_art.id,
         actor=user,
     )
-    assert evidence.evidence_kind == "face_review"
+    assert evidence.evidence_kind == "identity_review"
     refreshed = await session.get(ProviderModelBinding, binding.id)
     assert refreshed is not None and refreshed.quality_gated is True
 

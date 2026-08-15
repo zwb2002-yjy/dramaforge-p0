@@ -18,22 +18,37 @@ import pytest
 from sqlalchemy import create_engine, text
 
 BACKEND = Path(__file__).resolve().parents[2]
-DEFAULT_ADMIN = "postgresql://dramaforge:dramaforge@127.0.0.1:5432/postgres"
 DB_USER = "dramaforge"
 DB_PASSWORD = "dramaforge"
-DB_HOST = "127.0.0.1:5432"
+
+
+def _pg_host() -> str:
+    return os.environ.get("TEST_PG_HOST", "127.0.0.1")
+
+
+def _pg_port() -> str:
+    return os.environ.get("TEST_PG_PORT", "5432")
 
 
 def _pg_admin_url() -> str:
-    return os.environ.get("TEST_PG_ADMIN_URL", DEFAULT_ADMIN)
+    default = (
+        f"postgresql://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/postgres"
+    )
+    return os.environ.get("TEST_PG_ADMIN_URL", default)
 
 
 def _db_sync_url(dbname: str) -> str:
-    return f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{dbname}"
+    return (
+        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
+        f"@{_pg_host()}:{_pg_port()}/{dbname}"
+    )
 
 
 def _db_async_url(dbname: str) -> str:
-    return f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{dbname}"
+    return (
+        f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}"
+        f"@{_pg_host()}:{_pg_port()}/{dbname}"
+    )
 
 
 def _pg_available_sync() -> bool:
@@ -123,13 +138,13 @@ async def test_model_profiles_migration_and_rls_on_isolated_db() -> None:
     dbname = f"dramaforge_mp_{uuid.uuid4().hex[:10]}"
     try:
         await _create_db(dbname)
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20260813_0023")
         seeded = _seed_workspace_default(dbname)
 
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar()
-            assert head == "20260813_0022"
+            assert head == "20260813_0023"
             # Table + RLS policy exist.
             assert (
                 conn.execute(
@@ -221,7 +236,7 @@ async def test_model_profiles_migration_and_rls_on_isolated_db() -> None:
             )
         engine.dispose()
 
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20260813_0023")
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             assert (

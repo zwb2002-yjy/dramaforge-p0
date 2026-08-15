@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import InstanceBootstrapState, Project, User, Workspace
@@ -15,7 +15,20 @@ class AccessRepository:
         self._session = session
 
     async def get_user_by_email(self, email: str) -> User | None:
-        result = await self._session.execute(select(User).where(User.email == email))
+        bind = self._session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            # The runtime role cannot enumerate users through FORCE RLS before
+            # authentication establishes app.current_user_id.  A narrowly
+            # scoped SECURITY DEFINER function exposes exactly one normalized
+            # email lookup and only the fields required to verify credentials.
+            result = await self._session.execute(
+                select(User).from_statement(
+                    text("SELECT * FROM app.auth_user_by_email(:email)")
+                ),
+                {"email": email},
+            )
+        else:
+            result = await self._session.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
     async def get_user_by_id(self, user_id: UUID) -> User | None:

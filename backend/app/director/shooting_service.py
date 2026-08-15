@@ -484,7 +484,16 @@ class DirectorShootingService:
             operation=operation,
             required_capabilities=frozenset(required),
         )
-        blockers = [item.code for item in evaluation.issues]
+        all_blockers = [item.code for item in evaluation.issues]
+        # Product quality evidence is created by the first budget-controlled
+        # representative trial. Requiring it before that trial creates an
+        # impossible cold-start loop. All other eligibility failures remain
+        # fail-closed.
+        blockers = [
+            blocker
+            for blocker in all_blockers
+            if blocker != "MODEL_QUALITY_GATE_MISSING"
+        ]
         manifest = dict(entry.capability_manifest_json or {}) if entry is not None else {}
         operations = manifest.get("operations")
         raw_operation_manifest = (
@@ -529,7 +538,10 @@ class DirectorShootingService:
             manifest_hash=entry.contract_manifest_hash if entry is not None else None,
             required_capabilities=sorted(required),
             supported_capabilities=evaluation.supported_capabilities,
-            evidence=evaluation.evidence,
+            evidence={
+                **evaluation.evidence,
+                "trial_only_until_quality_gated": not binding.quality_gated,
+            },
             pricing_snapshot=(
                 dict(binding.pricing_snapshot_json or {})
                 if binding and binding.pricing_snapshot_json

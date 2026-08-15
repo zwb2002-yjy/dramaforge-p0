@@ -193,13 +193,13 @@ def test_compose_stack_does_not_force_memory_store() -> None:
     assert "DRAMA_FORCE_MEMORY_STORE" not in text
 
 
-def test_insightface_status_reports_backend() -> None:
-    from app.consistency.image_embed import insightface_status
+def test_identity_review_has_no_biometric_runtime_contract() -> None:
+    from app.consistency.identity_policy import identity_evidence_policy_snapshot
 
-    st = insightface_status()
-    assert "available" in st
-    assert st["embedding_dim"] == 512
-    assert st["backend"] in {"insightface+onnx", "hash_placeholder"}
+    policy = identity_evidence_policy_snapshot()
+    assert policy["automatic_identity_decision"] is False
+    assert "threshold" not in policy
+    assert "embedding" not in policy
 
 
 @pytest.mark.asyncio

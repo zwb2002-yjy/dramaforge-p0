@@ -26,7 +26,9 @@ from app.runtime.scheduler import WorkerRuntime
 from app.shared.db import (
     list_pending_outbox_event_rls_scopes,
     list_queued_node_run_rls_scopes,
+    resolve_artifact_rls_scope,
     resolve_node_run_rls_scope,
+    set_artifact_rls_context,
     set_rls_context,
 )
 from app.shared.enums import OutboxStatus
@@ -248,7 +250,7 @@ async def test_agent_ten_shot_async_product_path(
             ):
                 latest_by_key[key] = run
         assert set(latest_by_key) == set(SHOT_NODES)
-        for key in {"prompt", "keyframe", "face_review", "voice", "subtitle"}:
+        for key in {"prompt", "keyframe", "identity_review", "voice", "subtitle"}:
             run = latest_by_key[key]
             assert run.status in done, (
                 f"shot={shot_id} node={key} status={run.status} "
@@ -262,41 +264,27 @@ async def test_agent_ten_shot_async_product_path(
             object_keys.add(artifact.object_key)
         expected_artifact_count += 5
         identity_required = (
-            latest_by_key["face_review"].input_snapshot.get("lead_identity_required")
+            latest_by_key["identity_review"].input_snapshot.get("lead_identity_required")
             is True
         )
         if identity_required:
-            video = latest_by_key["video"]
-            assert latest_by_key["face_review"].output_summary["status"] in {
+            assert latest_by_key["identity_review"].output_summary["status"] in {
                 "needs_human",
                 "blocked",
             }
-            assert video.status == "failed"
-            assert video.error_code == "UPSTREAM_TERMINAL_FAILURE"
-            assert video.result_artifact_id is None
-            video_ops = list(
-                (
-                    await pg_session.execute(
-                        select(ProviderOperation).where(
-                            ProviderOperation.node_run_id == video.id
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            assert video_ops == []
         else:
-            assert latest_by_key["face_review"].output_summary["status"] == "not_applicable"
-            for key in {"video", "video_drift_review", "composite", "continuity_review"}:
-                run = latest_by_key[key]
-                assert run.status in done
-                assert run.result_artifact_id is not None
-                artifact = artifacts[run.result_artifact_id]
-                assert await store.get_bytes(object_key=artifact.object_key)
-                artifact_ids.add(artifact.id)
-                object_keys.add(artifact.object_key)
-                expected_artifact_count += 1
+            assert latest_by_key["identity_review"].output_summary["status"] == "not_applicable"
+        # Identity review records evidence for trial acceptance and repair, but it
+        # never blocks keyframe -> video in the first-release production graph.
+        for key in {"video", "video_drift_review", "composite", "continuity_review"}:
+            run = latest_by_key[key]
+            assert run.status in done
+            assert run.result_artifact_id is not None
+            artifact = artifacts[run.result_artifact_id]
+            assert await store.get_bytes(object_key=artifact.object_key)
+            artifact_ids.add(artifact.id)
+            object_keys.add(artifact.object_key)
+            expected_artifact_count += 1
     assert len(artifact_ids) == expected_artifact_count
     assert len(object_keys) == expected_artifact_count
 
@@ -593,24 +581,9 @@ async def test_ten_shot_p0_and_subtitle_rework(pg_session: AsyncSession) -> None
         pg_session, project_id=project.id, user_id=user.id, n=10, store=store
     )
     assert len(shots) == 10
-    assert all(s.face_checked and s.continuity_checked for s in shots)
+    assert all(s.identity_reviewed and s.continuity_checked for s in shots)
     assert all(len(s.node_ids) == 9 for s in shots)
-    # Two-source review: scores are real comparisons (not identity unit-vector);
-    # generated keyframe vs canonical may score below 0.5 on hash embeddings.
-    assert all(s.face_status is not None for s in shots)
-    assert all(s.face_score is not None for s in shots)
-    # Deliberate mismatch must not look like near-perfect identity
-    bad = await produce_shots_p0(
-        pg_session,
-        project_id=project.id,
-        user_id=user.id,
-        n=1,
-        store=store,
-        mismatch_face_on_shot=1,
-    )
-    assert bad[0].face_status in {"blocked", "needs_human", "warning"} or (
-        bad[0].face_score is not None and bad[0].face_score < 0.95
-    )
+    assert all(s.identity_status == "needs_human" for s in shots)
     kf_before = shots[0].run_ids["keyframe"]
     await rework_subtitle_only_p0(
         pg_session,
@@ -1054,7 +1027,7 @@ async def test_provider_reference_tables_enforce_workspace_rls() -> None:
                     """
                     INSERT INTO graph_nodes
                       (graph_version_id, node_key, node_type, display_name)
-                    VALUES (:version, 'face_review', 'face_review', 'Face Review')
+                    VALUES (:version, 'identity_review', 'identity_review', 'Identity Review')
                     RETURNING id
                     """
                 ),
@@ -1106,7 +1079,7 @@ async def test_provider_reference_tables_enforce_workspace_rls() -> None:
                        evidence_kind, policy_id, approved_by)
                     VALUES
                       (gen_random_uuid(), :workspace, :model, :run, :artifact,
-                       'face_review', 'P0-S0A-2026-07-25', :actor)
+                       'identity_review', 'P0-S0A-2026-07-25', :actor)
                     RETURNING id
                     """
                 ),
@@ -1219,6 +1192,17 @@ async def test_worker_resolvers_use_workspace_owner_and_project_scope(
         aspect_ratio="9:16",
         actor=owner,
     )
+    artifact = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key=f"resolver/{suffix}.png",
+        content_hash="b" * 64,
+        mime_type="image/png",
+        byte_size=1,
+    )
+    pg_session.add(artifact)
+    await pg_session.flush()
     graph = ProductionGraph(
         project_id=project.id,
         scope_type="episode",
@@ -1289,6 +1273,30 @@ async def test_worker_resolvers_use_workspace_owner_and_project_scope(
     assert run_scope.user_id != creator.id
     assert run_scope.workspace_id == workspace.id
     assert run_scope.project_id == project.id
+
+    artifact_scope = await resolve_artifact_rls_scope(
+        pg_session,
+        artifact_id=artifact.id,
+    )
+    assert artifact_scope is not None
+    assert artifact_scope.user_id == owner.id
+    assert artifact_scope.workspace_id == workspace.id
+    assert artifact_scope.project_id == project.id
+    assert (
+        await set_artifact_rls_context(
+            pg_session,
+            artifact_id=artifact.id,
+            expected_workspace_id=uuid4(),
+        )
+        is None
+    )
+    restored = await set_artifact_rls_context(
+        pg_session,
+        artifact_id=artifact.id,
+        expected_workspace_id=workspace.id,
+    )
+    assert restored == artifact_scope
+    assert await pg_session.get(Artifact, artifact.id) is not None
 
     queued = await list_queued_node_run_rls_scopes(
         pg_session, limit=10, project_id=project.id
@@ -1369,7 +1377,7 @@ async def test_graph_edges_persisted_for_shot_pipeline(pg_session: AsyncSession)
 async def test_required_dependencies_enforce_shot_scoped_order(
     pg_session: AsyncSession,
 ) -> None:
-    """face_review defers until its own shot's keyframe completes (graph_edges order)."""
+    """identity_review defers until its own shot's keyframe completes (graph_edges order)."""
     from app.execution.runtime_invariants import evaluate_required_dependencies
 
     suffix = uuid4().hex[:8]
@@ -1415,12 +1423,12 @@ async def test_required_dependencies_enforce_shot_scoped_order(
         str((run.input_snapshot or {}).get("node_key") or ""): run for run in runs
     }
     keyframe = by_key["keyframe"]
-    face_review = by_key["face_review"]
+    identity_review = by_key["identity_review"]
     assert keyframe.status == "queued"
-    assert face_review.status == "queued"
+    assert identity_review.status == "queued"
 
-    # keyframe still queued => face_review must defer
-    assert (await evaluate_required_dependencies(pg_session, run=face_review)).action == "defer"
+    # keyframe still queued => identity_review must defer
+    assert (await evaluate_required_dependencies(pg_session, run=identity_review)).action == "defer"
     # A different shot's completed keyframe must not satisfy this shot's ordering
     other_shot = await produce_shots_p0(
         pg_session,
@@ -1446,10 +1454,10 @@ async def test_required_dependencies_enforce_shot_scoped_order(
     assert await worker.process_one(other_by_key["prompt"].id)
     assert await worker.process_one(other_keyframe.id)
     # other shot's keyframe completed, but this shot's keyframe still queued
-    # => face_review is still deferred
-    assert (await evaluate_required_dependencies(pg_session, run=face_review)).action == "defer"
+    # => identity_review is still deferred
+    assert (await evaluate_required_dependencies(pg_session, run=identity_review)).action == "defer"
 
-    # complete the current shot's keyframe => face_review may proceed
+    # complete the current shot's keyframe => identity_review may proceed
     assert await worker.process_one(by_key["prompt"].id)
     assert await worker.process_one(keyframe.id)
-    assert (await evaluate_required_dependencies(pg_session, run=face_review)).action == "ready"
+    assert (await evaluate_required_dependencies(pg_session, run=identity_review)).action == "ready"

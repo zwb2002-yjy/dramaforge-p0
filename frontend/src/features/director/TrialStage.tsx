@@ -187,7 +187,7 @@ function QualityEvidence({ report }: { report: QualityReportPayload }) {
   return (
     <section className="panel" data-testid="trial-quality-report">
       <div className="panel-header"><div><h3>试拍质量证据</h3><p className="muted">自动信号是证据，不替你决定主观质量。</p></div><strong className={report.overall_status === "blocked" ? "status-bad" : report.overall_status === "passed" ? "status-ok" : "status-pending"}>{STATUS_ZH[report.overall_status]}</strong></div>
-      <div className="director-quality-grid">{report.dimensions.map((item) => <article key={item.dimension} className={item.status}><header><strong>{QUALITY_ZH[item.dimension]}</strong><span>{STATUS_ZH[item.status]}</span></header><p>{item.summary}</p>{item.evidence_refs.length > 0 && <small>证据：{item.evidence_refs.join(" · ")}</small>}{item.dimension === "identity" && <p className="muted">InsightFace 只作为人脸相似信号，不代表人物整体一致性通过。</p>}</article>)}</div>
+      <div className="director-quality-grid">{report.dimensions.map((item) => <article key={item.dimension} className={item.status}><header><strong>{QUALITY_ZH[item.dimension]}</strong><span>{STATUS_ZH[item.status]}</span></header><p>{item.summary}</p>{item.evidence_refs.length > 0 && <small>证据：{item.evidence_refs.join(" · ")}</small>}{item.dimension === "identity" && <p className="muted">系统会核对角色参考绑定与产物血缘；人物、发型、服装和跨帧观感由你在试拍中确认。</p>}</article>)}</div>
       {report.hard_blockers.length > 0 && <div className="callout warn"><strong>不可覆盖的硬阻断：</strong><ul>{report.hard_blockers.map((item) => <li key={item}>{item}</li>)}</ul></div>}
       {report.limitations.length > 0 && <details><summary>查看自动质检能力边界</summary><ul>{report.limitations.map((item) => <li key={item}>{item}</li>)}</ul></details>}
     </section>
@@ -218,11 +218,14 @@ function TrialDecision({
     onError: (error) => onError(errorText(error)),
   });
   const acceptBlocked = report.hard_blockers.length > 0 || report.overall_status === "blocked";
+  const overrideReasonRequired = ["warning", "needs_human"].includes(report.overall_status);
+  const acceptDisabled = acceptBlocked || (overrideReasonRequired && !note.trim());
   return (
     <section className="panel director-hard-confirm" data-testid="trial-decision">
       <div><span>试拍验收</span><h3>人物、声线、嘴巴开合、表演和风格是否达到你的底线？</h3><p>接受后也不会立刻生产全片；下一步会再次展示并询问正式预算。</p><label>给 AI 导演的验收说明<textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} placeholder="指出喜欢、不喜欢和必须修的部分" /></label></div>
-      <div className="director-confirm-actions"><button type="button" className="accent" disabled={acceptBlocked || mutation.isPending} onClick={() => mutation.mutate("accept")}>接受试拍质量</button><button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate("repair")}>先生成局部修复方案</button><label className="director-stop-confirm"><input type="checkbox" checked={stopConfirmed} onChange={(event) => setStopConfirmed(event.target.checked)} />确认停止</label><button type="button" className="danger" disabled={!stopConfirmed || mutation.isPending} onClick={() => mutation.mutate("stop")}>停止创作</button></div>
+      <div className="director-confirm-actions"><button type="button" className="accent" disabled={acceptDisabled || mutation.isPending} onClick={() => mutation.mutate("accept")}>接受试拍质量</button><button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate("repair")}>先生成局部修复方案</button><label className="director-stop-confirm"><input type="checkbox" checked={stopConfirmed} onChange={(event) => setStopConfirmed(event.target.checked)} />确认停止</label><button type="button" className="danger" disabled={!stopConfirmed || mutation.isPending} onClick={() => mutation.mutate("stop")}>停止创作</button></div>
       {acceptBlocked && <p className="status-bad">存在硬阻断，不能用主观验收覆盖；只能修复或停止。</p>}
+      {!acceptBlocked && overrideReasonRequired && !note.trim() && <p className="status-pending">接受需要人工判断的质量项前，请写明你的验收理由；系统会保留原自动结果并单独记录本次覆盖。</p>}
     </section>
   );
 }

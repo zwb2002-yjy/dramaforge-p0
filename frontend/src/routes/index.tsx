@@ -43,8 +43,8 @@ function HomePage() {
     queryFn: listWorkspaces,
     enabled: Boolean(currentUser.data),
   });
-  const [email, setEmail] = useState("creator@example.com");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("创作者");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
     getSelectedWorkspaceId,
@@ -107,7 +107,17 @@ function HomePage() {
       await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
       await queryClient.invalidateQueries({ queryKey: ["bootstrap-status"] });
     },
-    onError: (cause: Error) => setError(cause.message),
+    onError: (cause: Error) => {
+      if (cause instanceof ApiError && cause.status === 401) {
+        setError("邮箱或密码不正确，请使用初始化此实例时创建的 Owner 账号。");
+        return;
+      }
+      if (cause instanceof ApiError && cause.code === "REGISTRATION_CLOSED") {
+        setError("此单用户实例已有 Owner，请直接登录。");
+        return;
+      }
+      setError(cause.message);
+    },
   });
 
   const createWorkspaceMutation = useMutation({
@@ -154,6 +164,9 @@ function HomePage() {
   const dbUp = health.data?.db === "up" || (health.data?.status === "ok" && !health.data?.db);
   const apiLive = Boolean(health.data && !health.isError && health.data.status === "ok" && dbUp);
   const registrationAvailable = bootstrapStatus.data?.registration_available === true;
+  const ownerInitialized = bootstrapStatus.data?.owner_initialized === true;
+  const bootstrapReady = bootstrapStatus.data !== undefined;
+  const authFormReady = email.trim().length > 0 && password.length > 0;
   const selectedWorkspace = workspaces.data?.find((workspace) => workspace.id === selectedWorkspaceId);
   const workspacesError = workspaces.error instanceof ApiError ? workspaces.error.message : null;
 
@@ -174,23 +187,38 @@ function HomePage() {
 
       {!currentUser.data ? (
         <section className="panel auth-panel">
-          <h2>{bootstrapStatus.data?.owner_initialized === false ? "初始化 Owner" : "登录"}</h2>
-          <form className="auth-form" onSubmit={(event) => { event.preventDefault(); authenticate.mutate("login"); }}>
-            <label>邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" /></label>
-            <label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
-            {registrationAvailable && <label>显示名<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label>}
-            <div className="toolbar">
-              <button className="primary" type="submit" disabled={authenticate.isPending || !apiLive}>登录</button>
-              {registrationAvailable && (
-                <button type="button" onClick={() => authenticate.mutate("register")} disabled={authenticate.isPending || !apiLive || bootstrapStatus.isLoading}>
-                  {bootstrapStatus.data?.owner_initialized ? "创建账号" : "初始化 Owner"}
-                </button>
-              )}
-            </div>
-            {bootstrapStatus.data?.owner_initialized && !registrationAvailable && (
-              <p className="muted">此实例已完成 Owner 初始化，公共注册已关闭。</p>
-            )}
-          </form>
+          {!bootstrapReady ? (
+            <p className="muted auth-loading">正在确认实例账号状态…</p>
+          ) : (
+            <>
+              <div className="auth-heading">
+                <div>
+                  <h2>{ownerInitialized ? "Owner 登录" : "初始化 Owner"}</h2>
+                  <p className="muted">
+                    {ownerInitialized
+                      ? "这是单用户实例，已关闭后续注册。"
+                      : "首次使用需要创建唯一的 Owner 账号。"}
+                  </p>
+                </div>
+                <span className="auth-mode-badge">{ownerInitialized ? "单用户" : "首次设置"}</span>
+              </div>
+              <form className="auth-form" onSubmit={(event) => { event.preventDefault(); authenticate.mutate(ownerInitialized ? "login" : "register"); }}>
+                <label>邮箱<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="owner@example.com" required /></label>
+                <label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={ownerInitialized ? "current-password" : "new-password"} placeholder="输入密码" required /></label>
+                {registrationAvailable && <label>显示名<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label>}
+                <div className="toolbar">
+                  {ownerInitialized && (
+                    <button className="primary" type="submit" disabled={authenticate.isPending || !apiLive || !authFormReady}>登录</button>
+                  )}
+                  {registrationAvailable && (
+                    <button className="primary" type="submit" disabled={authenticate.isPending || !apiLive || !authFormReady || !displayName.trim()}>
+                      初始化 Owner
+                    </button>
+                  )}
+                </div>
+              </form>
+            </>
+          )}
         </section>
       ) : (
         <>

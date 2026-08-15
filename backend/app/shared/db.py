@@ -30,6 +30,15 @@ class NodeRunRlsScope:
 
 
 @dataclass(frozen=True)
+class ArtifactRlsScope:
+    """Ownership context reconstructed from Artifact -> Project -> Workspace."""
+
+    user_id: UUID
+    workspace_id: UUID
+    project_id: UUID
+
+
+@dataclass(frozen=True)
 class OutboxEventRlsScope:
     """Ownership context reconstructed from an outbox event's project."""
 
@@ -148,6 +157,71 @@ async def set_node_run_rls_context(
     """Apply the workspace-owner scope for one NodeRun to this transaction."""
     scope = await resolve_node_run_rls_scope(session, node_run_id=node_run_id)
     if scope is None:
+        return None
+    await set_rls_context(
+        session,
+        user_id=scope.user_id,
+        workspace_id=scope.workspace_id,
+        project_id=scope.project_id,
+    )
+    return scope
+
+
+async def resolve_artifact_rls_scope(
+    session: AsyncSession,
+    *,
+    artifact_id: UUID,
+) -> ArtifactRlsScope | None:
+    """Resolve an Artifact's owner scope without weakening project RLS."""
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT owner_user_id, workspace_id, project_id
+                FROM app.artifact_context(:artifact_id)
+                """
+            ),
+            {"artifact_id": artifact_id},
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return ArtifactRlsScope(
+            user_id=row["owner_user_id"],
+            workspace_id=row["workspace_id"],
+            project_id=row["project_id"],
+        )
+
+    from app.access.models import Project, Workspace
+    from app.execution.models import Artifact
+
+    artifact = await session.get(Artifact, artifact_id)
+    if artifact is None:
+        return None
+    project = await session.get(Project, artifact.project_id)
+    if project is None:
+        return None
+    workspace = await session.get(Workspace, project.workspace_id)
+    if workspace is None:
+        return None
+    return ArtifactRlsScope(
+        user_id=workspace.owner_user_id,
+        workspace_id=workspace.id,
+        project_id=project.id,
+    )
+
+
+async def set_artifact_rls_context(
+    session: AsyncSession,
+    *,
+    artifact_id: UUID,
+    expected_workspace_id: UUID,
+) -> ArtifactRlsScope | None:
+    """Apply an Artifact's project scope only when it belongs to the workspace."""
+    scope = await resolve_artifact_rls_scope(session, artifact_id=artifact_id)
+    if scope is None or scope.workspace_id != expected_workspace_id:
         return None
     await set_rls_context(
         session,

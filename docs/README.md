@@ -2,7 +2,7 @@
 
 **状态：ACTIVE / 唯一文档入口**
 
-**最近更新：2026-08-12**
+**最近更新：2026-08-14**
 
 ## 1. 默认只读这些
 
@@ -37,7 +37,7 @@
 | 文档/目录 | 用途 |
 |---|---|
 | [`../AGENTS.md`](../AGENTS.md) | 仓库工具、图片证据和文档权威规则 |
-| [`../agent.md`](../agent.md) | 历史 Agent 执行规则；与当前路线冲突时服从 `docs/current/04` |
+| [`../agent.md`](../agent.md) | 编码 Agent 导航；不定义产品合同或发布 Gate |
 | [`../AGENT_EXECUTION_PROTOCOL.md`](../AGENT_EXECUTION_PROTOCOL.md) | Git、任务与恢复操作协议 |
 | [`adr/`](adr/) | 当前合同未取代的已接受技术决策 |
 | [`runbooks/`](runbooks/) | 部署、恢复、故障和发布操作 |

@@ -220,7 +220,7 @@ async def test_matrix_budget_blocked(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_matrix_ten_shot_face_two_source_and_lock(session: AsyncSession) -> None:
+async def test_matrix_ten_shot_identity_evidence_and_lock(session: AsyncSession) -> None:
     user, workspace_id = await _user_workspace(session)
     project = await ProjectService(session).create_project(
         workspace_id=workspace_id, name="Ten", aspect_ratio="9:16", actor=user
@@ -230,20 +230,8 @@ async def test_matrix_ten_shot_face_two_source_and_lock(session: AsyncSession) -
         session, project_id=project.id, user_id=user.id, n=10
     )
     assert len(shots) == 10
-    assert all(s.face_checked and s.continuity_checked for s in shots)
-    # Two-source: scores are real comparisons (not forced identity-only assertion)
-    assert all(s.face_status in {"passed", "blocked", "warning", "needs_human"} for s in shots)
-    # Deliberate mismatch shot
-    bad = await produce_shots_p0(
-        session,
-        project_id=project.id,
-        user_id=user.id,
-        n=1,
-        mismatch_face_on_shot=1,
-    )
-    assert bad[0].face_status == "blocked" or (
-        bad[0].face_score is not None and bad[0].face_score < 0.95
-    )
+    assert all(s.identity_reviewed and s.continuity_checked for s in shots)
+    assert all(s.identity_status == "needs_human" for s in shots)
     kf = shots[0].run_ids["keyframe"]
     await rework_subtitle_only_p0(
         session,
@@ -388,7 +376,9 @@ async def test_matrix_script_import_and_canonical(session: AsyncSession) -> None
         canonical_image_bytes=ad.blobs[c["remote_task_id"]],
     )
     ref = await require_canonical_for_shot(session, project_id=project.id)
-    assert ref.is_canonical and len(ref.face_embedding) == 512
+    assert ref.is_canonical
+    assert ref.artifact_id is not None
+    assert ref.object_key
 
 
 @pytest.mark.asyncio

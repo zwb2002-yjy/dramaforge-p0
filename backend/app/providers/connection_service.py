@@ -1,4 +1,4 @@
-"""Provider Connection, capability evidence, and binding use cases."""
+﻿"""Provider Connection, capability evidence, and binding use cases."""
 
 from __future__ import annotations
 
@@ -16,10 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.config import Settings, get_settings
-from app.consistency.face_policy import (
-    approved_face_policy_snapshot,
-    approved_face_threshold,
-)
+from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.models import (
@@ -34,6 +31,7 @@ from app.providers.registry import ProviderPlugin, get_plugin
 from app.providers.workspace_credentials import configured_byok_keyring
 from app.security.credentials import read_credential, store_credential
 from app.security.models import EncryptedProviderCredential
+from app.shared.db import set_artifact_rls_context
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 from app.storage.minio_store import get_object_store
 
@@ -208,6 +206,7 @@ class ProviderConnectionService:
         actor: User,
         display_name: str | None,
         enabled: bool | None,
+        base_url: str | None = None,
     ) -> ProviderConnection:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
@@ -216,37 +215,31 @@ class ProviderConnectionService:
             connection.display_name = display_name.strip() or connection.display_name
         if enabled is not None:
             connection.enabled = enabled
+        if base_url is not None:
+            host = base_url.strip().rstrip("/")
+            if not host:
+                raise ValidationAppError("base_url must not be empty")
+            if host != connection.base_url:
+                connection.base_url = host
+                await self._invalidate_connection_evidence(connection=connection, actor=actor)
         connection.updated_by = actor.id
         await self._session.flush()
         return connection
 
-    async def update_credential(
+    async def _invalidate_connection_evidence(
         self,
         *,
-        workspace_id: UUID,
-        connection_id: UUID,
+        connection: ProviderConnection,
         actor: User,
-        api_key: str,
-    ) -> ProviderConnection:
-        connection = await self.get_connection(
-            workspace_id=workspace_id, connection_id=connection_id
-        )
-        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
-        secret = api_key.strip()
-        if not secret:
-            raise ValidationAppError("api_key must not be empty")
-        credential = await store_credential(
-            self._session,
-            workspace_id=workspace_id,
-            provider=plugin.credential_key,
-            plaintext=secret,
-            keyring=configured_byok_keyring(),
-        )
-        connection.credential_id = credential.id
-        connection.credential_revision += 1
+    ) -> None:
+        """Invalidate evidence whenever the effective account endpoint changes.
+
+        A key rotation and a Base URL change can both point at another account.
+        Capability/quality evidence is therefore tied to both, never retained
+        merely because the connection row keeps the same id.
+        """
         connection.verification_status = "unverified"
         connection.verified_at = None
-        connection.updated_by = actor.id
         await self._session.execute(
             delete(ProviderCapabilityEvidence).where(
                 ProviderCapabilityEvidence.connection_id == connection.id
@@ -276,6 +269,33 @@ class ProviderConnectionService:
             binding.account_verified = False
             binding.quality_gated = False
             binding.updated_by = actor.id
+
+    async def update_credential(
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        actor: User,
+        api_key: str,
+    ) -> ProviderConnection:
+        connection = await self.get_connection(
+            workspace_id=workspace_id, connection_id=connection_id
+        )
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        secret = api_key.strip()
+        if not secret:
+            raise ValidationAppError("api_key must not be empty")
+        credential = await store_credential(
+            self._session,
+            workspace_id=workspace_id,
+            provider=plugin.credential_key,
+            plaintext=secret,
+            keyring=configured_byok_keyring(),
+        )
+        connection.credential_id = credential.id
+        connection.credential_revision += 1
+        connection.updated_by = actor.id
+        await self._invalidate_connection_evidence(connection=connection, actor=actor)
         await self._session.flush()
         return connection
 
@@ -406,8 +426,9 @@ class ProviderConnectionService:
                 artifact_id=reference_artifact_id,
             )
             reference_mime = reference_artifact.mime_type
-            if capability == "video_i2v" or (
-                capability == "image_i2i" and plugin.image_i2i_probe_transport == "public_url"
+            if (
+                capability == "image_i2i"
+                and plugin.image_i2i_probe_transport == "public_url"
             ):
                 grant = await issue_artifact_reference(
                     self._session,
@@ -447,7 +468,7 @@ class ProviderConnectionService:
         http_status: int | None = None
         provider_request_id: str | None = None
         error_code: str | None = None
-        model_id: str | None = None
+        evidence_model_id: str | None = None
         if capability == "auth_models":
             try:
                 async with httpx.AsyncClient(timeout=30.0) as http:
@@ -468,7 +489,7 @@ class ProviderConnectionService:
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
                 error_code = "PROVIDER_UNAVAILABLE"
         elif capability == "image_t2i":
-            model_id = (
+            evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
                 else getattr(cfg, f"{plugin.prefix}_image_model")
@@ -483,7 +504,7 @@ class ProviderConnectionService:
             http_status = int(result["http_status"]) if result.get("http_status") else None
             error_code = str(result.get("error_code") or "") or None
         elif capability == "image_i2i":
-            model_id = (
+            evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
                 else getattr(cfg, f"{plugin.prefix}_image_model")
@@ -525,17 +546,24 @@ class ProviderConnectionService:
                     http_status = int(result["http_status"]) if result.get("http_status") else None
                     error_code = str(result.get("error_code") or "") or None
         elif capability == "video_i2v":
-            model_id = (
+            evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
                 else getattr(cfg, f"{plugin.prefix}_video_model")
             )
-            if reference_url is None:
+            if reference_bytes is None:
                 error_code = "PROBE_REFERENCE_REQUIRED"
             else:
                 result = await client.create_video(
                     prompt="Controlled camera motion with stable facial appearance",
-                    image_url=reference_url,
+                    image_bytes=reference_bytes,
+                    image_mime=reference_mime,
+                    reference_artifact_ids=[str(reference_artifact_id)],
+                    reference_fingerprints=(
+                        [reference_artifact.content_hash]
+                        if reference_artifact is not None
+                        else []
+                    ),
                 )
                 result_status = str(result.get("status") or "failed")
                 status = (
@@ -548,7 +576,7 @@ class ProviderConnectionService:
                 http_status = int(result["http_status"]) if result.get("http_status") else None
                 error_code = str(result.get("error_code") or "") or None
         else:
-            model_id = (
+            evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
                 else getattr(cfg, f"{plugin.prefix}_video_model")
@@ -570,7 +598,7 @@ class ProviderConnectionService:
             workspace_id=workspace_id,
             connection_id=connection.id,
             capability=capability,
-            model_id=model_id,
+            model_id=evidence_model_id,
             status=status,
             evidence_level="account_verified",
             http_status=http_status,
@@ -610,6 +638,13 @@ class ProviderConnectionService:
         workspace_id: UUID,
         artifact_id: UUID,
     ) -> tuple[Artifact, bytes]:
+        scope = await set_artifact_rls_context(
+            self._session,
+            artifact_id=artifact_id,
+            expected_workspace_id=workspace_id,
+        )
+        if scope is None:
+            raise NotFoundError("reference Artifact not found")
         artifact = await self._session.get(Artifact, artifact_id)
         project = await self._session.get(Project, artifact.project_id) if artifact else None
         if (
@@ -792,13 +827,13 @@ class ProviderConnectionService:
         review_run: NodeRun,
     ) -> ProviderOperation | None:
         """Find the ProviderOperation that produced the media this review gate
-        consumed (keyframe for face_review, video for video_drift_review), so the
+        consumed (keyframe for identity_review, video for video_drift_review), so the
         quality evidence can be tied to the exact model binding (review gate 6)."""
         node = await self._session.get(GraphNode, review_run.graph_node_id)
         if node is None:
             return None
         upstream_key = {
-            "face_review": "keyframe",
+            "identity_review": "keyframe",
             "video_drift_review": "video",
         }.get(node.node_key)
         if upstream_key is None:
@@ -816,6 +851,34 @@ class ProviderConnectionService:
         if upstream_node is None:
             return None
         shot_id = str((review_run.input_snapshot or {}).get("shot_id") or "")
+        frozen_source_id = (review_run.input_snapshot or {}).get("source_run_id")
+        if frozen_source_id is not None:
+            try:
+                source_id = UUID(str(frozen_source_id))
+            except (TypeError, ValueError, AttributeError):
+                return None
+            source = await self._session.get(NodeRun, source_id)
+            if (
+                source is None
+                or source.project_id != review_run.project_id
+                or source.graph_version_id != review_run.graph_version_id
+                or source.graph_node_id != upstream_node.id
+                or source.status not in {"completed", "cached"}
+                or str((source.input_snapshot or {}).get("shot_id") or "") != shot_id
+            ):
+                return None
+            return cast(
+                ProviderOperation | None,
+                await self._session.scalar(
+                    select(ProviderOperation)
+                    .where(ProviderOperation.node_run_id == source.id)
+                    .order_by(
+                        ProviderOperation.attempt_no.desc(),
+                        ProviderOperation.created_at.desc(),
+                    )
+                    .limit(1)
+                ),
+            )
         candidates = list(
             (
                 await self._session.execute(
@@ -823,7 +886,6 @@ class ProviderConnectionService:
                         NodeRun.project_id == review_run.project_id,
                         NodeRun.graph_version_id == review_run.graph_version_id,
                         NodeRun.graph_node_id == upstream_node.id,
-                        NodeRun.attempt_no == review_run.attempt_no,
                         NodeRun.status.in_({"completed", "cached"}),
                     )
                 )
@@ -923,34 +985,34 @@ class ProviderConnectionService:
         summary = run.output_summary or {}
         score: Decimal | None = None
         if binding.purpose == "keyframe":
-            if node.node_key != "face_review":
-                raise ValidationAppError("keyframe quality proof must be a Face Review")
-            try:
-                score = Decimal(str(summary.get("face_score")))
-            except Exception as exc:
-                raise ValidationAppError("Face Review score is missing") from exc
-            if (
-                summary.get("status") != "passed"
-                or score < Decimal(str(approved_face_threshold()))
-                or (run.input_snapshot or {}).get("face_policy") != approved_face_policy_snapshot()
-            ):
+            if node.node_key != "identity_review":
+                raise ValidationAppError("keyframe quality proof must be an Identity Review")
+            if (run.input_snapshot or {}).get(
+                "identity_evidence_policy"
+            ) != identity_evidence_policy_snapshot():
                 raise ValidationAppError(
-                    "Face Review does not satisfy the approved quality Gate",
+                    "Identity Review does not use the published evidence policy",
                     details={"code": "QUALITY_GATE_NOT_SATISFIED"},
                 )
-            evidence_kind = "face_review"
-            policy_id = str(approved_face_policy_snapshot()["policy_id"])
+            if summary.get("status") != "passed" or not bool(summary.get("human_approved")):
+                raise ValidationAppError(
+                    "Identity Review requires an audited human acceptance result",
+                    details={"code": "IDENTITY_REVIEW_REQUIRED"},
+                )
+            evidence_kind = "identity_review"
+            policy_id = str(identity_evidence_policy_snapshot()["policy_id"])
         else:
             policy = summary.get("video_drift_policy")
             if (
                 node.node_key != "video_drift_review"
                 or summary.get("status") != "passed"
+                or not bool(summary.get("human_approved"))
                 or not isinstance(policy, dict)
                 or not policy.get("approval_id")
             ):
                 raise ValidationAppError(
-                    "Video Drift policy is not approved",
-                    details={"code": "VIDEO_DRIFT_POLICY_UNAPPROVED"},
+                    "Video temporal review requires an audited human acceptance result",
+                    details={"code": "IDENTITY_REVIEW_REQUIRED"},
                 )
             evidence_kind = "video_drift_review"
             policy_id = str(policy.get("policy_id") or policy["approval_id"])
@@ -1023,15 +1085,18 @@ class ProviderConnectionService:
         )
         if model is None:
             raise NotFoundError("model binding not found")
+        # A fresh installation cannot have project-level quality evidence before
+        # its first representative trial. Allow an account-verified binding to
+        # enter the project, then require an accepted trial before formal
+        # production. The production boundary is enforced by the Director.
         if not (
             model.enabled
             and model.documented
             and model.contract_tested
             and model.account_verified
-            and model.quality_gated
         ):
             raise ValidationAppError(
-                "model binding is not fully verified",
+                "model binding is not eligible for a controlled trial",
                 details={"code": "MODEL_BINDING_NOT_VERIFIED"},
             )
         binding = await self._session.scalar(

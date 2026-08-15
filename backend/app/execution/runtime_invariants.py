@@ -1,4 +1,4 @@
-"""Runtime cache/budget/cancel and database-backed dependency invariants.
+﻿"""Runtime cache/budget/cancel and database-backed dependency invariants.
 
 Cache/budget/cancel helpers were originally unit-test-only; they remain here.
 The dependency helpers are used by every Worker entry before a NodeRun claim.
@@ -24,7 +24,7 @@ _UPSTREAM_PENDING = frozenset({"queued", "running", "cancel_requested"})
 _UPSTREAM_SUCCEEDED = frozenset({"completed", "cached", "completed_after_cancel"})
 _UPSTREAM_FAILED = frozenset({"failed", "blocked_budget", "cancelled"})
 _REVIEW_NODE_KEYS = frozenset(
-    {"face_review", "video_drift_review", "continuity_review"}
+    {"identity_review", "video_drift_review", "continuity_review"}
 )
 
 

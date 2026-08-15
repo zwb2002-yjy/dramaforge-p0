@@ -81,10 +81,62 @@ def test_release_workflow_cannot_publish_before_verification() -> None:
         encoding="utf-8"
     )
     assert "verify-release-source:" in workflow
-    assert "needs: verify-release-source" in workflow
+    assert "release-platform-baseline:" in workflow
+    assert "needs: [verify-release-source, release-platform-baseline]" in workflow
     assert "release_contract.py check" in workflow
     assert "uv run pytest tests/integration -q -rs --fail-on-skip" in workflow
     assert "npm run test:e2e -- tests/e2e/smoke.spec.ts" in workflow
     assert "DRAMAFORGE_VERSION=${{ needs.verify-release-source.outputs.version }}" in workflow
     assert "DRAMAFORGE_SOURCE_COMMIT=${{ github.sha }}" in workflow
     assert "release-manifest.json" in workflow
+
+
+def test_release_workflow_packages_installable_online_and_offline_bundles() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    for required in (
+        "docker-compose.yml",
+        "docker-compose.offline.yml",
+        ".env.example",
+        "install.ps1",
+        "install.sh",
+        "infra/litellm/config.yaml",
+        "release.env",
+        "release-manifest.json",
+        "images.tar",
+    ):
+        assert required in workflow
+    assert "docker compose config --images" in workflow
+    assert "docker save --output" in workflow
+    assert 'if [[ "${#runtime_images[@]}" -ne "${#expected_images[@]}" ]]' in workflow
+    for image in (
+        "postgres:15-alpine",
+        "redis:7-alpine",
+        "minio/minio:RELEASE.2024-12-18T13-15-44Z",
+        "ghcr.io/berriai/litellm:v1.96.0",
+    ):
+        assert image in workflow
+    assert "dramaforge-online-v*.zip" in workflow
+    assert "dramaforge-offline-linux-amd64-v*.tar.gz" in workflow
+
+
+def test_temporary_build_proxy_is_not_persisted_in_release_inputs() -> None:
+    temporary_proxy_port = "78" + "97"
+    forbidden_proxy_values = (
+        f"127.0.0.1:{temporary_proxy_port}",
+        f"host.docker.internal:{temporary_proxy_port}",
+    )
+    release_inputs = (
+        REPO_ROOT / ".env.example",
+        REPO_ROOT / "docker-compose.yml",
+        REPO_ROOT / "docker-compose.build.yml",
+        REPO_ROOT / "docker-compose.offline.yml",
+        REPO_ROOT / "install.ps1",
+        REPO_ROOT / "install.sh",
+        REPO_ROOT / ".github" / "workflows" / "release.yml",
+    )
+    for path in release_inputs:
+        text = path.read_text(encoding="utf-8")
+        for value in forbidden_proxy_values:
+            assert value not in text

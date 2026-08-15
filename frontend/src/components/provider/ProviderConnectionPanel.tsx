@@ -6,13 +6,16 @@ import {
   createProviderConnection,
   createProviderModelBinding,
   listProviderConnections,
+  listProviderPlugins,
   listProviderModelBindings,
   listProviderProbes,
   recordProviderQualityEvidence,
   runProviderProbe,
   setProviderModelBindingPricing,
   updateProviderConnectionCredential,
+  updateProviderConnection,
   type ProjectRead,
+  type ProviderPluginRead,
   type ProviderModelBindingRead,
 } from "../../lib/api";
 import { zhEvidenceState } from "../../lib/zh";
@@ -22,13 +25,13 @@ type ProviderConnectionPanelProps = {
   projects: ProjectRead[];
 };
 
-const CAPABILITIES = [
-  ["auth_models", "认证 / 模型目录"],
-  ["image_t2i", "图像文生图"],
-  ["image_i2i", "图像角色约束"],
-  ["video_i2v", "视频图生视频"],
-  ["video_poll_download", "视频轮询 / 下载"],
-] as const;
+const CAPABILITY_LABELS: Record<string, string> = {
+  auth_models: "认证 / 模型目录",
+  image_t2i: "图像文生图",
+  image_i2i: "图像角色约束",
+  video_i2v: "视频图生视频",
+  video_poll_download: "视频轮询 / 下载",
+};
 
 export function ProviderConnectionPanel({
   workspaceId,
@@ -36,7 +39,9 @@ export function ProviderConnectionPanel({
 }: ProviderConnectionPanelProps) {
   const queryClient = useQueryClient();
   const [apiKey, setApiKey] = useState("");
-  const [capability, setCapability] = useState<(typeof CAPABILITIES)[number][0]>("auth_models");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [selectedPluginKey, setSelectedPluginKey] = useState("agnes/agnes_cn_v1");
+  const [capability, setCapability] = useState("auth_models");
   const [budget, setBudget] = useState("0");
   const [referenceArtifactId, setReferenceArtifactId] = useState("");
   const [remoteTaskId, setRemoteTaskId] = useState("");
@@ -55,7 +60,20 @@ export function ProviderConnectionPanel({
     queryFn: () => listProviderConnections(workspaceId!),
     enabled: Boolean(workspaceId),
   });
-  const connection = connections.data?.[0] ?? null;
+  const plugins = useQuery({
+    queryKey: ["provider-plugins"],
+    queryFn: listProviderPlugins,
+    staleTime: 60_000,
+  });
+  const selectedPlugin: ProviderPluginRead | null = useMemo(() => {
+    const found = (plugins.data ?? []).find(
+      (plugin) => `${plugin.provider_type}/${plugin.protocol_profile}` === selectedPluginKey,
+    );
+    return found ?? plugins.data?.[0] ?? null;
+  }, [plugins.data, selectedPluginKey]);
+  const connection = connections.data?.find((item) => item.provider_type === selectedPlugin?.provider_type
+      && item.protocol_profile === selectedPlugin?.protocol_profile)
+    ?? null;
   const probes = useQuery({
     queryKey: ["provider-probes", workspaceId, connection?.id],
     queryFn: () => listProviderProbes(workspaceId!, connection!.id),
@@ -82,7 +100,13 @@ export function ProviderConnectionPanel({
     mutationFn: async () => {
       if (!workspaceId || !apiKey.trim()) throw new Error("请输入 API Key");
       if (connection) return updateProviderConnectionCredential(workspaceId, connection.id, apiKey);
-      return createProviderConnection(workspaceId, apiKey);
+      if (!selectedPlugin) throw new Error("正在加载供应商插件契约");
+      return createProviderConnection(workspaceId, apiKey, {
+        provider_type: selectedPlugin.provider_type,
+        display_name: selectedPlugin.display_name,
+        protocol_profile: selectedPlugin.protocol_profile,
+        base_url: selectedPlugin.default_base_url,
+      });
     },
     onMutate: resetFeedback,
     onSuccess: async () => {
@@ -93,13 +117,29 @@ export function ProviderConnectionPanel({
     onError: (cause: Error) => setError(cause.message),
   });
 
+  const connectionMutation = useMutation({
+    mutationFn: async () => {
+      if (!workspaceId || !connection) throw new Error("请先创建供应商连接");
+      if (!baseUrl.trim()) throw new Error("请输入供应商 Base URL");
+      return updateProviderConnection(workspaceId, connection.id, { base_url: baseUrl.trim() });
+    },
+    onMutate: resetFeedback,
+    onSuccess: async () => { setMessage("供应商连接地址已保存，下次探测将使用新地址。"); await refresh(); },
+    onError: (cause: Error) => setError(cause.message),
+  });
+
   const probeMutation = useMutation({
     mutationFn: async () => {
-      if (!workspaceId || !connection) throw new Error("请先创建 Agnes 连接");
-      const paid = capability === "image_t2i" || capability === "image_i2i" || capability === "video_i2v";
+      if (!workspaceId || !connection) throw new Error("请先创建当前供应商连接");
+      const paid = Boolean(selectedPlugin?.paid_capabilities.includes(capability));
       if (paid && Number(budget) <= 0) throw new Error("付费探测需要明确的正预算");
+      const probeBinding = capability === "video_i2v" ? videoBinding : capability.startsWith("image_") ? imageBinding : null;
+      if (capability !== "auth_models" && !probeBinding) {
+        throw new Error("请先添加与当前能力对应的模型绑定");
+      }
       return runProviderProbe(workspaceId, connection.id, {
         capability,
+        ...(probeBinding ? { model_binding_id: probeBinding.id } : {}),
         budget_authorized: paid ? budget : "0",
         ...(referenceArtifactId.trim() ? { reference_artifact_id: referenceArtifactId.trim() } : {}),
         ...(remoteTaskId.trim() ? { remote_task_id: remoteTaskId.trim() } : {}),
@@ -117,7 +157,7 @@ export function ProviderConnectionPanel({
 
   const bindingMutation = useMutation({
     mutationFn: async (input: { media_type: "image" | "video"; model_id: string; purpose: "keyframe" | "video" }) => {
-      if (!workspaceId || !connection) throw new Error("请先创建 Agnes 连接");
+      if (!workspaceId || !connection) throw new Error("请先创建当前供应商连接");
       return createProviderModelBinding(workspaceId, connection.id, input);
     },
     onMutate: resetFeedback,
@@ -140,7 +180,7 @@ export function ProviderConnectionPanel({
 
   const qualityEvidenceMutation = useMutation({
     mutationFn: async (input: { binding: ProviderModelBindingRead; nodeRunId: string; artifactId: string }) => {
-      if (!workspaceId || !connection) throw new Error("请先创建 Agnes 连接");
+      if (!workspaceId || !connection) throw new Error("请先创建当前供应商连接");
       if (!input.nodeRunId.trim() || !input.artifactId.trim()) {
         throw new Error("需要 NodeRun ID 与产物 ID");
       }
@@ -162,18 +202,18 @@ export function ProviderConnectionPanel({
       if (!workspaceId || !connection) throw new Error("请先配置生成服务");
       const amount = pricingAmounts[binding.id]?.trim();
       if (!amount || Number(amount) < 0) throw new Error("请输入非负单次估算价格");
-      if (!pricingConfirmed[binding.id]) throw new Error("请确认价格来自你的供应商账户或合同");
+      if (!pricingConfirmed[binding.id]) throw new Error("请确认这是本次调用的保守估算上限");
       return setProviderModelBindingPricing(workspaceId, connection.id, binding.id, {
         unit_amount: amount,
         currency: pricingCurrency,
         billing_unit: binding.media_type === "video" ? "per_generated_clip" : "per_generated_image",
-        source_note: "由工作区所有者根据当前供应商账户价格确认；实际账单以供应商为准",
+        source_note: "由工作区所有者填写的单次调用保守估算上限；实际账单以供应商为准",
         owner_verified: true,
       });
     },
     onMutate: resetFeedback,
     onSuccess: async () => {
-      setMessage("价格快照已记录。重新生成拍摄方案后会按此估算并冻结预算。");
+      setMessage("保守成本快照已记录。重新生成拍摄方案后会按此估算并冻结预算。");
       await queryClient.invalidateQueries({ queryKey: ["provider-bindings", workspaceId, connection?.id] });
     },
     onError: (cause: Error) => setError(cause.message),
@@ -188,8 +228,13 @@ export function ProviderConnectionPanel({
     [bindings.data],
   );
 
+  const pluginCapabilities = selectedPlugin?.capabilities ?? ["auth_models"];
+  const pluginModels = selectedPlugin?.models ?? [];
+  const imageModels = pluginModels.filter((model) => model.media_type === "image");
+  const videoModels = pluginModels.filter((model) => model.media_type === "video");
+
   if (!workspaceId) {
-    return <section className="panel" data-testid="provider-config"><h3>Agnes 中国站连接</h3><p className="muted">配置 Provider 前请先选择或创建空间。</p></section>;
+    return <section className="panel" data-testid="provider-config"><h3>模型供应商插件</h3><p className="muted">配置供应商前请先选择或创建空间。</p></section>;
   }
 
   function submitCredential(event: FormEvent) {
@@ -198,32 +243,47 @@ export function ProviderConnectionPanel({
   }
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
-  const paidProbe = capability === "image_t2i" || capability === "image_i2i" || capability === "video_i2v";
+  const paidProbe = Boolean(selectedPlugin?.paid_capabilities.includes(capability));
 
   return (
     <section className="panel provider-config" data-testid="provider-config">
       <div className="panel-header">
         <div>
-          <h2>Agnes 中国站连接</h2>
-          <p className="muted">空间级 BYOK、能力证据与项目模型门禁。</p>
+          <h2>模型供应商插件</h2>
+          <p className="muted">插件契约驱动的连接、能力探测、模型绑定与质量门禁。</p>
         </div>
         <span className={connection?.verification_status === "verified" ? "status-ok" : "status-pending"}>
           {connection?.verification_status === "verified" ? "已验证" : "未配置"}
         </span>
       </div>
 
+      <div className="provider-plugin-selector">
+        <label>供应商插件
+          <select aria-label="供应商插件" value={selectedPlugin ? `${selectedPlugin.provider_type}/${selectedPlugin.protocol_profile}` : selectedPluginKey} onChange={(event) => {
+            setSelectedPluginKey(event.target.value);
+            setBaseUrl("");
+            setCapability("auth_models");
+          }}>
+            {(plugins.data ?? []).map((plugin) => <option key={`${plugin.provider_type}/${plugin.protocol_profile}`} value={`${plugin.provider_type}/${plugin.protocol_profile}`}>{plugin.display_name} · {plugin.protocol_profile}</option>)}
+          </select>
+        </label>
+        <label><span className="status-label">Base URL</span><input aria-label="供应商 Base URL" value={baseUrl || connection?.base_url || selectedPlugin?.default_base_url || ""} onChange={(event) => setBaseUrl(event.target.value)} /></label>
+        {connection && <button type="button" onClick={() => connectionMutation.mutate()} disabled={connectionMutation.isPending}>保存连接地址</button>}
+        <div><span className="status-label">模型数</span><strong>{pluginModels.length}</strong></div>
+        <div><span className="status-label">插件状态</span><strong>{selectedPlugin?.implemented ? "已实现" : "仅目录"}</strong></div>
+      </div>
       <div className="provider-fixed-fields">
-        <div><span className="status-label">主机</span><code>https://api.agnes-ai.cn</code></div>
-        <div><span className="status-label">协议</span><code>agnes_cn_v1</code></div>
+        <div><span className="status-label">当前连接</span><code>{connection?.display_name ?? "尚未配置"}</code></div>
+        <div><span className="status-label">协议</span><code>{selectedPlugin?.protocol_profile ?? "-"}</code></div>
         <div><span className="status-label">凭证</span><strong>{connection?.credential_configured ? "已配置 · 仅写入" : "缺失"}</strong></div>
         <div><span className="status-label">密钥版本</span><code>{connection?.credential_key_version ?? "-"}</code></div>
       </div>
 
       <form className="provider-key-form" onSubmit={submitCredential}>
         <label>
-          {connection ? "轮换 API Key" : "添加 API Key"}
+          {connection ? `轮换 ${selectedPlugin?.display_name ?? "供应商"} API Key` : `添加 ${selectedPlugin?.display_name ?? "供应商"} API Key`}
           <input
-            aria-label="Agnes API Key"
+            aria-label={`${selectedPlugin?.display_name ?? "供应商"} API Key`}
             type="password"
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
@@ -241,11 +301,11 @@ export function ProviderConnectionPanel({
           <div>
             <h3>能力探测</h3>
             <form className="form-grid" onSubmit={(event) => { event.preventDefault(); probeMutation.mutate(); }}>
-              <label>能力<select value={capability} onChange={(event) => setCapability(event.target.value as typeof capability)}>{CAPABILITIES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+              <label>能力<select value={capability} onChange={(event) => setCapability(event.target.value)}>{pluginCapabilities.map((value) => <option value={value} key={value}>{CAPABILITY_LABELS[value] ?? value}</option>)}</select></label>
               {paidProbe && <label>预算授权金额<input type="number" min="0" step="0.01" value={budget} onChange={(event) => setBudget(event.target.value)} /></label>}
               {(capability === "image_i2i" || capability === "video_i2v") && <label>参考产物 ID<input value={referenceArtifactId} onChange={(event) => setReferenceArtifactId(event.target.value)} placeholder="参考探测必填" /></label>}
               {capability === "video_poll_download" && <><label>远端任务 ID<input value={remoteTaskId} onChange={(event) => setRemoteTaskId(event.target.value)} /></label><label>查询类型<select value={remoteQueryKind} onChange={(event) => setRemoteQueryKind(event.target.value)}><option value="video_id">video_id → /agnesapi</option><option value="task_id">task_id → /v1/videos/{"{id}"}</option></select></label></>}
-              <button type="submit" disabled={probeMutation.isPending}>{probeMutation.isPending ? "探测中…" : paidProbe ? "授权并运行付费探测" : "运行探测"}</button>
+              <button type="submit" disabled={probeMutation.isPending || !selectedPlugin?.implemented}>{probeMutation.isPending ? "探测中…" : paidProbe ? "授权并运行付费探测" : "运行探测"}</button>
             </form>
             <ul className="dense provider-evidence-list" data-testid="provider-probes">
               {(probes.data ?? []).slice(0, 6).map((probe) => <li key={probe.probe_id}><span>{probe.capability}</span><strong className={probe.status === "passed" ? "status-ok" : probe.status === "failed" ? "status-bad" : "status-pending"}>{probe.status === "passed" ? "通过" : probe.status === "failed" ? "失败" : "待定"}</strong><span className="muted">{probe.evidence_level}</span></li>)}
@@ -256,8 +316,14 @@ export function ProviderConnectionPanel({
           <div>
             <h3>模型与项目绑定</h3>
             <div className="toolbar">
-              <button type="button" disabled={bindingMutation.isPending || Boolean(imageBinding)} onClick={() => bindingMutation.mutate({ media_type: "image", model_id: "agnes-image-2.1-flash", purpose: "keyframe" })}>添加关键帧模型</button>
-              <button type="button" disabled={bindingMutation.isPending || Boolean(videoBinding)} onClick={() => bindingMutation.mutate({ media_type: "video", model_id: "agnes-video-v2.0", purpose: "video" })}>添加视频模型</button>
+              <select aria-label="关键帧模型" defaultValue="" onChange={(event) => { const model = imageModels.find((item) => item.model_id === event.target.value); if (model) bindingMutation.mutate({ media_type: "image", model_id: model.model_id, purpose: "keyframe" }); }} disabled={bindingMutation.isPending || !imageModels.length || Boolean(imageBinding)}>
+                <option value="">添加关键帧模型…</option>
+                {imageModels.map((model) => <option key={model.model_id} value={model.model_id}>{model.display_name} · {model.model_id}</option>)}
+              </select>
+              <select aria-label="视频模型" defaultValue="" onChange={(event) => { const model = videoModels.find((item) => item.model_id === event.target.value); if (model) bindingMutation.mutate({ media_type: "video", model_id: model.model_id, purpose: "video" }); }} disabled={bindingMutation.isPending || !videoModels.length || Boolean(videoBinding)}>
+                <option value="">添加视频模型…</option>
+                {videoModels.map((model) => <option key={model.model_id} value={model.model_id}>{model.display_name} · {model.model_id}</option>)}
+              </select>
             </div>
             <div className="provider-binding-list">
               {(bindings.data ?? []).map((binding) => {
@@ -287,7 +353,7 @@ export function ProviderConnectionPanel({
                         <div className="quality-evidence-form">
                           <input
                             aria-label={`${binding.purpose} 质量 NodeRun ID`}
-                            placeholder="人脸/漂移 NodeRun ID"
+                            placeholder="人物/时序复核 NodeRun ID"
                             value={qualityRunIds[binding.id] ?? ""}
                             onChange={(event) => setQualityRunIds((current) => ({ ...current, [binding.id]: event.target.value }))}
                           />
@@ -329,14 +395,14 @@ export function ProviderConnectionPanel({
                             checked={Boolean(pricingConfirmed[binding.id])}
                             onChange={(event) => setPricingConfirmed((current) => ({ ...current, [binding.id]: event.target.checked }))}
                           />
-                          我已核对当前账户价格
+                          我确认这是单次调用的保守估算上限，实际账单以供应商为准
                         </label>
                         <button type="button" disabled={pricingMutation.isPending} onClick={() => pricingMutation.mutate(binding)}>保存价格快照</button>
                       </div>
                     </div>
                     <button
                       type="button"
-                      disabled={!binding.quality_gated || !selectedProjectId || projectBindingMutation.isPending}
+                      disabled={!binding.account_verified || !selectedProjectId || projectBindingMutation.isPending}
                       onClick={() => projectBindingMutation.mutate({ purpose: binding.purpose as "keyframe" | "video", modelBindingId: binding.id })}
                     >
                       绑定所选项目

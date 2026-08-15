@@ -1,4 +1,4 @@
-"""Evidence-driven repair proposals; no media call occurs in this service."""
+﻿"""Evidence-driven repair proposals; no media call occurs in this service."""
 
 from __future__ import annotations
 
@@ -180,7 +180,7 @@ class DirectorRepairService:
         invalidated_by_strategy = {
             "prompt_reference": [
                 "keyframe",
-                "face_review",
+                "identity_review",
                 "video",
                 "video_drift_review",
                 "composite",
@@ -188,7 +188,7 @@ class DirectorRepairService:
             ],
             "model_parameter": [
                 "keyframe",
-                "face_review",
+                "identity_review",
                 "video",
                 "video_drift_review",
                 "composite",
@@ -197,7 +197,7 @@ class DirectorRepairService:
             "storyboard_simplify": [
                 "prompt",
                 "keyframe",
-                "face_review",
+                "identity_review",
                 "video",
                 "video_drift_review",
                 "subtitle",

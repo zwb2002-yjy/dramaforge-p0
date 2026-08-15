@@ -1,4 +1,4 @@
-"""Materialize confirmed Director plans into immutable production batches."""
+﻿"""Materialize confirmed Director plans into immutable production batches."""
 
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ from app.events.service import EventService
 from app.execution.models import Artifact, NodeRun
 from app.production.models import GraphVersion, ProductionGraph, definition_hash
 from app.production.service import GraphService
+from app.providers.models import ProviderModelBinding
 from app.shared.enums import GraphStatus
 from app.shared.errors import ConflictError, ValidationAppError
 
@@ -300,6 +301,7 @@ class DirectorProductionService:
         cost = CostEstimatePayload.model_validate(artifacts[ArtifactKind.COST_ESTIMATE].payload)
         trial_plan = TrialPlanPayload.model_validate(artifacts[ArtifactKind.TRIAL_PLAN].payload)
         self._assert_media_preflight(selection=selection, cost=cost, stage="production")
+        await self._assert_formal_production_quality_gates(selection)
         self._assert_frozen_cost_contract(
             cost=cost,
             selection=selection,
@@ -780,7 +782,7 @@ class DirectorProductionService:
         prompt_by_key = {
             "prompt": shot.image_prompt,
             "keyframe": shot.image_prompt,
-            "face_review": shot.image_prompt,
+            "identity_review": shot.image_prompt,
             "video": shot.video_prompt,
             "video_drift_review": shot.video_prompt,
             "voice": dialogue_text or "无对白环境声",
@@ -796,7 +798,7 @@ class DirectorProductionService:
         for key in (
             "prompt",
             "keyframe",
-            "face_review",
+            "identity_review",
             "video",
             "video_drift_review",
             "voice",
@@ -828,10 +830,10 @@ class DirectorProductionService:
                     if purpose
                     else None
                 ),
-                lead_identity_required=key in {"keyframe", "face_review", "video_drift_review"},
+                lead_identity_required=key in {"keyframe", "identity_review", "video_drift_review"},
                 canonical_source_run_id=(
                     reference_runs[primary_ref_key].id
-                    if key in {"keyframe", "face_review", "video_drift_review"}
+                    if key in {"keyframe", "identity_review", "video_drift_review"}
                     else None
                 ),
                 voice_design=(
@@ -1252,6 +1254,32 @@ class DirectorProductionService:
             raise ValidationAppError(
                 "provider pricing is not verified; paid media calls remain blocked",
                 details={"code": "PRICING_NOT_VERIFIED", "purposes": unknown},
+            )
+
+    async def _assert_formal_production_quality_gates(
+        self, selection: SelectionPlanPayload
+    ) -> None:
+        """Require trial-promoted bindings at the formal production boundary."""
+
+        missing: list[str] = []
+        for plan in selection.plans:
+            if plan.purpose not in {"character_reference", "keyframe", "video"}:
+                continue
+            if plan.model_binding_id is None:
+                missing.append(plan.purpose)
+                continue
+            binding = await self._session.get(
+                ProviderModelBinding, plan.model_binding_id
+            )
+            if binding is None or not binding.quality_gated:
+                missing.append(plan.purpose)
+        if missing:
+            raise ValidationAppError(
+                "formal production requires creator-accepted trial evidence",
+                details={
+                    "code": "MODEL_QUALITY_GATE_MISSING",
+                    "purposes": sorted(set(missing)),
+                },
             )
 
     @staticmethod

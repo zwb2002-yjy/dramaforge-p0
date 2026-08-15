@@ -134,6 +134,33 @@ export type ProviderConnectionRead = {
   verified_at: string | null;
 };
 
+export type ProviderPluginModelRead = {
+  model_id: string;
+  display_name: string;
+  media_type: string;
+  model_revision: string;
+  lifecycle: string;
+  catalog_source: string;
+  capabilities: string[];
+  option_schema: Record<string, unknown>;
+};
+
+export type ProviderPluginRead = {
+  provider_type: string;
+  protocol_profile: string;
+  display_name: string;
+  default_base_url: string;
+  implemented: boolean;
+  paid_capabilities: string[];
+  capabilities: string[];
+  model_list_path: string;
+  models: ProviderPluginModelRead[];
+};
+
+export function listProviderPlugins(): Promise<ProviderPluginRead[]> {
+  return apiGet("/api/v1/provider-plugins");
+}
+
 export type ProviderProbeRead = {
   probe_id: string;
   capability: string;
@@ -193,18 +220,22 @@ export function listProviderConnections(workspaceId: string): Promise<ProviderCo
 export async function createProviderConnection(
   workspaceId: string,
   apiKey: string,
+  input: {
+    provider_type: string;
+    display_name: string;
+    protocol_profile: string;
+    base_url?: string;
+  } = {
+    provider_type: "agnes",
+    display_name: "Agnes 中国站",
+    protocol_profile: "agnes_cn_v1",
+  },
 ): Promise<ProviderConnectionRead> {
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
     `/api/v1/workspaces/${workspaceId}/provider-connections`,
-    {
-      provider_type: "agnes",
-      display_name: "Agnes 中国站",
-      protocol_profile: "agnes_cn_v1",
-      api_key: apiKey,
-      enabled: true,
-    },
+    { ...input, api_key: apiKey, enabled: true },
     csrf,
   );
 }
@@ -223,6 +254,20 @@ export async function updateProviderConnectionCredential(
   );
 }
 
+export async function updateProviderConnection(
+  workspaceId: string,
+  connectionId: string,
+  input: { display_name?: string; base_url?: string; enabled?: boolean },
+): Promise<ProviderConnectionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "PATCH",
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}`,
+    input,
+    csrf,
+  );
+}
+
 export function listProviderProbes(
   workspaceId: string,
   connectionId: string,
@@ -235,6 +280,7 @@ export async function runProviderProbe(
   connectionId: string,
   input: {
     capability: string;
+    model_binding_id?: string;
     reference_artifact_id?: string;
     remote_task_id?: string;
     remote_query_kind?: string;
@@ -820,7 +866,7 @@ export type GoldenProduceResponse = {
   timeline_hash: string;
   srt_hash: string;
   package_hash: string;
-  face_checked: number;
+  identity_reviewed: number;
   continuity_checked: number;
   content_hash: string;
 };

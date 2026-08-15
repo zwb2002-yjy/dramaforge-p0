@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Float,
     ForeignKey,
     Integer,
     Numeric,
@@ -145,10 +144,7 @@ class Character(Base):
     id: Mapped[UUID] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), primary_key=True)
     locked_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     negative_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    calibration_state: Mapped[str] = mapped_column(String(16), nullable=False, default="cold")
-    similarity_threshold: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.60
-    )
+    calibration_state: Mapped[str] = mapped_column(String(32), nullable=False, default="unreviewed")
 
 
 class CharacterReference(Base):
@@ -164,13 +160,6 @@ class CharacterReference(Base):
     object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     reference_kind: Mapped[str] = mapped_column(String(40), nullable=False, default="canonical")
     is_canonical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Cross-db: JSON list of 512 floats (PG real[] lands later if needed)
-    face_embedding: Mapped[list[float]] = mapped_column(
-        JSON, nullable=False, default=list
-    )
-    embedding_model_version: Mapped[str] = mapped_column(
-        String(80), nullable=False, default="hash-v1"
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

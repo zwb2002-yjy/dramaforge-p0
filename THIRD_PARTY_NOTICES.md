@@ -10,7 +10,6 @@ the license files shipped by each dependency before redistributing a built
 image. Provider services, optional local models, voices, fonts, input media and
 generated media are not relicensed by DramaForge.
 
-In particular, this repository and its default container images do not contain
-or download InsightFace pretrained model weights. An operator who supplies
-optional weights is responsible for their provenance, license and permitted
-use.
+Any optional third-party model or evaluator added by an operator remains the
+operator's responsibility for provenance, license, training-data terms and
+permitted use.

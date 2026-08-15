@@ -26,7 +26,7 @@ REPO = Path(__file__).resolve().parents[1]
 NODE_KEYS = (
     "prompt",
     "keyframe",
-    "face_review",
+    "identity_review",
     "video",
     "video_drift_review",
     "voice",
@@ -67,7 +67,7 @@ def _png_bytes(seed: str) -> bytes:
 
 
 def _upload_payload(node_key: str, seed: str) -> tuple[str, bytes, str]:
-    if node_key in {"prompt", "keyframe", "face_review"}:
+    if node_key in {"prompt", "keyframe", "identity_review"}:
         return f"{node_key}.png", _png_bytes(seed), "image/png"
     if node_key in {"video", "composite"}:
         return f"{node_key}.mp4", MP4_TEMPLATE + seed.encode("ascii"), "video/mp4"

@@ -57,7 +57,8 @@ async def test_golden_path_10_shots_export(session: AsyncSession) -> None:
         session, project_id=project.id, user_id=user.id, try_ffmpeg=False
     )
     assert result.shot_count == 10
-    assert all(s.face_checked and s.continuity_checked for s in result.shots)
+    assert all(s.identity_reviewed and s.continuity_checked for s in result.shots)
+    assert all(s.identity_status == "needs_human" for s in result.shots)
     assert result.export.timeline_hash
     assert result.export.srt_hash
     assert result.export.package_hash

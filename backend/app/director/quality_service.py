@@ -1,7 +1,8 @@
-"""Aggregate production evidence without turning one metric into truth."""
+﻿"""Aggregate production evidence without turning one metric into truth."""
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Literal, cast
 from uuid import UUID
@@ -11,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
-from app.director.enums import ArtifactKind, WorkflowStatus
+from app.director.enums import ApprovalKind, ArtifactKind, WorkflowStatus
 from app.director.models import (
+    ApprovalRecord,
     CreativeArtifactVersion,
     ProductionBatch,
     ProductionBatchShot,
@@ -26,16 +28,18 @@ from app.director.shooting import (
     QualityReportPayload,
     TrialReviewPayload,
 )
+from app.director.state_machine import assert_subjective_override_allowed
 from app.execution.models import GraphNode, NodeRun, ProviderOperation
+from app.providers.models import ProviderModelBinding, ProviderQualityEvidence
 from app.shared.errors import ConflictError, ValidationAppError
 
 _SUCCESS = frozenset({"completed", "cached", "completed_after_cancel"})
 
 
-def _identity_evidence_status(face_status: str) -> Literal["passed", "needs_human"]:
-    """Map an advisory identity signal without turning it into a hard gate."""
+def _identity_evidence_status(review_status: str) -> Literal["passed", "needs_human"]:
+    """Only an explicit trusted/human decision may report identity as passed."""
 
-    return "passed" if face_status == "passed" else "needs_human"
+    return "passed" if review_status == "passed" else "needs_human"
 
 
 class DirectorQualityService:
@@ -43,6 +47,51 @@ class DirectorQualityService:
         self._session = session
         self._director = DirectorService(session)
         self._projects = ProjectService(session)
+
+    async def _record_subjective_override(
+        self,
+        *,
+        project_id: UUID,
+        workflow_id: UUID,
+        quality_report: CreativeArtifactVersion,
+        actor: User,
+        review_idempotency_key: str,
+        reason: str,
+        scopes: list[str],
+        hard_block: bool,
+    ) -> ApprovalRecord:
+        """Persist creator acceptance without mutating automatic quality facts."""
+        assert_subjective_override_allowed(hard_block=hard_block)
+        clean_reason = reason.strip()
+        if not clean_reason:
+            raise ValidationAppError(
+                "a reason is required to accept subjective quality warnings",
+                details={"code": "SUBJECTIVE_OVERRIDE_REASON_REQUIRED"},
+            )
+        digest = hashlib.sha256(review_idempotency_key.encode("utf-8")).hexdigest()
+        override_key = f"subjective-gate:{digest}"
+        existing = await self._session.scalar(
+            select(ApprovalRecord).where(
+                ApprovalRecord.project_id == project_id,
+                ApprovalRecord.idempotency_key == override_key,
+            )
+        )
+        if existing is not None:
+            return existing
+        approval = ApprovalRecord(
+            project_id=project_id,
+            workflow_run_id=workflow_id,
+            approval_kind=ApprovalKind.SUBJECTIVE_GATE_OVERRIDE.value,
+            idempotency_key=override_key,
+            approved_artifact_versions={
+                ArtifactKind.QUALITY_REPORT.value: str(quality_report.id)
+            },
+            reason=f"{clean_reason}\nScope: {', '.join(sorted(scopes))}",
+            approved_by=actor.id,
+        )
+        self._session.add(approval)
+        await self._session.flush()
+        return approval
 
     async def inspect_trial(
         self,
@@ -164,7 +213,10 @@ class DirectorQualityService:
         actor: User,
         idempotency_key: str,
     ) -> CreativeArtifactVersion:
-        await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
+        project = await self._projects.get_project_for_owner(
+            project_id=project_id,
+            actor=actor,
+        )
         workflow = await self._director.get_workflow(project_id=project_id, actor=actor)
         if workflow.status != WorkflowStatus.AWAITING_TRIAL_REVIEW.value:
             raise ValidationAppError("trial is not awaiting creator review")
@@ -203,6 +255,20 @@ class DirectorQualityService:
                     "code": "HARD_QUALITY_GATE_BLOCKED",
                     "hard_blockers": quality_payload.hard_blockers,
                 },
+            )
+        if decision == "accept" and quality_payload.overall_status in {
+            "warning",
+            "needs_human",
+        }:
+            await self._record_subjective_override(
+                project_id=project_id,
+                workflow_id=workflow.id,
+                quality_report=quality,
+                actor=actor,
+                review_idempotency_key=idempotency_key,
+                reason=user_note,
+                scopes=[quality_payload.logical_shot_id],
+                hard_block=bool(quality_payload.hard_blockers),
             )
         evidence = [
             ref
@@ -253,6 +319,11 @@ class DirectorQualityService:
             ):
                 raise ConflictError("accepted trial has no terminal composite evidence")
             batch_shot.status = "accepted"
+            await self._promote_trial_model_bindings(
+                batch=batch,
+                actor=actor,
+                workspace_id=project.workspace_id,
+            )
             workflow.status = WorkflowStatus.AWAITING_PRODUCTION_AUTHORIZATION.value
         elif decision == "repair":
             batch.status = "repair_requested"
@@ -265,6 +336,77 @@ class DirectorQualityService:
         await self._session.commit()
         await self._session.refresh(version)
         return version
+
+    async def _promote_trial_model_bindings(
+        self,
+        *,
+        batch: ProductionBatch,
+        actor: User,
+        workspace_id: UUID,
+    ) -> None:
+        """Turn accepted trial media into immutable binding quality evidence.
+
+        This is the first-install bootstrap path. It uses only successful media
+        runs from the accepted representative trial and their exact
+        ProviderOperation binding, so a different model's artifact cannot
+        promote the selected binding.
+        """
+
+        rows = list(
+            (
+                await self._session.execute(
+                    select(NodeRun, GraphNode, ProviderOperation)
+                    .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                    .join(
+                        ProviderOperation,
+                        ProviderOperation.node_run_id == NodeRun.id,
+                    )
+                    .where(
+                        NodeRun.production_batch_id == batch.id,
+                        NodeRun.status.in_(_SUCCESS),
+                        GraphNode.node_key.in_({"keyframe", "video"}),
+                        NodeRun.result_artifact_id.is_not(None),
+                        ProviderOperation.status == "succeeded",
+                        ProviderOperation.model_binding_id.is_not(None),
+                    )
+                )
+            ).tuples()
+        )
+        by_node_key = {node.node_key: (run, operation) for run, node, operation in rows}
+        missing = sorted({"keyframe", "video"} - set(by_node_key))
+        if missing:
+            raise ConflictError(
+                "accepted trial lacks exact provider quality evidence",
+                details={"node_keys": missing},
+            )
+        for node_key, (run, operation) in by_node_key.items():
+            assert operation.model_binding_id is not None
+            assert run.result_artifact_id is not None
+            binding = await self._session.get(
+                ProviderModelBinding, operation.model_binding_id
+            )
+            if binding is None or binding.workspace_id != workspace_id:
+                raise ConflictError("trial Provider binding lineage is invalid")
+            existing = await self._session.scalar(
+                select(ProviderQualityEvidence).where(
+                    ProviderQualityEvidence.model_binding_id == binding.id,
+                    ProviderQualityEvidence.node_run_id == run.id,
+                )
+            )
+            if existing is None:
+                self._session.add(
+                    ProviderQualityEvidence(
+                        workspace_id=binding.workspace_id,
+                        model_binding_id=binding.id,
+                        node_run_id=run.id,
+                        artifact_id=run.result_artifact_id,
+                        evidence_kind=f"creator_accepted_trial_{node_key}",
+                        policy_id="creator-accepted-representative-trial-v1",
+                        approved_by=actor.id,
+                    )
+                )
+            binding.quality_gated = True
+            binding.updated_by = actor.id
 
     async def inspect_production(
         self,
@@ -490,6 +632,23 @@ class DirectorQualityService:
             raise ValidationAppError(
                 "shots with hard blockers cannot be accepted",
                 details={"code": "HARD_QUALITY_GATE_BLOCKED", "shot_ids": invalid_accepts},
+            )
+        subjective_accepts = sorted(
+            shot_report.logical_shot_id
+            for shot_report in report.shot_reports
+            if decisions.get(shot_report.logical_shot_id) == "accept"
+            and shot_report.overall_status in {"warning", "needs_human"}
+        )
+        if subjective_accepts:
+            await self._record_subjective_override(
+                project_id=project_id,
+                workflow_id=workflow.id,
+                quality_report=quality,
+                actor=actor,
+                review_idempotency_key=idempotency_key,
+                reason=user_note,
+                scopes=subjective_accepts,
+                hard_block=bool(invalid_accepts),
             )
         for shot in shots:
             decision = decisions[shot.logical_shot_id]
@@ -782,19 +941,20 @@ class DirectorQualityService:
         )
         if bad_requests:
             hard_blockers.append("effective-request-evidence-missing")
-        face = by_key.get("face_review")
-        face_status = (
-            str((face.output_summary or {}).get("status") or "needs_human")
-            if face
+        identity_review = by_key.get("identity_review")
+        identity_review_status = (
+            str(
+                (identity_review.output_summary or {}).get("identity_review_status")
+                or (identity_review.output_summary or {}).get("status")
+                or "needs_human"
+            )
+            if identity_review
             else "blocked"
         )
-        face_signal = dict(face.output_summary or {}) if face else {}
-        # Face similarity is a triage signal, never an objective release gate.
-        # A low score, a missing detector, or a conflicting visual signal must
-        # be shown to the creator for comparison; it cannot make an otherwise
-        # valid artifact impossible to accept.  Missing/corrupt source media is
-        # already covered by the immutable request/artifact hard gates above.
-        identity_status = _identity_evidence_status(face_status)
+        identity_signal = (
+            dict(identity_review.output_summary or {}) if identity_review else {}
+        )
+        identity_status = _identity_evidence_status(identity_review_status)
         drift = by_key.get("video_drift_review")
         drift_status = (
             str((drift.output_summary or {}).get("status") or "needs_human")
@@ -826,19 +986,27 @@ class DirectorQualityService:
                 dimension="identity",
                 status=identity_status,
                 summary=(
-                    "Identity signal is within the configured evidence range."
+                    "Identity was accepted by an audited human or trusted evaluator."
                     if identity_status == "passed"
                     else (
                         "Identity evidence is insufficient or conflicting; "
                         "visual review is required."
                     )
                 ),
-                evidence_refs=[f"node-run:{face.id}"] if face else [],
+                evidence_refs=(
+                    [f"node-run:{identity_review.id}"] if identity_review else []
+                ),
                 signals={
-                    "insightface_is_one_signal_only": True,
-                    "raw_face_status": face_status,
-                    "face_score": face_signal.get("face_score"),
-                    "backend": face_signal.get("insightface_backend"),
+                    "identity_review_status": identity_review_status,
+                    "review_rule": identity_signal.get("review_rule"),
+                    "canonical_artifact_id": identity_signal.get(
+                        "canonical_artifact_id"
+                    ),
+                    "probe_artifact_id": identity_signal.get("probe_artifact_id"),
+                    "automatic_identity_decision": identity_signal.get(
+                        "automatic_identity_decision", False
+                    ),
+                    "human_review_required": identity_status != "passed",
                 },
             ),
             QualityDimensionResult(
@@ -929,7 +1097,8 @@ class DirectorQualityService:
             dimensions=dimensions,
             hard_blockers=sorted(set(hard_blockers)),
             limitations=[
-                "InsightFace similarity is identity evidence, not an approval decision.",
+                "No trusted and calibrated automatic identity evaluator is installed; "
+                "character, hair, costume and cross-frame consistency require trial review.",
                 "Severe body anomalies, voice quality, mouth motion and acting need human review.",
             ],
             recommended_action="stop" if overall == "blocked" else "review",

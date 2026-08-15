@@ -2480,8 +2480,8 @@ export interface components {
             srt_hash: string;
             /** Package Hash */
             package_hash: string;
-            /** Face Checked */
-            face_checked: number;
+            /** Identity Reviewed */
+            identity_reviewed: number;
             /** Continuity Checked */
             continuity_checked: number;
             /** Content Hash */

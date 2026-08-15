@@ -15,7 +15,6 @@ from app.execution.models import Artifact, NodeRun, ProviderOperation
 from app.execution.pipeline import (
     LEGACY_FIRST_FRAME_TEMPLATE_KEY,
     FirstFramePipeline,
-    face_review_hook,
 )
 from app.production import models as _p  # noqa: F401
 from app.production.models import GraphVersion, ProductionGraph
@@ -97,10 +96,15 @@ async def test_first_frame_writes_graph_node_run_artifact(session: AsyncSession)
     # LEGACY spike records image ProviderOperation only (no forged AgentRun row).
     assert len(ops) == 1
     assert ops[0].actual_provider == "flux"
-    # Two-source review status is real (not forced identity unit-vector pass)
-    assert result.face_review.status in {"passed", "blocked", "warning", "needs_human"}
+    # Independent media is evidence for a creator, not an automatic identity pass.
+    assert result.identity_review.status == "needs_human"
+    assert result.identity_review.rule == "visual_identity_requires_human_review"
     assert run.output_summary is not None
-    assert run.output_summary.get("embedding_source") == "probe_vs_canonical_images"
+    assert run.output_summary.get("evidence_source") == "probe_and_canonical_artifacts"
+    assert run.output_summary.get("automatic_identity_decision") is False
+    assert "score" not in run.output_summary
+    assert "threshold" not in run.output_summary
+    assert "embedding" not in run.output_summary
 
 
 @pytest.mark.asyncio
@@ -116,12 +120,3 @@ async def test_first_frame_rejects_unauthorized(session: AsyncSession) -> None:
             authorized_image=True,
             materialization_ops=["enqueue_keyframe"],
         )
-
-
-def test_face_review_hook_blocks_below_threshold() -> None:
-    a = [0.0] * 512
-    a[0] = 1.0
-    b = [0.0] * 512
-    b[1] = 1.0
-    blocked = face_review_hook(embedding=a, canonical=b, threshold=0.5)
-    assert blocked.status == "blocked"

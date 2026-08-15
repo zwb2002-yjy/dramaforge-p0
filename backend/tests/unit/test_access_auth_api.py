@@ -88,6 +88,22 @@ def test_register_creates_one_owned_default_workspace_and_login_roundtrip(
     ).status_code == 200
 
 
+def test_secure_cookie_is_explicit_and_not_implied_by_production(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SESSION_SECRET", "s" * 48)
+    monkeypatch.setenv("WORKER_TOKEN", "w" * 48)
+    monkeypatch.setenv("BYOK_FERNET_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
+    clear_settings_cache()
+
+    response = client.get("/api/v1/auth/csrf")
+
+    assert response.status_code == 200
+    assert "secure" not in response.headers["set-cookie"].lower()
+
+
 def test_workspace_create_rename_and_empty_delete_require_csrf(client: TestClient) -> None:
     _register(client, "bob@example.com")
     assert client.post("/api/v1/workspaces", json={"name": "Studio"}).status_code == 403

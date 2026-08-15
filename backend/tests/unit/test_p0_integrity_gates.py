@@ -394,7 +394,7 @@ async def _complete_approve_nodes(
     drift_status: str,
 ) -> NodeRun:
     """Build a shot graph with completed runs for every approve-required node."""
-    from app.consistency.face_policy import approved_face_policy_snapshot
+    from app.consistency.identity_policy import identity_evidence_policy_snapshot
     from app.execution.shot_pipeline import shot_pipeline_definition
 
     g = ProductionGraph(
@@ -445,7 +445,7 @@ async def _complete_approve_nodes(
                 "shot_id": str(shot.id),
                 "node_key": key,
                 "lead_identity_required": False,
-                "face_policy": approved_face_policy_snapshot(),
+                "identity_evidence_policy": identity_evidence_policy_snapshot(),
             },
             created_by=user.id,
         )
@@ -454,7 +454,7 @@ async def _complete_approve_nodes(
         if key in media:
             run.result_artifact_id = uuid4()
             run.output_summary = {"status": "passed"}
-        elif key == "face_review":
+        elif key == "identity_review":
             run.output_summary = {"status": "not_applicable"}
         elif key == "video_drift_review":
             run.output_summary = {"status": drift_status}

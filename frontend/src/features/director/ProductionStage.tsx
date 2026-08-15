@@ -183,6 +183,10 @@ function ProductionReview(props: ProductionStageProps & { report: ProductionQual
     onError: async (error) => { onError(errorText(error)); await refresh(); },
   });
   const complete = report.shot_reports.length > 0 && report.shot_reports.every((shot) => decisions[shot.logical_shot_id]);
+  const subjectiveAccepts = report.shot_reports.some(
+    (shot) => decisions[shot.logical_shot_id] === "accept" && ["warning", "needs_human"].includes(shot.overall_status),
+  );
+  const reviewReady = complete && (!subjectiveAccepts || Boolean(note.trim()));
   return (
     <section className="panel" data-testid="production-review">
       <div className="panel-header"><div><h3>逐镜质量验收</h3><p className="muted">每个镜头必须明确接受、修复或停止；硬阻断不能被接受。</p></div><strong>{report.overall_status}</strong></div>
@@ -191,7 +195,8 @@ function ProductionReview(props: ProductionStageProps & { report: ProductionQual
         return <article key={shot.logical_shot_id}><header><strong>{shot.logical_shot_id}</strong><span>{shot.overall_status}</span></header><p>{shot.dimensions.filter((item) => item.status !== "passed").map((item) => item.summary).join("；") || "自动证据未发现异常。"}</p><div className="director-shot-decisions"><button type="button" className={decisions[shot.logical_shot_id] === "accept" ? "selected" : ""} disabled={blocked} onClick={() => setDecisions((value) => ({ ...value, [shot.logical_shot_id]: "accept" }))}>接受</button><button type="button" className={decisions[shot.logical_shot_id] === "repair" ? "selected" : ""} onClick={() => setDecisions((value) => ({ ...value, [shot.logical_shot_id]: "repair" }))}>局部修复</button><button type="button" className={decisions[shot.logical_shot_id] === "stop" ? "selected" : ""} onClick={() => setDecisions((value) => ({ ...value, [shot.logical_shot_id]: "stop" }))}>停止</button></div>{blocked && <small className="status-bad">硬阻断：{shot.hard_blockers.join("；")}</small>}</article>;
       })}</div>
       <label>给 AI 导演的验收说明<textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} /></label>
-      <button type="button" className="accent" disabled={!complete || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? "正在提交并处理…" : complete && Object.values(decisions).every((value) => value === "accept") ? "全部接受并精确导出" : "提交逐镜决定"}</button>
+      <button type="button" className="accent" disabled={!reviewReady || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? "正在提交并处理…" : complete && Object.values(decisions).every((value) => value === "accept") ? "全部接受并精确导出" : "提交逐镜决定"}</button>
+      {subjectiveAccepts && !note.trim() && <p className="status-pending">接受需要人工判断的镜头前，请填写验收理由；原质量报告不会被改写。</p>}
     </section>
   );
 }

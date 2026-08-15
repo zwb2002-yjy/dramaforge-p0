@@ -18,19 +18,37 @@ import pytest
 from sqlalchemy import create_engine, text
 
 BACKEND = Path(__file__).resolve().parents[2]
-DEFAULT_ADMIN = "postgresql://dramaforge:dramaforge@127.0.0.1:5432/postgres"
+DB_USER = "dramaforge"
+DB_PASSWORD = "dramaforge"
+
+
+def _pg_host() -> str:
+    return os.environ.get("TEST_PG_HOST", "127.0.0.1")
+
+
+def _pg_port() -> str:
+    return os.environ.get("TEST_PG_PORT", "5432")
 
 
 def _pg_admin_url() -> str:
-    return os.environ.get("TEST_PG_ADMIN_URL", DEFAULT_ADMIN)
+    default = (
+        f"postgresql://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/postgres"
+    )
+    return os.environ.get("TEST_PG_ADMIN_URL", default)
 
 
 def _db_sync_url(dbname: str) -> str:
-    return f"postgresql+psycopg://dramaforge:dramaforge@127.0.0.1:5432/{dbname}"
+    return (
+        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
+        f"@{_pg_host()}:{_pg_port()}/{dbname}"
+    )
 
 
 def _db_async_url(dbname: str) -> str:
-    return f"postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/{dbname}"
+    return (
+        f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}"
+        f"@{_pg_host()}:{_pg_port()}/{dbname}"
+    )
 
 
 def _pg_available_sync() -> bool:
@@ -144,11 +162,11 @@ async def test_migration_0015_backfills_and_rolls_back_on_isolated_db() -> None:
         _alembic(dbname, "upgrade", "20260803_0014")
         seeded = _seed_legacy_binding(dbname)
 
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20260813_0023")
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar()
-            assert head == "20260813_0022"
+            assert head == "20260813_0023"
             rows = conn.execute(
                 text(
                     "select provider_type, model_id, model_revision "
@@ -220,7 +238,7 @@ async def test_migration_0015_backfills_and_rolls_back_on_isolated_db() -> None:
             )
         engine.dispose()
 
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20260813_0023")
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             assert (
@@ -229,6 +247,49 @@ async def test_migration_0015_backfills_and_rolls_back_on_isolated_db() -> None:
                 ).scalar()
                 == 6
             )
+        engine.dispose()
+    finally:
+        await _drop_db(dbname)
+
+
+@pytest.mark.asyncio
+async def test_identity_review_storage_contract_on_isolated_db() -> None:
+    dbname = f"dramaforge_identity_{uuid.uuid4().hex[:10]}"
+    try:
+        await _create_db(dbname)
+        _alembic(dbname, "upgrade", "head")
+
+        engine = create_engine(_db_sync_url(dbname))
+        with engine.connect() as conn:
+            head = conn.execute(text("select version_num from alembic_version")).scalar_one()
+            assert head == "20260814_0026"
+            node_types = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        "select enumlabel from pg_enum "
+                        "join pg_type on pg_type.oid=pg_enum.enumtypid "
+                        "where pg_type.typname='node_type'"
+                    )
+                )
+            }
+            assert "identity_review" in node_types
+            calibration_length = conn.execute(
+                text(
+                    "select character_maximum_length from information_schema.columns "
+                    "where table_name='characters' and column_name='calibration_state'"
+                )
+            ).scalar_one()
+            assert calibration_length == 32
+            removed_columns = conn.execute(
+                text(
+                    "select count(*) from information_schema.columns "
+                    "where (table_name='characters' and column_name='similarity_threshold') "
+                    "or (table_name='character_references' "
+                    "and column_name in ('face_embedding','embedding_model_version'))"
+                )
+            ).scalar_one()
+            assert removed_columns == 0
         engine.dispose()
     finally:
         await _drop_db(dbname)

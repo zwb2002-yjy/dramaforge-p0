@@ -16,10 +16,9 @@ Artifact 血缘、审核、局部返工和交付等可复用底座，但快速�
 [`docs/README.md`](docs/README.md)，当前执行合同见 [`docs/current/`](docs/current/)，实时工程状态见
 [`docs/开发执行检查点.md`](docs/开发执行检查点.md)。
 
-历史 S0-A 使用本地 InsightFace / ONNX Runtime 得到过 `0.60` 实验阈值；这只证明人脸信号可运行，
-不等于人物一致性已解决，也不再是发布级唯一 Gate。新质量体系要求先验证参考资产进入有效请求，
-再以多信号、真实校准集和人工验收判断。历史原始结果见
-[`docs/spikes/s0a-face-consistency.md`](docs/spikes/s0a-face-consistency.md)。
+首版不集成人脸 embedding、生物特征识别或相似度阈值。人物一致性先验证角色参考真实进入
+有效请求，再保存生成产物与视频首/中/末帧证据，由用户在试拍中验收；没有可信且校准过的
+自动评估器时，系统返回 `needs_human`，不会伪造通过分数。
 
 2026-09-15 首版发布标准见 [`docs/current/01-产品与发布契约.md`](docs/current/01-产品与发布契约.md)；
 不再以固定 10 Shot 作为产品完成条件。
@@ -49,9 +48,10 @@ D:\dramaforge
 | Dispatcher / Worker (default + heavy) | Outbox 派发与 Arq 异步任务消费 |
 | 前端网关 (React + Nginx) | 默认唯一入口 `127.0.0.1:8080` |
 
-`docker-compose.yml` 是完整发布拓扑：它构建前端静态产物与非特权 Nginx 网关，并启动
-PostgreSQL、Redis、MinIO、LiteLLM、迁移、API、常驻 Outbox dispatcher 与两类 Arq Worker。
-只有前端网关发布宿主端口，其他服务保留在 Compose 内网。
+`docker-compose.yml` 是完整发布拓扑：它只使用版本化成品镜像，启动 PostgreSQL、Redis、
+MinIO、LiteLLM、迁移、API、常驻 Outbox dispatcher、两类 Arq Worker 与非特权 Nginx 网关。
+只有前端网关发布宿主端口，其他服务保留在 Compose 内网。普通用户无需安装 Python、Node.js
+或编译器，也不会在安装时执行 `apt`、`pip`、`npm` 或源码构建。
 
 ---
 
@@ -61,40 +61,60 @@ PostgreSQL、Redis、MinIO、LiteLLM、迁移、API、常驻 Outbox dispatcher �
 
 **前置条件**：Docker Compose v2。
 
-**1. 准备环境文件**
+**在线安装（普通用户）**
 
 ```powershell
-python scripts/init_env.py
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
 ```
 
-该命令从 `.env.example` 创建本地 `.env`，为 Session、Worker、BYOK Fernet 和
-LiteLLM 分别生成唯一密钥，且不会把密钥值打印到终端。为避免误覆盖，`.env` 已存在时命令会
-直接拒绝；需要保留的 Provider BYOK 应继续只写入本地 `.env`。Compose 对这些必需密钥
-采用 fail-fast 校验，空值或缺失时不会启动。
+Linux/macOS：
+
+```sh
+chmod +x install.sh
+./install.sh
+```
+
+请从同一 GitHub Release 解压完整在线安装包后运行脚本。安装器读取发布包中的
+`release.env`，拉取与发布 commit 绑定的不可变镜像，在后端成品镜像内生成本地 `.env`，
+然后执行 Compose 健康等待；宿主机只需要 Docker Compose v2。已有 `.env` 升级时会保留
+数据库密码、Fernet 密钥和 Provider 配置，只更新发布身份。
+
+**完整离线安装**
+
+离线安装包按 CPU 架构发布，并包含 PostgreSQL、Redis、MinIO、LiteLLM、DramaForge 前后端
+等全部镜像。解压后运行：
+
+```powershell
+.\install.ps1 -Offline
+```
+
+或：
+
+```sh
+./install.sh --offline
+```
+
+安装器会从包内 `images.tar` 导入镜像，并通过 `docker-compose.offline.yml` 强制禁止拉取。
+“离线安装”只表示安装过程不访问镜像仓库；使用 Agnes、MiniMax 等云 Provider 创作仍需外网
+和用户自己的密钥。首版尚未宣称整条媒体创作链可断网运行。
+
+安装器为 Session、Worker、BYOK Fernet 和 LiteLLM 分别生成唯一密钥，且不会把密钥单独
+打印到终端。需要保留的 Provider BYOK 只写入本地 `.env`。Compose 对必需密钥采用
+fail-fast 校验，空值或缺失时不会启动。
 
 默认部署为单用户模式（`PUBLIC_REGISTRATION_ENABLED=false`）：干净数据库允许在登录页创建
 第一个 Owner；创建成功后后端 `/api/v1/auth/register` 返回 `REGISTRATION_CLOSED`，前端也会
 隐藏初始化入口。不要为了“修复登录”删除数据库。只有明确需要多账号实验时，才在受控环境将
 该变量改为 `true`。
 
-> 如果旧 `.env` 来自早期版本，请先备份并手工补齐
-> `POSTGRES_PASSWORD`、`MINIO_ROOT_PASSWORD`、`LITELLM_DB_PASSWORD`、`SESSION_SECRET`、
-> `WORKER_TOKEN`、`BYOK_FERNET_KEY`、`LITELLM_MASTER_KEY`；不要用仓库
-> 文档里的公共固定值。已经加密保存 BYOK 后不得随意替换 Fernet key，应按密钥轮换工具操作。
-
-**2. 启动完整应用**
-
-```powershell
-docker compose up -d --build
-```
-
 Compose 会从本地忽略的 `.env` 读取 `AGNES_*`、`TEXT_LLM_*` 和可选的 `TTS_*`，
 并仅注入 API 与 Worker 容器；未配置时保持 fail-closed。不要把真实密钥写入
 `docker-compose.yml` 或提交到 Git。
 
-> 这会启动 **所有** 服务（postgres、redis、minio、litellm、migrate、api、frontend、dispatcher、worker-default、worker-heavy）。首次运行会构建前后端镜像。后端包含 FFmpeg、eSpeak NG 和可选的 InsightFace Python 运行时代码，但不包含、下载或初始化任何 InsightFace 预训练权重。
+> 安装会启动 **所有** 服务（postgres、redis、minio、litellm、migrate、api、frontend、dispatcher、worker-default、worker-heavy）。后端成品镜像包含 FFmpeg 与 eSpeak NG；人物一致性由参考绑定、有效请求、产物血缘和人工试拍验收共同判断。
 
-**3. 验证**
+**验证**
 
 ```powershell
 curl http://localhost:8080/gateway-health
@@ -105,20 +125,6 @@ curl http://localhost:8080/health
 浏览器打开 `http://localhost:8080`。默认只绑定回环地址，不提供 TLS；公网或局域网部署必须
 明确配置入口与 HTTPS 边界，详见
 [`docs/runbooks/docker-deployment.md`](docs/runbooks/docker-deployment.md)。
-
-默认镜像应明确报告 InsightFace 未启用：
-
-```powershell
-docker compose exec api python -c "import json; from app.consistency.image_embed import insightface_status; print(json.dumps(insightface_status(), sort_keys=True))"
-# → {"available": false, "backend": "hash_placeholder", ...}
-```
-
-DramaForge 不分发或自动下载 `buffalo_l`。只有在部署者自行确认模型文件的来源、许可和用途，
-把模型目录只读挂载到容器，并设置 `INSIGHTFACE_ENABLED=true`、
-`INSIGHTFACE_MODEL_ROOT=/models/insightface` 后才会尝试加载。预期目录结构为
-`/models/insightface/models/<INSIGHTFACE_MODEL_NAME>/*.onnx`；缺少文件时保持 fail-closed，
-不会触发库的隐式联网下载。即使 `available=true`，它也只证明人脸 embedding 运行时可用，
-不等于人物一致性已解决，也不能单独作为发布 Gate。
 
 **GPU / ComfyUI（可选）**：
 
@@ -140,6 +146,15 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres re
 
 `docker-compose.dev.yml` 会显式开放调试端口，不得用于不受信网络。原生调试不提供另一套部署
 模式；数据库、队列和对象存储仍由 Compose 管理。
+
+需要从源码构建完整容器栈时，必须显式叠加构建 override：
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+发布拓扑本身没有 `build` 字段；改动源码后由开发者或 CI 重新构建镜像，普通用户不在安装机
+上编译。
 
 **后端**（Python 3.12 + venv）：
 

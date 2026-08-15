@@ -1,0 +1,460 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  verify-release-source:
+    name: Verify release source
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      migration_head: ${{ steps.migration-head.outputs.migration_head }}
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: dramaforge
+          POSTGRES_USER: dramaforge
+          POSTGRES_PASSWORD: dramaforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dramaforge -d dramaforge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge
+      SESSION_SECRET: release-verification-session-secret-32-characters
+      WORKER_TOKEN: release-verification-worker-token-32-characters
+      BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      AGNES_ENABLED: "false"
+      MINIMAX_ENABLED: "false"
+      TEXT_LLM_ENABLED: "false"
+      LITELLM_INTEGRATION_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Bind tag to repository version
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+              echo "Release tag must be an exact v-prefixed SemVer." >&2
+              exit 1
+            fi
+            expected="${GITHUB_REF_NAME#v}"
+            version="$(python scripts/release_contract.py check --repo-root . --expected-version "$expected" --output version)"
+          else
+            version="$(python scripts/release_contract.py check --repo-root . --output version)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Enforce repository policy
+        run: |
+          python scripts/check_directory_compliance.py
+          python scripts/repo_guardrails.py policy --repo-root .
+      - name: Sync backend dependencies
+        working-directory: backend
+        run: uv sync --locked --extra dev
+      - name: Backend static analysis
+        working-directory: backend
+        run: |
+          uv run ruff check app tests alembic
+          uv run mypy app
+      - name: Backend unit tests
+        working-directory: backend
+        run: uv run pytest tests/unit -q
+      - name: Resolve single migration head
+        id: migration-head
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t heads < <(uv run alembic heads | awk 'NF {print $1}')
+          if [[ "${#heads[@]}" -ne 1 ]]; then
+            echo "Release requires exactly one Alembic head; found ${#heads[@]}." >&2
+            exit 1
+          fi
+          echo "migration_head=${heads[0]}" >> "$GITHUB_OUTPUT"
+      - name: Apply migrations
+        working-directory: backend
+        run: uv run alembic upgrade head
+      - name: PostgreSQL and real LiteLLM integration tests
+        working-directory: backend
+        run: uv run pytest tests/integration -q -rs --fail-on-skip
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Frontend quality suite
+        working-directory: frontend
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke test
+        working-directory: frontend
+        run: npm run test:e2e -- tests/e2e/smoke.spec.ts
+
+  release-platform-baseline:
+    name: Release baseline (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Validate version identity
+        run: python scripts/release_contract.py check --repo-root .
+      - name: Sync backend dependencies
+        working-directory: backend
+        run: uv sync --locked --extra dev
+      - name: Cross-platform backend contracts
+        working-directory: backend
+        run: >-
+          uv run pytest
+          tests/unit/test_config.py
+          tests/unit/test_init_env.py
+          tests/unit/test_dockerfile_context.py
+          tests/unit/test_compose_contract.py
+          tests/unit/test_release_contract.py
+          -q
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  containers-and-sbom:
+    name: Build, smoke, and publish containers
+    needs: [verify-release-source, release-platform-baseline]
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_PASSWORD: release-compose-postgres-password
+      POSTGRES_APP_PASSWORD: release-compose-app-password
+      MINIO_ROOT_PASSWORD: release-compose-minio-password
+      LITELLM_DB_PASSWORD: release-compose-litellm-db-password
+      LITELLM_MASTER_KEY: sk-release-compose-master-key
+      LITELLM_API_KEY: sk-release-compose-master-key
+      SESSION_SECRET: release-compose-session-secret-32-characters
+      WORKER_TOKEN: release-compose-worker-token-32-characters
+      BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      DRAMAFORGE_VERSION: ${{ needs.verify-release-source.outputs.version }}
+      DRAMAFORGE_SOURCE_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Validate Compose topology
+        run: docker compose config --quiet
+      - name: Select immutable image identity
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "backend=ghcr.io/${GITHUB_REPOSITORY,,}-backend" >> "$GITHUB_OUTPUT"
+          echo "frontend=ghcr.io/${GITHUB_REPOSITORY,,}-frontend" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build exact local release images
+        env:
+          BACKEND_IMAGE: ${{ steps.image.outputs.backend }}
+          FRONTEND_IMAGE: ${{ steps.image.outputs.frontend }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          docker build \
+            --build-arg "DRAMAFORGE_VERSION=$DRAMAFORGE_VERSION" \
+            --build-arg "DRAMAFORGE_SOURCE_COMMIT=$DRAMAFORGE_SOURCE_COMMIT" \
+            --tag "$BACKEND_IMAGE:$IMAGE_TAG" backend
+          docker build \
+            --build-arg "DRAMAFORGE_VERSION=$DRAMAFORGE_VERSION" \
+            --build-arg "DRAMAFORGE_SOURCE_COMMIT=$DRAMAFORGE_SOURCE_COMMIT" \
+            --tag "$FRONTEND_IMAGE:$IMAGE_TAG" frontend
+      - name: Smoke exact Compose candidate
+        env:
+          DRAMAFORGE_BACKEND_IMAGE: ${{ steps.image.outputs.backend }}:${{ steps.image.outputs.tag }}
+          DRAMAFORGE_FRONTEND_IMAGE: ${{ steps.image.outputs.frontend }}:${{ steps.image.outputs.tag }}
+        run: |
+          docker compose up -d --wait
+          curl --fail --show-error --retry 10 --retry-delay 2 http://127.0.0.1:8080/gateway-health
+      - name: Capture Compose diagnostics
+        if: failure()
+        run: docker compose ps -a && docker compose logs --no-color --tail=250
+      - name: Stop Compose candidate
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+      - name: Record local image digests
+        id: local-digests
+        env:
+          BACKEND_IMAGE: ${{ steps.image.outputs.backend }}
+          FRONTEND_IMAGE: ${{ steps.image.outputs.frontend }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        shell: bash
+        run: |
+          echo "backend=$(docker image inspect --format '{{.Id}}' "$BACKEND_IMAGE:$IMAGE_TAG")" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(docker image inspect --format '{{.Id}}' "$FRONTEND_IMAGE:$IMAGE_TAG")" >> "$GITHUB_OUTPUT"
+      - uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dramaforge-source.spdx.json
+          upload-artifact: false
+      - uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.image.outputs.backend }}:${{ steps.image.outputs.tag }}
+          format: spdx-json
+          output-file: dramaforge-backend.spdx.json
+          upload-artifact: false
+      - uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.image.outputs.frontend }}:${{ steps.image.outputs.tag }}
+          format: spdx-json
+          output-file: dramaforge-frontend.spdx.json
+          upload-artifact: false
+      - uses: docker/login-action@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish multi-platform backend image
+        id: backend-push
+        uses: docker/build-push-action@v6
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          context: backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.backend }}:${{ steps.image.outputs.tag }}
+            ${{ steps.image.outputs.backend }}:${{ steps.image.outputs.sha_tag }}
+          build-args: |
+            DRAMAFORGE_VERSION=${{ needs.verify-release-source.outputs.version }}
+            DRAMAFORGE_SOURCE_COMMIT=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Publish multi-platform frontend image
+        id: frontend-push
+        uses: docker/build-push-action@v6
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          context: frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.frontend }}:${{ steps.image.outputs.tag }}
+            ${{ steps.image.outputs.frontend }}:${{ steps.image.outputs.sha_tag }}
+          build-args: |
+            DRAMAFORGE_VERSION=${{ needs.verify-release-source.outputs.version }}
+            DRAMAFORGE_SOURCE_COMMIT=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Select manifest digests
+        id: manifest-digests
+        shell: bash
+        env:
+          PUBLISHED: ${{ steps.image.outputs.published }}
+          LOCAL_BACKEND: ${{ steps.local-digests.outputs.backend }}
+          LOCAL_FRONTEND: ${{ steps.local-digests.outputs.frontend }}
+          PUSHED_BACKEND: ${{ steps.backend-push.outputs.digest }}
+          PUSHED_FRONTEND: ${{ steps.frontend-push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ "$PUBLISHED" == "true" ]]; then
+            backend="$PUSHED_BACKEND"
+            frontend="$PUSHED_FRONTEND"
+          else
+            backend="$LOCAL_BACKEND"
+            frontend="$LOCAL_FRONTEND"
+          fi
+          [[ "$backend" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$frontend" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
+      - name: Create release manifest
+        shell: bash
+        run: |
+          published=()
+          if [[ "${{ steps.image.outputs.published }}" == "true" ]]; then
+            published=(--published)
+          fi
+          python scripts/release_contract.py manifest \
+            --version "${{ needs.verify-release-source.outputs.version }}" \
+            --source-commit "${{ github.sha }}" \
+            --migration-head "${{ needs.verify-release-source.outputs.migration_head }}" \
+            --backend-image "${{ steps.image.outputs.backend }}" \
+            --backend-tag "${{ steps.image.outputs.tag }}" \
+            --backend-digest "${{ steps.manifest-digests.outputs.backend }}" \
+            --frontend-image "${{ steps.image.outputs.frontend }}" \
+            --frontend-tag "${{ steps.image.outputs.tag }}" \
+            --frontend-digest "${{ steps.manifest-digests.outputs.frontend }}" \
+            "${published[@]}" \
+            --output-file release-manifest.json
+      - name: Create online and offline release bundles
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify-release-source.outputs.version }}
+          BACKEND_IMAGE: ${{ steps.image.outputs.backend }}
+          FRONTEND_IMAGE: ${{ steps.image.outputs.frontend }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          BACKEND_DIGEST: ${{ steps.manifest-digests.outputs.backend }}
+          FRONTEND_DIGEST: ${{ steps.manifest-digests.outputs.frontend }}
+        run: |
+          set -euo pipefail
+          online_dir="dramaforge-online-v${VERSION}"
+          offline_dir="dramaforge-offline-linux-amd64-v${VERSION}"
+          mkdir -p "$online_dir/infra/litellm" "$offline_dir/infra/litellm"
+
+          common_files=(
+            docker-compose.yml
+            docker-compose.offline.yml
+            .env.example
+            install.ps1
+            install.sh
+            LICENSE
+            NOTICE
+            release-manifest.json
+            dramaforge-source.spdx.json
+            dramaforge-backend.spdx.json
+            dramaforge-frontend.spdx.json
+          )
+          for path in "${common_files[@]}"; do
+            cp "$path" "$online_dir/$path"
+            cp "$path" "$offline_dir/$path"
+          done
+          cp infra/litellm/config.yaml "$online_dir/infra/litellm/config.yaml"
+          cp infra/litellm/config.yaml "$offline_dir/infra/litellm/config.yaml"
+
+          cat > "$online_dir/release.env" <<EOF
+          DRAMAFORGE_VERSION=$VERSION
+          DRAMAFORGE_SOURCE_COMMIT=$GITHUB_SHA
+          DRAMAFORGE_BACKEND_IMAGE=$BACKEND_IMAGE@$BACKEND_DIGEST
+          DRAMAFORGE_FRONTEND_IMAGE=$FRONTEND_IMAGE@$FRONTEND_DIGEST
+          EOF
+          cat > "$offline_dir/release.env" <<EOF
+          DRAMAFORGE_VERSION=$VERSION
+          DRAMAFORGE_SOURCE_COMMIT=$GITHUB_SHA
+          DRAMAFORGE_BACKEND_IMAGE=$BACKEND_IMAGE:$IMAGE_TAG
+          DRAMAFORGE_FRONTEND_IMAGE=$FRONTEND_IMAGE:$IMAGE_TAG
+          EOF
+
+          mapfile -t runtime_images < <(
+            DRAMAFORGE_BACKEND_IMAGE="$BACKEND_IMAGE:$IMAGE_TAG" \
+            DRAMAFORGE_FRONTEND_IMAGE="$FRONTEND_IMAGE:$IMAGE_TAG" \
+            docker compose config --images | sort -u
+          )
+          expected_images=(
+            "$BACKEND_IMAGE:$IMAGE_TAG"
+            "$FRONTEND_IMAGE:$IMAGE_TAG"
+            "postgres:15-alpine"
+            "redis:7-alpine"
+            "minio/minio:RELEASE.2024-12-18T13-15-44Z"
+            "ghcr.io/berriai/litellm:v1.96.0"
+          )
+          for expected in "${expected_images[@]}"; do
+            printf '%s\n' "${runtime_images[@]}" | grep -Fqx "$expected" || {
+              echo "Offline bundle is missing runtime image: $expected" >&2
+              exit 1
+            }
+          done
+          if [[ "${#runtime_images[@]}" -ne "${#expected_images[@]}" ]]; then
+            echo "Offline bundle resolved an unexpected runtime image set." >&2
+            exit 1
+          fi
+          docker image inspect "${runtime_images[@]}" >/dev/null
+          docker save --output "$offline_dir/images.tar" "${runtime_images[@]}"
+
+          (cd "$online_dir" && zip -q -r "../${online_dir}.zip" .)
+          tar -czf "${offline_dir}.tar.gz" "$offline_dir"
+      - name: Create checksums
+        run: >-
+          sha256sum
+          dramaforge-*.spdx.json
+          release-manifest.json
+          dramaforge-online-v*.zip
+          dramaforge-offline-linux-amd64-v*.tar.gz
+          LICENSE NOTICE
+          > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ steps.image.outputs.tag }}
+          path: |
+            dramaforge-*.spdx.json
+            release-manifest.json
+            dramaforge-online-v*.zip
+            dramaforge-offline-linux-amd64-v*.tar.gz
+            SHA256SUMS
+            LICENSE
+            NOTICE
+      - name: Attest backend image provenance
+        uses: actions/attest-build-provenance@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          subject-name: ${{ steps.image.outputs.backend }}
+          subject-digest: ${{ steps.backend-push.outputs.digest }}
+          push-to-registry: true
+      - name: Attest frontend image provenance
+        uses: actions/attest-build-provenance@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          subject-name: ${{ steps.image.outputs.frontend }}
+          subject-digest: ${{ steps.frontend-push.outputs.digest }}
+          push-to-registry: true
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          generate_release_notes: true
+          files: |
+            dramaforge-source.spdx.json
+            dramaforge-backend.spdx.json
+            dramaforge-frontend.spdx.json
+            release-manifest.json
+            dramaforge-online-v*.zip
+            dramaforge-offline-linux-amd64-v*.tar.gz
+            SHA256SUMS
+            LICENSE
+            NOTICE

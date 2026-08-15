@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,21 +63,27 @@ class AccessService:
             )
         if await self._repo.get_user_by_email(email.lower()):
             raise ValidationAppError("email already registered")
-        user = await self._repo.add_user(
-            User(
-                email=email.lower(),
-                display_name=display_name,
-                password_hash=hash_password(password),
-                is_active=True,
-            )
+        user = User(
+            id=uuid4(),
+            email=email.lower(),
+            display_name=display_name,
+            password_hash=hash_password(password),
+            is_active=True,
         )
+        # INSERT ... RETURNING is also subject to the users SELECT policy.
+        # Bind the preallocated identity before the insert so the runtime role
+        # can see only the row it is creating.
         await set_rls_context(self._session, user_id=user.id)
+        user = await self._repo.add_user(user)
         await self._repo.add_workspace(
             Workspace(owner_user_id=user.id, name=DEFAULT_WORKSPACE_NAME)
         )
         if not owner_initialized:
             await self._repo.set_bootstrap_owner(user.id)
         await self._session.commit()
+        # SET LOCAL is cleared by commit; restore the self scope before the
+        # refresh performed under the restricted runtime role.
+        await set_rls_context(self._session, user_id=user.id)
         await self._session.refresh(user)
         return user
 

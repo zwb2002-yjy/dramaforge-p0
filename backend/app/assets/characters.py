@@ -10,8 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.models import Asset, Character, CharacterReference
 from app.config import get_settings
-from app.consistency.face_policy import approved_face_threshold
-from app.consistency.image_embed import embedding_from_image_bytes
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import GraphNode, NodeRun, ProviderOperation
 from app.production.service import GraphService
@@ -30,8 +28,6 @@ class CharacterWithCanonical:
     canonical_artifact_id: UUID
     canonical_content_hash: str
     canonical_mime_type: str
-    similarity_threshold: float
-    embedding_dim: int
 
 
 async def create_canonical_generation_run(
@@ -154,13 +150,10 @@ async def register_lead_character(
     store: ObjectStore | None = None,
     produced_by_run_id: UUID | None = None,
 ) -> CharacterWithCanonical:
-    """Create character asset + canonical reference with 512-d embedding from image."""
+    """Create a character and immutable Canonical reference Artifact."""
     if not canonical_image_bytes:
         raise ValidationAppError("canonical image required")
     obj = store or get_object_store()
-    emb = embedding_from_image_bytes(canonical_image_bytes)
-    if len(emb) != 512:
-        raise ValidationAppError("embedding dim must be 512")
 
     asset = Asset(
         project_id=project_id,
@@ -176,8 +169,7 @@ async def register_lead_character(
         id=asset.id,
         locked_prompt=locked_prompt,
         negative_prompt="",
-        calibration_state="calibrated",
-        similarity_threshold=approved_face_threshold(),
+        calibration_state="awaiting_visual_review",
     )
     session.add(char)
     await session.flush()
@@ -204,8 +196,6 @@ async def register_lead_character(
         object_key=artifact.object_key,
         reference_kind="canonical",
         is_canonical=True,
-        face_embedding=emb,
-        embedding_model_version="content-hash-v1",
     )
     session.add(ref)
     await session.flush()
@@ -217,8 +207,6 @@ async def register_lead_character(
         canonical_artifact_id=artifact.id,
         canonical_content_hash=artifact.content_hash,
         canonical_mime_type=artifact.mime_type,
-        similarity_threshold=approved_face_threshold(),
-        embedding_dim=len(emb),
     )
 
 
@@ -241,6 +229,6 @@ async def require_canonical_for_shot(
     ref = (await session.execute(q.limit(1))).scalar_one_or_none()
     if ref is None:
         raise ValidationAppError("CANONICAL_REFERENCE_REQUIRED")
-    if ref.artifact_id is None or not ref.object_key or not ref.face_embedding:
+    if ref.artifact_id is None or not ref.object_key:
         raise ValidationAppError("CANONICAL_REFERENCE_REQUIRED")
     return ref

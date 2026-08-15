@@ -287,9 +287,17 @@ async def enqueue_node_run(
         await require_legacy_execution_allowed(
             session, project_id=project_id, action="legacy_node_run_enqueue"
         )
+    response_run_id = run.id
+    response_status = run.status
     job_id = await AgentRunScheduler(session).enqueue_node_run_only(node_run_id)
-    await session.refresh(run)
-    return EnqueueResponse(node_run_id=run.id, status=run.status, job_id=job_id)
+    # enqueue_node_run_only commits before publishing to Arq. PostgreSQL RLS
+    # settings are transaction-local, so refreshing here would query without
+    # the request's project scope and can race a fast Worker to a terminal state.
+    return EnqueueResponse(
+        node_run_id=response_run_id,
+        status=response_status,
+        job_id=job_id,
+    )
 
 
 @router.post("/projects/{project_id}/exports", response_model=ExportResponse)
@@ -333,7 +341,7 @@ class GoldenProduceResponse(BaseModel):
     timeline_hash: str
     srt_hash: str
     package_hash: str
-    face_checked: int
+    identity_reviewed: int
     continuity_checked: int
     content_hash: str
 
@@ -377,7 +385,7 @@ async def produce_golden_path(
         timeline_hash=result.export.timeline_hash,
         srt_hash=result.export.srt_hash,
         package_hash=result.export.package_hash,
-        face_checked=sum(1 for s in result.shots if s.face_checked),
+        identity_reviewed=sum(1 for s in result.shots if s.identity_reviewed),
         continuity_checked=sum(1 for s in result.shots if s.continuity_checked),
         content_hash=result.content_hash,
     )

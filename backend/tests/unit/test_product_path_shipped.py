@@ -18,10 +18,14 @@ from app.events import models as _em  # noqa: F401
 from app.events.models import OutboxEvent
 from app.execution import models as _xm  # noqa: F401
 from app.execution.artifact_lineage import get_or_create_artifact
-from app.execution.models import Artifact, NodeRun
+from app.execution.models import Artifact, NodeRun, ProviderOperation
 from app.execution.product_path import execute_media_node_run
 from app.execution.shot_p0 import produce_shots_p0, rework_subtitle_only_p0, set_shot_lock
-from app.execution.shot_review import local_rerun_from_node, start_shot_nodes
+from app.execution.shot_review import (
+    _missing_required_prerequisites,
+    local_rerun_from_node,
+    start_shot_nodes,
+)
 from app.production import models as _pm  # noqa: F401
 from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
 from app.shared.base import Base
@@ -58,6 +62,60 @@ async def _seed_user_workspace(session: AsyncSession) -> tuple[User, UUID]:
     await session.flush()
     await session.commit()
     return user, workspace.id
+
+
+def test_partial_rerun_adds_only_missing_required_prerequisites() -> None:
+    def run(node_key: str, status: str) -> NodeRun:
+        return NodeRun(
+            project_id=uuid4(),
+            graph_version_id=uuid4(),
+            graph_node_id=uuid4(),
+            idempotency_key=f"dependency:{node_key}:{uuid4()}",
+            input_hash=uuid4().hex * 2,
+            status=status,
+            input_snapshot={"node_key": node_key},
+            created_by=uuid4(),
+        )
+
+    latest = {
+        "keyframe": run("keyframe", "completed"),
+        "video_drift_review": run("video_drift_review", "completed"),
+    }
+    missing = _missing_required_prerequisites(
+        requested_keys=["composite", "continuity_review"],
+        latest_by_key=latest,
+    )
+    assert missing == ["video", "voice", "subtitle"]
+
+
+def test_partial_rerun_reuses_pending_or_successful_ancestors() -> None:
+    latest = {
+        key: NodeRun(
+            project_id=uuid4(),
+            graph_version_id=uuid4(),
+            graph_node_id=uuid4(),
+            idempotency_key=f"dependency:{key}:{uuid4()}",
+            input_hash=uuid4().hex * 2,
+            status=status,
+            input_snapshot={"node_key": key},
+            created_by=uuid4(),
+        )
+        for key, status in {
+            "prompt": "completed",
+            "keyframe": "completed",
+            "video": "completed",
+            "video_drift_review": "running",
+            "voice": "queued",
+            "subtitle": "completed_after_cancel",
+        }.items()
+    }
+    assert (
+        _missing_required_prerequisites(
+            requested_keys=["composite", "continuity_review"],
+            latest_by_key=latest,
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio
@@ -254,19 +312,8 @@ async def test_ten_shot_full_nodes_and_lock(session: AsyncSession) -> None:
     shots = await produce_shots_p0(session, project_id=project.id, user_id=user.id, n=10)
     assert len(shots) == 10
     assert all(len(s.node_ids) == 9 for s in shots)
-    assert all(s.face_checked and s.continuity_checked for s in shots)
-    assert all(s.face_status is not None for s in shots)
-    # Deliberate character mismatch must not score as near-identity
-    mismatched = await produce_shots_p0(
-        session,
-        project_id=project.id,
-        user_id=user.id,
-        n=1,
-        mismatch_face_on_shot=1,
-    )
-    assert mismatched[0].face_status in {"blocked", "needs_human", "warning"} or (
-        mismatched[0].face_score is not None and mismatched[0].face_score < 0.95
-    )
+    assert all(s.identity_reviewed and s.continuity_checked for s in shots)
+    assert all(s.identity_status == "needs_human" for s in shots)
     for s in shots:
         for key in s.node_ids:
             assert key in s.run_ids and key in s.artifact_ids
@@ -547,6 +594,15 @@ async def test_explicit_enqueue_reuses_materialization_outbox(
 @pytest.mark.asyncio
 async def test_health_ping_job() -> None:
     assert (await health_ping({}))["status"] == "ok"
+
+
+def test_worker_model_registry_loads_provider_catalog_metadata() -> None:
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.shared.model_registry import load_all_models
+
+    load_all_models()
+    assert ModelCatalogEntry.__table__.name in ModelCatalogEntry.metadata.tables
+    assert "provider_model_catalog_entries" in ProviderOperation.metadata.tables
 
 
 def test_rls_migration_and_worker_jobs_registered() -> None:

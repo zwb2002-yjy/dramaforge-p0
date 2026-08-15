@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 前端中文化映射（用户可见文本）。
  *
  * 只负责把 API/领域原始值（status、error_code、node_key 等）翻译成中文展示。
@@ -46,7 +46,7 @@ export function zhEvidenceState(state: string | null | undefined): string {
 export const ZH_NODE: Record<string, string> = {
   prompt: "提示词",
   keyframe: "关键帧",
-  face_review: "人脸审核",
+  identity_review: "人物一致性复核",
   video: "视频",
   video_drift_review: "视频漂移审核",
   voice: "配音",
@@ -80,10 +80,10 @@ export const ZH_ERROR_CODE: Record<string, string> = {
   PROVIDER_POLL_TRANSIENT: "Provider 轮询瞬时错误",
   PROVIDER_RESPONSE_INVALID: "Provider 响应无效",
   PROVIDER_REQUEST_FAILED: "Provider 请求失败",
-  FACE_BELOW_THRESHOLD: "人脸分数低于阈值",
-  FACE_PROBE_UNAVAILABLE: "人脸探针不可用",
-  FACE_POLICY_MISSING: "人脸策略缺失",
-  FACE_POLICY_MISMATCH: "人脸策略不匹配",
+  IDENTITY_EVIDENCE_POLICY_MISSING: "人物证据策略缺失",
+  IDENTITY_EVIDENCE_POLICY_MISMATCH: "人物证据策略不匹配",
+  IDENTITY_EVIDENCE_INCOMPLETE: "人物证据链不完整",
+  IDENTITY_REVIEW_REQUIRED: "需要人工确认人物一致性",
   VIDEO_DRIFT_BLOCKED: "视频漂移阻断",
   VIDEO_DRIFT_POLICY_UNAPPROVED: "视频漂移策略未批准",
   blocked_budget: "预算阻断",

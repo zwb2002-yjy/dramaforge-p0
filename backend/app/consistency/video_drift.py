@@ -1,4 +1,4 @@
-"""Deterministic Video Drift sampling without an unapproved pass threshold."""
+"""Deterministic video frame sampling for human temporal review."""
 
 from __future__ import annotations
 
@@ -9,16 +9,9 @@ from typing import Any
 
 import cv2
 
-from app.consistency.image_embed import embedding_from_image_bytes
-
 VIDEO_DRIFT_SAMPLING_VERSION = "opencv-start-mid-end-scene-v1"
-# Approved 2026-08-04 on 6 real frozen-sample videos (P0-VIDEO-01 §12.3).
-# Decision rule: mean of scored frames >= 0.40 -> passed; otherwise blocked;
-# no scored frames or >half unscorable -> needs_human. Real distribution:
-# identity-preserving videos 0.416-0.605, drifting video (shot 10) 0.179.
-VIDEO_DRIFT_POLICY_STATUS = "APPROVED"
-VIDEO_DRIFT_POLICY_ID = "P0-VIDEO-DRIFT-2026-08-04"
-VIDEO_DRIFT_THRESHOLD = 0.40
+VIDEO_DRIFT_POLICY_STATUS = "HUMAN_REVIEW_REQUIRED"
+VIDEO_DRIFT_POLICY_ID = "live-dialogue-temporal-review-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,52 +97,12 @@ def extract_video_samples(video_bytes: bytes) -> list[VideoFrameSample]:
 
 
 def decide_video_drift(rows: list[dict[str, object]]) -> dict[str, object]:
-    """Approved Video Drift decision (P0-VIDEO-DRIFT-2026-08-04, §12.3).
-
-    passed:      mean of scored frames >= 0.40
-    blocked:     mean of scored frames < 0.40
-    needs_human: no scored frames, or more than half the sampled frames are
-                 unscorable (no detectable face / embedding failure). Fail-closed:
-                 a needs_human review blocks downstream and approve; the intended
-                 human path is re-running the video (or manual media), never an
-                 approve-time override (P0 decision 2026-08-04).
-
-    The returned evidence includes the scored-frame distribution (min/max and
-    count above threshold) so a single high frame masking a mostly-drifting
-    video is visible to a human reviewer without changing the decision rule.
-    """
-    scored: list[float] = []
-    for row in rows:
-        if row.get("status") == "scored":
-            value = row.get("score")
-            if isinstance(value, int | float):
-                scored.append(float(value))
-    total = len(rows)
-    # A "scored" row whose score is non-numeric carries no usable evidence; count
-    # it as unscorable so scored_frames + unscorable_frames always equals total.
-    unscorable = total - len(scored)
-    base: dict[str, object] = {
-        "scored_frames": len(scored),
-        "total_frames": total,
-        "unscorable_frames": unscorable,
-    }
-    if not scored or (total and unscorable > total / 2):
-        return {
-            "status": "needs_human",
-            "reason": "insufficient_scored_frames",
-            **base,
-        }
-    mean = sum(scored) / len(scored)
+    """Never infer identity drift without a trustworthy calibrated evaluator."""
     return {
-        "status": "passed" if mean >= VIDEO_DRIFT_THRESHOLD else "blocked",
-        "reason": "drift_mean_gate",
-        "mean_score": round(mean, 6),
-        "threshold": VIDEO_DRIFT_THRESHOLD,
+        "status": "needs_human",
+        "reason": "temporal_identity_requires_human_review",
+        "total_frames": len(rows),
         "policy_id": VIDEO_DRIFT_POLICY_ID,
-        "min_score": round(min(scored), 6),
-        "max_score": round(max(scored), 6),
-        "frames_above_threshold": sum(1 for s in scored if s >= VIDEO_DRIFT_THRESHOLD),
-        **base,
     }
 
 
@@ -158,31 +111,22 @@ def score_video_samples(
     *,
     canonical_image_bytes: bytes,
 ) -> list[dict[str, object]]:
-    """Return desensitized per-frame scores; never persist embedding arrays."""
-    canonical = embedding_from_image_bytes(canonical_image_bytes)
+    """Return reviewable frame evidence without biometric scores."""
+    import hashlib
+
+    if not canonical_image_bytes:
+        raise ValueError("canonical image is empty")
+    canonical_hash = hashlib.sha256(canonical_image_bytes).hexdigest()
     rows: list[dict[str, object]] = []
     for sample in samples:
-        try:
-            probe = embedding_from_image_bytes(sample.image_bytes)
-            score = sum(a * b for a, b in zip(probe, canonical, strict=True))
-            rows.append(
-                {
-                    "timestamp_seconds": sample.timestamp_seconds,
-                    "role": sample.role,
-                    "status": "scored",
-                    "score": score,
-                    "rule_version": VIDEO_DRIFT_SAMPLING_VERSION,
-                }
-            )
-        except Exception as exc:  # noqa: BLE001 - a bad frame remains review evidence
-            rows.append(
-                {
-                    "timestamp_seconds": sample.timestamp_seconds,
-                    "role": sample.role,
-                    "status": "unscorable",
-                    "score": None,
-                    "error_type": type(exc).__name__,
-                    "rule_version": VIDEO_DRIFT_SAMPLING_VERSION,
-                }
-            )
+        rows.append(
+            {
+                "timestamp_seconds": sample.timestamp_seconds,
+                "role": sample.role,
+                "status": "available_for_human_review",
+                "frame_content_hash": hashlib.sha256(sample.image_bytes).hexdigest(),
+                "canonical_content_hash": canonical_hash,
+                "rule_version": VIDEO_DRIFT_SAMPLING_VERSION,
+            }
+        )
     return rows

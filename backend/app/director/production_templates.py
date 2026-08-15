@@ -46,7 +46,7 @@ def dialogue_post_dub_definition(
         ],
         _node("prompt", "prompt_compose", "Prompt contract"),
         _node("keyframe", "keyframe", "Shot keyframe"),
-        _node("face_review", "face_review", "Identity evidence"),
+        _node("identity_review", "identity_review", "Identity evidence"),
         _node("video", "video", "Shot video"),
         _node("video_drift_review", "video_review", "Video drift evidence"),
         _node("voice", "voice", "Mandarin dialogue voice"),
@@ -57,7 +57,7 @@ def dialogue_post_dub_definition(
     edges = [
         ["prompt", "keyframe"],
         [primary_character_reference_key, "keyframe"],
-        ["keyframe", "face_review"],
+        ["keyframe", "identity_review"],
         ["keyframe", "video"],
         ["video", "video_drift_review"],
         ["video", "composite"],

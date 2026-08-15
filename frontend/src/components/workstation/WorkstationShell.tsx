@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 
@@ -12,12 +12,19 @@ type WorkstationShellProps = {
 export function WorkstationShell({ children }: WorkstationShellProps) {
   const leftOpen = useUiStore((s) => s.leftNavOpen);
   const toggleLeft = useUiStore((s) => s.toggleLeftNav);
+  const setLeftOpen = useUiStore((s) => s.setLeftNavOpen);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const projectMatch = pathname.match(/\/projects\/([^/]+)/);
   const projectId = projectMatch?.[1];
   const isRealProject = Boolean(projectId && projectId !== "demo");
   const onQuick = pathname.includes("/quick");
   const onProd = pathname.includes("/production");
+
+  useEffect(() => {
+    if (window.matchMedia?.("(max-width: 1100px)").matches) {
+      setLeftOpen(false);
+    }
+  }, [setLeftOpen]);
 
   const health = useQuery({
     queryKey: ["health"],
@@ -47,7 +54,14 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   return (
     <div className="workstation" data-testid="workstation-shell">
       <header className="workstation-topbar">
-        <button type="button" className="ghost" onClick={toggleLeft} aria-label="切换导航">
+        <button
+          type="button"
+          className="ghost nav-toggle"
+          onClick={toggleLeft}
+          aria-label={leftOpen ? "收起导航" : "展开导航"}
+          aria-expanded={leftOpen}
+          aria-controls="workstation-navigation"
+        >
           ☰
         </button>
         <Link to="/" className="brand">
@@ -83,8 +97,13 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
           {apiLive ? "API · DB 就绪" : "API 未就绪"}
         </span>
       </header>
-      <div className="workstation-body">
-        <aside className={leftOpen ? "nav open" : "nav"} data-testid="workstation-nav">
+      <div className={leftOpen ? "workstation-body nav-open" : "workstation-body"}>
+        <aside
+          id="workstation-navigation"
+          className={leftOpen ? "nav open" : "nav"}
+          data-testid="workstation-nav"
+          aria-hidden={!leftOpen}
+        >
           <div className="nav-section">入口</div>
           <nav>
             <Link to="/" className={pathname === "/" ? "active" : undefined}>
@@ -129,6 +148,14 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
             )}
           </nav>
         </aside>
+        {leftOpen && (
+          <button
+            type="button"
+            className="nav-scrim"
+            aria-label="关闭导航"
+            onClick={() => setLeftOpen(false)}
+          />
+        )}
         <main className="workstation-main">{children}</main>
         <aside className="inspector" data-testid="workstation-inspector">
           <h3>生产检查器</h3>

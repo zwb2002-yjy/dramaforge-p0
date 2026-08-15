@@ -25,5 +25,5 @@ fix is available. No fixed response deadline or bounty is promised.
   BYOK Fernet key across upgrades and use the rotation tooling for changes.
 - Do not expose PostgreSQL, Redis, MinIO, LiteLLM, or the API directly to untrusted
   networks. `docker-compose.dev.yml` opens debug ports and is for local development.
-- DramaForge does not distribute InsightFace pretrained weights. Review licenses
-  and provenance for all optional models, voices, fonts, and media.
+- Review licenses and provenance for all optional models, evaluators, voices,
+  fonts, and media.

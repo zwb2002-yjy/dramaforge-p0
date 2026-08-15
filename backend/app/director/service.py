@@ -237,6 +237,11 @@ class DirectorService:
     ) -> tuple[ApprovalRecord, DirectorWorkflowRun]:
         if not idempotency_key.strip():
             raise ValidationAppError("idempotency_key is required")
+        if approval_kind == ApprovalKind.SUBJECTIVE_GATE_OVERRIDE:
+            raise ValidationAppError(
+                "subjective quality overrides must use a trial or production review command",
+                details={"code": "QUALITY_REVIEW_COMMAND_REQUIRED"},
+            )
         workflow = await self.get_workflow(project_id=project_id, actor=actor, for_update=True)
         existing = (
             await self._session.execute(

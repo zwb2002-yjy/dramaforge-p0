@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 
 import type { ProjectSnapshot } from "../../src/lib/api";
 import {
@@ -15,11 +15,11 @@ const snapshot: ProjectSnapshot = {
       id: "run-json",
       status: "completed",
       result_artifact_id: "artifact-json",
-      output_summary: { node_type: "face_review" },
-      input_snapshot: { shot_id: "shot-1", node_key: "face_review" },
-      idempotency_key: "face_review:shot-1",
+      output_summary: { node_type: "identity_review" },
+      input_snapshot: { shot_id: "shot-1", node_key: "identity_review" },
+      idempotency_key: "identity_review:shot-1",
       attempt_no: 1,
-      node_key: "face_review",
+      node_key: "identity_review",
       provider_cost: "0",
       started_at: null,
       finished_at: null,
@@ -63,7 +63,7 @@ const snapshot: ProjectSnapshot = {
   artifacts: [
     {
       id: "artifact-json",
-      object_key: "projects/project-1/face_review/run.json",
+      object_key: "projects/project-1/identity_review/run.json",
       content_hash: "json",
       byte_size: 232,
       mime_type: "application/json",

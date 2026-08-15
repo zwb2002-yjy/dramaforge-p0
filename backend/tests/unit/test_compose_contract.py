@@ -10,6 +10,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = REPO_ROOT / "docker-compose.yml"
 DEV_COMPOSE = REPO_ROOT / "docker-compose.dev.yml"
 GPU_COMPOSE = REPO_ROOT / "docker-compose.gpu.yml"
+BUILD_COMPOSE = REPO_ROOT / "docker-compose.build.yml"
+OFFLINE_COMPOSE = REPO_ROOT / "docker-compose.offline.yml"
 
 
 def test_compose_defines_required_boot0_services() -> None:
@@ -67,7 +69,8 @@ def test_compose_defines_required_boot0_services() -> None:
     )
     assert services["frontend"]["depends_on"]["api"]["condition"] == "service_healthy"
     assert services["frontend"]["image"] == (
-        "${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:local}"
+        "${DRAMAFORGE_FRONTEND_IMAGE:-ghcr.io/zwb2002-yjy/"
+        "dramaforge-frontend:v0.1.0}"
     )
     assert services["frontend"]["read_only"] is True
     assert services["frontend"]["cap_drop"] == ["ALL"]
@@ -78,7 +81,8 @@ def test_compose_defines_required_boot0_services() -> None:
         assert services[name]["cap_drop"] == ["ALL"]
         assert "healthcheck" in services[name]
         assert services[name]["image"] == (
-            "${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:local}"
+            "${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/"
+            "dramaforge-backend:v0.1.0}"
         )
     maintenance = services["maintenance"]
     assert maintenance["profiles"] == ["maintenance"]
@@ -94,6 +98,47 @@ def test_compose_defines_required_boot0_services() -> None:
     )
     # GPU/ComfyUI must not be in the default compose file.
     assert "comfyui" not in services
+
+
+def test_release_compose_never_builds_on_the_user_machine() -> None:
+    services = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    assert all("build" not in service for service in services.values())
+    for name, service in services.items():
+        assert "image" in service, f"release service has no pinned image input: {name}"
+        assert ":latest" not in service["image"]
+
+
+def test_source_build_is_explicit_and_offline_mode_never_pulls() -> None:
+    build_services = yaml.safe_load(BUILD_COMPOSE.read_text(encoding="utf-8"))["services"]
+    for name in (
+        "migrate",
+        "api",
+        "dispatcher",
+        "worker-default",
+        "worker-heavy",
+        "maintenance",
+        "frontend",
+    ):
+        assert "build" in build_services[name]
+
+    release_services = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    offline_services = yaml.safe_load(OFFLINE_COMPOSE.read_text(encoding="utf-8"))["services"]
+    assert set(offline_services) == set(release_services)
+    assert all(service["pull_policy"] == "never" for service in offline_services.values())
+
+
+def test_installers_use_images_without_host_package_installers() -> None:
+    scripts = [
+        (REPO_ROOT / "install.ps1").read_text(encoding="utf-8").lower(),
+        (REPO_ROOT / "install.sh").read_text(encoding="utf-8").lower(),
+    ]
+    for script in scripts:
+        assert "--no-build" in script
+        assert "app.install_env" in script
+        for forbidden in ("apt-get", "pip install", "npm install", "npm ci"):
+            assert forbidden not in script
+    assert "docker load --input" in scripts[0]
+    assert "docker load --input" in scripts[1]
 
 
 def test_gpu_profile_is_optional_and_not_default() -> None:
@@ -112,27 +157,27 @@ def test_development_override_exposes_debug_ports_and_disables_production_ui() -
     assert services["frontend"]["profiles"] == ["production-ui"]
 
 
-def test_backend_image_declares_formal_media_and_face_runtime() -> None:
+def test_backend_image_declares_formal_media_runtime_without_biometrics() -> None:
     dockerfile = (REPO_ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
     pyproject = (REPO_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8")
-    for required in ("espeak-ng", "ffmpeg", "insightface==0.7.3"):
+    lockfile = (REPO_ROOT / "backend" / "uv.lock").read_text(encoding="utf-8")
+    for required in ("espeak-ng", "ffmpeg"):
         assert required in (dockerfile + pyproject)
     assert "postgresql-client" in dockerfile
-    assert "github.com/deepinsight/insightface/releases" not in dockerfile
-    assert "w600k_r50.onnx" not in dockerfile
-    assert "FaceAnalysis(name=" not in dockerfile
-    for required in (
+    forbidden = (
+        "insightface",
         "onnx",
         "onnxruntime",
-        "opencv-python-headless",
         "scikit-image",
         "scikit-learn",
         "albumentations",
         "matplotlib",
         "prettytable",
         "easydict",
-    ):
-        assert required in pyproject
+    )
+    dependency_contract = (dockerfile + pyproject + lockfile).lower()
+    assert all(name not in dependency_contract for name in forbidden)
+    assert "opencv-python-headless" in pyproject
     assert "USER 10001:10001" in dockerfile
 
 
@@ -155,6 +200,7 @@ def test_compose_requires_unique_runtime_secrets_and_disables_public_registratio
     for name in ("SESSION_SECRET", "WORKER_TOKEN", "BYOK_FERNET_KEY"):
         assert api_env[name].startswith(f"${{{name}:?")
     assert api_env["PUBLIC_REGISTRATION_ENABLED"] == "${PUBLIC_REGISTRATION_ENABLED:-false}"
+    assert api_env["SESSION_COOKIE_SECURE"] == "${SESSION_COOKIE_SECURE:-false}"
     for service_name in ("migrate", "api", "dispatcher", "worker-default", "worker-heavy"):
         service_env = services[service_name]["environment"]
         assert service_env["BYOK_FERNET_KEY"].startswith("${BYOK_FERNET_KEY:?")
