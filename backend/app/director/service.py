@@ -292,8 +292,11 @@ class DirectorService:
             ApprovalKind.REPAIR_BUDGET: "production",
         }.get(approval_kind, workflow.current_stage)
         workflow.version += 1
-        await self._session.commit()
+        # Approval tables are protected by project RLS whose context is scoped
+        # to the current transaction. Refresh while that context still exists;
+        # refreshing after commit starts a new transaction with no project GUC.
         await self._session.refresh(approval)
+        await self._session.commit()
         return approval, workflow
 
     async def authorize_budget(
@@ -364,8 +367,11 @@ class DirectorService:
             expires_at=expires_at,
         )
         self._session.add(auth)
-        await self._session.commit()
+        # Budget rows are protected by project RLS.  Refresh before commit while
+        # the transaction-scoped project context is still present.
+        await self._session.flush()
         await self._session.refresh(auth)
+        await self._session.commit()
         return auth
 
     async def propose_change(

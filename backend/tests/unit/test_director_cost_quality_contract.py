@@ -11,7 +11,10 @@ from app.access.models import Project
 from app.director.models import BudgetAuthorization
 from app.director.production_service import DirectorProductionService
 from app.director.production_templates import dialogue_post_dub_definition
-from app.director.quality_service import _identity_evidence_status
+from app.director.quality_service import (
+    _has_frozen_request_evidence,
+    _identity_evidence_status,
+)
 from app.director.shooting import (
     CostEstimatePayload,
     SelectedModelPlan,
@@ -19,6 +22,7 @@ from app.director.shooting import (
     StoryboardPlanPayload,
 )
 from app.director.shooting_service import DirectorShootingService
+from app.execution.models import ProviderOperation
 from app.shared.errors import ValidationAppError
 
 
@@ -177,6 +181,42 @@ def test_automatic_identity_status_requires_human_review(raw_status: str) -> Non
 
 def test_passing_identity_evidence_remains_passed() -> None:
     assert _identity_evidence_status("passed") == "passed"
+
+
+def test_local_tts_request_evidence_does_not_require_external_model_binding() -> None:
+    operation = ProviderOperation(
+        node_run_id=uuid4(),
+        attempt_no=1,
+        purpose="primary",
+        operation_kind="voice.generate",
+        actual_provider="local_tts",
+        actual_model="espeak-ng",
+        request_fingerprint="a" * 64,
+        status="succeeded",
+        request_summary={},
+        response_summary={},
+    )
+
+    assert _has_frozen_request_evidence(operation) is True
+
+
+def test_external_provider_request_evidence_requires_frozen_model_binding() -> None:
+    operation = ProviderOperation(
+        node_run_id=uuid4(),
+        attempt_no=1,
+        purpose="primary",
+        operation_kind="video.generate",
+        actual_provider="agnes",
+        actual_model="agnes-video-v2.0",
+        request_fingerprint="b" * 64,
+        status="succeeded",
+        request_summary={},
+        response_summary={},
+    )
+
+    assert _has_frozen_request_evidence(operation) is False
+    operation.model_binding_id = uuid4()
+    assert _has_frozen_request_evidence(operation) is True
 
 
 def test_current_shot_template_excludes_legacy_face_gate() -> None:

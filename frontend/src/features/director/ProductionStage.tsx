@@ -203,8 +203,14 @@ function ProductionReview(props: ProductionStageProps & { report: ProductionQual
 
 function RepairPlanning(props: ProductionStageProps & { plan: RepairPlanPayload | null }) {
   const { projectId, snapshot, plan, refresh, onMessage, onError } = props;
-  const batch = productionBatch(snapshot) ?? [...snapshot.production_batches].reverse().find((item) => item.batch_kind === "trial") ?? null;
   const quality = snapshot.current_artifacts.quality_report;
+  const qualityPayload = quality?.payload;
+  const qualityBatchId = qualityPayload && typeof qualityPayload === "object" && "batch_id" in qualityPayload
+    ? String(qualityPayload.batch_id)
+    : null;
+  const batch = qualityBatchId
+    ? snapshot.production_batches.find((item) => item.id === qualityBatchId) ?? null
+    : productionBatch(snapshot) ?? [...snapshot.production_batches].reverse().find((item) => item.batch_kind === "trial") ?? null;
   const [selectedId, setSelectedId] = useState("");
   const selected = plan?.options.find((option) => option.repair_option_id === selectedId) ?? null;
   const [limit, setLimit] = useState("");
@@ -240,7 +246,7 @@ function RepairPlanning(props: ProductionStageProps & { plan: RepairPlanPayload 
     },
     onError: (error) => onError(errorText(error)),
   });
-  if (!plan) return <section className="panel"><h3>生成局部修复方案</h3><p>AI 导演将基于质量证据定位失败原因、可复用资产和预计改动。本动作不生成媒体。</p><button type="button" className="accent" disabled={!batch || !quality || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? "正在诊断…" : "生成三个修复方案"}</button></section>;
+  if (!plan || snapshot.workflow.status === "repair_proposed") return <section className="panel"><h3>{plan ? "更新局部修复方案" : "生成局部修复方案"}</h3><p>AI 导演将基于最新质量证据定位失败原因、可复用资产和预计改动。本动作不生成媒体，也不会沿用上一次失败后的旧授权。</p><button type="button" className="accent" disabled={!batch || !quality || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? "正在诊断…" : plan ? "基于最新证据重新生成方案" : "生成三个修复方案"}</button></section>;
   const estimated = Number(selected?.estimated_cost ?? 0);
   const parsedLimit = Number(limit);
   const ready = Boolean(selected && selected.estimated_cost !== null && Number.isFinite(parsedLimit) && parsedLimit > 0 && parsedLimit >= estimated);

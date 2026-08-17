@@ -47,6 +47,13 @@ function textFrom(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export function shouldInitializeConceptChoices(
+  selectedConceptId: string | null,
+  lockedConceptId: string | null,
+): boolean {
+  return Boolean(selectedConceptId && selectedConceptId !== lockedConceptId);
+}
+
 function conceptInputReady(input: {
   entryMode: CreativeEntryMode;
   creationGoal: CreationGoal;
@@ -219,11 +226,14 @@ export function CreativeStage({
   }, [concepts]);
 
   useEffect(() => {
-    if (!selectedConcept) return;
+    if (!selectedConcept || !shouldInitializeConceptChoices(
+      selectedConcept.concept_id,
+      storyCore?.selected_concept_id ?? null,
+    )) return;
     setTheme(selectedConcept.theme);
     setCoreConflict(selectedConcept.core_conflict);
     setEnding(selectedConcept.ending_direction);
-  }, [selectedConcept]);
+  }, [selectedConcept, storyCore?.selected_concept_id]);
 
   useEffect(() => {
     if (!storyCore) return;

@@ -6,11 +6,13 @@ deterministic so a fluent response cannot silently waive a production risk.
 
 from __future__ import annotations
 
+import json
+import re
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.director.creative import EpisodeScriptPayload, StoryCorePayload, parse_json_object
 from app.shared.errors import ValidationAppError
@@ -27,6 +29,13 @@ class CharacterVisualAnchor(BaseModel):
     distinguishing_features: list[str] = Field(default_factory=list, max_length=6)
     locked_prompt: str = Field(min_length=1, max_length=2000)
     negative_prompt: str = Field(default="", max_length=1000)
+
+    @field_validator("character_id", mode="before")
+    @classmethod
+    def normalize_numeric_character_id(cls, value: object) -> object:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        return value
 
 
 class CharacterBiblePayload(BaseModel):
@@ -62,6 +71,13 @@ class VoiceDesign(BaseModel):
     emotional_range: list[str] = Field(min_length=1, max_length=8)
     voice_clone: Literal[False] = False
 
+    @field_validator("character_id", mode="before")
+    @classmethod
+    def normalize_numeric_character_id(cls, value: object) -> object:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        return value
+
 
 class VoiceBiblePayload(BaseModel):
     language: Literal["zh-CN"] = "zh-CN"
@@ -89,6 +105,98 @@ class StoryboardShot(BaseModel):
     image_prompt: str = Field(min_length=1, max_length=3000)
     video_prompt: str = Field(min_length=1, max_length=3000)
     transition: str = Field(min_length=1, max_length=200)
+
+    @field_validator("shot_id", mode="before")
+    @classmethod
+    def normalize_numeric_shot_id(cls, value: object) -> object:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return f"shot-{value}"
+        return value
+
+    @field_validator("shot_type", mode="before")
+    @classmethod
+    def normalize_descriptive_shot_type(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower().replace("-", "_")
+        if "过肩" in normalized:
+            return "over_shoulder"
+        if "中近" in normalized or "近中" in normalized:
+            return "medium_close"
+        if "全景" in normalized or "远景" in normalized:
+            return "wide"
+        if "插入" in normalized or "细节" in normalized:
+            return "insert"
+        if "特写" in normalized or "近景" in normalized:
+            return "close"
+        if "中景" in normalized:
+            return "medium"
+        if "over" in normalized and "shoulder" in normalized:
+            return "over_shoulder"
+        if "medium" in normalized and "close" in normalized:
+            return "medium_close"
+        for shot_type in ("wide", "medium", "close", "insert"):
+            if shot_type in normalized:
+                return shot_type
+        return value
+
+    @field_validator("camera_move", mode="before")
+    @classmethod
+    def normalize_descriptive_camera_move(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if "推" in normalized:
+            return "push_in"
+        if "拉远" in normalized or "拉出" in normalized:
+            return "pull_out"
+        if "固定" in normalized or "静止" in normalized:
+            return "static"
+        if "环绕" in normalized or "跟" in normalized:
+            return "tracking"
+        if "摇" in normalized or "横移" in normalized:
+            return "pan"
+        if "push" in normalized:
+            return "push_in"
+        if "pull" in normalized:
+            return "pull_out"
+        if "static" in normalized or "locked" in normalized:
+            return "static"
+        if "tracking" in normalized or "track" in normalized:
+            return "tracking"
+        if "pan" in normalized:
+            return "pan"
+        return value
+
+    @field_validator("dialogue", mode="before")
+    @classmethod
+    def normalize_single_dialogue_object(cls, value: object) -> object:
+        if isinstance(value, dict):
+            return [value]
+        if isinstance(value, str):
+            dialogue = value.strip()
+            if not dialogue:
+                return []
+            for separator in ("：", ":"):
+                if separator in dialogue:
+                    speaker, text = dialogue.split(separator, 1)
+                    return [
+                        {
+                            "speaker": speaker.strip(),
+                            "text": text.strip(),
+                            "emotion": "unspecified",
+                        }
+                    ]
+        return value
+
+    @field_validator("duration_seconds", mode="before")
+    @classmethod
+    def normalize_descriptive_duration(cls, value: object) -> object:
+        if isinstance(value, str):
+            matched = re.search(r"\d+(?:\.\d+)?", value)
+            if matched is not None:
+                return matched.group(0)
+        return value
 
 
 class StoryboardPlanPayload(BaseModel):
@@ -268,9 +376,7 @@ class ProductionQualityReportPayload(BaseModel):
 class ProductionReviewPayload(BaseModel):
     batch_id: UUID
     quality_report_version_id: UUID
-    decisions: dict[str, Literal["accept", "repair", "stop"]] = Field(
-        min_length=1, max_length=6
-    )
+    decisions: dict[str, Literal["accept", "repair", "stop"]] = Field(min_length=1, max_length=6)
     user_note: str = Field(default="", max_length=4000)
     accepted_shot_ids: list[str] = Field(default_factory=list, max_length=6)
     repair_shot_ids: list[str] = Field(default_factory=list, max_length=6)
@@ -333,24 +439,118 @@ class CharacterVisualDraftPayload(BaseModel):
     visual_bible: VisualBiblePayload
 
 
+def _named_payload(text: str, key: str) -> dict[str, object]:
+    payload = parse_json_object(text)
+    wrapped = payload.get(key)
+    if set(payload) == {key} and isinstance(wrapped, dict):
+        return {str(item_key): item for item_key, item in wrapped.items()}
+    return payload
+
+
+def _bounded_prose(value: object, *, max_length: int) -> object:
+    if isinstance(value, str):
+        prose = value.strip()
+    elif isinstance(value, dict | list):
+        prose = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    else:
+        return value
+    if len(prose) <= max_length:
+        return prose
+    return f"{prose[: max_length - 1]}…"
+
+
+def _continuity_rule_list(value: object) -> object:
+    if isinstance(value, str):
+        return [value.strip()]
+    if isinstance(value, dict):
+        return [
+            f"{key}: {_bounded_prose(item, max_length=900)}"
+            for key, item in list(value.items())[:12]
+        ]
+    if isinstance(value, list):
+        return [_bounded_prose(item, max_length=900) for item in value[:12]]
+    return value
+
+
 def parse_character_bible(text: str) -> CharacterBiblePayload:
-    return CharacterBiblePayload.model_validate(parse_json_object(text))
+    return CharacterBiblePayload.model_validate(_named_payload(text, "character_bible"))
 
 
 def parse_character_visual_draft(text: str) -> CharacterVisualDraftPayload:
     return CharacterVisualDraftPayload.model_validate(parse_json_object(text))
 
 
-def parse_visual_bible(text: str) -> VisualBiblePayload:
-    return VisualBiblePayload.model_validate(parse_json_object(text))
+def parse_visual_bible(text: str, *, aspect_ratio: str | None = None) -> VisualBiblePayload:
+    payload = _named_payload(text, "visual_bible")
+    if "aspect_ratio" not in payload and aspect_ratio is not None:
+        payload["aspect_ratio"] = aspect_ratio
+    for field_name, max_length in (
+        ("color_palette", 400),
+        ("lighting", 400),
+        ("lens_language", 500),
+    ):
+        if field_name in payload:
+            payload[field_name] = _bounded_prose(payload[field_name], max_length=max_length)
+    if "continuity_rules" in payload:
+        payload["continuity_rules"] = _continuity_rule_list(payload["continuity_rules"])
+    return VisualBiblePayload.model_validate(payload)
 
 
-def parse_voice_bible(text: str) -> VoiceBiblePayload:
-    return VoiceBiblePayload.model_validate(parse_json_object(text))
+def parse_voice_bible(text: str, *, character_names: list[str] | None = None) -> VoiceBiblePayload:
+    bible = VoiceBiblePayload.model_validate(_named_payload(text, "voice_bible"))
+    if character_names is None or len(bible.voices) != len(character_names):
+        return bible
+    voices_by_name = {voice.character_name.strip(): voice for voice in bible.voices}
+    if len(voices_by_name) == len(character_names) and set(voices_by_name) == set(character_names):
+        ordered = [voices_by_name[name] for name in character_names]
+    else:
+        # The model was explicitly asked to preserve input order.  Some providers
+        # translate or decorate the display label; restore the locked identity key
+        # without changing any creative voice attributes.
+        ordered = [
+            voice.model_copy(update={"character_name": name})
+            for voice, name in zip(bible.voices, character_names, strict=True)
+        ]
+    return bible.model_copy(update={"voices": ordered})
 
 
 def parse_storyboard_plan(text: str) -> StoryboardPlanPayload:
-    return StoryboardPlanPayload.model_validate(parse_json_object(text))
+    payload = _named_payload(text, "storyboard_plan")
+    shots = payload.get("shots")
+    if isinstance(shots, list):
+        for index, shot in enumerate(shots, start=1):
+            if not isinstance(shot, dict):
+                continue
+            if "shot_number" not in shot:
+                shot["shot_number"] = index
+            if "duration_seconds" not in shot and "duration" in shot:
+                shot["duration_seconds"] = shot["duration"]
+        missing_duration = [
+            shot for shot in shots if isinstance(shot, dict) and "duration_seconds" not in shot
+        ]
+        target = payload.get("target_duration_seconds")
+        known_values: list[Decimal] = []
+        for shot in shots:
+            if not isinstance(shot, dict) or "duration_seconds" not in shot:
+                continue
+            value = StoryboardShot.normalize_descriptive_duration(shot["duration_seconds"])
+            try:
+                known_values.append(Decimal(str(value)))
+            except Exception:  # noqa: BLE001 - schema validation reports the exact bad value
+                known_values = []
+                break
+        if missing_duration and isinstance(target, int) and known_values:
+            remaining = Decimal(target) - sum(known_values, Decimal("0"))
+            inferred = remaining / len(missing_duration)
+            if Decimal("2") <= inferred <= Decimal("10"):
+                for shot in missing_duration:
+                    shot["duration_seconds"] = inferred
+        elif missing_duration and isinstance(target, int) and len(missing_duration) == len(shots):
+            inferred = Decimal(target) / len(missing_duration)
+            if Decimal("2") <= inferred <= Decimal("10"):
+                for shot in missing_duration:
+                    shot["duration_seconds"] = inferred
+    return StoryboardPlanPayload.model_validate(payload)
 
 
 def validate_shooting_artifact_payload(
@@ -358,9 +558,7 @@ def validate_shooting_artifact_payload(
 ) -> dict[str, object]:
     if artifact_kind == "quality_report" and "shot_reports" in payload:
         try:
-            return ProductionQualityReportPayload.model_validate(payload).model_dump(
-                mode="json"
-            )
+            return ProductionQualityReportPayload.model_validate(payload).model_dump(mode="json")
         except ValidationError as exc:
             raise ValidationAppError(
                 "invalid quality_report payload",

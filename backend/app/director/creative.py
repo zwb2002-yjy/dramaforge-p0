@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
 from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
@@ -183,6 +185,41 @@ def validate_creative_artifact_payload(
         ) from exc
 
 
+def _normalize_closure_text(value: str) -> str:
+    """Normalize prose for a conservative, language-agnostic closure check."""
+
+    return "".join(re.findall(r"[0-9a-z\u4e00-\u9fff]+", value.casefold()))
+
+
+def _closure_matches(draft: StoryDraftPayload) -> bool:
+    """Accept a script when its ending or final dialogue realizes the story ending.
+
+    A literal substring check rejects normal paraphrases and also ignores that the
+    decisive closure is often carried by the final line of dialogue.  Keep this
+    gate deterministic, but compare the normalized story ending against the
+    scripted ending, the final two dialogue lines, and their combination.
+    """
+
+    expected = _normalize_closure_text(draft.story_core.ending)
+    final_dialogue = "".join(
+        line.text for line in draft.episode_script.dialogue[-2:]
+    )
+    candidates = (
+        draft.episode_script.ending,
+        final_dialogue,
+        draft.episode_script.ending + final_dialogue,
+    )
+    for candidate in candidates:
+        actual = _normalize_closure_text(candidate)
+        if not actual:
+            continue
+        if expected in actual or actual in expected:
+            return True
+        if SequenceMatcher(None, expected, actual, autojunk=False).ratio() >= 0.55:
+            return True
+    return False
+
+
 def review_story_deterministically(draft: StoryDraftPayload) -> StoryReviewPayload:
     logic_issues: list[str] = []
     pacing_issues: list[str] = []
@@ -208,9 +245,7 @@ def review_story_deterministically(draft: StoryDraftPayload) -> StoryReviewPaylo
     if len(draft.episode_script.dialogue) > 8:
         pacing_issues.append("15–30 秒模板中的对白轮次过多，容易造成切镜和口型压力。")
         suggestions.append("合并相邻对白，把核心交锋控制在 3–8 句。")
-    if draft.story_core.ending.strip() not in draft.episode_script.ending.strip() and (
-        draft.episode_script.ending.strip() not in draft.story_core.ending.strip()
-    ):
+    if not _closure_matches(draft):
         closure_issues.append("故事内核的结局与剧本落点表达不一致。")
         suggestions.append("让最后一个动作或对白明确落到用户确认的结局。")
     issues = logic_issues + pacing_issues + duration_risks + closure_issues

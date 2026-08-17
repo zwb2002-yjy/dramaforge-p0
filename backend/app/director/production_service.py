@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import Project, User
 from app.access.projects import ProjectService
 from app.assets.models import Episode, Scene, Shot
+from app.config import get_settings
+from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.director.enums import ApprovalKind, ArtifactKind, WorkflowStatus
 from app.director.models import (
     ApprovalRecord,
@@ -249,8 +251,9 @@ class DirectorProductionService:
                 },
                 actor_id=actor.id,
             )
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(batch)
+        await self._session.commit()
         _ = approval
         return batch, runs
 
@@ -510,8 +513,9 @@ class DirectorProductionService:
                 },
                 actor_id=actor.id,
             )
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(batch)
+        await self._session.commit()
         return batch, runs
 
     async def export_production(
@@ -876,6 +880,8 @@ class DirectorProductionService:
         if not isinstance(shot, StoryboardShot):
             raise TypeError("shot must be a StoryboardShot")
         snapshot: dict[str, object] = {
+            "source_commit": get_settings().source_commit,
+            "identity_evidence_policy": identity_evidence_policy_snapshot(),
             "workflow_run_id": str(batch.workflow_run_id),
             "production_batch_id": str(batch.id),
             "budget_reservation_id": str(reservation.id),

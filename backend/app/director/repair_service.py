@@ -6,6 +6,7 @@ import hashlib
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
@@ -16,12 +17,16 @@ from app.director.service import DirectorService
 from app.director.shooting import (
     CostEstimatePayload,
     ProductionQualityReportPayload,
+    ProductionReviewPayload,
     QualityReportPayload,
     RepairChange,
     RepairOptionPayload,
     RepairPlanPayload,
 )
+from app.execution.models import GraphNode, NodeRun
 from app.shared.errors import ConflictError, ValidationAppError
+
+_SUCCESS = frozenset({"completed", "cached", "completed_after_cancel"})
 
 
 class DirectorRepairService:
@@ -68,14 +73,38 @@ class DirectorRepairService:
         reports = self._shot_reports(quality)
         if any(report.batch_id != batch.id for report in reports):
             raise ConflictError("quality report belongs to another production batch")
-        affected = sorted(
-            report.logical_shot_id
-            for report in reports
-            if report.overall_status != "passed"
+        report_by_shot = {report.logical_shot_id: report for report in reports}
+        raw_production_review_id = workflow.current_artifact_versions.get(
+            ArtifactKind.PRODUCTION_REVIEW.value
         )
+        if raw_production_review_id is not None:
+            review_version = await self._session.get(
+                CreativeArtifactVersion, UUID(raw_production_review_id)
+            )
+            if (
+                review_version is None
+                or review_version.project_id != project_id
+                or review_version.artifact_kind != ArtifactKind.PRODUCTION_REVIEW.value
+            ):
+                raise ConflictError("production review is missing")
+            review = ProductionReviewPayload.model_validate(review_version.payload)
+            if review.batch_id != batch.id or review.quality_report_version_id != quality.id:
+                raise ConflictError("production review belongs to different quality evidence")
+            affected = sorted(review.repair_shot_ids)
+            missing_reports = sorted(set(affected) - set(report_by_shot))
+            if missing_reports:
+                raise ConflictError("repair decisions reference shots outside the quality report")
+        else:
+            # Trial repair has one representative shot and no production-wide
+            # decision map, so its affected scope continues to come from the
+            # trial quality evidence.
+            affected = sorted(
+                report.logical_shot_id
+                for report in reports
+                if report.overall_status != "passed"
+            )
         if not affected:
             raise ValidationAppError("quality evidence does not identify a shot to repair")
-        report_by_shot = {report.logical_shot_id: report for report in reports}
         raw_cost_id = workflow.current_artifact_versions.get(
             ArtifactKind.COST_ESTIMATE.value
         )
@@ -92,6 +121,11 @@ class DirectorRepairService:
                 "repair price is not verified",
                 details={"code": "REPAIR_PRICE_UNKNOWN"},
             )
+        strategies = (
+            ("video_retry", "model_parameter", "storyboard_simplify")
+            if await self._has_reusable_keyframes(batch=batch, affected=affected)
+            else ("prompt_reference", "model_parameter", "storyboard_simplify")
+        )
         options = [
             self._option(
                 batch=batch,
@@ -102,7 +136,7 @@ class DirectorRepairService:
                 cost=cost,
                 currency=cost.currency,
             )
-            for strategy in ("prompt_reference", "model_parameter", "storyboard_simplify")
+            for strategy in strategies
         ]
         payload = RepairPlanPayload(
             batch_id=batch.id,
@@ -132,8 +166,11 @@ class DirectorRepairService:
         )
         self._session.add(step)
         # publish_artifact_version deterministically advances to authorization.
-        await self._session.commit()
+        # Refresh while the transaction-scoped RLS context is still active;
+        # committing first clears that context and makes the instance invisible.
+        await self._session.flush()
         await self._session.refresh(version)
+        await self._session.commit()
         return version
 
     @staticmethod
@@ -145,6 +182,29 @@ class DirectorRepairService:
                 quality.payload
             ).shot_reports
         return [QualityReportPayload.model_validate(quality.payload)]
+
+    async def _has_reusable_keyframes(
+        self,
+        *,
+        batch: ProductionBatch,
+        affected: list[str],
+    ) -> bool:
+        rows = (
+            await self._session.execute(
+                select(NodeRun.input_snapshot)
+                .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                .where(
+                    NodeRun.production_batch_id == batch.id,
+                    NodeRun.status.in_(_SUCCESS),
+                    NodeRun.result_artifact_id.is_not(None),
+                    GraphNode.node_key == "keyframe",
+                )
+            )
+        ).scalars()
+        reusable_shots = {
+            str((snapshot or {}).get("logical_shot_id") or "") for snapshot in rows
+        }
+        return bool(affected) and set(affected).issubset(reusable_shots)
 
     @staticmethod
     def _option(
@@ -178,6 +238,12 @@ class DirectorRepairService:
             or "质量证据需要定向复核。"
         )
         invalidated_by_strategy = {
+            "video_retry": [
+                "video",
+                "video_drift_review",
+                "composite",
+                "continuity_review",
+            ],
             "prompt_reference": [
                 "keyframe",
                 "identity_review",
@@ -228,6 +294,25 @@ class DirectorRepairService:
             ),
             start=Decimal("0"),
         ) * len(affected)
+        if strategy == "video_retry":
+            return RepairOptionPayload(
+                repair_option_id=f"repair-{digest}",
+                title="复用成功关键帧，仅重试视频",
+                invalidated_node_keys=invalidated,
+                changes=[
+                    RepairChange(
+                        target="parameter",
+                        summary="保留已成功关键帧，只重新提交视频并重跑真实下游",
+                    )
+                ],
+                estimated_cost=estimated_cost,
+                affected_shot_ids=affected,
+                reusable_artifact_ids=reusable,
+                currency=currency,
+                estimated_time_seconds=None,
+                diagnosis=diagnosis,
+                residual_risks=["供应商仍可能暂时不可用；人物与表演仍需人工验收"],
+            )
         if strategy == "prompt_reference":
             return RepairOptionPayload(
                 repair_option_id=f"repair-{digest}",

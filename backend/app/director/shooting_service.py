@@ -194,7 +194,7 @@ class DirectorShootingService:
             skill_id="visual_anchor_design",
             prompt=self._visual_prompt(project, story, character_bible),
             max_tokens=2000,
-            parse=parse_visual_bible,
+            parse=lambda text: parse_visual_bible(text, aspect_ratio=project.aspect_ratio),
             idempotency_key=f"{idempotency_key}:visual",
             input_version_refs=[str(story_row.id)],
             provider_kind="shooting_visual",
@@ -220,7 +220,9 @@ class DirectorShootingService:
             skill_id="voice_design",
             prompt=self._voice_prompt(story, script),
             max_tokens=2200,
-            parse=parse_voice_bible,
+            parse=lambda text: parse_voice_bible(
+                text, character_names=[item.name for item in story.characters]
+            ),
             idempotency_key=f"{idempotency_key}:voices",
             input_version_refs=[str(story_row.id), str(script_row.id)],
             provider_kind="shooting_voice",
@@ -489,20 +491,12 @@ class DirectorShootingService:
         # representative trial. Requiring it before that trial creates an
         # impossible cold-start loop. All other eligibility failures remain
         # fail-closed.
-        blockers = [
-            blocker
-            for blocker in all_blockers
-            if blocker != "MODEL_QUALITY_GATE_MISSING"
-        ]
+        blockers = [blocker for blocker in all_blockers if blocker != "MODEL_QUALITY_GATE_MISSING"]
         manifest = dict(entry.capability_manifest_json or {}) if entry is not None else {}
         operations = manifest.get("operations")
-        raw_operation_manifest = (
-            operations.get(operation) if isinstance(operations, dict) else None
-        )
+        raw_operation_manifest = operations.get(operation) if isinstance(operations, dict) else None
         operation_manifest: dict[str, object] = (
-            dict(raw_operation_manifest)
-            if isinstance(raw_operation_manifest, dict)
-            else {}
+            dict(raw_operation_manifest) if isinstance(raw_operation_manifest, dict) else {}
         )
         if public_purpose == "video":
             blockers.extend(
@@ -567,9 +561,12 @@ class DirectorShootingService:
 
         def line(purpose: str, quantity: int) -> CostLine:
             configured = model_status.get(purpose) == "ready"
-            pricing = model_pricing.get(
-                cast(Literal["character_reference", "keyframe", "video", "voice"], purpose)
-            ) or {}
+            pricing = (
+                model_pricing.get(
+                    cast(Literal["character_reference", "keyframe", "video", "voice"], purpose)
+                )
+                or {}
+            )
             raw_unit = pricing.get("unit_amount")
             raw_currency = str(pricing.get("currency") or currency).upper()
             if raw_currency == "LOCAL" and raw_unit is not None:
@@ -595,14 +592,10 @@ class DirectorShootingService:
 
         count = len(storyboard.shots)
         representative = next(
-            shot
-            for shot in storyboard.shots
-            if shot.shot_id == representative_shot_id
+            shot for shot in storyboard.shots if shot.shot_id == representative_shot_id
         )
         trial_reference_count = len(set(representative.characters))
-        production_reference_count = sum(
-            len(set(shot.characters)) for shot in storyboard.shots
-        )
+        production_reference_count = sum(len(set(shot.characters)) for shot in storyboard.shots)
         trial = [
             line("character_reference", trial_reference_count),
             line("keyframe", 1),
@@ -731,8 +724,11 @@ class DirectorShootingService:
             "You are a short-drama storyboard director. Return ONLY JSON matching: "
             "template_key live_action_dialogue_short_v1, exact aspect_ratio, exact "
             "target_duration_seconds, and 3-6 ordered shots. shot_id must be shot-1...; "
-            "durations total the target within one second. Each shot needs location, "
-            "time_of_day, shot_type, camera_move, 1-2 character names, action, dialogue, "
+            "each shot must include numeric duration_seconds and durations must total the "
+            "target within one second. Each shot needs location, time_of_day, shot_type "
+            "(wide|medium|medium_close|close|over_shoulder|insert), camera_move "
+            "(static|push_in|pull_out|pan|tracking), 1-2 character names, action, dialogue "
+            "as an array of {speaker,text,emotion} objects, "
             "image_prompt, video_prompt and transition. Preserve every locked dialogue line "
             "verbatim, in original order and exactly once. Prefer singles/over-shoulder cuts "
             "over two-front-facing-character frames. Image/video prompts must include the "

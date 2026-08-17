@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+from app.creation.service import CreationService
 from app.shared.security import CSRF_HEADER
 from fastapi.testclient import TestClient
 
@@ -150,6 +152,37 @@ def test_text_calls_require_explicit_authorization_and_script_rights(
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert no_rights.status_code == 422
+
+
+def test_director_does_not_repost_provider_failure(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = _setup(client, "provider-failure@example.com")
+    calls = 0
+
+    async def fail_provider_call(
+        *args: object, **kwargs: object
+    ) -> tuple[object, str, str, dict[str, object]]:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("provider rate limited")
+
+    monkeypatch.setattr(CreationService, "_run_text_llm_attempt", fail_provider_call)
+    response = client.post(
+        f"/api/v1/projects/{project_id}/director/creative/concepts/generate",
+        json={
+            "entry_mode": "no_idea",
+            "creation_goal": "balanced",
+            "authorize_text_call": True,
+            "idempotency_key": "provider-failure",
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["details"]["code"] == "DIRECTOR_SKILL_FAILED"
+    assert calls == 1
 
 
 def test_selected_concept_must_come_from_exact_version(client: TestClient) -> None:

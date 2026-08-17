@@ -35,6 +35,7 @@ from app.director.shooting import (
 )
 from app.events.service import EventService
 from app.execution.models import GraphNode, NodeRun
+from app.shared.db import set_rls_context
 from app.shared.errors import ConflictError, ValidationAppError
 
 _SUCCESS = frozenset({"completed", "cached", "completed_after_cancel"})
@@ -76,6 +77,15 @@ class DirectorRepairExecutionService:
                 idempotency_key=f"{idempotency_key}:approval",
                 reason=f"selected repair option {repair_option_id}",
                 budget_authorization_id=budget_authorization_id,
+            )
+            # DirectorService.approve commits the approval. PostgreSQL SET LOCAL
+            # values are transaction-scoped, so restore the exact project scope
+            # before any follow-up query in this request.
+            await set_rls_context(
+                self._session,
+                user_id=actor.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
             )
             workflow = await self._director.get_workflow(
                 project_id=project_id, actor=actor, for_update=True
@@ -285,8 +295,10 @@ class DirectorRepairExecutionService:
                 },
                 actor_id=actor.id,
             )
-        await self._session.commit()
+        # Refresh while the project-scoped RLS context still exists. Committing
+        # first would clear SET LOCAL and make the row look deleted to refresh.
         await self._session.refresh(batch)
+        await self._session.commit()
         return batch, all_runs
 
     async def _repair_context(

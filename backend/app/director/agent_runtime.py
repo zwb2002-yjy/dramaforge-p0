@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.creation.models import AgentRun, PlanningAuthorization
-from app.creation.service import CreationService, _content_hash
+from app.creation.service import CreationService, TextOutputValidationError, _content_hash
 from app.director.models import WorkflowStepRun
 from app.director.registry import get_skill, get_template
 from app.shared.errors import ConflictError, ValidationAppError
@@ -140,9 +140,12 @@ class DirectorAgentRuntime:
                     parse=parse,
                     brief=provider_context,
                 )
-            except Exception as exc:  # noqa: BLE001 - provider/schema boundary
+            except TextOutputValidationError as exc:
                 last_error = exc
                 continue
+            except Exception as exc:  # noqa: BLE001 - provider boundary
+                last_error = exc
+                break
             break
         finished = datetime.now(UTC)
         if parsed is None:

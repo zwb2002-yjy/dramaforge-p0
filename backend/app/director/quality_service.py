@@ -1,4 +1,4 @@
-﻿"""Aggregate production evidence without turning one metric into truth."""
+"""Aggregate production evidence without turning one metric into truth."""
 
 from __future__ import annotations
 
@@ -42,6 +42,12 @@ def _identity_evidence_status(review_status: str) -> Literal["passed", "needs_hu
     return "passed" if review_status == "passed" else "needs_human"
 
 
+def _has_frozen_request_evidence(operation: ProviderOperation) -> bool:
+    if not operation.request_fingerprint:
+        return False
+    return operation.actual_provider == "local_tts" or operation.model_binding_id is not None
+
+
 class DirectorQualityService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -83,9 +89,7 @@ class DirectorQualityService:
             workflow_run_id=workflow_id,
             approval_kind=ApprovalKind.SUBJECTIVE_GATE_OVERRIDE.value,
             idempotency_key=override_key,
-            approved_artifact_versions={
-                ArtifactKind.QUALITY_REPORT.value: str(quality_report.id)
-            },
+            approved_artifact_versions={ArtifactKind.QUALITY_REPORT.value: str(quality_report.id)},
             reason=f"{clean_reason}\nScope: {', '.join(sorted(scopes))}",
             approved_by=actor.id,
         )
@@ -146,9 +150,7 @@ class DirectorQualityService:
             ).tuples()
         )
         by_key = {node.node_key: run for run, node in runs}
-        pending = sorted(
-            key for key, run in by_key.items() if run.status in {"queued", "running"}
-        )
+        pending = sorted(key for key, run in by_key.items() if run.status in {"queued", "running"})
         if pending:
             raise ValidationAppError(
                 "trial production is still running",
@@ -199,8 +201,9 @@ class DirectorQualityService:
         workflow.status = WorkflowStatus.AWAITING_TRIAL_REVIEW.value
         workflow.current_stage = "trial"
         workflow.version += 1
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(version)
+        await self._session.commit()
         return version
 
     async def review_trial(
@@ -237,9 +240,7 @@ class DirectorQualityService:
         batch = await self._session.get(ProductionBatch, batch_id)
         if batch is None or batch.project_id != project_id or batch.batch_kind != "trial":
             raise ValidationAppError("trial production batch not found")
-        raw_quality_id = workflow.current_artifact_versions.get(
-            ArtifactKind.QUALITY_REPORT.value
-        )
+        raw_quality_id = workflow.current_artifact_versions.get(ArtifactKind.QUALITY_REPORT.value)
         if raw_quality_id is None:
             raise ValidationAppError("quality report is required before trial review")
         quality = await self._session.get(CreativeArtifactVersion, UUID(raw_quality_id))
@@ -271,9 +272,7 @@ class DirectorQualityService:
                 hard_block=bool(quality_payload.hard_blockers),
             )
         evidence = [
-            ref
-            for dimension in quality_payload.dimensions
-            for ref in dimension.evidence_refs
+            ref for dimension in quality_payload.dimensions for ref in dimension.evidence_refs
         ]
         payload = TrialReviewPayload(
             batch_id=batch.id,
@@ -333,8 +332,9 @@ class DirectorQualityService:
             workflow.status = WorkflowStatus.CANCELLED.value
         workflow.current_stage = "trial" if decision == "accept" else "production"
         workflow.version += 1
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(version)
+        await self._session.commit()
         return version
 
     async def _promote_trial_model_bindings(
@@ -382,9 +382,7 @@ class DirectorQualityService:
         for node_key, (run, operation) in by_node_key.items():
             assert operation.model_binding_id is not None
             assert run.result_artifact_id is not None
-            binding = await self._session.get(
-                ProviderModelBinding, operation.model_binding_id
-            )
+            binding = await self._session.get(ProviderModelBinding, operation.model_binding_id)
             if binding is None or binding.workspace_id != workspace_id:
                 raise ConflictError("trial Provider binding lineage is invalid")
             existing = await self._session.scalar(
@@ -561,8 +559,9 @@ class DirectorQualityService:
         workflow.status = WorkflowStatus.FINAL_REVIEW.value
         workflow.current_stage = "production"
         workflow.version += 1
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(version)
+        await self._session.commit()
         return version
 
     async def review_production(
@@ -739,8 +738,9 @@ class DirectorQualityService:
         ):
             workflow.current_stage = "production"
         workflow.version += 1
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(version)
+        await self._session.commit()
         return version
 
     async def _repair_root_batch(
@@ -777,9 +777,7 @@ class DirectorQualityService:
             row.logical_shot_id: row
             for row in (
                 await self._session.execute(
-                    select(ProductionBatchShot).where(
-                        ProductionBatchShot.batch_id == root_batch.id
-                    )
+                    select(ProductionBatchShot).where(ProductionBatchShot.batch_id == root_batch.id)
                 )
             )
             .scalars()
@@ -791,10 +789,7 @@ class DirectorQualityService:
             root_shot = root_shots.get(repair_shot.logical_shot_id)
             if root_shot is None:
                 raise ConflictError("repair shot is absent from its root batch")
-            if (
-                repair_shot.accepted_artifact_id is None
-                or repair_shot.accepted_node_run_id is None
-            ):
+            if repair_shot.accepted_artifact_id is None or repair_shot.accepted_node_run_id is None:
                 raise ConflictError("accepted repair has no composite evidence")
             root_shot.accepted_artifact_id = repair_shot.accepted_artifact_id
             root_shot.accepted_node_run_id = repair_shot.accepted_node_run_id
@@ -910,16 +905,12 @@ class DirectorQualityService:
         terminal_failures: list[str],
     ) -> QualityReportPayload:
         refs = [
-            f"node-run:{run.id}"
-            for run in by_key.values()
-            if run.result_artifact_id is not None
+            f"node-run:{run.id}" for run in by_key.values() if run.result_artifact_id is not None
         ]
         hard_blockers = list(terminal_failures)
         media_keys = ("keyframe", "video", "voice", "composite")
         missing_media = [
-            key
-            for key in media_keys
-            if key not in by_key or by_key[key].result_artifact_id is None
+            key for key in media_keys if key not in by_key or by_key[key].result_artifact_id is None
         ]
         hard_blockers.extend(f"missing-artifact:{key}" for key in missing_media)
         provider_ops = list(
@@ -931,14 +922,8 @@ class DirectorQualityService:
                 )
             ).scalars()
         )
-        bad_requests = [
-            str(op.id)
-            for op in provider_ops
-            if not op.model_binding_id or not op.request_fingerprint
-        ]
-        request_status: Literal["passed", "blocked"] = (
-            "blocked" if bad_requests else "passed"
-        )
+        bad_requests = [str(op.id) for op in provider_ops if not _has_frozen_request_evidence(op)]
+        request_status: Literal["passed", "blocked"] = "blocked" if bad_requests else "passed"
         if bad_requests:
             hard_blockers.append("effective-request-evidence-missing")
         identity_review = by_key.get("identity_review")
@@ -951,15 +936,11 @@ class DirectorQualityService:
             if identity_review
             else "blocked"
         )
-        identity_signal = (
-            dict(identity_review.output_summary or {}) if identity_review else {}
-        )
+        identity_signal = dict(identity_review.output_summary or {}) if identity_review else {}
         identity_status = _identity_evidence_status(identity_review_status)
         drift = by_key.get("video_drift_review")
         drift_status = (
-            str((drift.output_summary or {}).get("status") or "needs_human")
-            if drift
-            else "blocked"
+            str((drift.output_summary or {}).get("status") or "needs_human") if drift else "blocked"
         )
         continuity = by_key.get("continuity_review")
         continuity_status = (
@@ -993,15 +974,11 @@ class DirectorQualityService:
                         "visual review is required."
                     )
                 ),
-                evidence_refs=(
-                    [f"node-run:{identity_review.id}"] if identity_review else []
-                ),
+                evidence_refs=([f"node-run:{identity_review.id}"] if identity_review else []),
                 signals={
                     "identity_review_status": identity_review_status,
                     "review_rule": identity_signal.get("review_rule"),
-                    "canonical_artifact_id": identity_signal.get(
-                        "canonical_artifact_id"
-                    ),
+                    "canonical_artifact_id": identity_signal.get("canonical_artifact_id"),
                     "probe_artifact_id": identity_signal.get("probe_artifact_id"),
                     "automatic_identity_decision": identity_signal.get(
                         "automatic_identity_decision", False
@@ -1025,8 +1002,7 @@ class DirectorQualityService:
                 dimension="voice_assignment",
                 status="needs_human" if "voice" not in missing_media else "blocked",
                 summary=(
-                    "Voice bytes exist; speaker ownership and stability require "
-                    "listening review."
+                    "Voice bytes exist; speaker ownership and stability require listening review."
                 ),
                 evidence_refs=[f"node-run:{by_key['voice'].id}"] if "voice" in by_key else [],
             ),
@@ -1055,9 +1031,7 @@ class DirectorQualityService:
                     "neither alone approves the shot."
                 ),
                 evidence_refs=[
-                    f"node-run:{run.id}"
-                    for run in (drift, continuity)
-                    if run is not None
+                    f"node-run:{run.id}" for run in (drift, continuity) if run is not None
                 ],
                 signals={
                     "video_drift_status": drift_status,
@@ -1072,9 +1046,7 @@ class DirectorQualityService:
                     "and must be accepted by the creator."
                 ),
                 evidence_refs=(
-                    [f"node-run:{by_key['composite'].id}"]
-                    if "composite" in by_key
-                    else []
+                    [f"node-run:{by_key['composite'].id}"] if "composite" in by_key else []
                 ),
             ),
         ]
@@ -1091,9 +1063,7 @@ class DirectorQualityService:
         return QualityReportPayload(
             batch_id=batch.id,
             logical_shot_id=batch_shot.logical_shot_id,
-            overall_status=cast(
-                Literal["passed", "warning", "needs_human", "blocked"], overall
-            ),
+            overall_status=cast(Literal["passed", "warning", "needs_human", "blocked"], overall),
             dimensions=dimensions,
             hard_blockers=sorted(set(hard_blockers)),
             limitations=[

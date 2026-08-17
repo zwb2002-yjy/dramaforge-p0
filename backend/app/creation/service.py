@@ -40,6 +40,15 @@ def _content_hash(payload: object) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+class TextOutputValidationError(ValueError):
+    """A completed text response failed the caller's structured-output contract.
+
+    Only this failure is safe to retry with a corrective prompt. Transport,
+    authentication, rate-limit, and availability failures are already handled
+    by the provider router and must not trigger another application-level POST.
+    """
+
+
 @dataclass(frozen=True)
 class StartProjectResult:
     project_id: UUID
@@ -638,9 +647,12 @@ class CreationService:
                     max_tokens=2400,
                     parse=lambda text: _parse_brief_json(text, idea),
                 )
-            except Exception as exc:  # noqa: BLE001 - provider/schema boundary
+            except TextOutputValidationError as exc:
                 last_error = exc
                 continue
+            except Exception as exc:  # noqa: BLE001 - provider boundary
+                last_error = exc
+                break
             break
 
         if parsed is None:
@@ -800,7 +812,7 @@ class CreationService:
             f"{json.dumps(brief_body, ensure_ascii=False)}"
         )
         plan_body: dict[str, object] | None = None
-        last_error = None
+        last_error: Exception | None = None
         for attempt_no in range(1, 4):
             attempt_prompt = prompt
             if last_error is not None:
@@ -822,9 +834,12 @@ class CreationService:
                     brief=brief_body,
                     parse=lambda text: _parse_plan_json(text, logline),
                 )
-            except Exception as exc:  # noqa: BLE001 - provider/schema boundary
+            except TextOutputValidationError as exc:
                 last_error = exc
                 continue
+            except Exception as exc:  # noqa: BLE001 - provider boundary
+                last_error = exc
+                break
             break
 
         if plan_body is None:
@@ -884,7 +899,9 @@ class CreationService:
         LiteLLMModelAdapter`` when ``TEXT_V3_ROUTER_ENABLED`` is set
         (spec §100–§101); otherwise the legacy OpenAI workspace adapter runs
         (LEGACY_COMPAT). A transport or schema-parse failure is recorded as a
-        failed op before re-raising — the caller retries on any failure.
+        failed op before re-raising. Callers may retry only a completed response
+        that fails structured-output validation; provider failures are terminal
+        at this layer because the provider router owns transport retries.
         """
         from datetime import UTC, datetime
 
@@ -1020,7 +1037,10 @@ class CreationService:
                 if not text_out and hasattr(adapter, "poll"):
                     polled = await adapter.poll(remote_id)
                     text_out = str(polled.get("text") or "")
-            parsed = parse(text_out)
+            try:
+                parsed = parse(text_out)
+            except Exception as exc:  # noqa: BLE001 - caller-owned schema boundary
+                raise TextOutputValidationError(str(exc)) from exc
             op.status = "succeeded"
             op.completed_at = datetime.now(UTC)
             op.response_summary = {"text_chars": len(text_out)}
