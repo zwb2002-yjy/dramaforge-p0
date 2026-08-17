@@ -1,7 +1,7 @@
 {
   "contract": {
     "documentation_source": {
-      "notes": "Video V2.0 image accepts public HTTPS URL or raw base64 (no data: prefix); keyframes mode uses extra_body.mode=keyframes.",
+      "notes": "Public docs specify a public HTTPS URL for top-level image and extra_body.mode=keyframes for keyframes. Raw base64 without a data: prefix is retained only as a vendor-confirmed, live-probed compatibility path.",
       "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-v20.md",
       "verified_at": "2026-08-05"
     },

@@ -53,7 +53,7 @@ def _load_frozen() -> object:
 
 
 def test_all_seed_manifests_parse() -> None:
-    assert len(SEED_MANIFESTS) == 6
+    assert len(SEED_MANIFESTS) == 7
     for manifest in SEED_MANIFESTS:
         parsed = ModelCapabilityManifest.model_validate(manifest)
         assert parsed.model_revision == "v1"
@@ -78,7 +78,11 @@ def test_seed_manifests_match_registry_plugins() -> None:
     ark_ids = [m["model_id"] for m in ark.catalog_manifests]
     minimax_ids = [m["model_id"] for m in minimax.catalog_manifests]
     assert agnes_ids == ["agnes-image-2.1-flash", "agnes-video-v2.0"]
-    assert ark_ids == ["doubao-seedream-4-0-250828", "doubao-seedance-1-0-pro-250528"]
+    assert ark_ids == [
+        "doubao-seedream-4-0-250828",
+        "doubao-seedance-1-0-pro-250528",
+        "doubao-seedance-2-0-260128",
+    ]
     assert minimax_ids == ["image-01", "MiniMax-H3"]
     for model_id in agnes_ids + ark_ids + minimax_ids:
         assert any(m["model_id"] == model_id for m in SEED_MANIFESTS)
@@ -86,7 +90,7 @@ def test_seed_manifests_match_registry_plugins() -> None:
 
 def test_contract_fixtures_match_current_seed_hash() -> None:
     fixture_files = sorted(CONTRACTS_DIR.glob("*.json"))
-    assert len(fixture_files) == 6
+    assert len(fixture_files) == 7
     manifest_by_id = {m["model_id"]: m for m in SEED_MANIFESTS}
     for fixture_path in fixture_files:
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))

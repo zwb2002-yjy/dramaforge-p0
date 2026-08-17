@@ -1,4 +1,4 @@
-﻿"""Product execution path: enqueue NodeRun for Worker (no Adapter in request thread)."""
+"""Product execution path: enqueue NodeRun for Worker (no Adapter in request thread)."""
 
 from __future__ import annotations
 
@@ -72,6 +72,15 @@ _ALLOWED_PROVIDER_MEDIA_MIMES = frozenset(
 )
 
 
+def _unknown_submission_error_summary(transport_error: object = None) -> str:
+    summary = "Provider submission outcome is unknown; manual reconciliation required"
+    candidate = str(transport_error or "").strip()
+    safe = candidate.replace("_", "").replace(".", "")
+    if candidate and len(candidate) <= 80 and candidate.isascii() and safe.isalnum():
+        return f"{summary} (transport={candidate})"
+    return summary
+
+
 def _is_public_ip(address: str) -> bool:
     ip = ipaddress.ip_address(address)
     return ip.is_global
@@ -91,9 +100,7 @@ async def _validate_public_media_url(value: str) -> tuple[str, set[str]]:
     try:
         port = parsed.port or 443
     except ValueError as exc:
-        raise ValidationAppError(
-            "PROVIDER_MEDIA_URL_INVALID: media URL port is invalid"
-        ) from exc
+        raise ValidationAppError("PROVIDER_MEDIA_URL_INVALID: media URL port is invalid") from exc
     try:
         addresses = {str(ipaddress.ip_address(host))}
     except ValueError:
@@ -166,12 +173,15 @@ async def _download_provider_media(
     """Download one provider result with pinned DNS and bounded streaming."""
     value, addresses = await _validate_public_media_url(artifact_uri)
     if transport is not None:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(120.0, connect=20.0),
-            follow_redirects=False,
-            trust_env=False,
-            transport=transport,
-        ) as client, client.stream("GET", value) as response:
+        async with (
+            httpx.AsyncClient(
+                timeout=httpx.Timeout(120.0, connect=20.0),
+                follow_redirects=False,
+                trust_env=False,
+                transport=transport,
+            ) as client,
+            client.stream("GET", value) as response,
+        ):
             if response.is_redirect:
                 raise ValidationAppError(
                     "PROVIDER_MEDIA_INVALID: provider media redirects are not allowed"
@@ -181,9 +191,7 @@ async def _download_provider_media(
             if content_length:
                 try:
                     if int(content_length) > _MAX_PROVIDER_MEDIA_BYTES:
-                        raise ValidationAppError(
-                            "PROVIDER_MEDIA_INVALID: response is too large"
-                        )
+                        raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
                 except ValueError as exc:
                     raise ValidationAppError(
                         "PROVIDER_MEDIA_INVALID: response Content-Length is invalid"
@@ -192,9 +200,7 @@ async def _download_provider_media(
             async for chunk in response.aiter_bytes(1024 * 1024):
                 body.extend(chunk)
                 if len(body) > _MAX_PROVIDER_MEDIA_BYTES:
-                    raise ValidationAppError(
-                        "PROVIDER_MEDIA_INVALID: response is too large"
-                    )
+                    raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
             return _validate_provider_media(
                 kind=kind,
                 data=bytes(body),
@@ -213,12 +219,15 @@ async def _download_provider_media(
         network_backend=_PinnedNetworkBackend(hostname=host, addresses=addresses),
     )
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(120.0, connect=20.0),
-            follow_redirects=False,
-            trust_env=False,
-            transport=base_transport,
-        ) as client, client.stream("GET", value) as response:
+        async with (
+            httpx.AsyncClient(
+                timeout=httpx.Timeout(120.0, connect=20.0),
+                follow_redirects=False,
+                trust_env=False,
+                transport=base_transport,
+            ) as client,
+            client.stream("GET", value) as response,
+        ):
             if response.is_redirect:
                 raise ValidationAppError(
                     "PROVIDER_MEDIA_INVALID: provider media redirects are not allowed"
@@ -228,9 +237,7 @@ async def _download_provider_media(
             if content_length:
                 try:
                     if int(content_length) > _MAX_PROVIDER_MEDIA_BYTES:
-                        raise ValidationAppError(
-                            "PROVIDER_MEDIA_INVALID: response is too large"
-                        )
+                        raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
                 except ValueError as exc:
                     raise ValidationAppError(
                         "PROVIDER_MEDIA_INVALID: response Content-Length is invalid"
@@ -239,9 +246,7 @@ async def _download_provider_media(
             async for chunk in response.aiter_bytes(1024 * 1024):
                 body.extend(chunk)
                 if len(body) > _MAX_PROVIDER_MEDIA_BYTES:
-                    raise ValidationAppError(
-                        "PROVIDER_MEDIA_INVALID: response is too large"
-                    )
+                    raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
             return _validate_provider_media(
                 kind=kind,
                 data=bytes(body),
@@ -253,8 +258,10 @@ async def _download_provider_media(
 
 def _media_magic_matches(kind: str, data: bytes) -> bool:
     if kind in {"keyframe", "image"}:
-        return data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"\xff\xd8\xff") or (
-            len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+        return (
+            data.startswith(b"\x89PNG\r\n\x1a\n")
+            or data.startswith(b"\xff\xd8\xff")
+            or (len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP")
         )
     if kind in {"video", "video_review"}:
         return len(data) >= 12 and data[4:8] == b"ftyp"
@@ -697,9 +704,7 @@ async def enqueue_keyframe_after_plan(
     assert project is not None
     from app.providers.model_profiles.node_snapshot import planned_node_model_profile
 
-    model_profile = await planned_node_model_profile(
-        session, project=project, node_key="keyframe"
-    )
+    model_profile = await planned_node_model_profile(session, project=project, node_key="keyframe")
     graph = await graphs.create_graph(
         project_id=project_id,
         scope_type="shot",
@@ -930,8 +935,7 @@ async def _run_shadow_selection(
             "legacy_provider": legacy_provider,
             "legacy_model": legacy_model,
             "matches_legacy": (
-                plan.provider_type == legacy_provider
-                and plan.invoke_model_value == legacy_model
+                plan.provider_type == legacy_provider and plan.invoke_model_value == legacy_model
             ),
         }
         op.request_summary = summary
@@ -1076,11 +1080,7 @@ async def _execute_unified_media_node_run(
     result: SubmissionResult | None = None
     director_context: DirectorMediaExecutionContext | None = None
 
-    resubmit = bool(
-        op is not None
-        and op.status == "rejected"
-        and not op.provider_operation_id
-    )
+    resubmit = bool(op is not None and op.status == "rejected" and not op.provider_operation_id)
     if op is not None and not resubmit:
         # A crash between the submission_started commit and the remote-id write
         # leaves an op with no remote id. Its outcome is unknown; escalate to
@@ -1240,11 +1240,7 @@ async def _execute_unified_media_node_run(
         invoke_model_value = plan.invoke_model_value
         provider_type = plan.provider_type
         protocol_profile = plan.protocol_profile
-        if (
-            invoke_model_value is None
-            or provider_type is None
-            or protocol_profile is None
-        ):
+        if invoke_model_value is None or provider_type is None or protocol_profile is None:
             raise ValidationAppError("unified selection has no model/provider identity")
         connection = await session.get(ProviderConnection, plan.connection_id)
         binding = await session.get(ProviderModelBinding, plan.model_binding_id)
@@ -1398,9 +1394,7 @@ async def _execute_unified_media_node_run(
         if result.status == "unknown_submission":
             op.status = "unknown_submission"
             op.error_code = str(result.error_code or "PROVIDER_SUBMISSION_UNKNOWN")
-            op.error_summary = (
-                "Provider submission outcome is unknown; manual reconciliation required"
-            )
+            op.error_summary = _unknown_submission_error_summary(result.error)
             op.completed_at = datetime.now(UTC)
             await _commit_terminal_failure(
                 session,
@@ -1905,9 +1899,7 @@ async def execute_media_node_run(
             # (verified 2026-08-04: data URI -> video task completed). This
             # removes the public HTTPS origin dependency for the P0 video chain.
             try:
-                first_frame_bytes = await obj_store.get_bytes(
-                    object_key=first_frame.object_key
-                )
+                first_frame_bytes = await obj_store.get_bytes(object_key=first_frame.object_key)
             except Exception:
                 first_frame_bytes = None
             if not first_frame_bytes:
@@ -1937,6 +1929,12 @@ async def execute_media_node_run(
         initial_fingerprint = hashlib.sha256(
             f"{kind}:{prompt}:{safe_request_summary}".encode()
         ).hexdigest()
+        raw_selection_plan = snap.get("selection_plan")
+        frozen_selection_plan = (
+            {str(key): value for key, value in raw_selection_plan.items()}
+            if isinstance(raw_selection_plan, dict)
+            else {}
+        )
         if director_context is not None:
             await _validate_director_submission_or_block(
                 session,
@@ -1947,10 +1945,14 @@ async def execute_media_node_run(
         # ProviderOperation row (uq_provider_operations_node_run) instead of
         # inserting a duplicate.
         op = (
-            await session.execute(
-                select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+            (
+                await session.execute(
+                    select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if op is None:
             op = ProviderOperation(
                 node_run_id=run.id,
@@ -1966,6 +1968,11 @@ async def execute_media_node_run(
                 request_summary=safe_request_summary,
                 response_summary={},
                 submitted_at=datetime.now(UTC),
+                model_binding_id=(
+                    director_context.model_binding_id if director_context is not None else None
+                ),
+                capability_manifest_hash=(str(snap.get("capability_manifest_hash") or "") or None),
+                selection_plan=frozen_selection_plan,
             )
             session.add(op)
         else:
@@ -1978,6 +1985,12 @@ async def execute_media_node_run(
             op.response_summary = {}
             op.submitted_at = datetime.now(UTC)
             op.completed_at = None
+            if director_context is not None:
+                op.model_binding_id = director_context.model_binding_id
+                op.capability_manifest_hash = (
+                    str(snap.get("capability_manifest_hash") or "") or None
+                )
+                op.selection_plan = frozen_selection_plan
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
@@ -2059,7 +2072,7 @@ async def execute_media_node_run(
     if create_unknown:
         op.status = "unknown_submission"
         op.error_code = str(create.get("error_code") or "PROVIDER_SUBMISSION_UNKNOWN")
-        op.error_summary = "Provider submission outcome is unknown; manual reconciliation required"
+        op.error_summary = _unknown_submission_error_summary(create.get("transport_error"))
         op.completed_at = datetime.now(UTC)
         await _commit_terminal_failure(
             session,
@@ -2441,6 +2454,7 @@ async def _complete_pure_node(
 
     from app.config import get_settings
     from app.consistency.continuity import continuity_four_layers
+
     identity_status: str | None = None
     review_status = "passed"
     payload: dict[str, object] = {

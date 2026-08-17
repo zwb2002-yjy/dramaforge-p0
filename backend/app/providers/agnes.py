@@ -17,6 +17,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 from uuid import uuid4
+from weakref import WeakKeyDictionary
 
 import httpx
 from pydantic import JsonValue
@@ -30,6 +31,22 @@ AGNES_VIDEO_CREATE_PATH = "/v1/videos"
 AGNES_VIDEO_BY_ID_PATH = "/agnesapi"
 _ALLOWED_REFERENCE_MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
 _MAX_REFERENCE_BYTES = 20 * 1024 * 1024
+_SUBMISSION_GATES: WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[tuple[str, int], asyncio.Semaphore]
+] = WeakKeyDictionary()
+
+
+def _submission_gate(host: str, limit: int) -> asyncio.Semaphore:
+    """Limit paid Agnes creates per host while leaving task polling parallel."""
+
+    loop = asyncio.get_running_loop()
+    loop_gates = _SUBMISSION_GATES.setdefault(loop, {})
+    key = (host, limit)
+    gate = loop_gates.get(key)
+    if gate is None:
+        gate = asyncio.Semaphore(limit)
+        loop_gates[key] = gate
+    return gate
 
 
 def normalize_agnes_host(value: str) -> str:
@@ -281,7 +298,6 @@ def _request_fingerprint(body: dict[str, object]) -> str:
 class AgnesHubClient:
     """Single-attempt Agnes China protocol client."""
 
-    _IMAGE_REQUEST_TIMEOUT_S = 150.0
     _VIDEO_REQUEST_TIMEOUT_S = 120.0
 
     def __init__(
@@ -297,6 +313,8 @@ class AgnesHubClient:
         self._key = self._settings.agnes_api_key.strip()
         self._image_model = self._settings.agnes_image_model
         self._video_model = self._settings.agnes_video_model
+        self._image_request_timeout_s = self._settings.agnes_image_request_timeout_seconds
+        self._submission_limit = self._settings.agnes_max_concurrent_submissions
         self._tasks: dict[str, dict[str, Any]] = {}
 
     @property
@@ -344,14 +362,15 @@ class AgnesHubClient:
             "request_schema_fingerprint": _schema_fingerprint(body),
         }
         try:
-            response = await _post_json(
-                self._host,
-                AGNES_IMAGE_PATH,
-                headers=self._headers(),
-                body=body,
-                timeout=self._IMAGE_REQUEST_TIMEOUT_S,
-                transport=self._transport,
-            )
+            async with _submission_gate(self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    AGNES_IMAGE_PATH,
+                    headers=self._headers(),
+                    body=body,
+                    timeout=self._image_request_timeout_s,
+                    transport=self._transport,
+                )
         except httpx.TransportError as exc:
             return {
                 "status": "unknown_submission",
@@ -443,14 +462,15 @@ class AgnesHubClient:
             "request_schema_fingerprint": _schema_fingerprint(body),
         }
         try:
-            response = await _post_json(
-                self._host,
-                AGNES_VIDEO_CREATE_PATH,
-                headers=self._headers(),
-                body=body,
-                timeout=self._VIDEO_REQUEST_TIMEOUT_S,
-                transport=self._transport,
-            )
+            async with _submission_gate(self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    AGNES_VIDEO_CREATE_PATH,
+                    headers=self._headers(),
+                    body=body,
+                    timeout=self._VIDEO_REQUEST_TIMEOUT_S,
+                    transport=self._transport,
+                )
         except httpx.TransportError as exc:
             return {
                 "status": "unknown_submission",
@@ -636,6 +656,7 @@ class AgnesHubClient:
 class AgnesImageAdapter:
     provider = "agnes"
     protocol_profile = AGNES_CN_PROFILE
+
     def __init__(
         self,
         settings: Settings | None = None,
@@ -919,7 +940,6 @@ class AgnesRuntime:
     protocol_profile = AGNES_CN_PROFILE
 
     _VIDEO_REQUEST_TIMEOUT_S = 120.0
-    _IMAGE_REQUEST_TIMEOUT_S = 150.0
 
     def __init__(
         self,
@@ -934,6 +954,8 @@ class AgnesRuntime:
         self._host = normalize_agnes_host(host or self._settings.agnes_base_url)
         self._key = self._settings.agnes_api_key.strip()
         self._enabled = self._settings.agnes_enabled
+        self._image_request_timeout_s = self._settings.agnes_image_request_timeout_seconds
+        self._submission_limit = self._settings.agnes_max_concurrent_submissions
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -950,14 +972,15 @@ class AgnesRuntime:
         if not self._configured():
             raise RuntimeError("Agnes China connection is not configured")
         try:
-            response = await _post_json(
-                self._host,
-                AGNES_IMAGE_PATH,
-                headers=self._headers(),
-                body=request.wire_request,
-                timeout=self._IMAGE_REQUEST_TIMEOUT_S,
-                transport=self._transport,
-            )
+            async with _submission_gate(self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    AGNES_IMAGE_PATH,
+                    headers=self._headers(),
+                    body=request.wire_request,
+                    timeout=self._image_request_timeout_s,
+                    transport=self._transport,
+                )
         except httpx.TransportError as exc:
             return SubmissionResult(
                 status="unknown_submission",
@@ -1002,14 +1025,15 @@ class AgnesRuntime:
         if not self._configured():
             raise RuntimeError("Agnes China connection is not configured")
         try:
-            response = await _post_json(
-                self._host,
-                AGNES_VIDEO_CREATE_PATH,
-                headers=self._headers(),
-                body=request.wire_request,
-                timeout=self._VIDEO_REQUEST_TIMEOUT_S,
-                transport=self._transport,
-            )
+            async with _submission_gate(self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    AGNES_VIDEO_CREATE_PATH,
+                    headers=self._headers(),
+                    body=request.wire_request,
+                    timeout=self._VIDEO_REQUEST_TIMEOUT_S,
+                    transport=self._transport,
+                )
         except httpx.TransportError as exc:
             return SubmissionResult(
                 status="unknown_submission",

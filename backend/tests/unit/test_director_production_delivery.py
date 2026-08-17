@@ -534,6 +534,8 @@ async def test_materialize_production_reuses_only_identical_accepted_trial(
     }
     assert all(run.production_batch_id == batch.id for run in runs)
     assert all(run.budget_reservation_id is not None for run in runs)
+    assert all(run.input_snapshot.get("source_commit") for run in runs)
+    assert all(run.input_snapshot.get("identity_evidence_policy") for run in runs)
     media_runs = [
         run
         for run in runs

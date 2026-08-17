@@ -17,6 +17,8 @@ model_list:
       model: os.environ/LITELLM_SCRIPT_QUALITY_MODEL
       api_base: os.environ/LITELLM_SCRIPT_QUALITY_API_BASE
       api_key: os.environ/LITELLM_SCRIPT_QUALITY_API_KEY
+      thinking:
+        type: disabled
       mock_response: os.environ/LITELLM_SCRIPT_QUALITY_MOCK_RESPONSE
 
   - model_name: script-fast
@@ -24,6 +26,8 @@ model_list:
       model: os.environ/LITELLM_SCRIPT_FAST_MODEL
       api_base: os.environ/LITELLM_SCRIPT_FAST_API_BASE
       api_key: os.environ/LITELLM_SCRIPT_FAST_API_KEY
+      thinking:
+        type: disabled
       mock_response: os.environ/LITELLM_SCRIPT_FAST_MOCK_RESPONSE
 
   # Bootstrap bridge target for ``litellm/text-llm`` (fix spec §32/§33).
@@ -32,6 +36,8 @@ model_list:
       model: os.environ/LITELLM_LEGACY_TEXT_MODEL
       api_base: os.environ/LITELLM_LEGACY_TEXT_API_BASE
       api_key: os.environ/LITELLM_LEGACY_TEXT_API_KEY
+      thinking:
+        type: disabled
       mock_response: os.environ/LITELLM_LEGACY_TEXT_MOCK_RESPONSE
 
 router_settings:

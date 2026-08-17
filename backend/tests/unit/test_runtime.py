@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from uuid import uuid4
 
 import httpx
 import pytest
 from app.config import Settings
+from app.execution.product_path import _unknown_submission_error_summary
 from app.providers.agnes import AgnesRuntime
 from app.providers.runtime import (
     CompiledImageRequest,
@@ -77,6 +79,33 @@ async def test_runtime_submit_image_returns_synchronous_url() -> None:
     result = await runtime.submit_image(_compiled_image())
     assert result.status == "succeeded"
     assert result.artifact_uri == "https://media.example/i.png"
+    assert runtime._image_request_timeout_s == 300.0
+
+
+@pytest.mark.asyncio
+async def test_runtime_serializes_paid_creates_across_instances() -> None:
+    active = 0
+    max_active = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return httpx.Response(200, json={"data": [{"url": "https://media.example/i.png"}]})
+
+    transport = httpx.MockTransport(handler)
+    first = AgnesRuntime(settings=_settings(), transport=transport)
+    second = AgnesRuntime(settings=_settings(), transport=transport)
+
+    results = await asyncio.gather(
+        first.submit_image(_compiled_image()),
+        second.submit_image(_compiled_image()),
+    )
+
+    assert [result.status for result in results] == ["succeeded", "succeeded"]
+    assert max_active == 1
 
 
 @pytest.mark.asyncio
@@ -155,7 +184,13 @@ async def test_runtime_transport_error_returns_unknown_submission() -> None:
     result = await runtime.submit_video(_compiled_video())
     assert result.status == "unknown_submission"
     assert result.error_code == "PROVIDER_SUBMISSION_UNKNOWN"
+    assert result.error == "ReadError"
     assert result.resume_token is None
+
+
+def test_unknown_submission_summary_keeps_only_safe_transport_class() -> None:
+    assert _unknown_submission_error_summary("ReadError").endswith("(transport=ReadError)")
+    assert "secret" not in _unknown_submission_error_summary("ReadError: secret=value")
 
 
 @pytest.mark.asyncio

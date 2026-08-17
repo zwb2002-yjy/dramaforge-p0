@@ -81,7 +81,7 @@ def test_ark_plugin_is_implemented() -> None:
     assert plugin.implemented is True
     assert plugin.default_base_url == "https://ark.cn-beijing.volces.com/api/v3"
     assert plugin.model_contracts[("image", "keyframe")] == "doubao-seedream-4-0-250828"
-    assert plugin.model_contracts[("video", "video")] == "doubao-seedance-1-0-pro-250528"
+    assert plugin.model_contracts[("video", "video")] == "doubao-seedance-2-0-260128"
     # The implemented plugin must build a real Ark protocol client.
     client = plugin.build_client(Settings())
     assert isinstance(client, ArkHubClient)
@@ -100,6 +100,12 @@ def test_minimax_plugin_is_implemented() -> None:
     assert plugin.capability_purposes == {"image_i2i": "keyframe", "video_i2v": "video"}
     assert plugin.image_i2i_probe_transport == "public_url"
     assert isinstance(plugin.build_client(Settings()), MiniMaxHubClient)
+
+
+def test_video_provider_defaults_are_ready_for_account_probes() -> None:
+    settings = Settings()
+    assert settings.minimax_video_model == "MiniMax-H3"
+    assert settings.volcengine_video_model == "doubao-seedance-2-0-260128"
 
 
 def test_unknown_plugin_is_rejected() -> None:

@@ -2,8 +2,8 @@
   "contract": {
     "documentation_source": {
       "notes": "Image 2.x accepts a prefixed data URI for i2i references; T2I omits the image field.",
-      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-image-21.md",
-      "verified_at": "2026-08-05"
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-image-21-flash.md",
+      "verified_at": "2026-08-17"
     },
     "wire_template": {
       "host": "https://api.agnes-ai.cn",

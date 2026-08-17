@@ -20,6 +20,8 @@ def test_agnes_settings_from_env(monkeypatch: object) -> None:
     assert s.agnes_base_url == "https://api.agnes-ai.cn/v1"
     assert s.agnes_image_model == "agnes-image-2.1-flash"
     assert s.agnes_video_model == "agnes-video-v2.0"
+    assert s.agnes_image_request_timeout_seconds == 300.0
+    assert s.agnes_max_concurrent_submissions == 1
     # Adapter factory selects Agnes when configured
     assert get_flux_adapter(allow_live=True).provider == "agnes"
     assert get_kling_adapter(allow_live=True).provider == "agnes"

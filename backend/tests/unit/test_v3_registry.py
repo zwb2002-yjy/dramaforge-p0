@@ -89,13 +89,14 @@ class TestModelRegistry:
     def test_register_get_and_find_by_capability(self) -> None:
         model_registry, transport_registry = build_v3_registry()
         models = model_registry.list_models()
-        assert len(models) == 6
+        assert len(models) == 7
         # all seeded A+B models registered as V3 manifests
         ids = {model.manifest.id for model in models}
         assert "agnes/agnes-image-2.1-flash" in ids
         assert "agnes/agnes-video-v2.0" in ids
         assert "volcengine/doubao-seedream-4-0-250828" in ids
         assert "volcengine/doubao-seedance-1-0-pro-250528" in ids
+        assert "volcengine/doubao-seedance-2-0-260128" in ids
         assert "minimax/image-01" in ids
         assert "minimax/MiniMax-H3" in ids
 
@@ -108,6 +109,7 @@ class TestModelRegistry:
         assert {model.manifest.id for model in image_to_video_models} == {
             "agnes/agnes-video-v2.0",
             "volcengine/doubao-seedance-1-0-pro-250528",
+            "volcengine/doubao-seedance-2-0-260128",
             "minimax/MiniMax-H3",
         }
 
@@ -149,7 +151,7 @@ class TestDefaultRegistryQueryable:
         model_registry, _ = build_v3_registry()
         # Phase 3 wires real adapters; until then capability queries work
         models = model_registry.find_by_capability(Capability.VIDEO_IMAGE_TO_VIDEO)
-        assert len(models) == 3
+        assert len(models) == 4
 
 
 class TestDefaultRegistryRealAdapters:

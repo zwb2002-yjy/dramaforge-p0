@@ -207,7 +207,7 @@ def _register_defaults() -> None:
             credential_provider_key="volcengine",
             model_contracts={
                 ("image", "keyframe"): "doubao-seedream-4-0-250828",
-                ("video", "video"): "doubao-seedance-1-0-pro-250528",
+                ("video", "video"): "doubao-seedance-2-0-260128",
             },
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),

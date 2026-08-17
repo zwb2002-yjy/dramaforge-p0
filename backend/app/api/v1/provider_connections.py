@@ -18,8 +18,8 @@ from app.api.deps import (
     SessionDep,
     require_selected_workspace,
 )
-from app.providers.connection_service import ProviderConnectionService
 from app.providers.catalog_service import ModelCatalogService
+from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import (
     ProviderCapabilityEvidence,
     ProviderConnection,
@@ -100,7 +100,9 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 implemented=plugin.implemented,
                 paid_capabilities=sorted(plugin.paid_capabilities),
                 capabilities=sorted(
-                    set(plugin.capability_purposes) | set(plugin.paid_capabilities) | {"auth_models"}
+                    set(plugin.capability_purposes)
+                    | set(plugin.paid_capabilities)
+                    | {"auth_models"}
                 ),
                 model_list_path=plugin.model_list_path,
                 models=models,

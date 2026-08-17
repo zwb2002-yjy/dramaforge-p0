@@ -40,6 +40,8 @@ def test_compose_defines_required_boot0_services() -> None:
         "AGNES_BASE_URL",
         "AGNES_IMAGE_MODEL",
         "AGNES_VIDEO_MODEL",
+        "AGNES_IMAGE_REQUEST_TIMEOUT_SECONDS",
+        "AGNES_MAX_CONCURRENT_SUBMISSIONS",
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "NO_PROXY",
@@ -187,7 +189,9 @@ def test_frontend_image_is_static_unprivileged_gateway() -> None:
     assert "npm run build" in dockerfile
     assert "nginx-unprivileged" in dockerfile
     assert "EXPOSE 8080" in dockerfile
-    assert "proxy_pass http://api:8000" in nginx
+    assert "resolver 127.0.0.11" in nginx
+    assert "set $api_upstream http://api:8000" in nginx
+    assert "proxy_pass $api_upstream" in nginx
     assert "try_files $uri $uri/ /index.html" in nginx
 
 
