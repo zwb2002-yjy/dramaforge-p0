@@ -31,24 +31,16 @@ def _pg_port() -> str:
 
 
 def _pg_admin_url() -> str:
-    default = (
-        f"postgresql://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/postgres"
-    )
+    default = f"postgresql://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/postgres"
     return os.environ.get("TEST_PG_ADMIN_URL", default)
 
 
 def _db_sync_url(dbname: str) -> str:
-    return (
-        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
-        f"@{_pg_host()}:{_pg_port()}/{dbname}"
-    )
+    return f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/{dbname}"
 
 
 def _db_async_url(dbname: str) -> str:
-    return (
-        f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}"
-        f"@{_pg_host()}:{_pg_port()}/{dbname}"
-    )
+    return f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/{dbname}"
 
 
 def _pg_available_sync() -> bool:
@@ -113,10 +105,7 @@ def _seed_legacy_binding(dbname: str) -> dict:
             {"e": f"mig-{uuid.uuid4().hex}@example.com"},
         ).scalar_one()
         workspace_id = conn.execute(
-            text(
-                "INSERT INTO workspaces (owner_user_id, name) "
-                "VALUES (:u, :n) RETURNING id"
-            ),
+            text("INSERT INTO workspaces (owner_user_id, name) VALUES (:u, :n) RETURNING id"),
             {"u": user_id, "n": f"mig-ws-{uuid.uuid4().hex[:8]}"},
         ).scalar_one()
         credential_id = conn.execute(
@@ -242,9 +231,7 @@ async def test_migration_0015_backfills_and_rolls_back_on_isolated_db() -> None:
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             assert (
-                conn.execute(
-                    text("select count(*) from provider_model_catalog_entries")
-                ).scalar()
+                conn.execute(text("select count(*) from provider_model_catalog_entries")).scalar()
                 == 6
             )
         engine.dispose()
@@ -262,7 +249,17 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar_one()
-            assert head == "20260814_0026"
+            assert head == "20260817_0027"
+            seedance_2 = conn.execute(
+                text(
+                    "select model_id, lifecycle from provider_model_catalog_entries "
+                    "where provider_type='volcengine' "
+                    "and protocol_profile='ark_cn_v1' "
+                    "and model_id='doubao-seedance-2-0-260128'"
+                )
+            ).one()
+            assert seedance_2.model_id == "doubao-seedance-2-0-260128"
+            assert seedance_2.lifecycle == "active"
             node_types = {
                 row[0]
                 for row in conn.execute(

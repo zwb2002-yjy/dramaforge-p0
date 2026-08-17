@@ -27,6 +27,9 @@ DOCUMENTED_AT = "2026-08-10"
 MINIMAX_MANIFEST_VERSION = "2026-08-13"
 MINIMAX_DOCUMENTED_AT = "2026-08-13"
 
+SEEDANCE_2_MANIFEST_VERSION = "2026-08-17"
+SEEDANCE_2_DOCUMENTED_AT = "2026-08-17"
+
 # ---------------------------------------------------------------------------
 # Contract hash: stable canonical JSON sha256. Order- and whitespace-insensitive.
 # ---------------------------------------------------------------------------
@@ -84,8 +87,7 @@ def _manifest(
         "catalog_source": "official_static",
         "documented_at": documented_at,
         "operations": operations,
-        "option_schema": option_schema
-        or {"namespace": "", "options": {}},
+        "option_schema": option_schema or {"namespace": "", "options": {}},
     }
 
 
@@ -184,6 +186,31 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
         model_revision="v1",
         media_kind="video",
         display_name="Seedance 1.0 Pro",
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.i2v.first_frame"],
+                reference_constraints={
+                    "first_frame": {"min": 1, "max": 1},
+                },
+            )
+        },
+    ),
+    # Volcengine Ark Seedance 2.0. The current public model identifier is
+    # account-scoped at execution time, so a real-account Probe remains
+    # mandatory before production. DramaForge exposes only the first-frame I2V
+    # subset already covered by the Ark task compiler; 2.0 audio, duration,
+    # multi-reference and trusted-asset controls stay fail-closed until they
+    # receive separate product and quality evidence.
+    _manifest(
+        provider_type="volcengine",
+        protocol_profile="ark_cn_v1",
+        model_id="doubao-seedance-2-0-260128",
+        model_revision="v1",
+        media_kind="video",
+        display_name="Seedance 2.0",
+        manifest_version=SEEDANCE_2_MANIFEST_VERSION,
+        documented_at=SEEDANCE_2_DOCUMENTED_AT,
         operations={
             "video.generate": _operation(
                 "video.generate",

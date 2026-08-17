@@ -1,0 +1,74 @@
+{
+  "contract": {
+    "documentation_source": {
+      "notes": "Current public full model ID; DramaForge exposes only the existing first-frame I2V subset until account, price, output, audio, duration and multi-reference evidence is recorded.",
+      "url": "https://www.volcengine.com/docs/82379/1520758?lang=zh",
+      "verified_at": "2026-08-17"
+    },
+    "wire_template": {
+      "host": "https://ark.cn-beijing.volces.com/api/v3",
+      "method": "POST",
+      "path": "/contents/generations/tasks",
+      "poll": {
+        "task_id": "GET /contents/generations/tasks/{id}"
+      },
+      "request_body": {
+        "content": [
+          {
+            "text": "<prompt>",
+            "type": "text"
+          },
+          {
+            "image_url": {
+              "url": "https://dramaforge.example/api/v1/provider-references/<token>"
+            },
+            "role": "first_frame",
+            "type": "image_url"
+          }
+        ],
+        "model": "doubao-seedance-2-0-260128"
+      },
+      "status_machine": [
+        "queued",
+        "running",
+        "succeeded"
+      ],
+      "success_response": {
+        "id": "cgt-..."
+      }
+    }
+  },
+  "manifest": {
+    "catalog_source": "official_static",
+    "display_name": "Seedance 2.0",
+    "documented_at": "2026-08-17",
+    "lifecycle": "active",
+    "manifest_version": "2026-08-17",
+    "media_kind": "video",
+    "model_id": "doubao-seedance-2-0-260128",
+    "model_revision": "v1",
+    "operations": {
+      "video.generate": {
+        "capabilities": [
+          "video.i2v.first_frame"
+        ],
+        "exclusive_groups": [],
+        "operation": "video.generate",
+        "output_constraints": {},
+        "reference_constraints": {
+          "first_frame": {
+            "max": 1,
+            "min": 1
+          }
+        }
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "protocol_profile": "ark_cn_v1",
+    "provider_type": "volcengine"
+  },
+  "manifest_hash": "9fe8be474428218ff47221413062b26d4d23e2541000611600112f09d1fcbae5"
+}

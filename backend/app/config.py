@@ -61,8 +61,7 @@ class Settings(BaseSettings):
     byok_rotation_database_url: str = Field(
         default="",
         description=(
-            "Dedicated maintenance DSN for BYOK key rotation; never used by "
-            "the API or workers"
+            "Dedicated maintenance DSN for BYOK key rotation; never used by the API or workers"
         ),
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
@@ -111,15 +110,25 @@ class Settings(BaseSettings):
     agnes_base_url: str = Field(default="https://api.agnes-ai.cn/v1")
     agnes_image_model: str = Field(default="agnes-image-2.1-flash")
     agnes_video_model: str = Field(default="agnes-video-v2.0")
+    agnes_image_request_timeout_seconds: float = Field(
+        default=300.0,
+        ge=60.0,
+        le=360.0,
+        description="Agnes synchronous image request timeout within the vendor's 60-360s range",
+    )
+    agnes_max_concurrent_submissions: int = Field(
+        default=1,
+        ge=1,
+        le=4,
+        description="Maximum concurrent Agnes paid create requests per worker process",
+    )
 
     # Volcengine Ark profile (local BYOK). Never log the raw key.
     volcengine_enabled: bool = False
     volcengine_api_key: str = Field(default="", description="User BYOK for Volcengine Ark")
-    volcengine_base_url: str = Field(
-        default="https://ark.cn-beijing.volces.com/api/v3"
-    )
+    volcengine_base_url: str = Field(default="https://ark.cn-beijing.volces.com/api/v3")
     volcengine_image_model: str = Field(default="doubao-seedream-4-0-250828")
-    volcengine_video_model: str = Field(default="doubao-seedance-1-0-pro-250528")
+    volcengine_video_model: str = Field(default="doubao-seedance-2-0-260128")
 
     # MiniMax China profile (local BYOK). Never log the raw key.
     minimax_enabled: bool = False

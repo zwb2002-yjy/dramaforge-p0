@@ -123,7 +123,7 @@ async def test_ark_video_create_uses_content_first_frame_role() -> None:
     )
 
     body = dict(seen["body"])
-    assert body["model"] == "doubao-seedance-1-0-pro-250528"
+    assert body["model"] == "doubao-seedance-2-0-260128"
     content = body["content"]
     assert isinstance(content, list) and len(content) == 2
     assert content[0] == {"type": "text", "text": "slow camera move"}
