@@ -21,8 +21,8 @@ from app.director.models import (
     ProductionBatch,
     ProductionBatchShot,
 )
-from app.director.production_service import DirectorProductionService
-from app.director.shooting import SelectionPlanPayload, StoryboardPlanPayload
+from app.director.production_service import DirectorProductionService, _video_generation_prompt
+from app.director.shooting import SelectionPlanPayload, StoryboardPlanPayload, StoryboardShot
 from app.director.snapshot_service import DirectorSnapshotService
 from app.execution.models import Artifact, NodeRun
 from app.production.service import GraphService
@@ -44,6 +44,33 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
     async with factory() as value:
         yield value
     await engine.dispose()
+
+
+def test_two_person_video_prompt_adds_anatomy_and_count_constraints() -> None:
+    shot = StoryboardShot.model_validate(
+        {
+            "shot_id": "shot-1",
+            "shot_number": 1,
+            "duration_seconds": "5",
+            "location": "dock",
+            "time_of_day": "dawn",
+            "shot_type": "wide",
+            "camera_move": "static",
+            "characters": ["爷爷", "孙女"],
+            "action": "并肩坐着看海",
+            "dialogue": [],
+            "image_prompt": "two people on a dock",
+            "video_prompt": "gentle breeze and water ripples",
+            "transition": "cut",
+        }
+    )
+
+    prompt = _video_generation_prompt(shot)
+
+    assert prompt.startswith("gentle breeze and water ripples")
+    assert "Exactly two visible people: 爷爷 and 孙女" in prompt
+    assert "all arms and hands anatomically separate" in prompt
+    assert "no additional person or limb enters the frame" in prompt
 
 
 def _storyboard() -> dict[str, object]:

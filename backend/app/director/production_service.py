@@ -36,6 +36,7 @@ from app.director.shooting import (
     CostEstimatePayload,
     SelectionPlanPayload,
     StoryboardPlanPayload,
+    StoryboardShot,
     TrialPlanPayload,
     TrialReviewPayload,
     VisualBiblePayload,
@@ -54,6 +55,30 @@ if TYPE_CHECKING:
     from app.storage.minio_store import ObjectStore
 
 _MEDIA_NODE_KEYS = frozenset({"character_reference", "keyframe", "video", "voice"})
+
+
+def _video_generation_prompt(shot: StoryboardShot) -> str:
+    """Add positive staging constraints for risky two-person video shots.
+
+    Agnes Video V2.0 has no native negative-prompt, person-count lock,
+    anatomy-repair, or identity-strength option. These requirements therefore
+    belong in the persisted effective prompt, not in invented provider fields.
+    """
+    video_prompt = shot.video_prompt
+    characters = shot.characters
+    if len(characters) != 2:
+        return video_prompt
+    names = " and ".join(str(name) for name in characters)
+    return (
+        f"{video_prompt}\n"
+        f"Exactly two visible people: {names}. Keep both bodies and all arms and hands "
+        "anatomically separate and attributable to their owner in every frame. "
+        "Use a clear side-by-side composition with visible shoulder boundaries. "
+        "Their arms remain on their own side; no arm crosses behind or through the "
+        "other person's shoulder or torso, no touching, no embrace, and no additional "
+        "person or limb enters the frame. Prefer subtle head, hair, clothing, and water "
+        "motion while body positions remain stable."
+    )
 
 
 class DirectorProductionService:
@@ -529,7 +554,7 @@ class DirectorProductionService:
     ) -> ExportResult:
         """Export only explicitly accepted composites in locked storyboard order."""
         from app.delivery.export_service import build_project_export
-        await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
+        project = await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
         workflow = await self._director.get_workflow(project_id=project_id, actor=actor)
         if workflow.status != WorkflowStatus.ASSEMBLING.value:
             raise ValidationAppError(
@@ -622,6 +647,17 @@ class DirectorProductionService:
                 },
             )
         from app.delivery.models import Export
+        from app.shared.db import set_rls_context
+
+        # build_project_export commits its immutable delivery records. PostgreSQL
+        # RLS settings are transaction-local, so restore the exact owner scope
+        # before reading the completed Export and closing the Director workflow.
+        await set_rls_context(
+            self._session,
+            user_id=actor.id,
+            workspace_id=project.workspace_id,
+            project_id=project_id,
+        )
 
         export_row = await self._session.get(Export, result.export_id)
         if export_row is None:
@@ -783,12 +819,13 @@ class DirectorProductionService:
             runs.append(reference_runs[key])
         await self._session.flush()
         dialogue_text = "\n".join(f"{line.speaker}: {line.text}" for line in shot.dialogue)
+        video_generation_prompt = _video_generation_prompt(shot)
         prompt_by_key = {
             "prompt": shot.image_prompt,
             "keyframe": shot.image_prompt,
             "identity_review": shot.image_prompt,
-            "video": shot.video_prompt,
-            "video_drift_review": shot.video_prompt,
+            "video": video_generation_prompt,
+            "video_drift_review": video_generation_prompt,
             "voice": dialogue_text or "无对白环境声",
             "subtitle": dialogue_text,
             "composite": shot.video_prompt,

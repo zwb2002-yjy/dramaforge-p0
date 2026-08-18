@@ -357,6 +357,50 @@ async def test_canonical_source_must_be_completed_image_in_same_batch(
     assert bound_artifact.id == artifact.id
     assert bound_bytes == data
 
+    reused_source = NodeRun(
+        project_id=run.project_id,
+        graph_version_id=run.graph_version_id,
+        graph_node_id=run.graph_node_id,
+        production_batch_id=run.production_batch_id,
+        budget_reservation_id=reservation.id,
+        attempt_no=2,
+        idempotency_key=f"canonical-reused:{uuid4()}",
+        input_hash="d" * 64,
+        status="cached",
+        input_snapshot={},
+        result_artifact_id=artifact.id,
+        reused_from_run_id=source.id,
+        created_by=user.id,
+    )
+    session.add(reused_source)
+    await session.flush()
+    twice_reused_source = NodeRun(
+        project_id=run.project_id,
+        graph_version_id=run.graph_version_id,
+        graph_node_id=run.graph_node_id,
+        production_batch_id=run.production_batch_id,
+        budget_reservation_id=reservation.id,
+        attempt_no=3,
+        idempotency_key=f"canonical-twice-reused:{uuid4()}",
+        input_hash="e" * 64,
+        status="cached",
+        input_snapshot={},
+        result_artifact_id=artifact.id,
+        reused_from_run_id=reused_source.id,
+        created_by=user.id,
+    )
+    session.add(twice_reused_source)
+    await session.flush()
+    resolved_from_chain = await _bind_director_canonical_source(
+        session,
+        run=run,
+        snapshot={
+            **run.input_snapshot,
+            "canonical_source_run_id": str(twice_reused_source.id),
+        },
+    )
+    assert resolved_from_chain["canonical_artifact_id"] == str(artifact.id)
+
     source.production_batch_id = uuid4()
     await session.flush()
     with pytest.raises(ValidationAppError, match="outside this Director production batch"):

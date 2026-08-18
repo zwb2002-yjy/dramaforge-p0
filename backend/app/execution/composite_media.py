@@ -236,6 +236,9 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise CompositeRenderError("ffmpeg executable not found")
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        raise CompositeRenderError("ffprobe executable not found")
     lineage_fingerprint = composite_lineage_fingerprint(inputs)
 
     with tempfile.TemporaryDirectory(prefix="dramaforge-composite-") as tmp:
@@ -247,6 +250,36 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
         video_path.write_bytes(inputs.video)
         voice_path.write_bytes(inputs.voice)
         subtitle_path.write_bytes(inputs.subtitle)
+
+        async def media_duration(path: Path) -> float:
+            probe = await asyncio.create_subprocess_exec(
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await probe.communicate()
+            if probe.returncode != 0:
+                detail = stderr.decode("utf-8", errors="replace").strip()[:300]
+                raise CompositeRenderError(detail or f"ffprobe failed for {path.name}")
+            try:
+                return float(stdout.decode("ascii").strip())
+            except ValueError as exc:
+                raise CompositeRenderError(f"invalid duration for {path.name}") from exc
+
+        video_duration = await media_duration(video_path)
+        voice_duration = await media_duration(voice_path)
+        if voice_duration > video_duration + 0.1:
+            raise CompositeRenderError(
+                "voice duration exceeds video duration "
+                f"({voice_duration:.2f}s > {video_duration:.2f}s)"
+            )
 
         subtitle_filter_path = (
             subtitle_path.as_posix().replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
@@ -264,6 +297,8 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
             "0:v:0",
             "-map",
             "1:a:0",
+            "-af",
+            "apad",
             "-c:v",
             "libx264",
             "-c:a",
