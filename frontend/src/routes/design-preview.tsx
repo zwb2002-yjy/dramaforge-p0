@@ -2,12 +2,19 @@ import { useState, type ReactNode } from "react";
 import { createRoute, Link } from "@tanstack/react-router";
 
 import { Badge, Button, Card, Input, PageHeader, Tab, Tabs } from "../components/ui";
+import { QuickCreationPreview } from "../features/creation-preview/QuickCreationPreview";
 import { rootRoute } from "./__root";
 
 export const designPreviewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/design-preview",
   component: DesignPreviewPage,
+});
+
+export const designPreviewProductRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/design-preview/product",
+  component: QuickCreationPreview,
 });
 
 const PALETTE = [

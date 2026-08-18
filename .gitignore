@@ -65,6 +65,10 @@ image*.png
 image*.jpg
 image*.jpeg
 scripts/_tmp_check.sql
+!frontend/tests/e2e/*-snapshots/
+!frontend/tests/e2e/*-snapshots/*.png
+frontend/public/demo/story/
+frontend/public/demo/mood/
 
 # Local-only fixture imports (large/temporary image sets)
 fixtures/images/character_canonical/*.jpg

@@ -20,7 +20,8 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const isRealProject = Boolean(projectId && projectId !== "demo");
   const onQuick = pathname.includes("/quick");
   const onProd = pathname.includes("/production");
-  const isDesignPreview = pathname === "/design-preview";
+  const isDesignPreview = pathname.startsWith("/design-preview");
+  const isProductPreview = pathname === "/design-preview/product";
   const showInspector = isRealProject;
 
   useEffect(() => {
@@ -43,6 +44,8 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
     enabled: isRealProject,
     refetchInterval: 4000,
   });
+
+  if (isProductPreview) return <>{children}</>;
 
   const runs = snapshot.data?.node_runs ?? [];
   const arts = snapshot.data?.artifacts ?? [];
