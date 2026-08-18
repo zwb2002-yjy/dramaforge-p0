@@ -4,6 +4,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 
 import { artifactContentUrl, fetchHealth, fetchSnapshot } from "../../lib/api";
 import { useUiStore } from "../../stores/uiStore";
+import { AppShell, AppShellBody, Sidebar, TopBar } from "../shell";
 
 type WorkstationShellProps = {
   children: ReactNode;
@@ -19,6 +20,8 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const isRealProject = Boolean(projectId && projectId !== "demo");
   const onQuick = pathname.includes("/quick");
   const onProd = pathname.includes("/production");
+  const isDesignPreview = pathname === "/design-preview";
+  const showInspector = isRealProject;
 
   useEffect(() => {
     if (window.matchMedia?.("(max-width: 1100px)").matches) {
@@ -29,6 +32,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const health = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealth,
+    enabled: !isDesignPreview,
     refetchInterval: 10_000,
     retry: 1,
   });
@@ -51,12 +55,66 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const dbUp = health.data?.db === "up" || (health.data?.status === "ok" && !health.data?.db);
   const apiLive = !!health.data && !health.isError && health.data.status === "ok" && dbUp !== false;
 
+  const inspector = showInspector ? (
+    <aside className="df-inspector inspector" data-testid="workstation-inspector">
+      <h3>生产检查器</h3>
+      <div className="df-inspector-stat inspector-stat">
+        <span>项目</span>
+        <strong title={projectId}>{projectId!.slice(0, 8)}…</strong>
+      </div>
+      <div className="df-inspector-stat inspector-stat">
+        <span>NodeRun 数</span>
+        <strong data-testid="insp-runs">{runs.length}</strong>
+      </div>
+      <div className="df-inspector-stat inspector-stat">
+        <span>完成</span>
+        <strong className="df-status-ok status-ok">{done}</strong>
+      </div>
+      <div className="df-inspector-stat inspector-stat">
+        <span>进行中</span>
+        <strong className="df-status-pending status-pending">{active}</strong>
+      </div>
+      <div className="df-inspector-stat inspector-stat">
+        <span>失败</span>
+        <strong className={failed ? "df-status-bad status-bad" : ""}>{failed}</strong>
+      </div>
+      <div className="df-inspector-stat inspector-stat">
+        <span>产物数</span>
+        <strong data-testid="insp-arts">{arts.length}</strong>
+      </div>
+      {snapshot.data?.name && (
+        <p className="muted" style={{ marginTop: "var(--df-space-3)" }}>
+          {snapshot.data.name}
+        </p>
+      )}
+      {projectId && arts[0] && (
+        <div style={{ marginTop: "var(--df-space-3)" }}>
+          <h3>最近产物</h3>
+          <a
+            href={artifactContentUrl(projectId, arts[0].id)}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: "var(--df-text-sm)", wordBreak: "break-all" }}
+          >
+            {arts[0].object_key.split("/").slice(-2).join("/")}
+          </a>
+        </div>
+      )}
+      <div style={{ marginTop: "var(--df-space-3)" }}>
+        <span className="df-pill pill">四阶段导演流程</span>
+        <span className="df-pill pill">角色视觉锚点</span>
+        <span className="df-pill pill">局部修复</span>
+        <span className="df-pill pill">质量证据</span>
+      </div>
+    </aside>
+  ) : undefined;
+
   return (
-    <div className="workstation" data-testid="workstation-shell">
-      <header className="workstation-topbar">
+    <AppShell data-testid="workstation-shell">
+      <TopBar>
         <button
           type="button"
-          className="ghost nav-toggle"
+          className="df-btn ghost nav-toggle"
           onClick={toggleLeft}
           aria-label={leftOpen ? "收起导航" : "展开导航"}
           aria-expanded={leftOpen}
@@ -64,163 +122,97 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
         >
           ☰
         </button>
-        <Link to="/" className="brand">
-          Drama<span>Forge</span>
+        <Link to="/" className="df-topbar-brand brand">
+          Drama<span className="df-topbar-accent">Forge</span>
         </Link>
-        <div className="topbar-meta">
+        <div className="df-topbar-meta topbar-meta">
           <span>私有短剧生产台</span>
           {isRealProject && (
-            <div className="topbar-mode" data-testid="mode-switch">
+            <div className="df-tabs topbar-mode" data-testid="mode-switch">
               <Link
                 to="/projects/$projectId/quick"
                 params={{ projectId: projectId! }}
-                className={onQuick ? "active" : undefined}
+                className={`df-tab ${onQuick ? "active" : ""}`}
               >
                 快速
               </Link>
               <Link
                 to="/projects/$projectId/production"
                 params={{ projectId: projectId! }}
-                className={onProd ? "active" : undefined}
+                className={`df-tab ${onProd ? "active" : ""}`}
               >
                 专业
               </Link>
             </div>
           )}
         </div>
-        <span
-          className="env-badge"
-          data-testid="env-badge"
-          title={health.data?.db_error ?? ""}
-          style={{ color: apiLive ? "var(--ok)" : "var(--danger)" }}
-        >
-          {apiLive ? "API · DB 就绪" : "API 未就绪"}
-        </span>
-      </header>
-      <div className={leftOpen ? "workstation-body nav-open" : "workstation-body"}>
-        <aside
-          id="workstation-navigation"
-          className={leftOpen ? "nav open" : "nav"}
-          data-testid="workstation-nav"
-          aria-hidden={!leftOpen}
-        >
-          <div className="nav-section">入口</div>
-          <nav>
-            <Link to="/" className={pathname === "/" ? "active" : undefined}>
+        {!isDesignPreview && (
+          <span
+            className="df-badge env-badge"
+            data-testid="env-badge"
+            title={health.data?.db_error ?? ""}
+            style={{ color: apiLive ? "var(--df-success)" : "var(--df-danger)" }}
+          >
+            {apiLive ? "API · DB 就绪" : "API 未就绪"}
+          </span>
+        )}
+      </TopBar>
+      <AppShellBody navigationOpen={leftOpen} inspector={inspector}>
+        <Sidebar id="workstation-navigation" data-testid="workstation-nav" open={leftOpen}>
+          <div className="df-sidebar-section nav-section">入口</div>
+          <nav className="df-sidebar-nav">
+            <Link to="/" className={`df-sidebar-link ${pathname === "/" ? "active" : ""}`}>
               项目大厅
             </Link>
             {isRealProject ? (
               <>
-                <div className="nav-section">当前项目</div>
+                <div className="df-sidebar-section nav-section">当前项目</div>
                 <Link
                   to="/projects/$projectId/quick"
                   params={{ projectId: projectId! }}
-                  className={onQuick ? "active" : undefined}
+                  className={`df-sidebar-link ${onQuick ? "active" : ""}`}
                 >
                   快速创作
                 </Link>
                 <Link
                   to="/projects/$projectId/production"
                   params={{ projectId: projectId! }}
-                  className={onProd ? "active" : undefined}
+                  className={`df-sidebar-link ${onProd ? "active" : ""}`}
                 >
                   专业生产板
                 </Link>
                 <Link
                   to="/projects/$projectId"
                   params={{ projectId: projectId! }}
-                  className={
+                  className={`df-sidebar-link ${
                     pathname.endsWith(projectId!) || pathname.endsWith(`${projectId}/`)
                       ? "active"
-                      : undefined
-                  }
+                      : ""
+                  }`}
                 >
                   项目总览
                 </Link>
               </>
             ) : (
               <>
-                <div className="nav-section">提示</div>
-                <p className="muted" style={{ padding: "0 0.7rem", fontSize: "0.78rem" }}>
+                <div className="df-sidebar-section nav-section">提示</div>
+                <p className="df-sidebar-hint muted">
                   创建正式项目后，快速与专业入口绑定同一 Project — 资产、Run、成本不分裂。
                 </p>
               </>
             )}
           </nav>
-        </aside>
+        </Sidebar>
         {leftOpen && (
           <button
             type="button"
-            className="nav-scrim"
+            className="df-sidebar-scrim nav-scrim"
             aria-label="关闭导航"
             onClick={() => setLeftOpen(false)}
           />
         )}
         <main className="workstation-main">{children}</main>
-        <aside className="inspector" data-testid="workstation-inspector">
-          <h3>生产检查器</h3>
-          {isRealProject ? (
-            <>
-              <div className="inspector-stat">
-                <span>项目</span>
-                <strong title={projectId}>{projectId!.slice(0, 8)}…</strong>
-              </div>
-              <div className="inspector-stat">
-                <span>NodeRun 数</span>
-                <strong data-testid="insp-runs">{runs.length}</strong>
-              </div>
-              <div className="inspector-stat">
-                <span>完成</span>
-                <strong className="status-ok">{done}</strong>
-              </div>
-              <div className="inspector-stat">
-                <span>进行中</span>
-                <strong className="status-pending">{active}</strong>
-              </div>
-              <div className="inspector-stat">
-                <span>失败</span>
-                <strong className={failed ? "status-bad" : ""}>{failed}</strong>
-              </div>
-              <div className="inspector-stat">
-                <span>产物数</span>
-                <strong data-testid="insp-arts">{arts.length}</strong>
-              </div>
-              {snapshot.data?.name && (
-                <p className="muted" style={{ marginTop: "0.75rem" }}>
-                  {snapshot.data.name}
-                </p>
-              )}
-              {projectId && arts[0] && (
-                <div style={{ marginTop: "0.75rem" }}>
-                  <h3>最近产物</h3>
-                  <a
-                    href={artifactContentUrl(projectId, arts[0].id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ fontSize: "0.78rem", wordBreak: "break-all" }}
-                  >
-                    {arts[0].object_key.split("/").slice(-2).join("/")}
-                  </a>
-                </div>
-              )}
-            </>
-          ) : (
-            <p>
-              行业台（LibTV / Jellyfish / Toonflow / ArcReel）共通：分镜可视、状态清楚、结果可回看。
-              DramaForge 在此加 Production Graph、一致性门禁与审计。
-            </p>
-          )}
-          <div style={{ marginTop: "0.85rem" }}>
-            <span className="pill">四阶段导演流程</span>
-            <span className="pill">角色视觉锚点</span>
-            <span className="pill">局部修复</span>
-            <span className="pill">质量证据</span>
-          </div>
-          <p className="muted" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
-            假 Adapter 仅 pytest；不得作为 §3.1 验收主路径。
-          </p>
-        </aside>
-      </div>
-    </div>
+      </AppShellBody>
+    </AppShell>
   );
 }

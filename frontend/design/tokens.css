@@ -1,0 +1,129 @@
+/* ============================================================
+   DramaForge Visual System 2.0 — Design Tokens
+   ============================================================
+   Single source of truth for all design values.
+   Loaded before theme.css and component styles in main.tsx.
+   ============================================================ */
+
+:root {
+  /* ---- Color: Core Palette ---- */
+  --df-obsidian:        #071013;
+  --df-ink:             #142129;
+  --df-ink-light:       #1c2c33;
+  --df-verdigris:       #4f9f8c;
+  --df-verdigris-dim:   #3d7f70;
+  --df-verdigris-tint:  rgba(79, 159, 140, 0.12);
+  --df-brass:           #c69a57;
+  --df-brass-dim:       #a77c3f;
+  --df-brass-tint:      rgba(198, 154, 87, 0.12);
+  --df-ivory:           #eee7db;
+  --df-ivory-dim:       #c4bcae;
+
+  /* ---- Color: Semantic ---- */
+  --df-success:         #4f9f8c;
+  --df-success-dim:     rgba(79, 159, 140, 0.15);
+  --df-success-border:  rgba(79, 159, 140, 0.38);
+  --df-success-text:    #b9d8cf;
+  --df-warning:         #c69a57;
+  --df-warning-dim:     rgba(198, 154, 87, 0.15);
+  --df-warning-border:  rgba(198, 154, 87, 0.38);
+  --df-danger:          #c85f55;
+  --df-danger-dim:      rgba(200, 95, 85, 0.15);
+  --df-danger-border:   rgba(200, 95, 85, 0.4);
+  --df-danger-text:     #e9aaa3;
+  --df-info:            #6f91a8;
+  --df-info-dim:        rgba(111, 145, 168, 0.15);
+  --df-info-border:     rgba(111, 145, 168, 0.38);
+  --df-focus-ring:      rgba(79, 159, 140, 0.18);
+  --df-selection:       rgba(79, 159, 140, 0.3);
+
+  /* ---- Color: Surface ---- */
+  --df-surface-0:       #071013;
+  --df-surface-1:       #0c171b;
+  --df-surface-2:       #111e23;
+  --df-surface-3:       #1a292f;
+  --df-surface-raised:  #203238;
+  --df-surface-overlay: rgba(7, 16, 19, 0.94);
+
+  /* ---- Color: Border ---- */
+  --df-border:          #293a40;
+  --df-border-strong:   #42565d;
+  --df-border-subtle:   #1b2a2f;
+
+  /* ---- Color: Text ---- */
+  --df-text-primary:    #eee7db;
+  --df-text-secondary:  #a8ada8;
+  --df-text-muted:      #747f7d;
+  --df-text-inverse:    #071013;
+
+  /* ---- Typography ---- */
+  --df-font-display:    Georgia, "Noto Serif SC", "Songti SC", serif;
+  --df-font-sans:       "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --df-font-mono:       "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  --df-text-xs:         0.6875rem;   /* 11px */
+  --df-text-sm:         0.75rem;     /* 12px */
+  --df-text-base:       0.8125rem;   /* 13px */
+  --df-text-md:         0.875rem;    /* 14px */
+  --df-text-lg:         1rem;        /* 16px */
+  --df-text-xl:         1.125rem;    /* 18px */
+  --df-text-2xl:        1.375rem;    /* 22px */
+  --df-text-3xl:        1.75rem;     /* 28px */
+
+  --df-leading-tight:   1.3;
+  --df-leading-normal:  1.5;
+  --df-leading-relaxed: 1.65;
+
+  --df-weight-normal:   400;
+  --df-weight-medium:   500;
+  --df-weight-semibold: 600;
+  --df-weight-bold:     700;
+
+  --df-tracking-tight:  0;
+  --df-tracking-normal: 0;
+  --df-tracking-wide:   0;
+  --df-tracking-wider:  0;
+
+  /* ---- Spacing ---- */
+  --df-space-0:   0;
+  --df-space-1:   0.25rem;    /* 4px */
+  --df-space-2:   0.5rem;     /* 8px */
+  --df-space-3:   0.75rem;    /* 12px */
+  --df-space-4:   1rem;       /* 16px */
+  --df-space-5:   1.25rem;    /* 20px */
+  --df-space-6:   1.5rem;     /* 24px */
+  --df-space-8:   2rem;       /* 32px */
+  --df-space-10:  2.5rem;     /* 40px */
+  --df-space-12:  3rem;       /* 48px */
+
+  /* ---- Radius ---- */
+  --df-radius-sm:   4px;
+  --df-radius-md:   8px;
+  --df-radius-lg:   8px;
+  --df-radius-xl:   8px;
+  --df-radius-full: 9999px;
+
+  /* ---- Shadow ---- */
+  --df-shadow-sm:   0 1px 2px rgba(0, 0, 0, 0.3);
+  --df-shadow-md:   0 4px 12px rgba(0, 0, 0, 0.35);
+  --df-shadow-lg:   0 8px 24px rgba(0, 0, 0, 0.4);
+  --df-shadow-xl:   0 16px 48px rgba(0, 0, 0, 0.5);
+
+  /* ---- Transition ---- */
+  --df-ease:         cubic-bezier(0.25, 0.1, 0.25, 1);
+  --df-duration-fast:  120ms;
+  --df-duration-base:  200ms;
+  --df-duration-slow:  350ms;
+
+  /* ---- Z-Index ---- */
+  --df-z-base:     1;
+  --df-z-dropdown: 20;
+  --df-z-sticky:   30;
+  --df-z-overlay:  40;
+  --df-z-modal:    50;
+
+  /* ---- Layout ---- */
+  --df-topbar-h:   52px;
+  --df-sidebar-w:   216px;
+  --df-inspector-w: 320px;
+}

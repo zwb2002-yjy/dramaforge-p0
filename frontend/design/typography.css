@@ -1,0 +1,176 @@
+/* ============================================================
+   DramaForge Visual System 2.0 — Typography
+   ============================================================
+   Type scale, heading hierarchy, and text utility classes.
+   ============================================================ */
+
+/* ---- Heading Hierarchy ---- */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--df-font-sans);
+  font-weight: var(--df-weight-semibold);
+  line-height: var(--df-leading-tight);
+  color: var(--df-text-primary);
+  letter-spacing: 0;
+}
+
+h1 {
+  font-size: var(--df-text-3xl);
+  font-weight: var(--df-weight-bold);
+  letter-spacing: 0;
+}
+
+h2 {
+  font-size: var(--df-text-2xl);
+}
+
+h3 {
+  font-size: var(--df-text-xl);
+}
+
+h4 {
+  font-size: var(--df-text-lg);
+}
+
+h5 {
+  font-size: var(--df-text-md);
+  font-weight: var(--df-weight-medium);
+}
+
+h6 {
+  font-size: var(--df-text-base);
+  font-weight: var(--df-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  color: var(--df-text-secondary);
+}
+
+/* ---- Body Text ---- */
+p {
+  line-height: var(--df-leading-relaxed);
+  color: var(--df-text-primary);
+}
+
+small,
+.text-sm {
+  font-size: var(--df-text-sm);
+}
+
+.text-xs {
+  font-size: var(--df-text-xs);
+}
+
+.text-lg {
+  font-size: var(--df-text-lg);
+}
+
+.text-muted {
+  color: var(--df-text-muted);
+}
+
+.text-secondary {
+  color: var(--df-text-secondary);
+}
+
+.text-verdigris {
+  color: var(--df-verdigris);
+}
+
+.text-brass {
+  color: var(--df-brass);
+}
+
+.text-danger {
+  color: var(--df-danger);
+}
+
+/* ---- Code / Mono ---- */
+code,
+pre,
+.font-mono {
+  font-family: var(--df-font-mono);
+}
+
+code {
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  background: var(--df-surface-2);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-sm);
+  color: var(--df-verdigris);
+}
+
+pre {
+  padding: var(--df-space-4);
+  background: var(--df-surface-1);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-md);
+  overflow-x: auto;
+  font-size: var(--df-text-sm);
+  line-height: var(--df-leading-relaxed);
+}
+
+/* ---- Labels / Caps ---- */
+.label {
+  font-size: var(--df-text-xs);
+  font-weight: var(--df-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  color: var(--df-text-muted);
+}
+
+.kicker {
+  font-size: var(--df-text-xs);
+  font-weight: var(--df-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  color: var(--df-verdigris);
+}
+
+.display-title {
+  font-family: var(--df-font-display);
+  font-size: 2.25rem;
+  font-weight: var(--df-weight-semibold);
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+/* ---- Lists ---- */
+ul.clean,
+ol.clean {
+  padding-left: var(--df-space-5);
+  color: var(--df-text-secondary);
+}
+
+ul.dense,
+ol.dense {
+  padding: 0;
+  list-style: none;
+}
+
+ul.dense li,
+ol.dense li {
+  padding: var(--df-space-2) 0;
+  border-bottom: 1px solid var(--df-border-subtle);
+  font-size: var(--df-text-sm);
+  display: flex;
+  gap: var(--df-space-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+/* ---- Description List ---- */
+dl.summary {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: var(--df-space-1) var(--df-space-3);
+  font-size: var(--df-text-sm);
+}
+
+dl.summary dt {
+  color: var(--df-text-muted);
+}
+
+dl.summary dd {
+  color: var(--df-text-primary);
+  overflow-wrap: anywhere;
+}
