@@ -2,11 +2,11 @@
 
 **状态：ACTIVE / 专项开发 Runbook**
 
-**修订日期：2026-08-19**
+**修订日期：2026-08-20**
 
 **初始审计基线：`dev@5f2eb6e930bb791ba5e760d4927e467494200a4a`**
 
-**当前运行候选：`dev@acaa6c4f602adb49a1c0bded22d48560acd35bc1`**
+**当前运行候选：`dev@1d921fb5b332f0809f9b9924872e619030459de2`**
 
 **来源：** `D:\DramaForge_Unified_Media_Path_开发执行规格_v1.0.md`
 
@@ -136,7 +136,7 @@ DirectorProductionService
 
 ### 3.2 当前双路径事实
 
-截至候选 `acaa6c4f602adb49a1c0bded22d48560acd35bc1`，
+截至候选 `1d921fb5b332f0809f9b9924872e619030459de2`，
 `execute_media_node_run` 的图片和视频分支是：
 
 ```text
@@ -178,13 +178,14 @@ Agnes 原生 JSON。
 
 ### 3.4 当前无费用验证结果
 
-基于候选 `acaa6c4` 执行的无费用验证：
+基于候选 `1d921fb` 执行的无费用验证：
 
 ```text
-候选锁文件隔离容器后端全量：633 passed / 22 skipped
-Unified / Provider 聚焦：108 passed / 2 skipped
+候选后端全量：642 passed / 16 skipped
+Unified / Provider 聚焦：115 passed
 隔离 PostgreSQL migration：2 passed
-候选镜像内 Director G2 smoke：1 passed
+前端 Vitest：56 passed
+Chromium Playwright：11 passed
 Ruff、mypy：passed
 ```
 
@@ -368,8 +369,8 @@ selected_cast = [one_lead_character]
 当前主工作区仍保留用户已有的 CI/依赖修改，但专项代码已经冻结为独立候选：
 
 ```text
-acaa6c4f602adb49a1c0bded22d48560acd35bc1
-DRAMAFORGE_SOURCE_COMMIT=acaa6c4f602adb49a1c0bded22d48560acd35bc1
+1d921fb5b332f0809f9b9924872e619030459de2
+DRAMAFORGE_SOURCE_COMMIT=1d921fb5b332f0809f9b9924872e619030459de2
 TEXT_V3_ROUTER_ENABLED=true
 PROVIDER_UNIFIED_PATH_ENABLED=true
 ```
@@ -792,18 +793,18 @@ Idea
 
 某个 Gate 未关闭时，停在当前阶段解决，不通过新增功能绕开。
 
-### 16.1 当前执行状态（2026-08-19）
+### 16.1 当前执行状态（2026-08-20）
 
 | Gate | 状态 | 当前证据与缺口 |
 |---|---|---|
-| G0 候选冻结 | `PASS` | 候选 `acaa6c4`；候选锁文件隔离容器后端 `633 passed / 22 skipped`，另有隔离 PostgreSQL migration `2 passed`；前端 `54 passed`；Chromium `11 passed`；Ruff、mypy、build 通过；应用镜像同源健康 |
+| G0 候选冻结 | `PASS` | 候选 `1d921fb`；后端 `642 passed / 16 skipped`，另有隔离 PostgreSQL migration `2 passed`；前端 `56 passed`；Chromium `11 passed`；Ruff、mypy、build 通过；应用镜像同源健康 |
 | G1 合同收口 | `PASS` | Director 强制 Unified；Agnes 视频固定 9:16/24fps/121 帧/5 秒/无原生音频；Agnes 图片 v2 按官方合同冻结 `1K + 9:16`、参考输出 `736x1312`；EffectiveRequest、显式 TranslationReport、严格引用匹配和 `not_reported` 费用语义已落地 |
 | G2 无费用证明 | `PASS` | 完整 Spy 从真实 Director Workflow、锁定工件、预算 Approval 和 `materialize_trial()` 起跑，经 Production Graph、Outbox、Worker、Frozen Binding、Manifest、Compiler、Runtime 到 ProviderOperation/Artifact；三次 submit，重复 Worker 执行不增 submit；Canonical/首帧 ID 与 SHA-256、Resume Token、费用和 `produced_by_run_id` 均断言通过 |
-| G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `acaa6c4` 镜像并健康；数据服务容器 ID/卷未变；数据库 head 为 `0028`；候选镜像内 G2 smoke `1 passed`；临时数据库事实证明新 NodeRun 持久化相同 source commit |
-| G4 Agnes 图片 | `OPEN` | 已无费用创建 v2 Binding `663ecf84-af9c-4316-81a7-dc1a8893e09c`，绑定 active v2 Catalog/hash，保持 `account_verified=false`、`quality_gated=false` 且未绑定项目；官方页面价格快照已冻结为 `0 CNY/image`（页面 SHA-256 `8a7eb15c...`）；虚构 Canonical Artifact `8531a6ae...` 的 MinIO 字节、SHA-256 `8d6eee3b...`、PNG MIME 和 `1152x864` 尺寸已核验；官方条款/隐私页面哈希及免费层数据使用限制已记录；脱敏 preflight 位于 `tmp/p0-evidence/acaa6c4.../real-provider/`，索引 SHA-256 `a5aa5344...`，当前决定为 `BLOCKED/AUTHORIZATION_REQUIRED`；部署栈 fail-closed 实证保持 Provider evidence `6→6`；尚缺单次书面费用上限授权、本账号 Probe、真实 I2I 和质量门禁；未经授权未调用 Provider |
+| G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `1d921fb` 镜像并健康；数据服务容器 ID/卷未变；数据库 head 为 `0028`；部署栈零预算 Probe 保持 Provider evidence `6→6` |
+| G4 Agnes 图片 | `OPEN` | 已无费用创建 v2 Binding `663ecf84-af9c-4316-81a7-dc1a8893e09c`，绑定 active v2 Catalog/hash，保持 `account_verified=false`、`quality_gated=false` 且未绑定项目；官方页面价格快照已冻结为 `0 CNY/image`（页面 SHA-256 `8a7eb15c...`）；虚构 Canonical Artifact `8531a6ae...` 的 MinIO 字节、SHA-256 `8d6eee3b...`、PNG MIME 和 `1152x864` 尺寸已核验；官方条款/隐私页面哈希及免费层数据使用限制已记录；Probe 与 Unified 未报告费用按 Binding 定价快照派生 CNY；脱敏 preflight 位于 `tmp/p0-evidence/1d921fb.../real-provider/`，索引 SHA-256 `009016f1...`，当前决定为 `BLOCKED/AUTHORIZATION_REQUIRED`；部署栈 fail-closed 实证保持 Provider evidence `6→6`；尚缺单次书面费用上限授权、本账号 Probe、真实 I2I 和质量门禁；未经授权未调用 Provider |
 | G5 Agnes 视频 | `OPEN` | 未取得本候选的视频费用授权；未执行远端任务创建后的 Worker 停启恢复实证 |
 | G6 Legacy 退出 | `PARTIAL` | Director 已无 Feature Flag fallback；真实 G4/G5 前不删除非 Director 兼容代码和历史恢复依赖 |
-| G7 试拍审阅 | `PARTIAL` | 新 Visual 2.0 项目大厅和 canonical 快速创作路由已接真实 Director API；试拍页仍缺完整视频/音频/首中末帧、EffectiveRequest、费用状态和限制呈现 |
+| G7 试拍审阅 | `PARTIAL` | Visual 2.0 项目大厅、项目总览、快速创作与专业生产已统一；试拍页可审阅 Canonical、关键帧、视频、音频、首/中/末帧、EffectiveRequest、费用状态和已知限制；仍需真实 Agnes 试拍数据完成闭环验收 |
 | G8 局部修复 | `OPEN` | Mock E2E 通过，不构成真实 Provider 局部修复证据 |
 | G9 黄金样本 | `OPEN` | 未完成一个单主角三镜头真实作品，也未进行三名目标用户验证 |
 
