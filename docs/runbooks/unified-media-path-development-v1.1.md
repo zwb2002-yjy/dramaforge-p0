@@ -800,7 +800,7 @@ Idea
 | G1 合同收口 | `PASS` | Director 强制 Unified；Agnes 视频固定 9:16/24fps/121 帧/5 秒/无原生音频；Agnes 图片 v2 按官方合同冻结 `1K + 9:16`、参考输出 `736x1312`；EffectiveRequest、显式 TranslationReport、严格引用匹配和 `not_reported` 费用语义已落地 |
 | G2 无费用证明 | `PASS` | 完整 Spy 从真实 Director Workflow、锁定工件、预算 Approval 和 `materialize_trial()` 起跑，经 Production Graph、Outbox、Worker、Frozen Binding、Manifest、Compiler、Runtime 到 ProviderOperation/Artifact；三次 submit，重复 Worker 执行不增 submit；Canonical/首帧 ID 与 SHA-256、Resume Token、费用和 `produced_by_run_id` 均断言通过 |
 | G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `acaa6c4` 镜像并健康；数据服务容器 ID/卷未变；数据库 head 为 `0028`；候选镜像内 G2 smoke `1 passed`；临时数据库事实证明新 NodeRun 持久化相同 source commit |
-| G4 Agnes 图片 | `OPEN` | 已无费用创建 v2 Binding `663ecf84-af9c-4316-81a7-dc1a8893e09c`，绑定 active v2 Catalog/hash，保持 `account_verified=false`、`quality_gated=false` 且未绑定项目；尚缺本账号付费 Probe、真实 I2I、质量门禁和单次书面费用上限授权；未经授权未调用 Provider |
+| G4 Agnes 图片 | `OPEN` | 已无费用创建 v2 Binding `663ecf84-af9c-4316-81a7-dc1a8893e09c`，绑定 active v2 Catalog/hash，保持 `account_verified=false`、`quality_gated=false` 且未绑定项目；官方页面价格快照已冻结为 `0 CNY/image`（页面 SHA-256 `8a7eb15c...`）；虚构 Canonical Artifact `8531a6ae...` 的 MinIO 字节、SHA-256 `8d6eee3b...`、PNG MIME 和 `1152x864` 尺寸已核验；尚缺单次书面费用上限授权、本账号 Probe、真实 I2I 和质量门禁；未经授权未调用 Provider |
 | G5 Agnes 视频 | `OPEN` | 未取得本候选的视频费用授权；未执行远端任务创建后的 Worker 停启恢复实证 |
 | G6 Legacy 退出 | `PARTIAL` | Director 已无 Feature Flag fallback；真实 G4/G5 前不删除非 Director 兼容代码和历史恢复依赖 |
 | G7 试拍审阅 | `PARTIAL` | 新 Visual 2.0 项目大厅和 canonical 快速创作路由已接真实 Director API；试拍页仍缺完整视频/音频/首中末帧、EffectiveRequest、费用状态和限制呈现 |
