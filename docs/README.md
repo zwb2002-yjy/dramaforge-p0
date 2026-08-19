@@ -35,6 +35,7 @@
 | [`../AGENT_EXECUTION_PROTOCOL.md`](../AGENT_EXECUTION_PROTOCOL.md) | Git、任务和恢复操作 |
 | [`adr/`](adr/) | 当前合同尚未取代的重大技术决定 |
 | [`runbooks/`](runbooks/) | 部署、Provider 真实接入、证据和用户测试操作 |
+| [`runbooks/unified-media-path-development-v1.1.md`](runbooks/unified-media-path-development-v1.1.md) | Unified Media Path 当前专项开发、真实验证与 Legacy 收敛顺序 |
 | [`acceptance/`](acceptance/) | 当前正式验收记录 |
 | [`../infra/litellm/`](../infra/litellm/) | LiteLLM 网关配置与兼容说明 |
 

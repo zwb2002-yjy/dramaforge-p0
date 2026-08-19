@@ -12,20 +12,20 @@
 
 | 字段 | 当前事实 |
 |---|---|
-| 开发 HEAD | `5df1332f1c4f002dd7b3d20d771a9dc65b9f8db1` (`dev`) |
-| 当前候选 | 尚未冻结；工作树正在清理历史文档和临时材料 |
-| 自动化基线 | 聚焦后端 46 + 92 项通过；前端 53 项、typecheck/build、Ruff 通过；mypy 2 个错误；Chromium 9/11；后端全量 pytest 本次未完成 |
-| 真实证据 | 一个 Agnes 真实视频镜头被 Q3 人工拒绝；没有当前 HEAD 的完整试拍、修复、全片或用户测试 |
+| 运行候选 | `b1c9782df69347033bd3e24573156ff5db29d5b0` (`dev`) |
+| 当前候选 | `b1c9782`；由 detached 干净 worktree 构建，主工作区既有 CI/依赖改动未进入候选 |
+| 自动化基线 | 后端全量 630 passed / 16 skipped、Unified 聚焦 57 项、前端 53 项、typecheck/build、Ruff/mypy 通过；Chromium 11/11；同源 Docker Compose 栈健康 |
+| 真实证据 | 一个 Agnes 真实视频镜头被 Q3 人工拒绝；当前 HEAD 仍没有新的完整试拍、修复、全片或用户测试 |
 | 历史边界 | `0cb923f` 曾关闭 A2，但不是当前候选；只作为回归目标，不计入当前 HEAD 发布通过数 |
 
 ## Gate A：核心体验
 
 | ID | 要求 | 必须证据 | 当前状态 | 下一动作 |
 |---|---|---|---|---|
-| A1 | 三入口、四阶段、四确认和变更预览 | 当前候选的真实后端浏览器 E2E | `PARTIAL` | 修复 2 个 Chromium 失败并跑 authenticated live-stack |
+| A1 | 三入口、四阶段、四确认和变更预览 | 当前候选的真实后端浏览器 E2E | `PARTIAL` | Visual 2.0 canonical 路由和 Mock API E2E 已通过；补 authenticated live-stack |
 | A2 | 快速/专业模式共享同一事实源 | 双模式读取同一版本、批次、预算和血缘 | `PARTIAL` | 在当前候选复现历史 A2 场景 |
 | A3 | 试拍、生产和修复费用分别授权 | 真实请求、Reservation、ProviderOperation 和实际费用 | `OPEN` | 完成单请求 preflight 与书面授权 |
-| A4 | Canonical 和必需参数进入有效请求 | Spy + 真实 EffectiveRequest/TranslationReport | `PARTIAL` | 启用 Unified Media Path 并跑 Agnes I2I/I2V |
+| A4 | Canonical 和必需参数进入有效请求 | Spy + 真实 EffectiveRequest/TranslationReport | `PARTIAL` | Spy 已证明 ID/SHA-256、EffectiveRequest 和空 dropped_options；先冻结 Agnes 图片尺寸，再跑真实 I2I/I2V |
 | A5 | 代表镜头真实暴露风险或支持继续 | 试拍 Artifact、Q0–Q6、限制和用户决定 | `PARTIAL` | 现有 Agnes 失败镜头补齐产品内验收证据 |
 | A6 | 一个失败镜头被局部修复 | 新旧 NodeRun、复用 Artifact、额外授权和费用 | `OPEN` | 对现有失败镜头执行一次授权修复 |
 | A7 | 15–30 秒中文对白作品和四项交付 | 同一候选的多镜头真实全链 | `OPEN` | 完成 1 主角、3 镜头黄金样本 |
