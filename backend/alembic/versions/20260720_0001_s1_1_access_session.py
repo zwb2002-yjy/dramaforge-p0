@@ -4,7 +4,7 @@ Revision ID: 20260720_0001
 Revises:
 Create Date: 2026-07-20
 
-Field-faithful to 04_数据定义全集.md for tables owned by S1.1.
+Historical initial access/session migration. Frozen after release.
 """
 
 from __future__ import annotations

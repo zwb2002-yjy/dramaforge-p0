@@ -1,4 +1,4 @@
-"""Shared enums. Values mirror `04_数据定义全集.md`."""
+"""Shared persisted enum values used by migrations and runtime models."""
 
 from enum import StrEnum
 

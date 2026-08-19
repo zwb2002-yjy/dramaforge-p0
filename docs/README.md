@@ -2,72 +2,48 @@
 
 **状态：ACTIVE / 唯一文档入口**
 
-**最近更新：2026-08-14**
+**最近更新：2026-08-19**
 
-## 1. 默认只读这些
+## 默认阅读顺序
 
 | 顺序 | 文档 | 用途 |
 |---|---|---|
-| 1 | [`../DramaForge总开发文档.md`](../DramaForge总开发文档.md) | 唯一产品总纲、方向、边界与总 Gate |
-| 2 | [`current/README.md`](current/README.md) | 当前四份执行合同入口 |
-| 3 | [`开发执行检查点.md`](开发执行检查点.md) | 当前 HEAD、今日任务、测试证据和阻断项 |
+| 1 | [`../DramaForge总开发文档.md`](../DramaForge总开发文档.md) | 产品目标、首版边界、长期方向和总 Gate |
+| 2 | [`current/README.md`](current/README.md) | 当前四份产品、架构、质量和执行合同 |
+| 3 | [`开发执行检查点.md`](开发执行检查点.md) | 当前 HEAD、验证结果、阻断项和下一唯一目标 |
+| 4 | [`runbooks/release-gate-board.md`](runbooks/release-gate-board.md) | 发布证据状态，不定义产品方向 |
 
-判断规则：
+没有被这里或当前 Task 明确引用的文档默认不读。
 
-- 产品、用户、首版范围和优先级以总纲为准；
-- 实现架构、质量和排期以 `docs/current/` 为准；
-- “代码现在做到哪里、今天在做什么”只看开发执行检查点；
-- 没被当前入口引用的规划文档默认不读。
+## 当前合同
 
-## 2. 当前执行合同
-
-| 文档 | 读取条件 |
+| 文档 | 决定什么 |
 |---|---|
-| [`current/01-产品与发布契约.md`](current/01-产品与发布契约.md) | 设计用户流程、范围、验收或发布内容 |
-| [`current/02-运行时与领域架构.md`](current/02-运行时与领域架构.md) | 修改 Director、Skill、版本、生产图、Provider 或领域模型 |
-| [`current/03-质量与验证体系.md`](current/03-质量与验证体系.md) | 修改人物一致性、质量 Gate、试拍、修复或真实测试 |
-| [`current/04-执行路线图.md`](current/04-执行路线图.md) | 领取每日任务、并行开发、里程碑或发布 Gate |
+| [`current/01-产品与发布契约.md`](current/01-产品与发布契约.md) | 为谁做、首版做什么、用户如何创作、发布如何算成功 |
+| [`current/02-运行时与领域架构.md`](current/02-运行时与领域架构.md) | Director、Skill、Production Graph、Node、Provider、版本和架构确认表 |
+| [`current/03-质量与验证体系.md`](current/03-质量与验证体系.md) | 人物、质量证据、试拍、修复和人工验收边界 |
+| [`current/04-执行路线图.md`](current/04-执行路线图.md) | 工作顺序、里程碑、延期规则和最终 Release Checklist |
 
-这四份合同只拆分职责，不是四套平行规划。发生冲突时以总纲为准并立即修正文档。
+发生冲突时以总纲为准，并直接修正当前合同，不新增解释冲突的平行规划。
 
-## 3. 工程操作材料
-
-这些文档仍有效，但不能决定产品方向：
+## 工程与证据材料
 
 | 文档/目录 | 用途 |
 |---|---|
-| [`../AGENTS.md`](../AGENTS.md) | 仓库工具、图片证据和文档权威规则 |
-| [`../agent.md`](../agent.md) | 编码 Agent 导航；不定义产品合同或发布 Gate |
-| [`../AGENT_EXECUTION_PROTOCOL.md`](../AGENT_EXECUTION_PROTOCOL.md) | Git、任务与恢复操作协议 |
-| [`adr/`](adr/) | 当前合同未取代的已接受技术决策 |
-| [`runbooks/`](runbooks/) | 部署、恢复、故障和发布操作 |
-| [`acceptance/`](acceptance/) | 正式验收证据及脱敏规则 |
-| [`spikes/`](spikes/) | 有边界的技术可行性实验 |
-| [`task-contracts/`](task-contracts/) | 0.5–1 天可验收开发任务 |
-| [`dev/`](dev/) | 实现报告和代码审计材料，不是规划 |
+| [`../AGENTS.md`](../AGENTS.md) | 仓库协作和证据规则 |
+| [`../agent.md`](../agent.md) | 编码 Agent 导航 |
+| [`../AGENT_EXECUTION_PROTOCOL.md`](../AGENT_EXECUTION_PROTOCOL.md) | Git、任务和恢复操作 |
+| [`adr/`](adr/) | 当前合同尚未取代的重大技术决定 |
+| [`runbooks/`](runbooks/) | 部署、Provider 真实接入、证据和用户测试操作 |
+| [`acceptance/`](acceptance/) | 当前正式验收记录 |
+| [`../infra/litellm/`](../infra/litellm/) | LiteLLM 网关配置与兼容说明 |
 
-## 4. 历史材料
+旧 `01` 至 `06`、重复总规划、旧 P0 验收方案、专题实现规格、阶段报告、已完成 Task Contract 和旧测试输出已从工作树删除；需要追溯时使用 Git 历史。
 
-以下文件全部是 `HISTORICAL / SUPERSEDED`。保留用于理解旧代码和决策来源，但禁止作为新任务的需求、验收或优先级依据：
+## 文档治理
 
-- 根目录 `01_项目总需求.md` 至 `06_受控混合Agent运行时规范.md`；
-- `AI短剧工作台完整实施规划.md` 及其旧副本；
-- `DramaForge双模式产品与架构汇报方案.md`；
-- `DramaForge架构决策与技术选型书.md`；
-- `Agnes-first通用Provider适配规划.md`；
-- Provider、Model Plugin、LiteLLM、Production Profile 的专题设计和实现报告；
-- `docs/产品阶段与效果路线图.md`、`docs/个人创作空间重构方案.md` 和旧现状审计；
-- `task-contracts/` 中已标记替代或完成的合同。
-
-旧文档中仍写着 `FROZEN`、`唯一事实源`、`当前` 或 `ACTIVE` 的文字，只代表当时状态，已由 2026-08-12 决策整体撤销。
-
-暂不物理移动文件，因为代码、ADR 和提交历史可能引用原路径。后续物理归档必须单独校验所有链接。
-
-## 5. 文档治理
-
-1. 根目录不得新增“最终规划”“完整架构”“总开发方案”等平行总文档。
-2. 产品决定修改总纲或 `docs/current/`；重大技术取舍新增 ADR；每日实现新增 Task Contract。
-3. 实现报告只陈述实现和证据，不能宣布产品阶段完成。
-4. 实时测试数字只写开发执行检查点，避免散落后过期。
-5. 每个新文档必须声明状态、版本、职责和替代关系。
-6. 发现冲突要改回唯一事实源，不能再写一份解释冲突的文档。
+1. 根目录只保留一个产品总纲，不新增“最终规划”“完整架构”或平行路线图。
+2. 产品决定更新总纲或 `docs/current/`；重大技术取舍新增 ADR；操作步骤更新 Runbook。
+3. 实现与测试数字只更新 `开发执行检查点.md`，发布证据只更新 Gate Board。
+4. Task Contract 只在任务执行期间存在；完成并沉淀到代码、测试和检查点后删除，由 Git 历史追溯。
+5. 旧设计若仍有价值，应重新写入当前合同或新 ADR，不能通过恢复旧文件重新获得权威。

@@ -1,4 +1,4 @@
-"""Production Graph models field-faithful to `04` production_graphs / graph_versions."""
+"""Versioned Production Graph definitions for controlled media execution."""
 
 from __future__ import annotations
 

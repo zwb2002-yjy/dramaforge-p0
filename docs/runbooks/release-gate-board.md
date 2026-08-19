@@ -1,94 +1,68 @@
 # Release Gate Board
 
-**Status:** LIVE / evidence tracker, not a product contract
+**状态：LIVE / 发布证据看板，不定义产品合同**
 
-**Last reviewed:** 2026-08-13
+**最近复核：2026-08-19**
 
-## How To Use This Board
+本看板执行 [`../current/01-产品与发布契约.md`](../current/01-产品与发布契约.md)、[`../current/03-质量与验证体系.md`](../current/03-质量与验证体系.md) 和 [`../current/04-执行路线图.md`](../current/04-执行路线图.md)。架构证明另见 [`../current/02-运行时与领域架构.md`](../current/02-运行时与领域架构.md#14-架构确认表)。
 
-This board operationalizes the release requirements in
-[`../current/01-产品与发布契约.md`](../current/01-产品与发布契约.md),
-[`../current/03-质量与验证体系.md`](../current/03-质量与验证体系.md), and
-[`../current/04-执行路线图.md`](../current/04-执行路线图.md). Those contracts
-remain authoritative when this board and a contract disagree.
+`PASS` 必须绑定一个干净候选 commit 和要求的证据类型。Mock、Spy、旧 P0、其他 commit 或口头结论不能替代真实 Provider、目标用户、离线硬件和安装证据。脱敏证据写入 `tmp/p0-evidence/<source-commit>/`；任何真实付费请求前必须执行 [`real-provider-evidence-preflight.md`](real-provider-evidence-preflight.md) 并获得单次书面授权。
 
-Each entry is `OPEN` until evidence is attached to one clean candidate commit.
-Use `PARTIAL` only when some required evidence exists but the release criterion
-is still open. `PASS` requires the evidence described in the row; no
-automation, API mock, historical P0 evidence, or manual assertion may replace
-an evidence type explicitly marked real-provider, target-user, or installation.
+## 当前候选边界
 
-Generated, source-bound evidence belongs under
-`tmp/p0-evidence/<source-commit>/`; do not put prompts, credentials, permanent
-object URLs, download grants, or participant identities in this repository.
-Run [`real-provider-evidence-preflight.md`](real-provider-evidence-preflight.md)
-before each real Provider submission; that runbook does not itself authorize
-spend.
-
-## Current Candidate Boundary
-
-| Field | Value |
+| 字段 | 当前事实 |
 |---|---|
-| Candidate source commit | `0cb923f6b483bb957a9ec383fb5d2a5b85b84b54` (`codex/director-v1-candidate`) |
-| Candidate state | Clean isolated worktree used for the recorded A2 live-stack scenario. The shared development worktree remains intentionally dirty with pre-existing untracked material and is not the candidate boundary. |
-| Automated baseline | Candidate checks passed: backend `ruff`, `mypy app`, and `pytest` (`605 passed`); frontend lint, typecheck, Vitest (`46 passed`), focused Playwright (`5 passed`), and production build; `git diff --check`. Details are recorded in `docs/开发执行检查点.md`. |
-| Evidence limitation | A2 has source-bound, isolated live-stack edit-then-cross-mode evidence, including static batch and unused-reservation lineage, without Provider activity. No real Provider call, user study, installation test, or Q0-Q6 release evidence has been collected. |
+| 开发 HEAD | `5df1332f1c4f002dd7b3d20d771a9dc65b9f8db1` (`dev`) |
+| 当前候选 | 尚未冻结；工作树正在清理历史文档和临时材料 |
+| 自动化基线 | 聚焦后端 46 + 92 项通过；前端 53 项、typecheck/build、Ruff 通过；mypy 2 个错误；Chromium 9/11；后端全量 pytest 本次未完成 |
+| 真实证据 | 一个 Agnes 真实视频镜头被 Q3 人工拒绝；没有当前 HEAD 的完整试拍、修复、全片或用户测试 |
+| 历史边界 | `0cb923f` 曾关闭 A2，但不是当前候选；只作为回归目标，不计入当前 HEAD 发布通过数 |
 
-## Gate A: Core Experience (Due 2026-08-31)
+## Gate A：核心体验
 
-| ID | Requirement | Evidence Required | Status | Next Action |
+| ID | 要求 | 必须证据 | 当前状态 | 下一动作 |
 |---|---|---|---|---|
-| A1 | Three entries, four stages, four confirmations, and change preview | Source-bound browser E2E against the candidate plus backend command evidence | PARTIAL | Replace mocked-only E2E with a controlled live-stack scenario after a clean candidate exists. |
-| A2 | Quick and professional modes share one project truth | Browser/API scenario that edits, reads, and verifies the same version and batch lineage in both modes | PASS | `0cb923f` records an authenticated isolated PostgreSQL/API/Vite scenario: Quick shows structured impact for a locked StoryCore edit with one accepted static batch and one unused CNY reservation, restricts action to explicit confirmation, and Professional reads the identical revision-2 StoryCore plus `superseded_by_change` batch and `released` reservation. The scenario has zero page/console errors, external Provider requests, NodeRuns, ProviderOperations, and media Artifacts. |
-| A3 | Trial, production, and repair spend are authorized | Real provider run with authorization, effective request, reservation, actual cost, and no unapproved paid call | OPEN | Run the real-Provider evidence preflight, obtain per-run written approval, then capture the full ledger evidence. |
-| A4 | Canonical and required media parameters enter the effective request | Spy contract test plus real request evidence for the selected binding | PARTIAL | The zero-network Unified Provider Spy verifies Canonical/first-frame lineage, aspect ratio, duration, native-audio flag, frozen binding, and persisted sanitized summary; after preflight, run the selected Provider path on a clean candidate. |
-| A5 | Representative trial reveals a known risk or supports continuation | Trial artifact, Q0-Q6 report, limitations, and recorded user decision | OPEN | Select a high-information dialogue shot and run it after cost authorization. |
-| A6 | One failed shot is repaired locally | Intentional failure, repair option, extra authorization, rerun scope, reused artifacts, and final evidence | OPEN | Exercise this during the first real production run. |
-| A7 | 15-30 second Chinese dialogue work and four deliverables export | Real multi-shot run: `program.mp4`, `subtitles.srt`, `timeline.json`, package hash, and project summary | OPEN | Run the frozen golden sample after A3-A5 are ready. |
-| A8 | Three target users finish without developer intervention | Three redacted participant records using `unmoderated-user-test.md` | OPEN | Recruit and schedule three sessions; developers observe only. |
-| A9 | At least two users want to save, show, publish, or make another work | Redacted post-session responses tied to A8 participants | OPEN | Ask the closing questions verbatim after each session. |
+| A1 | 三入口、四阶段、四确认和变更预览 | 当前候选的真实后端浏览器 E2E | `PARTIAL` | 修复 2 个 Chromium 失败并跑 authenticated live-stack |
+| A2 | 快速/专业模式共享同一事实源 | 双模式读取同一版本、批次、预算和血缘 | `PARTIAL` | 在当前候选复现历史 A2 场景 |
+| A3 | 试拍、生产和修复费用分别授权 | 真实请求、Reservation、ProviderOperation 和实际费用 | `OPEN` | 完成单请求 preflight 与书面授权 |
+| A4 | Canonical 和必需参数进入有效请求 | Spy + 真实 EffectiveRequest/TranslationReport | `PARTIAL` | 启用 Unified Media Path 并跑 Agnes I2I/I2V |
+| A5 | 代表镜头真实暴露风险或支持继续 | 试拍 Artifact、Q0–Q6、限制和用户决定 | `PARTIAL` | 现有 Agnes 失败镜头补齐产品内验收证据 |
+| A6 | 一个失败镜头被局部修复 | 新旧 NodeRun、复用 Artifact、额外授权和费用 | `OPEN` | 对现有失败镜头执行一次授权修复 |
+| A7 | 15–30 秒中文对白作品和四项交付 | 同一候选的多镜头真实全链 | `OPEN` | 完成 1 主角、3 镜头黄金样本 |
+| A8 | 三名目标用户无人代操作完成 | 三份脱敏用户记录 | `OPEN` | A7 稳定后安排三次测试 |
+| A9 | 至少两人愿意保存、展示或继续创作 | A8 对应的结束问题原话 | `OPEN` | 与 A8 同步收集 |
 
-## Quality And Evidence Gate
+## Quality Gate
 
-| ID | Requirement | Evidence Required | Status | Next Action |
-|---|---|---|---|---|
-| Q0 | Authorization, capability, license, and reference validity | Preflight decision, binding evidence, license inventory, and budget record | OPEN | Use the real-Provider evidence preflight to freeze selected model/weight/voice inventory before an authorized paid test. |
-| Q1 | Effective request completeness | Sanitized effective request and TranslationReport; Canonical artifact hash and injection location | PARTIAL | Automated Spy coverage proves the compiled request and persisted sanitized summary retain the required Director fields. After preflight, capture the selected Provider's real request evidence on a clean candidate. |
-| Q2 | Artifact integrity | Decode, dimensions, duration, audio, black-frame/silence checks and hashes | OPEN | Run against trial and final delivery artifacts. |
-| Q3 | Identity, appearance, and temporal evidence | Canonical/request/artifact lineage, frame observations, coverage/limitations, and human conclusion | OPEN | Complete `character-consistency-v1` with audited human trial acceptance; no automatic similarity threshold is a release gate. |
-| Q4 | Voice, speaker, lip-sync, and performance evidence | Audio/lip-sync observations, limitations, and human conclusion | OPEN | Capture on the representative dialogue shot. |
-| Q5 | Narrative and continuity evidence | Storyboard-to-output review, dialogue checks, continuity evidence, and human conclusion | OPEN | Review trial and full work with the quality report. |
-| Q6 | User acceptance and subjective overrides | Trial/final user decisions and, where used, retained override reasons | OPEN | Collect through the workflow and user-study records. |
-| Q7 | Three repair diagnoses | One identity drift, one voice/lip-sync, and one narrative issue with targeted repair evidence | OPEN | Plan and execute only after each issue has real evidence. |
-| Q8 | Model/weight license traceability | Third-party inventory, sources, license compatibility review, and known limits | OPEN | Complete the release inventory and Owner sign-off. |
+| ID | 要求 | 当前状态 | 下一动作 |
+|---|---|---|---|
+| Q0 | 授权、能力、许可和参考有效 | `OPEN` | 冻结首发模型/声音许可和价格快照 |
+| Q1 | 有效请求完整 | `PARTIAL` | 收集当前候选真实请求与参考注入证据 |
+| Q2 | 文件、尺寸、时长、音轨、黑帧和静音检查 | `OPEN` | 对试拍和交付 Artifact 执行确定性检查 |
+| Q3 | 人物、外观、肢体和时序证据 | `PARTIAL` | 已有一条拒绝记录；补项目级 Canonical 和产品内人工结论 |
+| Q4 | 声音、说话人、口型和表演 | `OPEN` | 明确 post-dub 无 lip-sync 引擎并完成试听/观察证据 |
+| Q5 | 叙事、对白和连续性 | `OPEN` | 对黄金样本逐镜复核 |
+| Q6 | 用户验收和主观覆盖 | `OPEN` | 通过产品流程记录，不改写自动结果 |
+| Q7 | 身份、声音/口型、叙事三类修复演练 | `OPEN` | 先以真实失败证据生成可执行修复方案 |
+| Q8 | 模型、权重、声音和字体许可 | `OPEN` | 完成第三方资源清单和负责人签字 |
 
-## Gate B: Offline Production Stack (Due 2026-09-06)
+## Gate B：离线生产栈
 
-| ID | Requirement | Evidence Required | Status | Next Action |
-|---|---|---|---|---|
-| B1 | One documented offline stack completes a real work | Hardware, versions, licenses, timings, peak memory/disk, restart recovery, final artifacts | OPEN | Freeze a candidate stack after the cloud workflow Gate A is stable. |
-| B2 | Offline limitations are explicit | Comparison of quality/capability gaps and supported fallback boundary | OPEN | Publish only measured limits; do not infer parity with cloud providers. |
+| ID | 要求 | 当前状态 | 下一动作 |
+|---|---|---|---|
+| B1 | 一套离线栈在声明硬件完成真实作品 | `OPEN` | 云端 Gate A 稳定后冻结唯一离线组合 |
+| B2 | 离线质量、能力和硬件限制明确 | `OPEN` | 只发布实测结果，不推断与云模型等价 |
 
-## Gate C: Installation And Release (Due 2026-09-15)
+## Gate C：安装与发布
 
-| ID | Requirement | Evidence Required | Status | Next Action |
-|---|---|---|---|---|
-| C1 | Linux/AIOS first-class installation | Clean install, real workflow, restart, backup/restore, upgrade, and support-matrix record | OPEN | Execute the deployment runbook on declared hardware. |
-| C2 | Windows 11 first-class installation | Clean Docker Desktop/WSL2 install, real workflow, download, restart, and support-matrix record | OPEN | Execute after Gate A candidate freezes. |
-| C3 | macOS second-class installation | Compose/UI/cloud-provider verification and explicit local-model limitation | OPEN | Execute cloud path only; document unsupported local features. |
-| C4 | Security, privacy, and supply-chain release checks | Single Owner behavior, secret/log/download boundary, SBOM/vulnerability review, third-party inventory | OPEN | Run security workflow and complete owner review. |
-| C5 | Release candidate is reproducible | All release evidence refers to one clean commit; install, automated tests, real-provider, offline, and browser evidence agree | OPEN | Freeze the final candidate only after A-C evidence is complete. |
+| ID | 要求 | 当前状态 | 下一动作 |
+|---|---|---|---|
+| C1 | Linux/AIOS 一等安装、恢复和真实链 | `OPEN` | Gate A 候选冻结后实机执行 |
+| C2 | Windows 11 一等安装、恢复和真实链 | `PARTIAL` | 旧安装器证据存在；当前候选需重验完整作品 |
+| C3 | macOS 二等云 Provider 路径 | `OPEN` | 明确不承诺同等本地视频能力 |
+| C4 | 安全、隐私、SBOM 和第三方供应链 | `PARTIAL` | 单 Owner/基础安全已有代码；当前候选需完整签字 |
+| C5 | 所有发布证据绑定同一干净 commit | `OPEN` | A–C 关闭后冻结 RC |
 
-## Gate Review Record
+## 状态变更记录
 
-For every status change, append a redacted entry here. A `PASS` entry must name
-the exact clean source commit, evidence directory, reviewer, date, and any
-remaining known limits. Do not delete or rewrite a failed or blocked entry.
-
-| Date | Gate IDs | From -> To | Source Commit | Evidence Location | Reviewer | Notes |
-|---|---|---|---|---|---|---|
-| 2026-08-13 | A2 | OPEN -> PARTIAL | Dirty worktree; no candidate commit | Local unit/build evidence; `docs/task-contracts/director-shared-workspace-evidence.md` | Development self-check | Backend snapshot lineage and mocked professional-mode rendering are covered. This is not source-bound live-stack, real-provider, or release evidence. |
-| 2026-08-13 | A2 | PARTIAL -> PARTIAL | `712399f06db23cbdc63a9a6ea6572d4c136f1ed7` | `tmp/p0-evidence/712399f06db23cbdc63a9a6ea6572d4c136f1ed7/a2-live-stack.json` | Development self-check | Clean isolated PostgreSQL/API/Vite scenario logged in and read the same workflow, locked storyboard revision 3, trial batch, and CNY reservation in Quick and professional modes. Four Quick stages and Director handoff rendered; legacy import/shot/export controls, post-login page/console errors, Provider requests, NodeRuns, ProviderOperations, and media Artifacts were all absent. The scenario was read-only because the seeded `trial_running` state does not allow `propose_change`; a legal edit-then-cross-mode case remains required. No Provider call or spend occurred. |
-| 2026-08-13 | A2 | PARTIAL -> PARTIAL | `602f536d35d9de8b508f65b42d380be3d51573d2` | `tmp/p0-evidence/602f536d35d9de8b508f65b42d380be3d51573d2/a2-live-stack.json` | Development self-check | Clean isolated PostgreSQL/API/Vite scenario authenticated an Owner, created a legal locked creative state, used Quick to propose a StoryCore change, displayed exactly three invalidated downstream versions, restricted actions to `confirm_change`, explicitly confirmed revision 2, and then read the identical StoryCore ID/revision through Professional. Page errors, console errors, external Provider requests, NodeRuns, ProviderOperations, and media Artifacts were all zero. This does not close A2 because that editable state intentionally has no existing batch/reservation lineage; no unsafe media-state edit behavior was introduced. No Provider call or spend occurred. |
-| 2026-08-13 | A2 | PARTIAL -> PASS | `0cb923f6b483bb957a9ec383fb5d2a5b85b84b54` | `tmp/p0-evidence/0cb923f6b483bb957a9ec383fb5d2a5b85b84b54/a2-live-stack.json` (SHA-256 `f034d618dd27125788105e30f7b4a0ef2ed918f950378dbca6182c0a9d5f1876`) | Development self-check | Clean isolated PostgreSQL/API/Vite scenario verified exact candidate source through `/health`, authenticated an Owner, inserted one local-only accepted static trial batch and one unused CNY reservation, then used Quick to preview and explicitly confirm a StoryCore revision. Professional read the same StoryCore ID/revision 2, `trial/superseded_by_change`, and `released/3.000000 CNY`; the database also verified revoked authorization and invalidated approvals. Post-login page/console errors, external Provider requests, NodeRuns, ProviderOperations, and media Artifacts were all zero. No Provider call, paid operation, worker, dispatcher, or media materialization occurred. This A2 result does not satisfy any real-provider, user-study, offline-stack, installation, quality, or release gate. |
-| — | — | — | — | — | — | No source-bound Gate decision recorded yet. |
+每次状态变化追加：日期、Gate ID、前后状态、完整 commit、证据目录、复核角色和已知限制。失败记录不得删除或改写。旧看板历史可从 Git 历史查询，不继续复制到当前入口。

@@ -1,4 +1,4 @@
-﻿"""Execution-layer models field-faithful to `04` (graph_nodes/node_runs/artifacts/ops).
+"""Execution-layer models for graph nodes, runs, artifacts and provider operations.
 
 RLS policies land in S1-RLS-0.1. Product path must use Worker, not request-thread spike.
 """

@@ -231,7 +231,7 @@ python .\scripts\check_directory_compliance.py --demo-unregistered utils2 --demo
 2. [`AGENT_EXECUTION_PROTOCOL.md`](AGENT_EXECUTION_PROTOCOL.md)
 3. 本机 `.agent-control/PROGRESS.jsonl` 尾部和 `open` 结果
 4. [`docs/开发执行检查点.md`](docs/开发执行检查点.md)
-5. 当前 Task 明确引用的 [`01_项目总需求.md`](01_项目总需求.md) 至 [`06_受控混合Agent运行时规范.md`](06_受控混合Agent运行时规范.md) 条款
+5. 当前 Task 明确引用的 `docs/current/` 合同、ADR 和 Runbook
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1 -Operation open
@@ -244,21 +244,13 @@ git remote -v
 
 每个任务开始、完成、失败或暂停时，通过 `.agent-control/control.ps1 -Operation log` 追加事实记录。日常开发在根 worktree 的本地 `dev` 分支进行，提交后推送到 `origin/dev`；推送前本地 `dev` 可以领先远端。`main` 只保留经过验证的稳定版本，并且只能通过 `dev -> main` 的受保护 PR 更新。需要并行隔离或紧急修复时，才从当前本地 `dev`（紧急修复从 `main`）创建短期 `agent/<task-id>` 分支和 `.worktrees/<task-id>`，其 PR 先合回 `dev`（紧急修复合回 `main` 后也要同步回 `dev`）。Agent 不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以在批准并合并 PR 后记录该状态。GitHub Ruleset 配置见 [`docs/runbooks/github-ruleset.md`](docs/runbooks/github-ruleset.md)。
 
-发布或 P0 tag 前，从候选 commit 的干净 worktree 运行 formal proof 和 §3.1 Gate。默认报告写入 `tmp/p0-evidence/<sha>/`，并携带 commit、dirty、UTC 起止时间、脱敏命令、环境摘要和 source 一致性；任何 `FAIL`、`BLOCKED`、dirty 或 source mismatch 都不能标记 P0 MVP 完成。
+发布或 tag 前，从候选 commit 的干净 worktree 执行 [`docs/runbooks/release-gate-board.md`](docs/runbooks/release-gate-board.md) 要求的自动化、真实 Provider、用户、离线和安装证据。报告写入 `tmp/p0-evidence/<sha>/`，并绑定 commit、dirty 状态、环境和 source 一致性；任何 `FAIL`、`BLOCKED` 或 source mismatch 都禁止发布。
 
-Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在开发检查点定义可观察效果和验收证据；完成并合并后重算当前阶段 Gate，继续最高优先级的 `READY` Task。某个外部条件暂停时，只暂停依赖它的路径；P0 完成后按个人创作者路线 `P1.1 -> P1.2 -> P1.3 -> P2` 建立阶段合同，除非遇到需要用户账号、付费、受限数据、不可逆操作或会改变产品路线的真实阻塞。
+Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在开发检查点定义可观察效果和验收证据；完成并合并后重算当前 Gate，继续最高优先级的 `READY` Task。外部条件只暂停依赖它的路径；后续能力按当前总纲和架构确认表重新进入，不沿用已删除的旧阶段标签。
 
 ## 产品阶段
 
-- P0：内部试产的完整 MVP。
-- P1.1：个人候选结果治理、选片与项目内复用。
-- P1.2：个人故事板、审核/返工队列、正式资产库与模板复用。
-- P1.3：版本化时间线、受控精剪和条件性后期工具适配。
-- P2：3D 导演台和高级专业后期互操作。
-
-成员、邀请、共享、评论和任务指派不在当前个人创作者路线中。
-
-详细效果和进入条件见 [`docs/产品阶段与效果路线图.md`](docs/产品阶段与效果路线图.md) 与 [`docs/MVP能力延期台账.md`](docs/MVP能力延期台账.md)。
+首版只稳定支持四阶段 AI 导演完成 15–30 秒真人对白短剧。资产库、故事板、候选治理、版本化时间线和专业后期能力保留为同一生产底座上的后续扩展层，不阻塞当前真实作品闭环。成员、邀请、共享、评论和任务指派不在当前个人创作者路线中。详细范围与进入条件只看 [`DramaForge总开发文档.md`](DramaForge总开发文档.md) 和 [`docs/current/`](docs/current/)。
 
 ## 开源治理
 

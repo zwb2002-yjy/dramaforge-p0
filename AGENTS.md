@@ -5,7 +5,7 @@
 - Read `DramaForge总开发文档.md` first for product direction and scope.
 - Read only the task-relevant contract under `docs/current/` before changing product, runtime, quality, or roadmap behavior.
 - `docs/开发执行检查点.md` is the live implementation-status source, not a product-definition source.
-- Root documents `01_项目总需求.md` through `06_受控混合Agent运行时规范.md` and other legacy planning/specification documents are historical. Their old `FROZEN`, `ACTIVE`, or "single source of truth" labels no longer grant execution authority.
+- Deleted legacy planning/specification documents remain available only through Git history. They cannot generate tasks or regain authority through restoration.
 - Do not create another parallel master plan. Update the active contract or add an ADR/Task Contract as routed by `docs/README.md`.
 
 ## Image Evidence Handling

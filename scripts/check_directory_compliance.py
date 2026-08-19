@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce 03_全局目录规范.md directory and sensitive-file rules for CI.
+"""Enforce the current repository directory and sensitive-file rules for CI.
 
 Local build caches that are gitignored may exist on disk. This checker:
 1. Rejects unregistered *root* entries that are not local-only.
@@ -15,28 +15,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Registered top-level entries under the repo root (03 §1).
+# Registered top-level entries under the repo root.
 ALLOWED_ROOT = {
     ".gitattributes",
     ".gitignore",
     ".env.example",
     ".dockerignore",
-    "01_项目总需求.md",
-    "02_全栈技术栈锁定表.md",
-    "03_全局目录规范.md",
-    "04_数据定义全集.md",
-    "05_模块落地约束.md",
-    "06_受控混合Agent运行时规范.md",
-    "DramaForge架构决策与技术选型书.md",
-    "DramaForge双模式产品与架构汇报方案.md",
-    "Agnes-first通用Provider适配规划.md",
-    "AI短剧工作台完整实施规划.md",
     "DramaForge总开发文档.md",
-    "DramaForge 模型能力插件化架构设计与开发规范.md",
-    "DramaForge_Model_Plugin_Architecture_V3_Full_Development_Spec.md",
-    "dramaforge_model_plugin_development_spec_for_dsv4flash.md",
-    "DramaForge_Multi_Model_Production_Profile_LiteLLM_DS_Development_Spec.md",
-    "DramaForge_LiteLLM_Proxy_Current_Dev_Fix_Spec_for_DS.md",
     "README.md",
     "LICENSE",
     "NOTICE",
