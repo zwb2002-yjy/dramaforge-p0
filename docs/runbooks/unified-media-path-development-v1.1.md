@@ -6,7 +6,7 @@
 
 **初始审计基线：`dev@5f2eb6e930bb791ba5e760d4927e467494200a4a`**
 
-**当前运行候选：`dev@b1c9782df69347033bd3e24573156ff5db29d5b0`**
+**当前运行候选：`dev@acaa6c4f602adb49a1c0bded22d48560acd35bc1`**
 
 **来源：** `D:\DramaForge_Unified_Media_Path_开发执行规格_v1.0.md`
 
@@ -136,7 +136,7 @@ DirectorProductionService
 
 ### 3.2 当前双路径事实
 
-截至候选 `b1c9782df69347033bd3e24573156ff5db29d5b0`，
+截至候选 `acaa6c4f602adb49a1c0bded22d48560acd35bc1`，
 `execute_media_node_run` 的图片和视频分支是：
 
 ```text
@@ -178,21 +178,22 @@ Agnes 原生 JSON。
 
 ### 3.4 当前无费用验证结果
 
-基于当前工作树执行的聚焦验证：
+基于候选 `acaa6c4` 执行的无费用验证：
 
 ```text
-test_unified_path.py
-test_compilers.py
-test_runtime.py
-test_v3_boundary.py
-
-27 passed
-Ruff passed
+候选锁文件隔离容器后端全量：633 passed / 22 skipped
+Unified / Provider 聚焦：108 passed / 2 skipped
+隔离 PostgreSQL migration：2 passed
+候选镜像内 Director G2 smoke：1 passed
+Ruff、mypy：passed
 ```
 
 该结果证明：
 
-- Fake/Spy 环境下 Binding、Compiler、Runtime、ProviderOperation 和 Artifact 可串联；
+- Director 的真实授权和物化入口可以经 Outbox、Worker、Binding、Manifest、Compiler、
+  Runtime、ProviderOperation 到达 Artifact；
+- Fake/Spy 环境下三次 Unified submit 完成图片和视频关键链，重复执行不会增加 submit；
+- Canonical 与第一帧 Artifact ID、SHA-256、Resume Token、费用和产物血缘均可复核；
 - Frozen Binding 不会被运行期 Project 默认值静默替换；
 - Resume Token 可驱动恢复；
 - 已持久化的 Unified ProviderOperation 不会因开关变化而重新提交；
@@ -254,25 +255,25 @@ Agnes Video V2.0 第一版只允许：
 - 原生音频；
 - 高级运动或镜头控制。
 
-当前 Compiler 对满足 `8n+1` 的其他帧数仍可能放行，这与首版 Manifest 的
-`121` 固定约束不完全一致。必须在真实调用前修复为 Manifest 驱动的严格校验。
+当前 Compiler 已把视频意图限制为 9:16、5 秒、无原生音频，并把 Manifest 限制为
+24fps、121 帧、720x1280；解析后的首帧 Artifact ID 必须与 Intent 完全一致。
 
-Agnes Image 当前还存在 Director 竖屏尺寸与 Manifest 固定尺寸不完全一致的问题。
-真实 I2I 前必须通过官方合同或账号 Probe 冻结一个可用尺寸，并保证：
+Agnes Image v2 已根据官方文档冻结原生竖屏合同：
 
 ```text
-Director Intent
-= Manifest 声明
-= Compiler 校验
-= EffectiveRequest
-= Agnes 实际 wire request
+Director Intent：aspect_ratio=9:16，size 未指定
+Frozen Manifest：size=1K，aspect_ratio=9:16，736x1312
+TranslationReport：size null → 1K，reason=frozen_manifest_native_size_tier
+EffectiveRequest / wire request：size=1K，ratio=9:16
 ```
 
-没有证据时不通过静默改尺寸来“让请求成功”。
+Compiler 会拒绝 Manifest 的 size、ratio、width 或 height 漂移；I2I 解析后的 Artifact
+ID、SHA-256 和 MIME 也必须与 Intent 一致。v1 Catalog 行只用于历史恢复，不能绑定
+新项目或运行新 Probe。
 
 ### 4.3 EffectiveRequest 与 TranslationReport 必须持久化
 
-当前 Unified Director 分支已经保存：
+当前 Unified Director 分支统一保存：
 
 - Intent；
 - Compiler 的安全请求摘要；
@@ -281,7 +282,7 @@ Director Intent
 - Manifest hash；
 - Selection Plan。
 
-下一步必须统一为可直接审计的证据结构：
+可直接审计的证据结构为：
 
 ```json
 {
@@ -323,7 +324,8 @@ Director Intent
 
 ### 4.4 费用未知不能记成真实零费用
 
-当前 Agnes Runtime 的 `fetch_cost()` 返回固定 `0 USD`。这不构成供应商真实结算证据。
+当前 Agnes Runtime 的 `fetch_cost()` 返回 `amount=null`、
+`cost_status=not_reported`，不会把未知费用记为真实零费用。
 
 费用需要区分：
 
@@ -366,16 +368,18 @@ selected_cast = [one_lead_character]
 当前主工作区仍保留用户已有的 CI/依赖修改，但专项代码已经冻结为独立候选：
 
 ```text
-b1c9782df69347033bd3e24573156ff5db29d5b0
-DRAMAFORGE_SOURCE_COMMIT=b1c9782df69347033bd3e24573156ff5db29d5b0
+acaa6c4f602adb49a1c0bded22d48560acd35bc1
+DRAMAFORGE_SOURCE_COMMIT=acaa6c4f602adb49a1c0bded22d48560acd35bc1
 TEXT_V3_ROUTER_ENABLED=true
 PROVIDER_UNIFIED_PATH_ENABLED=true
 ```
 
 该候选由 detached 干净 worktree 构建。运行中的 API、Dispatcher、两个 Worker 和
 Frontend 镜像均标记为该完整 commit，且全部健康；PostgreSQL、Redis、MinIO、
-LiteLLM 和 LiteLLM DB 保留原卷并保持健康。主工作区的未提交 CI/依赖修改没有进入
-候选镜像，也不能归属为候选内容。
+LiteLLM 和 LiteLLM DB 保留原容器与原卷并保持健康。数据库已升级到
+`20260819_0028`，保留 Agnes 图片 v1 历史 Catalog 行并标记为 `deprecated`，新增
+v2 active 行冻结 `size=1K`、`ratio=9:16`、`736x1312`。主工作区的未提交 CI/依赖
+修改没有进入候选镜像，也不能归属为候选内容。
 
 ### 5.2 进入实现前必须完成
 
@@ -792,11 +796,11 @@ Idea
 
 | Gate | 状态 | 当前证据与缺口 |
 |---|---|---|
-| G0 候选冻结 | `PASS` | 候选 `b1c9782`；后端 `630 passed / 16 skipped`；前端 `53 passed`；Chromium `11 passed`；Ruff、mypy、build 通过；应用镜像同源健康 |
-| G1 合同收口 | `PARTIAL` | Director 强制 Unified；Agnes 视频固定 9:16/24fps/121 帧/5 秒/无原生音频；EffectiveRequest、TranslationReport、`not_reported` 费用语义已落地；Agnes 图片竖屏尺寸合同仍未取得正式证据，当前按 Manifest 不一致阻断 |
-| G2 无费用证明 | `PARTIAL` | Unified 聚焦合同 `57 passed`，覆盖 Frozen Binding、参考 Artifact ID/SHA-256、恢复不重提、未知提交 fail-stop、预算和未报告费用；尚缺从 Director 真实物化入口经 Outbox/Worker 的完整 Spy smoke |
-| G3 同源环境 | `PARTIAL` | API、Dispatcher、Worker、Frontend 与镜像标签同源，所有服务健康；尚缺候选内从 Director 入口触发的 Compose Spy smoke 和新 NodeRun source_commit 数据库证据 |
-| G4 Agnes 图片 | `OPEN` | 未取得本候选的单次书面费用授权；图片尺寸合同仍阻断真实请求 |
+| G0 候选冻结 | `PASS` | 候选 `acaa6c4`；候选锁文件隔离容器后端 `633 passed / 22 skipped`，另有隔离 PostgreSQL migration `2 passed`；前端 `54 passed`；Chromium `11 passed`；Ruff、mypy、build 通过；应用镜像同源健康 |
+| G1 合同收口 | `PASS` | Director 强制 Unified；Agnes 视频固定 9:16/24fps/121 帧/5 秒/无原生音频；Agnes 图片 v2 按官方合同冻结 `1K + 9:16`、参考输出 `736x1312`；EffectiveRequest、显式 TranslationReport、严格引用匹配和 `not_reported` 费用语义已落地 |
+| G2 无费用证明 | `PASS` | 完整 Spy 从真实 Director Workflow、锁定工件、预算 Approval 和 `materialize_trial()` 起跑，经 Production Graph、Outbox、Worker、Frozen Binding、Manifest、Compiler、Runtime 到 ProviderOperation/Artifact；三次 submit，重复 Worker 执行不增 submit；Canonical/首帧 ID 与 SHA-256、Resume Token、费用和 `produced_by_run_id` 均断言通过 |
+| G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `acaa6c4` 镜像并健康；数据服务容器 ID/卷未变；数据库 head 为 `0028`；候选镜像内 G2 smoke `1 passed`；临时数据库事实证明新 NodeRun 持久化相同 source commit |
+| G4 Agnes 图片 | `OPEN` | 已无费用创建 v2 Binding `663ecf84-af9c-4316-81a7-dc1a8893e09c`，绑定 active v2 Catalog/hash，保持 `account_verified=false`、`quality_gated=false` 且未绑定项目；尚缺本账号付费 Probe、真实 I2I、质量门禁和单次书面费用上限授权；未经授权未调用 Provider |
 | G5 Agnes 视频 | `OPEN` | 未取得本候选的视频费用授权；未执行远端任务创建后的 Worker 停启恢复实证 |
 | G6 Legacy 退出 | `PARTIAL` | Director 已无 Feature Flag fallback；真实 G4/G5 前不删除非 Director 兼容代码和历史恢复依赖 |
 | G7 试拍审阅 | `PARTIAL` | 新 Visual 2.0 项目大厅和 canonical 快速创作路由已接真实 Director API；试拍页仍缺完整视频/音频/首中末帧、EffectiveRequest、费用状态和限制呈现 |
