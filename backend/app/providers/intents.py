@@ -78,6 +78,7 @@ class ImageGenerationIntent(BaseModel):
     purpose: Literal["keyframe"] = "keyframe"
     prompt: str
     size: str | None = None
+    aspect_ratio: Literal["9:16", "16:9", "1:1"] | None = None
     seed: int | None = None
     reference_artifact_id: UUID | None = None
     reference_fingerprint: str | None = None

@@ -31,7 +31,10 @@ AGNES_VIDEO_CREATE_PATH = "/v1/videos"
 AGNES_VIDEO_BY_ID_PATH = "/agnesapi"
 _ALLOWED_REFERENCE_MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
 _MAX_REFERENCE_BYTES = 20 * 1024 * 1024
-_AGNES_IMAGE_SIZE = "1024x768"
+_AGNES_IMAGE_SIZE = "1K"
+_AGNES_IMAGE_RATIO = "9:16"
+_AGNES_IMAGE_WIDTH = 736
+_AGNES_IMAGE_HEIGHT = 1312
 _AGNES_VIDEO_NUM_FRAMES = 121
 _AGNES_VIDEO_FRAME_RATE = 24
 _AGNES_VIDEO_DURATION_SECONDS = 5
@@ -218,6 +221,7 @@ def _build_image_body(
     *,
     prompt: str,
     size: str,
+    ratio: str | None = None,
     canonical_image_bytes: bytes | None = None,
     canonical_image_mime: str = "image/png",
 ) -> tuple[dict[str, object], str, list[str]]:
@@ -241,6 +245,8 @@ def _build_image_body(
         "size": size_value,
         "extra_body": extra_body,
     }
+    if ratio is not None:
+        body["ratio"] = ratio
     operation = "image.i2i" if reference_fingerprints else "image.t2i"
     return body, operation, reference_fingerprints
 
@@ -332,7 +338,8 @@ class AgnesHubClient:
         self,
         *,
         prompt: str,
-        size: str = "1024x768",
+        size: str = _AGNES_IMAGE_SIZE,
+        ratio: str | None = _AGNES_IMAGE_RATIO,
         canonical_image_bytes: bytes | None = None,
         canonical_image_mime: str = "image/png",
         reference_artifact_id: str | None = None,
@@ -343,6 +350,7 @@ class AgnesHubClient:
             self._image_model,
             prompt=prompt,
             size=size,
+            ratio=ratio,
             canonical_image_bytes=canonical_image_bytes,
             canonical_image_mime=canonical_image_mime,
         )
@@ -353,6 +361,7 @@ class AgnesHubClient:
             "operation": operation,
             "model": self._image_model,
             "size": str(body.get("size", "")),
+            "aspect_ratio": str(body.get("ratio", "")) or None,
             "reference_count": len(reference_fingerprints),
             "reference_artifact_ids": ([reference_artifact_id] if reference_artifact_id else []),
             "reference_fingerprints": reference_fingerprints,
@@ -671,7 +680,8 @@ class AgnesImageAdapter:
             raise TypeError("canonical_image_bytes must be bytes")
         return await self._client.create_image(
             prompt=str(request.get("prompt") or ""),
-            size=str(request.get("size") or "1024x768"),
+            size=str(request.get("size") or _AGNES_IMAGE_SIZE),
+            ratio=str(request.get("ratio") or _AGNES_IMAGE_RATIO),
             canonical_image_bytes=image_bytes,
             canonical_image_mime=str(request.get("canonical_image_mime") or "image/png"),
             reference_artifact_id=(
@@ -784,6 +794,16 @@ class AgnesImageCompiler:
         op = model.operations.get("image.generate")
         if op is None:
             raise ValueError("model does not support image.generate")
+        constraints = op.output_constraints
+        if (
+            constraints.get("size") != _AGNES_IMAGE_SIZE
+            or constraints.get("aspect_ratio") != _AGNES_IMAGE_RATIO
+            or constraints.get("width") != _AGNES_IMAGE_WIDTH
+            or constraints.get("height") != _AGNES_IMAGE_HEIGHT
+        ):
+            raise ValueError(
+                "Agnes Image 2.1 Flash manifest is outside the verified product subset"
+            )
         capabilities = set(op.capabilities)
         required = "image.t2i"
         if intent.reference_artifact_id is not None:
@@ -795,6 +815,7 @@ class AgnesImageCompiler:
             if constraint is None or constraint.max < 1:
                 raise ValueError("model does not accept a reference_image")
         manifest_size = op.output_constraints.get("size")
+        manifest_ratio = op.output_constraints.get("aspect_ratio")
         if (
             isinstance(manifest_size, str)
             and intent.size is not None
@@ -802,6 +823,15 @@ class AgnesImageCompiler:
         ):
             raise ValueError(
                 f"image size {intent.size} does not match frozen manifest size {manifest_size}"
+            )
+        if (
+            isinstance(manifest_ratio, str)
+            and intent.aspect_ratio is not None
+            and intent.aspect_ratio != manifest_ratio
+        ):
+            raise ValueError(
+                f"image aspect ratio {intent.aspect_ratio} does not match frozen "
+                f"manifest ratio {manifest_ratio}"
             )
 
     async def compile(
@@ -815,15 +845,35 @@ class AgnesImageCompiler:
         self.validate(intent, model)
         resolved = {ref.role: ref for ref in references}
         ref_image = resolved.get("reference_image")
+        expected_reference_id = intent.reference_artifact_id
+        if expected_reference_id is None and ref_image is not None:
+            raise ValueError("image compiler received an unexpected reference_image")
+        if expected_reference_id is not None:
+            if ref_image is None:
+                raise ValueError("image intent reference_image was not resolved")
+            if ref_image.artifact_id != expected_reference_id:
+                raise ValueError("resolved reference_image does not match the image intent")
+            if (
+                intent.reference_fingerprint is not None
+                and ref_image.fingerprint != intent.reference_fingerprint
+            ):
+                raise ValueError("resolved reference_image fingerprint does not match the intent")
+            if intent.reference_mime is not None and ref_image.mime_type != intent.reference_mime:
+                raise ValueError("resolved reference_image MIME does not match the intent")
         operation_manifest = model.operations["image.generate"]
         manifest_size = operation_manifest.output_constraints.get("size")
+        manifest_ratio = operation_manifest.output_constraints.get("aspect_ratio")
         size = intent.size or (
             manifest_size if isinstance(manifest_size, str) else _AGNES_IMAGE_SIZE
+        )
+        ratio = intent.aspect_ratio or (
+            manifest_ratio if isinstance(manifest_ratio, str) else None
         )
         body, operation, fingerprints = _build_image_body(
             invoke_model_value,
             prompt=intent.prompt,
             size=size,
+            ratio=ratio,
             canonical_image_bytes=ref_image.content_bytes if ref_image is not None else None,
             canonical_image_mime=ref_image.mime_type if ref_image is not None else "image/png",
         )
@@ -831,6 +881,22 @@ class AgnesImageCompiler:
 
         artifact_ids = [str(ref_image.artifact_id)] if ref_image is not None else []
         fps = [ref_image.fingerprint] if ref_image is not None and ref_image.fingerprint else []
+        summary = _compiled_summary(
+            operation=operation,
+            invoke_model_value=invoke_model_value,
+            reference_artifact_ids=artifact_ids,
+            reference_fingerprints=fps,
+            schema_version=model.manifest_version,
+        )
+        summary.update({"size": size, "aspect_ratio": ratio})
+        summary["translation_transformations"] = [
+            {
+                "field": "size",
+                "from_value": None,
+                "to_value": size,
+                "reason": "frozen_manifest_native_size_tier",
+            }
+        ] if intent.size is None else []
         return CompiledImageRequest(
             provider_type="agnes",
             protocol_profile=AGNES_CN_PROFILE,
@@ -838,16 +904,7 @@ class AgnesImageCompiler:
             operation="image.generate",
             wire_request=cast(dict[str, JsonValue], body),
             request_schema_version=model.manifest_version,
-            safe_request_summary=cast(
-                dict[str, JsonValue],
-                _compiled_summary(
-                    operation=operation,
-                    invoke_model_value=invoke_model_value,
-                    reference_artifact_ids=artifact_ids,
-                    reference_fingerprints=fps,
-                    schema_version=model.manifest_version,
-                ),
-            ),
+            safe_request_summary=cast(dict[str, JsonValue], summary),
             reference_artifact_ids=[ref_image.artifact_id] if ref_image is not None else [],
             reference_fingerprints=fps,
         )
@@ -900,7 +957,13 @@ class AgnesVideoCompiler:
         invoke_model_value: str,
     ) -> Any:
         self.validate(intent, model)
-        first = next(ref for ref in references if ref.role == "first_frame")
+        intent_first = next(ref for ref in intent.references if ref.role == "first_frame")
+        resolved_first = [ref for ref in references if ref.role == "first_frame"]
+        if len(resolved_first) != 1:
+            raise ValueError("video intent first_frame was not resolved exactly once")
+        first = resolved_first[0]
+        if first.artifact_id != intent_first.artifact_id:
+            raise ValueError("resolved first_frame does not match the video intent")
         duration_seconds = _AGNES_VIDEO_DURATION_SECONDS
         num_frames = _AGNES_VIDEO_NUM_FRAMES
         if first.content_bytes is not None:

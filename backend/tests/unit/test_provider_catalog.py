@@ -56,7 +56,8 @@ def test_all_seed_manifests_parse() -> None:
     assert len(SEED_MANIFESTS) == 7
     for manifest in SEED_MANIFESTS:
         parsed = ModelCapabilityManifest.model_validate(manifest)
-        assert parsed.model_revision == "v1"
+        expected_revision = "v2" if parsed.model_id == "agnes-image-2.1-flash" else "v1"
+        assert parsed.model_revision == expected_revision
         assert parsed.catalog_source == "official_static"
 
 
@@ -105,11 +106,24 @@ def test_frozen_migration_snapshot_matches_current_seed_hash() -> None:
     frozen = _load_frozen()
     frozen_manifests = frozen.FROZEN_0015
     assert len(frozen_manifests) == 4
-    by_id = {m["model_id"]: m for m in SEED_MANIFESTS}
+    by_identity = {(m["model_id"], m["model_revision"]): m for m in SEED_MANIFESTS}
     for frozen_manifest in frozen_manifests:
-        current = by_id[frozen_manifest["model_id"]]
-        assert hash_manifest(current) == hash_manifest(frozen_manifest)
-        assert hash_manifest(current) == frozen.hash_seed(frozen_manifest)
+        frozen_hash = frozen.hash_seed(frozen_manifest)
+        assert frozen_hash == hash_manifest(frozen_manifest)
+        current = by_identity.get(
+            (frozen_manifest["model_id"], frozen_manifest["model_revision"])
+        )
+        if current is not None:
+            assert hash_manifest(current) == frozen_hash
+    current_image = next(
+        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+    )
+    frozen_image = next(
+        item for item in frozen_manifests if item["model_id"] == "agnes-image-2.1-flash"
+    )
+    assert current_image["model_revision"] == "v2"
+    assert frozen_image["model_revision"] == "v1"
+    assert hash_manifest(current_image) != frozen.hash_seed(frozen_image)
 
 
 def test_frozen_snapshot_is_self_contained() -> None:

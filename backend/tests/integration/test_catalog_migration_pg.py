@@ -253,7 +253,26 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar_one()
-            assert head == "20260817_0027"
+            assert head == "20260819_0028"
+            agnes_image_revisions = conn.execute(
+                text(
+                    "select model_revision, lifecycle, capability_manifest_json "
+                    "from provider_model_catalog_entries "
+                    "where provider_type='agnes' "
+                    "and protocol_profile='agnes_cn_v1' "
+                    "and model_id='agnes-image-2.1-flash' "
+                    "order by model_revision"
+                )
+            ).fetchall()
+            assert [(row.model_revision, row.lifecycle) for row in agnes_image_revisions] == [
+                ("v1", "deprecated"),
+                ("v2", "active"),
+            ]
+            image_v2 = agnes_image_revisions[1].capability_manifest_json
+            image_output = image_v2["operations"]["image.generate"]["output_constraints"]
+            assert image_output["size"] == "1K"
+            assert image_output["aspect_ratio"] == "9:16"
+            assert (image_output["width"], image_output["height"]) == (736, 1312)
             seedance_2 = conn.execute(
                 text(
                     "select model_id, lifecycle from provider_model_catalog_entries "
@@ -291,6 +310,52 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
                 )
             ).scalar_one()
             assert removed_columns == 0
+        engine.dispose()
+
+        _alembic(dbname, "downgrade", "20260817_0027")
+        engine = create_engine(_db_sync_url(dbname))
+        with engine.connect() as conn:
+            assert (
+                conn.execute(text("select version_num from alembic_version")).scalar_one()
+                == "20260817_0027"
+            )
+            downgraded = conn.execute(
+                text(
+                    "select model_revision, lifecycle "
+                    "from provider_model_catalog_entries "
+                    "where provider_type='agnes' "
+                    "and protocol_profile='agnes_cn_v1' "
+                    "and model_id='agnes-image-2.1-flash' "
+                    "order by model_revision"
+                )
+            ).fetchall()
+            assert [(row.model_revision, row.lifecycle) for row in downgraded] == [
+                ("v1", "active"),
+                ("v2", "deprecated"),
+            ]
+        engine.dispose()
+
+        _alembic(dbname, "upgrade", "head")
+        engine = create_engine(_db_sync_url(dbname))
+        with engine.connect() as conn:
+            assert (
+                conn.execute(text("select version_num from alembic_version")).scalar_one()
+                == "20260819_0028"
+            )
+            reupgraded = conn.execute(
+                text(
+                    "select model_revision, lifecycle "
+                    "from provider_model_catalog_entries "
+                    "where provider_type='agnes' "
+                    "and protocol_profile='agnes_cn_v1' "
+                    "and model_id='agnes-image-2.1-flash' "
+                    "order by model_revision"
+                )
+            ).fetchall()
+            assert [(row.model_revision, row.lifecycle) for row in reupgraded] == [
+                ("v1", "deprecated"),
+                ("v2", "active"),
+            ]
         engine.dispose()
     finally:
         await _drop_db(dbname)

@@ -219,19 +219,40 @@ export function ProviderConnectionPanel({
     onError: (cause: Error) => setError(cause.message),
   });
 
-  const imageBinding = useMemo(
-    () => bindings.data?.find((binding) => binding.purpose === "keyframe") ?? null,
-    [bindings.data],
-  );
-  const videoBinding = useMemo(
-    () => bindings.data?.find((binding) => binding.purpose === "video") ?? null,
-    [bindings.data],
-  );
-
   const pluginCapabilities = selectedPlugin?.capabilities ?? ["auth_models"];
   const pluginModels = selectedPlugin?.models ?? [];
   const imageModels = pluginModels.filter((model) => model.media_type === "image");
   const videoModels = pluginModels.filter((model) => model.media_type === "video");
+  const activeModelsByContract = useMemo(
+    () => new Map(
+      (selectedPlugin?.models ?? []).map((model) => [
+        `${model.catalog_entry_id}:${model.capability_manifest_hash}`,
+        model,
+      ]),
+    ),
+    [selectedPlugin?.models],
+  );
+  const activeModelFor = (binding: ProviderModelBindingRead) => activeModelsByContract.get(
+    `${binding.catalog_entry_id}:${binding.capability_manifest_hash}`,
+  ) ?? null;
+  const imageBinding = useMemo(
+    () => bindings.data?.find((binding) => (
+      binding.purpose === "keyframe"
+      && activeModelsByContract.has(
+        `${binding.catalog_entry_id}:${binding.capability_manifest_hash}`,
+      )
+    )) ?? null,
+    [activeModelsByContract, bindings.data],
+  );
+  const videoBinding = useMemo(
+    () => bindings.data?.find((binding) => (
+      binding.purpose === "video"
+      && activeModelsByContract.has(
+        `${binding.catalog_entry_id}:${binding.capability_manifest_hash}`,
+      )
+    )) ?? null,
+    [activeModelsByContract, bindings.data],
+  );
 
   if (!workspaceId) {
     return <section className="panel" data-testid="provider-config"><h3>模型供应商插件</h3><p className="muted">配置供应商前请先选择或创建空间。</p></section>;
@@ -327,6 +348,7 @@ export function ProviderConnectionPanel({
             </div>
             <div className="provider-binding-list">
               {(bindings.data ?? []).map((binding) => {
+                const activeModel = activeModelFor(binding);
                 const states = [
                   ["documented", binding.documented],
                   ["contract_tested", binding.contract_tested],
@@ -337,7 +359,7 @@ export function ProviderConnectionPanel({
                   <div className="provider-binding" key={binding.id}>
                     <div>
                       <strong>{binding.model_id}</strong>
-                      <span className="muted">{binding.purpose}</span>
+                      <span className="muted">{binding.purpose} · {activeModel ? activeModel.model_revision : "历史合同"}</span>
                       <div className="provider-binding-states" data-testid={`binding-states-${binding.purpose}`}>
                         {states.map(([state, passed]) => (
                           <span
@@ -402,7 +424,7 @@ export function ProviderConnectionPanel({
                     </div>
                     <button
                       type="button"
-                      disabled={!binding.account_verified || !selectedProjectId || projectBindingMutation.isPending}
+                      disabled={!activeModel || !binding.account_verified || !selectedProjectId || projectBindingMutation.isPending}
                       onClick={() => projectBindingMutation.mutate({ purpose: binding.purpose as "keyframe" | "video", modelBindingId: binding.id })}
                     >
                       绑定所选项目

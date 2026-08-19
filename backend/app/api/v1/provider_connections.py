@@ -33,6 +33,8 @@ router = APIRouter(tags=["provider-connections"])
 
 
 class ProviderPluginModelRead(BaseModel):
+    catalog_entry_id: UUID
+    capability_manifest_hash: str
     model_id: str
     display_name: str
     media_type: str
@@ -78,6 +80,8 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
         )
         by_plugin.setdefault((entry.provider_type, entry.protocol_profile), []).append(
             ProviderPluginModelRead(
+                catalog_entry_id=entry.id,
+                capability_manifest_hash=entry.contract_manifest_hash,
                 model_id=entry.model_id,
                 display_name=entry.display_name,
                 media_type=entry.media_kind,

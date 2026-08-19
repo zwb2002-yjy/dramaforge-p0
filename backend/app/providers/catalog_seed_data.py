@@ -30,6 +30,9 @@ MINIMAX_DOCUMENTED_AT = "2026-08-13"
 SEEDANCE_2_MANIFEST_VERSION = "2026-08-17"
 SEEDANCE_2_DOCUMENTED_AT = "2026-08-17"
 
+AGNES_IMAGE_MANIFEST_VERSION = "2026-08-19"
+AGNES_IMAGE_DOCUMENTED_AT = "2026-08-19"
+
 # ---------------------------------------------------------------------------
 # Contract hash: stable canonical JSON sha256. Order- and whitespace-insensitive.
 # ---------------------------------------------------------------------------
@@ -97,22 +100,28 @@ def _manifest(
 # ---------------------------------------------------------------------------
 
 SEED_MANIFESTS: list[dict[str, Any]] = [
-    # Agnes China image (Image 2.x). Wire: POST /v1/images/generations
-    #   {model, prompt, size, extra_body:{response_format:"url", image:[data_uri]}}.
-    # Verified 2026-08-04/05 against wiki.agnes-ai.cn + vendor support.
+    # Agnes China image (Image 2.1 Flash). The v2 catalog revision freezes the
+    # documented native portrait contract: size tier 1K + ratio 9:16, yielding
+    # a documented 736x1312 output. Legacy exact dimensions remain in the
+    # immutable v1 migration row only and are not eligible for new submissions.
     _manifest(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
         model_id="agnes-image-2.1-flash",
-        model_revision="v1",
+        model_revision="v2",
         media_kind="image",
         display_name="Agnes Image Flash",
+        manifest_version=AGNES_IMAGE_MANIFEST_VERSION,
+        documented_at=AGNES_IMAGE_DOCUMENTED_AT,
         operations={
             "image.generate": _operation(
                 "image.generate",
                 capabilities=["image.t2i", "image.i2i"],
                 output_constraints={
-                    "size": "1024x768",
+                    "size": "1K",
+                    "aspect_ratio": "9:16",
+                    "width": 736,
+                    "height": 1312,
                     "response_format": "url",
                 },
                 reference_constraints={

@@ -214,9 +214,10 @@ async def test_agnes_image_i2i_uses_generation_json_and_redacted_summary() -> No
         assert request.url.path == "/v1/images/generations"
         assert request.headers["content-type"] == "application/json"
         body = json.loads(request.content)
-        assert set(body) == {"model", "prompt", "size", "extra_body"}
+        assert set(body) == {"model", "prompt", "size", "ratio", "extra_body"}
         assert body["model"] == "agnes-image-2.1-flash"
-        assert body["size"] == "1024x768"
+        assert body["size"] == "1K"
+        assert body["ratio"] == "9:16"
         assert "image" not in {key for key in body if key != "extra_body"}
         assert body["extra_body"]["response_format"] == "url"
         assert len(body["extra_body"]["image"]) == 1

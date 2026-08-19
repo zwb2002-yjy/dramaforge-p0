@@ -7,23 +7,30 @@ runtime) with zero network, proving the path works without a provider branch.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import AsyncGenerator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from app.access.models import User, Workspace
+from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.config import Settings, clear_settings_cache
 from app.creation import models as _cm  # noqa: F401
+from app.director.enums import ArtifactKind, WorkflowStatus
 from app.director.execution_guard import DirectorExecutionGuardError
 from app.director.models import (
+    ApprovalRecord,
     BudgetAuthorization,
     BudgetReservation,
+    CreativeArtifactVersion,
     DirectorWorkflowRun,
     ProductionBatch,
+    ProductionBatchShot,
 )
+from app.director.production_service import DirectorProductionService
+from app.events.models import OutboxEvent
 from app.execution import models as _xm  # noqa: F401
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
 from app.execution.product_path import (
@@ -51,6 +58,7 @@ from app.providers.runtime import (
     SubmissionResult,
 )
 from app.providers.workspace_credentials import configured_byok_keyring
+from app.runtime.scheduler import WorkerRuntime
 from app.security.credentials import store_credential
 from app.shared.base import Base
 from app.shared.errors import ValidationAppError
@@ -84,7 +92,12 @@ _FAKE_IMAGE_MANIFEST = {
         "image.generate": {
             "operation": "image.generate",
             "capabilities": ["image.t2i", "image.i2i"],
-            "output_constraints": {},
+            "output_constraints": {
+                "size": "1K",
+                "aspect_ratio": "9:16",
+                "width": 736,
+                "height": 1312,
+            },
             "reference_constraints": {"reference_image": {"min": 0, "max": 1}},
             "exclusive_groups": [],
         }
@@ -108,8 +121,10 @@ _FAKE_VIDEO_MANIFEST = {
             "operation": "video.generate",
             "capabilities": ["video.i2v.first_frame"],
             "output_constraints": {
-                "aspect_ratio": "16:9",
-                "duration_seconds": {"allowed": [6]},
+                "aspect_ratio": "9:16",
+                "duration_seconds": {"allowed": [5]},
+                "num_frames": {"allowed": [121]},
+                "frame_rate": {"allowed": [24]},
                 "native_audio": False,
             },
             "reference_constraints": {"first_frame": {"min": 1, "max": 1}},
@@ -200,6 +215,12 @@ class FakeUnifiedImageCompiler:
         *,
         invoke_model_value: str,
     ) -> CompiledImageRequest:
+        operation = model.operations["image.generate"]
+        size = getattr(intent, "size", None) or operation.output_constraints["size"]
+        aspect_ratio = (
+            getattr(intent, "aspect_ratio", None)
+            or operation.output_constraints["aspect_ratio"]
+        )
         reference_ids = [str(ref.artifact_id) for ref in references]
         fingerprints = [
             str(ref.fingerprint) for ref in references if getattr(ref, "fingerprint", None)
@@ -212,13 +233,27 @@ class FakeUnifiedImageCompiler:
             wire_request={
                 "model": invoke_model_value,
                 "prompt": getattr(intent, "prompt", ""),
-                "size": getattr(intent, "size", None),
+                "size": size,
+                "aspect_ratio": aspect_ratio,
                 "reference_artifact_ids": reference_ids,
             },
             request_schema_version="2026-08-10",
             safe_request_summary={
                 "operation": "image.i2i" if reference_ids else "image.t2i",
-                "size": getattr(intent, "size", None),
+                "size": size,
+                "aspect_ratio": aspect_ratio,
+                "translation_transformations": (
+                    [
+                        {
+                            "field": "size",
+                            "from_value": None,
+                            "to_value": size,
+                            "reason": "frozen_manifest_native_size_tier",
+                        }
+                    ]
+                    if getattr(intent, "size", None) is None
+                    else []
+                ),
                 "reference_artifact_ids": reference_ids,
                 "reference_fingerprints": fingerprints,
             },
@@ -244,7 +279,7 @@ class FakeUnifiedVideoCompiler:
         aspect_ratio = output.aspect_ratio
         duration_seconds = output.duration_seconds
         generate_audio = output.generate_audio
-        if aspect_ratio != "16:9" or duration_seconds != 6 or generate_audio is not False:
+        if aspect_ratio != "9:16" or duration_seconds != 5 or generate_audio is not False:
             raise ValueError("test provider rejected an incomplete Director video request")
         fingerprints = [str(first_frame.fingerprint)] if first_frame.fingerprint else []
         return CompiledVideoRequest(
@@ -258,6 +293,8 @@ class FakeUnifiedVideoCompiler:
                 "first_frame_artifact_id": str(first_frame.artifact_id),
                 "aspect_ratio": aspect_ratio,
                 "duration_seconds": duration_seconds,
+                "num_frames": 121,
+                "frame_rate": 24,
                 "generate_audio": generate_audio,
             },
             request_schema_version="2026-08-10",
@@ -265,6 +302,8 @@ class FakeUnifiedVideoCompiler:
                 "operation": "video.i2v",
                 "aspect_ratio": aspect_ratio,
                 "duration_seconds": duration_seconds,
+                "num_frames": 121,
+                "frame_rate": 24,
                 "native_audio": generate_audio,
                 "reference_artifact_ids": [str(first_frame.artifact_id)],
                 "reference_fingerprints": fingerprints,
@@ -275,12 +314,14 @@ class FakeUnifiedVideoCompiler:
 
 
 _FAKE_RUNTIME_HOLDER: dict[str, FakeUnifiedRuntime] = {}
+_FAKE_RUNTIMES: list[FakeUnifiedRuntime] = []
 
 
 def _fake_plugin() -> ProviderPlugin:
     def _runtime_factory(**kwargs: object) -> FakeUnifiedRuntime:
         runtime = FakeUnifiedRuntime()
         _FAKE_RUNTIME_HOLDER["runtime"] = runtime
+        _FAKE_RUNTIMES.append(runtime)
         return runtime
 
     return ProviderPlugin(
@@ -313,6 +354,7 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture
 def fake_plugin() -> ProviderPlugin:
     _FAKE_RUNTIME_HOLDER.clear()
+    _FAKE_RUNTIMES.clear()
     _FAKE_IMAGE_PLAN.clear()
     _FAKE_COST_PLAN.clear()
     plugin = _fake_plugin()
@@ -322,6 +364,7 @@ def fake_plugin() -> ProviderPlugin:
     finally:
         registry_module._registry.pop((FAKE_PROVIDER, FAKE_PROFILE), None)
         _FAKE_RUNTIME_HOLDER.clear()
+        _FAKE_RUNTIMES.clear()
         _FAKE_IMAGE_PLAN.clear()
         _FAKE_COST_PLAN.clear()
 
@@ -679,6 +722,484 @@ async def _seed_video_binding(
 
 
 @pytest.mark.asyncio
+async def test_director_trial_materialization_reaches_unified_artifacts_once(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """G2 smoke: real Director authorization -> graph/outbox -> Worker -> Artifact."""
+    _byok(monkeypatch)
+    monkeypatch.setattr(
+        "app.execution.product_path.get_settings",
+        lambda: Settings(provider_unified_path_enabled=False, source_commit="g2-spy"),
+    )
+    monkeypatch.setattr(
+        "app.director.production_service.get_settings",
+        lambda: Settings(provider_unified_path_enabled=False, source_commit="g2-spy"),
+    )
+    await _no_sleep(monkeypatch)
+    user, workspace, seed_run = await _seed_project_chain(session)
+    project = await session.get(Project, seed_run.project_id)
+    assert project is not None
+    image_binding = await session.scalar(
+        select(ProviderModelBinding).where(
+            ProviderModelBinding.workspace_id == workspace.id,
+            ProviderModelBinding.purpose == "keyframe",
+        )
+    )
+    assert image_binding is not None and image_binding.catalog_entry_id is not None
+    image_entry = await session.get(ModelCatalogEntry, image_binding.catalog_entry_id)
+    assert image_entry is not None
+    video_binding = await _seed_video_binding(
+        session,
+        workspace_id=workspace.id,
+        project_id=project.id,
+        user_id=user.id,
+    )
+    assert video_binding.catalog_entry_id is not None
+    video_entry = await session.get(ModelCatalogEntry, video_binding.catalog_entry_id)
+    assert video_entry is not None
+
+    workflow = DirectorWorkflowRun(
+        project_id=project.id,
+        template_id="live_action_dialogue_short_v1",
+        template_version="1.0.0",
+        status=WorkflowStatus.TRIAL_RUNNING.value,
+        current_stage="trial",
+        current_artifact_versions={},
+        created_by=user.id,
+    )
+    session.add(workflow)
+    await session.flush()
+
+    def selection_plan(
+        purpose: str,
+        *,
+        binding: ProviderModelBinding | None,
+        entry: ModelCatalogEntry | None,
+        unit_amount: str,
+    ) -> dict[str, object]:
+        is_video = purpose == "video"
+        return {
+            "purpose": purpose,
+            "model_binding_id": str(binding.id) if binding is not None else None,
+            "provider_type": FAKE_PROVIDER if binding is not None else "local_tts",
+            "protocol_profile": FAKE_PROFILE if binding is not None else "local-v1",
+            "model_id": (
+                "uni-vid-model" if is_video else "uni-img-model"
+            ) if binding is not None else "local-tts-v1",
+            "invoke_model_value": binding.invoke_model_value if binding is not None else None,
+            "manifest_hash": entry.contract_manifest_hash if entry is not None else None,
+            "required_capabilities": (
+                ["video.i2v.first_frame"]
+                if is_video
+                else ["image.i2i"]
+                if purpose == "keyframe"
+                else ["image.t2i"]
+                if purpose == "character_reference"
+                else []
+            ),
+            "supported_capabilities": (
+                ["video.i2v.first_frame"]
+                if is_video
+                else ["image.t2i", "image.i2i"]
+                if binding is not None
+                else []
+            ),
+            "evidence": {
+                "documented": True,
+                "contract_tested": True,
+                "account_verified": True,
+                "quality_gated": True,
+            },
+            "pricing_snapshot": {"unit_amount": unit_amount, "currency": "USD"},
+            "status": "ready",
+            "blockers": [],
+        }
+
+    plans = [
+        selection_plan(
+            "character_reference",
+            binding=image_binding,
+            entry=image_entry,
+            unit_amount="1",
+        ),
+        selection_plan(
+            "keyframe",
+            binding=image_binding,
+            entry=image_entry,
+            unit_amount="1",
+        ),
+        selection_plan(
+            "video",
+            binding=video_binding,
+            entry=video_entry,
+            unit_amount="1",
+        ),
+        selection_plan("voice", binding=None, entry=None, unit_amount="0"),
+    ]
+    known_line = {
+        "quantity": 1,
+        "unit_amount": "1",
+        "estimated_amount": "1",
+        "currency": "USD",
+        "status": "known",
+    }
+    storyboard = {
+        "template_key": "live_action_dialogue_short_v1",
+        "aspect_ratio": "9:16",
+        "target_duration_seconds": 15,
+        "shots": [
+            {
+                "shot_id": f"shot-{number}",
+                "shot_number": number,
+                "duration_seconds": "5",
+                "location": "fictional studio",
+                "time_of_day": "night",
+                "shot_type": "medium_close",
+                "camera_move": "static",
+                "characters": ["Lin"],
+                "action": f"Lin completes fictional beat {number}",
+                "dialogue": [
+                    {
+                        "speaker": "Lin",
+                        "text": f"fictional line {number}",
+                        "emotion": "restrained",
+                    }
+                ],
+                "image_prompt": f"portrait keyframe {number}",
+                "video_prompt": f"subtle performance {number}",
+                "transition": "cut",
+            }
+            for number in range(1, 4)
+        ],
+    }
+    payloads: dict[ArtifactKind, dict[str, object]] = {
+        ArtifactKind.CHARACTER_BIBLE: {
+            "policy": "fictional_characters_only",
+            "real_person_reference_allowed": False,
+            "characters": [
+                {
+                    "character_id": "lin",
+                    "name": "Lin",
+                    "age_range": "25-30",
+                    "facial_features": "oval face and dark eyes",
+                    "hair": "short black hair",
+                    "body_shape": "slender",
+                    "wardrobe": "black fictional coat",
+                    "distinguishing_features": ["small fictional mole"],
+                    "locked_prompt": "fictional adult woman with an oval face",
+                    "negative_prompt": "real person",
+                }
+            ],
+        },
+        ArtifactKind.VISUAL_BIBLE: {
+            "medium": "photorealistic_live_action",
+            "aspect_ratio": "9:16",
+            "era_and_setting": "contemporary fictional studio",
+            "color_palette": "cool blue with neutral skin tones",
+            "lighting": "soft practical light",
+            "lens_language": "restrained medium close shots",
+            "continuity_rules": ["preserve hair and coat"],
+            "preview_is_generated_media": False,
+        },
+        ArtifactKind.VOICE_BIBLE: {
+            "language": "zh-CN",
+            "voice_clone_allowed": False,
+            "voices": [
+                {
+                    "character_id": "lin",
+                    "character_name": "Lin",
+                    "voice_description": "calm licensed fictional voice",
+                    "pace": "medium",
+                    "emotional_range": ["restrained"],
+                    "voice_clone": False,
+                }
+            ],
+        },
+        ArtifactKind.STORYBOARD_PLAN: storyboard,
+        ArtifactKind.RISK_REPORT: {
+            "status": "ready",
+            "representative_shot_id": "shot-1",
+            "representative_shot_reason": "identity and dialogue evidence",
+            "risks": [],
+        },
+        ArtifactKind.SELECTION_PLAN: {
+            "status": "ready",
+            "plans": plans,
+            "fallback_allowed": False,
+            "advanced_parameters_hidden_in_quick_mode": True,
+        },
+        ArtifactKind.COST_ESTIMATE: {
+            "pricing_snapshot_id": "g2-spy-price-v1",
+            "currency": "USD",
+            "trial": [
+                {**known_line, "purpose": purpose}
+                for purpose in ("character_reference", "keyframe", "video")
+            ]
+            + [
+                {
+                    **known_line,
+                    "purpose": "voice",
+                    "unit_amount": "0",
+                    "estimated_amount": "0",
+                }
+            ],
+            "production": [
+                {
+                    **known_line,
+                    "purpose": purpose,
+                    "quantity": 3,
+                    "estimated_amount": "3",
+                }
+                for purpose in ("keyframe", "video")
+            ]
+            + [
+                {
+                    **known_line,
+                    "purpose": "voice",
+                    "quantity": 3,
+                    "unit_amount": "0",
+                    "estimated_amount": "0",
+                }
+            ],
+            "repair": [{**known_line, "purpose": "video"}],
+            "trial_total": "3",
+            "production_total": "6",
+            "repair_total": "1",
+            "requires_user_budget_limit": True,
+            "disclaimer": "Frozen fake prices; no external request is made.",
+        },
+        ArtifactKind.TRIAL_PLAN: {
+            "representative_shot_id": "shot-1",
+            "selection_reason": "identity and dialogue evidence",
+            "planned_operations": ["character_reference", "keyframe", "video", "voice"],
+            "quality_dimensions": ["request_contract", "identity", "continuity"],
+            "budget_authorization_required": True,
+        },
+    }
+    locked_refs: dict[str, str] = {}
+    for kind, payload in payloads.items():
+        artifact_version = CreativeArtifactVersion(
+            project_id=project.id,
+            workflow_run_id=workflow.id,
+            artifact_kind=kind.value,
+            revision_no=1,
+            source_kind="user",
+            payload=payload,
+            content_hash=hashlib.sha256(f"g2:{kind.value}".encode()).hexdigest(),
+            status="locked",
+            locked_at=datetime.now(UTC),
+            created_by=user.id,
+        )
+        session.add(artifact_version)
+        await session.flush()
+        locked_refs[kind.value] = str(artifact_version.id)
+    workflow.current_artifact_versions = dict(locked_refs)
+    authorization = BudgetAuthorization(
+        project_id=project.id,
+        workflow_run_id=workflow.id,
+        authorization_kind="trial_budget",
+        idempotency_key="g2-spy-trial-budget",
+        pricing_snapshot_id="g2-spy-price-v1",
+        limit_amount=Decimal("10"),
+        consumed_amount=Decimal("0"),
+        currency="USD",
+        status="active",
+        authorized_by=user.id,
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+    session.add(authorization)
+    await session.flush()
+    session.add(
+        ApprovalRecord(
+            project_id=project.id,
+            workflow_run_id=workflow.id,
+            approval_kind="trial_budget",
+            idempotency_key="g2-spy-trial-approval",
+            approved_artifact_versions=locked_refs,
+            budget_authorization_id=authorization.id,
+            reason="Explicit zero-network G2 authorization fixture",
+            approved_by=user.id,
+        )
+    )
+    await session.flush()
+
+    batch, runs = await DirectorProductionService(session).materialize_trial(
+        project_id=project.id,
+        actor=user,
+        idempotency_key="g2-spy-materialize-trial",
+    )
+
+    assert batch.status == "running"
+    assert batch.batch_kind == "trial"
+    assert batch.selection_snapshot["fallback_allowed"] is False
+    batch_shot = await session.scalar(
+        select(ProductionBatchShot).where(ProductionBatchShot.batch_id == batch.id)
+    )
+    assert batch_shot is not None and batch_shot.graph_version_id is not None
+    graph_version = await session.get(_pm.GraphVersion, batch_shot.graph_version_id)
+    assert graph_version is not None and graph_version.status == "published"
+    graph = await session.get(_pm.ProductionGraph, graph_version.graph_id)
+    assert graph is not None and graph.project_id == project.id
+
+    run_rows = list(
+        (
+            await session.execute(
+                select(NodeRun, GraphNode)
+                .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                .where(NodeRun.production_batch_id == batch.id)
+            )
+        ).tuples()
+    )
+    by_key = {node.node_key: run for run, node in run_rows}
+    assert set(by_key) == {
+        "character_lin",
+        "prompt",
+        "keyframe",
+        "identity_review",
+        "video",
+        "video_drift_review",
+        "voice",
+        "subtitle",
+        "composite",
+        "continuity_review",
+    }
+    assert {run.id for run in runs} == {run.id for run, _node in run_rows}
+    assert all(run.status == "queued" for run in runs)
+    assert all(run.input_snapshot["source_commit"] == "g2-spy" for run in runs)
+    outbox = list(
+        (
+            await session.execute(
+                select(OutboxEvent).where(
+                    OutboxEvent.project_id == project.id,
+                    OutboxEvent.topic == "node_run.enqueue",
+                )
+            )
+        ).scalars()
+    )
+    assert {str(event.payload["node_run_id"]) for event in outbox} == {
+        str(run.id) for run in runs
+    }
+    edges = list(
+        (
+            await session.execute(
+                select(GraphEdge).where(
+                    GraphEdge.graph_version_id == batch_shot.graph_version_id
+                )
+            )
+        ).scalars()
+    )
+    node_keys = {node.id: node.node_key for _run, node in run_rows}
+    edge_keys = {
+        (node_keys[edge.upstream_node_id], node_keys[edge.downstream_node_id])
+        for edge in edges
+    }
+    assert {
+        ("character_lin", "keyframe"),
+        ("prompt", "keyframe"),
+        ("keyframe", "video"),
+    }.issubset(edge_keys)
+
+    worker = WorkerRuntime(session)
+    execution_order = ["character_lin", "prompt", "keyframe", "video"]
+    for key in execution_order:
+        assert await worker.process_one(by_key[key].id) is True
+        await session.refresh(by_key[key])
+        assert by_key[key].status == "completed"
+        assert by_key[key].result_artifact_id is not None
+
+    submit_count = sum(runtime.submit_calls for runtime in _FAKE_RUNTIMES)
+    assert submit_count == 3
+    for key in execution_order:
+        assert await worker.process_one(by_key[key].id) is True
+    assert sum(runtime.submit_calls for runtime in _FAKE_RUNTIMES) == submit_count
+
+    operations = list(
+        (
+            await session.execute(
+                select(ProviderOperation).where(
+                    ProviderOperation.node_run_id.in_(
+                        [by_key[key].id for key in execution_order]
+                    )
+                )
+            )
+        ).scalars()
+    )
+    op_by_key = {
+        next(key for key, run in by_key.items() if run.id == operation.node_run_id): operation
+        for operation in operations
+    }
+    assert set(op_by_key) == {"character_lin", "keyframe", "video"}
+    for key, operation in op_by_key.items():
+        expected_binding = video_binding if key == "video" else image_binding
+        expected_entry = video_entry if key == "video" else image_entry
+        assert operation.execution_path_version == UNIFIED_PATH_VERSION
+        assert operation.status == "succeeded"
+        assert operation.model_binding_id == expected_binding.id
+        assert operation.catalog_entry_id == expected_entry.id
+        assert operation.capability_manifest_hash == expected_entry.contract_manifest_hash
+        assert operation.selection_plan is not None
+        assert operation.resume_token is not None
+        assert operation.request_summary["frozen_model_binding_id"] == str(
+            expected_binding.id
+        )
+        assert operation.request_summary["capability_manifest_hash"] == (
+            expected_entry.contract_manifest_hash
+        )
+        assert operation.request_summary["translation_report"]["dropped_options"] == []
+
+    character_artifact = await session.get(Artifact, by_key["character_lin"].result_artifact_id)
+    keyframe_artifact = await session.get(Artifact, by_key["keyframe"].result_artifact_id)
+    video_artifact = await session.get(Artifact, by_key["video"].result_artifact_id)
+    assert character_artifact is not None
+    assert keyframe_artifact is not None
+    assert video_artifact is not None
+    assert character_artifact.produced_by_run_id == by_key["character_lin"].id
+    assert keyframe_artifact.produced_by_run_id == by_key["keyframe"].id
+    assert video_artifact.produced_by_run_id == by_key["video"].id
+
+    character_effective = op_by_key["character_lin"].request_summary["effective_request"]
+    keyframe_effective = op_by_key["keyframe"].request_summary["effective_request"]
+    video_effective = op_by_key["video"].request_summary["effective_request"]
+    assert character_effective["reference_artifact_ids"] == []
+    assert keyframe_effective["reference_artifact_ids"] == [str(character_artifact.id)]
+    assert keyframe_effective["reference_fingerprints"] == [
+        character_artifact.content_hash
+    ]
+    assert keyframe_effective["common_options"] == {
+        "size": "1K",
+        "aspect_ratio": "9:16",
+    }
+    assert op_by_key["keyframe"].request_summary["translation_report"][
+        "transformations"
+    ] == [
+        {
+            "field": "size",
+            "from_value": None,
+            "to_value": "1K",
+            "reason": "frozen_manifest_native_size_tier",
+        }
+    ]
+    assert video_effective["reference_artifact_ids"] == [str(keyframe_artifact.id)]
+    assert video_effective["reference_fingerprints"] == [keyframe_artifact.content_hash]
+    assert video_effective["common_options"] == {
+        "aspect_ratio": "9:16",
+        "duration_seconds": 5,
+        "frame_rate": 24,
+        "num_frames": 121,
+        "generate_audio": False,
+    }
+    assert op_by_key["video"].provider_operation_id == "uni-vid-1"
+    assert op_by_key["video"].resume_token["remote_task_id"] == "uni-vid-1"
+    reservation = await session.get(BudgetReservation, by_key["video"].budget_reservation_id)
+    refreshed_authorization = await session.get(BudgetAuthorization, authorization.id)
+    assert reservation is not None and reservation.actual_amount == Decimal("3.75")
+    assert refreshed_authorization is not None
+    assert refreshed_authorization.consumed_amount == Decimal("3.75")
+
+
+@pytest.mark.asyncio
 async def test_unified_keyframe_submits_once_and_completes(
     session: AsyncSession,
     fake_plugin: ProviderPlugin,
@@ -811,7 +1332,8 @@ async def test_director_keyframe_canonical_and_aspect_ratio_reach_compiled_reque
 
     submitted = _current_runtime().submitted_image
     assert submitted is not None
-    assert submitted.wire_request["size"] == "1080x1920"
+    assert submitted.wire_request["size"] == "1K"
+    assert submitted.wire_request["aspect_ratio"] == "9:16"
     assert submitted.wire_request["reference_artifact_ids"] == [str(canonical.id)]
     op = await session.scalar(
         select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
@@ -819,7 +1341,8 @@ async def test_director_keyframe_canonical_and_aspect_ratio_reach_compiled_reque
     assert op is not None
     compiled = op.request_summary["compiled_request"]
     assert isinstance(compiled, dict)
-    assert compiled["size"] == "1080x1920"
+    assert compiled["size"] == "1K"
+    assert compiled["aspect_ratio"] == "9:16"
     assert compiled["reference_artifact_ids"] == [str(canonical.id)]
     assert compiled["reference_fingerprints"] == [canonical.content_hash]
     assert op.request_summary["frozen_model_binding_id"] == str(binding.id)
@@ -830,6 +1353,14 @@ async def test_director_keyframe_canonical_and_aspect_ratio_reach_compiled_reque
     translation = op.request_summary["translation_report"]
     assert isinstance(translation, dict)
     assert translation["dropped_options"] == []
+    assert translation["transformations"] == [
+        {
+            "field": "size",
+            "from_value": None,
+            "to_value": "1K",
+            "reason": "frozen_manifest_native_size_tier",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -922,8 +1453,8 @@ async def test_director_video_first_frame_ratio_duration_and_audio_reach_compile
         **video_run.input_snapshot,
         "shot_id": "shot-1",
         "node_key": "video",
-        "aspect_ratio": "16:9",
-        "duration_seconds": "6",
+        "aspect_ratio": "9:16",
+        "duration_seconds": "5",
     }
     await session.flush()
 
@@ -932,8 +1463,8 @@ async def test_director_video_first_frame_ratio_duration_and_audio_reach_compile
     submitted = _current_runtime().submitted_video
     assert submitted is not None
     assert submitted.wire_request["first_frame_artifact_id"] == str(first_frame.id)
-    assert submitted.wire_request["aspect_ratio"] == "16:9"
-    assert submitted.wire_request["duration_seconds"] == 6
+    assert submitted.wire_request["aspect_ratio"] == "9:16"
+    assert submitted.wire_request["duration_seconds"] == 5
     assert submitted.wire_request["generate_audio"] is False
     op = await session.scalar(
         select(ProviderOperation).where(ProviderOperation.node_run_id == video_run.id)
@@ -943,17 +1474,17 @@ async def test_director_video_first_frame_ratio_duration_and_audio_reach_compile
     assert isinstance(compiled, dict)
     assert compiled["reference_artifact_ids"] == [str(first_frame.id)]
     assert compiled["reference_fingerprints"] == [first_frame.content_hash]
-    assert compiled["aspect_ratio"] == "16:9"
-    assert compiled["duration_seconds"] == 6
+    assert compiled["aspect_ratio"] == "9:16"
+    assert compiled["duration_seconds"] == 5
     assert compiled["native_audio"] is False
     assert op.request_summary["frozen_model_binding_id"] == str(video_binding.id)
     effective = op.request_summary["effective_request"]
     assert isinstance(effective, dict)
     assert effective["common_options"] == {
-        "aspect_ratio": "16:9",
-        "duration_seconds": 6,
-        "frame_rate": None,
-        "num_frames": None,
+        "aspect_ratio": "9:16",
+        "duration_seconds": 5,
+        "frame_rate": 24,
+        "num_frames": 121,
         "generate_audio": False,
     }
     assert effective["reference_artifact_ids"] == [str(first_frame.id)]

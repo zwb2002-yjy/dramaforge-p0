@@ -135,6 +135,8 @@ export type ProviderConnectionRead = {
 };
 
 export type ProviderPluginModelRead = {
+  catalog_entry_id: string;
+  capability_manifest_hash: string;
   model_id: string;
   display_name: string;
   media_type: string;
@@ -190,6 +192,11 @@ export type ProviderModelBindingRead = {
   contract_tested: boolean;
   account_verified: boolean;
   quality_gated: boolean;
+  catalog_entry_id: string | null;
+  capability_manifest_hash: string | null;
+  remote_resource_kind: string | null;
+  remote_resource_id: string | null;
+  invoke_model_value: string | null;
   pricing_snapshot: Record<string, unknown>;
 };
 

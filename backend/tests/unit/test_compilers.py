@@ -115,13 +115,48 @@ def test_image_compiler_validate_rejects_unsupported_operation() -> None:
         AgnesImageCompiler().validate(intent, _video_manifest())
 
 
+@pytest.mark.parametrize(
+    ("constraint", "value"),
+    [
+        ("size", "2K"),
+        ("aspect_ratio", "16:9"),
+        ("width", 1024),
+        ("height", 1792),
+    ],
+)
+def test_image_compiler_rejects_manifest_outside_verified_subset(
+    constraint: str,
+    value: object,
+) -> None:
+    manifest = _image_manifest().model_copy(deep=True)
+    manifest.operations["image.generate"].output_constraints[constraint] = value
+    intent = ImageGenerationIntent(
+        prompt="portrait",
+        aspect_ratio="9:16",
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+
+    with pytest.raises(ValueError, match="outside the verified product subset"):
+        AgnesImageCompiler().validate(intent, manifest)
+
+
 def test_image_compiler_rejects_size_outside_frozen_manifest() -> None:
     intent = ImageGenerationIntent(
         prompt="portrait",
         size="1080x1920",
         selection=ModelSelectionIntent(mode="explicit_binding"),
     )
-    with pytest.raises(ValueError, match="does not match frozen manifest size 1024x768"):
+    with pytest.raises(ValueError, match="does not match frozen manifest size 1K"):
+        AgnesImageCompiler().validate(intent, _image_manifest())
+
+
+def test_image_compiler_rejects_ratio_outside_frozen_manifest() -> None:
+    intent = ImageGenerationIntent(
+        prompt="portrait",
+        aspect_ratio="16:9",
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="does not match frozen manifest ratio 9:16"):
         AgnesImageCompiler().validate(intent, _image_manifest())
 
 
@@ -140,5 +175,73 @@ async def test_image_compiler_compiles_t2i_wire_request() -> None:
     )
     assert compiled.wire_request["model"] == "agnes-image-2.1-flash"
     assert compiled.wire_request["prompt"] == "portrait"
+    assert compiled.wire_request["size"] == "1K"
+    assert compiled.wire_request["ratio"] == "9:16"
     assert compiled.wire_request["extra_body"]["response_format"] == "url"
+    assert compiled.safe_request_summary["size"] == "1K"
+    assert compiled.safe_request_summary["aspect_ratio"] == "9:16"
+    assert compiled.safe_request_summary["translation_transformations"] == [
+        {
+            "field": "size",
+            "from_value": None,
+            "to_value": "1K",
+            "reason": "frozen_manifest_native_size_tier",
+        }
+    ]
     assert compiled.reference_artifact_ids == []
+
+
+@pytest.mark.asyncio
+async def test_image_compiler_rejects_missing_or_mismatched_resolved_reference() -> None:
+    reference_id = uuid4()
+    intent = ImageGenerationIntent(
+        prompt="portrait",
+        aspect_ratio="9:16",
+        reference_artifact_id=reference_id,
+        reference_fingerprint="a" * 64,
+        reference_mime="image/png",
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+
+    with pytest.raises(ValueError, match="was not resolved"):
+        await AgnesImageCompiler().compile(
+            intent,
+            _image_manifest(),
+            [],
+            invoke_model_value="agnes-image-2.1-flash",
+        )
+
+    mismatched = ResolvedReference(
+        role="reference_image",
+        artifact_id=uuid4(),
+        content_bytes=b"\x89PNG\r\n\x1a\nreference",
+        mime_type="image/png",
+        fingerprint="a" * 64,
+    )
+    with pytest.raises(ValueError, match="does not match the image intent"):
+        await AgnesImageCompiler().compile(
+            intent,
+            _image_manifest(),
+            [mismatched],
+            invoke_model_value="agnes-image-2.1-flash",
+        )
+
+
+@pytest.mark.asyncio
+async def test_video_compiler_rejects_mismatched_resolved_first_frame() -> None:
+    intent_id = uuid4()
+    resolved = ResolvedReference(
+        role="first_frame",
+        artifact_id=uuid4(),
+        content_bytes=b"\x89PNG\r\n\x1a\nframe",
+        mime_type="image/png",
+        fingerprint="b" * 64,
+    )
+
+    with pytest.raises(ValueError, match="does not match the video intent"):
+        await AgnesVideoCompiler().compile(
+            _video_intent(intent_id),
+            _video_manifest(),
+            [resolved],
+            invoke_model_value="agnes-video-v2.0",
+        )

@@ -1056,6 +1056,7 @@ async def _execute_unified_media_node_run(
         SubmissionResult,
     )
     from app.providers.selection import ModelSelectionService
+    from app.providers.translation import RequestTransformation
     from app.providers.workspace_credentials import runtime_connection_settings
     from app.shared.errors import ProviderRateLimitedError, ProviderTaskPendingError
 
@@ -1155,18 +1156,18 @@ async def _execute_unified_media_node_run(
                 except ValueError:
                     reference_uuid = None
             raw_ratio = str(snap.get("aspect_ratio") or project.aspect_ratio or "")
-            image_size = {
-                "9:16": "1080x1920",
-                "16:9": "1920x1080",
-            }.get(raw_ratio)
-            if image_size is None:
+            image_ratio: Literal["9:16", "16:9"] | None = (
+                "9:16" if raw_ratio == "9:16" else "16:9" if raw_ratio == "16:9" else None
+            )
+            if image_ratio is None:
                 raise ValidationAppError(
                     "Director image request has an unsupported aspect ratio",
                     details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
                 )
             image_intent = ImageGenerationIntent(
                 prompt=prompt,
-                size=image_size,
+                size=None,
+                aspect_ratio=image_ratio,
                 seed=None,
                 reference_artifact_id=reference_uuid,
                 reference_fingerprint=(
@@ -1326,9 +1327,11 @@ async def _execute_unified_media_node_run(
         if image_intent is not None:
             requested_options: dict[str, object] = {
                 "size": image_intent.size,
+                "aspect_ratio": image_intent.aspect_ratio,
             }
             effective_options: dict[str, object] = {
                 "size": compiled.safe_request_summary.get("size"),
+                "aspect_ratio": compiled.safe_request_summary.get("aspect_ratio"),
             }
         else:
             assert video_intent is not None
@@ -1354,10 +1357,25 @@ async def _execute_unified_media_node_run(
             ],
             "reference_fingerprints": list(compiled.reference_fingerprints),
         }
+        raw_transformations = compiled.safe_request_summary.get(
+            "translation_transformations"
+        )
+        if raw_transformations is None:
+            transformations: list[dict[str, object]] = []
+        elif isinstance(raw_transformations, list):
+            transformations = [
+                RequestTransformation.model_validate(item).model_dump(mode="json")
+                for item in raw_transformations
+            ]
+        else:
+            raise ValidationAppError(
+                "compiler returned malformed translation evidence",
+                details={"code": "COMPILER_TRANSLATION_EVIDENCE_INVALID"},
+            )
         translation_report = {
             "requested_options": requested_options,
             "effective_options": effective_options,
-            "transformations": [],
+            "transformations": transformations,
             "dropped_options": [],
             "warnings": [],
         }

@@ -18,6 +18,7 @@ from app.access.models import Project, User
 from app.config import Settings, get_settings
 from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
+from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.models import (
     ProjectProviderBinding,
@@ -354,7 +355,37 @@ class ProviderConnectionService:
         )
         if binding is None:
             raise NotFoundError("model binding not found")
+        await self._require_active_binding_contract(
+            binding=binding,
+            connection=connection,
+        )
         return binding
+
+    async def _require_active_binding_contract(
+        self,
+        *,
+        binding: ProviderModelBinding,
+        connection: ProviderConnection,
+    ) -> ModelCatalogEntry:
+        entry = (
+            await self._session.get(ModelCatalogEntry, binding.catalog_entry_id)
+            if binding.catalog_entry_id is not None
+            else None
+        )
+        if (
+            entry is None
+            or entry.lifecycle != "active"
+            or entry.provider_type != connection.provider_type
+            or entry.protocol_profile != connection.protocol_profile
+            or entry.model_id != binding.model_id
+            or entry.media_kind != binding.media_type
+            or binding.capability_manifest_hash != entry.contract_manifest_hash
+        ):
+            raise ValidationAppError(
+                "model binding does not reference the active catalog contract",
+                details={"code": "MODEL_BINDING_CONTRACT_INACTIVE"},
+            )
+        return entry
 
     async def probe(
         self,
@@ -496,7 +527,6 @@ class ProviderConnectionService:
             )
             result = await client.create_image(
                 prompt="Cinematic portrait contract probe",
-                size="1024x768",
             )
             result_status = str(result.get("status") or "failed")
             status = "passed" if result_status == "succeeded" else result_status
@@ -536,7 +566,6 @@ class ProviderConnectionService:
                 else:
                     result = await client.create_image(
                         prompt="Preserve the supplied character identity",
-                        size="1024x768",
                         canonical_image_bytes=reference_bytes,
                         canonical_image_mime=reference_mime,
                     )
@@ -1085,6 +1114,18 @@ class ProviderConnectionService:
         )
         if model is None:
             raise NotFoundError("model binding not found")
+        model_connection = await self._session.get(
+            ProviderConnection, model.connection_id
+        )
+        if model_connection is None:
+            raise ValidationAppError(
+                "model binding does not reference the active catalog contract",
+                details={"code": "MODEL_BINDING_CONTRACT_INACTIVE"},
+            )
+        await self._require_active_binding_contract(
+            binding=model,
+            connection=model_connection,
+        )
         # A fresh installation cannot have project-level quality evidence before
         # its first representative trial. Allow an account-verified binding to
         # enter the project, then require an accepted trial before formal
