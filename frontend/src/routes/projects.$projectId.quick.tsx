@@ -315,6 +315,7 @@ function QuickModePage() {
 
   const snapshot = workspace.data;
   const currentStage = stageForStatus(snapshot.workflow.status);
+  const hasTrialBatch = snapshot.production_batches.some((batch) => batch.batch_kind === "trial");
   const liveStages: PreviewStage[] = DIRECTOR_STAGES.map((stage) => {
     const state = stageState(stage.id, currentStage, snapshot.workflow.status);
     return {
@@ -330,6 +331,7 @@ function QuickModePage() {
       projectName={snapshot.project_name}
       stages={liveStages}
       directorContent={<DirectorSidebar snapshot={snapshot} />}
+      overviewHref={`/projects/${projectId}`}
       quickHref="#creative-stage"
       secondaryHref={`/projects/${projectId}/production`}
       secondaryLabel="专业生产"
@@ -368,7 +370,7 @@ function QuickModePage() {
           ) : (
             <FutureStage snapshot={snapshot} stage="shooting" />
           )}
-          {currentStage === "trial" ? (
+          {currentStage === "trial" || hasTrialBatch ? (
             <TrialStage projectId={projectId} snapshot={snapshot} refresh={workspace.refresh} onMessage={(value) => { setError(null); setMessage(value); }} onError={(value) => { setMessage(null); setError(value); }} />
           ) : (
             <FutureStage snapshot={snapshot} stage="trial" />

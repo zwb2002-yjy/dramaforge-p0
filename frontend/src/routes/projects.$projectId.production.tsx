@@ -412,7 +412,7 @@ function ProductionPage() {
         <div>
           <h2 style={{ margin: 0 }}>专业生产板</h2>
           <p className="muted" style={{ margin: "0.25rem 0 0" }}>
-            分镜板 + shot-p0-v1 节点轨 · 与
+            展开逐镜头、节点状态、媒体产物与执行血缘 · 与
             <Link to="/projects/$projectId/quick" params={{ projectId }}>
               {" "}
               快速创作
@@ -422,10 +422,8 @@ function ProductionPage() {
         </div>
       </div>
 
-      <div className="callout warn">
-        行业台共同点：分镜可视、节点状态清楚、结果可回看。
-        <strong>禁止用「黄金夹具一键」冒充 §3.1 验收</strong>
-        。正式路径：导入剧本 → 逐 Shot 生产/审核 → 导出可校验交付。
+      <div className="callout">
+        这里读取与快速创作相同的 Project、Production Graph、NodeRun 和 Artifact；媒体生成、修复和导出仍由 AI 导演的确认与预算门控制。
       </div>
 
       {directorControlled && (
@@ -625,7 +623,7 @@ function ProductionPage() {
               </div>
             ) : (
               <p className="muted">
-                尚无分镜 — 点「导入 10 Shot 冻结剧本」，或从快速模式生成首帧后再回来。
+                尚无分镜。请先在快速创作中确认创作方案与拍摄方案。
               </p>
             )}
           </div>
@@ -682,7 +680,7 @@ function ProductionPage() {
                         <dt>结束</dt>
                         <dd>{formatTimestamp(run?.finished_at ?? null)}</dd>
                         <dt>Provider 成本</dt>
-                        <dd>{run?.provider_cost ?? "0"}</dd>
+                        <dd>{run ? run.provider_cost : "—"}</dd>
                         <dt>产物</dt>
                         <dd>
                           {artifact ? (
@@ -787,8 +785,7 @@ function ProductionPage() {
                 </button>
               </div>}
               <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }}>
-                真实路径：NodeRun → Outbox → Arq → Worker → Artifact → 审核。假黄金批处理仅夹具。
-                手工媒体：POST …/manual-media（受审计上传）。
+                执行路径：NodeRun → Outbox → Worker → ProviderOperation → Artifact → 审核。
               </p>
             </div>
           )}

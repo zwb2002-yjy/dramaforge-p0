@@ -12,6 +12,22 @@ export function imageArtifacts(artifacts: ProjectArtifact[]): ProjectArtifact[] 
   );
 }
 
+export function videoArtifacts(artifacts: ProjectArtifact[]): ProjectArtifact[] {
+  return artifacts.filter(
+    (artifact) =>
+      artifact.mime_type.startsWith("video/") &&
+      IMAGE_STORAGE_STATES.has(artifact.storage_state),
+  );
+}
+
+export function audioArtifacts(artifacts: ProjectArtifact[]): ProjectArtifact[] {
+  return artifacts.filter(
+    (artifact) =>
+      artifact.mime_type.startsWith("audio/") &&
+      IMAGE_STORAGE_STATES.has(artifact.storage_state),
+  );
+}
+
 export function latestImageArtifact(
   artifacts: ProjectArtifact[],
 ): ProjectArtifact | null {

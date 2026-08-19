@@ -69,6 +69,9 @@ const snapshot: ProjectSnapshot = {
       mime_type: "application/json",
       storage_state: "ready",
       produced_by_run_id: "run-json",
+      width: null,
+      height: null,
+      duration_seconds: null,
     },
     {
       id: "artifact-shot-2",
@@ -78,6 +81,9 @@ const snapshot: ProjectSnapshot = {
       mime_type: "image/png",
       storage_state: "ready",
       produced_by_run_id: "run-shot-2",
+      width: 736,
+      height: 1312,
+      duration_seconds: null,
     },
     {
       id: "artifact-shot-1",
@@ -87,6 +93,9 @@ const snapshot: ProjectSnapshot = {
       mime_type: "image/png",
       storage_state: "ready",
       produced_by_run_id: "run-shot-1",
+      width: 736,
+      height: 1312,
+      duration_seconds: null,
     },
     {
       id: "artifact-video",
@@ -96,8 +105,12 @@ const snapshot: ProjectSnapshot = {
       mime_type: "video/mp4",
       storage_state: "ready",
       produced_by_run_id: null,
+      width: 720,
+      height: 1280,
+      duration_seconds: "5.042",
     },
   ],
+  provider_operations: [],
 };
 
 describe("project media selection", () => {

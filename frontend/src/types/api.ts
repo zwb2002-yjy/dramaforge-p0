@@ -714,6 +714,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/artifacts/{artifact_id}/video-frames/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artifact Video Frame
+         * @description Return a deterministic start, middle, or end frame for human review.
+         */
+        get: operations["get_artifact_video_frame_api_v1_projects__project_id__artifacts__artifact_id__video_frames__role__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/snapshot": {
         parameters: {
             query?: never;
@@ -925,6 +945,31 @@ export interface paths {
         };
         /** Get Workspace Provider Credential Status */
         get: operations["get_workspace_provider_credential_status_api_v1_workspaces__workspace_id__provider_credentials__provider__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/provider-plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Provider Plugins
+         * @description Return the installed plugin contracts and catalog models.
+         *
+         *     This is deliberately metadata-only: credentials and workspace connections
+         *     remain private. The frontend uses this response to render provider setup,
+         *     capability probes, and model binding choices without hard-coded supplier
+         *     names or model ids.
+         */
+        get: operations["list_provider_plugins_api_v1_provider_plugins_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1703,6 +1748,12 @@ export interface components {
             storage_state: string;
             /** Produced By Run Id */
             produced_by_run_id: string | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Duration Seconds */
+            duration_seconds: string | null;
         };
         /** ArtifactVersionCreate */
         ArtifactVersionCreate: {
@@ -1812,10 +1863,7 @@ export interface components {
              * @default
              */
             note: string;
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** BootstrapStatusRead */
@@ -2109,6 +2157,8 @@ export interface components {
         ConnectionPatch: {
             /** Display Name */
             display_name?: string | null;
+            /** Base Url */
+            base_url?: string | null;
             /** Enabled */
             enabled?: boolean | null;
         };
@@ -2456,7 +2506,7 @@ export interface components {
             error_code: string | null;
             /** Result Artifact Id */
             result_artifact_id: string | null;
-            provider_operation: components["schemas"]["ProviderOperationRead"];
+            provider_operation: components["schemas"]["app__api__v1__generations__ProviderOperationRead"];
         };
         /** GoldenProduceResponse */
         GoldenProduceResponse: {
@@ -3240,22 +3290,62 @@ export interface components {
             node_runs: components["schemas"]["NodeRunRead"][];
             /** Artifacts */
             artifacts: components["schemas"]["ArtifactRead"][];
+            /** Provider Operations */
+            provider_operations: components["schemas"]["app__api__v1__production__ProviderOperationRead"][];
         };
         /**
          * ProjectStage
          * @enum {string}
          */
         ProjectStage: "draft" | "planning" | "production" | "review" | "delivering" | "archived";
-        /** ProviderOperationRead */
-        ProviderOperationRead: {
-            /** Provider Operation Id */
-            provider_operation_id: string | null;
-            /** Provider */
-            provider: string | null;
-            /** Model */
-            model: string | null;
-            /** Remote Task Id */
-            remote_task_id: string | null;
+        /** ProviderPluginModelRead */
+        ProviderPluginModelRead: {
+            /**
+             * Catalog Entry Id
+             * Format: uuid
+             */
+            catalog_entry_id: string;
+            /** Capability Manifest Hash */
+            capability_manifest_hash: string;
+            /** Model Id */
+            model_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Media Type */
+            media_type: string;
+            /** Model Revision */
+            model_revision: string;
+            /** Lifecycle */
+            lifecycle: string;
+            /** Catalog Source */
+            catalog_source: string;
+            /** Capabilities */
+            capabilities: string[];
+            /** Option Schema */
+            option_schema: {
+                [key: string]: unknown;
+            };
+        };
+        /** ProviderPluginRead */
+        ProviderPluginRead: {
+            /** Provider Type */
+            provider_type: string;
+            /** Protocol Profile */
+            protocol_profile: string;
+            /** Display Name */
+            display_name: string;
+            /** Default Base Url */
+            default_base_url: string;
+            /** Implemented */
+            implemented: boolean;
+            /** Paid Capabilities */
+            paid_capabilities: string[];
+            /** Capabilities */
+            capabilities: string[];
+            /** Model List Path */
+            model_list_path: string;
+            /** Models */
+            models: components["schemas"]["ProviderPluginModelRead"][];
         };
         /** QualityEvidenceRead */
         QualityEvidenceRead: {
@@ -3706,6 +3796,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /** WorkerTickResponse */
         WorkerTickResponse: {
@@ -3823,6 +3917,65 @@ export interface components {
         WorkspaceUpdate: {
             /** Name */
             name: string;
+        };
+        /** ProviderOperationRead */
+        app__api__v1__generations__ProviderOperationRead: {
+            /** Provider Operation Id */
+            provider_operation_id: string | null;
+            /** Provider */
+            provider: string | null;
+            /** Model */
+            model: string | null;
+            /** Remote Task Id */
+            remote_task_id: string | null;
+        };
+        /** ProviderOperationRead */
+        app__api__v1__production__ProviderOperationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Node Run Id */
+            node_run_id: string | null;
+            /** Operation Kind */
+            operation_kind: string;
+            /** Actual Provider */
+            actual_provider: string;
+            /** Actual Model */
+            actual_model: string;
+            /** Provider Request Id */
+            provider_request_id: string | null;
+            /** Protocol Profile */
+            protocol_profile: string | null;
+            /** Status */
+            status: string;
+            /** Request Fingerprint */
+            request_fingerprint: string;
+            /** Request Summary */
+            request_summary: {
+                [key: string]: unknown;
+            };
+            /** Response Summary */
+            response_summary: {
+                [key: string]: unknown;
+            };
+            /** Model Binding Id */
+            model_binding_id: string | null;
+            /** Catalog Entry Id */
+            catalog_entry_id: string | null;
+            /** Capability Manifest Hash */
+            capability_manifest_hash: string | null;
+            /** Execution Path Version */
+            execution_path_version: string | null;
+            /** Provider Cost */
+            provider_cost: string | null;
+            /** Currency */
+            currency: string;
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
         };
     };
     responses: never;
@@ -5583,6 +5736,45 @@ export interface operations {
             };
         };
     };
+    get_artifact_video_frame_api_v1_projects__project_id__artifacts__artifact_id__video_frames__role__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                artifact_id: string;
+                role: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     project_snapshot_api_v1_projects__project_id__snapshot_get: {
         parameters: {
             query?: {
@@ -6058,6 +6250,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_provider_plugins_api_v1_provider_plugins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderPluginRead"][];
                 };
             };
         };

@@ -459,6 +459,9 @@ test("locked creative changes show an impact preview before confirmation and upd
     expect(state.mediaRequests).toEqual([]);
 
     await page.goto(`/projects/${PROJECT_ID}/production`);
+    await expect(page.getByTestId("project-workspace-shell")).toBeVisible();
+    await expect(page.getByTestId("project-evidence-inspector")).toBeVisible();
+    await expect(page.getByTestId("workstation-shell")).toHaveCount(0);
     await expect(page.getByTestId("director-shared-facts")).toContainText("story_core");
     await expect(page.getByTestId("director-shared-facts")).toContainText("第 2 版");
     expect(state.mediaRequests).toEqual([]);
@@ -505,6 +508,7 @@ test("formal production, repair, evidence review, and delivery use real gated su
   const state = await installDirectorMock(page, seedProduction);
   await expectCleanRuntime(page, async () => {
     await page.goto(`/projects/${PROJECT_ID}/quick`);
+    await expect(page.getByTestId("trial-media-evidence")).toBeVisible();
     await expect(page.getByTestId("production-budget-panel")).toContainText("3.00 CNY");
     await page.getByLabel(/我接受试拍证据/).check();
     await page.getByRole("button", { name: "确认并授权正式生产预算" }).click();

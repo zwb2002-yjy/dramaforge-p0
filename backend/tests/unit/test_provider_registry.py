@@ -286,6 +286,22 @@ async def test_plugin_extension_needs_no_service_branch(
             enabled=True,
         )
 
+    with pytest.raises(ValidationAppError) as pricing_error:
+        await service.probe(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            actor=user,
+            capability="image_t2i",
+            model_binding_id=binding.id,
+            budget_authorized=Decimal("1"),
+        )
+    assert pricing_error.value.details["code"] == "PROBE_PRICING_CURRENCY_REQUIRED"
+    binding.pricing_snapshot_json = {
+        "unit_amount": "0.25",
+        "currency": "USD",
+        "billing_unit": "per_generated_image",
+    }
+
     evidence = await service.probe(
         workspace_id=workspace.id,
         connection_id=connection.id,
@@ -296,6 +312,7 @@ async def test_plugin_extension_needs_no_service_branch(
     )
     assert evidence.status == "passed"
     assert evidence.provider_request_id == "fake-img-1"
+    assert evidence.currency == "USD"
     assert (
         await session.scalar(
             select(ProviderCapabilityEvidence.id).where(
@@ -370,6 +387,11 @@ async def test_binding_scoped_probe_only_advances_probed_binding(
         purpose="keyframe",
         enabled=True,
     )
+    binding_a.pricing_snapshot_json = {
+        "unit_amount": "0",
+        "currency": "CNY",
+        "billing_unit": "per_generated_image",
+    }
     binding_b = await service.create_model_binding(
         workspace_id=workspace.id,
         connection_id=connection.id,
@@ -413,6 +435,7 @@ async def test_binding_scoped_probe_only_advances_probed_binding(
     assert evidence.model_binding_id == binding_a.id
     assert evidence.capability_manifest_hash == binding_a.capability_manifest_hash
     assert evidence.credential_revision == connection.credential_revision
+    assert evidence.currency == "CNY"
 
     refreshed_a = await session.get(ProviderModelBinding, binding_a.id)
     refreshed_b = await session.get(ProviderModelBinding, binding_b.id)

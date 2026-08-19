@@ -11,17 +11,30 @@ type WorkstationShellProps = {
 };
 
 export function WorkstationShell({ children }: WorkstationShellProps) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  if (
+    pathname === "/" ||
+    pathname.startsWith("/projects/") ||
+    pathname === "/design-preview/product"
+  ) {
+    return <>{children}</>;
+  }
+  return <LegacyWorkstationShell pathname={pathname}>{children}</LegacyWorkstationShell>;
+}
+
+function LegacyWorkstationShell({
+  children,
+  pathname,
+}: WorkstationShellProps & { pathname: string }) {
   const leftOpen = useUiStore((s) => s.leftNavOpen);
   const toggleLeft = useUiStore((s) => s.toggleLeftNav);
   const setLeftOpen = useUiStore((s) => s.setLeftNavOpen);
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
   const projectMatch = pathname.match(/\/projects\/([^/]+)/);
   const projectId = projectMatch?.[1];
   const isRealProject = Boolean(projectId && projectId !== "demo");
   const onQuick = pathname.includes("/quick");
   const onProd = pathname.includes("/production");
   const isDesignPreview = pathname.startsWith("/design-preview");
-  const isProductPreview = pathname === "/design-preview/product";
   const showInspector = isRealProject;
 
   useEffect(() => {
@@ -44,8 +57,6 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
     enabled: isRealProject,
     refetchInterval: 4000,
   });
-
-  if (isProductPreview || pathname === "/" || (isRealProject && onQuick)) return <>{children}</>;
 
   const runs = snapshot.data?.node_runs ?? [];
   const arts = snapshot.data?.artifacts ?? [];

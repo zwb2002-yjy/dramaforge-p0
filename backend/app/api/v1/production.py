@@ -20,9 +20,9 @@ from app.delivery.export_service import build_project_export
 from app.director.legacy_guard import require_legacy_execution_allowed
 from app.director.models import DirectorWorkflowRun
 from app.events.models import OutboxEvent
-from app.execution.models import Artifact, GraphNode, NodeRun
+from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.runtime.scheduler import AgentRunScheduler
-from app.shared.errors import ForbiddenError
+from app.shared.errors import ForbiddenError, NotFoundError, ValidationAppError
 
 router = APIRouter(
     tags=["production"], dependencies=[Depends(require_selected_workspace)]
@@ -62,6 +62,31 @@ class ArtifactRead(BaseModel):
     mime_type: str
     storage_state: str
     produced_by_run_id: UUID | None
+    width: int | None
+    height: int | None
+    duration_seconds: str | None
+
+
+class ProviderOperationRead(BaseModel):
+    id: UUID
+    node_run_id: UUID | None
+    operation_kind: str
+    actual_provider: str
+    actual_model: str
+    provider_request_id: str | None
+    protocol_profile: str | None
+    status: str
+    request_fingerprint: str
+    request_summary: dict[str, object]
+    response_summary: dict[str, object]
+    model_binding_id: UUID | None
+    catalog_entry_id: UUID | None
+    capability_manifest_hash: str | None
+    execution_path_version: str | None
+    provider_cost: str | None
+    currency: str
+    submitted_at: str | None
+    completed_at: str | None
 
 
 class ProjectSnapshot(BaseModel):
@@ -69,6 +94,7 @@ class ProjectSnapshot(BaseModel):
     name: str
     node_runs: list[NodeRunRead]
     artifacts: list[ArtifactRead]
+    provider_operations: list[ProviderOperationRead]
 
 
 class DispatchResponse(BaseModel):
@@ -95,6 +121,41 @@ class ExportResponse(BaseModel):
     export_item_count: int
 
 
+def _public_provider_request_summary(operation: ProviderOperation) -> dict[str, object]:
+    summary = dict(operation.request_summary or {})
+    return {
+        key: summary[key]
+        for key in (
+            "kind",
+            "execution_path",
+            "compiled_request",
+            "effective_request",
+            "translation_report",
+            "reference_artifact_ids",
+            "reference_fingerprints",
+            "frozen_model_binding_id",
+            "capability_manifest_hash",
+        )
+        if key in summary
+    }
+
+
+def _public_provider_response_summary(operation: ProviderOperation) -> dict[str, object]:
+    summary = dict(operation.response_summary or {})
+    return {
+        key: summary[key]
+        for key in (
+            "create_status",
+            "final_status",
+            "poll_count",
+            "query_kind",
+            "provider_reported_cost",
+            "cost_status",
+        )
+        if key in summary
+    }
+
+
 @router.get(
     "/projects/{project_id}/artifacts/{artifact_id}/content",
 )
@@ -112,18 +173,54 @@ async def get_artifact_content(
     )
     art = await session.get(Artifact, artifact_id)
     if art is None or art.project_id != project_id:
-        from app.shared.errors import NotFoundError
-
         raise NotFoundError("artifact not found")
     store = get_object_store()
     try:
         data = await store.get_bytes(object_key=art.object_key)
     except KeyError as exc:
-        from app.shared.errors import NotFoundError
-
         raise NotFoundError("artifact bytes not in object store") from exc
     media = art.mime_type or "application/octet-stream"
     return Response(content=data, media_type=media)
+
+
+@router.get("/projects/{project_id}/artifacts/{artifact_id}/video-frames/{role}")
+async def get_artifact_video_frame(
+    project_id: UUID,
+    artifact_id: UUID,
+    role: str,
+    user: CurrentUser,
+    session: SessionDep,
+) -> Response:
+    """Return a deterministic start, middle, or end frame for human review."""
+    from app.consistency.video_drift import extract_video_samples
+    from app.storage.minio_store import get_object_store
+
+    if role not in {"start", "mid", "end"}:
+        raise ValidationAppError(
+            "video frame role must be start, mid, or end",
+            details={"code": "VIDEO_FRAME_ROLE_INVALID"},
+        )
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    artifact = await session.get(Artifact, artifact_id)
+    if (
+        artifact is None
+        or artifact.project_id != project_id
+        or not artifact.mime_type.startswith("video/")
+    ):
+        raise NotFoundError("video Artifact not found")
+    try:
+        video = await get_object_store().get_bytes(object_key=artifact.object_key)
+        sample = next(item for item in extract_video_samples(video) if item.role == role)
+    except (KeyError, StopIteration, ValueError) as exc:
+        raise ValidationAppError(
+            "video frame evidence could not be decoded",
+            details={"code": "VIDEO_FRAME_EVIDENCE_UNAVAILABLE"},
+        ) from exc
+    return Response(
+        content=sample.image_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.get("/projects/{project_id}/snapshot", response_model=ProjectSnapshot)
@@ -156,6 +253,21 @@ async def project_snapshot(
         )
         .scalars()
         .all()
+    )
+    operations = (
+        list(
+            (
+                await session.execute(
+                    select(ProviderOperation)
+                    .where(ProviderOperation.node_run_id.in_([run.id for run in runs]))
+                    .order_by(ProviderOperation.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if runs
+        else []
     )
     from app.execution.runtime_invariants import evaluate_required_dependencies
 
@@ -215,8 +327,43 @@ async def project_snapshot(
                 mime_type=a.mime_type,
                 storage_state=a.storage_state,
                 produced_by_run_id=a.produced_by_run_id,
+                width=a.width,
+                height=a.height,
+                duration_seconds=(
+                    str(a.duration_seconds) if a.duration_seconds is not None else None
+                ),
             )
             for a in arts
+        ],
+        provider_operations=[
+            ProviderOperationRead(
+                id=operation.id,
+                node_run_id=operation.node_run_id,
+                operation_kind=operation.operation_kind,
+                actual_provider=operation.actual_provider,
+                actual_model=operation.actual_model,
+                provider_request_id=operation.provider_operation_id,
+                protocol_profile=operation.protocol_profile,
+                status=operation.status,
+                request_fingerprint=operation.request_fingerprint,
+                request_summary=_public_provider_request_summary(operation),
+                response_summary=_public_provider_response_summary(operation),
+                model_binding_id=operation.model_binding_id,
+                catalog_entry_id=operation.catalog_entry_id,
+                capability_manifest_hash=operation.capability_manifest_hash,
+                execution_path_version=operation.execution_path_version,
+                provider_cost=(
+                    str(operation.provider_cost) if operation.provider_cost is not None else None
+                ),
+                currency=operation.currency,
+                submitted_at=(
+                    operation.submitted_at.isoformat() if operation.submitted_at else None
+                ),
+                completed_at=(
+                    operation.completed_at.isoformat() if operation.completed_at else None
+                ),
+            )
+            for operation in operations
         ],
     )
 

@@ -799,6 +799,30 @@ export type ProjectSnapshot = {
     mime_type: string;
     storage_state: string;
     produced_by_run_id: string | null;
+    width: number | null;
+    height: number | null;
+    duration_seconds: string | null;
+  }>;
+  provider_operations: Array<{
+    id: string;
+    node_run_id: string | null;
+    operation_kind: string;
+    actual_provider: string;
+    actual_model: string;
+    provider_request_id: string | null;
+    protocol_profile: string | null;
+    status: string;
+    request_fingerprint: string;
+    request_summary: Record<string, unknown>;
+    response_summary: Record<string, unknown>;
+    model_binding_id: string | null;
+    catalog_entry_id: string | null;
+    capability_manifest_hash: string | null;
+    execution_path_version: string | null;
+    provider_cost: string | null;
+    currency: string;
+    submitted_at: string | null;
+    completed_at: string | null;
   }>;
 };
 
@@ -978,6 +1002,16 @@ export async function rerunShot(
 
 export function artifactContentUrl(projectId: string, artifactId: string): string {
   return workspaceScopedUrl(`/api/v1/projects/${projectId}/artifacts/${artifactId}/content`);
+}
+
+export function artifactVideoFrameUrl(
+  projectId: string,
+  artifactId: string,
+  role: "start" | "mid" | "end",
+): string {
+  return workspaceScopedUrl(
+    `/api/v1/projects/${projectId}/artifacts/${artifactId}/video-frames/${role}`,
+  );
 }
 
 export function exportDownloadUrl(

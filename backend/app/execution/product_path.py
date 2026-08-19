@@ -7,9 +7,12 @@ import hashlib
 import ipaddress
 import json
 import socket
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
+from io import BytesIO
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
@@ -21,6 +24,7 @@ from httpcore._backends.base import (
     AsyncNetworkBackend,
     AsyncNetworkStream,
 )
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -283,6 +287,79 @@ def _validate_provider_media(*, kind: str, data: bytes, content_type: str | None
     if kind in {"keyframe", "image"} and len(data) > _MAX_PROVIDER_IMAGE_BYTES:
         raise ValidationAppError("PROVIDER_MEDIA_INVALID: image response is too large")
     return data
+
+
+@dataclass(frozen=True)
+class _MediaMetadata:
+    width: int | None = None
+    height: int | None = None
+    duration_seconds: Decimal | None = None
+
+
+def _inspect_media_metadata(*, kind: str, data: bytes) -> _MediaMetadata:
+    """Decode deterministic media metadata before bytes enter object storage."""
+    if kind in {"keyframe", "image"}:
+        try:
+            with Image.open(BytesIO(data)) as image:
+                image.load()
+                return _MediaMetadata(width=image.width, height=image.height)
+        except (UnidentifiedImageError, OSError) as exc:
+            if get_settings().app_env != "test":
+                raise ValidationAppError(
+                    "PROVIDER_MEDIA_INVALID: image cannot be decoded"
+                ) from exc
+            return _MediaMetadata()
+    if kind not in {"video", "video_review", "composite"}:
+        return _MediaMetadata()
+    import cv2
+
+    with tempfile.TemporaryDirectory(prefix="dramaforge-media-meta-") as temp_dir:
+        path = Path(temp_dir) / "source.mp4"
+        path.write_bytes(data)
+        capture = cv2.VideoCapture(str(path))
+        try:
+            if not capture.isOpened():
+                if get_settings().app_env == "test":
+                    return _MediaMetadata()
+                raise ValidationAppError("PROVIDER_MEDIA_INVALID: video cannot be decoded")
+            width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            frame_rate = float(capture.get(cv2.CAP_PROP_FPS))
+            if width <= 0 or height <= 0 or frame_count <= 0 or frame_rate <= 0:
+                if get_settings().app_env == "test":
+                    return _MediaMetadata()
+                raise ValidationAppError(
+                    "PROVIDER_MEDIA_INVALID: video metadata is invalid"
+                )
+            return _MediaMetadata(
+                width=width,
+                height=height,
+                duration_seconds=Decimal(str(round(frame_count / frame_rate, 3))),
+            )
+        finally:
+            capture.release()
+
+
+def _apply_media_metadata(artifact: Artifact, metadata: _MediaMetadata) -> None:
+    artifact.width = metadata.width
+    artifact.height = metadata.height
+    artifact.duration_seconds = metadata.duration_seconds
+
+
+def _binding_pricing_currency(binding: object, *, required: bool) -> str | None:
+    snapshot = getattr(binding, "pricing_snapshot_json", None)
+    raw = snapshot.get("currency") if isinstance(snapshot, dict) else None
+    if isinstance(raw, str):
+        currency = raw.strip().upper()
+        if len(currency) == 3 and currency.isalpha():
+            return currency
+    if required:
+        raise ValidationAppError(
+            "frozen model Binding has no valid pricing currency",
+            details={"code": "MODEL_BINDING_PRICING_CURRENCY_REQUIRED"},
+        )
+    return None
 
 
 @dataclass(frozen=True)
@@ -1256,6 +1333,10 @@ async def _execute_unified_media_node_run(
                 "unified selection references missing connection/binding/catalog",
                 details={"code": "MODEL_BINDING_MISSING"},
             )
+        pricing_currency = _binding_pricing_currency(
+            binding,
+            required=director_context is not None,
+        )
         plugin = get_plugin(provider_type, protocol_profile)
         cfg = await runtime_connection_settings(session, connection=connection)
         resolved = await ProviderRuntimeResolver(session).resolve(
@@ -1426,6 +1507,7 @@ async def _execute_unified_media_node_run(
                 capability_manifest_hash=plan.manifest_hash,
                 selection_plan=json.loads(json.dumps(asdict(plan), default=str)),
                 execution_path_version=UNIFIED_PATH_VERSION,
+                currency=pricing_currency or "USD",
             )
             session.add(op)
         else:
@@ -1439,6 +1521,7 @@ async def _execute_unified_media_node_run(
             op.response_summary = {}
             op.completed_at = None
             op.resume_token = None
+            op.currency = pricing_currency or op.currency
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
@@ -1603,7 +1686,8 @@ async def _execute_unified_media_node_run(
     op.provider_cost = (
         Decimal(str(cost_amount)) if cost_amount is not None else None
     )
-    op.currency = str(getattr(cost, "currency", "USD"))
+    if cost_amount is not None or cost_status in {"reported", "reconciled"}:
+        op.currency = str(getattr(cost, "currency", op.currency)).upper()
     op.response_summary = {
         "create_status": create_status,
         "final_status": status,
@@ -1644,6 +1728,7 @@ async def _execute_unified_media_node_run(
 
     mime, ext, art_type = _mime_for_node(node_type)
     object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
+    media_metadata = _inspect_media_metadata(kind=node_type, data=data)
     stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
     art = await get_or_create_artifact(
         session,
@@ -1655,6 +1740,7 @@ async def _execute_unified_media_node_run(
         byte_size=stored.byte_size,
         produced_by_run_id=run.id,
     )
+    _apply_media_metadata(art, media_metadata)
 
     run.status = "completed"
     run.result_artifact_id = art.id

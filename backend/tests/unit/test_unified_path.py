@@ -499,6 +499,7 @@ async def _seed_project_chain(
         remote_resource_kind="model",
         remote_resource_id="uni-img-model",
         invoke_model_value="uni-img-model",
+        pricing_snapshot_json={"unit_amount": "1", "currency": "USD"},
         created_by=user.id,
         updated_by=user.id,
     )
@@ -533,6 +534,7 @@ async def _attach_director_context(
     run: NodeRun,
     model_binding_id: object,
     purpose: str = "keyframe",
+    currency: str = "USD",
 ) -> ProductionBatch:
     workflow = DirectorWorkflowRun(
         project_id=run.project_id,
@@ -553,7 +555,7 @@ async def _attach_director_context(
         pricing_snapshot_id="pricing-v1",
         limit_amount=Decimal("10"),
         consumed_amount=Decimal("0"),
-        currency="USD",
+        currency=currency,
         status="active",
         authorized_by=user.id,
         expires_at=datetime.now(UTC) + timedelta(hours=1),
@@ -586,7 +588,7 @@ async def _attach_director_context(
         authorization_id=authorization.id,
         idempotency_key=f"reservation:{uuid4()}",
         reserved_amount=Decimal("10"),
-        currency="USD",
+        currency=currency,
         status="reserved",
     )
     session.add(reservation)
@@ -701,6 +703,7 @@ async def _seed_video_binding(
         remote_resource_kind="model",
         remote_resource_id="uni-vid-model",
         invoke_model_value="uni-vid-model",
+        pricing_snapshot_json={"unit_amount": "1", "currency": "USD"},
         created_by=user_id,
         updated_by=user_id,
     )
@@ -1508,11 +1511,13 @@ async def test_unified_unreported_cost_remains_null_and_unsettled(
         select(ProviderModelBinding).where(ProviderModelBinding.purpose == "keyframe")
     )
     assert binding is not None
+    binding.pricing_snapshot_json = {"unit_amount": "0", "currency": "CNY"}
     batch = await _attach_director_context(
         session,
         user=user,
         run=run,
         model_binding_id=binding.id,
+        currency="CNY",
     )
     _FAKE_COST_PLAN.append(
         CostResult(amount=None, currency="USD", units=1.0, cost_status="not_reported")
@@ -1525,6 +1530,7 @@ async def test_unified_unreported_cost_remains_null_and_unsettled(
     )
     assert op is not None
     assert op.provider_cost is None
+    assert op.currency == "CNY"
     assert op.response_summary["cost_status"] == "not_reported"
     assert op.response_summary["provider_reported_cost"] is None
     assert op.response_summary["director_budget_settled"] is False

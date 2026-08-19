@@ -5,6 +5,7 @@ import {
   Clapperboard,
   FolderKanban,
   CircleHelp,
+  Gauge,
   Library,
   Menu,
   Settings,
@@ -27,6 +28,7 @@ type QuickCreationShellProps = {
   directorContent?: ReactNode;
   renderDirector?: (controls: DirectorControls) => ReactNode;
   projectHref?: string;
+  overviewHref?: string | null;
   quickHref?: string;
   secondaryHref?: string;
   secondaryLabel?: string;
@@ -44,6 +46,7 @@ export function QuickCreationShell({
   directorContent,
   renderDirector,
   projectHref = "/",
+  overviewHref = null,
   quickHref = "#creative-stage",
   secondaryHref = "/design-preview",
   secondaryLabel = "素材库",
@@ -83,6 +86,12 @@ export function QuickCreationShell({
             <FolderKanban size={18} aria-hidden="true" />
             <span>项目大厅</span>
           </a>
+          {overviewHref && (
+            <a href={overviewHref}>
+              <Gauge size={18} aria-hidden="true" />
+              <span>项目总览</span>
+            </a>
+          )}
           <a href={quickHref} className="active" aria-current="page">
             <Clapperboard size={18} aria-hidden="true" />
             <span>快速创作</span>

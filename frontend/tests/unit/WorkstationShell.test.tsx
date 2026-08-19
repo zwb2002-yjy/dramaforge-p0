@@ -62,26 +62,29 @@ describe("Workstation shell", () => {
     expect(screen.getByRole("complementary", { name: "项目大厅导航" })).toBeInTheDocument();
   });
 
-  it("shows the contextual production inspector for a real project", async () => {
+  it("uses the Visual 2.0 evidence inspector for a real project", async () => {
     renderApp("/projects/project-1/production");
 
-    expect(await screen.findByTestId("workstation-inspector")).toBeInTheDocument();
+    expect(await screen.findByTestId("project-evidence-inspector")).toBeInTheDocument();
+    expect(screen.getByTestId("project-workspace-shell")).toBeInTheDocument();
+    expect(screen.queryByTestId("workstation-shell")).not.toBeInTheDocument();
   });
 
-  it("toggles the navigation state from the menu button", async () => {
+  it("toggles the Visual 2.0 project navigation", async () => {
     renderApp("/projects/demo/production");
-    const navigation = await screen.findByTestId("workstation-nav");
-    const toggle = screen.getByRole("button", { name: "收起导航" });
+    const shell = await screen.findByTestId("project-workspace-shell");
+    const navigation = screen.getByRole("complementary", { name: "项目工作区导航" });
+    const toggle = screen.getByRole("button", { name: "展开导航" });
 
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(navigation).toHaveClass("open");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(shell).not.toHaveClass("sidebar-expanded");
     fireEvent.click(toggle);
-    expect(screen.getByRole("button", { name: "展开导航" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "收起导航" })).toHaveAttribute(
       "aria-expanded",
-      "false",
+      "true",
     );
-    expect(navigation).not.toHaveClass("open");
-    expect(navigation).toHaveAttribute("aria-hidden", "true");
+    expect(shell).toHaveClass("sidebar-expanded");
+    expect(navigation).toBeVisible();
   });
 
   it("shows a blank login form after the single Owner is initialized", async () => {
@@ -111,12 +114,11 @@ describe("Workstation shell", () => {
     renderApp("/projects/demo/production");
     const panel = await screen.findByTestId("production-mode");
     expect(panel).toBeInTheDocument();
-    // Production board title + shared Project layout (id shown truncated, not "项目 demo")
     expect(panel).toHaveTextContent("专业生产板");
-    const projectPanel = screen.getByTestId("project-panel");
-    expect(projectPanel).toBeInTheDocument();
-    expect(projectPanel).toHaveTextContent("同一 Project");
-    expect(projectPanel).toHaveTextContent("demo");
+    const projectShell = screen.getByTestId("project-workspace-shell");
+    expect(projectShell).toBeInTheDocument();
+    expect(projectShell).toHaveTextContent("演示项目");
+    expect(screen.getByRole("link", { name: "专业生产" })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows the same Director workflow and batch facts in professional mode", async () => {

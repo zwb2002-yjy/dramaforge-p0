@@ -53,9 +53,59 @@ describe("Director trial and production stages", () => {
   it("recovers a trial batch and enables inspection only when all batch runs are terminal", async () => {
     const value = snapshot("trial_running");
     value.production_batches = [{ id: "batch-1", batch_kind: "trial", status: "running", budget_authorization_id: "budget-1", locked_version_refs: {}, selected_shot_ids: ["shot-2"], template_keys: ["keyframe", "video"], quality_policy_id: "live-dialogue-quality-v1", selection_snapshot: {}, semantic_hash: "hash" }];
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ project_id: "project-1", name: "试拍作品", artifacts: [], node_runs: [{ id: "run-1", status: "completed", result_artifact_id: null, output_summary: {}, input_snapshot: { production_batch_id: "batch-1" }, idempotency_key: "run", attempt_no: 1, node_key: "video", provider_cost: "1.00", started_at: null, finished_at: null, error_code: null, error_summary: null, upstream_dependencies: [] }] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ project_id: "project-1", name: "试拍作品", artifacts: [], provider_operations: [], node_runs: [{ id: "run-1", status: "completed", result_artifact_id: null, output_summary: {}, input_snapshot: { production_batch_id: "batch-1" }, idempotency_key: "run", attempt_no: 1, node_key: "video", provider_cost: "1.00", started_at: null, finished_at: null, error_code: null, error_summary: null, upstream_dependencies: [] }] }), { status: 200, headers: { "Content-Type": "application/json" } }));
     renderWithQuery(<TrialStage projectId="project-1" snapshot={value} refresh={vi.fn()} onMessage={vi.fn()} onError={vi.fn()} />);
     expect(await screen.findByRole("button", { name: "运行已结束，生成质量报告" })).toBeEnabled();
+  });
+
+  it("renders real trial media, temporal frames, and sanitized Unified execution evidence", async () => {
+    const value = snapshot("awaiting_trial_review");
+    value.production_batches = [{ id: "batch-1", batch_kind: "trial", status: "running", budget_authorization_id: "budget-1", locked_version_refs: {}, selected_shot_ids: ["shot-2"], template_keys: ["dialogue-post-dub-shot-v1"], quality_policy_id: "live-dialogue-quality-v1", selection_snapshot: {}, semantic_hash: "hash" }];
+    const runs = [
+      ["canonical-run", "character_reference", "canonical-artifact"],
+      ["keyframe-run", "keyframe", "keyframe-artifact"],
+      ["video-run", "video", "video-artifact"],
+      ["voice-run", "voice", "voice-artifact"],
+    ].map(([id, nodeKey, artifactId]) => ({ id, status: "completed", result_artifact_id: artifactId, output_summary: {}, input_snapshot: { production_batch_id: "batch-1", source_commit: "acaa6c4f602adb49a1c0bded22d48560acd35bc1" }, idempotency_key: id, attempt_no: 1, node_key: nodeKey, provider_cost: "0", started_at: null, finished_at: null, error_code: null, error_summary: null, upstream_dependencies: [] }));
+    const artifact = (id: string, runId: string, mimeType: string) => ({ id, object_key: `projects/project-1/${id}`, content_hash: `${id}-sha256`, byte_size: 1024, mime_type: mimeType, storage_state: "available", produced_by_run_id: runId, width: mimeType.startsWith("video/") ? 720 : mimeType.startsWith("image/") ? 736 : null, height: mimeType.startsWith("video/") ? 1280 : mimeType.startsWith("image/") ? 1312 : null, duration_seconds: mimeType.startsWith("video/") ? "5.042" : null });
+    const operation = (id: string, runId: string, model: string) => ({ id, node_run_id: runId, operation_kind: "media.generate", actual_provider: "agnes", actual_model: model, provider_request_id: `${id}-remote`, protocol_profile: "agnes_cn_v1", status: "succeeded", request_fingerprint: `${id}-fingerprint`, request_summary: { effective_request: { common_options: model.includes("video") ? { aspect_ratio: "9:16", frame_rate: 24, num_frames: 121, duration_seconds: 5, generate_audio: false } : { aspect_ratio: "9:16", size: "1K" }, reference_artifact_ids: ["canonical-artifact"], reference_fingerprints: ["canonical-sha256"] }, translation_report: { transformations: [], dropped_options: [] } }, response_summary: { cost_status: "not_reported", provider_reported_cost: null }, model_binding_id: `${id}-binding`, catalog_entry_id: `${id}-catalog`, capability_manifest_hash: `${id}-manifest`, execution_path_version: "unified-v1", provider_cost: null, currency: "CNY", submitted_at: null, completed_at: null });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      project_id: "project-1",
+      name: "试拍作品",
+      node_runs: runs,
+      artifacts: [
+        artifact("canonical-artifact", "canonical-run", "image/png"),
+        artifact("keyframe-artifact", "keyframe-run", "image/png"),
+        artifact("video-artifact", "video-run", "video/mp4"),
+        artifact("voice-artifact", "voice-run", "audio/wav"),
+      ],
+      provider_operations: [
+        operation("keyframe-operation", "keyframe-run", "agnes-image-2.1-flash"),
+        operation("video-operation", "video-run", "agnes-video-v2.0"),
+      ],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    renderWithQuery(<TrialStage projectId="project-1" snapshot={value} refresh={vi.fn()} onMessage={vi.fn()} onError={vi.fn()} />);
+
+    expect(await screen.findByTestId("trial-video")).toHaveAttribute("src", expect.stringContaining("video-artifact/content"));
+    expect(screen.getByTestId("trial-audio")).toHaveAttribute("src", expect.stringContaining("voice-artifact/content"));
+    expect(screen.getByTestId("trial-video-frames").querySelectorAll("img")).toHaveLength(3);
+    expect(screen.getByTestId("trial-media-evidence")).toHaveTextContent("24 fps · 121 帧 · 5.042 秒");
+    expect(screen.getByTestId("trial-execution-evidence")).toHaveTextContent("unified-v1");
+    expect(screen.getByTestId("trial-execution-evidence")).toHaveTextContent("Provider 未报告 · not_reported");
+    expect(screen.getByTestId("trial-known-limitations")).toHaveTextContent("post-dub");
+  });
+
+  it("keeps trial evidence visible when the current quality report belongs to production", async () => {
+    const value = snapshot("final_review");
+    value.production_batches = [{ id: "trial-batch", batch_kind: "trial", status: "accepted", budget_authorization_id: "budget-1", locked_version_refs: {}, selected_shot_ids: ["shot-2"], template_keys: ["dialogue-post-dub-shot-v1"], quality_policy_id: "live-dialogue-quality-v1", selection_snapshot: {}, semantic_hash: "hash" }];
+    value.current_artifacts.quality_report = artifact("quality_report", { policy_id: "live-dialogue-quality-v1", batch_id: "production-batch", overall_status: "warning", hard_blockers: [], shot_reports: [] });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ project_id: "project-1", name: "试拍作品", artifacts: [], provider_operations: [], node_runs: [] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    renderWithQuery(<TrialStage projectId="project-1" snapshot={value} refresh={vi.fn()} onMessage={vi.fn()} onError={vi.fn()} />);
+
+    expect(await screen.findByTestId("trial-media-evidence")).toBeInTheDocument();
+    expect(screen.queryByTestId("trial-quality-report")).not.toBeInTheDocument();
   });
 
   it("shows formal pricing and keeps production materialization behind a separate budget action", () => {
