@@ -520,9 +520,9 @@ async def _bind_director_canonical_source(
             details={"code": "CANONICAL_SOURCE_NOT_READY"},
         )
     artifact = await session.get(Artifact, source.result_artifact_id)
-    origin = source
+    origin: NodeRun | None = source
     visited_run_ids: set[UUID] = set()
-    while origin.reused_from_run_id is not None:
+    while origin is not None and origin.reused_from_run_id is not None:
         if origin.id in visited_run_ids:
             origin = None
             break
