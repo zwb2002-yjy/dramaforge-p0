@@ -33,7 +33,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const health = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealth,
-    enabled: !isDesignPreview,
+    enabled: !isDesignPreview && pathname !== "/",
     refetchInterval: 10_000,
     retry: 1,
   });
@@ -45,7 +45,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
     refetchInterval: 4000,
   });
 
-  if (isProductPreview || (isRealProject && onQuick)) return <>{children}</>;
+  if (isProductPreview || pathname === "/" || (isRealProject && onQuick)) return <>{children}</>;
 
   const runs = snapshot.data?.node_runs ?? [];
   const arts = snapshot.data?.artifacts ?? [];

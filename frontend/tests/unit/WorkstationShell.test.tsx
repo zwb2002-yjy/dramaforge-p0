@@ -53,15 +53,13 @@ afterEach(() => vi.restoreAllMocks());
 beforeEach(() => useUiStore.setState({ leftNavOpen: true, selectedShotId: null }));
 
 describe("Workstation shell", () => {
-  it("renders the workstation shell without production telemetry on home", async () => {
+  it("renders the Visual 2.0 project lobby without production telemetry", async () => {
     renderApp("/");
-    expect(await screen.findByTestId("workstation-shell")).toBeInTheDocument();
-    expect(screen.getByTestId("workstation-nav")).toBeInTheDocument();
+    expect(await screen.findByTestId("project-lobby-shell")).toBeInTheDocument();
+    expect(screen.queryByTestId("workstation-shell")).not.toBeInTheDocument();
     expect(screen.queryByTestId("workstation-inspector")).not.toBeInTheDocument();
     expect(screen.getByTestId("home-panel")).toBeInTheDocument();
-    // Brand is split across elements: Drama<span>Forge</span>
-    const brand = screen.getByRole("link", { name: /Drama\s*Forge/i });
-    expect(brand).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "项目大厅导航" })).toBeInTheDocument();
   });
 
   it("shows the contextual production inspector for a real project", async () => {
@@ -71,7 +69,7 @@ describe("Workstation shell", () => {
   });
 
   it("toggles the navigation state from the menu button", async () => {
-    renderApp("/");
+    renderApp("/projects/demo/production");
     const navigation = await screen.findByTestId("workstation-nav");
     const toggle = screen.getByRole("button", { name: "收起导航" });
 

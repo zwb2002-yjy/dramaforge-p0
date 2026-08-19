@@ -20,6 +20,7 @@ import {
   type WorkspaceRead,
 } from "../lib/api";
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
+import { ProjectLobbyShell } from "../features/creation-preview/ProjectLobbyShell";
 import { rootRoute } from "./__root";
 
 export const indexRoute = createRoute({
@@ -176,6 +177,7 @@ function HomePage() {
   }
 
   return (
+    <ProjectLobbyShell apiLive={apiLive}>
     <div className="workspace-home" data-testid="home-panel">
       <section className="workspace-header">
         <div>
@@ -244,12 +246,14 @@ function HomePage() {
             </div>
           </section>
 
-          <ProviderConnectionPanel
-            workspaceId={selectedWorkspaceId}
-            projects={projects.data ?? []}
-          />
+          <div id="provider-settings">
+            <ProviderConnectionPanel
+              workspaceId={selectedWorkspaceId}
+              projects={projects.data ?? []}
+            />
+          </div>
 
-          <section className="panel project-manager">
+          <section className="panel project-manager" id="projects">
             <div className="panel-header"><div><h2>{selectedWorkspace?.name ?? "选择一个空间"}</h2><p className="muted">项目隔离在所选空间内。</p></div></div>
             <form className="inline-form project-create" onSubmit={(event) => { event.preventDefault(); createProjectMutation.mutate(); }}>
               <input aria-label="项目名" value={projectName} onChange={(event) => setProjectName(event.target.value)} disabled={!selectedWorkspaceId} />
@@ -273,5 +277,6 @@ function HomePage() {
       )}
       {(error || workspacesError) && <p className="flash err">{error ?? workspacesError}</p>}
     </div>
+    </ProjectLobbyShell>
   );
 }

@@ -723,6 +723,46 @@
   border-left: 2px solid var(--df-brass);
 }
 
+.qc-lobby-main {
+  width: min(100%, 1240px);
+  margin: 0 auto;
+  padding: var(--df-space-6) clamp(var(--df-space-5), 3vw, var(--df-space-10)) var(--df-space-10);
+}
+
+.qc-lobby-main .workspace-home {
+  max-width: none;
+}
+
+.qc-runtime-state {
+  min-width: 84px;
+  padding: var(--df-space-1) var(--df-space-2);
+  border: 1px solid var(--df-danger-border);
+  border-radius: var(--df-radius-sm);
+  color: var(--df-danger-text);
+  font-size: var(--df-text-xs);
+  text-align: center;
+}
+
+.qc-runtime-state.ready {
+  border-color: var(--df-success-border);
+  color: var(--df-success-text);
+}
+
+.qc-lobby-shell .workspace-header {
+  padding-bottom: var(--df-space-4);
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+
+@media (max-width: 620px) {
+  .qc-lobby-main {
+    padding-inline: var(--df-space-4);
+  }
+
+  .qc-runtime-state {
+    margin-left: auto;
+  }
+}
+
 @media (max-width: 900px) {
   .qc-live .director-concept-grid {
     grid-template-columns: 1fr;
