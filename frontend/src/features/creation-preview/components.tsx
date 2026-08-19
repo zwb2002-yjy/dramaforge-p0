@@ -8,11 +8,17 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import type { MoodReference, PreviewStage, StoryDirection } from "./mockData";
+import type { MoodReference, PreviewStage, StoryDirection } from "./types";
 
-export function StageStepper({ stages }: { stages: PreviewStage[] }) {
+export function StageStepper({
+  stages,
+  testId = "stage-stepper",
+}: {
+  stages: PreviewStage[];
+  testId?: string;
+}) {
   return (
-    <ol className="qc-stage-stepper" aria-label="创作进度" data-testid="stage-stepper">
+    <ol className="qc-stage-stepper" aria-label="创作进度" data-testid={testId}>
       {stages.map((stage, index) => (
         <li
           className={stage.state}

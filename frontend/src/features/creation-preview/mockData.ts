@@ -1,25 +1,6 @@
-export type PreviewStage = {
-  id: string;
-  label: string;
-  caption: string;
-  state: "active" | "upcoming";
-};
+import type { MoodReference, PreviewStage, StoryDirection } from "./types";
 
-export type StoryDirection = {
-  id: string;
-  image: string;
-  number: string;
-  title: string;
-  premise: string;
-  tone: string;
-  ending: string;
-};
-
-export type MoodReference = {
-  id: string;
-  image: string;
-  alt: string;
-};
+export type { MoodReference, PreviewStage, StoryDirection } from "./types";
 
 export const previewStages: PreviewStage[] = [
   { id: "story", label: "创作方案", caption: "确定故事方向", state: "active" },

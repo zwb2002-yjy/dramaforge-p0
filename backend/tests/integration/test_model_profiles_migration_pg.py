@@ -53,7 +53,11 @@ def _db_async_url(dbname: str) -> str:
 
 def _pg_available_sync() -> bool:
     try:
-        engine = create_engine(_db_sync_url("dramaforge"), pool_pre_ping=True)
+        engine = create_engine(
+            _db_sync_url("dramaforge"),
+            pool_pre_ping=True,
+            connect_args={"connect_timeout": 2},
+        )
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         engine.dispose()

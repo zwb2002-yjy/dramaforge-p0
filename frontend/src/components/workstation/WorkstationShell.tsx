@@ -45,7 +45,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
     refetchInterval: 4000,
   });
 
-  if (isProductPreview) return <>{children}</>;
+  if (isProductPreview || (isRealProject && onQuick)) return <>{children}</>;
 
   const runs = snapshot.data?.node_runs ?? [];
   const arts = snapshot.data?.artifacts ?? [];

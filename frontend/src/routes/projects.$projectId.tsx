@@ -17,6 +17,8 @@ function ProjectLayout() {
   const onProd = pathname.includes("/production");
   const isOverview = !onQuick && !onProd;
 
+  if (onQuick) return <Outlet />;
+
   return (
     <div data-testid="project-panel">
       <div className="mode-banner">

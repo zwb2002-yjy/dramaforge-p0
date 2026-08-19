@@ -425,7 +425,7 @@ async def test_agnes_video_invalid_shape_fails_before_network() -> None:
         return httpx.Response(200, json={})
 
     client = AgnesHubClient(_agnes_settings(), transport=httpx.MockTransport(handler))
-    with pytest.raises(ValueError, match=r"8n \+ 1"):
+    with pytest.raises(ValueError, match="exactly 121 frames"):
         await client.create_video(
             prompt="motion",
             image_url="https://references.example/token",

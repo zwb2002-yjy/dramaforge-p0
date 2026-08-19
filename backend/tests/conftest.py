@@ -17,6 +17,7 @@ os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
 os.environ["AGNES_ENABLED"] = "false"
 os.environ["TEXT_LLM_ENABLED"] = "false"
 os.environ["TEXT_V3_ROUTER_ENABLED"] = "false"
+os.environ["PROVIDER_UNIFIED_PATH_ENABLED"] = "false"
 os.environ["LITELLM_GATEWAY_URL"] = ""
 os.environ["LITELLM_API_KEY"] = ""
 os.environ["WORKER_TOKEN"] = ""

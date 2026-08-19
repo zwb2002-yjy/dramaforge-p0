@@ -197,8 +197,9 @@ class Settings(BaseSettings):
     tts_engine: str = "espeak-ng"
     tts_voice: str = "zh"
 
-    # Stage A+B provider unification. All default OFF; each flips when the
-    # matching stage lands. Resume never reads these flags (persisted state wins).
+    # Stage A+B provider unification. Director image/video runs are always unified;
+    # this flag only migrates non-Director historical projects. Resume never reads
+    # these flags because persisted execution state wins.
     provider_catalog_enabled: bool = False
     provider_unified_shadow: bool = False
     provider_unified_path_enabled: bool = False

@@ -68,30 +68,39 @@ function conceptInputReady(input: {
 
 function ConceptCard({
   concept,
+  visualIndex,
   selected,
   onSelect,
 }: {
   concept: StoryConcept;
+  visualIndex: number;
   selected: boolean;
   onSelect: () => void;
 }) {
   return (
     <button
       type="button"
-      className={`director-concept-card ${selected ? "selected" : ""}`}
+      className={`director-concept-card qc-story-card ${selected ? "selected" : ""}`}
       onClick={onSelect}
       aria-pressed={selected}
       data-testid={`concept-${concept.concept_id}`}
     >
-      <span className="director-concept-title">{concept.title}</span>
-      <span>{concept.logline}</span>
-      <dl>
-        <dt>主题</dt><dd>{concept.theme}</dd>
-        <dt>人物关系</dt><dd>{concept.character_relationship}</dd>
-        <dt>核心冲突</dt><dd>{concept.core_conflict}</dd>
-        <dt>结局方向</dt><dd>{concept.ending_direction}</dd>
-      </dl>
-      <small>{concept.why_it_fits}</small>
+      <span className="qc-story-media">
+        <img src={`/demo/story-v2/direction-0${visualIndex + 1}.jpg`} alt="" />
+        <span className="qc-story-index">方向 {String(visualIndex + 1).padStart(2, "0")}</span>
+        {selected && <span className="qc-story-selected">已选择</span>}
+      </span>
+      <span className="qc-story-body">
+        <span className="director-concept-title">{concept.title}</span>
+        <span className="qc-story-premise">{concept.logline}</span>
+        <dl>
+          <dt>主题</dt><dd>{concept.theme}</dd>
+          <dt>人物关系</dt><dd>{concept.character_relationship}</dd>
+          <dt>核心冲突</dt><dd>{concept.core_conflict}</dd>
+          <dt>结局方向</dt><dd>{concept.ending_direction}</dd>
+        </dl>
+        <small>{concept.why_it_fits} · 图片为风格参考，不是生成结果</small>
+      </span>
     </button>
   );
 }
@@ -392,7 +401,7 @@ export function CreativeStage({
         <section className="panel" data-testid="concept-set">
           <div className="panel-header"><div><h3>三个原创概念</h3><p className="muted">第 {conceptArtifact?.revision_no ?? 1} 版 · 选择不等于锁定，生成完整方案后仍需你确认</p></div></div>
           <div className="director-concept-grid">
-            {concepts.concepts.map((concept) => <ConceptCard key={concept.concept_id} concept={concept} selected={selectedConceptId === concept.concept_id} onSelect={() => setSelectedConceptId(concept.concept_id)} />)}
+            {concepts.concepts.map((concept, index) => <ConceptCard key={concept.concept_id} concept={concept} visualIndex={index} selected={selectedConceptId === concept.concept_id} onSelect={() => setSelectedConceptId(concept.concept_id)} />)}
           </div>
           <div className="director-feedback">
             <label>还没选中？直接说喜欢和不喜欢的部分<textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} rows={3} placeholder="例如：喜欢第二个的关系，但不想要悲剧；希望冲突更日常、更克制。" /></label>
@@ -410,7 +419,7 @@ export function CreativeStage({
           <h3>重新选择故事方向</h3>
           <p className="muted">这里只创建新的未锁定版本；当前方案仍保留，直到你确认新版本。</p>
           <div className="director-concept-grid">
-            {concepts.concepts.map((concept) => <ConceptCard key={concept.concept_id} concept={concept} selected={selectedConceptId === concept.concept_id} onSelect={() => setSelectedConceptId(concept.concept_id)} />)}
+            {concepts.concepts.map((concept, index) => <ConceptCard key={concept.concept_id} concept={concept} visualIndex={index} selected={selectedConceptId === concept.concept_id} onSelect={() => setSelectedConceptId(concept.concept_id)} />)}
           </div>
         </section>
       )}

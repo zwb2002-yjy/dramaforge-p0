@@ -61,7 +61,8 @@ describe("AI Director workspace", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByRole("heading", { name: "AI 导演工作台" })).toBeInTheDocument();
+    expect(await screen.findByTestId("quick-creation-workspace")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "创作方案", level: 1 })).toBeInTheDocument();
     expect(screen.getByTestId("director-stage-rail").querySelectorAll("li")).toHaveLength(4);
     expect(screen.getByRole("radio", { name: /我还没有想法/ })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /我有一句话创意/ })).toBeInTheDocument();

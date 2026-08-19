@@ -31,6 +31,10 @@ AGNES_VIDEO_CREATE_PATH = "/v1/videos"
 AGNES_VIDEO_BY_ID_PATH = "/agnesapi"
 _ALLOWED_REFERENCE_MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
 _MAX_REFERENCE_BYTES = 20 * 1024 * 1024
+_AGNES_IMAGE_SIZE = "1024x768"
+_AGNES_VIDEO_NUM_FRAMES = 121
+_AGNES_VIDEO_FRAME_RATE = 24
+_AGNES_VIDEO_DURATION_SECONDS = 5
 _SUBMISSION_GATES: WeakKeyDictionary[
     asyncio.AbstractEventLoop, dict[tuple[str, int], asyncio.Semaphore]
 ] = WeakKeyDictionary()
@@ -89,10 +93,10 @@ def _require_https_reference(value: str) -> str:
 
 
 def _validate_video_shape(*, num_frames: int, frame_rate: int) -> None:
-    if num_frames < 1 or num_frames > 441 or (num_frames - 1) % 8 != 0:
-        raise ValueError("num_frames must be <= 441 and satisfy 8n + 1")
-    if frame_rate < 1 or frame_rate > 60:
-        raise ValueError("frame_rate must be between 1 and 60")
+    if num_frames != _AGNES_VIDEO_NUM_FRAMES:
+        raise ValueError("Agnes Video V2.0 requires exactly 121 frames")
+    if frame_rate != _AGNES_VIDEO_FRAME_RATE:
+        raise ValueError("Agnes Video V2.0 requires exactly 24 fps")
 
 
 def _schema_fingerprint(body: dict[str, object]) -> str:
@@ -255,9 +259,9 @@ def _build_video_body(
     """Construct the Video V2.0 request body and derive operation/transport."""
     prompt_value = _require_prompt(prompt)
     _validate_video_shape(num_frames=num_frames, frame_rate=frame_rate)
-    if image_url and keyframe_urls:
-        raise ValueError("first-frame I2V and keyframes mode are mutually exclusive")
-    if image_bytes is not None and (image_url or keyframe_urls):
+    if keyframe_urls is not None:
+        raise ValueError("Agnes Video V2.0 product contract only supports first-frame I2V")
+    if image_bytes is not None and image_url:
         raise ValueError("image_bytes cannot be combined with image_url/keyframe_urls")
     body: dict[str, object] = {
         "model": model,
@@ -270,13 +274,7 @@ def _build_video_body(
     operation = "video.i2v"
     reference_transport = "short_lived_https"
     references: list[str]
-    if keyframe_urls is not None:
-        if len(keyframe_urls) != 2:
-            raise ValueError("keyframes mode requires exactly two HTTPS images")
-        references = [_require_https_reference(item) for item in keyframe_urls]
-        body["extra_body"] = {"image": references, "mode": "keyframes"}
-        operation = "video.keyframes"
-    elif image_url is not None:
+    if image_url is not None:
         references = [_require_https_reference(image_url)]
         body["image"] = references[0]
     elif image_bytes is not None:
@@ -796,6 +794,15 @@ class AgnesImageCompiler:
             constraint = op.reference_constraints.get("reference_image")
             if constraint is None or constraint.max < 1:
                 raise ValueError("model does not accept a reference_image")
+        manifest_size = op.output_constraints.get("size")
+        if (
+            isinstance(manifest_size, str)
+            and intent.size is not None
+            and intent.size != manifest_size
+        ):
+            raise ValueError(
+                f"image size {intent.size} does not match frozen manifest size {manifest_size}"
+            )
 
     async def compile(
         self,
@@ -808,10 +815,15 @@ class AgnesImageCompiler:
         self.validate(intent, model)
         resolved = {ref.role: ref for ref in references}
         ref_image = resolved.get("reference_image")
+        operation_manifest = model.operations["image.generate"]
+        manifest_size = operation_manifest.output_constraints.get("size")
+        size = intent.size or (
+            manifest_size if isinstance(manifest_size, str) else _AGNES_IMAGE_SIZE
+        )
         body, operation, fingerprints = _build_image_body(
             invoke_model_value,
             prompt=intent.prompt,
-            size=intent.size or "1024x768",
+            size=size,
             canonical_image_bytes=ref_image.content_bytes if ref_image is not None else None,
             canonical_image_mime=ref_image.mime_type if ref_image is not None else "image/png",
         )
@@ -849,6 +861,15 @@ class AgnesVideoCompiler:
         op = model.operations.get("video.generate")
         if op is None:
             raise ValueError("model does not support video.generate")
+        constraints = op.output_constraints
+        if (
+            constraints.get("aspect_ratio") != "9:16"
+            or constraints.get("num_frames") != {"allowed": [_AGNES_VIDEO_NUM_FRAMES]}
+            or constraints.get("frame_rate") != {"allowed": [_AGNES_VIDEO_FRAME_RATE]}
+            or constraints.get("height") != 1280
+            or constraints.get("width") != 720
+        ):
+            raise ValueError("Agnes Video V2.0 manifest is outside the verified product subset")
         capabilities = set(op.capabilities)
         if not ("video.i2v" in capabilities or "video.i2v.first_frame" in capabilities):
             raise ValueError("model does not support video.i2v")
@@ -860,14 +881,15 @@ class AgnesVideoCompiler:
             raise ValueError("model does not accept a first_frame reference")
         if len(first_refs) > constraint.max:
             raise ValueError("too many first_frame references")
+        if len(first_refs) != 1:
+            raise ValueError("Agnes Video V2.0 requires exactly one first_frame reference")
         output = intent.output
         if output.aspect_ratio not in {None, "9:16"}:
             raise ValueError("Agnes Video V2.0 catalog revision only supports 9:16")
         if output.generate_audio not in {None, False}:
             raise ValueError("Agnes Video V2.0 compiler cannot request native audio")
-        if output.duration_seconds is not None:
-            frames = output.duration_seconds * 24 + 1
-            _validate_video_shape(num_frames=frames, frame_rate=24)
+        if output.duration_seconds not in {None, _AGNES_VIDEO_DURATION_SECONDS}:
+            raise ValueError("Agnes Video V2.0 requires a 5 second product intent")
 
     async def compile(
         self,
@@ -879,8 +901,8 @@ class AgnesVideoCompiler:
     ) -> Any:
         self.validate(intent, model)
         first = next(ref for ref in references if ref.role == "first_frame")
-        duration_seconds = intent.output.duration_seconds or 5
-        num_frames = duration_seconds * 24 + 1
+        duration_seconds = _AGNES_VIDEO_DURATION_SECONDS
+        num_frames = _AGNES_VIDEO_NUM_FRAMES
         if first.content_bytes is not None:
             body, operation, _refs, _transport = _build_video_body(
                 invoke_model_value,
@@ -888,7 +910,7 @@ class AgnesVideoCompiler:
                 image_bytes=first.content_bytes,
                 image_mime=first.mime_type,
                 num_frames=num_frames,
-                frame_rate=24,
+                frame_rate=_AGNES_VIDEO_FRAME_RATE,
             )
         elif first.content_url is not None:
             body, operation, _refs, _transport = _build_video_body(
@@ -896,7 +918,7 @@ class AgnesVideoCompiler:
                 prompt=intent.prompt,
                 image_url=first.content_url,
                 num_frames=num_frames,
-                frame_rate=24,
+                frame_rate=_AGNES_VIDEO_FRAME_RATE,
             )
         else:
             raise ValueError("video first_frame reference has no bytes or URL")
@@ -915,7 +937,7 @@ class AgnesVideoCompiler:
                 "aspect_ratio": "9:16",
                 "duration_seconds": duration_seconds,
                 "num_frames": num_frames,
-                "frame_rate": 24,
+                "frame_rate": _AGNES_VIDEO_FRAME_RATE,
                 "native_audio": False,
             }
         )
@@ -1157,7 +1179,12 @@ class AgnesRuntime:
     async def fetch_cost(self, resume: Any) -> Any:
         from app.providers.runtime import CostResult
 
-        return CostResult(amount=0.0, currency="USD", units=1.0)
+        return CostResult(
+            amount=None,
+            currency="USD",
+            units=1.0,
+            cost_status="not_reported",
+        )
 
 
 def _agnes_runtime_factory(

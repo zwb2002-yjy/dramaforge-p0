@@ -39,6 +39,7 @@ def _pg_available() -> bool:
             "postgresql+psycopg://dramaforge:dramaforge"
             f"@{_pg_host()}:{_pg_port()}/dramaforge",
             pool_pre_ping=True,
+            connect_args={"connect_timeout": 2},
         )
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))

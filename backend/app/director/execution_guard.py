@@ -55,6 +55,21 @@ async def settle_director_media_cost(
     summary = dict(operation.response_summary or {})
     if summary.get("director_budget_settled") is True:
         return
+    cost_status = str(
+        summary.get("cost_status")
+        or ("reported" if operation.provider_cost is not None else "not_reported")
+    )
+    if cost_status in {"not_reported", "estimated_only"} and operation.provider_cost is None:
+        summary.update(
+            {
+                "director_budget_settled": False,
+                "director_budget_settlement_status": cost_status,
+                "provider_reported_cost": None,
+            }
+        )
+        operation.response_summary = summary
+        await session.flush()
+        return
     reservation = await session.scalar(
         select(BudgetReservation)
         .where(BudgetReservation.id == run.budget_reservation_id)
@@ -103,8 +118,10 @@ async def settle_director_media_cost(
     summary.update(
         {
             "director_budget_settled": True,
+            "director_budget_settlement_status": cost_status,
             "director_budget_amount": str(amount),
             "director_budget_currency": ledger_currency,
+            "provider_reported_cost": str(amount),
         }
     )
     operation.response_summary = summary

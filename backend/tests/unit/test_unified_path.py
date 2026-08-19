@@ -66,6 +66,7 @@ FAKE_PROFILE = "u_test_v1"
 # Test-scoped behavior plan for submit_image outcomes ("PROVIDER_RATE_LIMITED"
 # marks one submission as a 429; anything else = success).
 _FAKE_IMAGE_PLAN: list[str] = []
+_FAKE_COST_PLAN: list[CostResult] = []
 
 
 _FAKE_IMAGE_MANIFEST = {
@@ -182,6 +183,8 @@ class FakeUnifiedRuntime:
         return CancelResult(status="cancelled")
 
     async def fetch_cost(self, resume: ProviderResumeToken) -> CostResult:
+        if _FAKE_COST_PLAN:
+            return _FAKE_COST_PLAN.pop(0)
         return CostResult(amount=1.25, currency="USD", units=1.0)
 
 
@@ -311,6 +314,7 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
 def fake_plugin() -> ProviderPlugin:
     _FAKE_RUNTIME_HOLDER.clear()
     _FAKE_IMAGE_PLAN.clear()
+    _FAKE_COST_PLAN.clear()
     plugin = _fake_plugin()
     register_plugin(plugin)
     try:
@@ -319,6 +323,7 @@ def fake_plugin() -> ProviderPlugin:
         registry_module._registry.pop((FAKE_PROVIDER, FAKE_PROFILE), None)
         _FAKE_RUNTIME_HOLDER.clear()
         _FAKE_IMAGE_PLAN.clear()
+        _FAKE_COST_PLAN.clear()
 
 
 def _current_runtime() -> FakeUnifiedRuntime:
@@ -741,6 +746,40 @@ async def test_director_unified_submission_uses_frozen_binding_not_project_resel
 
 
 @pytest.mark.asyncio
+async def test_director_forces_unified_path_when_feature_flag_is_false(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _byok(monkeypatch)
+    monkeypatch.setattr(
+        "app.execution.product_path.get_settings",
+        lambda: Settings(provider_unified_path_enabled=False),
+    )
+    await _no_sleep(monkeypatch)
+    user, _workspace, run = await _seed_project_chain(session)
+    binding = await session.scalar(
+        select(ProviderModelBinding).where(ProviderModelBinding.purpose == "keyframe")
+    )
+    assert binding is not None
+    await _attach_director_context(
+        session,
+        user=user,
+        run=run,
+        model_binding_id=binding.id,
+    )
+
+    await execute_media_node_run(session, node_run_id=run.id)
+
+    op = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+    )
+    assert op is not None
+    assert op.execution_path_version == UNIFIED_PATH_VERSION
+    assert _current_runtime().submit_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_director_keyframe_canonical_and_aspect_ratio_reach_compiled_request(
     session: AsyncSession,
     fake_plugin: ProviderPlugin,
@@ -784,6 +823,13 @@ async def test_director_keyframe_canonical_and_aspect_ratio_reach_compiled_reque
     assert compiled["reference_artifact_ids"] == [str(canonical.id)]
     assert compiled["reference_fingerprints"] == [canonical.content_hash]
     assert op.request_summary["frozen_model_binding_id"] == str(binding.id)
+    effective = op.request_summary["effective_request"]
+    assert isinstance(effective, dict)
+    assert effective["reference_artifact_ids"] == [str(canonical.id)]
+    assert effective["reference_fingerprints"] == [canonical.content_hash]
+    translation = op.request_summary["translation_report"]
+    assert isinstance(translation, dict)
+    assert translation["dropped_options"] == []
 
 
 @pytest.mark.asyncio
@@ -901,6 +947,60 @@ async def test_director_video_first_frame_ratio_duration_and_audio_reach_compile
     assert compiled["duration_seconds"] == 6
     assert compiled["native_audio"] is False
     assert op.request_summary["frozen_model_binding_id"] == str(video_binding.id)
+    effective = op.request_summary["effective_request"]
+    assert isinstance(effective, dict)
+    assert effective["common_options"] == {
+        "aspect_ratio": "16:9",
+        "duration_seconds": 6,
+        "frame_rate": None,
+        "num_frames": None,
+        "generate_audio": False,
+    }
+    assert effective["reference_artifact_ids"] == [str(first_frame.id)]
+    assert effective["reference_fingerprints"] == [first_frame.content_hash]
+    translation = op.request_summary["translation_report"]
+    assert isinstance(translation, dict)
+    assert translation["dropped_options"] == []
+
+
+@pytest.mark.asyncio
+async def test_unified_unreported_cost_remains_null_and_unsettled(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _byok(monkeypatch)
+    _enable_unified(monkeypatch)
+    await _no_sleep(monkeypatch)
+    user, _workspace, run = await _seed_project_chain(session)
+    binding = await session.scalar(
+        select(ProviderModelBinding).where(ProviderModelBinding.purpose == "keyframe")
+    )
+    assert binding is not None
+    batch = await _attach_director_context(
+        session,
+        user=user,
+        run=run,
+        model_binding_id=binding.id,
+    )
+    _FAKE_COST_PLAN.append(
+        CostResult(amount=None, currency="USD", units=1.0, cost_status="not_reported")
+    )
+
+    await execute_media_node_run(session, node_run_id=run.id)
+
+    op = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+    )
+    assert op is not None
+    assert op.provider_cost is None
+    assert op.response_summary["cost_status"] == "not_reported"
+    assert op.response_summary["provider_reported_cost"] is None
+    assert op.response_summary["director_budget_settled"] is False
+    reservation = await session.get(BudgetReservation, run.budget_reservation_id)
+    authorization = await session.get(BudgetAuthorization, batch.budget_authorization_id)
+    assert reservation is not None and reservation.actual_amount is None
+    assert authorization is not None and authorization.consumed_amount == Decimal("0")
 
 
 @pytest.mark.asyncio

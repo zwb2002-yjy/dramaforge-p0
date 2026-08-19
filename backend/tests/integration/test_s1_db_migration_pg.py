@@ -27,7 +27,9 @@ def _sync_url() -> str:
 
 def _pg_available() -> bool:
     try:
-        engine = create_engine(_sync_url(), pool_pre_ping=True)
+        engine = create_engine(
+            _sync_url(), pool_pre_ping=True, connect_args={"connect_timeout": 2}
+        )
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         engine.dispose()

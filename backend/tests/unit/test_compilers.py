@@ -13,6 +13,7 @@ from app.providers.intents import (
     ImageGenerationIntent,
     ModelSelectionIntent,
     VideoGenerationIntentV1,
+    VideoOutputIntent,
 )
 from app.providers.manifest import ModelCapabilityManifest
 from app.providers.runtime import ResolvedReference
@@ -48,6 +49,29 @@ def test_video_compiler_requires_first_frame() -> None:
 def test_video_compiler_rejects_too_many_first_frames() -> None:
     intent = _video_intent(uuid4(), uuid4())
     with pytest.raises(ValueError, match="too many first_frame"):
+        AgnesVideoCompiler().validate(intent, _video_manifest())
+
+
+@pytest.mark.parametrize(
+    ("output", "message"),
+    [
+        (VideoOutputIntent(aspect_ratio="16:9"), "only supports 9:16"),
+        (VideoOutputIntent(duration_seconds=6), "requires a 5 second"),
+        (VideoOutputIntent(generate_audio=True), "cannot request native audio"),
+    ],
+)
+def test_video_compiler_rejects_options_outside_verified_subset(
+    output: VideoOutputIntent,
+    message: str,
+) -> None:
+    frame_id = uuid4()
+    intent = VideoGenerationIntentV1(
+        prompt="rainy street",
+        output=output,
+        references=[ArtifactReferenceIntent(artifact_id=frame_id, role="first_frame")],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match=message):
         AgnesVideoCompiler().validate(intent, _video_manifest())
 
 
@@ -89,6 +113,16 @@ def test_image_compiler_validate_rejects_unsupported_operation() -> None:
     )
     with pytest.raises(ValueError, match="image.generate"):
         AgnesImageCompiler().validate(intent, _video_manifest())
+
+
+def test_image_compiler_rejects_size_outside_frozen_manifest() -> None:
+    intent = ImageGenerationIntent(
+        prompt="portrait",
+        size="1080x1920",
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="does not match frozen manifest size 1024x768"):
+        AgnesImageCompiler().validate(intent, _image_manifest())
 
 
 @pytest.mark.asyncio

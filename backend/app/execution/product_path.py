@@ -1322,6 +1322,45 @@ async def _execute_unified_media_node_run(
         fingerprint = hashlib.sha256(
             f"{kind}:{prompt}:{compiled.model_dump_json()}".encode()
         ).hexdigest()
+        prompt_fingerprint = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        if image_intent is not None:
+            requested_options: dict[str, object] = {
+                "size": image_intent.size,
+            }
+            effective_options: dict[str, object] = {
+                "size": compiled.safe_request_summary.get("size"),
+            }
+        else:
+            assert video_intent is not None
+            requested_options = {
+                "aspect_ratio": video_intent.output.aspect_ratio,
+                "duration_seconds": video_intent.output.duration_seconds,
+                "generate_audio": video_intent.output.generate_audio,
+            }
+            effective_options = {
+                "aspect_ratio": compiled.safe_request_summary.get("aspect_ratio"),
+                "duration_seconds": compiled.safe_request_summary.get("duration_seconds"),
+                "frame_rate": compiled.safe_request_summary.get("frame_rate"),
+                "num_frames": compiled.safe_request_summary.get("num_frames"),
+                "generate_audio": compiled.safe_request_summary.get("native_audio"),
+            }
+        effective_request = {
+            "operation": compiled.operation,
+            "model_id": compiled.model_id,
+            "prompt_fingerprint": prompt_fingerprint,
+            "common_options": effective_options,
+            "reference_artifact_ids": [
+                str(value) for value in compiled.reference_artifact_ids
+            ],
+            "reference_fingerprints": list(compiled.reference_fingerprints),
+        }
+        translation_report = {
+            "requested_options": requested_options,
+            "effective_options": effective_options,
+            "transformations": [],
+            "dropped_options": [],
+            "warnings": [],
+        }
         # Revalidate after request compilation, immediately before persisting
         # the submission marker and making the paid call.
         if director_context is not None:
@@ -1352,6 +1391,8 @@ async def _execute_unified_media_node_run(
                         else {}
                     ),
                     "compiled_request": compiled.safe_request_summary,
+                    "effective_request": effective_request,
+                    "translation_report": translation_report,
                     "reference_artifact_ids": [
                         str(value) for value in compiled.reference_artifact_ids
                     ],
@@ -1539,13 +1580,21 @@ async def _execute_unified_media_node_run(
 
     cost = await runtime.fetch_cost(resume)
     status = str(poll.status)
-    op.provider_cost = Decimal(str(getattr(cost, "amount", 0.0)))
+    cost_amount = getattr(cost, "amount", None)
+    cost_status = str(getattr(cost, "cost_status", "not_reported"))
+    op.provider_cost = (
+        Decimal(str(cost_amount)) if cost_amount is not None else None
+    )
     op.currency = str(getattr(cost, "currency", "USD"))
     op.response_summary = {
         "create_status": create_status,
         "final_status": status,
         "poll_count": poll_count,
         "query_kind": resume.query_kind,
+        "provider_reported_cost": (
+            str(op.provider_cost) if op.provider_cost is not None else None
+        ),
+        "cost_status": cost_status,
     }
     if run.production_batch_id is not None and run.budget_reservation_id is not None:
         from app.director.execution_guard import settle_director_media_cost
@@ -1772,8 +1821,15 @@ async def execute_media_node_run(
     if await set_node_run_rls_context(session, node_run_id=run.id) is None:
         raise ValidationAppError("node_run ownership context unavailable")
 
-    # Stage B4: unified path is driven by persisted execution_path_version or the
-    # enable flag. A persisted unified op wins over any flag (single-path rule).
+    # Director image/video work is always unified. The feature flag only keeps
+    # the migration path open for non-Director historical projects.
+    from app.director.models import DirectorWorkflowRun
+
+    director_workflow_id = await session.scalar(
+        select(DirectorWorkflowRun.id)
+        .where(DirectorWorkflowRun.project_id == run.project_id)
+        .limit(1)
+    )
     _unified_op = await session.scalar(
         select(ProviderOperation)
         .where(
@@ -1783,9 +1839,13 @@ async def execute_media_node_run(
         .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
         .limit(1)
     )
+    force_director_unified = director_workflow_id is not None and node_type in {
+        "keyframe",
+        "video",
+    }
     if _unified_op is not None or (
-        get_settings().provider_unified_path_enabled
-        and node_type in {"keyframe", "video", "video_review"}
+        node_type in {"keyframe", "video"}
+        and (force_director_unified or get_settings().provider_unified_path_enabled)
     ):
         return await _execute_unified_media_node_run(
             session,

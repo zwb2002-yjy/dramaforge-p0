@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, model_validator
 
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.intents import (
@@ -94,9 +94,18 @@ class CancelResult(BaseModel):
 
 
 class CostResult(BaseModel):
-    amount: float = 0.0
+    amount: float | None = None
     currency: str = "USD"
     units: float = 1.0
+    cost_status: Literal[
+        "reported", "estimated_only", "not_reported", "reconciled"
+    ] = "not_reported"
+
+    @model_validator(mode="after")
+    def infer_reported_amount(self) -> CostResult:
+        if self.amount is not None and self.cost_status == "not_reported":
+            self.cost_status = "reported"
+        return self
 
 
 @dataclass(frozen=True)

@@ -98,7 +98,7 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
       WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
@@ -118,7 +118,7 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
@@ -163,6 +163,7 @@ services:
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       TEXT_V3_ROUTER_ENABLED: ${TEXT_V3_ROUTER_ENABLED:-false}
+      PROVIDER_UNIFIED_PATH_ENABLED: ${PROVIDER_UNIFIED_PATH_ENABLED:-false}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
@@ -268,7 +269,7 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
@@ -302,7 +303,7 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
@@ -344,6 +345,7 @@ services:
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       TEXT_V3_ROUTER_ENABLED: ${TEXT_V3_ROUTER_ENABLED:-false}
+      PROVIDER_UNIFIED_PATH_ENABLED: ${PROVIDER_UNIFIED_PATH_ENABLED:-false}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
@@ -374,7 +376,7 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:-}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
@@ -417,6 +419,7 @@ services:
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       TEXT_V3_ROUTER_ENABLED: ${TEXT_V3_ROUTER_ENABLED:-false}
+      PROVIDER_UNIFIED_PATH_ENABLED: ${PROVIDER_UNIFIED_PATH_ENABLED:-false}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
       TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}

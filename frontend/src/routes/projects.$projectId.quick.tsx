@@ -3,6 +3,8 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { CreativeStage } from "../features/director/CreativeStage";
+import { QuickCreationShell } from "../features/creation-preview/QuickCreationShell";
+import type { PreviewStage } from "../features/creation-preview/types";
 import { ProductionStage } from "../features/director/ProductionStage";
 import { ShootingStage } from "../features/director/ShootingStage";
 import { TrialStage } from "../features/director/TrialStage";
@@ -54,23 +56,6 @@ const STAGE_ARTIFACTS: Record<string, Array<{ kind: DirectorArtifactKind; label:
     { kind: "repair_plan", label: "局部修复方案" },
   ],
 };
-
-function StageRail({ snapshot }: { snapshot: DirectorWorkspaceSnapshot }) {
-  const current = stageForStatus(snapshot.workflow.status);
-  return (
-    <ol className="workflow-steps director-stage-rail" data-testid="director-stage-rail">
-      {DIRECTOR_STAGES.map((stage) => {
-        const state = stageState(stage.id, current, snapshot.workflow.status);
-        return (
-          <li key={stage.id} className={state === "pending" ? "" : state}>
-            <span>{stage.number}</span>
-            <div><strong>{stage.title}</strong><small>{stage.confirmation}</small></div>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
 
 function ArtifactSummary({
   snapshot,
@@ -330,19 +315,41 @@ function QuickModePage() {
 
   const snapshot = workspace.data;
   const currentStage = stageForStatus(snapshot.workflow.status);
+  const liveStages: PreviewStage[] = DIRECTOR_STAGES.map((stage) => {
+    const state = stageState(stage.id, currentStage, snapshot.workflow.status);
+    return {
+      id: stage.id,
+      label: stage.title,
+      caption: stage.confirmation,
+      state: state === "done" ? "done" : state === "active" ? "active" : "upcoming",
+    };
+  });
   return (
-    <div data-testid="quick-mode" className="director-workspace">
-      <div className="page-title-row">
-        <div><h1>AI 导演工作台</h1><p className="muted">{snapshot.project_name} · 你决定作品内核，AI 带你完成拍摄与交付</p></div>
-        <span className="director-status-chip">{WORKFLOW_STATUS_ZH[snapshot.workflow.status]}</span>
-      </div>
-      <StageRail snapshot={snapshot} />
-      {message && <div className="flash ok" data-testid="director-message">{message}</div>}
-      {error && <div className="flash err" data-testid="director-error">{error}</div>}
-      {snapshot.pending_changes.length > 0 && (
-        <div className="callout warn" data-testid="pending-change">有 {snapshot.pending_changes.length} 个变更预览等待确认；系统尚未应用这些修改。</div>
-      )}
-      <div className="director-layout">
+    <QuickCreationShell
+      live
+      projectName={snapshot.project_name}
+      stages={liveStages}
+      directorContent={<DirectorSidebar snapshot={snapshot} />}
+      quickHref="#creative-stage"
+      secondaryHref={`/projects/${projectId}/production`}
+      secondaryLabel="专业生产"
+      settingsHref="/"
+      settingsLabel="模型设置"
+      helpHref={null}
+      avatarText="创"
+    >
+      <div data-testid="quick-mode" className="director-workspace" id="creative-stage">
+        <div className="page-title-row qc-live-title">
+          <div><span className="director-stage-kicker">阶段 {DIRECTOR_STAGES.find((stage) => stage.id === currentStage)?.number}</span><h1>{DIRECTOR_STAGES.find((stage) => stage.id === currentStage)?.title}</h1><p className="muted">你决定作品内核，AI 导演带你完成拍摄与交付</p></div>
+          <span className="director-status-chip">{WORKFLOW_STATUS_ZH[snapshot.workflow.status]}</span>
+        </div>
+        <div className="qc-live-alerts">
+          {message && <div className="flash ok" data-testid="director-message">{message}</div>}
+          {error && <div className="flash err" data-testid="director-error">{error}</div>}
+          {snapshot.pending_changes.length > 0 && (
+            <div className="callout warn" data-testid="pending-change">有 {snapshot.pending_changes.length} 个变更预览等待确认；系统尚未应用这些修改。</div>
+          )}
+        </div>
         <main>
           {currentStage === "creative" ? (
             <CreativeStage projectId={projectId} snapshot={snapshot} refresh={workspace.refresh} onMessage={(value) => { setError(null); setMessage(value); }} onError={(value) => { setMessage(null); setError(value); }} />
@@ -372,8 +379,7 @@ function QuickModePage() {
             <FutureStage snapshot={snapshot} stage="production" />
           )}
         </main>
-        <DirectorSidebar snapshot={snapshot} />
       </div>
-    </div>
+    </QuickCreationShell>
   );
 }

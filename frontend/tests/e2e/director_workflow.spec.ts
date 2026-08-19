@@ -204,6 +204,7 @@ async function installDirectorMock(page: Page, initial?: (state: MockState) => v
     if (method === "GET" && path === `/api/v1/workspaces/${WORKSPACE_ID}/provider-connections`) return json(route, []);
     if (method === "GET" && path === `/api/v1/workspaces/${WORKSPACE_ID}/model-profiles`) return json(route, []);
     if (method === "GET" && path === "/api/v1/model-slots") return json(route, []);
+    if (method === "GET" && path === "/api/v1/provider-plugins") return json(route, []);
     if (method === "POST" && path === "/api/v1/creation/start-project") {
       state.aspectRatio = body.aspect_ratio as "9:16" | "16:9";
       state.createdAspects.push(state.aspectRatio);
@@ -375,6 +376,12 @@ test("Director creation supports all three entries and restores confirmed prefer
   const state = await installDirectorMock(page);
   await expectCleanRuntime(page, async () => {
     await page.goto(`/projects/${PROJECT_ID}/quick`);
+    await expect(page.getByTestId("quick-creation-workspace")).toBeVisible();
+    await expect(page.getByRole("link", { name: "专业生产" })).toHaveAttribute(
+      "href",
+      `/projects/${PROJECT_ID}/production`,
+    );
+    await expect(page.getByTestId("workstation-shell")).toHaveCount(0);
     await expect(page.getByTestId("director-stage-rail").locator("li")).toHaveCount(4);
     await expect(page.getByRole("radio", { name: /我还没有想法/ })).toBeChecked();
     await expect(page.getByText("平台热点和高流量题材")).toBeVisible();
@@ -387,6 +394,7 @@ test("Director creation supports all three entries and restores confirmed prefer
     await page.getByLabel("用一句话说出你最想看到的故事").fill("搬家前夜，她接到失踪姐姐的电话。");
     await page.getByTestId("generate-concepts").click();
     await expect(page.getByTestId("concept-set").locator("[data-testid^='concept-']")).toHaveCount(3);
+    expect(state.requests.some((request) => request.path.endsWith("/creative/concepts/generate"))).toBe(true);
     expect(state.mediaRequests).toEqual([]);
 
     await page.getByLabel("还没选中？直接说喜欢和不喜欢的部分").fill("喜欢克制的姐妹关系，但不要悲剧和堆反转。");
@@ -527,6 +535,7 @@ test("formal production, repair, evidence review, and delivery use real gated su
 
     await page.getByRole("button", { name: "运行已结束，生成逐镜质量报告" }).click();
     await page.getByRole("button", { name: "接受", exact: true }).click();
+    await page.getByLabel("给 AI 导演的验收说明").fill("人物外观的轻微漂移不影响我表达这段故事，我接受当前镜头。");
     await page.getByRole("button", { name: "全部接受并精确导出" }).click();
     await expect(page.getByRole("button", { name: "重试精确导出" })).toBeVisible();
     await page.getByRole("button", { name: "重试精确导出" }).click();

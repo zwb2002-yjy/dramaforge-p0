@@ -50,6 +50,7 @@ def test_compose_defines_required_boot0_services() -> None:
         "TEXT_LLM_BASE_URL",
         "TEXT_LLM_MODEL",
         "TEXT_LLM_API_STYLE",
+        "PROVIDER_UNIFIED_PATH_ENABLED",
         "TTS_ENABLED",
         "TTS_ENGINE",
         "TTS_VOICE",
