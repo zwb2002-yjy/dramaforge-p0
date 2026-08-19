@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
+from app.assets.characters import promote_project_character_canonical
 from app.assets.models import Episode, Scene, Shot
 from app.director.enums import ArtifactKind, WorkflowStatus
 from app.director.models import (
@@ -202,11 +203,11 @@ def _shooting_payloads(binding_id: str) -> dict[ArtifactKind, dict[str, object]]
                     "quantity": 3,
                     "estimated_amount": "3",
                 }
-                for purpose in ("character_reference", "keyframe", "video", "voice")
+                for purpose in ("keyframe", "video", "voice")
             ],
             "repair": [known_line],
             "trial_total": "4",
-            "production_total": "12",
+            "production_total": "9",
             "repair_total": "1",
             "requires_user_budget_limit": True,
             "disclaimer": "Provider price snapshot is frozen for this batch.",
@@ -416,7 +417,10 @@ async def test_materialize_production_reuses_only_identical_accepted_trial(
         template_key="trial-composite",
         created_by=user.id,
         definition={
-            "nodes": [{"key": "composite", "type": "composite"}],
+            "nodes": [
+                {"key": "character_lin", "type": "keyframe"},
+                {"key": "composite", "type": "composite"},
+            ],
             "edges": [],
         },
     )
@@ -426,6 +430,47 @@ async def test_materialize_production_reuses_only_identical_accepted_trial(
     )
     await GraphService(session).publish(
         version_id=graph.current_version_id, published_by=user.id
+    )
+    canonical_run = NodeRun(
+        project_id=project.id,
+        graph_version_id=graph.current_version_id,
+        graph_node_id=materialized.nodes["character_lin"].id,
+        production_batch_id=trial_batch.id,
+        budget_reservation_id=trial_reservation.id,
+        attempt_no=1,
+        idempotency_key="accepted-trial-character-lin",
+        input_hash=hashlib.sha256(b"accepted-character-lin").hexdigest(),
+        status="completed",
+        input_snapshot={
+            "node_key": "character_lin",
+            "purpose": "character_reference",
+            "logical_shot_id": "shot-1",
+        },
+        created_by=user.id,
+    )
+    session.add(canonical_run)
+    await session.flush()
+    canonical_raw = b"\x89PNG\r\n\x1a\n" + b"canonical-lin" * 8
+    canonical_artifact = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key="trial/canonical-lin.png",
+        content_hash=hashlib.sha256(canonical_raw).hexdigest(),
+        mime_type="image/png",
+        byte_size=len(canonical_raw),
+        produced_by_run_id=canonical_run.id,
+    )
+    session.add(canonical_artifact)
+    await session.flush()
+    canonical_run.result_artifact_id = canonical_artifact.id
+    await promote_project_character_canonical(
+        session,
+        project_id=project.id,
+        name="Lin",
+        locked_prompt="fictional Chinese woman, oval face, dark eyes",
+        artifact=canonical_artifact,
+        source_run=canonical_run,
     )
     trial_run = NodeRun(
         project_id=project.id,
@@ -583,6 +628,15 @@ async def test_materialize_production_reuses_only_identical_accepted_trial(
         for run in videos
     )
     assert all(run.input_snapshot.get("canonical_source_run_id") for run in keyframes)
+    canonical_references = [
+        run
+        for run in media_runs
+        if run.input_snapshot.get("purpose") == "character_reference"
+    ]
+    assert len(canonical_references) == 2
+    assert all(run.status == "cached" for run in canonical_references)
+    assert all(run.result_artifact_id == canonical_artifact.id for run in canonical_references)
+    assert all(run.reused_from_run_id == canonical_run.id for run in canonical_references)
     assert all(
         run.input_snapshot.get("locked_version_refs") == batch.locked_version_refs
         for run in media_runs

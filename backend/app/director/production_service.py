@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.access.projects import ProjectService
+from app.assets.characters import project_canonical_bindings
 from app.assets.models import Episode, Scene, Shot
 from app.config import get_settings
 from app.consistency.identity_policy import identity_evidence_policy_snapshot
@@ -135,6 +136,7 @@ class DirectorProductionService:
             representative_shot_id=trial.representative_shot_id,
             stage="trial",
             authorization=authorization,
+            character_count=len(character.characters),
         )
         shot = next(
             (item for item in storyboard.shots if item.shot_id == trial.representative_shot_id),
@@ -263,6 +265,8 @@ class DirectorProductionService:
         )
         self._session.add(package_run)
         for run in runs:
+            if run.status != "queued":
+                continue
             await self._events.append_with_outbox(
                 project_id=project.id,
                 aggregate_type="production_batch",
@@ -337,6 +341,7 @@ class DirectorProductionService:
             representative_shot_id=trial_plan.representative_shot_id,
             stage="production",
             authorization=authorization,
+            character_count=len(character.characters),
         )
         estimated_production = cost.production_total
         if (
@@ -523,6 +528,8 @@ class DirectorProductionService:
             )
         )
         for run in runs:
+            if run.status != "queued":
+                continue
             await self._events.append_with_outbox(
                 project_id=project.id,
                 aggregate_type="production_batch",
@@ -764,11 +771,15 @@ class DirectorProductionService:
         if unknown:
             raise ConflictError("storyboard character anchors are incomplete")
         primary = character_by_name[shot.characters[0]]
-        trial_character_names = set(shot.characters)
+        reference_character_names = (
+            {item.name for item in character.characters}
+            if batch.batch_kind == "trial"
+            else set(shot.characters)
+        )
         ref_keys = [
             f"character_{item.character_id}"
             for item in character.characters
-            if item.name in trial_character_names
+            if item.name in reference_character_names
         ]
         primary_ref_key = f"character_{primary.character_id}"
         definition = dialogue_post_dub_definition(
@@ -792,14 +803,23 @@ class DirectorProductionService:
         await self._graphs.publish(version_id=graph_version.id, published_by=actor.id)
         batch_shot.graph_version_id = graph_version.id
         plans = {item.purpose: item.model_dump(mode="json") for item in selection.plans}
+        canonical_bindings = (
+            await project_canonical_bindings(
+                self._session,
+                project_id=project.id,
+                names=[item.name for item in character.characters if item.name in shot.characters],
+            )
+            if batch.batch_kind == "production"
+            else {}
+        )
         reference_runs: dict[str, NodeRun] = {}
         runs: list[NodeRun] = []
         for item in character.characters:
-            if item.name not in trial_character_names:
+            if item.name not in reference_character_names:
                 continue
             key = f"character_{item.character_id}"
             prompt = self._reference_prompt(item.locked_prompt, visual)
-            reference_runs[key] = self._new_run(
+            reference_run = self._new_run(
                 project=project,
                 actor=actor,
                 batch=batch,
@@ -815,8 +835,22 @@ class DirectorProductionService:
                 selection_plan=plans["character_reference"],
                 lead_identity_required=False,
             )
-            self._session.add(reference_runs[key])
-            runs.append(reference_runs[key])
+            if batch.batch_kind == "production":
+                binding = canonical_bindings[item.name]
+                reference_run.status = "cached"
+                reference_run.result_artifact_id = binding.artifact.id
+                reference_run.reused_from_run_id = binding.source_run.id
+                reference_run.output_summary = {
+                    "status": "cached",
+                    "project_canonical_reference_id": str(binding.reference_id),
+                    "canonical_artifact_id": str(binding.artifact.id),
+                    "canonical_content_hash": binding.artifact.content_hash,
+                    "reused_from_run_id": str(binding.source_run.id),
+                }
+                reference_run.finished_at = datetime.now(UTC)
+            reference_runs[key] = reference_run
+            self._session.add(reference_run)
+            runs.append(reference_run)
         await self._session.flush()
         dialogue_text = "\n".join(f"{line.speaker}: {line.text}" for line in shot.dialogue)
         video_generation_prompt = _video_generation_prompt(shot)
@@ -1334,6 +1368,7 @@ class DirectorProductionService:
         representative_shot_id: str,
         stage: Literal["trial", "production"],
         authorization: BudgetAuthorization,
+        character_count: int,
     ) -> None:
         """Verify that the authorized snapshot covers every planned paid call.
 
@@ -1359,16 +1394,13 @@ class DirectorProductionService:
         shot_count = len(storyboard.shots)
         expected = (
             {
-                "character_reference": len(set(representative.characters)),
+                "character_reference": character_count,
                 "keyframe": 1,
                 "video": 1,
                 "voice": 1,
             }
             if stage == "trial"
             else {
-                "character_reference": sum(
-                    len(set(shot.characters)) for shot in storyboard.shots
-                ),
                 "keyframe": shot_count,
                 "video": shot_count,
                 "voice": shot_count,

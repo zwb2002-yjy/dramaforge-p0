@@ -217,12 +217,27 @@ async def _seed_repair_review(
     ],
 )
 async def test_accepting_repair_propagates_exact_composite_to_root_batch(
-    session: AsyncSession, root_kind: str, expected_status: str
+    session: AsyncSession,
+    root_kind: str,
+    expected_status: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user, project, workflow, root, root_shot, repair, repair_shot, quality = (
         await _seed_repair_review(session, root_kind=root_kind)
     )
 
+    promoted_batches: list[UUID] = []
+
+    async def record_canonical_promotion(
+        _service: DirectorQualityService, *, batch: ProductionBatch
+    ) -> None:
+        promoted_batches.append(batch.id)
+
+    monkeypatch.setattr(
+        DirectorQualityService,
+        "_promote_trial_canonical_set",
+        record_canonical_promotion,
+    )
     result = await DirectorQualityService(session).review_production(
         project_id=project.id,
         batch_id=repair.id,
@@ -241,6 +256,7 @@ async def test_accepting_repair_propagates_exact_composite_to_root_batch(
     assert root_shot.semantic_hash == repair_shot.semantic_hash
     assert workflow.status == expected_status
     if root_kind == "trial":
+        assert promoted_batches == [root.id]
         trial_review_id = workflow.current_artifact_versions.get(
             ArtifactKind.TRIAL_REVIEW.value
         )
@@ -250,6 +266,8 @@ async def test_accepting_repair_propagates_exact_composite_to_root_batch(
         assert trial_review.payload["batch_id"] == str(root.id)
         assert trial_review.payload["accepted_quality"] is True
         assert trial_review.payload["quality_report_version_id"] == str(quality.id)
+    else:
+        assert promoted_batches == []
 
 
 @pytest.mark.asyncio

@@ -270,6 +270,7 @@ class DirectorShootingService:
             storyboard=storyboard,
             selection=selection,
             representative_shot_id=risk.representative_shot_id,
+            character_count=len(character_bible.characters),
         )
         trial = TrialPlanPayload(
             representative_shot_id=risk.representative_shot_id,
@@ -554,6 +555,7 @@ class DirectorShootingService:
         storyboard: StoryboardPlanPayload,
         selection: SelectionPlanPayload,
         representative_shot_id: str,
+        character_count: int,
     ) -> CostEstimatePayload:
         currency = project.budget_currency.upper()
         model_status: dict[str, str] = {item.purpose: item.status for item in selection.plans}
@@ -591,19 +593,14 @@ class DirectorShootingService:
             )
 
         count = len(storyboard.shots)
-        representative = next(
-            shot for shot in storyboard.shots if shot.shot_id == representative_shot_id
-        )
-        trial_reference_count = len(set(representative.characters))
-        production_reference_count = sum(len(set(shot.characters)) for shot in storyboard.shots)
+        _ = next(shot for shot in storyboard.shots if shot.shot_id == representative_shot_id)
         trial = [
-            line("character_reference", trial_reference_count),
+            line("character_reference", character_count),
             line("keyframe", 1),
             line("video", 1),
             line("voice", 1),
         ]
         production = [
-            line("character_reference", production_reference_count),
             line("keyframe", count),
             line("video", count),
             line("voice", count),

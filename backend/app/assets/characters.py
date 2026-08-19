@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.assets.models import Asset, Character, CharacterReference
 from app.config import get_settings
 from app.execution.artifact_lineage import get_or_create_artifact
-from app.execution.models import GraphNode, NodeRun, ProviderOperation
+from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.service import GraphService
 from app.shared.errors import ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
@@ -28,6 +28,15 @@ class CharacterWithCanonical:
     canonical_artifact_id: UUID
     canonical_content_hash: str
     canonical_mime_type: str
+
+
+@dataclass(frozen=True)
+class ProjectCanonicalBinding:
+    character_id: UUID
+    name: str
+    reference_id: UUID
+    artifact: Artifact
+    source_run: NodeRun
 
 
 async def create_canonical_generation_run(
@@ -208,6 +217,158 @@ async def register_lead_character(
         canonical_content_hash=artifact.content_hash,
         canonical_mime_type=artifact.mime_type,
     )
+
+
+async def promote_project_character_canonical(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    name: str,
+    locked_prompt: str,
+    artifact: Artifact,
+    source_run: NodeRun,
+) -> ProjectCanonicalBinding:
+    """Promote one accepted trial image into the project's canonical set."""
+    if (
+        artifact.project_id != project_id
+        or artifact.artifact_type != "image"
+        or artifact.storage_state != "available"
+        or artifact.deleted_at is not None
+        or artifact.produced_by_run_id != source_run.id
+        or source_run.project_id != project_id
+        or source_run.result_artifact_id != artifact.id
+        or source_run.status not in {"completed", "cached", "completed_after_cancel"}
+    ):
+        raise ValidationAppError("accepted canonical Artifact lineage is invalid")
+
+    asset = await session.scalar(
+        select(Asset).where(
+            Asset.project_id == project_id,
+            Asset.kind == "character",
+            Asset.name == name,
+        )
+    )
+    character: Character
+    if asset is None:
+        asset = Asset(
+            project_id=project_id,
+            kind="character",
+            name=name,
+            description=f"Fictional character {name}",
+            status="active",
+            metadata_json={"source": "director_trial"},
+        )
+        session.add(asset)
+        await session.flush()
+        character = Character(
+            id=asset.id,
+            locked_prompt=locked_prompt,
+            negative_prompt="",
+            calibration_state="creator_accepted_trial",
+        )
+        session.add(character)
+        await session.flush()
+    else:
+        existing_character = await session.get(Character, asset.id)
+        if existing_character is None:
+            raise ValidationAppError("character Asset has no Character row")
+        character = existing_character
+        character.locked_prompt = locked_prompt
+        character.calibration_state = "creator_accepted_trial"
+
+    existing_refs = list(
+        (
+            await session.execute(
+                select(CharacterReference).where(
+                    CharacterReference.character_id == character.id,
+                    CharacterReference.is_canonical.is_(True),
+                )
+            )
+        ).scalars()
+    )
+    for existing in existing_refs:
+        if existing.artifact_id == artifact.id:
+            return ProjectCanonicalBinding(
+                character_id=character.id,
+                name=name,
+                reference_id=existing.id,
+                artifact=artifact,
+                source_run=source_run,
+            )
+        existing.is_canonical = False
+
+    reference = CharacterReference(
+        character_id=character.id,
+        artifact_id=artifact.id,
+        object_key=artifact.object_key,
+        reference_kind="canonical",
+        is_canonical=True,
+    )
+    session.add(reference)
+    await session.flush()
+    return ProjectCanonicalBinding(
+        character_id=character.id,
+        name=name,
+        reference_id=reference.id,
+        artifact=artifact,
+        source_run=source_run,
+    )
+
+
+async def project_canonical_bindings(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    names: list[str],
+) -> dict[str, ProjectCanonicalBinding]:
+    """Return exact project-level Canonical bindings for the requested cast."""
+    requested = list(dict.fromkeys(names))
+    rows = list(
+        (
+            await session.execute(
+                select(Asset, Character, CharacterReference, Artifact, NodeRun)
+                .join(Character, Character.id == Asset.id)
+                .join(CharacterReference, CharacterReference.character_id == Character.id)
+                .join(Artifact, Artifact.id == CharacterReference.artifact_id)
+                .join(NodeRun, NodeRun.id == Artifact.produced_by_run_id)
+                .where(
+                    Asset.project_id == project_id,
+                    Asset.kind == "character",
+                    Asset.name.in_(requested),
+                    CharacterReference.is_canonical.is_(True),
+                )
+            )
+        ).tuples()
+    )
+    result: dict[str, ProjectCanonicalBinding] = {}
+    for asset, character, reference, artifact, source_run in rows:
+        if (
+            artifact.project_id != project_id
+            or artifact.artifact_type != "image"
+            or artifact.storage_state != "available"
+            or artifact.deleted_at is not None
+            or artifact.produced_by_run_id != source_run.id
+            or source_run.project_id != project_id
+            or source_run.result_artifact_id != artifact.id
+            or source_run.status not in {"completed", "cached", "completed_after_cancel"}
+        ):
+            continue
+        if asset.name in result:
+            raise ValidationAppError("multiple active Canonical references exist for a character")
+        result[asset.name] = ProjectCanonicalBinding(
+            character_id=character.id,
+            name=asset.name,
+            reference_id=reference.id,
+            artifact=artifact,
+            source_run=source_run,
+        )
+    missing = [name for name in requested if name not in result]
+    if missing:
+        raise ValidationAppError(
+            "project Canonical reference set is incomplete",
+            details={"code": "CANONICAL_REFERENCE_REQUIRED", "characters": missing},
+        )
+    return result
 
 
 async def require_canonical_for_shot(

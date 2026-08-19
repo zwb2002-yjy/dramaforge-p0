@@ -125,7 +125,7 @@ def _authorization(cost: CostEstimatePayload) -> BudgetAuthorization:
     )
 
 
-def test_cost_estimate_counts_every_character_reference_call() -> None:
+def test_cost_estimate_generates_each_project_canonical_once_during_trial() -> None:
     storyboard = _storyboard()
 
     cost = DirectorShootingService._build_cost_estimate(
@@ -133,14 +133,15 @@ def test_cost_estimate_counts_every_character_reference_call() -> None:
         storyboard=storyboard,
         selection=_selection(),
         representative_shot_id="shot-2",
+        character_count=2,
     )
 
     trial = {line.purpose: line for line in cost.trial}
     production = {line.purpose: line for line in cost.production}
     assert trial["character_reference"].quantity == 2
     assert cost.trial_total == Decimal("5")
-    assert production["character_reference"].quantity == 4
-    assert cost.production_total == Decimal("13")
+    assert "character_reference" not in production
+    assert cost.production_total == Decimal("9")
 
 
 def test_materialization_rejects_legacy_under_count_before_media_queueing() -> None:
@@ -150,12 +151,11 @@ def test_materialization_rejects_legacy_under_count_before_media_queueing() -> N
         storyboard=storyboard,
         selection=_selection(),
         representative_shot_id="shot-2",
+        character_count=2,
     )
     raw = cost.model_dump(mode="json")
-    raw["production"] = [
-        line for line in raw["production"] if line["purpose"] != "character_reference"
-    ]
-    raw["production_total"] = "9"
+    raw["production"] = [line for line in raw["production"] if line["purpose"] != "video"]
+    raw["production_total"] = "6"
     under_counted = CostEstimatePayload.model_validate(raw)
 
     with pytest.raises(ValidationAppError) as caught:
@@ -166,6 +166,7 @@ def test_materialization_rejects_legacy_under_count_before_media_queueing() -> N
             representative_shot_id="shot-2",
             stage="production",
             authorization=_authorization(under_counted),
+            character_count=2,
         )
 
     assert caught.value.details["code"] == "COST_OPERATION_COUNT_MISMATCH"
