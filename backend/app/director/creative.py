@@ -217,6 +217,28 @@ def _closure_matches(draft: StoryDraftPayload) -> bool:
             return True
         if SequenceMatcher(None, expected, actual, autojunk=False).ratio() >= 0.55:
             return True
+
+    # A creator's decisive closing line may be quoted exactly while the action
+    # around it is naturally paraphrased. Accept that case only when the
+    # scripted ending also overlaps the locked ending, so copying one line
+    # cannot disguise an unrelated final action.
+    scripted_ending = _normalize_closure_text(draft.episode_script.ending)
+    ending_overlap = (
+        SequenceMatcher(None, expected, scripted_ending, autojunk=False).ratio()
+        if scripted_ending
+        else 0.0
+    )
+    if ending_overlap >= 0.30:
+        normalized_dialogue = _normalize_closure_text(final_dialogue)
+        expected_clauses = [
+            _normalize_closure_text(part)
+            for part in re.split(r"[，,。；;：:！？!?…]+", draft.story_core.ending)
+        ]
+        if any(
+            len(clause) >= 6 and clause in normalized_dialogue
+            for clause in expected_clauses
+        ):
+            return True
     return False
 
 

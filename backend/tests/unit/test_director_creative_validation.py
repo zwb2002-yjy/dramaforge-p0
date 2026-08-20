@@ -68,3 +68,38 @@ def test_story_review_rejects_unrelated_ending() -> None:
 
     assert review.status == "needs_revision"
     assert review.closure_issues == ["故事内核的结局与剧本落点表达不一致。"]
+
+
+def test_story_review_accepts_paraphrased_action_with_locked_final_line() -> None:
+    draft = _draft(
+        core_ending=(
+            "她按下十三楼，门开后独自迈入空走廊；"
+            "手机里未来的自己说：你比当时的我更勇敢。"
+        ),
+        script_ending=(
+            "她深吸一口气，毅然按下按钮。门开，通向一束明亮的空走廊。"
+            "手机再次响起，传来释然的低语。"
+        ),
+        final_lines=["如果不按，我才会后悔一辈子。", "你比当时的我更勇敢。"],
+    )
+
+    review = review_story_deterministically(draft)
+
+    assert review.status == "passed"
+    assert review.closure_issues == []
+
+
+def test_story_review_rejects_locked_line_with_unrelated_final_action() -> None:
+    draft = _draft(
+        core_ending=(
+            "她按下十三楼，门开后独自迈入空走廊；"
+            "手机里未来的自己说：你比当时的我更勇敢。"
+        ),
+        script_ending="电梯坠入地下，她丢下手机逃离现场。",
+        final_lines=["快跑。", "你比当时的我更勇敢。"],
+    )
+
+    review = review_story_deterministically(draft)
+
+    assert review.status == "needs_revision"
+    assert review.closure_issues == ["故事内核的结局与剧本落点表达不一致。"]
