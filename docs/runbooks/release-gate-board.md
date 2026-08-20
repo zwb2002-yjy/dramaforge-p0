@@ -12,10 +12,10 @@
 
 | 字段 | 当前事实 |
 |---|---|
-| 运行候选 | `acaa6c4f602adb49a1c0bded22d48560acd35bc1` (`dev`) |
-| 当前候选 | `acaa6c4`；由 detached 干净 worktree构建，主工作区既有 CI/依赖改动未进入候选；数据库 head `20260819_0028` |
-| 自动化基线 | 候选镜像/锁文件后端全量 633 passed / 22 skipped、Unified/Provider 聚焦 108 passed / 2 skipped、隔离 PostgreSQL migration 2 passed、前端 54 项、typecheck/build、Ruff/mypy 通过；Chromium 11/11；候选镜像内 G2 smoke 与 NodeRun source commit 数据库事实通过；同源 Docker Compose 栈健康 |
-| 真实证据 | 一个 Agnes 真实视频镜头被 Q3 人工拒绝；当前 HEAD 仍没有新的完整试拍、修复、全片或用户测试 |
+| 运行候选 | `1d921fb5b332f0809f9b9924872e619030459de2` (`dev`) |
+| 当前候选 | `1d921fb`；运行中的 API、Dispatcher、两个 Worker 与 Frontend 同源，数据库 head `20260819_0028` |
+| 自动化基线 | 当前候选后端全量 `642 passed / 16 skipped`、Unified/Provider 聚焦 `115 passed`、隔离 PostgreSQL migration `2 passed`、前端 `56 passed`、typecheck/build、Ruff/mypy 通过；Chromium `11/11`；候选镜像内 G2 smoke 与 NodeRun source commit 数据库事实通过；同源 Docker Compose 栈健康 |
+| 真实证据 | 一个 Agnes 真实视频镜头被 Q3 人工拒绝；`2026-08-20` 单次、`0.01 CNY` 上限 Agnes 图片 v2 `image_i2i` 账号 Probe 通过，Binding 已 account-verified，成本未报告；当前 HEAD 仍没有新的 Director I2I Artifact、完整试拍、修复、全片或用户测试 |
 | 历史边界 | `0cb923f` 曾关闭 A2，但不是当前候选；只作为回归目标，不计入当前 HEAD 发布通过数 |
 
 ## Gate A：核心体验
@@ -24,8 +24,8 @@
 |---|---|---|---|---|
 | A1 | 三入口、四阶段、四确认和变更预览 | 当前候选的真实后端浏览器 E2E | `PARTIAL` | Visual 2.0 canonical 路由和 Mock API E2E 已通过；补 authenticated live-stack |
 | A2 | 快速/专业模式共享同一事实源 | 双模式读取同一版本、批次、预算和血缘 | `PARTIAL` | 在当前候选复现历史 A2 场景 |
-| A3 | 试拍、生产和修复费用分别授权 | 真实请求、Reservation、ProviderOperation 和实际费用 | `OPEN` | 完成单请求 preflight 与书面授权 |
-| A4 | Canonical 和必需参数进入有效请求 | Spy + 真实 EffectiveRequest/TranslationReport | `PARTIAL` | G2 Spy 已证明 Canonical/首帧 ID 与 SHA-256、严格参数、EffectiveRequest、TranslationReport 和空 dropped_options；Agnes 图片 v2 已冻结 `1K + 9:16`，下一步在单次书面授权下跑真实 I2I/I2V |
+| A3 | 试拍、生产和修复费用分别授权 | 真实请求、Reservation、ProviderOperation 和实际费用 | `PARTIAL` | 已完成一次明确授权的账号 Probe，仍需新授权下的真实 Director I2I 和账本/ProviderOperation 证据 |
+| A4 | Canonical 和必需参数进入有效请求 | Spy + 真实 EffectiveRequest/TranslationReport | `PARTIAL` | G2 Spy 已证明 Canonical/首帧 ID 与 SHA-256、严格参数、EffectiveRequest、TranslationReport 和空 dropped_options；账号 Probe 仅证明本账号 I2I 能力，仍需独立授权下的真实 Unified Director I2I |
 | A5 | 代表镜头真实暴露风险或支持继续 | 试拍 Artifact、Q0–Q6、限制和用户决定 | `PARTIAL` | 现有 Agnes 失败镜头补齐产品内验收证据 |
 | A6 | 一个失败镜头被局部修复 | 新旧 NodeRun、复用 Artifact、额外授权和费用 | `OPEN` | 对现有失败镜头执行一次授权修复 |
 | A7 | 15–30 秒中文对白作品和四项交付 | 同一候选的多镜头真实全链 | `OPEN` | 完成 1 主角、3 镜头黄金样本 |

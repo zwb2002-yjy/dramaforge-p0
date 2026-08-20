@@ -286,6 +286,267 @@ class DirectorProductionService:
         _ = approval
         return batch, runs
 
+    async def materialize_trial_keyframe(
+        self,
+        *,
+        project_id: UUID,
+        actor: User,
+        idempotency_key: str,
+    ) -> tuple[ProductionBatch, list[NodeRun]]:
+        """Materialize one frozen Canonical -> keyframe I2I validation run.
+
+        Unlike the full representative-trial materializer, this controlled
+        slice intentionally has no video, voice, or post-production nodes.
+        """
+        project = await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
+        workflow = await self._director.get_workflow(
+            project_id=project_id, actor=actor, for_update=True
+        )
+        existing = await self._batch_by_key(project_id, idempotency_key)
+        if existing is not None:
+            if existing.batch_kind != "trial_keyframe":
+                raise ConflictError("idempotency key belongs to another batch kind")
+            return existing, await self._batch_runs(existing.id)
+        if workflow.status != WorkflowStatus.TRIAL_RUNNING.value:
+            raise ValidationAppError(
+                "trial keyframe can only be materialized after explicit budget approval",
+                details={"code": "TRIAL_AUTHORIZATION_REQUIRED"},
+            )
+        approval, authorization = await self._active_budget_approval(
+            project_id=project_id,
+            workflow_id=workflow.id,
+            approval_kind=ApprovalKind.TRIAL_BUDGET,
+        )
+        prior = await self._session.scalar(
+            select(ProductionBatch.id).where(
+                ProductionBatch.project_id == project.id,
+                ProductionBatch.workflow_run_id == workflow.id,
+                ProductionBatch.budget_authorization_id == authorization.id,
+                ProductionBatch.batch_kind == "trial_keyframe",
+            )
+        )
+        if prior is not None:
+            raise ConflictError(
+                "this trial budget already has a materialized keyframe validation",
+                details={"code": "TRIAL_KEYFRAME_ALREADY_MATERIALIZED"},
+            )
+
+        artifacts = await self._locked_inputs(approval.approved_artifact_versions)
+        storyboard = StoryboardPlanPayload.model_validate(
+            artifacts[ArtifactKind.STORYBOARD_PLAN].payload
+        )
+        _character = CharacterBiblePayload.model_validate(
+            artifacts[ArtifactKind.CHARACTER_BIBLE].payload
+        )
+        _visual = VisualBiblePayload.model_validate(artifacts[ArtifactKind.VISUAL_BIBLE].payload)
+        selection = SelectionPlanPayload.model_validate(
+            artifacts[ArtifactKind.SELECTION_PLAN].payload
+        )
+        cost = CostEstimatePayload.model_validate(artifacts[ArtifactKind.COST_ESTIMATE].payload)
+        trial = TrialPlanPayload.model_validate(artifacts[ArtifactKind.TRIAL_PLAN].payload)
+        shot = next(
+            (item for item in storyboard.shots if item.shot_id == trial.representative_shot_id),
+            None,
+        )
+        if shot is None:
+            raise ConflictError("trial plan representative shot is absent from storyboard")
+        if len(shot.characters) != 1:
+            raise ValidationAppError(
+                "a one-request trial keyframe requires exactly one character",
+                details={"code": "TRIAL_KEYFRAME_SINGLE_CHARACTER_REQUIRED"},
+            )
+        estimated_keyframe, keyframe_plan = self._assert_trial_keyframe_cost_contract(
+            cost=cost,
+            selection=selection,
+            authorization=authorization,
+        )
+        if estimated_keyframe > authorization.limit_amount:
+            raise ValidationAppError(
+                "trial keyframe estimate exceeds the authorized budget limit",
+                details={
+                    "code": "TRIAL_KEYFRAME_BUDGET_LIMIT_INSUFFICIENT",
+                    "estimated_amount": str(estimated_keyframe),
+                    "authorized_limit": str(authorization.limit_amount),
+                    "currency": authorization.currency,
+                },
+            )
+        canonical = (
+            await project_canonical_bindings(
+                self._session,
+                project_id=project.id,
+                names=[shot.characters[0]],
+            )
+        ).get(shot.characters[0])
+        if canonical is None:
+            raise ValidationAppError(
+                "trial keyframe requires a verified project Canonical",
+                details={"code": "TRIAL_KEYFRAME_CANONICAL_REQUIRED"},
+            )
+
+        locked_refs = {
+            kind.value: str(row.id)
+            for kind, row in artifacts.items()
+            if kind
+            in {
+                ArtifactKind.CHARACTER_BIBLE,
+                ArtifactKind.VISUAL_BIBLE,
+                ArtifactKind.STORYBOARD_PLAN,
+                ArtifactKind.RISK_REPORT,
+                ArtifactKind.SELECTION_PLAN,
+                ArtifactKind.COST_ESTIMATE,
+                ArtifactKind.TRIAL_PLAN,
+            }
+        }
+        selection_snapshot = {
+            **selection.model_dump(mode="json"),
+            "execution_scope": "trial_keyframe_i2i",
+            "submission_policy": {"maximum_submissions": 1, "retry_rule": "no_retry"},
+        }
+        batch = ProductionBatch(
+            project_id=project.id,
+            workflow_run_id=workflow.id,
+            batch_kind="trial_keyframe",
+            idempotency_key=idempotency_key,
+            status="materializing",
+            budget_authorization_id=authorization.id,
+            locked_version_refs=locked_refs,
+            selected_shot_ids=[shot.shot_id],
+            template_keys=["trial-keyframe-i2i-v1"],
+            quality_policy_id=QUALITY_POLICY_V1,
+            selection_snapshot=selection_snapshot,
+            semantic_hash=content_hash(
+                {
+                    "kind": "trial_keyframe",
+                    "versions": locked_refs,
+                    "selected_shots": [shot.shot_id],
+                    "selection": selection_snapshot,
+                    "budget_authorization_id": str(authorization.id),
+                }
+            ),
+            created_by=actor.id,
+        )
+        self._session.add(batch)
+        await self._session.flush()
+        reservation = BudgetReservation(
+            project_id=project.id,
+            batch_id=batch.id,
+            authorization_id=authorization.id,
+            idempotency_key=f"{idempotency_key}:budget",
+            reserved_amount=(
+                estimated_keyframe if estimated_keyframe > 0 else authorization.limit_amount
+            ),
+            currency=authorization.currency,
+            status="reserved",
+        )
+        self._session.add(reservation)
+        await self._session.flush()
+        shot_row = await self._project_storyboard_shot(
+            project=project,
+            storyboard=storyboard,
+            logical_shot_id=shot.shot_id,
+        )
+        batch_shot = ProductionBatchShot(
+            project_id=project.id,
+            batch_id=batch.id,
+            logical_shot_id=shot.shot_id,
+            shot_id=shot_row.id,
+            status="materializing",
+            semantic_hash=self._shot_semantic_hash(
+                shot=shot.model_dump(mode="json"),
+                locked_refs=locked_refs,
+                selection_snapshot=selection_snapshot,
+            ),
+        )
+        self._session.add(batch_shot)
+        await self._session.flush()
+        graph, graph_version = await self._create_shot_graph_version(
+            project_id=project.id,
+            shot_id=cast(UUID, batch_shot.shot_id),
+            created_by=actor.id,
+            definition={
+                "template_key": "trial-keyframe-i2i-v1",
+                "template_version": "1.0.0",
+                "quality_policy_id": QUALITY_POLICY_V1,
+                "nodes": [
+                    {"key": "keyframe", "type": "keyframe", "display_name": "Trial keyframe"}
+                ],
+                "edges": [],
+                "workflow_run_id": str(batch.workflow_run_id),
+                "production_batch_id": str(batch.id),
+                "logical_shot_id": shot.shot_id,
+            },
+        )
+        materialized = await self._graphs.materialize_definition(version_id=graph_version.id)
+        await self._graphs.publish(version_id=graph_version.id, published_by=actor.id)
+        _ = graph
+        batch_shot.graph_version_id = graph_version.id
+        run = self._new_run(
+            project=project,
+            actor=actor,
+            batch=batch,
+            reservation=reservation,
+            batch_shot=batch_shot,
+            graph_version_id=graph_version.id,
+            graph_node_id=materialized.nodes["keyframe"].id,
+            node_key="keyframe",
+            purpose="keyframe",
+            prompt=shot.image_prompt,
+            shot=shot,
+            storyboard=storyboard,
+            selection_plan=keyframe_plan,
+            lead_identity_required=True,
+            canonical_source_run_id=canonical.source_run.id,
+        )
+        run.input_snapshot = {
+            **run.input_snapshot,
+            "canonical_artifact_id": str(canonical.artifact.id),
+            "canonical_object_key": canonical.artifact.object_key,
+            "canonical_content_hash": canonical.artifact.content_hash,
+            "canonical_mime_type": canonical.artifact.mime_type,
+            "canonical_reference_id": str(canonical.reference_id),
+            "trial_keyframe_only": True,
+            "submission_policy": {"maximum_submissions": 1, "retry_rule": "no_retry"},
+        }
+        self._session.add(run)
+        batch.status = "running"
+        batch.started_at = datetime.now(UTC)
+        batch_shot.status = "queued"
+        self._session.add(
+            WorkflowStepRun(
+                project_id=project.id,
+                workflow_run_id=workflow.id,
+                step_key="materialize_trial_keyframe",
+                skill_id="production_preflight",
+                skill_version="1.0.0",
+                execution_kind="domain_service",
+                idempotency_key=f"{idempotency_key}:materialize",
+                status="succeeded",
+                input_version_refs=list(locked_refs.values()),
+                output_version_refs=[],
+                service_run_ref=f"production-batch:{batch.id}",
+                started_at=datetime.now(UTC),
+                finished_at=datetime.now(UTC),
+            )
+        )
+        await self._events.append_with_outbox(
+            project_id=project.id,
+            aggregate_type="production_batch",
+            aggregate_id=batch.id,
+            event_type="director.node_run.queued",
+            topic="node_run.enqueue",
+            payload={
+                "node_run_id": str(run.id),
+                "production_batch_id": str(batch.id),
+                "logical_shot_id": shot.shot_id,
+            },
+            actor_id=actor.id,
+        )
+        await self._session.flush()
+        await self._session.refresh(batch)
+        await self._session.commit()
+        _ = approval
+        return batch, [run]
+
     async def materialize_production(
         self,
         *,
@@ -1491,6 +1752,65 @@ class DirectorProductionService:
                 "budget authorization does not match the frozen cost estimate",
                 details={"code": "BUDGET_PRICING_SNAPSHOT_MISMATCH"},
             )
+
+    @staticmethod
+    def _assert_trial_keyframe_cost_contract(
+        *,
+        cost: CostEstimatePayload,
+        selection: SelectionPlanPayload,
+        authorization: BudgetAuthorization,
+    ) -> tuple[Decimal, dict[str, object]]:
+        """Validate the one-image G4 scope against frozen Director inputs."""
+        keyframe_plans = [item for item in selection.plans if item.purpose == "keyframe"]
+        if len(keyframe_plans) != 1:
+            raise ValidationAppError(
+                "trial keyframe selection is missing or ambiguous",
+                details={"code": "TRIAL_KEYFRAME_SELECTION_INVALID"},
+            )
+        plan = keyframe_plans[0]
+        if (
+            plan.status != "ready"
+            or plan.model_binding_id is None
+            or "image.i2i" not in plan.required_capabilities
+            or "image.i2i" not in plan.supported_capabilities
+        ):
+            raise ValidationAppError(
+                "trial keyframe requires a ready image_i2i Binding",
+                details={"code": "TRIAL_KEYFRAME_I2I_REQUIRED"},
+            )
+        lines = [line for line in cost.trial if line.purpose == "keyframe"]
+        if len(lines) != 1:
+            raise ValidationAppError(
+                "trial keyframe cost is missing or ambiguous",
+                details={"code": "TRIAL_KEYFRAME_COST_INVALID"},
+            )
+        line = lines[0]
+        snapshot = dict(plan.pricing_snapshot or {})
+        try:
+            frozen_unit = Decimal(str(snapshot.get("unit_amount")))
+        except (ArithmeticError, TypeError, ValueError) as exc:
+            raise ValidationAppError(
+                "trial keyframe Binding price is invalid",
+                details={"code": "TRIAL_KEYFRAME_PRICING_INVALID"},
+            ) from exc
+        frozen_currency = str(snapshot.get("currency") or "").upper()
+        if (
+            line.status != "known"
+            or line.quantity != 1
+            or line.unit_amount is None
+            or line.estimated_amount is None
+            or line.unit_amount != frozen_unit
+            or line.estimated_amount != frozen_unit
+            or line.currency.upper() != frozen_currency
+            or cost.currency.upper() != frozen_currency
+            or authorization.currency.upper() != frozen_currency
+            or authorization.pricing_snapshot_id != cost.pricing_snapshot_id
+        ):
+            raise ValidationAppError(
+                "trial keyframe cost differs from its frozen Binding price",
+                details={"code": "TRIAL_KEYFRAME_COST_INVALID"},
+            )
+        return line.estimated_amount, plan.model_dump(mode="json")
 
     async def _active_budget_approval(
         self,

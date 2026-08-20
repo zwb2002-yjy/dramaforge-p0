@@ -173,6 +173,7 @@ def _aware(value: datetime) -> datetime:
 def _expected_authorization_kind(batch_kind: str) -> str:
     expected = {
         "trial": "trial_budget",
+        "trial_keyframe": "trial_budget",
         "production": "production_budget",
         "repair": "repair_budget",
     }.get(batch_kind)

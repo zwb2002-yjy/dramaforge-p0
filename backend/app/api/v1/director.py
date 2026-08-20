@@ -34,6 +34,7 @@ from app.director.schemas import (
     MaterializeBatchRequest,
     MaterializeBatchResult,
     MaterializedNodeRunRead,
+    MaterializeTrialKeyframeRequest,
     PreferenceInterpretRequest,
     ProductionBatchRead,
     ProductionExportRead,
@@ -360,6 +361,29 @@ async def materialize_trial(
     _: CsrfDep,
 ) -> MaterializeBatchResult:
     batch, runs = await DirectorProductionService(session).materialize_trial(
+        project_id=project_id,
+        actor=user,
+        idempotency_key=body.idempotency_key,
+    )
+    return MaterializeBatchResult(
+        batch=ProductionBatchRead.model_validate(batch),
+        node_runs=[MaterializedNodeRunRead.model_validate(run) for run in runs],
+    )
+
+
+@router.post(
+    "/projects/{project_id}/director/trial/keyframe/materialize",
+    response_model=MaterializeBatchResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def materialize_trial_keyframe(
+    project_id: UUID,
+    body: MaterializeTrialKeyframeRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> MaterializeBatchResult:
+    batch, runs = await DirectorProductionService(session).materialize_trial_keyframe(
         project_id=project_id,
         actor=user,
         idempotency_key=body.idempotency_key,
