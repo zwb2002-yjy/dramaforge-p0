@@ -18,10 +18,16 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TYPE node_type ADD VALUE IF NOT EXISTS "
-        "'identity_review' AFTER 'keyframe'"
-    )
+    # ALTER TYPE ... ADD VALUE must run outside a transaction block in
+    # PostgreSQL.  Without autocommit_block, asyncpg refuses to PREPARE
+    # any statement that references the new value later in the same
+    # migration run — in particular migration 0029 assigns
+    # 'identity_review' to graph_nodes.node_type in the same transaction.
+    with op.get_context().autocommit_block():
+        op.execute(
+            "ALTER TYPE node_type ADD VALUE IF NOT EXISTS "
+            "'identity_review' AFTER 'keyframe'"
+        )
     op.alter_column(
         "characters",
         "calibration_state",
