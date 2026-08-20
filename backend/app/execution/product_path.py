@@ -1567,22 +1567,6 @@ async def _execute_unified_media_node_run(
                 op.error_summary = error_text
                 op.completed_at = datetime.now(UTC)
                 await session.commit()
-                policy = (run.input_snapshot or {}).get("submission_policy")
-                if isinstance(policy, dict) and policy.get("retry_rule") == "no_retry":
-                    op.status = "failed"
-                    op.error_code = "PROVIDER_RATE_LIMITED_NO_RETRY"
-                    op.error_summary = (
-                        "provider refused the single authorized submission with rate limiting; "
-                        "the frozen no-retry policy prevents resubmission"
-                    )
-                    op.completed_at = datetime.now(UTC)
-                    await _commit_terminal_failure(
-                        session,
-                        run=run,
-                        error_code="PROVIDER_RATE_LIMITED_NO_RETRY",
-                        error_summary=op.error_summary,
-                    )
-                    raise ValidationAppError("PROVIDER_RATE_LIMITED_NO_RETRY")
                 raise ProviderRateLimitedError(retry_after_seconds=retry_after)
             op.status = "failed"
             op.error_code = "PROVIDER_CREATE_FAILED"

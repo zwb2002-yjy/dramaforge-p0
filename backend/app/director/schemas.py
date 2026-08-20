@@ -301,10 +301,6 @@ class MaterializeBatchRequest(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=160)
 
 
-class MaterializeTrialKeyframeRequest(MaterializeBatchRequest):
-    """Request shape for the deliberately single-node I2I trial slice."""
-
-
 class MaterializedNodeRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
