@@ -1,6 +1,7 @@
 from app.director.creative import (
     StoryDraftPayload,
     canonicalize_dialogue_speakers,
+    canonicalize_self_variant_characters,
     review_story_deterministically,
 )
 
@@ -77,12 +78,10 @@ def test_story_review_rejects_unrelated_ending() -> None:
 def test_story_review_accepts_paraphrased_action_with_locked_final_line() -> None:
     draft = _draft(
         core_ending=(
-            "她按下十三楼，门开后独自迈入空走廊；"
-            "手机里未来的自己说：你比当时的我更勇敢。"
+            "她按下十三楼，门开后独自迈入空走廊；手机里未来的自己说：你比当时的我更勇敢。"
         ),
         script_ending=(
-            "她深吸一口气，毅然按下按钮。门开，通向一束明亮的空走廊。"
-            "手机再次响起，传来释然的低语。"
+            "她深吸一口气，毅然按下按钮。门开，通向一束明亮的空走廊。手机再次响起，传来释然的低语。"
         ),
         final_lines=["如果不按，我才会后悔一辈子。", "你比当时的我更勇敢。"],
     )
@@ -96,8 +95,7 @@ def test_story_review_accepts_paraphrased_action_with_locked_final_line() -> Non
 def test_story_review_rejects_locked_line_with_unrelated_final_action() -> None:
     draft = _draft(
         core_ending=(
-            "她按下十三楼，门开后独自迈入空走廊；"
-            "手机里未来的自己说：你比当时的我更勇敢。"
+            "她按下十三楼，门开后独自迈入空走廊；手机里未来的自己说：你比当时的我更勇敢。"
         ),
         script_ending="电梯坠入地下，她丢下手机逃离现场。",
         final_lines=["快跑。", "你比当时的我更勇敢。"],
@@ -178,6 +176,62 @@ def test_dialogue_speaker_aliases_remain_blocked_when_ambiguous() -> None:
 
     assert normalized.episode_script.dialogue[0].speaker == "未来的我（手机语音）"
     assert review.status == "needs_revision"
-    assert review.logic_issues == [
-        "对白包含未在人物动机中定义的说话人：未来的我（手机语音）"
-    ]
+    assert review.logic_issues == ["对白包含未在人物动机中定义的说话人：未来的我（手机语音）"]
+
+
+def test_future_voice_variant_is_merged_into_single_character() -> None:
+    draft = StoryDraftPayload.model_validate(
+        {
+            "story_core": {
+                "selected_concept_id": "elevator-growth",
+                "theme": "直面过去",
+                "core_conflict": "林晚必须决定是否继续逃避。",
+                "emotional_direction": "不安到坚定",
+                "ending": "林晚迈出电梯，未来的自己肯定了她的勇气。",
+                "characters": [
+                    {
+                        "name": "林晚",
+                        "identity": "年轻女性",
+                        "desire": "成长",
+                        "fear_or_cost": "重历痛苦",
+                    },
+                    {
+                        "name": "未来的林晚（声音）",
+                        "identity": "未来声音",
+                        "desire": "保护过去的自己",
+                        "fear_or_cost": "阻碍成长",
+                    },
+                ],
+            },
+            "episode_script": {
+                "title": "十三楼",
+                "target_duration_seconds": 20,
+                "setup": "林晚独自在电梯里。",
+                "turn": "她决定不再逃避。",
+                "ending": "林晚迈出电梯，手机传来未来自己的肯定。",
+                "dialogue": [
+                    {"speaker": "林晚", "text": "我不再逃了。", "emotion": "坚定"},
+                    {"speaker": "未来的林晚（声音）", "text": "你更勇敢。", "emotion": "温柔"},
+                ],
+            },
+        }
+    )
+
+    merged = canonicalize_self_variant_characters(draft)
+    normalized = canonicalize_dialogue_speakers(merged)
+
+    assert [item.name for item in normalized.story_core.characters] == ["林晚"]
+    assert "相同人物身份与声音设计" in normalized.story_core.characters[0].identity
+    assert [line.speaker for line in normalized.episode_script.dialogue] == ["林晚", "林晚"]
+
+
+def test_distinct_story_characters_are_not_merged() -> None:
+    draft = _draft(
+        core_ending="孙女决定归来，爷爷答应等待。",
+        script_ending="孙女决定归来，爷爷答应等待。",
+        final_lines=["我会回来。", "我会等你。"],
+    )
+
+    normalized = canonicalize_self_variant_characters(draft)
+
+    assert [item.name for item in normalized.story_core.characters] == ["孙女", "爷爷"]

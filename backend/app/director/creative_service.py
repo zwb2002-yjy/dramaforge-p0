@@ -15,6 +15,7 @@ from app.director.creative import (
     PreferenceUnderstandingPayload,
     StoryDraftPayload,
     canonicalize_dialogue_speakers,
+    canonicalize_self_variant_characters,
     parse_concept_set,
     parse_preference_understanding,
     parse_story_draft,
@@ -235,7 +236,9 @@ class DirectorCreativeService:
             "core_conflict, emotional_direction, ending, characters(name, identity, desire, "
             "fear_or_cost). episode_script requires title, target_duration_seconds 15-30, "
             "setup, turn, ending and dialogue(speaker,text,emotion). Use 1-2 main characters "
-            "where possible and concise Mandarin dialogue.\nConcept set:\n"
+            "where possible and concise Mandarin dialogue. A future/past self, inner voice, "
+            "or self-recording is the same character: keep one character entry and the same "
+            "speaker name unless a genuinely different person appears.\nConcept set:\n"
             f"{json.dumps(concept_version.payload, ensure_ascii=False)}\nLocked choices:\n"
             f"{json.dumps(locked_choices, ensure_ascii=False)}"
         )
@@ -258,6 +261,7 @@ class DirectorCreativeService:
         # LLM output cannot overrule the creator's explicitly locked story choices.
         story_core = draft.story_core.model_copy(update=locked_choices)
         draft = draft.model_copy(update={"story_core": story_core})
+        draft = canonicalize_self_variant_characters(draft)
         draft = canonicalize_dialogue_speakers(draft)
         review = review_story_deterministically(draft)
         story_version = await self._director.publish_artifact_version(

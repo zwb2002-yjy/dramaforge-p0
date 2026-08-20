@@ -111,6 +111,36 @@ class StoryDraftPayload(BaseModel):
 
 _SPEAKER_QUALIFIER_RE = re.compile(r"[（(][^）)]*[）)]")
 _SELF_SPEAKER_ALIASES = {"我", "未来的我", "未来的自己"}
+_SELF_VARIANT_MARKERS = ("未来", "过去", "年老", "年轻", "声音", "语音", "内心", "自己")
+
+
+def canonicalize_self_variant_characters(draft: StoryDraftPayload) -> StoryDraftPayload:
+    """Collapse future/past/inner-voice variants of one identity."""
+
+    characters = list(draft.story_core.characters)
+    if len(characters) <= 1:
+        return draft
+    for base in sorted(characters, key=lambda item: len(item.name)):
+        variants = [item for item in characters if item is not base]
+        if not variants:
+            continue
+        if all(
+            base.name in variant.name
+            and any(
+                marker in variant.name.replace(base.name, "")
+                for marker in _SELF_VARIANT_MARKERS
+            )
+            for variant in variants
+        ):
+            identity_note = "同一角色的未来、过去或内心声音使用相同人物身份与声音设计"
+            merged = base.model_copy(
+                update={
+                    "identity": f"{base.identity}；{identity_note}"[:300],
+                }
+            )
+            story_core = draft.story_core.model_copy(update={"characters": [merged]})
+            return draft.model_copy(update={"story_core": story_core})
+    return draft
 
 
 def canonicalize_dialogue_speakers(draft: StoryDraftPayload) -> StoryDraftPayload:
