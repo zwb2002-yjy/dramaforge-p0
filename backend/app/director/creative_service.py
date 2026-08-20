@@ -14,6 +14,7 @@ from app.director.creative import (
     ConceptSetPayload,
     PreferenceUnderstandingPayload,
     StoryDraftPayload,
+    canonicalize_dialogue_speakers,
     parse_concept_set,
     parse_preference_understanding,
     parse_story_draft,
@@ -257,6 +258,7 @@ class DirectorCreativeService:
         # LLM output cannot overrule the creator's explicitly locked story choices.
         story_core = draft.story_core.model_copy(update=locked_choices)
         draft = draft.model_copy(update={"story_core": story_core})
+        draft = canonicalize_dialogue_speakers(draft)
         review = review_story_deterministically(draft)
         story_version = await self._director.publish_artifact_version(
             project_id=project_id,

@@ -109,6 +109,34 @@ class StoryDraftPayload(BaseModel):
     episode_script: EpisodeScriptPayload
 
 
+_SPEAKER_QUALIFIER_RE = re.compile(r"[（(][^）)]*[）)]")
+_SELF_SPEAKER_ALIASES = {"我", "未来的我", "未来的自己"}
+
+
+def canonicalize_dialogue_speakers(draft: StoryDraftPayload) -> StoryDraftPayload:
+    """Map explicit same-character speaker aliases to locked character names."""
+
+    character_names = [item.name for item in draft.story_core.characters]
+
+    def canonical_name(raw_speaker: str) -> str:
+        base = _SPEAKER_QUALIFIER_RE.sub("", raw_speaker).strip()
+        if base in character_names:
+            return base
+        contained = [name for name in character_names if name and name in base]
+        if len(contained) == 1:
+            return contained[0]
+        if len(character_names) == 1 and base in _SELF_SPEAKER_ALIASES:
+            return character_names[0]
+        return raw_speaker
+
+    dialogue = [
+        line.model_copy(update={"speaker": canonical_name(line.speaker)})
+        for line in draft.episode_script.dialogue
+    ]
+    script = draft.episode_script.model_copy(update={"dialogue": dialogue})
+    return draft.model_copy(update={"episode_script": script})
+
+
 class PreferenceUnderstandingPayload(BaseModel):
     liked: list[str] = Field(default_factory=list, max_length=10)
     disliked: list[str] = Field(default_factory=list, max_length=10)

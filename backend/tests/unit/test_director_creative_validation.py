@@ -1,4 +1,8 @@
-from app.director.creative import StoryDraftPayload, review_story_deterministically
+from app.director.creative import (
+    StoryDraftPayload,
+    canonicalize_dialogue_speakers,
+    review_story_deterministically,
+)
 
 
 def _draft(*, core_ending: str, script_ending: str, final_lines: list[str]):
@@ -103,3 +107,77 @@ def test_story_review_rejects_locked_line_with_unrelated_final_action() -> None:
 
     assert review.status == "needs_revision"
     assert review.closure_issues == ["故事内核的结局与剧本落点表达不一致。"]
+
+
+def test_dialogue_speaker_aliases_are_canonicalized_for_single_character() -> None:
+    draft = StoryDraftPayload.model_validate(
+        {
+            "story_core": {
+                "selected_concept_id": "elevator-growth",
+                "theme": "直面过去",
+                "core_conflict": "林晚必须决定是否继续逃避。",
+                "emotional_direction": "不安到坚定",
+                "ending": "林晚迈出电梯，未来的自己肯定了她的勇气。",
+                "characters": [
+                    {
+                        "name": "林晚",
+                        "identity": "独自乘坐电梯的成年女性",
+                        "desire": "摆脱过去的阴影",
+                        "fear_or_cost": "再次经历痛苦",
+                    }
+                ],
+            },
+            "episode_script": {
+                "title": "十三楼",
+                "target_duration_seconds": 20,
+                "setup": "林晚独自在电梯里。",
+                "turn": "她决定不再逃避。",
+                "ending": "林晚迈出电梯，手机传来未来自己的肯定。",
+                "dialogue": [
+                    {"speaker": "林晚（自言自语）", "text": "我不再逃了。", "emotion": "坚定"},
+                    {"speaker": "林晚（内心独白）", "text": "向前走。", "emotion": "清醒"},
+                    {"speaker": "未来的我（手机语音）", "text": "你更勇敢。", "emotion": "温柔"},
+                ],
+            },
+        }
+    )
+
+    normalized = canonicalize_dialogue_speakers(draft)
+
+    assert [line.speaker for line in normalized.episode_script.dialogue] == [
+        "林晚",
+        "林晚",
+        "林晚",
+    ]
+    assert review_story_deterministically(normalized).logic_issues == []
+
+
+def test_dialogue_speaker_aliases_remain_blocked_when_ambiguous() -> None:
+    draft = _draft(
+        core_ending="孙女决定归来，爷爷答应等待。",
+        script_ending="孙女决定归来，爷爷答应等待。",
+        final_lines=["我会回来。", "我们等你。"],
+    )
+    ambiguous = draft.model_copy(
+        update={
+            "episode_script": draft.episode_script.model_copy(
+                update={
+                    "dialogue": [
+                        draft.episode_script.dialogue[0].model_copy(
+                            update={"speaker": "未来的我（手机语音）"}
+                        ),
+                        draft.episode_script.dialogue[1],
+                    ]
+                }
+            )
+        }
+    )
+
+    normalized = canonicalize_dialogue_speakers(ambiguous)
+    review = review_story_deterministically(normalized)
+
+    assert normalized.episode_script.dialogue[0].speaker == "未来的我（手机语音）"
+    assert review.status == "needs_revision"
+    assert review.logic_issues == [
+        "对白包含未在人物动机中定义的说话人：未来的我（手机语音）"
+    ]
