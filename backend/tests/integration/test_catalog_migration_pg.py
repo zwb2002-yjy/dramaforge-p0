@@ -248,12 +248,15 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
     dbname = f"dramaforge_identity_{uuid.uuid4().hex[:10]}"
     try:
         await _create_db(dbname)
-        _alembic(dbname, "upgrade", "head")
+        # Upgrade to 0028 (before 0029 which is intentionally irreversible) so
+        # the downgrade to 0027 below works.  0029 is verified later via the
+        # re-upgrade to head.
+        _alembic(dbname, "upgrade", "20260819_0028")
 
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar_one()
-            assert head == "20260820_0029"
+            assert head == "20260819_0028"
             agnes_image_revisions = conn.execute(
                 text(
                     "select model_revision, lifecycle, capability_manifest_json "
