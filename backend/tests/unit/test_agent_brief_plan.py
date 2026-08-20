@@ -850,6 +850,59 @@ async def test_deterministic_prompt_document_can_be_reused_across_node_runs(
 
 
 @pytest.mark.asyncio
+async def test_explicit_deterministic_media_reuse_preserves_source_lineage(
+    session: AsyncSession,
+) -> None:
+    project_id = uuid4()
+    user_id = uuid4()
+    first = NodeRun(
+        project_id=project_id,
+        graph_version_id=uuid4(),
+        graph_node_id=uuid4(),
+        idempotency_key=f"voice-source:{uuid4()}",
+        input_hash="a" * 64,
+        input_snapshot={"shot_id": str(uuid4()), "node_key": "voice"},
+        created_by=user_id,
+    )
+    second = NodeRun(
+        project_id=project_id,
+        graph_version_id=uuid4(),
+        graph_node_id=uuid4(),
+        idempotency_key=f"voice-target:{uuid4()}",
+        input_hash="b" * 64,
+        input_snapshot={"shot_id": str(uuid4()), "node_key": "voice"},
+        created_by=user_id,
+    )
+    session.add_all([first, second])
+    await session.flush()
+    original = await get_or_create_artifact(
+        session,
+        project_id=project_id,
+        artifact_type="audio",
+        object_key=f"projects/{project_id}/nodes/voice/{first.id}.wav",
+        content_hash="d" * 64,
+        mime_type="audio/wav",
+        byte_size=12,
+        produced_by_run_id=first.id,
+    )
+
+    reused = await get_or_create_artifact(
+        session,
+        project_id=project_id,
+        artifact_type="audio",
+        object_key=f"projects/{project_id}/nodes/voice/{second.id}.wav",
+        content_hash="d" * 64,
+        mime_type="audio/wav",
+        byte_size=12,
+        produced_by_run_id=second.id,
+        allow_cross_run_reuse=True,
+    )
+
+    assert reused.id == original.id
+    assert reused.produced_by_run_id == first.id
+
+
+@pytest.mark.asyncio
 async def test_legacy_agent_plan_requires_regeneration_before_materialization(
     session: AsyncSession,
 ) -> None:

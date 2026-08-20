@@ -2457,10 +2457,17 @@ async def execute_media_node_run(
         mime_type=stored.mime_type,
         byte_size=stored.byte_size,
         produced_by_run_id=run.id,
+        allow_cross_run_reuse=provider_name == "local_tts",
     )
 
-    run.status = "completed"
+    reused_from_run_id = (
+        art.produced_by_run_id
+        if art.produced_by_run_id is not None and art.produced_by_run_id != run.id
+        else None
+    )
+    run.status = "cached" if reused_from_run_id is not None else "completed"
     run.result_artifact_id = art.id
+    run.reused_from_run_id = reused_from_run_id
     run.provider_cost = op.provider_cost or Decimal("0")
     run.finished_at = datetime.now(UTC)
     run.output_summary = {
@@ -2470,6 +2477,9 @@ async def execute_media_node_run(
         "content_hash": art.content_hash,
         "source_commit": _settings.source_commit,
         "identity_evidence_policy": identity_evidence_policy_snapshot(),
+        "reused_from_run_id": (
+            str(reused_from_run_id) if reused_from_run_id is not None else None
+        ),
     }
     node.latest_successful_run_id = run.id
     await session.flush()

@@ -64,6 +64,25 @@ def _discrete_duration_values(raw: object) -> set[Decimal] | None:
     return result or None
 
 
+def _single_positive_decimal(raw: object) -> Decimal | None:
+    values: object = raw
+    if isinstance(raw, dict):
+        if set(raw) != {"allowed"}:
+            return None
+        values = raw.get("allowed")
+    if isinstance(values, list):
+        if len(values) != 1:
+            return None
+        values = values[0]
+    if isinstance(values, bool) or not isinstance(values, int | float | Decimal):
+        return None
+    try:
+        value = Decimal(str(values))
+    except (ArithmeticError, ValueError):
+        return None
+    return value if value.is_finite() and value > 0 else None
+
+
 def _video_preflight_blockers(
     *,
     operation_manifest: dict[str, object],
@@ -108,7 +127,20 @@ def _video_preflight_blockers(
             or not requested_durations <= supported_durations
         ):
             blockers.append("MODEL_DURATION_UNSUPPORTED")
-    elif not ("num_frames" in constraints and "frame_rate" in constraints):
+    elif "num_frames" in constraints and "frame_rate" in constraints:
+        frame_count = _single_positive_decimal(constraints["num_frames"])
+        frame_rate = _single_positive_decimal(constraints["frame_rate"])
+        if frame_count is None or frame_rate is None or frame_count <= 1:
+            blockers.append("MODEL_DURATION_UNVERIFIED")
+        else:
+            derived_duration = (frame_count - 1) / frame_rate
+            if (
+                not requested_durations
+                or derived_duration != derived_duration.to_integral_value()
+                or any(value != derived_duration for value in requested_durations)
+            ):
+                blockers.append("MODEL_DURATION_UNSUPPORTED")
+    else:
         blockers.append("MODEL_DURATION_UNVERIFIED")
     return blockers
 

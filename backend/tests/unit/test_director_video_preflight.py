@@ -66,3 +66,23 @@ def test_unknown_duration_capability_fails_closed() -> None:
         project_aspect_ratio="9:16",
         requested_durations=frozenset({Decimal("5")}),
     ) == ["MODEL_DURATION_UNVERIFIED"]
+
+
+def test_frame_contract_derives_five_second_duration() -> None:
+    operation = _h3_operation()
+    operation["output_constraints"] = {
+        "aspect_ratio": "adaptive",
+        "num_frames": {"allowed": [121]},
+        "frame_rate": {"allowed": [24]},
+    }
+
+    assert _video_preflight_blockers(
+        operation_manifest=operation,
+        project_aspect_ratio="9:16",
+        requested_durations=frozenset({Decimal("5")}),
+    ) == []
+    assert _video_preflight_blockers(
+        operation_manifest=operation,
+        project_aspect_ratio="9:16",
+        requested_durations=frozenset({Decimal("6")}),
+    ) == ["MODEL_DURATION_UNSUPPORTED"]
