@@ -1309,12 +1309,32 @@ async def _execute_unified_media_node_run(
             )
 
         service = ModelSelectionService(session)
+        raw_frozen_selection = snap.get("selection_plan")
+        frozen_evidence = (
+            raw_frozen_selection.get("evidence")
+            if isinstance(raw_frozen_selection, dict)
+            else None
+        )
+        allow_trial_without_quality_gate = bool(
+            director_context is not None
+            and director_context.batch_kind == "trial"
+            and isinstance(frozen_evidence, dict)
+            and frozen_evidence.get("trial_only_until_quality_gated") is True
+        )
         if node_type == "keyframe":
             assert image_intent is not None
-            plan = await service.select_image(project=project, intent=image_intent)
+            plan = await service.select_image(
+                project=project,
+                intent=image_intent,
+                allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+            )
         else:
             assert video_intent is not None
-            plan = await service.select_video(project=project, intent=video_intent)
+            plan = await service.select_video(
+                project=project,
+                intent=video_intent,
+                allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+            )
         if frozen_binding_id is not None and plan.model_binding_id != frozen_binding_id:
             raise ValidationAppError(
                 "unified selection changed the frozen model binding",

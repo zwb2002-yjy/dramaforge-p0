@@ -32,6 +32,7 @@ from app.shared.errors import AppError
 class DirectorMediaExecutionContext:
     workflow_run_id: UUID
     production_batch_id: UUID
+    batch_kind: str
     budget_reservation_id: UUID
     budget_authorization_id: UUID
     model_binding_id: UUID | None
@@ -399,6 +400,7 @@ async def validate_director_media_submission(
     return DirectorMediaExecutionContext(
         workflow_run_id=workflow.id,
         production_batch_id=batch.id,
+        batch_kind=batch.batch_kind,
         budget_reservation_id=reservation.id,
         budget_authorization_id=authorization.id,
         model_binding_id=model_binding_id,

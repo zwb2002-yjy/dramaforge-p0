@@ -97,6 +97,7 @@ class ModelSelectionService:
         *,
         project: Project,
         intent: VideoGenerationIntentV1,
+        allow_trial_without_quality_gate: bool = False,
     ) -> SelectionPlan:
         normalized = normalize_video(intent)
         if not normalized.ok:
@@ -114,6 +115,7 @@ class ModelSelectionService:
             required_capabilities=normalized.required_capabilities,
             reference_roles=normalized.reference_roles,
             preferred_capabilities=normalized.preferred_capabilities,
+            allow_trial_without_quality_gate=allow_trial_without_quality_gate,
         )
 
     async def select_image(
@@ -121,6 +123,7 @@ class ModelSelectionService:
         *,
         project: Project,
         intent: ImageGenerationIntent,
+        allow_trial_without_quality_gate: bool = False,
     ) -> SelectionPlan:
         normalized = normalize_image(intent)
         if not normalized.ok:
@@ -138,6 +141,7 @@ class ModelSelectionService:
             required_capabilities=normalized.required_capabilities,
             reference_roles=normalized.reference_roles,
             preferred_capabilities=normalized.preferred_capabilities,
+            allow_trial_without_quality_gate=allow_trial_without_quality_gate,
         )
 
     async def _resolve(
@@ -152,6 +156,7 @@ class ModelSelectionService:
         required_capabilities: frozenset[str],
         reference_roles: frozenset[str],
         preferred_capabilities: frozenset[str],
+        allow_trial_without_quality_gate: bool,
     ) -> SelectionPlan:
         binding = await self._resolve_binding(
             project=project,
@@ -177,12 +182,28 @@ class ModelSelectionService:
             reference_roles=reference_roles,
             preferred_capabilities=preferred_capabilities,
         )
-        if not evaluation.eligible:
+        remaining_issues = [
+            issue
+            for issue in evaluation.issues
+            if not (
+                allow_trial_without_quality_gate
+                and issue.code == "MODEL_QUALITY_GATE_MISSING"
+            )
+        ]
+        trial_quality_gate_exception = (
+            allow_trial_without_quality_gate
+            and not remaining_issues
+            and any(
+                issue.code == "MODEL_QUALITY_GATE_MISSING"
+                for issue in evaluation.issues
+            )
+        )
+        if remaining_issues:
             raise ValidationAppError(
                 "selected model binding is not eligible for this intent",
                 details={
                     "code": "MODEL_INELIGIBLE",
-                    "issues": [issue.code for issue in evaluation.issues],
+                    "issues": [issue.code for issue in remaining_issues],
                 },
             )
         manifest = ModelCapabilityManifest.model_validate(
@@ -204,7 +225,10 @@ class ModelSelectionService:
             met_requirements=sorted(required_capabilities & supported),
             unmet_requirements=sorted(required_capabilities - supported),
             dropped_preferences=evaluation.unmet_preferences,
-            evidence=evaluation.evidence,
+            evidence={
+                **evaluation.evidence,
+                "trial_quality_gate_exception": trial_quality_gate_exception,
+            },
             manifest_hash=entry.contract_manifest_hash if entry is not None else None,
             compiled_by=manifest.catalog_source if manifest is not None else None,
         )

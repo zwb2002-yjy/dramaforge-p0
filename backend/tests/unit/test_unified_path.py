@@ -751,6 +751,7 @@ async def test_director_trial_materialization_reaches_unified_artifacts_once(
         )
     )
     assert image_binding is not None and image_binding.catalog_entry_id is not None
+    image_binding.quality_gated = False
     image_entry = await session.get(ModelCatalogEntry, image_binding.catalog_entry_id)
     assert image_entry is not None
     video_binding = await _seed_video_binding(
@@ -813,7 +814,10 @@ async def test_director_trial_materialization_reaches_unified_artifacts_once(
                 "documented": True,
                 "contract_tested": True,
                 "account_verified": True,
-                "quality_gated": True,
+                "quality_gated": binding.quality_gated if binding is not None else True,
+                "trial_only_until_quality_gated": bool(
+                    binding is not None and not binding.quality_gated
+                ),
             },
             "pricing_snapshot": {"unit_amount": unit_amount, "currency": "USD"},
             "status": "ready",
