@@ -293,7 +293,7 @@ def build_fake_storyboard(request: dict[str, Any]) -> dict[str, object]:
     story_characters = _fake_story_characters(request)
     names = [_fixture_text(item.get("name"), fallback="Lead") for item in story_characters]
     duration = int(script_body.get("target_duration_seconds") or 24)
-    shot_count = 4
+    shot_count = 3
     base = duration // shot_count
     durations = [base] * shot_count
     durations[-1] += duration - sum(durations)

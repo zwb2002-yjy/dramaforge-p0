@@ -250,7 +250,7 @@ class DirectorShootingService:
                 voice_bible=voice,
             ),
             max_tokens=5200,
-            parse=parse_storyboard_plan,
+            parse=lambda text: parse_storyboard_plan(text, expected_shot_count=3),
             idempotency_key=f"{idempotency_key}:storyboard",
             input_version_refs=[str(story_row.id), str(script_row.id)],
             provider_kind="shooting_storyboard",
@@ -722,7 +722,8 @@ class DirectorShootingService:
         return (
             "You are a short-drama storyboard director. Return ONLY JSON matching: "
             "template_key live_action_dialogue_short_v1, exact aspect_ratio, exact "
-            "target_duration_seconds, and 3-6 ordered shots. shot_id must be shot-1...; "
+            "target_duration_seconds, and exactly 3 ordered shots. shot_id must be "
+            "shot-1, shot-2, and shot-3; "
             "each shot must include numeric duration_seconds and durations must total the "
             "target within one second. Each shot needs location, time_of_day, shot_type "
             "(wide|medium|medium_close|close|over_shoulder|insert), camera_move "

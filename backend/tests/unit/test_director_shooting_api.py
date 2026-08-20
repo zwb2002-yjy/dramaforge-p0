@@ -123,7 +123,7 @@ def test_shooting_package_is_versioned_and_does_not_start_media(client: TestClie
     assert response.status_code == 201, response.text
     package = response.json()
     assert package["visual_bible"]["payload"]["aspect_ratio"] == "16:9"
-    assert len(package["storyboard_plan"]["payload"]["shots"]) == 4
+    assert len(package["storyboard_plan"]["payload"]["shots"]) == 3
     assert package["selection_plan"]["payload"]["status"] == "configuration_required"
     assert package["trial_plan"]["payload"]["budget_authorization_required"] is True
 

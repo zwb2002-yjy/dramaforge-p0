@@ -147,6 +147,42 @@ def test_storyboard_parser_normalizes_descriptive_provider_output() -> None:
     assert all(len(shot.dialogue) == 1 for shot in parsed.shots)
 
 
+def test_storyboard_parser_enforces_requested_shot_count() -> None:
+    payload = {
+        "template_key": "live_action_dialogue_short_v1",
+        "aspect_ratio": "9:16",
+        "target_duration_seconds": 15,
+        "shots": [
+            {
+                "shot_id": f"shot-{index}",
+                "shot_number": index,
+                "duration_seconds": 5,
+                "location": "elevator",
+                "time_of_day": "night",
+                "shot_type": "medium_close",
+                "camera_move": "static",
+                "characters": ["林晚"],
+                "action": f"beat {index}",
+                "dialogue": [],
+                "image_prompt": f"frame {index}",
+                "video_prompt": f"motion {index}",
+                "transition": "cut",
+            }
+            for index in range(1, 4)
+        ],
+    }
+
+    parsed = parse_storyboard_plan(
+        json.dumps({"storyboard_plan": payload}), expected_shot_count=3
+    )
+    assert len(parsed.shots) == 3
+
+    with pytest.raises(ValueError, match="exactly 4 shots"):
+        parse_storyboard_plan(
+            json.dumps({"storyboard_plan": payload}), expected_shot_count=4
+        )
+
+
 def test_storyboard_parser_normalizes_chinese_labels_and_infers_durations() -> None:
     common = {
         "location": "海边码头",

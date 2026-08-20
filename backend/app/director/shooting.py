@@ -520,7 +520,9 @@ def parse_voice_bible(text: str, *, character_names: list[str] | None = None) ->
     return bible.model_copy(update={"voices": ordered})
 
 
-def parse_storyboard_plan(text: str) -> StoryboardPlanPayload:
+def parse_storyboard_plan(
+    text: str, *, expected_shot_count: int | None = None
+) -> StoryboardPlanPayload:
     payload = _named_payload(text, "storyboard_plan")
     shots = payload.get("shots")
     if isinstance(shots, list):
@@ -556,7 +558,10 @@ def parse_storyboard_plan(text: str) -> StoryboardPlanPayload:
             if Decimal("2") <= inferred <= Decimal("10"):
                 for shot in missing_duration:
                     shot["duration_seconds"] = inferred
-    return StoryboardPlanPayload.model_validate(payload)
+    storyboard = StoryboardPlanPayload.model_validate(payload)
+    if expected_shot_count is not None and len(storyboard.shots) != expected_shot_count:
+        raise ValueError(f"storyboard must contain exactly {expected_shot_count} shots")
+    return storyboard
 
 
 def validate_shooting_artifact_payload(
