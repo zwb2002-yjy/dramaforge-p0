@@ -140,6 +140,8 @@ class DirectorService:
             self._assert_artifact_allowed(workflow, artifact_kind)
         payload = validate_creative_artifact_payload(artifact_kind.value, payload)
         digest = content_hash(payload)
+        current_id = workflow.current_artifact_versions.get(artifact_kind.value)
+        current_uuid = UUID(current_id) if current_id else None
         existing = (
             await self._session.execute(
                 select(CreativeArtifactVersion).where(
@@ -150,9 +152,25 @@ class DirectorService:
             )
         ).scalar_one_or_none()
         if existing is not None:
+            if existing.id == current_uuid:
+                return existing
+            if current_uuid is not None:
+                current_version = await self._session.get(
+                    CreativeArtifactVersion, current_uuid
+                )
+                if current_version is None:
+                    raise ConflictError("current creative artifact version is missing")
+                if current_version.status == "locked" and not confirmed_change:
+                    raise ConflictError(
+                        "locked content must be changed through a confirmed change proposal",
+                        details={"code": "LOCKED_CONTENT_REQUIRES_PROPOSAL"},
+                    )
+            existing.status = "draft"
+            existing.locked_at = None
+            self._set_current_artifact(workflow, artifact_kind, existing.id)
+            if commit:
+                await self._session.commit()
             return existing
-        current_id = workflow.current_artifact_versions.get(artifact_kind.value)
-        current_uuid = UUID(current_id) if current_id else None
         if current_uuid is not None:
             current_version = await self._session.get(CreativeArtifactVersion, current_uuid)
             if current_version is None:
@@ -183,9 +201,21 @@ class DirectorService:
         )
         self._session.add(version)
         await self._session.flush()
+        self._set_current_artifact(workflow, artifact_kind, version.id)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(version)
+        return version
+
+    @staticmethod
+    def _set_current_artifact(
+        workflow: DirectorWorkflowRun,
+        artifact_kind: ArtifactKind,
+        version_id: UUID,
+    ) -> None:
         workflow.current_artifact_versions = {
             **workflow.current_artifact_versions,
-            artifact_kind.value: str(version.id),
+            artifact_kind.value: str(version_id),
         }
         workflow.version += 1
         if artifact_kind in {
@@ -220,10 +250,6 @@ class DirectorService:
                 raise ValidationAppError("repair plan is not allowed in the current workflow state")
             workflow.status = WorkflowStatus.AWAITING_REPAIR_AUTHORIZATION.value
             workflow.current_stage = "production"
-        if commit:
-            await self._session.commit()
-            await self._session.refresh(version)
-        return version
 
     async def approve(
         self,

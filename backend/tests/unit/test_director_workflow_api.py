@@ -323,6 +323,58 @@ def test_change_proposal_requires_current_artifact_and_confirmation_state(
     assert missing.json()["details"]["code"] == "CHANGE_TARGET_NOT_CURRENT"
 
 
+def test_confirmed_change_can_restore_an_identical_historical_version(
+    client: TestClient,
+) -> None:
+    project_id = _project(client, "restore-version@example.com")
+    _start(client, project_id)
+    original = _artifact(client, project_id, "story_core")
+    _artifact(client, project_id, "episode_script")
+    _artifact(client, project_id, "story_review")
+
+    changed = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals",
+        json={
+            "idempotency_key": "change-away-from-original",
+            "target_artifact_kind": "story_core",
+            "summary": "先改成另一个结局",
+            "replacement_payload": {
+                **original["payload"],
+                "ending": "主角暂时离开，决定以后再回答。",
+            },
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert changed.status_code == 201, changed.text
+    changed_apply = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals/"
+        f"{changed.json()['proposal']['id']}/confirm",
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert changed_apply.status_code == 200, changed_apply.text
+
+    restore = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals",
+        json={
+            "idempotency_key": "restore-original-content",
+            "target_artifact_kind": "story_core",
+            "summary": "恢复原结局",
+            "replacement_payload": original["payload"],
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert restore.status_code == 201, restore.text
+    restored = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals/"
+        f"{restore.json()['proposal']['id']}/confirm",
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["id"] == original["id"]
+    workflow = client.get(f"/api/v1/projects/{project_id}/director/workflow").json()
+    assert workflow["current_artifact_versions"] == {"story_core": original["id"]}
+
+
 def test_pending_change_blocks_stage_approval_until_confirmed(client: TestClient) -> None:
     project_id = _project(client, "change-approval@example.com")
     _start(client, project_id)
