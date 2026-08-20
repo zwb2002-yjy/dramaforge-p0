@@ -479,8 +479,6 @@ class DirectorService:
         )
         self._session.add(report)
         await self._session.commit()
-        await self._session.refresh(proposal)
-        await self._session.refresh(report)
         return proposal, report
 
     async def apply_change(
