@@ -253,7 +253,7 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar_one()
-            assert head == "20260819_0028"
+            assert head == "20260820_0029"
             agnes_image_revisions = conn.execute(
                 text(
                     "select model_revision, lifecycle, capability_manifest_json "
@@ -340,7 +340,7 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
         with engine.connect() as conn:
             assert (
                 conn.execute(text("select version_num from alembic_version")).scalar_one()
-                == "20260819_0028"
+                == "20260820_0029"
             )
             reupgraded = conn.execute(
                 text(
