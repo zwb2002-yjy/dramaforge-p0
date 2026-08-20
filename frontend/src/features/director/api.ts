@@ -278,6 +278,19 @@ export async function generateShootingPackage(
   );
 }
 
+export async function regenerateStoryReview(
+  projectId: string,
+  idempotencyKey: string,
+): Promise<DirectorArtifactVersion<Record<string, unknown>>> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    directorPath(projectId, "/creative/review/generate"),
+    { idempotency_key: idempotencyKey },
+    csrf,
+  );
+}
+
 export function commandKey(prefix: string): string {
   const uuid = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
   return `${prefix}:${uuid}`;

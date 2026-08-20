@@ -27,6 +27,7 @@ from app.director.schemas import (
     ConceptGenerateRequest,
     CreativePackageGenerateRequest,
     CreativePackageResult,
+    CreativeReviewGenerateRequest,
     DirectorWorkspaceSnapshot,
     ImpactReportRead,
     InspectProductionRequest,
@@ -315,6 +316,26 @@ async def generate_creative_package(
         episode_script=ArtifactVersionRead.model_validate(script),
         story_review=ArtifactVersionRead.model_validate(review),
     )
+
+
+@router.post(
+    "/projects/{project_id}/director/creative/review/generate",
+    response_model=ArtifactVersionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def regenerate_story_review(
+    project_id: UUID,
+    body: CreativeReviewGenerateRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ArtifactVersionRead:
+    version = await DirectorCreativeService(session).regenerate_story_review(
+        project_id=project_id,
+        actor=user,
+        idempotency_key=body.idempotency_key,
+    )
+    return ArtifactVersionRead.model_validate(version)
 
 
 @router.post(

@@ -154,6 +154,63 @@ def test_text_calls_require_explicit_authorization_and_script_rights(
     assert no_rights.status_code == 422
 
 
+def test_story_review_can_be_regenerated_without_rewriting_creative_facts(
+    client: TestClient,
+) -> None:
+    project_id = _setup(client, "review-recovery@example.com")
+    story = {
+        "selected_concept_id": "elevator-growth",
+        "theme": "直面过去",
+        "core_conflict": "林晚必须决定是否继续逃避。",
+        "emotional_direction": "不安到坚定",
+        "ending": "林晚迈出电梯，未来的自己肯定了她的勇气。",
+        "characters": [
+            {
+                "name": "林晚",
+                "identity": "独自乘坐电梯的成年女性",
+                "desire": "摆脱过去的阴影",
+                "fear_or_cost": "再次经历痛苦",
+            }
+        ],
+    }
+    script = {
+        "title": "十三楼",
+        "target_duration_seconds": 15,
+        "setup": "林晚独自在电梯里。",
+        "turn": "她决定不再逃避。",
+        "ending": "林晚迈出电梯，未来的自己肯定了她的勇气。",
+        "dialogue": [
+            {"speaker": "林晚", "text": "我不再逃了。", "emotion": "坚定"},
+            {"speaker": "林晚", "text": "你更勇敢。", "emotion": "温柔"},
+        ],
+    }
+    for kind, payload in (("story_core", story), ("episode_script", script)):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/director/artifact-versions",
+            json={"artifact_kind": kind, "payload": payload, "source_kind": "user"},
+            headers={CSRF_HEADER: _csrf(client)},
+        )
+        assert response.status_code == 201, response.text
+
+    body = {"idempotency_key": "review-current-creative"}
+    review = client.post(
+        f"/api/v1/projects/{project_id}/director/creative/review/generate",
+        json=body,
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert review.status_code == 201, review.text
+    assert review.json()["artifact_kind"] == "story_review"
+    assert review.json()["payload"]["status"] == "passed"
+
+    repeated = client.post(
+        f"/api/v1/projects/{project_id}/director/creative/review/generate",
+        json=body,
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert repeated.status_code == 201, repeated.text
+    assert repeated.json()["id"] == review.json()["id"]
+
+
 def test_director_does_not_repost_provider_failure(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +23,7 @@ from app.director.creative import (
     review_story_deterministically,
 )
 from app.director.enums import ArtifactKind, WorkflowStatus
-from app.director.models import CreativeArtifactVersion, DirectorWorkflowRun
+from app.director.models import CreativeArtifactVersion, DirectorWorkflowRun, WorkflowStepRun
 from app.director.service import DirectorService
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -298,6 +299,76 @@ class DirectorCreativeService:
         ]
         await self._session.commit()
         return story_version, script_version, review_version
+
+    async def regenerate_story_review(
+        self,
+        *,
+        project_id: UUID,
+        actor: User,
+        idempotency_key: str,
+    ) -> CreativeArtifactVersion:
+        _project, workflow = await self._creative_context(project_id=project_id, actor=actor)
+        existing = await self._existing_single_output(
+            project_id=project_id,
+            actor=actor,
+            idempotency_key=idempotency_key,
+            artifact_kind=ArtifactKind.STORY_REVIEW,
+        )
+        if existing is not None:
+            return existing
+        story_id = workflow.current_artifact_versions.get(ArtifactKind.STORY_CORE.value)
+        script_id = workflow.current_artifact_versions.get(ArtifactKind.EPISODE_SCRIPT.value)
+        if story_id is None or script_id is None:
+            raise ValidationAppError(
+                "story review requires current story core and episode script",
+                details={"code": "STORY_REVIEW_INPUT_MISSING"},
+            )
+        story_version = await self._artifact(
+            project_id=project_id,
+            version_id=UUID(story_id),
+            expected_kind=ArtifactKind.STORY_CORE,
+        )
+        script_version = await self._artifact(
+            project_id=project_id,
+            version_id=UUID(script_id),
+            expected_kind=ArtifactKind.EPISODE_SCRIPT,
+        )
+        draft = StoryDraftPayload.model_validate(
+            {
+                "story_core": story_version.payload,
+                "episode_script": script_version.payload,
+            }
+        )
+        review = review_story_deterministically(draft)
+        review_version = await self._director.publish_artifact_version(
+            project_id=project_id,
+            actor=actor,
+            artifact_kind=ArtifactKind.STORY_REVIEW,
+            payload=review.model_dump(mode="json"),
+            source_kind="service",
+            source_run_id=None,
+            commit=False,
+        )
+        now = datetime.now(UTC)
+        self._session.add(
+            WorkflowStepRun(
+                project_id=project_id,
+                workflow_run_id=workflow.id,
+                step_key="review_story",
+                skill_id="story_validation",
+                skill_version="1.0.0",
+                execution_kind="domain_service",
+                idempotency_key=idempotency_key,
+                status="succeeded",
+                input_version_refs=[str(story_version.id), str(script_version.id)],
+                output_version_refs=[str(review_version.id)],
+                service_run_ref=f"story-review:{review_version.id}",
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        await self._session.commit()
+        return review_version
 
     async def _creative_context(
         self, *, project_id: UUID, actor: User

@@ -192,6 +192,10 @@ class CreativePackageResult(BaseModel):
     story_review: ArtifactVersionRead
 
 
+class CreativeReviewGenerateRequest(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+
 class ShootingPackageGenerateRequest(BaseModel):
     authorize_text_calls: bool = False
     idempotency_key: str = Field(min_length=1, max_length=120)

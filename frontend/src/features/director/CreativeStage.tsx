@@ -6,6 +6,7 @@ import {
   commandKey,
   generateConcepts,
   generateCreativePackage,
+  regenerateStoryReview,
   interpretPreferences,
 } from "./api";
 import type {
@@ -312,9 +313,17 @@ export function CreativeStage({
     },
     onError: (error) => onError(textFrom(error)),
   });
+  const reviewMutation = useMutation({
+    mutationFn: () => regenerateStoryReview(projectId, commandKey("review-story")),
+    onSuccess: async () => {
+      onMessage("剧本预审已重新生成。故事内核和完整对白没有被改写。");
+      await refresh();
+    },
+    onError: (error) => onError(textFrom(error)),
+  });
 
   const busy = conceptMutation.isPending || preferenceMutation.isPending
-    || packageMutation.isPending || approvalMutation.isPending;
+    || packageMutation.isPending || approvalMutation.isPending || reviewMutation.isPending;
   const ready = conceptInputReady({
     entryMode,
     creationGoal,
@@ -469,6 +478,15 @@ export function CreativeStage({
             </section>
           )}
         </>
+      )}
+      {storyCore && episodeScript && !storyReview && editable && (
+        <section className="panel" data-testid="regenerate-story-review">
+          <h3>剧本内容已更新，需要重新预审</h3>
+          <p className="muted">只重新检查当前故事内核、15–30 秒时长、说话人、对白顺序与结局闭合；不会调用媒体模型，也不会改写剧本。</p>
+          <button type="button" className="primary" disabled={busy} onClick={() => reviewMutation.mutate()}>
+            {reviewMutation.isPending ? "正在预审…" : "重新运行剧本预审"}
+          </button>
+        </section>
       )}
     </section>
   );
