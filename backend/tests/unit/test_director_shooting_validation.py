@@ -37,6 +37,18 @@ def test_character_bible_parser_accepts_unique_named_wrapper() -> None:
     assert parsed.characters[0].character_id == "grandfather"
 
 
+def test_character_bible_parser_accepts_named_character_list_wrapper() -> None:
+    payload = _character_bible()
+    characters = payload["characters"]
+    assert isinstance(characters, list)
+
+    parsed = parse_character_bible(json.dumps({"character_bible": characters}))
+
+    assert parsed.policy == "fictional_characters_only"
+    assert parsed.real_person_reference_allowed is False
+    assert parsed.characters[0].character_id == "grandfather"
+
+
 def test_character_bible_parser_normalizes_numeric_model_ids() -> None:
     payload = _character_bible()
     characters = payload["characters"]

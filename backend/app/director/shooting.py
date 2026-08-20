@@ -473,7 +473,13 @@ def _continuity_rule_list(value: object) -> object:
 
 
 def parse_character_bible(text: str) -> CharacterBiblePayload:
-    return CharacterBiblePayload.model_validate(_named_payload(text, "character_bible"))
+    payload = parse_json_object(text)
+    wrapped = payload.get("character_bible")
+    if set(payload) == {"character_bible"} and isinstance(wrapped, list):
+        payload = {"characters": wrapped}
+    else:
+        payload = _named_payload(text, "character_bible")
+    return CharacterBiblePayload.model_validate(payload)
 
 
 def parse_character_visual_draft(text: str) -> CharacterVisualDraftPayload:

@@ -656,9 +656,11 @@ class DirectorShootingService:
     def _character_prompt(story: StoryCorePayload) -> str:
         return (
             "You are the casting department for a fictional short drama. "
-            "Return ONLY a character_bible JSON object. Never use or request a "
-            "real person's photo. character_bible policy must be fictional_characters_only, "
-            "real_person_reference_allowed false, and exactly preserve every input character "
+            "Return ONLY one JSON object with top-level fields policy, "
+            "real_person_reference_allowed, and characters. Do not wrap the characters array "
+            "inside a character_bible key. Never use or request a real person's photo. "
+            "policy must be fictional_characters_only, real_person_reference_allowed false, "
+            "and characters must exactly preserve every input character "
             "name/order. Each character needs character_id, name, age_range, facial_features, "
             "hair, body_shape, wardrobe, distinguishing_features, locked_prompt and "
             "negative_prompt. Make "
