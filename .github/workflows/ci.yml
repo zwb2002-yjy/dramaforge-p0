@@ -57,12 +57,14 @@ jobs:
         if: runner.os == 'Linux'
         env:
           POSTGRES_PASSWORD: ci-postgres-password-not-for-deployment
+          POSTGRES_APP_PASSWORD: ci-postgres-app-password-not-for-deployment
           MINIO_ROOT_PASSWORD: ci-minio-password-not-for-deployment
           LITELLM_DB_PASSWORD: ci-litellm-db-password-not-for-deployment
           LITELLM_MASTER_KEY: ci-litellm-master-key-not-for-deployment
           SESSION_SECRET: ci-session-secret-not-for-deployment-1234567890
           WORKER_TOKEN: ci-worker-token-not-for-deployment-1234567890
           BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          DRAMAFORGE_SOURCE_COMMIT: ${{ github.sha }}
         run: docker compose config --quiet
 
   policy:
