@@ -1,8 +1,5 @@
 FROM node:22-alpine AS build
 
-ARG DRAMAFORGE_VERSION=0.1.0
-ARG DRAMAFORGE_SOURCE_COMMIT=local
-
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

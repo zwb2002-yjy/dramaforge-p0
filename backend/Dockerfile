@@ -1,8 +1,5 @@
 FROM python:3.12-slim
 
-ARG DRAMAFORGE_VERSION=0.1.0
-ARG DRAMAFORGE_SOURCE_COMMIT=local
-
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -55,6 +52,9 @@ RUN ffmpeg -version >/dev/null \
 
 # Release identity belongs after dependency layers so a new source commit does
 # not invalidate the expensive APT and locked Python dependency caches.
+ARG DRAMAFORGE_VERSION=0.1.0
+ARG DRAMAFORGE_SOURCE_COMMIT=local
+
 LABEL org.opencontainers.image.title="DramaForge backend" \
       org.opencontainers.image.version=$DRAMAFORGE_VERSION \
       org.opencontainers.image.revision=$DRAMAFORGE_SOURCE_COMMIT \
