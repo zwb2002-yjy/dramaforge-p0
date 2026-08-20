@@ -1021,17 +1021,25 @@ class DirectorProductionService:
             )
             self._session.add(episode)
             await self._session.flush()
+        projection_hash = content_hash(storyboard.model_dump(mode="json"))
+        projection_synopsis = f"Director storyboard projection:{projection_hash}"
         scene = await self._session.scalar(
-            select(Scene).where(Scene.episode_id == episode.id, Scene.scene_number == 1)
+            select(Scene).where(
+                Scene.episode_id == episode.id,
+                Scene.synopsis == projection_synopsis,
+            )
         )
         first = storyboard.shots[0]
         if scene is None:
+            latest_scene_number = await self._session.scalar(
+                select(func.max(Scene.scene_number)).where(Scene.episode_id == episode.id)
+            )
             scene = Scene(
                 episode_id=episode.id,
-                scene_number=1,
+                scene_number=(latest_scene_number or 0) + 1,
                 location_name=first.location,
                 time_of_day=first.time_of_day,
-                synopsis="Director-confirmed storyboard projection",
+                synopsis=projection_synopsis,
             )
             self._session.add(scene)
             await self._session.flush()

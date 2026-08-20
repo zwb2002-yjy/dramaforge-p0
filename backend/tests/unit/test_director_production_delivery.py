@@ -74,6 +74,80 @@ def test_two_person_video_prompt_adds_anatomy_and_count_constraints() -> None:
     assert "no additional person or limb enters the frame" in prompt
 
 
+@pytest.mark.asyncio
+async def test_storyboard_projection_preserves_conflicting_historical_shots(
+    session: AsyncSession,
+) -> None:
+    user = User(
+        email=f"projection-{uuid4().hex[:8]}@example.com",
+        display_name="Projection owner",
+        password_hash=hash_password("password123"),
+    )
+    session.add(user)
+    await session.flush()
+    workspace = Workspace(owner_user_id=user.id, name="Projection workspace")
+    session.add(workspace)
+    await session.flush()
+    project = Project(
+        workspace_id=workspace.id,
+        name="Projection short",
+        aspect_ratio="9:16",
+        budget_limit=Decimal("100"),
+    )
+    session.add(project)
+    await session.flush()
+    episode = Episode(
+        project_id=project.id,
+        episode_number=1,
+        title="Historical episode",
+        synopsis="Historical projection",
+    )
+    session.add(episode)
+    await session.flush()
+    historical_scene = Scene(
+        episode_id=episode.id,
+        scene_number=1,
+        location_name="legacy room",
+        time_of_day="day",
+        synopsis="Historical projection",
+    )
+    session.add(historical_scene)
+    await session.flush()
+    historical_shot = Shot(
+        project_id=project.id,
+        scene_id=historical_scene.id,
+        shot_number=3,
+        visual_description="legacy action",
+        dialogue="legacy dialogue",
+        duration_seconds=Decimal("5"),
+    )
+    session.add(historical_shot)
+    await session.flush()
+
+    storyboard = StoryboardPlanPayload.model_validate(_storyboard())
+    service = DirectorProductionService(session)
+    projected = await service._project_storyboard_shot(
+        project=project,
+        storyboard=storyboard,
+        logical_shot_id="shot-3",
+    )
+    repeated = await service._project_storyboard_shot(
+        project=project,
+        storyboard=storyboard,
+        logical_shot_id="shot-3",
+    )
+
+    assert projected.id != historical_shot.id
+    assert projected.scene_id != historical_scene.id
+    assert projected.visual_description == "Lin performs beat 3"
+    assert projected.dialogue == "line 3"
+    assert repeated.id == projected.id
+    projected_scene = await session.get(Scene, projected.scene_id)
+    assert projected_scene is not None
+    assert projected_scene.scene_number == 2
+    assert projected_scene.synopsis.startswith("Director storyboard projection:")
+
+
 def _storyboard() -> dict[str, object]:
     return {
         "template_key": "live_action_dialogue_short_v1",
