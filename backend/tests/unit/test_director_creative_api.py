@@ -210,6 +210,36 @@ def test_story_review_can_be_regenerated_without_rewriting_creative_facts(
     assert repeated.status_code == 201, repeated.text
     assert repeated.json()["id"] == review.json()["id"]
 
+    proposal = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals",
+        json={
+            "idempotency_key": "change-duration-after-review",
+            "target_artifact_kind": "episode_script",
+            "summary": "把时长改成16秒并重新预审",
+            "replacement_payload": {**script, "target_duration_seconds": 16},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert proposal.status_code == 201, proposal.text
+    applied = client.post(
+        f"/api/v1/projects/{project_id}/director/change-proposals/"
+        f"{proposal.json()['proposal']['id']}/confirm",
+        json={},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert applied.status_code == 200, applied.text
+
+    restored = client.post(
+        f"/api/v1/projects/{project_id}/director/creative/review/generate",
+        json={"idempotency_key": "review-updated-creative"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert restored.status_code == 201, restored.text
+    assert restored.json()["id"] == review.json()["id"]
+    workflow = client.get(f"/api/v1/projects/{project_id}/director/workflow")
+    assert workflow.status_code == 200, workflow.text
+    assert workflow.json()["current_artifact_versions"]["story_review"] == review.json()["id"]
+
 
 def test_director_does_not_repost_provider_failure(
     client: TestClient,

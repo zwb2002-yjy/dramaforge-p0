@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
@@ -24,7 +25,7 @@ from app.director.creative import (
 )
 from app.director.enums import ArtifactKind, WorkflowStatus
 from app.director.models import CreativeArtifactVersion, DirectorWorkflowRun, WorkflowStepRun
-from app.director.service import DirectorService
+from app.director.service import DirectorService, content_hash
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 
@@ -58,6 +59,8 @@ class DirectorCreativeService:
             artifact_kind=ArtifactKind.CONCEPT_SET,
         )
         if existing is not None:
+            await self._restore_story_review_current(workflow, existing)
+            await self._session.commit()
             return existing
         if not authorize_text_call:
             raise ValidationAppError(
@@ -340,15 +343,27 @@ class DirectorCreativeService:
             }
         )
         review = review_story_deterministically(draft)
-        review_version = await self._director.publish_artifact_version(
-            project_id=project_id,
-            actor=actor,
-            artifact_kind=ArtifactKind.STORY_REVIEW,
-            payload=review.model_dump(mode="json"),
-            source_kind="service",
-            source_run_id=None,
-            commit=False,
+        review_payload = review.model_dump(mode="json")
+        digest = content_hash(review_payload)
+        review_version = await self._session.scalar(
+            select(CreativeArtifactVersion).where(
+                CreativeArtifactVersion.project_id == project_id,
+                CreativeArtifactVersion.artifact_kind == ArtifactKind.STORY_REVIEW.value,
+                CreativeArtifactVersion.content_hash == digest,
+            )
         )
+        if review_version is None:
+            review_version = await self._director.publish_artifact_version(
+                project_id=project_id,
+                actor=actor,
+                artifact_kind=ArtifactKind.STORY_REVIEW,
+                payload=review_payload,
+                source_kind="service",
+                source_run_id=None,
+                commit=False,
+            )
+        else:
+            await self._restore_story_review_current(workflow, review_version)
         now = datetime.now(UTC)
         self._session.add(
             WorkflowStepRun(
@@ -369,6 +384,26 @@ class DirectorCreativeService:
         )
         await self._session.commit()
         return review_version
+
+    async def _restore_story_review_current(
+        self,
+        workflow: DirectorWorkflowRun,
+        review_version: CreativeArtifactVersion,
+    ) -> None:
+        if workflow.current_artifact_versions.get(ArtifactKind.STORY_REVIEW.value) == str(
+            review_version.id
+        ):
+            return
+        review_version.status = "draft"
+        review_version.locked_at = None
+        workflow.current_artifact_versions = {
+            **workflow.current_artifact_versions,
+            ArtifactKind.STORY_REVIEW.value: str(review_version.id),
+        }
+        workflow.status = WorkflowStatus.AWAITING_CREATIVE_CONFIRMATION.value
+        workflow.current_stage = "creative"
+        workflow.version += 1
+        await self._session.flush()
 
     async def _creative_context(
         self, *, project_id: UUID, actor: User
