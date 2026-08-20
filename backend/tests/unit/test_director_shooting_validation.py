@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 import pytest
 from app.director.shooting import (
@@ -180,6 +181,13 @@ def test_storyboard_parser_enforces_requested_shot_count() -> None:
     with pytest.raises(ValueError, match="exactly 4 shots"):
         parse_storyboard_plan(
             json.dumps({"storyboard_plan": payload}), expected_shot_count=4
+        )
+
+    with pytest.raises(ValueError, match="exactly 6 seconds"):
+        parse_storyboard_plan(
+            json.dumps({"storyboard_plan": payload}),
+            expected_shot_count=3,
+            expected_shot_duration=Decimal("6"),
         )
 
 

@@ -521,7 +521,10 @@ def parse_voice_bible(text: str, *, character_names: list[str] | None = None) ->
 
 
 def parse_storyboard_plan(
-    text: str, *, expected_shot_count: int | None = None
+    text: str,
+    *,
+    expected_shot_count: int | None = None,
+    expected_shot_duration: Decimal | None = None,
 ) -> StoryboardPlanPayload:
     payload = _named_payload(text, "storyboard_plan")
     shots = payload.get("shots")
@@ -561,6 +564,12 @@ def parse_storyboard_plan(
     storyboard = StoryboardPlanPayload.model_validate(payload)
     if expected_shot_count is not None and len(storyboard.shots) != expected_shot_count:
         raise ValueError(f"storyboard must contain exactly {expected_shot_count} shots")
+    if expected_shot_duration is not None and any(
+        shot.duration_seconds != expected_shot_duration for shot in storyboard.shots
+    ):
+        raise ValueError(
+            f"every storyboard shot must be exactly {expected_shot_duration} seconds"
+        )
     return storyboard
 
 

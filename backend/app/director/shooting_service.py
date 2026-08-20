@@ -266,6 +266,8 @@ class DirectorShootingService:
         assert isinstance(voice, VoiceBiblePayload)
         self._validate_voice_bible(voice, story)
 
+        required_video_duration = await self._required_video_shot_duration(project)
+
         storyboard, _board_agent, storyboard_run = await self._runtime.run_text_skill(
             workspace_id=project.workspace_id,
             project_id=project.id,
@@ -280,9 +282,14 @@ class DirectorShootingService:
                 character_bible=character_bible,
                 visual_bible=visual_bible,
                 voice_bible=voice,
+                required_video_duration=required_video_duration,
             ),
             max_tokens=5200,
-            parse=lambda text: parse_storyboard_plan(text, expected_shot_count=3),
+            parse=lambda text: parse_storyboard_plan(
+                text,
+                expected_shot_count=3,
+                expected_shot_duration=required_video_duration,
+            ),
             idempotency_key=f"{idempotency_key}:storyboard",
             input_version_refs=[str(story_row.id), str(script_row.id)],
             provider_kind="shooting_storyboard",
@@ -437,6 +444,39 @@ class DirectorShootingService:
             else "ready"
         )
         return SelectionPlanPayload(status=status, plans=plans)
+
+    async def _required_video_shot_duration(self, project: Project) -> Decimal | None:
+        project_binding = await self._session.scalar(
+            select(ProjectProviderBinding).where(
+                ProjectProviderBinding.project_id == project.id,
+                ProjectProviderBinding.purpose == "video",
+            )
+        )
+        if project_binding is None:
+            return None
+        binding = await self._session.get(
+            ProviderModelBinding, project_binding.model_binding_id
+        )
+        entry = (
+            await self._session.get(ModelCatalogEntry, binding.catalog_entry_id)
+            if binding is not None and binding.catalog_entry_id is not None
+            else None
+        )
+        manifest = dict(entry.capability_manifest_json or {}) if entry is not None else {}
+        operations = manifest.get("operations")
+        operation = operations.get("video.generate") if isinstance(operations, dict) else None
+        constraints = operation.get("output_constraints") if isinstance(operation, dict) else None
+        if not isinstance(constraints, dict):
+            return None
+        if "duration_seconds" in constraints:
+            values = _discrete_duration_values(constraints["duration_seconds"])
+            return next(iter(values)) if values is not None and len(values) == 1 else None
+        frame_count = _single_positive_decimal(constraints.get("num_frames"))
+        frame_rate = _single_positive_decimal(constraints.get("frame_rate"))
+        if frame_count is None or frame_rate is None or frame_count <= 1:
+            return None
+        duration = (frame_count - 1) / frame_rate
+        return duration if duration == duration.to_integral_value() else None
 
     @staticmethod
     def _voice_plan() -> SelectedModelPlan:
@@ -743,6 +783,7 @@ class DirectorShootingService:
         character_bible: CharacterBiblePayload,
         visual_bible: VisualBiblePayload,
         voice_bible: VoiceBiblePayload,
+        required_video_duration: Decimal | None,
     ) -> str:
         inputs = {
             "story": story.model_dump(mode="json"),
@@ -751,13 +792,19 @@ class DirectorShootingService:
             "visual": visual_bible.model_dump(mode="json"),
             "voices": voice_bible.model_dump(mode="json"),
         }
+        duration_rule = (
+            f" Every shot duration_seconds must be exactly {required_video_duration}."
+            if required_video_duration is not None
+            else ""
+        )
         return (
             "You are a short-drama storyboard director. Return ONLY JSON matching: "
             "template_key live_action_dialogue_short_v1, exact aspect_ratio, exact "
             "target_duration_seconds, and exactly 3 ordered shots. shot_id must be "
             "shot-1, shot-2, and shot-3; "
             "each shot must include numeric duration_seconds and durations must total the "
-            "target within one second. Each shot needs location, time_of_day, shot_type "
+            f"target within one second.{duration_rule} Each shot needs location, "
+            "time_of_day, shot_type "
             "(wide|medium|medium_close|close|over_shoulder|insert), camera_move "
             "(static|push_in|pull_out|pan|tracking), 1-2 character names, action, dialogue "
             "as an array of {speaker,text,emotion} objects, "
