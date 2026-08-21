@@ -521,6 +521,7 @@ class ProviderConnectionService:
         provider_request_id: str | None = None
         error_code: str | None = None
         evidence_model_id: str | None = None
+        listed_model_ids: set[str] = set()
         if capability == "auth_models":
             try:
                 async with httpx.AsyncClient(timeout=30.0) as http:
@@ -529,10 +530,30 @@ class ProviderConnectionService:
                         headers={
                             "Authorization": f"Bearer {getattr(cfg, f'{plugin.prefix}_api_key')}"
                         },
-                    )
+                )
                 http_status = response.status_code
                 status = "passed" if response.status_code < 400 else "failed"
-                if response.status_code == 401:
+                if status == "passed":
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = None
+                    raw_models = (
+                        payload.get("data") or payload.get("models")
+                        if isinstance(payload, dict)
+                        else None
+                    )
+                    if isinstance(raw_models, list):
+                        listed_model_ids = {
+                            str(item.get("id") or item.get("model") or "").strip()
+                            for item in raw_models
+                            if isinstance(item, dict)
+                        }
+                        listed_model_ids.discard("")
+                    if not listed_model_ids:
+                        status = "failed"
+                        error_code = "PROVIDER_MODELS_RESPONSE_INVALID"
+                elif response.status_code == 401:
                     error_code = "PROVIDER_AUTH_FAILED"
                 elif response.status_code == 403:
                     error_code = "PROVIDER_FORBIDDEN"
@@ -672,6 +693,11 @@ class ProviderConnectionService:
         if capability == "auth_models" and status == "passed":
             connection.verification_status = "verified"
             connection.verified_at = datetime.now(UTC)
+            await self._mark_listed_models_verified(
+                connection_id=connection.id,
+                model_ids=listed_model_ids,
+                actor=actor,
+            )
         if status in {"passed", "succeeded"}:
             await self._mark_capability_verified(
                 connection_id=connection.id,
@@ -681,6 +707,33 @@ class ProviderConnectionService:
             )
         await self._session.flush()
         return evidence
+
+    async def _mark_listed_models_verified(
+        self,
+        *,
+        connection_id: UUID,
+        model_ids: set[str],
+        actor: User,
+    ) -> None:
+        """Verify only Bindings named by the authenticated Provider catalog."""
+
+        if not model_ids:
+            return
+        bindings = list(
+            (
+                await self._session.execute(
+                    select(ProviderModelBinding).where(
+                        ProviderModelBinding.connection_id == connection_id,
+                        ProviderModelBinding.invoke_model_value.in_(model_ids),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for binding in bindings:
+            binding.account_verified = True
+            binding.updated_by = actor.id
 
     async def _validated_reference_artifact(
         self,

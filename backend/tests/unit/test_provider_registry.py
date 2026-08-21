@@ -327,6 +327,95 @@ async def test_plugin_extension_needs_no_service_branch(
 
 
 @pytest.mark.asyncio
+async def test_auth_models_verifies_only_bindings_listed_by_provider(
+    session: AsyncSession,
+    fake_registration: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import date
+
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.catalog_seed_data import hash_manifest
+
+    _byok_env(monkeypatch)
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="Fake",
+        api_key="secret",
+        enabled=True,
+        provider_type=FAKE_PROVIDER,
+        protocol_profile=FAKE_PROFILE,
+    )
+    bindings: list[ProviderModelBinding] = []
+    for model_id in ("fake-img-listed", "fake-img-hidden"):
+        manifest = {**_FAKE_IMAGE_MANIFEST, "model_id": model_id}
+        session.add(
+            ModelCatalogEntry(
+                provider_type=FAKE_PROVIDER,
+                protocol_profile=FAKE_PROFILE,
+                model_id=model_id,
+                model_revision="v1",
+                display_name=model_id,
+                media_kind="image",
+                lifecycle="active",
+                catalog_source="official_static",
+                capability_manifest_json=manifest,
+                option_schema_json={},
+                documented_at=date.fromisoformat("2026-08-10"),
+                contract_manifest_hash=hash_manifest(manifest),
+            )
+        )
+        await session.flush()
+        bindings.append(
+            await service.create_model_binding(
+                workspace_id=workspace.id,
+                connection_id=connection.id,
+                actor=user,
+                media_type="image",
+                model_id=model_id,
+                purpose="keyframe",
+                enabled=True,
+            )
+        )
+
+    class _ModelsResponse:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {"data": [{"id": "fake-img-listed"}]}
+
+    class _ModelsClient:
+        async def __aenter__(self) -> _ModelsClient:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def get(self, *args: object, **kwargs: object) -> _ModelsResponse:
+            return _ModelsResponse()
+
+    monkeypatch.setattr(
+        "app.providers.connection_service.httpx.AsyncClient",
+        lambda **kwargs: _ModelsClient(),
+    )
+    evidence = await service.probe(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        capability="auth_models",
+    )
+
+    assert evidence.status == "passed"
+    assert connection.verification_status == "verified"
+    assert bindings[0].account_verified is True
+    assert bindings[1].account_verified is False
+
+
+@pytest.mark.asyncio
 async def test_binding_scoped_probe_only_advances_probed_binding(
     session: AsyncSession,
     fake_registration: ProviderPlugin,
