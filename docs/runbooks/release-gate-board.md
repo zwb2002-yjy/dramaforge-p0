@@ -12,10 +12,10 @@
 
 | 字段 | 当前事实 |
 |---|---|
-| 运行候选 | `9665773ba85bc1d36c4646352681ea690c8a1ed4` (`dev`) |
-| 当前候选 | `9665773`；运行中的 API、Dispatcher、两个 Worker 与 Frontend 同源，数据库 head `20260820_0029`；两个 Worker 共用同一 Backend 镜像；PostgreSQL、Redis、MinIO、LiteLLM 与数据卷未重建 |
-| 自动化基线 | 当前候选后端全量 `662 passed / 16 skipped`、前端 `57 passed`、Chromium `11/11`、typecheck/build、Ruff/mypy 通过；同源 Docker Compose 栈健康 |
-| 真实证据 | 一个 Agnes 真实视频镜头被 Q3 人工拒绝；`2026-08-20` 单次、`0.01 CNY` 上限 Agnes 图片 v2 `image_i2i` 账号 Probe 通过，Binding 已 account-verified；`2026-08-21` 完成新授权下真实 Director TRIAL：t2i character_reference 成功、i2i keyframe 成功（Artifact + EffectiveRequest + TranslationReport + ProviderOperation unified-v1 已持久化）、i2v video 被 Agnes 拒绝（503 PROVIDER_CREATE_FAILED）、provider 未报告成本故账本 consumed=0；identity_review=needs_human；完整试拍、修复、全片或用户测试仍无 |
+| 运行候选 | `faee665c1d53dd6c6f48064fbb2a6b6887efd91d` (`dev`) |
+| 当前候选 | `faee665`；运行中的 API、Dispatcher、两个 Worker 与 Frontend 同源健康，数据库 head `20260821_0031`；两个 Worker 共用同一 Backend 镜像；PostgreSQL、Redis、MinIO、LiteLLM 与数据卷未重建 |
+| 自动化基线 | 当前候选后端全量 `670 passed / 16 skipped`、前端 `60 passed`、Chromium `11/11`、typecheck/build、Ruff/mypy 通过；同源 Docker Compose 栈健康 |
+| 真实证据 | Director Workflow `ade7a0b0…` 完成真实 t2i、I2I、I2V、同远端 ID Worker 恢复、独立 10 USD 局部修复授权、33 USD 正式生产授权、逐镜验收和四项交付。成片 15.17 秒；3 个镜头均为 704×1280、24fps、121 帧/5.04 秒；三个 keyframe 共用 Canonical `64ad1657…` / SHA-256 `1a4c3233…`。Provider 未报告费用，保持 `not_reported`；用户明确接受主观模型质量限制用于端到端验证，不等同独立质量通过。 |
 | 历史边界 | `0cb923f` 曾关闭 A2，但不是当前候选；只作为回归目标，不计入当前 HEAD 发布通过数 |
 
 ## Gate A：核心体验
@@ -24,11 +24,11 @@
 |---|---|---|---|---|
 | A1 | 三入口、四阶段、四确认和变更预览 | 当前候选的真实后端浏览器 E2E | `PARTIAL` | Visual 2.0 canonical 路由和 Mock API E2E 已通过；补 authenticated live-stack |
 | A2 | 快速/专业模式共享同一事实源 | 双模式读取同一版本、批次、预算和血缘 | `PARTIAL` | 在当前候选复现历史 A2 场景 |
-| A3 | 试拍、生产和修复费用分别授权 | 真实请求、Reservation、ProviderOperation 和实际费用 | `PARTIAL` | `5783e6b` 下完成新授权 $12 TRIAL：Reservation `63b5dfb7`、ProviderOperation `unified-v1` 已持久化；真实 t2i+i2i 成功但 provider 未报告成本（cost_status=not_reported，账本 consumed=0），需 provider 账单/成本确认；video i2v 被拒（503） |
-| A4 | Canonical 和必需参数进入有效请求 | Spy + 真实 EffectiveRequest/TranslationReport | `PARTIAL` | `5783e6b` 下真实 Unified Director I2I：compiled_request `image.i2i` 携带 reference_artifact_ids=`64ad1657` + SHA-256、size=1K（frozen manifest 变换）、aspect=9:16；TranslationReport 已持久化（无 dropped_options）；identity_review=needs_human 需人工复核 |
-| A5 | 代表镜头真实暴露风险或支持继续 | 试拍 Artifact、Q0–Q6、限制和用户决定 | `PARTIAL` | 产品内质量报告已把 video 503、缺失 video/composite 和 MinIO 字幕竞态列为不可覆盖硬阻断；需修复后完成用户验收 |
-| A6 | 一个失败镜头被局部修复 | 新旧 NodeRun、复用 Artifact、额外授权和费用 | `PARTIAL` | 真实 RepairPlan `0a056f2c…` 已生成并选中 10 USD 视频单点方案；独立授权后执行，并核对仅重跑 video 与三个下游 |
-| A7 | 15–30 秒中文对白作品和四项交付 | 同一候选的多镜头真实全链 | `OPEN` | 完成 1 主角、3 镜头黄金样本 |
+| A3 | 试拍、生产和修复费用分别授权 | 真实请求、Reservation、ProviderOperation 和实际费用 | `PARTIAL` | 三类授权与 Reservation 已分别生效，所有付费媒体 operation 均 attempt 1、无重复 submit；Provider 未报告最终费用，继续保持 `not_reported`，等待账单口径核对 |
+| A4 | Canonical 和必需参数进入有效请求 | Spy + 真实 EffectiveRequest/TranslationReport | `PASS` | shot-1/2/3 keyframe 均携带 Canonical `64ad1657…` + SHA-256；Agnes 图片 `1K/9:16`、视频 `9:16/24fps/121帧/5秒/无原生音频`，无 dropped options |
+| A5 | 代表镜头真实暴露风险或支持继续 | 试拍 Artifact、Q0–Q6、限制和用户决定 | `PARTIAL` | 首次 video 503 和对象存储竞态形成硬阻断；产品生成局部修复，成功视频及首/中/末帧进入审阅，用户说明与自动限制分别保留；试拍/修复发生在当前候选之前 |
+| A6 | 一个失败镜头被局部修复 | 新旧 NodeRun、复用 Artifact、额外授权和费用 | `PARTIAL` | Repair Batch `933ee4bc…` 只重跑 video、video_drift_review、composite、continuity_review；Canonical/Keyframe/Voice/Subtitle 复用；新 operation `49db23a6…` 单次成功，旧失败未删除；需在冻结 RC 的目标用户流程中自然复现，不为补证单独付费重跑 |
+| A7 | 15–30 秒中文对白作品和四项交付 | 同一候选的多镜头真实全链 | `PASS` | Production Batch `7b760f99…` 完成 3 镜头、15.17 秒 MP4、SRT、timeline.json 和素材包；验收与导出精确引用 3 个 accepted Artifact |
 | A8 | 三名目标用户无人代操作完成 | 三份脱敏用户记录 | `OPEN` | A7 稳定后安排三次测试 |
 | A9 | 至少两人愿意保存、展示或继续创作 | A8 对应的结束问题原话 | `OPEN` | 与 A8 同步收集 |
 
@@ -36,14 +36,14 @@
 
 | ID | 要求 | 当前状态 | 下一动作 |
 |---|---|---|---|
-| Q0 | 授权、能力、许可和参考有效 | `PARTIAL` | 真实 TRIAL 使用冻结 Binding/Manifest 与 12 USD 上限；旧授权不允许付费重试，下一次 G5 必须重新明确授权；Binding 仍待真实质量验收后提升 quality gate |
-| Q1 | 有效请求完整 | `PARTIAL` | 真实 I2I 已证明 Canonical ID/SHA-256、1K、9:16 和无 dropped options；视频创建被 503 拒绝，尚无远端任务与输出 Artifact |
-| Q2 | 文件、尺寸、时长、音轨、黑帧和静音检查 | `OPEN` | 对试拍和交付 Artifact 执行确定性检查 |
-| Q3 | 人物、外观、肢体和时序证据 | `PARTIAL` | 已有一条拒绝记录；补项目级 Canonical 和产品内人工结论 |
-| Q4 | 声音、说话人、口型和表演 | `OPEN` | 明确 post-dub 无 lip-sync 引擎并完成试听/观察证据 |
-| Q5 | 叙事、对白和连续性 | `OPEN` | 对黄金样本逐镜复核 |
-| Q6 | 用户验收和主观覆盖 | `OPEN` | 通过产品流程记录，不改写自动结果 |
-| Q7 | 身份、声音/口型、叙事三类修复演练 | `OPEN` | 先以真实失败证据生成可执行修复方案 |
+| Q0 | 授权、能力、许可和参考有效 | `PASS` | 三类预算独立授权；冻结 Binding/Manifest、账号能力、Canonical 引用和一次性提交边界可追溯 |
+| Q1 | 有效请求完整 | `PASS` | 真实 I2I/I2V 的 EffectiveRequest、TranslationReport、引用 ID/SHA、固定参数和无 dropped options 均持久化 |
+| Q2 | 文件、尺寸、时长、音轨、黑帧和静音检查 | `PARTIAL` | MP4/SRT/timeline/ZIP 非空且哈希通过；三段视频与成片的尺寸、帧率、帧数、时长和音轨已探测；黑帧/静音专项仍未独立量化 |
+| Q3 | 人物、外观、肢体和时序证据 | `PARTIAL` | Canonical 与首/中/末帧血缘完整；本轮按用户指示不以模型主观质量阻断，尚无独立视觉复核结论 |
+| Q4 | 声音、说话人、口型和表演 | `PARTIAL` | post-dub 音轨、台词和限制已交付并记录用户覆盖理由；未宣称完成可信 lip-sync 或独立试听评估 |
+| Q5 | 叙事、对白和连续性 | `PARTIAL` | 三镜故事与字幕完整交付且逐镜接受；独立目标用户对叙事和连续性的观察尚未收集 |
+| Q6 | 用户验收和主观覆盖 | `PARTIAL` | Owner 在产品内逐镜接受并保留主观质量限制；三名目标用户无人代操作仍未执行 |
+| Q7 | 身份、声音/口型、叙事三类修复演练 | `PARTIAL` | 已完成一次真实视频局部修复；身份、声音/口型、叙事三类独立修复演练仍未全部完成 |
 | Q8 | 模型、权重、声音和字体许可 | `OPEN` | 完成第三方资源清单和负责人签字 |
 
 ## Gate B：离线生产栈
@@ -72,3 +72,6 @@
 | 2026-08-21 | A3, A4 | PARTIAL -> PARTIAL（证据推进） | `5783e6b141d5d67f3625e442aae9385cee917482` | `tmp/p0-evidence/5783e6b141d5d67f3625e442aae9385cee917482/real-provider/` | run_operator | Authorization `auth-g4-trial-2026-08-21-001`; scope trial; cost 真实 t2i+i2i 成功（provider 未报告成本，账本 consumed=0）；video i2v 被 Agnes 拒（503 PROVIDER_CREATE_FAILED）；result pass（核心 I2I 成功）+ blocked（video）；known limits: provider 成本未确认、video 未生成、identity_review=needs_human、subtitle 失败为 MinIO bucket 竞态 |
 | 2026-08-21 | A5 | OPEN -> PARTIAL | `8e3c30738cbc57c15afdf6c604b7879465f53133` | 产品内 QualityReport + DOM 断言 | run_operator | 10 个试拍节点全部终止并生成质量报告；硬阻断不可接受；修复 MinIO bucket 并发、Canonical/Keyframe 误选和工作区 Provider 上下文竞态，未触发新的 Provider 请求 |
 | 2026-08-21 | A6 | OPEN -> PARTIAL | `9665773ba85bc1d36c4646352681ea690c8a1ed4` | `tmp/p0-evidence/9665773ba85bc1d36c4646352681ea690c8a1ed4/g5-repair-preflight/decision.json` + RepairPlan `0a056f2c-a6b7-4e64-bc48-2873f2690f1e` + 产品 DOM | run_operator | 基于真实 503 与硬阻断生成三个结构化修复方案；UI 中选中 10 USD 视频单点方案，失效范围为 video、video_drift_review、composite、continuity_review；当前 awaiting_repair_authorization，未创建新 Authorization、Repair Batch 或 ProviderOperation |
+| 2026-08-21 | A5, A6 | PARTIAL -> PARTIAL（真实链完成，候选边界未闭） | `214a527fb1a53a59d6fedc5d7e97dd6b9c62add1` | `tmp/p0-evidence/214a527fb1a53a59d6fedc5d7e97dd6b9c62add1/g5-repair/` | run_operator | 独立 10 USD 授权执行真实局部修复；ProviderOperation `49db23a6…` 在 Heavy Worker 停启后以同一远端 ID、attempt 1 恢复并成功；只重跑 video 与三个下游。证据候选不是当前 `faee665`，故发布 Gate 不升 PASS |
+| 2026-08-21 | A4 | PARTIAL -> PASS | `faee665c1d53dd6c6f48064fbb2a6b6887efd91d` | `tmp/p0-evidence/faee665c1d53dd6c6f48064fbb2a6b6887efd91d/g9-production-delivery/` | run_operator | 三个 keyframe 真实请求均引用同一 Canonical Artifact ID/SHA-256；图片和视频 Binding/Manifest、EffectiveRequest、TranslationReport 与固定参数断言通过 |
+| 2026-08-21 | A7 | OPEN -> PASS | `faee665c1d53dd6c6f48064fbb2a6b6887efd91d` | `tmp/p0-evidence/faee665c1d53dd6c6f48064fbb2a6b6887efd91d/g9-production-delivery/` | run_operator | 3 个 accepted 镜头精确导出为 15.17 秒 MP4、SRT、timeline.json 和素材包；20 个正式节点全部终态，付费媒体节点无重复 operation；主观模型质量按用户说明保留为限制，A8/A9 未执行 |

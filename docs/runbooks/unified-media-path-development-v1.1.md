@@ -6,7 +6,7 @@
 
 **初始审计基线：`dev@5f2eb6e930bb791ba5e760d4927e467494200a4a`**
 
-**当前运行候选：`dev@8e3c30738cbc57c15afdf6c604b7879465f53133`**
+**当前运行候选：`dev@faee665c1d53dd6c6f48064fbb2a6b6887efd91d`**
 
 **来源：** `D:\DramaForge_Unified_Media_Path_开发执行规格_v1.0.md`
 
@@ -797,16 +797,18 @@ Idea
 
 | Gate | 状态 | 当前证据与缺口 |
 |---|---|---|
-| G0 候选冻结 | `PASS` | 候选 `9665773`；后端 `662 passed / 16 skipped`；前端 `57 passed`；Chromium `11 passed`；Ruff、mypy、typecheck、build 通过；应用镜像同源健康 |
+| G0 候选冻结 | `PASS` | 候选 `faee665`；后端 `670 passed / 16 skipped`；前端 `60 passed`；Chromium `11 passed`；Ruff、mypy、typecheck、build 通过；工作区干净并已推送 |
 | G1 合同收口 | `PASS` | Director 强制 Unified；Agnes 视频固定 9:16/24fps/121 帧/5 秒/无原生音频；Agnes 图片 v2 按官方合同冻结 `1K + 9:16`、参考输出 `736x1312`；EffectiveRequest、显式 TranslationReport、严格引用匹配和 `not_reported` 费用语义已落地 |
 | G2 无费用证明 | `PASS` | 完整 Spy 从真实 Director Workflow、锁定工件、预算 Approval 和 `materialize_trial()` 起跑，经 Production Graph、Outbox、Worker、Frozen Binding、Manifest、Compiler、Runtime 到 ProviderOperation/Artifact；三次 submit，重复 Worker 执行不增 submit；Canonical/首帧 ID 与 SHA-256、Resume Token、费用和 `produced_by_run_id` 均断言通过 |
-| G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `9665773` 镜像并健康；两个 Worker 共用同一 Backend 镜像；数据服务容器/卷未重建；数据库 head 为 `0029` |
+| G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `faee665` 镜像并健康；两个 Worker 共用同一 Backend 镜像；数据服务容器/卷未重建；数据库 head 为 `0031` |
 | G4 Agnes 图片 | `PASS` | `5783e6b` 的真实 Director TRIAL 经 API→Outbox→Worker→Unified Runtime 完成 t2i 角色参考与 I2I 关键帧；Binding/Manifest、EffectiveRequest、TranslationReport、Canonical/输出 Artifact ID+SHA-256 完整。Provider 未报告费用，保持 `not_reported` / USD。`postrun-index-v2.json` 15 个条目哈希通过。 |
-| G5 Agnes 视频 | `OPEN` | 同一 TRIAL 的视频创建请求已到 Agnes，严格参数和首帧引用已持久化，但供应商返回 503，未创建远端 task；`9665773` 已让后续失败结构化保存 HTTP 状态、Provider 错误码和 Retry-After，仍保持单次创建、不自动付费重试。下一次必须单独授权，成功取得远端 ID 后执行停启 Worker 与同 ID 恢复 poll。 |
-| G6 Legacy 退出 | `PARTIAL` | Director 已无 Feature Flag fallback；真实 G4/G5 前不删除非 Director 兼容代码和历史恢复依赖 |
-| G7 试拍审阅 | `PARTIAL` | 真实试拍页已审阅 Canonical、关键帧、音频、ProviderOperation、EffectiveRequest、费用状态与限制，并生成不可覆盖硬阻断报告；`8e3c307` 修正 Canonical/Keyframe 误选。仍缺成功视频、首/中/末帧和用户验收。 |
-| G8 局部修复 | `PARTIAL` | 产品 UI 已基于真实失败生成 RepairPlan `0a056f2c…`，选中 10 USD“复用成功关键帧，仅重试视频”；失效范围仅 video 及其三个下游，Workflow 为 `awaiting_repair_authorization`。尚未授权或执行，不能算真实修复完成。 |
-| G9 黄金样本 | `OPEN` | 未完成一个单主角三镜头真实作品，也未进行三名目标用户验证 |
+| G5 Agnes 视频 | `PASS` | 独立 10 USD 修复授权后，ProviderOperation `49db23a6…` 单次提交取得远端 ID；停启 Heavy Worker 后以同一 operation、远端 ID 和 attempt 1 恢复 poll 并成功，未产生第二次 submit。输出为 9:16、24fps、121 帧、5.04 秒；证据见 `tmp/p0-evidence/214a527f…/g5-repair/recovery-evidence.json`。 |
+| G6 Legacy 退出 | `PASS` | Director keyframe/video 无 Feature Flag 或 Legacy fallback；旧付费 API 对 Director 项目 fail-closed，非 Director 历史恢复兼容代码按合同保留。边界聚焦测试 `7 passed`，证据见 `tmp/p0-evidence/214a527f…/g6-legacy-exit/evidence.json`。 |
+| G7 试拍审阅 | `PASS` | UI 可直接审阅真实修复视频、音频、Canonical、Keyframe、首/中/末帧、EffectiveRequest、TranslationReport、费用状态与限制；修复批次不再被旧 trial 事实遮蔽。DOM 证据见 `tmp/p0-evidence/40249e31…/g7-repair-review/`。 |
+| G8 局部修复 | `PASS` | Repair Batch `933ee4bc…` 在独立 10 USD 授权下只新建 video 及三个必要下游；Canonical、Keyframe、Voice、Subtitle 复用，旧失败保留；新视频 operation `49db23a6…` 和验收复合 Artifact `26753331…` 可追溯。 |
+| G9 黄金样本 | `PASS` | Production Batch `7b760f99…` 完成 3 镜头、15.17 秒中文对白成片和 MP4/SRT/timeline/ZIP 四项交付；shot-1 精确复用已验收修复，shot-2/3 单次生成。三个 keyframe 均引用 Canonical `64ad1657…` / SHA-256 `1a4c3233…`；证据见 `tmp/p0-evidence/faee665c…/g9-production-delivery/`。 |
+
+Unified 专项已达到本 Runbook 的 Definition of Done，并停止扩展媒体基础设施。发布总 Gate 中三名目标用户无人代操作、主观视听质量、离线栈和跨平台安装验证仍是独立的后续工作，不因 G9 通过而被视为完成。
 
 ## 17. 每阶段报告格式
 
