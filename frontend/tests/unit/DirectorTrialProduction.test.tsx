@@ -144,4 +144,58 @@ describe("Director trial and production stages", () => {
     expect(screen.getByTestId("repair-budget-panel")).toHaveTextContent("1.50 CNY");
     expect(screen.getByRole("button", { name: "授权额外预算并开始局部修复" })).toBeDisabled();
   });
+
+  it("shows the repaired composite and cached lineage directly in final review", async () => {
+    const value = snapshot("final_review");
+    value.production_batches = [{ id: "repair-batch", batch_kind: "repair", status: "running", budget_authorization_id: "repair-budget", locked_version_refs: {}, selected_shot_ids: ["shot-2"], template_keys: ["dialogue-post-dub-shot-v1"], quality_policy_id: "live-dialogue-quality-v1", selection_snapshot: {}, semantic_hash: "repair-hash" }];
+    value.current_artifacts.quality_report = artifact("quality_report", {
+      policy_id: "live-dialogue-quality-v1",
+      batch_id: "repair-batch",
+      overall_status: "needs_human",
+      hard_blockers: [],
+      shot_reports: [{
+        policy_id: "live-dialogue-quality-v1",
+        batch_id: "repair-batch",
+        logical_shot_id: "shot-2",
+        overall_status: "needs_human",
+        hard_blockers: [],
+        limitations: [],
+        recommended_action: "review",
+        dimensions: [],
+      }],
+    });
+    const runs = [
+      ["cached-canonical", "character_1", "canonical-artifact", "character_reference", "cached"],
+      ["cached-keyframe", "keyframe", "keyframe-artifact", "keyframe", "cached"],
+      ["video-run", "video", "video-artifact", "video", "completed"],
+      ["cached-voice", "voice", "voice-artifact", "voice", "cached"],
+      ["composite-run", "composite", "composite-artifact", "composite", "completed"],
+    ].map(([id, nodeKey, artifactId, purpose, status]) => ({ id, status, result_artifact_id: artifactId, output_summary: {}, input_snapshot: { production_batch_id: "repair-batch", source_commit: "candidate", purpose }, idempotency_key: id, attempt_no: 1, node_key: nodeKey, provider_cost: "0", started_at: null, finished_at: null, error_code: null, error_summary: null, upstream_dependencies: [] }));
+    const media = (id: string, runId: string, mimeType: string) => ({ id, object_key: `projects/project-1/${id}`, content_hash: `${id}-sha256`, byte_size: 1024, mime_type: mimeType, storage_state: "available", produced_by_run_id: runId, width: mimeType.startsWith("video/") ? 704 : 736, height: mimeType.startsWith("video/") ? 1280 : 1312, duration_seconds: mimeType.startsWith("video/") ? "5.042" : null });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      project_id: "project-1",
+      name: "试拍作品",
+      node_runs: runs,
+      artifacts: [
+        media("canonical-artifact", "old-canonical-run", "image/png"),
+        media("keyframe-artifact", "old-keyframe-run", "image/png"),
+        media("video-artifact", "video-run", "video/mp4"),
+        media("voice-artifact", "old-voice-run", "audio/wav"),
+        media("composite-artifact", "composite-run", "video/mp4"),
+      ],
+      provider_operations: [{
+        id: "video-operation", node_run_id: "video-run", operation_kind: "video.generate", actual_provider: "agnes", actual_model: "agnes-video-v2.0", provider_request_id: "remote-video", protocol_profile: "agnes_cn_v1", status: "succeeded", request_fingerprint: "fingerprint", request_summary: { effective_request: { common_options: { aspect_ratio: "9:16", frame_rate: 24, num_frames: 121, duration_seconds: 5, generate_audio: false }, reference_artifact_ids: ["keyframe-artifact"] }, translation_report: { transformations: [], dropped_options: [] } }, response_summary: { cost_status: "not_reported" }, model_binding_id: "video-binding", catalog_entry_id: "video-catalog", capability_manifest_hash: "video-manifest", execution_path_version: "unified-v1", provider_cost: null, currency: "USD", submitted_at: null, completed_at: null,
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    renderWithQuery(<ProductionStage projectId="project-1" snapshot={value} refresh={vi.fn()} onMessage={vi.fn()} onError={vi.fn()} />);
+
+    expect(await screen.findByTestId("repair-media-evidence")).toHaveTextContent("本次局部修复及其明确复用血缘");
+    expect(screen.getByAltText("主角 Canonical")).toHaveAttribute("src", expect.stringContaining("canonical-artifact/content"));
+    expect(screen.getByTestId("repair-video")).toHaveAttribute("src", expect.stringContaining("composite-artifact/content"));
+    expect(screen.getByTestId("repair-audio")).toHaveAttribute("src", expect.stringContaining("voice-artifact/content"));
+    expect(screen.getByTestId("repair-video-frames").querySelectorAll("img")).toHaveLength(3);
+    expect(screen.getByTestId("repair-execution-evidence")).toHaveTextContent("video.generate · succeeded");
+    expect(screen.getByTestId("repair-execution-evidence")).toHaveTextContent("Provider 未报告 · not_reported");
+  });
 });

@@ -19,6 +19,7 @@ import {
   reviewProduction,
 } from "./api";
 import { areTrialRunsTerminal, isProductionPricingReady } from "./safetyGates";
+import { TrialMediaEvidence } from "./TrialStage";
 import { artifactPayload } from "./types";
 import type {
   CostEstimatePayload,
@@ -188,6 +189,11 @@ function ProductionProgress(props: ProductionStageProps) {
 function ProductionReview(props: ProductionStageProps & { report: ProductionQualityReportPayload }) {
   const { projectId, snapshot, report, refresh, onMessage, onError } = props;
   const batch = activeExecutionBatch(snapshot);
+  const project = useQuery({ queryKey: ["snapshot", projectId], queryFn: () => fetchSnapshot(projectId) });
+  const batchRuns = useMemo(
+    () => (project.data?.node_runs ?? []).filter((run) => String(run.input_snapshot.production_batch_id ?? "") === batch?.id),
+    [batch?.id, project.data?.node_runs],
+  );
   const [decisions, setDecisions] = useState<Record<string, "accept" | "repair" | "stop">>({});
   const [note, setNote] = useState("");
   const mutation = useMutation({
@@ -212,6 +218,9 @@ function ProductionReview(props: ProductionStageProps & { report: ProductionQual
   return (
     <section className="panel" data-testid="production-review">
       <div className="panel-header"><div><h3>逐镜质量验收</h3><p className="muted">每个镜头必须明确接受、修复或停止；硬阻断不能被接受。</p></div><strong>{report.overall_status}</strong></div>
+      {batch?.batch_kind === "repair" && project.data && (
+        <TrialMediaEvidence projectId={projectId} project={project.data} trialRuns={batchRuns} snapshot={snapshot} evidenceKind="repair" />
+      )}
       <div className="director-shot-review-list">{report.shot_reports.map((shot) => {
         const blocked = shot.hard_blockers.length > 0 || shot.overall_status === "blocked";
         return <article key={shot.logical_shot_id}><header><strong>{shot.logical_shot_id}</strong><span>{shot.overall_status}</span></header><p>{shot.dimensions.filter((item) => item.status !== "passed").map((item) => item.summary).join("；") || "自动证据未发现异常。"}</p><div className="director-shot-decisions"><button type="button" className={decisions[shot.logical_shot_id] === "accept" ? "selected" : ""} disabled={blocked} onClick={() => setDecisions((value) => ({ ...value, [shot.logical_shot_id]: "accept" }))}>接受</button><button type="button" className={decisions[shot.logical_shot_id] === "repair" ? "selected" : ""} onClick={() => setDecisions((value) => ({ ...value, [shot.logical_shot_id]: "repair" }))}>局部修复</button><button type="button" className={decisions[shot.logical_shot_id] === "stop" ? "selected" : ""} onClick={() => setDecisions((value) => ({ ...value, [shot.logical_shot_id]: "stop" }))}>停止</button></div>{blocked && <small className="status-bad">硬阻断：{shot.hard_blockers.join("；")}</small>}</article>;

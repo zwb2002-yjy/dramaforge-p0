@@ -89,31 +89,42 @@ function sourceCommit(run: ProjectSnapshot["node_runs"][number] | undefined): st
   return typeof value === "string" && value ? value : "—";
 }
 
-function TrialMediaEvidence({
+export function TrialMediaEvidence({
   projectId,
   project,
   trialRuns,
   snapshot,
+  evidenceKind = "trial",
 }: {
   projectId: string;
   project: ProjectSnapshot;
   trialRuns: ProjectSnapshot["node_runs"];
   snapshot: DirectorWorkspaceSnapshot;
+  evidenceKind?: "trial" | "repair";
 }) {
   const runIds = new Set(trialRuns.map((run) => run.id));
+  const artifactRun = new Map(
+    trialRuns.flatMap((run) => run.result_artifact_id ? [[run.result_artifact_id, run] as const] : []),
+  );
   const artifacts = project.artifacts.filter(
-    (artifact) => artifact.produced_by_run_id && runIds.has(artifact.produced_by_run_id),
+    (artifact) => artifactRun.has(artifact.id) || (
+      artifact.produced_by_run_id && runIds.has(artifact.produced_by_run_id)
+    ),
   );
   const runById = new Map(trialRuns.map((run) => [run.id, run]));
+  const runForArtifact = (artifact: ProjectSnapshot["artifacts"][number]) => (
+    artifactRun.get(artifact.id) ?? runById.get(artifact.produced_by_run_id ?? "")
+  );
   const byNode = (nodeKey: string) => artifacts.find(
-    (artifact) => runById.get(artifact.produced_by_run_id ?? "")?.node_key === nodeKey,
+    (artifact) => runForArtifact(artifact)?.node_key === nodeKey,
   ) ?? null;
   const byPurpose = (purpose: string) => artifacts.find(
-    (artifact) => runById.get(artifact.produced_by_run_id ?? "")?.input_snapshot.purpose === purpose,
+    (artifact) => runForArtifact(artifact)?.input_snapshot.purpose === purpose,
   ) ?? null;
   const canonical = byPurpose("character_reference") ?? byNode("character_reference") ?? imageArtifacts(artifacts)[0] ?? null;
   const keyframe = byPurpose("keyframe") ?? byNode("keyframe") ?? imageArtifacts(artifacts).find((item) => item.id !== canonical?.id) ?? null;
-  const video = byNode("video") ?? videoArtifacts(artifacts)[0] ?? null;
+  const providerVideo = byNode("video") ?? videoArtifacts(artifacts)[0] ?? null;
+  const video = byNode("composite") ?? providerVideo;
   const voice = byNode("voice") ?? audioArtifacts(artifacts)[0] ?? null;
   const storyboard = artifactPayload<StoryboardPlanPayload>(snapshot, "storyboard_plan");
   const trialPlan = artifactPayload<TrialPlanPayload>(snapshot, "trial_plan");
@@ -124,7 +135,9 @@ function TrialMediaEvidence({
     (operation) => operation.node_run_id && runIds.has(operation.node_run_id),
   );
   const videoOperation = operations.find(
-    (operation) => operation.node_run_id === video?.produced_by_run_id,
+    (operation) => operation.node_run_id === providerVideo?.produced_by_run_id || (
+      operation.node_run_id && runById.get(operation.node_run_id)?.result_artifact_id === providerVideo?.id
+    ),
   );
   const videoEffective = videoOperation?.request_summary.effective_request as
     | Record<string, unknown>
@@ -132,10 +145,10 @@ function TrialMediaEvidence({
   const videoOptions = videoEffective?.common_options as Record<string, unknown> | undefined;
 
   return (
-    <div className="director-trial-evidence" data-testid="trial-media-evidence">
+    <div className="director-trial-evidence" data-testid={`${evidenceKind}-media-evidence`}>
       <section className="director-evidence-media">
         <header>
-          <div><h3>真实试拍媒体</h3><p className="muted">角色参考、关键帧、视频和后配音均来自当前试拍批次。</p></div>
+          <div><h3>{evidenceKind === "repair" ? "真实修复媒体" : "真实试拍媒体"}</h3><p className="muted">角色参考、关键帧、视频和后配音均来自{evidenceKind === "repair" ? "本次局部修复及其明确复用血缘" : "当前试拍批次"}。</p></div>
           <span>{artifacts.length} 个 Artifact</span>
         </header>
         <div className="director-evidence-visuals">
@@ -160,16 +173,16 @@ function TrialMediaEvidence({
                   : "等待视频"}
               </small>
             </div>
-            {video ? <video controls preload="metadata" src={artifactContentUrl(projectId, video.id)} data-testid="trial-video" /> : <div className="director-media-empty">视频完成后可在此直接播放</div>}
+            {video ? <video controls preload="metadata" src={artifactContentUrl(projectId, video.id)} data-testid={`${evidenceKind}-video`} /> : <div className="director-media-empty">视频完成后可在此直接播放</div>}
           </article>
           <article>
             <div><strong>对白后配音</strong><small>{representativeShot?.dialogue.map((item) => `${item.speaker}：${item.text}`).join(" / ") || "当前镜头无对白文本"}</small></div>
-            {voice ? <audio controls preload="metadata" src={artifactContentUrl(projectId, voice.id)} data-testid="trial-audio" /> : <div className="director-media-empty">音频完成后可在此直接播放</div>}
+            {voice ? <audio controls preload="metadata" src={artifactContentUrl(projectId, voice.id)} data-testid={`${evidenceKind}-audio`} /> : <div className="director-media-empty">音频完成后可在此直接播放</div>}
             <p className="muted">当前模板为 post-dub，不代表已完成 lip-sync；嘴巴开合与语音同步仍需人工判断。</p>
           </article>
         </div>
         {video && (
-          <section className="director-frame-evidence" data-testid="trial-video-frames">
+          <section className="director-frame-evidence" data-testid={`${evidenceKind}-video-frames`}>
             <header><strong>首 / 中 / 末帧</strong><span>从同一视频 Artifact 确定性解码</span></header>
             <div>
               {(["start", "mid", "end"] as const).map((role) => (
@@ -183,7 +196,7 @@ function TrialMediaEvidence({
         )}
       </section>
 
-      <section className="director-operation-evidence" data-testid="trial-execution-evidence">
+      <section className="director-operation-evidence" data-testid={`${evidenceKind}-execution-evidence`}>
         <header><div><h3>执行证据</h3><p className="muted">显示脱敏有效请求、参数翻译、费用状态与不可变血缘。</p></div><span>{operations.length} 次 Unified 操作</span></header>
         {operations.map((operation) => {
           const request = operation.request_summary;
@@ -214,7 +227,7 @@ function TrialMediaEvidence({
         {operations.length === 0 && <div className="director-media-empty">媒体 ProviderOperation 尚未产生；授权前这里保持为空。</div>}
       </section>
 
-      <section className="callout warn director-known-limits" data-testid="trial-known-limitations">
+      <section className="callout warn director-known-limits" data-testid={`${evidenceKind}-known-limitations`}>
         <strong>当前已知限制</strong>
         <ul>
           <li>人物、发型、服装、肢体、遮挡和跨帧观感必须由人查看，系统不使用人脸相似度替你放行。</li>
