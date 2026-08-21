@@ -103,8 +103,9 @@ class DirectorService:
             created_by=actor.id,
         )
         self._session.add(workflow)
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(workflow)
+        await self._session.commit()
         return workflow
 
     async def get_workflow(
@@ -203,8 +204,8 @@ class DirectorService:
         await self._session.flush()
         self._set_current_artifact(workflow, artifact_kind, version.id)
         if commit:
-            await self._session.commit()
             await self._session.refresh(version)
+            await self._session.commit()
         return version
 
     @staticmethod

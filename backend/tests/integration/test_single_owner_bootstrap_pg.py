@@ -10,7 +10,10 @@ from pathlib import Path
 
 import asyncpg
 import pytest
+from app.access.projects import ProjectService
 from app.access.service import AccessService
+from app.director.enums import ArtifactKind
+from app.director.service import DirectorService
 from app.shared.db import set_rls_context
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -129,6 +132,65 @@ async def test_first_owner_bootstrap_survives_users_force_rls() -> None:
                     actor=owner,
                 )
                 assert renamed.name == "Renamed workspace"
+
+            async with factory() as project_session:
+                await set_rls_context(
+                    project_session,
+                    user_id=owner.id,
+                    workspace_id=workspace.id,
+                )
+                project = await ProjectService(project_session).create_project(
+                    workspace_id=workspace.id,
+                    name="Director bootstrap project",
+                    aspect_ratio="9:16",
+                    actor=owner,
+                )
+                await project_session.commit()
+
+            async with factory() as workflow_session:
+                await set_rls_context(
+                    workflow_session,
+                    user_id=owner.id,
+                    workspace_id=workspace.id,
+                    project_id=project.id,
+                )
+                workflow = await DirectorService(workflow_session).start_workflow(
+                    project_id=project.id,
+                    actor=owner,
+                )
+                assert workflow.project_id == project.id
+
+            async with factory() as artifact_session:
+                await set_rls_context(
+                    artifact_session,
+                    user_id=owner.id,
+                    workspace_id=workspace.id,
+                    project_id=project.id,
+                )
+                artifact = await DirectorService(
+                    artifact_session
+                ).publish_artifact_version(
+                    project_id=project.id,
+                    actor=owner,
+                    artifact_kind=ArtifactKind.STORY_CORE,
+                    payload={
+                        "selected_concept_id": "bootstrap-concept",
+                        "theme": "Courage",
+                        "core_conflict": "The lead must decide whether to face the truth.",
+                        "emotional_direction": "Uncertainty to resolve",
+                        "ending": "The lead chooses to move forward.",
+                        "characters": [
+                            {
+                                "name": "Lin",
+                                "identity": "A fictional designer",
+                                "desire": "Tell the truth",
+                                "fear_or_cost": "Losing a relationship",
+                            }
+                        ],
+                    },
+                    source_kind="user",
+                )
+                assert artifact.workflow_run_id == workflow.id
 
             async with factory() as second_session:
                 initialized, available = await AccessService(
