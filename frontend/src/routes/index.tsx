@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRoute, useNavigate } from "@tanstack/react-router";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import {
   ApiError,
@@ -56,12 +56,17 @@ function HomePage() {
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9">("9:16");
   const [error, setError] = useState<string | null>(null);
 
+  const selectWorkspace = useCallback((workspaceId: string | null) => {
+    persistSelectedWorkspaceId(workspaceId);
+    setSelectedWorkspaceId(workspaceId);
+  }, []);
+
   useEffect(() => {
-    if (!selectedWorkspaceId && workspaces.data?.[0]) setSelectedWorkspaceId(workspaces.data[0].id);
+    if (!selectedWorkspaceId && workspaces.data?.[0]) selectWorkspace(workspaces.data[0].id);
     if (selectedWorkspaceId && workspaces.data && !workspaces.data.some((workspace) => workspace.id === selectedWorkspaceId)) {
-      setSelectedWorkspaceId(workspaces.data[0]?.id ?? null);
+      selectWorkspace(workspaces.data[0]?.id ?? null);
     }
-  }, [selectedWorkspaceId, workspaces.data]);
+  }, [selectWorkspace, selectedWorkspaceId, workspaces.data]);
 
   useEffect(() => {
     persistSelectedWorkspaceId(selectedWorkspaceId);
@@ -87,8 +92,7 @@ function HomePage() {
       // A session can change accounts without a full page reload. Do not render
       // the prior account's selected workspace or cached projects while the
       // new session is being established.
-      setSelectedWorkspaceId(null);
-      persistSelectedWorkspaceId(null);
+      selectWorkspace(null);
       await Promise.all([
         queryClient.cancelQueries({ queryKey: ["current-user"] }),
         queryClient.cancelQueries({ queryKey: ["workspaces"] }),
@@ -125,7 +129,7 @@ function HomePage() {
     mutationFn: async () => createWorkspace(workspaceName.trim()),
     onSuccess: async (workspace) => {
       setWorkspaceName("");
-      setSelectedWorkspaceId(workspace.id);
+      selectWorkspace(workspace.id);
       await invalidateWorkspaceData();
     },
     onError: (cause: Error) => setError(cause.message),
@@ -235,7 +239,7 @@ function HomePage() {
             <div className="workspace-list" role="list" aria-label="我的空间">
               {workspaces.data?.map((workspace) => (
                 <div className={workspace.id === selectedWorkspaceId ? "workspace-row selected" : "workspace-row"} key={workspace.id} role="listitem">
-                  <button className="workspace-select" type="button" onClick={() => setSelectedWorkspaceId(workspace.id)}>{workspace.name}</button>
+                  <button className="workspace-select" type="button" onClick={() => selectWorkspace(workspace.id)}>{workspace.name}</button>
                   <div className="workspace-actions">
                     <button className="ghost" type="button" onClick={() => renameWorkspaceMutation.mutate(workspace)}>重命名</button>
                     <button className="ghost danger" type="button" onClick={() => deleteWorkspaceMutation.mutate(workspace)} disabled={projects.data?.some((project) => project.workspace_id === workspace.id)}>删除</button>
@@ -248,6 +252,7 @@ function HomePage() {
 
           <div id="provider-settings">
             <ProviderConnectionPanel
+              key={selectedWorkspaceId ?? "no-workspace"}
               workspaceId={selectedWorkspaceId}
               projects={projects.data ?? []}
             />

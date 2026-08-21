@@ -99,7 +99,7 @@ class MinioObjectStore:
             "https://", ""
         )
         secure = self._settings.minio_endpoint.startswith("https://")
-        self._client = cast(
+        client = cast(
             _MinioClient,
             Minio(
                 endpoint,
@@ -109,10 +109,20 @@ class MinioObjectStore:
                 region=self._settings.minio_region,
             ),
         )
+        self._ensure_bucket(client)
+        self._client = client
+        return client
+
+    def _ensure_bucket(self, client: _MinioClient) -> None:
         bucket = self._settings.minio_bucket
-        if not self._client.bucket_exists(bucket):
-            self._client.make_bucket(bucket)
-        return self._client
+        if client.bucket_exists(bucket):
+            return
+        try:
+            client.make_bucket(bucket)
+        except Exception:
+            # Another API/Worker process may create the bucket after our check.
+            if not client.bucket_exists(bucket):
+                raise
 
     async def put_bytes(
         self, *, object_key: str, data: bytes, mime_type: str

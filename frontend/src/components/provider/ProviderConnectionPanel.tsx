@@ -60,6 +60,11 @@ export function ProviderConnectionPanel({
     queryFn: () => listProviderConnections(workspaceId!),
     enabled: Boolean(workspaceId),
   });
+  const connectionLoadError = connections.error instanceof Error
+    ? connections.error.message
+    : connections.isError
+      ? "未知错误"
+      : null;
   const plugins = useQuery({
     queryKey: ["provider-plugins"],
     queryFn: listProviderPlugins,
@@ -273,10 +278,12 @@ export function ProviderConnectionPanel({
           <h2>模型供应商插件</h2>
           <p className="muted">插件契约驱动的连接、能力探测、模型绑定与质量门禁。</p>
         </div>
-        <span className={connection?.verification_status === "verified" ? "status-ok" : "status-pending"}>
-          {connection?.verification_status === "verified" ? "已验证" : "未配置"}
+        <span className={connectionLoadError ? "status-bad" : connection?.verification_status === "verified" ? "status-ok" : "status-pending"}>
+          {connectionLoadError ? "读取失败" : connection?.verification_status === "verified" ? "已验证" : "未配置"}
         </span>
       </div>
+
+      {connectionLoadError && <p className="flash err">连接列表加载失败：{connectionLoadError}</p>}
 
       <div className="provider-plugin-selector">
         <label>供应商插件

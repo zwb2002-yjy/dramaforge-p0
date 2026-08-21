@@ -28,6 +28,22 @@ vi.mock("../../src/lib/api", () => ({
 afterEach(() => vi.clearAllMocks());
 
 describe("Provider connection contract revisions", () => {
+  it("does not misreport a failed workspace query as an unconfigured provider", async () => {
+    vi.mocked(listProviderConnections).mockRejectedValue(new Error("workspace context mismatch"));
+    vi.mocked(listProviderPlugins).mockResolvedValue([]);
+
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <ProviderConnectionPanel workspaceId="workspace-2" projects={[]} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("读取失败")).toBeInTheDocument();
+    expect(screen.getByText("连接列表加载失败：workspace context mismatch")).toBeInTheDocument();
+  });
+
   it("keeps historical bindings visible but only allows the active revision on new projects", async () => {
     vi.mocked(listProviderConnections).mockResolvedValue([
       {

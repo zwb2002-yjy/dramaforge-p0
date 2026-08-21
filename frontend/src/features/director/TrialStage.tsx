@@ -108,8 +108,11 @@ function TrialMediaEvidence({
   const byNode = (nodeKey: string) => artifacts.find(
     (artifact) => runById.get(artifact.produced_by_run_id ?? "")?.node_key === nodeKey,
   ) ?? null;
-  const canonical = byNode("character_reference") ?? imageArtifacts(artifacts)[0] ?? null;
-  const keyframe = byNode("keyframe") ?? imageArtifacts(artifacts).find((item) => item.id !== canonical?.id) ?? null;
+  const byPurpose = (purpose: string) => artifacts.find(
+    (artifact) => runById.get(artifact.produced_by_run_id ?? "")?.input_snapshot.purpose === purpose,
+  ) ?? null;
+  const canonical = byPurpose("character_reference") ?? byNode("character_reference") ?? imageArtifacts(artifacts)[0] ?? null;
+  const keyframe = byPurpose("keyframe") ?? byNode("keyframe") ?? imageArtifacts(artifacts).find((item) => item.id !== canonical?.id) ?? null;
   const video = byNode("video") ?? videoArtifacts(artifacts)[0] ?? null;
   const voice = byNode("voice") ?? audioArtifacts(artifacts)[0] ?? null;
   const storyboard = artifactPayload<StoryboardPlanPayload>(snapshot, "storyboard_plan");

@@ -62,11 +62,11 @@ describe("Director trial and production stages", () => {
     const value = snapshot("awaiting_trial_review");
     value.production_batches = [{ id: "batch-1", batch_kind: "trial", status: "running", budget_authorization_id: "budget-1", locked_version_refs: {}, selected_shot_ids: ["shot-2"], template_keys: ["dialogue-post-dub-shot-v1"], quality_policy_id: "live-dialogue-quality-v1", selection_snapshot: {}, semantic_hash: "hash" }];
     const runs = [
-      ["canonical-run", "character_reference", "canonical-artifact"],
-      ["keyframe-run", "keyframe", "keyframe-artifact"],
-      ["video-run", "video", "video-artifact"],
-      ["voice-run", "voice", "voice-artifact"],
-    ].map(([id, nodeKey, artifactId]) => ({ id, status: "completed", result_artifact_id: artifactId, output_summary: {}, input_snapshot: { production_batch_id: "batch-1", source_commit: "acaa6c4f602adb49a1c0bded22d48560acd35bc1" }, idempotency_key: id, attempt_no: 1, node_key: nodeKey, provider_cost: "0", started_at: null, finished_at: null, error_code: null, error_summary: null, upstream_dependencies: [] }));
+      ["canonical-run", "character_1", "canonical-artifact", "character_reference"],
+      ["keyframe-run", "keyframe", "keyframe-artifact", "keyframe"],
+      ["video-run", "video", "video-artifact", "video"],
+      ["voice-run", "voice", "voice-artifact", "voice"],
+    ].map(([id, nodeKey, artifactId, purpose]) => ({ id, status: "completed", result_artifact_id: artifactId, output_summary: {}, input_snapshot: { production_batch_id: "batch-1", source_commit: "acaa6c4f602adb49a1c0bded22d48560acd35bc1", purpose }, idempotency_key: id, attempt_no: 1, node_key: nodeKey, provider_cost: "0", started_at: null, finished_at: null, error_code: null, error_summary: null, upstream_dependencies: [] }));
     const artifact = (id: string, runId: string, mimeType: string) => ({ id, object_key: `projects/project-1/${id}`, content_hash: `${id}-sha256`, byte_size: 1024, mime_type: mimeType, storage_state: "available", produced_by_run_id: runId, width: mimeType.startsWith("video/") ? 720 : mimeType.startsWith("image/") ? 736 : null, height: mimeType.startsWith("video/") ? 1280 : mimeType.startsWith("image/") ? 1312 : null, duration_seconds: mimeType.startsWith("video/") ? "5.042" : null });
     const operation = (id: string, runId: string, model: string) => ({ id, node_run_id: runId, operation_kind: "media.generate", actual_provider: "agnes", actual_model: model, provider_request_id: `${id}-remote`, protocol_profile: "agnes_cn_v1", status: "succeeded", request_fingerprint: `${id}-fingerprint`, request_summary: { effective_request: { common_options: model.includes("video") ? { aspect_ratio: "9:16", frame_rate: 24, num_frames: 121, duration_seconds: 5, generate_audio: false } : { aspect_ratio: "9:16", size: "1K" }, reference_artifact_ids: ["canonical-artifact"], reference_fingerprints: ["canonical-sha256"] }, translation_report: { transformations: [], dropped_options: [] } }, response_summary: { cost_status: "not_reported", provider_reported_cost: null }, model_binding_id: `${id}-binding`, catalog_entry_id: `${id}-catalog`, capability_manifest_hash: `${id}-manifest`, execution_path_version: "unified-v1", provider_cost: null, currency: "CNY", submitted_at: null, completed_at: null });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
@@ -87,6 +87,8 @@ describe("Director trial and production stages", () => {
 
     renderWithQuery(<TrialStage projectId="project-1" snapshot={value} refresh={vi.fn()} onMessage={vi.fn()} onError={vi.fn()} />);
 
+    expect(await screen.findByAltText("主角 Canonical")).toHaveAttribute("src", expect.stringContaining("canonical-artifact/content"));
+    expect(screen.getByAltText("代表镜头关键帧")).toHaveAttribute("src", expect.stringContaining("keyframe-artifact/content"));
     expect(await screen.findByTestId("trial-video")).toHaveAttribute("src", expect.stringContaining("video-artifact/content"));
     expect(screen.getByTestId("trial-audio")).toHaveAttribute("src", expect.stringContaining("voice-artifact/content"));
     expect(screen.getByTestId("trial-video-frames").querySelectorAll("img")).toHaveLength(3);
