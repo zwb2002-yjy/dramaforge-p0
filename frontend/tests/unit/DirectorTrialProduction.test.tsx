@@ -117,6 +117,17 @@ describe("Director trial and production stages", () => {
     expect(screen.queryByRole("button", { name: "开始正式生产" })).not.toBeInTheDocument();
   });
 
+  it("does not mistake an accepted repair for a newly authorized production batch", async () => {
+    const value = snapshot("production_running");
+    value.production_batches = [{ id: "accepted-repair", batch_kind: "repair", status: "accepted", budget_authorization_id: "repair-budget", locked_version_refs: {}, selected_shot_ids: ["shot-2"], template_keys: ["dialogue-post-dub-shot-v1"], quality_policy_id: "live-dialogue-quality-v1", selection_snapshot: {}, semantic_hash: "repair-hash" }];
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ project_id: "project-1", name: "试拍作品", node_runs: [], artifacts: [], provider_operations: [] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    renderWithQuery(<ProductionStage projectId="project-1" snapshot={value} refresh={vi.fn()} onMessage={vi.fn()} onError={vi.fn()} />);
+
+    expect(await screen.findByRole("button", { name: "开始正式生产" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "运行已结束，生成逐镜质量报告" })).not.toBeInTheDocument();
+  });
+
   it("shows repair changes and keeps repair materialization behind a separate extra-budget confirmation", () => {
     const value = snapshot("awaiting_repair_authorization");
     value.current_artifacts.repair_plan = artifact("repair_plan", {

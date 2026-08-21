@@ -69,11 +69,12 @@ function productionBatch(snapshot: DirectorWorkspaceSnapshot) {
 }
 
 function activeExecutionBatch(snapshot: DirectorWorkspaceSnapshot) {
-  const repair = [...snapshot.production_batches]
+  return [...snapshot.production_batches]
     .reverse()
-    .find((batch) => batch.batch_kind === "repair");
-  if (repair && ["production_running", "final_review"].includes(snapshot.workflow.status)) return repair;
-  return productionBatch(snapshot);
+    .find((batch) => (
+      ["production", "repair"].includes(batch.batch_kind)
+      && ["planned", "running"].includes(batch.status)
+    )) ?? null;
 }
 
 function isProductionReport(value: unknown): value is ProductionQualityReportPayload {
