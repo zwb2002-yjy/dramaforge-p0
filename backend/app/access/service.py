@@ -104,6 +104,11 @@ class AccessService:
             Workspace(owner_user_id=owner.id, name=name)
         )
         await self._session.commit()
+        await set_rls_context(
+            self._session,
+            user_id=owner.id,
+            workspace_id=workspace.id,
+        )
         await self._session.refresh(workspace)
         return workspace
 
@@ -128,6 +133,11 @@ class AccessService:
         )
         workspace.name = name
         await self._session.commit()
+        await set_rls_context(
+            self._session,
+            user_id=actor.id,
+            workspace_id=workspace.id,
+        )
         await self._session.refresh(workspace)
         return workspace
 

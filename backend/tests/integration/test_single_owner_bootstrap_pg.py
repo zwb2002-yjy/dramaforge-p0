@@ -11,6 +11,7 @@ from pathlib import Path
 import asyncpg
 import pytest
 from app.access.service import AccessService
+from app.shared.db import set_rls_context
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -110,6 +111,24 @@ async def test_first_owner_bootstrap_survives_users_force_rls() -> None:
                     display_name="Bootstrap Owner",
                     public_registration_enabled=False,
                 )
+                workspace = await first_service.create_workspace(
+                    name="Post-bootstrap workspace",
+                    owner=owner,
+                )
+                assert workspace.owner_user_id == owner.id
+
+            async with factory() as workspace_session:
+                await set_rls_context(
+                    workspace_session,
+                    user_id=owner.id,
+                    workspace_id=workspace.id,
+                )
+                renamed = await AccessService(workspace_session).rename_workspace(
+                    workspace_id=workspace.id,
+                    name="Renamed workspace",
+                    actor=owner,
+                )
+                assert renamed.name == "Renamed workspace"
 
             async with factory() as second_session:
                 initialized, available = await AccessService(
