@@ -296,6 +296,64 @@ async def list_queued_node_run_rls_scopes(
     return scopes
 
 
+async def list_resumable_provider_node_run_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    source_commit: str | None = None,
+) -> list[tuple[UUID, NodeRunRlsScope]]:
+    """Find interrupted Unified polls without exposing unrelated runtime rows."""
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT node_run_id, owner_user_id, workspace_id, project_id
+                FROM app.resumable_provider_node_run_contexts(:limit, :source_commit)
+                """
+            ),
+            {"limit": limit, "source_commit": source_commit},
+        )
+        return [
+            (
+                row["node_run_id"],
+                NodeRunRlsScope(
+                    user_id=row["owner_user_id"],
+                    workspace_id=row["workspace_id"],
+                    project_id=row["project_id"],
+                ),
+            )
+            for row in result.mappings().all()
+        ]
+
+    from app.execution.models import NodeRun, ProviderOperation
+
+    stmt = (
+        select(NodeRun.id)
+        .join(ProviderOperation, ProviderOperation.node_run_id == NodeRun.id)
+        .where(
+            NodeRun.status == "running",
+            ProviderOperation.execution_path_version == "unified-v1",
+            ProviderOperation.status.in_({"submitted", "running", "timed_out"}),
+            ProviderOperation.provider_operation_id.is_not(None),
+        )
+        .distinct()
+        .order_by(NodeRun.id)
+        .limit(limit)
+    )
+    if source_commit is not None:
+        stmt = stmt.where(
+            NodeRun.input_snapshot["source_commit"].as_string() == source_commit
+        )
+    scopes: list[tuple[UUID, NodeRunRlsScope]] = []
+    for node_run_id in (await session.execute(stmt)).scalars().all():
+        scope = await resolve_node_run_rls_scope(session, node_run_id=node_run_id)
+        if scope is not None:
+            scopes.append((node_run_id, scope))
+    return scopes
+
+
 async def list_pending_outbox_event_rls_scopes(
     session: AsyncSession,
     *,

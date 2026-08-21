@@ -207,8 +207,13 @@ class AgentRunScheduler:
                 OutboxEvent.topic == "node_run.enqueue",
             )
         )
+        dispatch_generation = str(
+            (run.input_snapshot or {}).get("dispatch_generation") or ""
+        )
         has_enqueue_event = any(
             str((event.payload or {}).get("node_run_id")) == str(node_run_id)
+            and str((event.payload or {}).get("dispatch_generation") or "")
+            == dispatch_generation
             for event in existing.scalars().all()
         )
         if not has_enqueue_event:
@@ -222,6 +227,7 @@ class AgentRunScheduler:
                         "node_run_id": str(node_run_id),
                         "status": run.status,
                         "project_id": str(run.project_id),
+                        "dispatch_generation": dispatch_generation,
                     },
                     status=OutboxStatus.PENDING.value,
                     attempt_count=0,

@@ -1927,6 +1927,75 @@ async def test_unified_resume_never_recreates(
 
 
 @pytest.mark.asyncio
+async def test_heavy_worker_startup_requeues_persisted_remote_poll(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import AbstractAsyncContextManager
+    from unittest.mock import AsyncMock
+
+    from app.runtime.scheduler import AgentRunScheduler
+    from app.workers.jobs import recover_interrupted_provider_jobs
+
+    _byok(monkeypatch)
+    _user, _workspace, run = await _seed_project_chain(session)
+    run.status = "running"
+    run.input_snapshot = {
+        **run.input_snapshot,
+        "source_commit": "resume-candidate",
+        "dispatch_generation": "initial-submit",
+    }
+    operation = ProviderOperation(
+        node_run_id=run.id,
+        attempt_no=1,
+        purpose="primary",
+        operation_kind="video.generate",
+        actual_provider=FAKE_PROVIDER,
+        actual_model="uni-vid-model",
+        protocol_profile=FAKE_PROFILE,
+        request_fingerprint="f" * 64,
+        status="submitted",
+        request_summary={},
+        response_summary={},
+        provider_operation_id="remote-video-1",
+        execution_path_version=UNIFIED_PATH_VERSION,
+    )
+    session.add(operation)
+    await session.commit()
+
+    class ExistingSessionContext(AbstractAsyncContextManager[AsyncSession]):
+        async def __aenter__(self) -> AsyncSession:
+            return session
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+            return None
+
+    enqueue = AsyncMock(return_value="resume-job")
+    monkeypatch.setattr(
+        "app.workers.jobs.get_session_factory",
+        lambda: lambda: ExistingSessionContext(),
+    )
+    monkeypatch.setattr(
+        "app.runtime.scheduler.dispatch_source_commit",
+        lambda: "resume-candidate",
+    )
+    monkeypatch.setattr(AgentRunScheduler, "enqueue_node_run_only", enqueue)
+
+    await recover_interrupted_provider_jobs({})
+
+    await session.refresh(run)
+    await session.refresh(operation)
+    assert run.status == "queued"
+    assert run.input_snapshot["provider_poll_resume_count"] == 1
+    assert str(run.input_snapshot["dispatch_generation"]).startswith(
+        f"provider-resume-{str(operation.id)[:12]}-"
+    )
+    assert operation.provider_operation_id == "remote-video-1"
+    assert operation.attempt_no == 1
+    enqueue.assert_awaited_once_with(run.id)
+
+
+@pytest.mark.asyncio
 async def test_submission_started_without_remote_id_is_unknown(
     session: AsyncSession,
     fake_plugin: ProviderPlugin,

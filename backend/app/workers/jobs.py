@@ -44,6 +44,66 @@ async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
     return {"status": "ok", "job": "health_ping"}
 
 
+async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
+    """Resume polling persisted remote tasks after a Heavy Worker restart."""
+    from sqlalchemy import select
+
+    from app.execution.models import NodeRun, ProviderOperation
+    from app.runtime.scheduler import AgentRunScheduler, dispatch_source_commit
+    from app.shared.db import (
+        list_resumable_provider_node_run_rls_scopes,
+        set_rls_context,
+    )
+
+    _ = ctx
+    factory = get_session_factory()
+    async with factory() as session:
+        candidates = await list_resumable_provider_node_run_rls_scopes(
+            session,
+            limit=50,
+            source_commit=dispatch_source_commit(),
+        )
+        for node_run_id, scope in candidates:
+            await set_rls_context(
+                session,
+                user_id=scope.user_id,
+                workspace_id=scope.workspace_id,
+                project_id=scope.project_id,
+            )
+            run = await session.scalar(
+                select(NodeRun).where(NodeRun.id == node_run_id).with_for_update()
+            )
+            operation = await session.scalar(
+                select(ProviderOperation)
+                .where(
+                    ProviderOperation.node_run_id == node_run_id,
+                    ProviderOperation.execution_path_version == "unified-v1",
+                    ProviderOperation.status.in_({"submitted", "running", "timed_out"}),
+                    ProviderOperation.provider_operation_id.is_not(None),
+                )
+                .order_by(ProviderOperation.attempt_no.desc())
+                .limit(1)
+            )
+            if run is None or run.status != "running" or operation is None:
+                await session.rollback()
+                continue
+            snapshot = dict(run.input_snapshot or {})
+            raw_resume_count = snapshot.get("provider_poll_resume_count")
+            resume_count = (
+                raw_resume_count if isinstance(raw_resume_count, int) else 0
+            ) + 1
+            snapshot["provider_poll_resume_count"] = resume_count
+            snapshot["dispatch_generation"] = (
+                f"provider-resume-{str(operation.id)[:12]}-{resume_count}"
+            )
+            run.input_snapshot = snapshot
+            run.status = "queued"
+            run.error_code = None
+            run.error_summary = None
+            await session.commit()
+            await AgentRunScheduler(session).enqueue_node_run_only(node_run_id)
+
+
 async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, Any]:
     """Worker job: execute media NodeRun via product_path (Adapter OK here)."""
     from app.execution.composite_media import composite_inputs_pending
