@@ -393,6 +393,7 @@ class DirectorQualityService:
         batch: ProductionBatch,
         actor: User,
         workspace_id: UUID,
+        evidence_batches: tuple[ProductionBatch, ...] | None = None,
     ) -> None:
         """Turn accepted trial media into immutable binding quality evidence.
 
@@ -402,6 +403,9 @@ class DirectorQualityService:
         promote the selected binding.
         """
 
+        evidence_batch_ids = {
+            item.id for item in (evidence_batches or (batch,))
+        }
         rows = list(
             (
                 await self._session.execute(
@@ -412,13 +416,14 @@ class DirectorQualityService:
                         ProviderOperation.node_run_id == NodeRun.id,
                     )
                     .where(
-                        NodeRun.production_batch_id == batch.id,
+                        NodeRun.production_batch_id.in_(evidence_batch_ids),
                         NodeRun.status.in_(_SUCCESS),
                         GraphNode.node_key.in_({"keyframe", "video"}),
                         NodeRun.result_artifact_id.is_not(None),
                         ProviderOperation.status == "succeeded",
                         ProviderOperation.model_binding_id.is_not(None),
                     )
+                    .order_by(NodeRun.created_at)
                 )
             ).tuples()
         )
@@ -455,6 +460,70 @@ class DirectorQualityService:
                 )
             binding.quality_gated = True
             binding.updated_by = actor.id
+
+    async def ensure_accepted_trial_model_bindings(
+        self,
+        *,
+        project_id: UUID,
+        workflow_id: UUID,
+        trial_review: TrialReviewPayload,
+        actor: User,
+        workspace_id: UUID,
+    ) -> None:
+        """Reconcile quality evidence from an accepted trial and its accepted repair."""
+
+        trial_batch = await self._session.get(ProductionBatch, trial_review.batch_id)
+        if (
+            trial_batch is None
+            or trial_batch.project_id != project_id
+            or trial_batch.workflow_run_id != workflow_id
+            or trial_batch.batch_kind != "trial"
+            or trial_batch.status != "accepted"
+            or trial_review.decision != "accept"
+            or not trial_review.accepted_quality
+        ):
+            raise ConflictError("accepted trial binding evidence is invalid")
+        evidence_batches = [trial_batch]
+        repaired_evidence = False
+        for reference in trial_review.evidence_refs:
+            if not reference.startswith("repair-node-run:"):
+                continue
+            repaired_evidence = True
+            try:
+                node_run_id = UUID(reference.removeprefix("repair-node-run:"))
+            except ValueError as exc:
+                raise ConflictError("accepted repair NodeRun reference is invalid") from exc
+            run = await self._session.get(NodeRun, node_run_id)
+            repair = (
+                await self._session.get(ProductionBatch, run.production_batch_id)
+                if run is not None and run.production_batch_id is not None
+                else None
+            )
+            if (
+                run is None
+                or run.project_id != project_id
+                or repair is None
+                or repair.project_id != project_id
+                or repair.workflow_run_id != workflow_id
+                or repair.batch_kind != "repair"
+                or repair.status != "accepted"
+                or str(
+                    (repair.selection_snapshot or {}).get("root_source_batch_id")
+                    or ""
+                )
+                != str(trial_batch.id)
+            ):
+                raise ConflictError("accepted repair binding evidence is invalid")
+            if repair.id not in {item.id for item in evidence_batches}:
+                evidence_batches.append(repair)
+        if not repaired_evidence:
+            return
+        await self._promote_trial_model_bindings(
+            batch=trial_batch,
+            actor=actor,
+            workspace_id=workspace_id,
+            evidence_batches=tuple(evidence_batches),
+        )
 
     async def inspect_production(
         self,
@@ -624,7 +693,9 @@ class DirectorQualityService:
         actor: User,
         idempotency_key: str,
     ) -> CreativeArtifactVersion:
-        await self._projects.get_project_for_owner(project_id=project_id, actor=actor)
+        project = await self._projects.get_project_for_owner(
+            project_id=project_id, actor=actor
+        )
         workflow = await self._director.get_workflow(project_id=project_id, actor=actor)
         if workflow.status != WorkflowStatus.FINAL_REVIEW.value:
             raise ValidationAppError("production is not awaiting creator review")
@@ -768,6 +839,12 @@ class DirectorQualityService:
             batch.status = "accepted"
             root_batch.status = "accepted"
             await self._promote_trial_canonical_set(batch=root_batch)
+            await self._promote_trial_model_bindings(
+                batch=root_batch,
+                actor=actor,
+                workspace_id=project.workspace_id,
+                evidence_batches=(root_batch, batch),
+            )
             await self._publish_repaired_trial_acceptance(
                 project_id=project_id,
                 actor=actor,

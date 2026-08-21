@@ -333,7 +333,6 @@ class DirectorProductionService:
         cost = CostEstimatePayload.model_validate(artifacts[ArtifactKind.COST_ESTIMATE].payload)
         trial_plan = TrialPlanPayload.model_validate(artifacts[ArtifactKind.TRIAL_PLAN].payload)
         self._assert_media_preflight(selection=selection, cost=cost, stage="production")
-        await self._assert_formal_production_quality_gates(selection)
         self._assert_frozen_cost_contract(
             cost=cost,
             selection=selection,
@@ -384,6 +383,16 @@ class DirectorProductionService:
                 "the representative trial was not accepted",
                 details={"code": "ACCEPTED_TRIAL_REQUIRED"},
             )
+        from app.director.quality_service import DirectorQualityService
+
+        await DirectorQualityService(self._session).ensure_accepted_trial_model_bindings(
+            project_id=project.id,
+            workflow_id=workflow.id,
+            trial_review=trial_review,
+            actor=actor,
+            workspace_id=project.workspace_id,
+        )
+        await self._assert_formal_production_quality_gates(selection)
 
         locked_refs = {
             kind.value: str(row.id)

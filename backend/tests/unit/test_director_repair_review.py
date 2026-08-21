@@ -22,8 +22,9 @@ from app.director.models import (
 )
 from app.director.quality_service import DirectorQualityService
 from app.director.repair_execution_service import DirectorRepairExecutionService
+from app.director.shooting import TrialReviewPayload
 from app.events.models import OutboxEvent
-from app.execution.models import GraphNode, NodeRun
+from app.execution.models import Artifact, GraphNode, NodeRun
 from app.production.service import GraphService
 from app.shared.base import Base
 from app.shared.errors import ValidationAppError
@@ -232,6 +233,7 @@ async def test_accepting_repair_propagates_exact_composite_to_root_batch(
     )
 
     promoted_batches: list[UUID] = []
+    promoted_binding_batches: list[tuple[UUID, ...]] = []
 
     async def record_canonical_promotion(
         _service: DirectorQualityService, *, batch: ProductionBatch
@@ -242,6 +244,25 @@ async def test_accepting_repair_propagates_exact_composite_to_root_batch(
         DirectorQualityService,
         "_promote_trial_canonical_set",
         record_canonical_promotion,
+    )
+
+    async def record_binding_promotion(
+        _service: DirectorQualityService,
+        *,
+        batch: ProductionBatch,
+        actor: User,
+        workspace_id: UUID,
+        evidence_batches: tuple[ProductionBatch, ...] | None = None,
+    ) -> None:
+        _ = actor, workspace_id
+        promoted_binding_batches.append(
+            tuple(item.id for item in (evidence_batches or (batch,)))
+        )
+
+    monkeypatch.setattr(
+        DirectorQualityService,
+        "_promote_trial_model_bindings",
+        record_binding_promotion,
     )
     result = await DirectorQualityService(session).review_production(
         project_id=project.id,
@@ -262,6 +283,7 @@ async def test_accepting_repair_propagates_exact_composite_to_root_batch(
     assert workflow.status == expected_status
     if root_kind == "trial":
         assert promoted_batches == [root.id]
+        assert promoted_binding_batches == [(root.id, repair.id)]
         trial_review_id = workflow.current_artifact_versions.get(
             ArtifactKind.TRIAL_REVIEW.value
         )
@@ -273,6 +295,7 @@ async def test_accepting_repair_propagates_exact_composite_to_root_batch(
         assert trial_review.payload["quality_report_version_id"] == str(quality.id)
     else:
         assert promoted_batches == []
+        assert promoted_binding_batches == []
 
 
 @pytest.mark.asyncio
@@ -332,6 +355,97 @@ async def test_subjective_accept_requires_reason_and_records_override(
     assert "The identity and performance are acceptable" in (override.reason or "")
     assert "Scope:" in (override.reason or "")
     assert "shot-1" in (override.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_formal_preflight_reconciles_exact_accepted_repair_binding_evidence(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user, project, workflow, root, _root_shot, repair, repair_shot, quality = (
+        await _seed_repair_review(session, root_kind="trial")
+    )
+    root.status = "accepted"
+    repair.status = "accepted"
+    graph = await GraphService(session).create_graph(
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=uuid4(),
+        template_key="repair-review-evidence",
+        created_by=user.id,
+        definition={},
+    )
+    node = GraphNode(
+        graph_version_id=graph.current_version_id,
+        node_key="composite",
+        node_type="composite",
+        display_name="Composite",
+        cacheable=True,
+    )
+    session.add(node)
+    artifact = Artifact(
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=f"projects/{project.id}/accepted-repair.mp4",
+        content_hash="e" * 64,
+        mime_type="video/mp4",
+        byte_size=16,
+    )
+    session.add(artifact)
+    await session.flush()
+    run = NodeRun(
+        id=repair_shot.accepted_node_run_id,
+        project_id=project.id,
+        graph_version_id=graph.current_version_id,
+        graph_node_id=node.id,
+        production_batch_id=repair.id,
+        attempt_no=1,
+        idempotency_key=f"accepted-repair-evidence:{repair.id}",
+        input_hash="f" * 64,
+        status="completed",
+        input_snapshot={"production_batch_id": str(repair.id)},
+        result_artifact_id=artifact.id,
+        created_by=user.id,
+    )
+    session.add(run)
+    await session.flush()
+    captured: list[tuple[UUID, ...]] = []
+
+    async def capture(
+        _service: DirectorQualityService,
+        *,
+        batch: ProductionBatch,
+        actor: User,
+        workspace_id: UUID,
+        evidence_batches: tuple[ProductionBatch, ...] | None = None,
+    ) -> None:
+        _ = actor, workspace_id
+        captured.append(tuple(item.id for item in (evidence_batches or (batch,))))
+
+    monkeypatch.setattr(
+        DirectorQualityService,
+        "_promote_trial_model_bindings",
+        capture,
+    )
+    review = TrialReviewPayload(
+        batch_id=root.id,
+        quality_report_version_id=quality.id,
+        decision="accept",
+        accepted_quality=True,
+        user_note="Accepted repaired trial.",
+        evidence_refs=[f"repair-node-run:{run.id}"],
+    )
+
+    await DirectorQualityService(session).ensure_accepted_trial_model_bindings(
+        project_id=project.id,
+        workflow_id=workflow.id,
+        trial_review=review,
+        actor=user,
+        workspace_id=project.workspace_id,
+    )
+
+    assert captured == [(root.id, repair.id)]
 
 
 @pytest.mark.asyncio
