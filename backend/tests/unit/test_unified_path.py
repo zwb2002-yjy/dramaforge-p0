@@ -1975,10 +1975,6 @@ async def test_heavy_worker_startup_requeues_persisted_remote_poll(
         "app.workers.jobs.get_session_factory",
         lambda: lambda: ExistingSessionContext(),
     )
-    monkeypatch.setattr(
-        "app.runtime.scheduler.dispatch_source_commit",
-        lambda: "resume-candidate",
-    )
     monkeypatch.setattr(AgentRunScheduler, "enqueue_node_run_only", enqueue)
 
     await recover_interrupted_provider_jobs({})

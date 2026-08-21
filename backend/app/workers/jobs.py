@@ -49,7 +49,7 @@ async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
     from sqlalchemy import select
 
     from app.execution.models import NodeRun, ProviderOperation
-    from app.runtime.scheduler import AgentRunScheduler, dispatch_source_commit
+    from app.runtime.scheduler import AgentRunScheduler
     from app.shared.db import (
         list_resumable_provider_node_run_rls_scopes,
         set_rls_context,
@@ -58,10 +58,11 @@ async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
     _ = ctx
     factory = get_session_factory()
     async with factory() as session:
+        # Persisted remote identity is authoritative across candidate upgrades.
         candidates = await list_resumable_provider_node_run_rls_scopes(
             session,
             limit=50,
-            source_commit=dispatch_source_commit(),
+            source_commit=None,
         )
         for node_run_id, scope in candidates:
             await set_rls_context(
