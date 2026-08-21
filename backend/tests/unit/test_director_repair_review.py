@@ -335,8 +335,10 @@ async def test_subjective_accept_requires_reason_and_records_override(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("initial_status", ["failed", "queued"])
 async def test_resume_pre_submit_repair_requeues_same_batch_without_new_budget(
     session: AsyncSession,
+    initial_status: str,
 ) -> None:
     user, project, workflow, _root, _root_shot, repair, repair_shot, _quality = (
         await _seed_repair_review(session, root_kind="trial")
@@ -391,10 +393,12 @@ async def test_resume_pre_submit_repair_requeues_same_batch_without_new_budget(
             attempt_no=1,
             idempotency_key=f"resume-run:{node_key}:{uuid4()}",
             input_hash=hashlib.sha256(node_key.encode()).hexdigest(),
-            status="failed",
+            status=initial_status,
             input_snapshot={"logical_shot_id": "shot-1", "node_key": node_key},
-            error_code=error_code,
-            error_summary="local pre-submit failure",
+            error_code=error_code if initial_status == "failed" else None,
+            error_summary=(
+                "local pre-submit failure" if initial_status == "failed" else None
+            ),
             created_by=user.id,
         )
         session.add(run)
@@ -413,6 +417,8 @@ async def test_resume_pre_submit_repair_requeues_same_batch_without_new_budget(
     assert result_batch.id == repair.id
     assert {run.status for run in result_runs} == {"queued"}
     assert all(run.error_code is None for run in result_runs)
+    assert all(run.input_snapshot.get("source_commit") for run in result_runs)
+    assert all(run.input_snapshot.get("dispatch_generation") for run in result_runs)
     await session.refresh(authorization)
     await session.refresh(reservation)
     assert authorization.consumed_amount == Decimal("0")

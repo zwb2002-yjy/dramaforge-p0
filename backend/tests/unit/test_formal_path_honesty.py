@@ -62,6 +62,18 @@ def test_queue_scoped_job_id_prevents_stale_job_collision_after_stack_restart() 
     assert old_job_id != new_job_id
     assert new_job_id == repeated_new_job_id
 
+    recovery_job_id = queue_scoped_job_id(
+        queue_name=new_queue,
+        node_run_id=node_run_id,
+        dispatch_generation="repair-resume-1",
+    )
+    assert recovery_job_id != new_job_id
+    assert recovery_job_id == queue_scoped_job_id(
+        queue_name=new_queue,
+        node_run_id=node_run_id,
+        dispatch_generation="repair-resume-1",
+    )
+
 
 def test_formal_dispatch_uses_its_bound_source_commit(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.config import clear_settings_cache

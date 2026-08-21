@@ -135,8 +135,14 @@ function ProductionProgress(props: ProductionStageProps) {
     [batch?.id, project.data?.node_runs],
   );
   const allTerminal = Boolean(batch && areTrialRunsTerminal(runs.map((run) => run.status)));
-  const hasFailedRepair = Boolean(
-    batch?.batch_kind === "repair" && runs.some((run) => run.status === "failed"),
+  const hasRecoverableRepair = Boolean(
+    batch?.batch_kind === "repair" && runs.some((run) =>
+      run.status === "failed" || (
+        run.node_key === "video" &&
+        run.status === "queued" &&
+        !run.input_snapshot.dispatch_generation
+      ),
+    ),
   );
   const materialize = useMutation({
     mutationFn: () => materializeProduction(projectId, commandKey("materialize-production")),
@@ -172,7 +178,7 @@ function ProductionProgress(props: ProductionStageProps) {
       {batch && <>
         <div className="status-grid"><div className="status-card"><span className="status-label">镜头</span><strong>{batch.selected_shot_ids.length}</strong></div><div className="status-card"><span className="status-label">节点</span><strong>{runs.length}</strong></div><div className="status-card"><span className="status-label">终态节点</span><strong>{runs.filter((run) => !["queued", "running", "leased"].includes(run.status)).length}</strong></div></div>
         <div className="director-trial-run-list">{runs.map((run) => <article key={run.id}><div><strong>{run.node_key}</strong><span>{run.status}</span></div>{run.error_code && <p className="status-bad">{run.error_code}：{run.error_summary}</p>}</article>)}</div>
-        {hasFailedRepair && <button type="button" className="accent" disabled={resumeRepair.isPending} onClick={() => resumeRepair.mutate()}>{resumeRepair.isPending ? "正在恢复原修复…" : "继续本次局部修复（不新增预算）"}</button>}
+        {hasRecoverableRepair && <button type="button" className="accent" disabled={resumeRepair.isPending} onClick={() => resumeRepair.mutate()}>{resumeRepair.isPending ? "正在恢复原修复…" : "继续本次局部修复（不新增预算）"}</button>}
         {snapshot.workflow.status === "production_running" && <button type="button" className="primary" disabled={!allTerminal || inspect.isPending} onClick={() => inspect.mutate()}>{inspect.isPending ? "正在汇总逐镜证据…" : allTerminal ? "运行已结束，生成逐镜质量报告" : "等待所有节点结束"}</button>}
       </>}
     </section>

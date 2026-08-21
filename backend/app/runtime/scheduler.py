@@ -29,7 +29,12 @@ from app.shared.errors import (
 )
 
 
-def queue_scoped_job_id(*, queue_name: str, node_run_id: UUID) -> str:
+def queue_scoped_job_id(
+    *,
+    queue_name: str,
+    node_run_id: UUID,
+    dispatch_generation: str | None = None,
+) -> str:
     """Return an idempotency key that cannot leak across isolated Arq queues.
 
     Arq stores job definitions under a global Redis key. Reusing only the
@@ -40,7 +45,8 @@ def queue_scoped_job_id(*, queue_name: str, node_run_id: UUID) -> str:
     stack restart on a new source commit.
     """
     queue_fingerprint = hashlib.sha256(queue_name.encode("utf-8")).hexdigest()[:12]
-    return f"node-run:{queue_fingerprint}:{node_run_id}"
+    generation = f":{dispatch_generation}" if dispatch_generation else ""
+    return f"node-run:{queue_fingerprint}:{node_run_id}{generation}"
 
 
 def dispatch_source_commit() -> str | None:
@@ -274,6 +280,17 @@ class AgentRunScheduler:
         stable_job_id = queue_scoped_job_id(
             queue_name=queue_name,
             node_run_id=node_run_id,
+            dispatch_generation=(
+                str(
+                    (getattr(run, "input_snapshot", None) or {}).get(
+                        "dispatch_generation"
+                    )
+                    or ""
+                )
+                or None
+                if run is not None
+                else None
+            ),
         )
 
         async def _arq() -> str:

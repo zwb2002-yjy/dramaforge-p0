@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
+from app.config import get_settings
 from app.director.enums import ApprovalKind, ArtifactKind, WorkflowStatus
 from app.director.models import (
     BudgetAuthorization,
@@ -400,7 +401,14 @@ class DirectorRepairExecutionService:
         paid_failures = [
             (run, node)
             for run, node in rows
-            if run.status == "failed" and node.node_type in {"keyframe", "video", "voice"}
+            if (
+                run.status == "failed"
+                or (
+                    run.status == "queued"
+                    and not (run.input_snapshot or {}).get("dispatch_generation")
+                )
+            )
+            and node.node_type in {"keyframe", "video", "voice"}
         ]
         if submitted is not None or len(paid_failures) != 1:
             raise ValidationAppError(
@@ -416,7 +424,7 @@ class DirectorRepairExecutionService:
         recoverable = [
             run
             for run, _node in rows
-            if run.status == "failed"
+            if run.status in {"failed", "queued"}
             and str(
                 (run.input_snapshot or {}).get("logical_shot_id")
                 or (run.input_snapshot or {}).get("shot_id")
@@ -425,10 +433,13 @@ class DirectorRepairExecutionService:
             == logical_shot_id
         ]
         if not logical_shot_id or any(
-            run.id != target.id and run.error_code != "UPSTREAM_TERMINAL_FAILURE"
+            run.id != target.id
+            and run.status == "failed"
+            and run.error_code != "UPSTREAM_TERMINAL_FAILURE"
             for run in recoverable
         ) or any(
-            run.status == "failed" and run not in recoverable for run, _node in rows
+            run.status in {"failed", "queued"} and run not in recoverable
+            for run, _node in rows
         ):
             raise ValidationAppError(
                 "repair has failures outside the pre-submit recovery scope",
@@ -436,6 +447,19 @@ class DirectorRepairExecutionService:
             )
 
         for run in recoverable:
+            snapshot = {
+                **dict(run.input_snapshot or {}),
+                "source_commit": get_settings().source_commit,
+                "dispatch_generation": content_hash(
+                    {
+                        "batch_id": str(batch.id),
+                        "node_run_id": str(run.id),
+                        "idempotency_key": idempotency_key,
+                    }
+                )[:16],
+            }
+            run.input_snapshot = snapshot
+            run.input_hash = content_hash(snapshot)
             run.status = "queued"
             run.error_code = None
             run.error_summary = None
