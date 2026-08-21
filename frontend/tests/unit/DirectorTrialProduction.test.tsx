@@ -198,4 +198,25 @@ describe("Director trial and production stages", () => {
     expect(screen.getByTestId("repair-execution-evidence")).toHaveTextContent("video.generate · succeeded");
     expect(screen.getByTestId("repair-execution-evidence")).toHaveTextContent("Provider 未报告 · not_reported");
   });
+
+  it("uses the quality report batch instead of an older repair during production review", async () => {
+    const value = snapshot("final_review");
+    value.production_batches = [
+      { id: "old-repair", batch_kind: "repair", status: "completed", budget_authorization_id: "repair-budget", locked_version_refs: {}, selected_shot_ids: ["shot-2"], template_keys: ["dialogue-post-dub-shot-v1"], quality_policy_id: "live-dialogue-quality-v1", selection_snapshot: {}, semantic_hash: "repair-hash" },
+      { id: "production-batch", batch_kind: "production", status: "running", budget_authorization_id: "production-budget", locked_version_refs: {}, selected_shot_ids: ["shot-1", "shot-2", "shot-3"], template_keys: ["dialogue-post-dub-shot-v1"], quality_policy_id: "live-dialogue-quality-v1", selection_snapshot: {}, semantic_hash: "production-hash" },
+    ];
+    value.current_artifacts.quality_report = artifact("quality_report", {
+      policy_id: "live-dialogue-quality-v1",
+      batch_id: "production-batch",
+      overall_status: "passed",
+      hard_blockers: [],
+      shot_reports: [{ policy_id: "live-dialogue-quality-v1", batch_id: "production-batch", logical_shot_id: "shot-1", overall_status: "passed", hard_blockers: [], limitations: [], recommended_action: "accept", dimensions: [] }],
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ project_id: "project-1", name: "试拍作品", node_runs: [], artifacts: [], provider_operations: [] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    renderWithQuery(<ProductionStage projectId="project-1" snapshot={value} refresh={vi.fn()} onMessage={vi.fn()} onError={vi.fn()} />);
+
+    expect(await screen.findByTestId("production-review")).toBeInTheDocument();
+    expect(screen.queryByTestId("repair-media-evidence")).not.toBeInTheDocument();
+  });
 });

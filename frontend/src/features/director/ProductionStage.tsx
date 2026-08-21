@@ -188,7 +188,8 @@ function ProductionProgress(props: ProductionStageProps) {
 
 function ProductionReview(props: ProductionStageProps & { report: ProductionQualityReportPayload }) {
   const { projectId, snapshot, report, refresh, onMessage, onError } = props;
-  const batch = activeExecutionBatch(snapshot);
+  const batch = snapshot.production_batches.find((item) => item.id === report.batch_id)
+    ?? activeExecutionBatch(snapshot);
   const project = useQuery({ queryKey: ["snapshot", projectId], queryFn: () => fetchSnapshot(projectId) });
   const batchRuns = useMemo(
     () => (project.data?.node_runs ?? []).filter((run) => String(run.input_snapshot.production_batch_id ?? "") === batch?.id),
