@@ -857,6 +857,7 @@ class ArkRuntime:
                 ),
                 error=f"Ark image request failed ({response.status_code})",
                 retry_after_seconds=_retry_after_seconds(response),
+                http_status=response.status_code,
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )
@@ -910,6 +911,7 @@ class ArkRuntime:
                 ),
                 error=f"Ark video request failed ({response.status_code})",
                 retry_after_seconds=_retry_after_seconds(response),
+                http_status=response.status_code,
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )

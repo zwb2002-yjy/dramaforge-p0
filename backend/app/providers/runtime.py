@@ -78,6 +78,7 @@ class SubmissionResult(BaseModel):
     error_code: str | None = None
     error: str | None = None
     retry_after_seconds: float | None = None
+    http_status: int | None = None
 
 
 class PollResult(BaseModel):

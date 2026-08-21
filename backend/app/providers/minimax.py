@@ -636,6 +636,7 @@ class MiniMaxRuntime:
                 if response.status_code >= 400
                 else "PROVIDER_RESPONSE_INVALID",
                 retry_after_seconds=_retry_after_seconds(response),
+                http_status=response.status_code,
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )
@@ -685,6 +686,7 @@ class MiniMaxRuntime:
                 if response.status_code >= 400
                 else "PROVIDER_RESPONSE_INVALID",
                 retry_after_seconds=_retry_after_seconds(response),
+                http_status=response.status_code,
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )

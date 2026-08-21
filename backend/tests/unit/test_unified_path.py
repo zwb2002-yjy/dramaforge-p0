@@ -73,7 +73,7 @@ FAKE_PROFILE = "u_test_v1"
 
 # Test-scoped behavior plan for submit_image outcomes ("PROVIDER_RATE_LIMITED"
 # marks one submission as a 429; anything else = success).
-_FAKE_IMAGE_PLAN: list[str] = []
+_FAKE_IMAGE_PLAN: list[str | SubmissionResult] = []
 _FAKE_COST_PLAN: list[CostResult] = []
 
 
@@ -158,7 +158,10 @@ class FakeUnifiedRuntime:
         self.submitted_image = request
         remote = "uni-img-1"
         if _FAKE_IMAGE_PLAN:
-            code = _FAKE_IMAGE_PLAN.pop(0)
+            outcome = _FAKE_IMAGE_PLAN.pop(0)
+            if isinstance(outcome, SubmissionResult):
+                return outcome
+            code = outcome
             if code == "PROVIDER_RATE_LIMITED":
                 return SubmissionResult(
                     status="failed",
@@ -1233,6 +1236,46 @@ async def test_unified_keyframe_submits_once_and_completes(
     assert op.selection_plan["invoke_model_value"] == "uni-img-model"
     assert op.capability_manifest_hash is not None
     assert _current_runtime().submit_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unified_create_failure_persists_structured_provider_evidence(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _byok(monkeypatch)
+    _enable_unified(monkeypatch)
+    await _no_sleep(monkeypatch)
+    _user, _workspace, run = await _seed_project_chain(session)
+    _FAKE_IMAGE_PLAN.append(
+        SubmissionResult(
+            status="failed",
+            error_code="PROVIDER_UNAVAILABLE",
+            error="provider unavailable",
+            http_status=503,
+            retry_after_seconds=17.0,
+        )
+    )
+
+    with pytest.raises(
+        ValidationAppError,
+        match="PROVIDER_CREATE_FAILED: provider unavailable",
+    ):
+        await execute_media_node_run(session, node_run_id=run.id)
+
+    op = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+    )
+    assert op is not None
+    assert op.error_code == "PROVIDER_CREATE_FAILED"
+    assert op.response_summary == {
+        "create_status": "failed",
+        "create_error": "provider unavailable",
+        "provider_error_code": "PROVIDER_UNAVAILABLE",
+        "create_http_status": 503,
+        "retry_after_seconds": 17.0,
+    }
 
 
 @pytest.mark.asyncio

@@ -1591,7 +1591,17 @@ async def _execute_unified_media_node_run(
             op.status = "failed"
             op.error_code = "PROVIDER_CREATE_FAILED"
             op.error_summary = error_text
-            op.response_summary = {"create_status": result.status, "create_error": error_text[:300]}
+            failure_summary: dict[str, object] = {
+                "create_status": result.status,
+                "create_error": error_text[:300],
+            }
+            if result.error_code:
+                failure_summary["provider_error_code"] = str(result.error_code)
+            if result.http_status is not None:
+                failure_summary["create_http_status"] = result.http_status
+            if result.retry_after_seconds is not None:
+                failure_summary["retry_after_seconds"] = result.retry_after_seconds
+            op.response_summary = failure_summary
             op.completed_at = datetime.now(UTC)
             await _commit_terminal_failure(
                 session,
@@ -2296,6 +2306,15 @@ async def execute_media_node_run(
             "create_status": create_status,
             "create_error": create_error[:300],
         }
+        provider_error_code = create.get("error_code")
+        if provider_error_code:
+            op.response_summary["provider_error_code"] = str(provider_error_code)
+        create_http_status = create.get("http_status")
+        if isinstance(create_http_status, int):
+            op.response_summary["create_http_status"] = create_http_status
+        retry_after_seconds = create.get("retry_after_seconds")
+        if isinstance(retry_after_seconds, int | float):
+            op.response_summary["retry_after_seconds"] = retry_after_seconds
         op.completed_at = datetime.now(UTC)
         await _commit_terminal_failure(
             session,

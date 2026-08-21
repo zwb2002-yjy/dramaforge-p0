@@ -18,7 +18,8 @@ from app.execution.models import GraphNode, NodeRun, ProviderOperation
 from app.execution.product_path import execute_media_node_run
 from app.production import models as _pm  # noqa: F401
 from app.production.service import GraphService
-from app.providers.agnes import AgnesHubClient
+from app.providers.agnes import AgnesHubClient, AgnesRuntime
+from app.providers.runtime import CompiledVideoRequest
 from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
@@ -369,6 +370,38 @@ async def test_agnes_video_rate_limit_is_not_reposted_and_keeps_retry_after() ->
     assert result["status"] == "failed"
     assert result["error_code"] == "PROVIDER_RATE_LIMITED"
     assert result["retry_after_seconds"] == 17.0
+
+
+@pytest.mark.asyncio
+async def test_agnes_unified_video_failure_preserves_http_evidence() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            503,
+            headers={"Retry-After": "17"},
+            json={"error": "overloaded"},
+        )
+
+    runtime = AgnesRuntime(settings=_agnes_settings(), transport=httpx.MockTransport(handler))
+    result = await runtime.submit_video(
+        CompiledVideoRequest(
+            provider_type="agnes",
+            protocol_profile="agnes_cn_v1",
+            model_id="agnes-video-v2.0",
+            operation="video.generate",
+            wire_request={"model": "agnes-video-v2.0", "prompt": "motion"},
+            request_schema_version="test-v1",
+        )
+    )
+
+    assert attempts == 1
+    assert result.status == "failed"
+    assert result.error_code == "PROVIDER_UNAVAILABLE"
+    assert result.http_status == 503
+    assert result.retry_after_seconds == 17.0
 
 
 @pytest.mark.asyncio
