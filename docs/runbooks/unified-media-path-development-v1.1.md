@@ -793,19 +793,19 @@ Idea
 
 某个 Gate 未关闭时，停在当前阶段解决，不通过新增功能绕开。
 
-### 16.1 当前执行状态（2026-08-20）
+### 16.1 当前执行状态（2026-08-21）
 
 | Gate | 状态 | 当前证据与缺口 |
 |---|---|---|
-| G0 候选冻结 | `PASS` | 候选 `8e3c307`；后端 `660 passed / 16 skipped`；前端 `57 passed`；Chromium `11 passed`；Ruff、mypy、typecheck、build 通过；应用镜像同源健康 |
+| G0 候选冻结 | `PASS` | 候选 `9665773`；后端 `662 passed / 16 skipped`；前端 `57 passed`；Chromium `11 passed`；Ruff、mypy、typecheck、build 通过；应用镜像同源健康 |
 | G1 合同收口 | `PASS` | Director 强制 Unified；Agnes 视频固定 9:16/24fps/121 帧/5 秒/无原生音频；Agnes 图片 v2 按官方合同冻结 `1K + 9:16`、参考输出 `736x1312`；EffectiveRequest、显式 TranslationReport、严格引用匹配和 `not_reported` 费用语义已落地 |
 | G2 无费用证明 | `PASS` | 完整 Spy 从真实 Director Workflow、锁定工件、预算 Approval 和 `materialize_trial()` 起跑，经 Production Graph、Outbox、Worker、Frozen Binding、Manifest、Compiler、Runtime 到 ProviderOperation/Artifact；三次 submit，重复 Worker 执行不增 submit；Canonical/首帧 ID 与 SHA-256、Resume Token、费用和 `produced_by_run_id` 均断言通过 |
-| G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `8e3c307` 镜像并健康；数据服务容器/卷未重建；数据库 head 为 `0029` |
+| G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `9665773` 镜像并健康；两个 Worker 共用同一 Backend 镜像；数据服务容器/卷未重建；数据库 head 为 `0029` |
 | G4 Agnes 图片 | `PASS` | `5783e6b` 的真实 Director TRIAL 经 API→Outbox→Worker→Unified Runtime 完成 t2i 角色参考与 I2I 关键帧；Binding/Manifest、EffectiveRequest、TranslationReport、Canonical/输出 Artifact ID+SHA-256 完整。Provider 未报告费用，保持 `not_reported` / USD。`postrun-index-v2.json` 15 个条目哈希通过。 |
-| G5 Agnes 视频 | `OPEN` | 同一 TRIAL 的视频创建请求已到 Agnes，严格参数和首帧引用已持久化，但供应商返回 503，未创建远端 task；因此尚不能执行“远端 ID 后停启 Worker、同 ID 恢复 poll”的实证。旧授权无付费重试，下一次必须单独授权。 |
+| G5 Agnes 视频 | `OPEN` | 同一 TRIAL 的视频创建请求已到 Agnes，严格参数和首帧引用已持久化，但供应商返回 503，未创建远端 task；`9665773` 已让后续失败结构化保存 HTTP 状态、Provider 错误码和 Retry-After，仍保持单次创建、不自动付费重试。下一次必须单独授权，成功取得远端 ID 后执行停启 Worker 与同 ID 恢复 poll。 |
 | G6 Legacy 退出 | `PARTIAL` | Director 已无 Feature Flag fallback；真实 G4/G5 前不删除非 Director 兼容代码和历史恢复依赖 |
 | G7 试拍审阅 | `PARTIAL` | 真实试拍页已审阅 Canonical、关键帧、音频、ProviderOperation、EffectiveRequest、费用状态与限制，并生成不可覆盖硬阻断报告；`8e3c307` 修正 Canonical/Keyframe 误选。仍缺成功视频、首/中/末帧和用户验收。 |
-| G8 局部修复 | `OPEN` | Mock E2E 通过，不构成真实 Provider 局部修复证据 |
+| G8 局部修复 | `PARTIAL` | 产品 UI 已基于真实失败生成 RepairPlan `0a056f2c…`，选中 10 USD“复用成功关键帧，仅重试视频”；失效范围仅 video 及其三个下游，Workflow 为 `awaiting_repair_authorization`。尚未授权或执行，不能算真实修复完成。 |
 | G9 黄金样本 | `OPEN` | 未完成一个单主角三镜头真实作品，也未进行三名目标用户验证 |
 
 ## 17. 每阶段报告格式
