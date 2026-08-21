@@ -6,7 +6,7 @@
 
 **初始审计基线：`dev@5f2eb6e930bb791ba5e760d4927e467494200a4a`**
 
-**当前运行候选：`dev@1d921fb5b332f0809f9b9924872e619030459de2`**
+**当前运行候选：`dev@8e3c30738cbc57c15afdf6c604b7879465f53133`**
 
 **来源：** `D:\DramaForge_Unified_Media_Path_开发执行规格_v1.0.md`
 
@@ -797,14 +797,14 @@ Idea
 
 | Gate | 状态 | 当前证据与缺口 |
 |---|---|---|
-| G0 候选冻结 | `PASS` | 候选 `1d921fb`；后端 `642 passed / 16 skipped`，另有隔离 PostgreSQL migration `2 passed`；前端 `56 passed`；Chromium `11 passed`；Ruff、mypy、build 通过；应用镜像同源健康 |
+| G0 候选冻结 | `PASS` | 候选 `8e3c307`；后端 `660 passed / 16 skipped`；前端 `57 passed`；Chromium `11 passed`；Ruff、mypy、typecheck、build 通过；应用镜像同源健康 |
 | G1 合同收口 | `PASS` | Director 强制 Unified；Agnes 视频固定 9:16/24fps/121 帧/5 秒/无原生音频；Agnes 图片 v2 按官方合同冻结 `1K + 9:16`、参考输出 `736x1312`；EffectiveRequest、显式 TranslationReport、严格引用匹配和 `not_reported` 费用语义已落地 |
 | G2 无费用证明 | `PASS` | 完整 Spy 从真实 Director Workflow、锁定工件、预算 Approval 和 `materialize_trial()` 起跑，经 Production Graph、Outbox、Worker、Frozen Binding、Manifest、Compiler、Runtime 到 ProviderOperation/Artifact；三次 submit，重复 Worker 执行不增 submit；Canonical/首帧 ID 与 SHA-256、Resume Token、费用和 `produced_by_run_id` 均断言通过 |
-| G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `1d921fb` 镜像并健康；数据服务容器 ID/卷未变；数据库 head 为 `0028`；部署栈零预算 Probe 保持 Provider evidence `6→6` |
-| G4 Agnes 图片 | `OPEN` | `2026-08-20` 已在同源候选上完成唯一一次、`0.01 CNY` 上限、无重试的 Agnes v2 `image_i2i` 账号 Probe：Binding `663ecf84...` / active Catalog / Manifest 均匹配，虚构 Canonical `8531a6ae...` 真实进入 Probe，ProviderCapabilityEvidence `eb781bee...` 为 `passed`，Provider evidence `6→7`，Binding 已 `account_verified=true`。Provider 未报告成本，保留 `not_reported` / CNY，绝不称免费。该 Probe 不创建 Director ProviderOperation、EffectiveRequest、TranslationReport 或输出 Artifact；因此尚缺独立授权下的真实 Unified I2I、Artifact/lineage 和质量门禁，G4 不能关闭。脱敏证据在 `tmp/p0-evidence/1d921fb.../real-provider/`。 |
-| G5 Agnes 视频 | `OPEN` | 未取得本候选的视频费用授权；未执行远端任务创建后的 Worker 停启恢复实证 |
+| G3 同源环境 | `PASS` | API、Dispatcher、两个 Worker 和 Frontend 均运行 `8e3c307` 镜像并健康；数据服务容器/卷未重建；数据库 head 为 `0029` |
+| G4 Agnes 图片 | `PASS` | `5783e6b` 的真实 Director TRIAL 经 API→Outbox→Worker→Unified Runtime 完成 t2i 角色参考与 I2I 关键帧；Binding/Manifest、EffectiveRequest、TranslationReport、Canonical/输出 Artifact ID+SHA-256 完整。Provider 未报告费用，保持 `not_reported` / USD。`postrun-index-v2.json` 15 个条目哈希通过。 |
+| G5 Agnes 视频 | `OPEN` | 同一 TRIAL 的视频创建请求已到 Agnes，严格参数和首帧引用已持久化，但供应商返回 503，未创建远端 task；因此尚不能执行“远端 ID 后停启 Worker、同 ID 恢复 poll”的实证。旧授权无付费重试，下一次必须单独授权。 |
 | G6 Legacy 退出 | `PARTIAL` | Director 已无 Feature Flag fallback；真实 G4/G5 前不删除非 Director 兼容代码和历史恢复依赖 |
-| G7 试拍审阅 | `PARTIAL` | Visual 2.0 项目大厅、项目总览、快速创作与专业生产已统一；试拍页可审阅 Canonical、关键帧、视频、音频、首/中/末帧、EffectiveRequest、费用状态和已知限制；仍需真实 Agnes 试拍数据完成闭环验收 |
+| G7 试拍审阅 | `PARTIAL` | 真实试拍页已审阅 Canonical、关键帧、音频、ProviderOperation、EffectiveRequest、费用状态与限制，并生成不可覆盖硬阻断报告；`8e3c307` 修正 Canonical/Keyframe 误选。仍缺成功视频、首/中/末帧和用户验收。 |
 | G8 局部修复 | `OPEN` | Mock E2E 通过，不构成真实 Provider 局部修复证据 |
 | G9 黄金样本 | `OPEN` | 未完成一个单主角三镜头真实作品，也未进行三名目标用户验证 |
 
