@@ -393,3 +393,7 @@ class RepairAuthorizeRequest(BaseModel):
     repair_option_id: str = Field(pattern=r"^repair-[a-f0-9]{12}$")
     budget_authorization_id: UUID
     idempotency_key: str = Field(min_length=1, max_length=160)
+
+
+class ResumePreSubmitRepairRequest(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=160)

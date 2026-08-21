@@ -12,6 +12,7 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.director.enums import ApprovalKind, ArtifactKind, WorkflowStatus
 from app.director.models import (
+    BudgetAuthorization,
     BudgetReservation,
     CreativeArtifactVersion,
     ProductionBatch,
@@ -34,7 +35,7 @@ from app.director.shooting import (
     VoiceBiblePayload,
 )
 from app.events.service import EventService
-from app.execution.models import GraphNode, NodeRun
+from app.execution.models import GraphNode, NodeRun, ProviderOperation
 from app.shared.db import set_rls_context
 from app.shared.errors import ConflictError, ValidationAppError
 
@@ -300,6 +301,194 @@ class DirectorRepairExecutionService:
         await self._session.refresh(batch)
         await self._session.commit()
         return batch, all_runs
+
+    async def resume_pre_submit_failure(
+        self,
+        *,
+        project_id: UUID,
+        batch_id: UUID,
+        actor: User,
+        idempotency_key: str,
+    ) -> tuple[ProductionBatch, list[NodeRun]]:
+        """Requeue one repair that failed locally before any Provider submit."""
+        project = await self._projects.get_project_for_owner(
+            project_id=project_id, actor=actor
+        )
+        workflow = await self._director.get_workflow(
+            project_id=project_id, actor=actor, for_update=True
+        )
+        existing = await self._session.scalar(
+            select(WorkflowStepRun).where(
+                WorkflowStepRun.workflow_run_id == workflow.id,
+                WorkflowStepRun.step_key == "resume_pre_submit_repair",
+                WorkflowStepRun.idempotency_key == idempotency_key,
+            )
+        )
+        batch = await self._session.scalar(
+            select(ProductionBatch)
+            .where(ProductionBatch.id == batch_id)
+            .with_for_update()
+        )
+        if (
+            batch is None
+            or batch.project_id != project.id
+            or batch.workflow_run_id != workflow.id
+            or batch.batch_kind != "repair"
+        ):
+            raise ValidationAppError(
+                "repair batch is unavailable",
+                details={"code": "REPAIR_BATCH_INVALID"},
+            )
+        if existing is not None:
+            return batch, await self._production._batch_runs(batch.id)
+        if batch.status != "running":
+            raise ValidationAppError(
+                "repair batch is not running",
+                details={"code": "REPAIR_BATCH_NOT_RUNNING"},
+            )
+
+        authorization = await self._session.scalar(
+            select(BudgetAuthorization)
+            .where(BudgetAuthorization.id == batch.budget_authorization_id)
+            .with_for_update()
+        )
+        reservation = await self._session.scalar(
+            select(BudgetReservation)
+            .where(BudgetReservation.batch_id == batch.id)
+            .with_for_update()
+        )
+        now = datetime.now(UTC)
+        expires_at = authorization.expires_at if authorization is not None else None
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if (
+            authorization is None
+            or authorization.authorization_kind != "repair_budget"
+            or authorization.status != "active"
+            or expires_at is None
+            or expires_at <= now
+            or authorization.consumed_amount != 0
+            or reservation is None
+            or reservation.authorization_id != authorization.id
+            or reservation.status != "reserved"
+            or (reservation.actual_amount or 0) != 0
+        ):
+            raise ValidationAppError(
+                "repair budget is not eligible for pre-submit recovery",
+                details={"code": "REPAIR_PRE_SUBMIT_BUDGET_INVALID"},
+            )
+
+        rows = list(
+            (
+                await self._session.execute(
+                    select(NodeRun, GraphNode)
+                    .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                    .where(NodeRun.production_batch_id == batch.id)
+                )
+            ).tuples()
+        )
+        run_ids = [run.id for run, _node in rows]
+        submitted = (
+            await self._session.scalar(
+                select(ProviderOperation.id)
+                .where(ProviderOperation.node_run_id.in_(run_ids))
+                .limit(1)
+            )
+            if run_ids
+            else None
+        )
+        paid_failures = [
+            (run, node)
+            for run, node in rows
+            if run.status == "failed" and node.node_type in {"keyframe", "video", "voice"}
+        ]
+        if submitted is not None or len(paid_failures) != 1:
+            raise ValidationAppError(
+                "repair is not a single unsubmitted Provider failure",
+                details={"code": "REPAIR_PRE_SUBMIT_RECOVERY_NOT_ALLOWED"},
+            )
+        target, _target_node = paid_failures[0]
+        logical_shot_id = str(
+            (target.input_snapshot or {}).get("logical_shot_id")
+            or (target.input_snapshot or {}).get("shot_id")
+            or ""
+        )
+        recoverable = [
+            run
+            for run, _node in rows
+            if run.status == "failed"
+            and str(
+                (run.input_snapshot or {}).get("logical_shot_id")
+                or (run.input_snapshot or {}).get("shot_id")
+                or ""
+            )
+            == logical_shot_id
+        ]
+        if not logical_shot_id or any(
+            run.id != target.id and run.error_code != "UPSTREAM_TERMINAL_FAILURE"
+            for run in recoverable
+        ) or any(
+            run.status == "failed" and run not in recoverable for run, _node in rows
+        ):
+            raise ValidationAppError(
+                "repair has failures outside the pre-submit recovery scope",
+                details={"code": "REPAIR_PRE_SUBMIT_RECOVERY_NOT_ALLOWED"},
+            )
+
+        for run in recoverable:
+            run.status = "queued"
+            run.error_code = None
+            run.error_summary = None
+            run.output_summary = {}
+            run.started_at = None
+            run.finished_at = None
+            await self._events.append_with_outbox(
+                project_id=project.id,
+                aggregate_type="production_batch",
+                aggregate_id=batch.id,
+                event_type="director.node_run.requeued_after_local_failure",
+                topic="node_run.enqueue",
+                payload={
+                    "node_run_id": str(run.id),
+                    "production_batch_id": str(batch.id),
+                    "logical_shot_id": logical_shot_id,
+                    "recovery_scope": "pre_submit_local_failure",
+                },
+                actor_id=actor.id,
+            )
+        batch_shot = await self._session.scalar(
+            select(ProductionBatchShot).where(
+                ProductionBatchShot.batch_id == batch.id,
+                ProductionBatchShot.logical_shot_id == logical_shot_id,
+            )
+        )
+        if batch_shot is not None:
+            batch_shot.status = "queued"
+        self._session.add(
+            WorkflowStepRun(
+                project_id=project.id,
+                workflow_run_id=workflow.id,
+                step_key="resume_pre_submit_repair",
+                skill_id="repair_planning",
+                skill_version="1.0.0",
+                execution_kind="domain_service",
+                idempotency_key=idempotency_key,
+                status="succeeded",
+                input_version_refs=[],
+                output_version_refs=[],
+                service_run_ref=f"repair-resume:{batch.id}:{target.id}",
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        await self._session.commit()
+        await set_rls_context(
+            self._session,
+            user_id=actor.id,
+            workspace_id=project.workspace_id,
+            project_id=project.id,
+        )
+        return batch, await self._production._batch_runs(batch.id)
 
     async def _repair_context(
         self,

@@ -14,12 +14,17 @@ from app.director.enums import ArtifactKind, WorkflowStatus
 from app.director.models import (
     ApprovalRecord,
     BudgetAuthorization,
+    BudgetReservation,
     CreativeArtifactVersion,
     DirectorWorkflowRun,
     ProductionBatch,
     ProductionBatchShot,
 )
 from app.director.quality_service import DirectorQualityService
+from app.director.repair_execution_service import DirectorRepairExecutionService
+from app.events.models import OutboxEvent
+from app.execution.models import GraphNode, NodeRun
+from app.production.service import GraphService
 from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
@@ -327,3 +332,110 @@ async def test_subjective_accept_requires_reason_and_records_override(
     assert "The identity and performance are acceptable" in (override.reason or "")
     assert "Scope:" in (override.reason or "")
     assert "shot-1" in (override.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_resume_pre_submit_repair_requeues_same_batch_without_new_budget(
+    session: AsyncSession,
+) -> None:
+    user, project, workflow, _root, _root_shot, repair, repair_shot, _quality = (
+        await _seed_repair_review(session, root_kind="trial")
+    )
+    authorization = await session.get(BudgetAuthorization, repair.budget_authorization_id)
+    assert authorization is not None
+    authorization.consumed_amount = Decimal("0")
+    workflow.status = WorkflowStatus.PRODUCTION_RUNNING.value
+    repair.status = "running"
+    repair_shot.status = "failed"
+    reservation = BudgetReservation(
+        project_id=project.id,
+        batch_id=repair.id,
+        authorization_id=authorization.id,
+        idempotency_key=f"resume-reservation:{uuid4()}",
+        reserved_amount=Decimal("10"),
+        actual_amount=None,
+        currency="CNY",
+        status="reserved",
+    )
+    session.add(reservation)
+    graph = await GraphService(session).create_graph(
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=uuid4(),
+        template_key="dialogue-post-dub-shot-v1",
+        created_by=user.id,
+        definition={},
+    )
+    node_specs = [
+        ("video", "video", "WORKER_ERROR"),
+        ("video_drift_review", "video_review", "UPSTREAM_TERMINAL_FAILURE"),
+        ("composite", "composite", "UPSTREAM_TERMINAL_FAILURE"),
+    ]
+    runs: list[NodeRun] = []
+    for node_key, node_type, error_code in node_specs:
+        node = GraphNode(
+            graph_version_id=graph.current_version_id,
+            node_key=node_key,
+            node_type=node_type,
+            display_name=node_key,
+            cacheable=True,
+        )
+        session.add(node)
+        await session.flush()
+        run = NodeRun(
+            project_id=project.id,
+            graph_version_id=graph.current_version_id,
+            graph_node_id=node.id,
+            production_batch_id=repair.id,
+            budget_reservation_id=reservation.id,
+            attempt_no=1,
+            idempotency_key=f"resume-run:{node_key}:{uuid4()}",
+            input_hash=hashlib.sha256(node_key.encode()).hexdigest(),
+            status="failed",
+            input_snapshot={"logical_shot_id": "shot-1", "node_key": node_key},
+            error_code=error_code,
+            error_summary="local pre-submit failure",
+            created_by=user.id,
+        )
+        session.add(run)
+        runs.append(run)
+    await session.commit()
+
+    result_batch, result_runs = await DirectorRepairExecutionService(
+        session
+    ).resume_pre_submit_failure(
+        project_id=project.id,
+        batch_id=repair.id,
+        actor=user,
+        idempotency_key="resume-local-pre-submit-once",
+    )
+
+    assert result_batch.id == repair.id
+    assert {run.status for run in result_runs} == {"queued"}
+    assert all(run.error_code is None for run in result_runs)
+    await session.refresh(authorization)
+    await session.refresh(reservation)
+    assert authorization.consumed_amount == Decimal("0")
+    assert reservation.actual_amount is None
+    outbox_count = len(
+        (
+            await session.execute(
+                select(OutboxEvent).where(OutboxEvent.project_id == project.id)
+            )
+        ).scalars().all()
+    )
+    assert outbox_count == 3
+
+    await DirectorRepairExecutionService(session).resume_pre_submit_failure(
+        project_id=project.id,
+        batch_id=repair.id,
+        actor=user,
+        idempotency_key="resume-local-pre-submit-once",
+    )
+    assert len(
+        (
+            await session.execute(
+                select(OutboxEvent).where(OutboxEvent.project_id == project.id)
+            )
+        ).scalars().all()
+    ) == outbox_count

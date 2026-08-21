@@ -42,6 +42,7 @@ from app.director.schemas import (
     RepairAuthorizeRequest,
     RepairPlanRequest,
     RepairPlanResult,
+    ResumePreSubmitRepairRequest,
     ReviewProductionRequest,
     ReviewTrialRequest,
     ShootingPackageGenerateRequest,
@@ -583,6 +584,32 @@ async def authorize_repair(
         project_id=project_id,
         repair_option_id=repair_option_id,
         budget_authorization_id=body.budget_authorization_id,
+        actor=user,
+        idempotency_key=body.idempotency_key,
+    )
+    return MaterializeBatchResult(
+        batch=ProductionBatchRead.model_validate(batch),
+        node_runs=[MaterializedNodeRunRead.model_validate(run) for run in runs],
+    )
+
+
+@router.post(
+    "/projects/{project_id}/director/repairs/batches/{batch_id}/resume-pre-submit",
+    response_model=MaterializeBatchResult,
+)
+async def resume_pre_submit_repair(
+    project_id: UUID,
+    batch_id: UUID,
+    body: ResumePreSubmitRepairRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> MaterializeBatchResult:
+    batch, runs = await DirectorRepairExecutionService(
+        session
+    ).resume_pre_submit_failure(
+        project_id=project_id,
+        batch_id=batch_id,
         actor=user,
         idempotency_key=body.idempotency_key,
     )

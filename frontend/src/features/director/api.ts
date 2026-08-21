@@ -265,6 +265,20 @@ export async function authorizeAndMaterializeRepair(
   );
 }
 
+export async function resumePreSubmitRepair(
+  projectId: string,
+  batchId: string,
+  idempotencyKey: string,
+): Promise<MaterializeBatchResult> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    directorPath(projectId, `/repairs/batches/${encodeURIComponent(batchId)}/resume-pre-submit`),
+    { idempotency_key: idempotencyKey },
+    csrf,
+  );
+}
+
 export async function generateShootingPackage(
   projectId: string,
   input: { authorize_text_calls: boolean; idempotency_key: string },
