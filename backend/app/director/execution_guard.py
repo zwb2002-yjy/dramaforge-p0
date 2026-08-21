@@ -36,6 +36,7 @@ class DirectorMediaExecutionContext:
     budget_reservation_id: UUID
     budget_authorization_id: UUID
     model_binding_id: UUID | None
+    trial_quality_gate_bootstrap_allowed: bool
 
 
 async def settle_director_media_cost(
@@ -275,6 +276,108 @@ def _local_zero_cost_binding(
     )
 
 
+def _selection_plan_for_purpose(
+    *,
+    batch: ProductionBatch,
+    purpose: str,
+) -> dict[str, object]:
+    plans = (batch.selection_snapshot or {}).get("plans")
+    if not isinstance(plans, list):
+        _reject(
+            "DIRECTOR_MODEL_BINDING_NOT_FROZEN",
+            "Director production batch has no frozen selection plans",
+        )
+    plan = next(
+        (
+            item
+            for item in plans
+            if isinstance(item, dict) and item.get("purpose") == purpose
+        ),
+        None,
+    )
+    if not isinstance(plan, dict):
+        _reject(
+            "DIRECTOR_MODEL_BINDING_NOT_FROZEN",
+            "Director production batch has no selection for this media purpose",
+            purpose=purpose,
+        )
+    return plan
+
+
+async def _trial_quality_gate_bootstrap_allowed(
+    session: AsyncSession,
+    *,
+    batch: ProductionBatch,
+    snapshot: dict[str, object],
+    model_binding_id: UUID | None,
+) -> bool:
+    """Allow an ungated model only while producing evidence for a trial.
+
+    A repair can continue the trial bootstrap only when its immutable model and
+    manifest snapshots are identical to the root trial. Production lineage can
+    never acquire this exception.
+    """
+    if model_binding_id is None:
+        return False
+    if batch.batch_kind == "trial":
+        return True
+    if batch.batch_kind != "repair":
+        return False
+
+    raw_root_id = (batch.selection_snapshot or {}).get("root_source_batch_id")
+    try:
+        root_id = UUID(str(raw_root_id))
+    except (TypeError, ValueError, AttributeError):
+        _reject(
+            "DIRECTOR_REPAIR_ROOT_LINEAGE_INVALID",
+            "Director repair batch has no valid root production batch",
+        )
+    root = await session.scalar(
+        select(ProductionBatch)
+        .where(ProductionBatch.id == root_id)
+        .with_for_update()
+    )
+    if (
+        root is None
+        or root.project_id != batch.project_id
+        or root.workflow_run_id != batch.workflow_run_id
+        or root.batch_kind not in {"trial", "production"}
+    ):
+        _reject(
+            "DIRECTOR_REPAIR_ROOT_LINEAGE_INVALID",
+            "Director repair root production batch is invalid",
+        )
+
+    purpose = str(snapshot.get("purpose") or "")
+    current_plan = _selection_plan_for_purpose(batch=batch, purpose=purpose)
+    root_plan = _selection_plan_for_purpose(batch=root, purpose=purpose)
+    node_plan = snapshot.get("selection_plan")
+    if not isinstance(node_plan, dict):
+        _reject(
+            "DIRECTOR_MODEL_BINDING_NOT_FROZEN",
+            "Director media NodeRun has no frozen selection plan",
+        )
+
+    current_manifest = str(current_plan.get("manifest_hash") or "")
+    node_manifest = str(node_plan.get("manifest_hash") or "")
+    root_manifest = str(root_plan.get("manifest_hash") or "")
+    snapshots_match = (
+        _uuid(current_plan.get("model_binding_id"), field="batch.model_binding_id")
+        == model_binding_id
+        and _uuid(root_plan.get("model_binding_id"), field="root.model_binding_id")
+        == model_binding_id
+        and bool(current_manifest)
+        and current_manifest == node_manifest == root_manifest
+    )
+    if not snapshots_match:
+        _reject(
+            "DIRECTOR_REPAIR_MODEL_SNAPSHOT_MISMATCH",
+            "Director repair model binding or manifest differs from its root batch",
+            purpose=purpose,
+        )
+    return root.batch_kind == "trial"
+
+
 async def validate_director_media_submission(
     session: AsyncSession,
     *,
@@ -397,6 +500,14 @@ async def validate_director_media_submission(
         if _local_zero_cost_binding(snapshot=snapshot, batch=batch)
         else _frozen_binding_id(snapshot=snapshot, batch=batch)
     )
+    trial_quality_gate_bootstrap_allowed = (
+        await _trial_quality_gate_bootstrap_allowed(
+            session,
+            batch=batch,
+            snapshot=snapshot,
+            model_binding_id=model_binding_id,
+        )
+    )
     return DirectorMediaExecutionContext(
         workflow_run_id=workflow.id,
         production_batch_id=batch.id,
@@ -404,4 +515,5 @@ async def validate_director_media_submission(
         budget_reservation_id=reservation.id,
         budget_authorization_id=authorization.id,
         model_binding_id=model_binding_id,
+        trial_quality_gate_bootstrap_allowed=trial_quality_gate_bootstrap_allowed,
     )

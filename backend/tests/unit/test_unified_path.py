@@ -614,6 +614,88 @@ async def _attach_director_context(
     return batch
 
 
+async def _derive_repair_context(
+    session: AsyncSession,
+    *,
+    user: User,
+    run: NodeRun,
+    root_batch: ProductionBatch,
+    manifest_hash: str,
+) -> tuple[ProductionBatch, BudgetAuthorization, BudgetReservation]:
+    purpose = str((run.input_snapshot or {}).get("purpose") or "keyframe")
+    frozen_binding_id = str((run.input_snapshot or {})["model_binding_id"])
+    frozen_plan = {
+        "purpose": purpose,
+        "model_binding_id": frozen_binding_id,
+        "manifest_hash": manifest_hash,
+        "evidence": {
+            "documented": True,
+            "contract_tested": True,
+            "account_verified": True,
+            "quality_gated": False,
+            "trial_only_until_quality_gated": True,
+        },
+    }
+    root_batch.selection_snapshot = {"plans": [dict(frozen_plan)]}
+    authorization = BudgetAuthorization(
+        project_id=run.project_id,
+        workflow_run_id=root_batch.workflow_run_id,
+        authorization_kind="repair_budget",
+        idempotency_key=f"repair-auth:{uuid4()}",
+        pricing_snapshot_id="repair-pricing-v1",
+        limit_amount=Decimal("10"),
+        consumed_amount=Decimal("0"),
+        currency="USD",
+        status="active",
+        authorized_by=user.id,
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+    session.add(authorization)
+    await session.flush()
+    repair = ProductionBatch(
+        project_id=run.project_id,
+        workflow_run_id=root_batch.workflow_run_id,
+        batch_kind="repair",
+        idempotency_key=f"repair-batch:{uuid4()}",
+        status="running",
+        budget_authorization_id=authorization.id,
+        locked_version_refs={},
+        selected_shot_ids=["shot-1"],
+        template_keys=["dialogue-post-dub-shot-v1"],
+        quality_policy_id="live-dialogue-quality-v1",
+        selection_snapshot={
+            "plans": [dict(frozen_plan)],
+            "source_batch_id": str(root_batch.id),
+            "root_source_batch_id": str(root_batch.id),
+        },
+        semantic_hash="e" * 64,
+        created_by=user.id,
+    )
+    session.add(repair)
+    await session.flush()
+    reservation = BudgetReservation(
+        project_id=run.project_id,
+        batch_id=repair.id,
+        authorization_id=authorization.id,
+        idempotency_key=f"repair-reservation:{uuid4()}",
+        reserved_amount=Decimal("10"),
+        currency="USD",
+        status="reserved",
+    )
+    session.add(reservation)
+    await session.flush()
+    run.production_batch_id = repair.id
+    run.budget_reservation_id = reservation.id
+    run.input_snapshot = {
+        **(run.input_snapshot or {}),
+        "production_batch_id": str(repair.id),
+        "budget_reservation_id": str(reservation.id),
+        "selection_plan": dict(frozen_plan),
+    }
+    await session.flush()
+    return repair, authorization, reservation
+
+
 async def _attach_canonical_source(
     session: AsyncSession,
     *,
@@ -1348,6 +1430,173 @@ async def test_director_forces_unified_path_when_feature_flag_is_false(
     assert op is not None
     assert op.execution_path_version == UNIFIED_PATH_VERSION
     assert _current_runtime().submit_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_trial_derived_repair_can_bootstrap_quality_gate(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _byok(monkeypatch)
+    _enable_unified(monkeypatch)
+    await _no_sleep(monkeypatch)
+    user, _workspace, run = await _seed_project_chain(session)
+    binding = await session.scalar(
+        select(ProviderModelBinding).where(ProviderModelBinding.purpose == "keyframe")
+    )
+    assert binding is not None and binding.catalog_entry_id is not None
+    binding.quality_gated = False
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    root = await _attach_director_context(
+        session,
+        user=user,
+        run=run,
+        model_binding_id=binding.id,
+    )
+    await _derive_repair_context(
+        session,
+        user=user,
+        run=run,
+        root_batch=root,
+        manifest_hash=entry.contract_manifest_hash,
+    )
+
+    await execute_media_node_run(session, node_run_id=run.id)
+
+    operation = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+    )
+    assert operation is not None
+    assert operation.model_binding_id == binding.id
+    assert operation.capability_manifest_hash == entry.contract_manifest_hash
+    assert operation.selection_plan["evidence"]["trial_quality_gate_exception"] is True
+    assert _current_runtime().submit_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_production_derived_repair_cannot_bootstrap_quality_gate(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _byok(monkeypatch)
+    _enable_unified(monkeypatch)
+    await _no_sleep(monkeypatch)
+    user, _workspace, run = await _seed_project_chain(session)
+    binding = await session.scalar(
+        select(ProviderModelBinding).where(ProviderModelBinding.purpose == "keyframe")
+    )
+    assert binding is not None and binding.catalog_entry_id is not None
+    binding.quality_gated = False
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    root = await _attach_director_context(
+        session,
+        user=user,
+        run=run,
+        model_binding_id=binding.id,
+    )
+    root.batch_kind = "production"
+    root_authorization = await session.get(
+        BudgetAuthorization, root.budget_authorization_id
+    )
+    assert root_authorization is not None
+    root_authorization.authorization_kind = "production_budget"
+    _repair, authorization, reservation = await _derive_repair_context(
+        session,
+        user=user,
+        run=run,
+        root_batch=root,
+        manifest_hash=entry.contract_manifest_hash,
+    )
+
+    with pytest.raises(ValidationAppError) as caught:
+        await execute_media_node_run(session, node_run_id=run.id)
+
+    assert caught.value.details["code"] == "MODEL_INELIGIBLE"
+    assert caught.value.details["issues"] == ["MODEL_QUALITY_GATE_MISSING"]
+    assert (
+        await session.scalar(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+        is None
+    )
+    await session.refresh(authorization)
+    await session.refresh(reservation)
+    assert authorization.consumed_amount == Decimal("0")
+    assert reservation.actual_amount is None
+    assert "runtime" not in _FAKE_RUNTIME_HOLDER
+
+
+@pytest.mark.parametrize("drift_field", ["model_binding_id", "manifest_hash"])
+@pytest.mark.asyncio
+async def test_trial_repair_rejects_frozen_model_snapshot_drift_before_submit(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    drift_field: str,
+) -> None:
+    _byok(monkeypatch)
+    _enable_unified(monkeypatch)
+    await _no_sleep(monkeypatch)
+    user, _workspace, run = await _seed_project_chain(session)
+    binding = await session.scalar(
+        select(ProviderModelBinding).where(ProviderModelBinding.purpose == "keyframe")
+    )
+    assert binding is not None and binding.catalog_entry_id is not None
+    binding.quality_gated = False
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    root = await _attach_director_context(
+        session,
+        user=user,
+        run=run,
+        model_binding_id=binding.id,
+    )
+    repair, authorization, reservation = await _derive_repair_context(
+        session,
+        user=user,
+        run=run,
+        root_batch=root,
+        manifest_hash=entry.contract_manifest_hash,
+    )
+    drift_value = str(uuid4()) if drift_field == "model_binding_id" else "f" * 64
+    repair_plan = dict(repair.selection_snapshot["plans"][0])
+    repair_plan[drift_field] = drift_value
+    repair.selection_snapshot = {
+        **repair.selection_snapshot,
+        "plans": [repair_plan],
+    }
+    node_plan = dict(run.input_snapshot["selection_plan"])
+    node_plan[drift_field] = drift_value
+    run.input_snapshot = {
+        **run.input_snapshot,
+        "model_binding_id": (
+            drift_value
+            if drift_field == "model_binding_id"
+            else run.input_snapshot["model_binding_id"]
+        ),
+        "selection_plan": node_plan,
+    }
+    await session.flush()
+
+    with pytest.raises(DirectorExecutionGuardError) as caught:
+        await execute_media_node_run(session, node_run_id=run.id)
+
+    assert caught.value.code == "DIRECTOR_REPAIR_MODEL_SNAPSHOT_MISMATCH"
+    assert (
+        await session.scalar(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+        is None
+    )
+    await session.refresh(authorization)
+    await session.refresh(reservation)
+    assert authorization.consumed_amount == Decimal("0")
+    assert reservation.actual_amount is None
+    assert "runtime" not in _FAKE_RUNTIME_HOLDER
 
 
 @pytest.mark.asyncio

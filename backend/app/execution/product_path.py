@@ -1317,7 +1317,7 @@ async def _execute_unified_media_node_run(
         )
         allow_trial_without_quality_gate = bool(
             director_context is not None
-            and director_context.batch_kind == "trial"
+            and director_context.trial_quality_gate_bootstrap_allowed
             and isinstance(frozen_evidence, dict)
             and frozen_evidence.get("trial_only_until_quality_gated") is True
         )
