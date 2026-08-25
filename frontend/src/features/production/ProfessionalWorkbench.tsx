@@ -284,7 +284,7 @@ export function ProfessionalWorkbench({
       <div className="professional-workbench-grid">
         <aside className="scene-rail" aria-label="场景列表">
           <div className="scene-rail-header"><span>场景</span><strong>{scenes.length}</strong></div>
-          {scenes.length === 0 && <p className="muted">还没有镜头。可从快速模式导入剧本，或在后续版本手动创建场景。</p>}
+          {scenes.length === 0 && <p className="muted">还没有镜头。可在专业工作台导入剧本，或手动创建场景。</p>}
           {scenes.map(([sceneId, sceneShots], index) => (
             <section key={sceneId || index} className="scene-group">
               <div className="scene-group-title"><span>{sceneName(sceneId, index)}</span><small>{sceneShots.length} 镜头</small></div>

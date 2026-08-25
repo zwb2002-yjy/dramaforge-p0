@@ -93,10 +93,10 @@ function ProjectOverview({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | u
       </section>
       <section className="qc-overview-grid">
         <article>
-          <span className="director-stage-kicker">快速模式</span>
-          <h2>AI 导演工作区</h2>
-          <p>完成四阶段、四次硬确认、试拍验收和正式生产授权。</p>
-          <Link to="/projects/$projectId/production" params={{ projectId }}>进入快速创作</Link>
+          <span className="director-stage-kicker">导演助手（兼容事实）</span>
+          <h2>受控导演建议</h2>
+          <p>历史导演流程事实继续保留，但新的创作入口统一在专业工作台。</p>
+          <Link to="/projects/$projectId/production" params={{ projectId }}>进入专业工作台</Link>
         </article>
         <article>
           <span className="director-stage-kicker">专业模式</span>

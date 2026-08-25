@@ -186,7 +186,7 @@ export function DirectorPanel({
           <CircleDollarSign size={15} aria-hidden="true" />
           <span>
             <strong>当前阶段</strong>
-            <small>不生成媒体，不产生费用</small>
+            <small>不生成媒体，仅更新文本事实</small>
           </span>
         </div>
       </section>
