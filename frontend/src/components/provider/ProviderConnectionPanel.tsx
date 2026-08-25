@@ -11,7 +11,6 @@ import {
   listProviderProbes,
   recordProviderQualityEvidence,
   runProviderProbe,
-  setProviderModelBindingPricing,
   updateProviderConnectionCredential,
   updateProviderConnection,
   type ProjectRead,
@@ -42,16 +41,13 @@ export function ProviderConnectionPanel({
   const [baseUrl, setBaseUrl] = useState("");
   const [selectedPluginKey, setSelectedPluginKey] = useState("agnes/agnes_cn_v1");
   const [capability, setCapability] = useState("auth_models");
-  const [budget, setBudget] = useState("0");
+  const [paidRequestConfirmed, setPaidRequestConfirmed] = useState(false);
   const [referenceArtifactId, setReferenceArtifactId] = useState("");
   const [remoteTaskId, setRemoteTaskId] = useState("");
   const [remoteQueryKind, setRemoteQueryKind] = useState("video_id");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [qualityRunIds, setQualityRunIds] = useState<Record<string, string>>({});
   const [qualityArtifactIds, setQualityArtifactIds] = useState<Record<string, string>>({});
-  const [pricingAmounts, setPricingAmounts] = useState<Record<string, string>>({});
-  const [pricingCurrency, setPricingCurrency] = useState("USD");
-  const [pricingConfirmed, setPricingConfirmed] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,7 +133,7 @@ export function ProviderConnectionPanel({
     mutationFn: async () => {
       if (!workspaceId || !connection) throw new Error("请先创建当前供应商连接");
       const paid = Boolean(selectedPlugin?.paid_capabilities.includes(capability));
-      if (paid && Number(budget) <= 0) throw new Error("付费探测需要明确的正预算");
+      if (paid && !paidRequestConfirmed) throw new Error("请先确认将直接调用模型供应商");
       const probeBinding = capability === "video_i2v" ? videoBinding : capability.startsWith("image_") ? imageBinding : null;
       if (capability !== "auth_models" && !probeBinding) {
         throw new Error("请先添加与当前能力对应的模型绑定");
@@ -145,7 +141,7 @@ export function ProviderConnectionPanel({
       return runProviderProbe(workspaceId, connection.id, {
         capability,
         ...(probeBinding ? { model_binding_id: probeBinding.id } : {}),
-        budget_authorized: paid ? budget : "0",
+        paid_request_confirmed: paid ? paidRequestConfirmed : false,
         ...(referenceArtifactId.trim() ? { reference_artifact_id: referenceArtifactId.trim() } : {}),
         ...(remoteTaskId.trim() ? { remote_task_id: remoteTaskId.trim() } : {}),
         ...(capability === "video_poll_download" ? { remote_query_kind: remoteQueryKind } : {}),
@@ -198,28 +194,6 @@ export function ProviderConnectionPanel({
     onSuccess: async () => {
       setMessage("质量证据已记录，绑定现可被项目使用。");
       await queryClient.invalidateQueries({ queryKey: ["provider-bindings", workspaceId] });
-    },
-    onError: (cause: Error) => setError(cause.message),
-  });
-
-  const pricingMutation = useMutation({
-    mutationFn: async (binding: ProviderModelBindingRead) => {
-      if (!workspaceId || !connection) throw new Error("请先配置生成服务");
-      const amount = pricingAmounts[binding.id]?.trim();
-      if (!amount || Number(amount) < 0) throw new Error("请输入非负单次估算价格");
-      if (!pricingConfirmed[binding.id]) throw new Error("请确认这是本次调用的保守估算上限");
-      return setProviderModelBindingPricing(workspaceId, connection.id, binding.id, {
-        unit_amount: amount,
-        currency: pricingCurrency,
-        billing_unit: binding.media_type === "video" ? "per_generated_clip" : "per_generated_image",
-        source_note: "由工作区所有者填写的单次调用保守估算上限；实际账单以供应商为准",
-        owner_verified: true,
-      });
-    },
-    onMutate: resetFeedback,
-    onSuccess: async () => {
-      setMessage("保守成本快照已记录。重新生成拍摄方案后会按此估算并冻结预算。");
-      await queryClient.invalidateQueries({ queryKey: ["provider-bindings", workspaceId, connection?.id] });
     },
     onError: (cause: Error) => setError(cause.message),
   });
@@ -330,10 +304,10 @@ export function ProviderConnectionPanel({
             <h3>能力探测</h3>
             <form className="form-grid" onSubmit={(event) => { event.preventDefault(); probeMutation.mutate(); }}>
               <label>能力<select value={capability} onChange={(event) => setCapability(event.target.value)}>{pluginCapabilities.map((value) => <option value={value} key={value}>{CAPABILITY_LABELS[value] ?? value}</option>)}</select></label>
-              {paidProbe && <label>预算授权金额<input type="number" min="0" step="0.01" value={budget} onChange={(event) => setBudget(event.target.value)} /></label>}
+              {paidProbe && <label className="director-rights-confirm"><input type="checkbox" checked={paidRequestConfirmed} onChange={(event) => setPaidRequestConfirmed(event.target.checked)} /><span>我确认本次探测会直接调用模型供应商，价格与结算由供应商负责。</span></label>}
               {(capability === "image_i2i" || capability === "video_i2v") && <label>参考产物 ID<input value={referenceArtifactId} onChange={(event) => setReferenceArtifactId(event.target.value)} placeholder="参考探测必填" /></label>}
               {capability === "video_poll_download" && <><label>远端任务 ID<input value={remoteTaskId} onChange={(event) => setRemoteTaskId(event.target.value)} /></label><label>查询类型<select value={remoteQueryKind} onChange={(event) => setRemoteQueryKind(event.target.value)}><option value="video_id">video_id → /agnesapi</option><option value="task_id">task_id → /v1/videos/{"{id}"}</option></select></label></>}
-              <button type="submit" disabled={probeMutation.isPending || !selectedPlugin?.implemented}>{probeMutation.isPending ? "探测中…" : paidProbe ? "授权并运行付费探测" : "运行探测"}</button>
+              <button type="submit" disabled={probeMutation.isPending || !selectedPlugin?.implemented || (paidProbe && !paidRequestConfirmed)}>{probeMutation.isPending ? "探测中…" : paidProbe ? "确认并运行供应商探测" : "运行探测"}</button>
             </form>
             <ul className="dense provider-evidence-list" data-testid="provider-probes">
               {(probes.data ?? []).slice(0, 6).map((probe) => <li key={probe.probe_id}><span>{probe.capability}</span><strong className={probe.status === "passed" ? "status-ok" : probe.status === "failed" ? "status-bad" : "status-pending"}>{probe.status === "passed" ? "通过" : probe.status === "failed" ? "失败" : "待定"}</strong><span className="muted">{probe.evidence_level}</span></li>)}
@@ -405,29 +379,6 @@ export function ProviderConnectionPanel({
                           </button>
                         </div>
                       )}
-                      <div className="quality-evidence-form">
-                        <input
-                          aria-label={`${binding.purpose} 单次价格`}
-                          type="number"
-                          min="0"
-                          step="0.000001"
-                          placeholder="单次估算价格"
-                          value={pricingAmounts[binding.id] ?? String(binding.pricing_snapshot.unit_amount ?? "")}
-                          onChange={(event) => setPricingAmounts((current) => ({ ...current, [binding.id]: event.target.value }))}
-                        />
-                        <select aria-label="价格币种" value={pricingCurrency} onChange={(event) => setPricingCurrency(event.target.value)}>
-                          <option value="USD">USD</option><option value="CNY">CNY</option>
-                        </select>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(pricingConfirmed[binding.id])}
-                            onChange={(event) => setPricingConfirmed((current) => ({ ...current, [binding.id]: event.target.checked }))}
-                          />
-                          我确认这是单次调用的保守估算上限，实际账单以供应商为准
-                        </label>
-                        <button type="button" disabled={pricingMutation.isPending} onClick={() => pricingMutation.mutate(binding)}>保存价格快照</button>
-                      </div>
                     </div>
                     <button
                       type="button"

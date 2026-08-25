@@ -1,21 +1,21 @@
-"""Script import and shot listing API."""
+"""Script import and professional shot canvas API."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
-from app.assets.models import Shot
+from app.assets.models import CanvasRevision, Shot, ShotChangeProposal
 from app.assets.script_import import import_script
+from app.shared.errors import ConflictError, NotFoundError
 
-router = APIRouter(
-    tags=["scripts"], dependencies=[Depends(require_selected_workspace)]
-)
+router = APIRouter(tags=["scripts"], dependencies=[Depends(require_selected_workspace)])
 
 
 class ScriptImportBody(BaseModel):
@@ -41,6 +41,7 @@ class ShotRead(BaseModel):
     scene_id: UUID
     shot_number: int
     shot_type: str
+    camera_move: str
     visual_description: str
     dialogue: str
     sort_order: int
@@ -48,10 +49,90 @@ class ShotRead(BaseModel):
     version: int
 
 
-@router.post(
-    "/projects/{project_id}/scripts/import",
-    response_model=ScriptImportResponse,
-)
+class CanvasRevisionRead(BaseModel):
+    id: UUID
+    revision_number: int
+    base_shot_version: int
+    visual_description: str
+    shot_type: str
+    camera_move: str
+    dialogue: str
+    source: str
+    created_at: datetime
+
+class ShotChangeProposalCreate(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=160)
+    summary: str = Field(min_length=1, max_length=4000)
+    expected_version: int = Field(ge=1)
+    replacement_payload: dict[str, object]
+    affected_node_keys: list[str] = Field(default_factory=list, max_length=20)
+    reusable_artifact_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class ShotChangeProposalRead(BaseModel):
+    id: UUID
+    shot_id: UUID
+    summary: str
+    base_shot_version: int
+    replacement_payload: dict[str, object]
+    affected_node_keys: list[str]
+    reusable_artifact_ids: list[str]
+    status: str
+    confirmed_revision_id: UUID | None
+    created_at: datetime
+    confirmed_at: datetime | None
+
+
+class ShotChangeProposalResult(BaseModel):
+    proposal: ShotChangeProposalRead
+    impact: dict[str, object]
+
+class ShotCanvasUpdateBody(BaseModel):
+    expected_version: int = Field(ge=1)
+    visual_description: str = Field(min_length=1)
+    shot_type: str = Field(min_length=1, max_length=40)
+    camera_move: str = Field(min_length=1, max_length=80)
+    dialogue: str = ""
+    source: str = Field(default="user", pattern="^(user|assistant)$")
+
+
+class ShotCanvasUpdateResponse(BaseModel):
+    shot: ShotRead
+    revision_id: UUID
+    revision_number: int
+
+
+def _proposal_read(proposal: ShotChangeProposal) -> ShotChangeProposalRead:
+    return ShotChangeProposalRead(
+        id=proposal.id,
+        shot_id=proposal.shot_id,
+        summary=proposal.summary,
+        base_shot_version=proposal.base_shot_version,
+        replacement_payload=proposal.replacement_payload,
+        affected_node_keys=list(proposal.affected_node_keys),
+        reusable_artifact_ids=list(proposal.reusable_artifact_ids),
+        status=proposal.status,
+        confirmed_revision_id=proposal.confirmed_revision_id,
+        created_at=proposal.created_at,
+        confirmed_at=proposal.confirmed_at,
+    )
+
+def _shot_read(shot: Shot) -> ShotRead:
+    return ShotRead(
+        id=shot.id,
+        scene_id=shot.scene_id,
+        shot_number=shot.shot_number,
+        shot_type=shot.shot_type,
+        camera_move=shot.camera_move,
+        visual_description=shot.visual_description,
+        dialogue=shot.dialogue,
+        sort_order=shot.sort_order,
+        status=shot.status,
+        version=shot.version,
+    )
+
+
+@router.post("/projects/{project_id}/scripts/import", response_model=ScriptImportResponse)
 async def import_project_script(
     project_id: UUID,
     body: ScriptImportBody,
@@ -68,13 +149,7 @@ async def import_project_script(
         text=body.text,
         actor=user,
     )
-    character_id = None
-    canon_key = None
-    # Never silent-Fake canonical on import. Lead must be registered via
-    # POST .../characters/lead (live Provider) or audited manual upload.
-    if body.register_lead and result.lead_character:
-        # Keep character name only — no Fake image generation
-        pass
+    # Canonical references are intentionally not fabricated during import.
     await session.commit()
     return ScriptImportResponse(
         script_document_id=result.script_document_id,
@@ -84,10 +159,248 @@ async def import_project_script(
         shot_ids=result.shot_ids,
         lead_character=result.lead_character,
         content_hash=result.content_hash,
-        character_id=character_id,
-        canonical_object_key=canon_key,
+        character_id=None,
+        canonical_object_key=None,
     )
 
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/change-proposals",
+    response_model=ShotChangeProposalResult,
+    status_code=201,
+)
+async def create_shot_change_proposal(
+    project_id: UUID,
+    shot_id: UUID,
+    body: ShotChangeProposalCreate,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> ShotChangeProposalResult:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    shot = (
+        await session.execute(
+            select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id)
+        )
+    ).scalar_one_or_none()
+    if shot is None:
+        raise NotFoundError("shot not found")
+    existing = (
+        await session.execute(
+            select(ShotChangeProposal).where(
+                ShotChangeProposal.project_id == project_id,
+                ShotChangeProposal.idempotency_key == body.idempotency_key,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return ShotChangeProposalResult(
+            proposal=_proposal_read(existing),
+            impact={
+                "affected_shot_ids": [str(existing.shot_id)],
+                "invalidated_node_keys": list(existing.affected_node_keys),
+                "reusable_artifact_ids": list(existing.reusable_artifact_ids),
+            },
+        )
+    if shot.version != body.expected_version:
+        raise ConflictError(
+            "shot change proposal base version conflict",
+            details={"expected_version": body.expected_version, "actual_version": shot.version},
+        )
+    proposal = ShotChangeProposal(
+        project_id=project_id,
+        shot_id=shot.id,
+        created_by=user.id,
+        idempotency_key=body.idempotency_key,
+        summary=body.summary,
+        base_shot_version=shot.version,
+        replacement_payload=dict(body.replacement_payload),
+        affected_node_keys=list(body.affected_node_keys),
+        reusable_artifact_ids=list(body.reusable_artifact_ids),
+    )
+    session.add(proposal)
+    await session.commit()
+    return ShotChangeProposalResult(
+        proposal=_proposal_read(proposal),
+        impact={
+            "affected_shot_ids": [str(shot.id)],
+            "invalidated_node_keys": list(proposal.affected_node_keys),
+            "reusable_artifact_ids": list(proposal.reusable_artifact_ids),
+        },
+    )
+
+
+@router.get(
+    "/projects/{project_id}/shots/{shot_id}/change-proposals",
+    response_model=list[ShotChangeProposalRead],
+)
+async def list_shot_change_proposals(
+    project_id: UUID,
+    shot_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[ShotChangeProposalRead]:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    rows = (
+        await session.execute(
+            select(ShotChangeProposal)
+            .where(
+                ShotChangeProposal.project_id == project_id,
+                ShotChangeProposal.shot_id == shot_id,
+            )
+            .order_by(ShotChangeProposal.created_at.desc())
+        )
+    ).scalars().all()
+    return [_proposal_read(row) for row in rows]
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/change-proposals/{proposal_id}/confirm",
+    response_model=ShotChangeProposalRead,
+)
+async def confirm_shot_change_proposal(
+    project_id: UUID,
+    shot_id: UUID,
+    proposal_id: UUID,
+    revision_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> ShotChangeProposalRead:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    proposal = (
+        await session.execute(
+            select(ShotChangeProposal).where(
+                ShotChangeProposal.id == proposal_id,
+                ShotChangeProposal.project_id == project_id,
+                ShotChangeProposal.shot_id == shot_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if proposal is None:
+        raise NotFoundError("shot change proposal not found")
+    revision = (
+        await session.execute(
+            select(CanvasRevision).where(
+                CanvasRevision.id == revision_id,
+                CanvasRevision.project_id == project_id,
+                CanvasRevision.shot_id == shot_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if revision is None:
+        raise NotFoundError("canvas revision not found")
+    if proposal.status == "applied":
+        return _proposal_read(proposal)
+    if proposal.status != "awaiting_confirmation":
+        raise ConflictError("shot change proposal is not awaiting confirmation")
+    if revision.base_shot_version != proposal.base_shot_version:
+        raise ConflictError("canvas revision does not match proposal base version")
+    proposal.status = "applied"
+    proposal.confirmed_revision_id = revision.id
+    proposal.confirmed_at = datetime.now(UTC)
+    await session.commit()
+    return _proposal_read(proposal)
+
+@router.patch(
+    "/projects/{project_id}/shots/{shot_id}/canvas",
+    response_model=ShotCanvasUpdateResponse,
+)
+async def update_shot_canvas(
+    project_id: UUID,
+    shot_id: UUID,
+    body: ShotCanvasUpdateBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> ShotCanvasUpdateResponse:
+    """Persist an immutable CanvasRevision and advance the Shot version."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    shot = (
+        await session.execute(
+            select(Shot)
+            .where(Shot.id == shot_id, Shot.project_id == project_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if shot is None:
+        raise NotFoundError("shot not found")
+    if shot.version != body.expected_version:
+        raise ConflictError(
+            "shot canvas version conflict",
+            details={"expected_version": body.expected_version, "actual_version": shot.version},
+        )
+    latest_revision = (
+        await session.execute(
+            select(func.max(CanvasRevision.revision_number)).where(
+                CanvasRevision.shot_id == shot.id
+            )
+        )
+    ).scalar_one()
+    revision = CanvasRevision(
+        project_id=project_id,
+        shot_id=shot.id,
+        revision_number=int(latest_revision or 0) + 1,
+        base_shot_version=shot.version,
+        visual_description=body.visual_description,
+        shot_type=body.shot_type,
+        camera_move=body.camera_move,
+        dialogue=body.dialogue,
+        source=body.source,
+        created_by=user.id,
+    )
+    shot.visual_description = body.visual_description
+    shot.shot_type = body.shot_type
+    shot.camera_move = body.camera_move
+    shot.dialogue = body.dialogue
+    shot.version += 1
+    session.add(revision)
+    await session.commit()
+    return ShotCanvasUpdateResponse(
+        shot=_shot_read(shot), revision_id=revision.id, revision_number=revision.revision_number
+    )
+
+
+
+@router.get(
+    "/projects/{project_id}/shots/{shot_id}/canvas-revisions",
+    response_model=list[CanvasRevisionRead],
+)
+async def list_shot_canvas_revisions(
+    project_id: UUID,
+    shot_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[CanvasRevisionRead]:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    shot_exists = (
+        await session.execute(
+            select(Shot.id).where(Shot.id == shot_id, Shot.project_id == project_id)
+        )
+    ).scalar_one_or_none()
+    if shot_exists is None:
+        raise NotFoundError("shot not found")
+    rows = (
+        await session.execute(
+            select(CanvasRevision)
+            .where(CanvasRevision.project_id == project_id, CanvasRevision.shot_id == shot_id)
+            .order_by(CanvasRevision.revision_number.desc())
+        )
+    ).scalars().all()
+    return [
+        CanvasRevisionRead(
+            id=row.id,
+            revision_number=row.revision_number,
+            base_shot_version=row.base_shot_version,
+            visual_description=row.visual_description,
+            shot_type=row.shot_type,
+            camera_move=row.camera_move,
+            dialogue=row.dialogue,
+            source=row.source,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
 
 @router.get("/projects/{project_id}/shots", response_model=list[ShotRead])
 async def list_project_shots(
@@ -107,17 +420,4 @@ async def list_project_shots(
         .scalars()
         .all()
     )
-    return [
-        ShotRead(
-            id=r.id,
-            scene_id=r.scene_id,
-            shot_number=r.shot_number,
-            shot_type=r.shot_type,
-            visual_description=r.visual_description,
-            dialogue=r.dialogue,
-            sort_order=r.sort_order,
-            status=r.status,
-            version=r.version,
-        )
-        for r in rows
-    ]
+    return [_shot_read(row) for row in rows]

@@ -4,6 +4,58 @@
  */
 
 export interface paths {
+    "/api/v1/projects/{project_id}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Project Assets */
+        get: operations["list_project_assets_api_v1_projects__project_id__assets_get"];
+        put?: never;
+        /** Create Project Asset */
+        post: operations["create_project_asset_api_v1_projects__project_id__assets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/assets/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Project Asset */
+        patch: operations["update_project_asset_api_v1_projects__project_id__assets__asset_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/assets/{asset_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Asset Versions */
+        get: operations["list_asset_versions_api_v1_projects__project_id__assets__asset_id__versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/bootstrap-status": {
         parameters: {
             query?: never;
@@ -405,23 +457,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{project_id}/director/budget-authorizations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Authorize Budget */
-        post: operations["authorize_budget_api_v1_projects__project_id__director_budget_authorizations_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/projects/{project_id}/director/approvals": {
         parameters: {
             query?: never;
@@ -518,6 +553,23 @@ export interface paths {
         put?: never;
         /** Generate Creative Package */
         post: operations["generate_creative_package_api_v1_projects__project_id__director_creative_package_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/creative/review/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Regenerate Story Review */
+        post: operations["regenerate_story_review_api_v1_projects__project_id__director_creative_review_generate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -688,6 +740,41 @@ export interface paths {
         put?: never;
         /** Authorize Repair */
         post: operations["authorize_repair_api_v1_projects__project_id__director_repairs__repair_option_id__authorize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/repairs/batches/{batch_id}/resume-pre-submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Pre Submit Repair */
+        post: operations["resume_pre_submit_repair_api_v1_projects__project_id__director_repairs_batches__batch_id__resume_pre_submit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/director-board": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Director Board */
+        get: operations["get_director_board_api_v1_projects__project_id__shots__shot_id__director_board_get"];
+        /** Save Director Board */
+        put: operations["save_director_board_api_v1_projects__project_id__shots__shot_id__director_board_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -865,6 +952,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Annotations */
+        get: operations["list_annotations_api_v1_projects__project_id__shots__shot_id__annotations_get"];
+        put?: never;
+        /** Create Annotation */
+        post: operations["create_annotation_api_v1_projects__project_id__shots__shot_id__annotations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/annotations/{annotation_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Annotation */
+        post: operations["decide_annotation_api_v1_projects__project_id__shots__shot_id__annotations__annotation_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/scripts/import": {
         parameters: {
             query?: never;
@@ -876,6 +998,78 @@ export interface paths {
         put?: never;
         /** Import Project Script */
         post: operations["import_project_script_api_v1_projects__project_id__scripts_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/change-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Shot Change Proposals */
+        get: operations["list_shot_change_proposals_api_v1_projects__project_id__shots__shot_id__change_proposals_get"];
+        put?: never;
+        /** Create Shot Change Proposal */
+        post: operations["create_shot_change_proposal_api_v1_projects__project_id__shots__shot_id__change_proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/change-proposals/{proposal_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Shot Change Proposal */
+        post: operations["confirm_shot_change_proposal_api_v1_projects__project_id__shots__shot_id__change_proposals__proposal_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/canvas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Shot Canvas
+         * @description Persist an immutable CanvasRevision and advance the Shot version.
+         */
+        patch: operations["update_shot_canvas_api_v1_projects__project_id__shots__shot_id__canvas_patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/canvas-revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Shot Canvas Revisions */
+        get: operations["list_shot_canvas_revisions_api_v1_projects__project_id__shots__shot_id__canvas_revisions_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1061,23 +1255,6 @@ export interface paths {
         put?: never;
         /** Create Model Binding */
         post: operations["create_model_binding_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/model-bindings/{model_binding_id}/pricing": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Set Model Binding Pricing */
-        put: operations["set_model_binding_pricing_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings__model_binding_id__pricing_put"];
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1382,6 +1559,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/opencut-manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Opencut Manifest */
+        get: operations["opencut_manifest_api_v1_projects__project_id__opencut_manifest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/status": {
         parameters: {
             query?: never;
@@ -1410,6 +1604,40 @@ export interface paths {
         put?: never;
         /** Start Shot */
         post: operations["start_shot_api_v1_projects__project_id__shots__shot_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/professional/shots/{shot_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Professional Shot */
+        post: operations["start_professional_shot_api_v1_projects__project_id__professional_shots__shot_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/professional/shots/{shot_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rerun Professional Shot */
+        post: operations["rerun_professional_shot_api_v1_projects__project_id__professional_shots__shot_id__rerun_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1532,6 +1760,58 @@ export interface paths {
         get: operations["event_stream_api_v1_events_stream_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/experiments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Experiments */
+        get: operations["list_experiments_api_v1_projects__project_id__experiments_get"];
+        put?: never;
+        /** Create Experiment */
+        post: operations["create_experiment_api_v1_projects__project_id__experiments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/experiments/{experiment_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Experiment */
+        post: operations["start_experiment_api_v1_projects__project_id__experiments__experiment_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/experiments/{experiment_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Experiment */
+        post: operations["decide_experiment_api_v1_projects__project_id__experiments__experiment_id__decision_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1669,6 +1949,84 @@ export interface components {
              */
             source: string;
         };
+        /** AnnotationCreateBody */
+        AnnotationCreateBody: {
+            /** Artifact Id */
+            artifact_id?: string | null;
+            /** Target Kind */
+            target_kind?: string | null;
+            /** Time Start */
+            time_start?: number | string | null;
+            /** Time End */
+            time_end?: number | string | null;
+            /** X */
+            x?: number | string | null;
+            /** Y */
+            y?: number | string | null;
+            /** Width */
+            width?: number | string | null;
+            /** Height */
+            height?: number | string | null;
+            /** Note */
+            note: string;
+            /**
+             * Severity
+             * @default note
+             */
+            severity: string;
+        };
+        /** AnnotationDecisionBody */
+        AnnotationDecisionBody: {
+            /** Status */
+            status: string;
+        };
+        /** AnnotationRead */
+        AnnotationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Artifact Id */
+            artifact_id: string | null;
+            /** Target Kind */
+            target_kind: string;
+            /** Time Start */
+            time_start: string | null;
+            /** Time End */
+            time_end: string | null;
+            /** X */
+            x: string | null;
+            /** Y */
+            y: string | null;
+            /** Width */
+            width: string | null;
+            /** Height */
+            height: string | null;
+            /** Note */
+            note: string;
+            /** Severity */
+            severity: string;
+            /** Status */
+            status: string;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+        };
         /** ApprovalCreate */
         ApprovalCreate: {
             approval_kind: components["schemas"]["ApprovalKind"];
@@ -1802,6 +2160,124 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** AssetCreateBody */
+        AssetCreateBody: {
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Status
+             * @default draft
+             */
+            status: string;
+        };
+        /** AssetRead */
+        AssetRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string;
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** AssetUpdateBody */
+        AssetUpdateBody: {
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Status
+             * @default draft
+             */
+            status: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** AssetVersionRead */
+        AssetVersionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Version Number */
+            version_number: number;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** BindingInput */
         BindingInput: {
             /** Model Id */
@@ -1815,22 +2291,6 @@ export interface components {
              * @default true
              */
             enabled: boolean;
-        };
-        /** BindingPricingWrite */
-        BindingPricingWrite: {
-            /** Unit Amount */
-            unit_amount: number | string;
-            /** Currency */
-            currency: string;
-            /** Billing Unit */
-            billing_unit: string;
-            /** Source Note */
-            source_note: string;
-            /**
-             * Owner Verified
-             * @constant
-             */
-            owner_verified: true;
         };
         /** BindingRead */
         BindingRead: {
@@ -1911,23 +2371,6 @@ export interface components {
              */
             audience: string;
         };
-        /** BudgetAuthorizationCreate */
-        BudgetAuthorizationCreate: {
-            authorization_kind: components["schemas"]["ApprovalKind"];
-            /** Idempotency Key */
-            idempotency_key: string;
-            /** Pricing Snapshot Id */
-            pricing_snapshot_id: string;
-            /** Limit Amount */
-            limit_amount: number | string;
-            /** Currency */
-            currency: string;
-            /**
-             * Expires At
-             * Format: date-time
-             */
-            expires_at: string;
-        };
         /** BudgetAuthorizationRead */
         BudgetAuthorizationRead: {
             /**
@@ -1997,6 +2440,33 @@ export interface components {
             code: string;
             /** Detail */
             detail: string;
+        };
+        /** CanvasRevisionRead */
+        CanvasRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Revision Number */
+            revision_number: number;
+            /** Base Shot Version */
+            base_shot_version: number;
+            /** Visual Description */
+            visual_description: string;
+            /** Shot Type */
+            shot_type: string;
+            /** Camera Move */
+            camera_move: string;
+            /** Dialogue */
+            dialogue: string;
+            /** Source */
+            source: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** CapabilityRead */
         CapabilityRead: {
@@ -2277,6 +2747,11 @@ export interface components {
             episode_script: components["schemas"]["ArtifactVersionRead"];
             story_review: components["schemas"]["ArtifactVersionRead"];
         };
+        /** CreativeReviewGenerateRequest */
+        CreativeReviewGenerateRequest: {
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
         /** CredentialWrite */
         CredentialWrite: {
             /**
@@ -2300,6 +2775,59 @@ export interface components {
             content_hash: string;
             /** Byte Size */
             byte_size: number;
+        };
+        /** DirectorBoardBody */
+        DirectorBoardBody: {
+            /** Expected Version */
+            expected_version?: number | null;
+            /** Mode */
+            mode: string;
+            /** Camera */
+            camera?: {
+                [key: string]: unknown;
+            };
+            /** Characters */
+            characters?: {
+                [key: string]: unknown;
+            }[];
+            /** Scene */
+            scene?: {
+                [key: string]: unknown;
+            };
+        };
+        /** DirectorBoardRead */
+        DirectorBoardRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Mode */
+            mode: string;
+            /** Camera */
+            camera: {
+                [key: string]: unknown;
+            };
+            /** Characters */
+            characters: {
+                [key: string]: unknown;
+            }[];
+            /** Scene */
+            scene: {
+                [key: string]: unknown;
+            };
+            /** Version */
+            version: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** DirectorIssueRead */
         DirectorIssueRead: {
@@ -2427,6 +2955,103 @@ export interface components {
         /** ExperienceModeUpdate */
         ExperienceModeUpdate: {
             experience_mode: components["schemas"]["ExperienceMode"];
+        };
+        /** ExperimentCreateBody */
+        ExperimentCreateBody: {
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Name */
+            name: string;
+            /**
+             * Branch Type
+             * @default model_experiment
+             */
+            branch_type: string;
+            /** Source Shot Id */
+            source_shot_id?: string | null;
+            /** Source Artifact Ids */
+            source_artifact_ids?: string[];
+            /** Parameters */
+            parameters?: {
+                [key: string]: unknown;
+            };
+            /** Selected Model */
+            selected_model?: string | null;
+        };
+        /** ExperimentDecisionBody */
+        ExperimentDecisionBody: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "accepted" | "rejected" | "kept";
+            /** Adoption Scope */
+            adoption_scope?: ("current_node" | "keyframe_keep_video" | "keyframe_rerun_downstream") | null;
+            /** Candidate Artifact Id */
+            candidate_artifact_id?: string | null;
+            /** Adopted Shot Ids */
+            adopted_shot_ids?: string[];
+        };
+        /** ExperimentRead */
+        ExperimentRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Source Shot Id */
+            source_shot_id: string | null;
+            /** Name */
+            name: string;
+            /** Branch Type */
+            branch_type: string;
+            /** Status */
+            status: string;
+            /** Source Artifact Ids */
+            source_artifact_ids: string[];
+            /** Candidate Artifact Ids */
+            candidate_artifact_ids: string[];
+            /** Comparison */
+            comparison: {
+                [key: string]: unknown;
+            };
+            /** Adopted Shot Ids */
+            adopted_shot_ids: string[];
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /** Selected Model */
+            selected_model: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+        };
+        /** ExperimentStartBody */
+        ExperimentStartBody: {
+            /**
+             * Target Node Key
+             * @default video
+             * @enum {string}
+             */
+            target_node_key: "keyframe" | "video";
+        };
+        /** ExperimentStartRead */
+        ExperimentStartRead: {
+            experiment: components["schemas"]["ExperimentRead"];
+            /** Run Ids */
+            run_ids: string[];
+            /** Job Ids */
+            job_ids: string[];
         };
         /** ExportResponse */
         ExportResponse: {
@@ -2751,10 +3376,6 @@ export interface components {
             remote_resource_id: string | null;
             /** Invoke Model Value */
             invoke_model_value: string | null;
-            /** Pricing Snapshot */
-            pricing_snapshot: {
-                [key: string]: unknown;
-            };
         };
         /** ModelCandidateRead */
         ModelCandidateRead: {
@@ -2863,6 +3484,152 @@ export interface components {
             /** Upstream Dependencies */
             upstream_dependencies?: components["schemas"]["UpstreamDependencyRead"][];
         };
+        /** OpenCutClip */
+        OpenCutClip: {
+            /** Id */
+            id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /**
+             * Scene Id
+             * Format: uuid
+             */
+            scene_id: string;
+            /** Track Kind */
+            track_kind: string;
+            /** Timeline Start Seconds */
+            timeline_start_seconds: string;
+            /** Timeline End Seconds */
+            timeline_end_seconds: string;
+            /**
+             * Source In Seconds
+             * @default 0
+             */
+            source_in_seconds: string;
+            /** Duration Seconds */
+            duration_seconds: string;
+            /** Artifact Id */
+            artifact_id?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Mime Type */
+            mime_type?: string | null;
+            /** Text */
+            text?: string | null;
+            trace: components["schemas"]["OpenCutTrace"];
+        };
+        /** OpenCutManifest */
+        OpenCutManifest: {
+            /** Schema Version */
+            schema_version: string;
+            /** Adapter */
+            adapter: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Official Line */
+            official_line: string;
+            timeline: components["schemas"]["OpenCutTimeline"];
+            /** Tracks */
+            tracks: components["schemas"]["OpenCutTrack"][];
+            /** Shots */
+            shots: components["schemas"]["OpenCutShot"][];
+        };
+        /** OpenCutShot */
+        OpenCutShot: {
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Shot Number */
+            shot_number: number;
+            /**
+             * Scene Id
+             * Format: uuid
+             */
+            scene_id: string;
+            /** Timeline Start Seconds */
+            timeline_start_seconds: string;
+            /** Duration Seconds */
+            duration_seconds: string;
+            /** Dialogue */
+            dialogue: string;
+            /** Status */
+            status: string;
+            /** Artifact Ids */
+            artifact_ids: string[];
+            /** Formal Artifacts */
+            formal_artifacts: {
+                [key: string]: string;
+            };
+        };
+        /** OpenCutTimeline */
+        OpenCutTimeline: {
+            /** Duration Seconds */
+            duration_seconds: string;
+            /** Frame Rate */
+            frame_rate: number;
+            /** Timebase */
+            timebase: string;
+            /** Aspect Ratio */
+            aspect_ratio: string;
+        };
+        /** OpenCutTrace */
+        OpenCutTrace: {
+            /** Node Run Id */
+            node_run_id?: string | null;
+            /** Artifact Id */
+            artifact_id?: string | null;
+            /** Source Kind */
+            source_kind: string;
+            /** Adopted From Experiment Id */
+            adopted_from_experiment_id?: string | null;
+            /** Provider Operation Id */
+            provider_operation_id?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Prompt */
+            prompt?: string | null;
+            /** Reference Artifact Ids */
+            reference_artifact_ids?: string[];
+            /** Parameters */
+            parameters?: {
+                [key: string]: unknown;
+            };
+            /** Effective Request */
+            effective_request?: {
+                [key: string]: unknown;
+            };
+        };
+        /** OpenCutTrack */
+        OpenCutTrack: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /**
+             * Locked
+             * @default false
+             */
+            locked: boolean;
+            /**
+             * Muted
+             * @default false
+             */
+            muted: boolean;
+            /** Clips */
+            clips: components["schemas"]["OpenCutClip"][];
+        };
         /** PlanRequest */
         PlanRequest: {
             /**
@@ -2950,14 +3717,6 @@ export interface components {
             remote_query_kind: string | null;
             /** Request Fingerprint */
             request_fingerprint: string;
-            /** Budget Authorized */
-            budget_authorized: string;
-            /** Provider Cost */
-            provider_cost: string | null;
-            /** Currency */
-            currency: string;
-            /** Cost Status */
-            cost_status: string;
             /**
              * Tested At
              * Format: date-time
@@ -2982,10 +3741,10 @@ export interface components {
             /** Remote Query Kind */
             remote_query_kind?: ("video_id" | "task_id") | null;
             /**
-             * Budget Authorized
-             * @default 0
+             * Paid Request Confirmed
+             * @default false
              */
-            budget_authorized: number | string;
+            paid_request_confirmed: boolean;
         };
         /** ProductionBatchRead */
         ProductionBatchRead: {
@@ -3234,16 +3993,6 @@ export interface components {
             /** Aspect Ratio */
             aspect_ratio: string;
             /**
-             * Budget Limit
-             * @default 0
-             */
-            budget_limit: number | string;
-            /**
-             * Budget Currency
-             * @default USD
-             */
-            budget_currency: string;
-            /**
              * Target Platform
              * @default general
              */
@@ -3268,10 +4017,6 @@ export interface components {
             aspect_ratio: string;
             /** Target Platform */
             target_platform: string;
-            /** Budget Limit */
-            budget_limit: string;
-            /** Budget Currency */
-            budget_currency: string;
             /** Provider Dispatch Frozen */
             provider_dispatch_frozen: boolean;
             /** Version */
@@ -3484,6 +4229,11 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /** ResumePreSubmitRepairRequest */
+        ResumePreSubmitRepairRequest: {
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
         /** ReviewProductionRequest */
         ReviewProductionRequest: {
             /**
@@ -3628,6 +4378,99 @@ export interface components {
             /** Job Ids */
             job_ids?: string[];
         };
+        /** ShotCanvasUpdateBody */
+        ShotCanvasUpdateBody: {
+            /** Expected Version */
+            expected_version: number;
+            /** Visual Description */
+            visual_description: string;
+            /** Shot Type */
+            shot_type: string;
+            /** Camera Move */
+            camera_move: string;
+            /**
+             * Dialogue
+             * @default
+             */
+            dialogue: string;
+            /**
+             * Source
+             * @default user
+             */
+            source: string;
+        };
+        /** ShotCanvasUpdateResponse */
+        ShotCanvasUpdateResponse: {
+            shot: components["schemas"]["ShotRead"];
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Revision Number */
+            revision_number: number;
+        };
+        /** ShotChangeProposalCreate */
+        ShotChangeProposalCreate: {
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Summary */
+            summary: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Replacement Payload */
+            replacement_payload: {
+                [key: string]: unknown;
+            };
+            /** Affected Node Keys */
+            affected_node_keys?: string[];
+            /** Reusable Artifact Ids */
+            reusable_artifact_ids?: string[];
+        };
+        /** ShotChangeProposalRead */
+        ShotChangeProposalRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Summary */
+            summary: string;
+            /** Base Shot Version */
+            base_shot_version: number;
+            /** Replacement Payload */
+            replacement_payload: {
+                [key: string]: unknown;
+            };
+            /** Affected Node Keys */
+            affected_node_keys: string[];
+            /** Reusable Artifact Ids */
+            reusable_artifact_ids: string[];
+            /** Status */
+            status: string;
+            /** Confirmed Revision Id */
+            confirmed_revision_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Confirmed At */
+            confirmed_at: string | null;
+        };
+        /** ShotChangeProposalResult */
+        ShotChangeProposalResult: {
+            proposal: components["schemas"]["ShotChangeProposalRead"];
+            /** Impact */
+            impact: {
+                [key: string]: unknown;
+            };
+        };
         /** ShotRead */
         ShotRead: {
             /**
@@ -3644,6 +4487,8 @@ export interface components {
             shot_number: number;
             /** Shot Type */
             shot_type: string;
+            /** Camera Move */
+            camera_move: string;
             /** Visual Description */
             visual_description: string;
             /** Dialogue */
@@ -3986,6 +4831,168 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_project_assets_api_v1_projects__project_id__assets_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_project_asset_api_v1_projects__project_id__assets_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_project_asset_api_v1_projects__project_id__assets__asset_id__patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                asset_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_asset_versions_api_v1_projects__project_id__assets__asset_id__versions_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                asset_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetVersionRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     bootstrap_status_api_v1_auth_bootstrap_status_get: {
         parameters: {
             query?: never;
@@ -4969,49 +5976,6 @@ export interface operations {
             };
         };
     };
-    authorize_budget_api_v1_projects__project_id__director_budget_authorizations_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BudgetAuthorizationCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BudgetAuthorizationRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     approve_api_v1_projects__project_id__director_approvals_post: {
         parameters: {
             query?: {
@@ -5254,6 +6218,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreativePackageResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_story_review_api_v1_projects__project_id__director_creative_review_generate_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreativeReviewGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRead"];
                 };
             };
             /** @description Validation Error */
@@ -5698,6 +6705,132 @@ export interface operations {
             };
         };
     };
+    resume_pre_submit_repair_api_v1_projects__project_id__director_repairs_batches__batch_id__resume_pre_submit_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                batch_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumePreSubmitRepairRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaterializeBatchResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_director_board_api_v1_projects__project_id__shots__shot_id__director_board_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorBoardRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_director_board_api_v1_projects__project_id__shots__shot_id__director_board_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectorBoardBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorBoardRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_artifact_content_api_v1_projects__project_id__artifacts__artifact_id__content_get: {
         parameters: {
             query?: {
@@ -6050,6 +7183,133 @@ export interface operations {
             };
         };
     };
+    list_annotations_api_v1_projects__project_id__shots__shot_id__annotations_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_annotation_api_v1_projects__project_id__shots__shot_id__annotations_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_annotation_api_v1_projects__project_id__shots__shot_id__annotations__annotation_id__decision_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+                annotation_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationDecisionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     import_project_script_api_v1_projects__project_id__scripts_import_post: {
         parameters: {
             query?: {
@@ -6080,6 +7340,212 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScriptImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_shot_change_proposals_api_v1_projects__project_id__shots__shot_id__change_proposals_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotChangeProposalRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_shot_change_proposal_api_v1_projects__project_id__shots__shot_id__change_proposals_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotChangeProposalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotChangeProposalResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_shot_change_proposal_api_v1_projects__project_id__shots__shot_id__change_proposals__proposal_id__confirm_post: {
+        parameters: {
+            query: {
+                revision_id: string;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+                proposal_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotChangeProposalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_shot_canvas_api_v1_projects__project_id__shots__shot_id__canvas_patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotCanvasUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotCanvasUpdateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_shot_canvas_revisions_api_v1_projects__project_id__shots__shot_id__canvas_revisions_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CanvasRevisionRead"][];
                 };
             };
             /** @description Validation Error */
@@ -6626,51 +8092,6 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelBindingRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    set_model_binding_pricing_api_v1_workspaces__workspace_id__provider_connections__connection_id__model_bindings__model_binding_id__pricing_put: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                workspace_id: string;
-                connection_id: string;
-                model_binding_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BindingPricingWrite"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7541,6 +8962,43 @@ export interface operations {
             };
         };
     };
+    opencut_manifest_api_v1_projects__project_id__opencut_manifest_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenCutManifest"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     shot_status_api_v1_projects__project_id__shots__shot_id__status_get: {
         parameters: {
             query?: {
@@ -7580,6 +9038,94 @@ export interface operations {
         };
     };
     start_shot_api_v1_projects__project_id__shots__shot_id__start_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotActionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_professional_shot_api_v1_projects__project_id__professional_shots__shot_id__start_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotActionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_professional_shot_api_v1_projects__project_id__professional_shots__shot_id__rerun_post: {
         parameters: {
             query?: {
                 workspace_id?: string | null;
@@ -7897,6 +9443,174 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_experiments_api_v1_projects__project_id__experiments_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_experiment_api_v1_projects__project_id__experiments_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_experiment_api_v1_projects__project_id__experiments__experiment_id__start_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                experiment_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentStartBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentStartRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_experiment_api_v1_projects__project_id__experiments__experiment_id__decision_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                experiment_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentDecisionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentRead"];
                 };
             };
             /** @description Validation Error */

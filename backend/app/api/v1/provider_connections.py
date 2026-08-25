@@ -160,7 +160,7 @@ class ProbeRequest(BaseModel):
     reference_artifact_id: UUID | None = None
     remote_task_id: str | None = None
     remote_query_kind: Literal["video_id", "task_id"] | None = None
-    budget_authorized: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=6)
+    paid_request_confirmed: bool = False
 
 
 class ProbeRead(BaseModel):
@@ -174,10 +174,6 @@ class ProbeRead(BaseModel):
     model_binding_id: UUID | None
     remote_query_kind: str | None
     request_fingerprint: str
-    budget_authorized: Decimal
-    provider_cost: Decimal | None
-    currency: str
-    cost_status: str
     tested_at: datetime
     error_code: str | None
 
@@ -205,15 +201,6 @@ class ModelBindingRead(BaseModel):
     remote_resource_kind: str | None
     remote_resource_id: str | None
     invoke_model_value: str | None
-    pricing_snapshot: dict[str, object]
-
-
-class BindingPricingWrite(BaseModel):
-    unit_amount: Decimal = Field(ge=0, decimal_places=6)
-    currency: str = Field(min_length=3, max_length=3)
-    billing_unit: str = Field(min_length=1, max_length=80)
-    source_note: str = Field(min_length=1, max_length=500)
-    owner_verified: Literal[True]
 
 
 class ProjectBindingWrite(BaseModel):
@@ -278,10 +265,6 @@ def _probe_read(evidence: ProviderCapabilityEvidence) -> ProbeRead:
         model_binding_id=evidence.model_binding_id,
         remote_query_kind=evidence.remote_query_kind,
         request_fingerprint=evidence.request_fingerprint,
-        budget_authorized=evidence.budget_authorized,
-        provider_cost=evidence.provider_cost,
-        currency=evidence.currency,
-        cost_status=evidence.cost_status,
         tested_at=evidence.tested_at,
         error_code=evidence.error_code,
     )
@@ -304,7 +287,6 @@ def _model_read(binding: ProviderModelBinding) -> ModelBindingRead:
         remote_resource_kind=binding.remote_resource_kind,
         remote_resource_id=binding.remote_resource_id,
         invoke_model_value=binding.invoke_model_value,
-        pricing_snapshot=dict(binding.pricing_snapshot_json or {}),
     )
 
 
@@ -467,7 +449,7 @@ async def run_probe(
         reference_artifact_id=body.reference_artifact_id,
         remote_task_id=body.remote_task_id,
         remote_query_kind=body.remote_query_kind,
-        budget_authorized=body.budget_authorized,
+        paid_request_confirmed=body.paid_request_confirmed,
     )
     await session.commit()
     return _probe_read(evidence)
@@ -537,39 +519,6 @@ async def list_model_bindings(
         workspace_id=workspace_id, connection_id=connection_id
     )
     return [_model_read(binding) for binding in bindings]
-
-
-@router.put(
-    (
-        "/workspaces/{workspace_id}/provider-connections/{connection_id}"
-        "/model-bindings/{model_binding_id}/pricing"
-    ),
-    response_model=ModelBindingRead,
-)
-async def set_model_binding_pricing(
-    workspace_id: UUID,
-    connection_id: UUID,
-    model_binding_id: UUID,
-    body: BindingPricingWrite,
-    workspace: SelectedWorkspace,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-) -> ModelBindingRead:
-    if workspace.id != workspace_id:
-        raise NotFoundError("workspace not found")
-    binding = await ProviderConnectionService(session).set_binding_pricing(
-        workspace_id=workspace_id,
-        connection_id=connection_id,
-        model_binding_id=model_binding_id,
-        actor=user,
-        unit_amount=body.unit_amount,
-        currency=body.currency,
-        billing_unit=body.billing_unit,
-        source_note=body.source_note,
-    )
-    await session.commit()
-    return _model_read(binding)
 
 
 @router.post(

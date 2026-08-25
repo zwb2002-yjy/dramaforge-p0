@@ -1,15 +1,31 @@
-﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createRoute } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import { ArtifactStage } from "../lib/artifactStage";
 import {
   approveShot,
-  ApiError,
   artifactContentUrl,
   exportDownloadUrl,
   exportProject,
+  updateShotCanvas,
   fetchProjectShots,
+  fetchShotCanvasRevisions,
+  createShotChangeProposal,
+  confirmShotChangeProposal,
+  createProjectAsset,
+  updateProjectAsset,
+  fetchDirectorBoard,
+  saveDirectorBoard,
+  fetchProjectAssets,
+  fetchExperiments,
+  createExperiment,
+  startExperiment,
+  decideExperiment,
+  fetchReviewAnnotations,
+  createReviewAnnotation,
+  fetchOpenCutManifest,
+  listModels,
   fetchShotStatus,
   fetchSnapshot,
   grantExportDownload,
@@ -17,6 +33,8 @@ import {
   lockShot,
   rejectShot,
   rerunShot,
+  rerunProfessionalShot,
+  startProfessionalShot,
   startShot,
 } from "../lib/api";
 import type { ProjectSnapshot } from "../lib/api";
@@ -27,9 +45,7 @@ import {
 } from "../lib/projectMedia";
 import { projectRoute } from "./projects.$projectId";
 import { zhErrorCode, zhErrorSummary, zhNode, zhStatus } from "../lib/zh";
-import { fetchDirectorWorkspace } from "../features/director/api";
-import { directorWorkspaceKey } from "../features/director/useDirectorWorkspace";
-import type { DirectorWorkspaceSnapshot } from "../features/director/types";
+import { ProfessionalWorkbench } from "../features/production/ProfessionalWorkbench";
 
 export const projectProductionRoute = createRoute({
   getParentRoute: () => projectRoute,
@@ -76,7 +92,7 @@ const RETRY_SUGGESTIONS: Record<string, string> = {
   IDENTITY_EVIDENCE_INCOMPLETE: "核对角色参考、有效请求和生成产物后局部返工",
   IDENTITY_REVIEW_REQUIRED: "对比角色参考与试拍结果，选择接受或局部返工",
   VIDEO_DRIFT_BLOCKED: "查看抽样时间点，从 Video 及下游重跑",
-  blocked_budget: "调整项目预算后重试原节点",
+  blocked_budget: "检查执行状态后重试当前节点",
   QUEUE_UNAVAILABLE: "恢复 Redis/Worker 后重新 enqueue",
 };
 
@@ -159,7 +175,7 @@ function nodeStatusLabel(run: ProjectSnapshot["node_runs"][number] | undefined, 
     return dependencies.length ? "等待上游" : "未开始";
   }
   if (run.status === "failed") return zhErrorCode(run.error_code) || "Provider 失败";
-  if (run.status === "blocked_budget") return "预算阻断";
+  if (run.status === "blocked_budget") return "执行阻断";
   if (run.status === "queued" || run.status === "running") {
     if (run.output_summary?.status === "provider_pending") return "Provider 处理中";
     return run.status === "queued" ? "排队中" : "运行中";
@@ -179,102 +195,10 @@ function retrySuggestion(code: string | null): string {
   return RETRY_SUGGESTIONS[code] ?? "查看错误摘要后局部重跑失败节点";
 }
 
-function compactId(value: string): string {
-  return value.length > 12 ? `${value.slice(0, 8)}…` : value;
-}
-
-function DirectorSharedFacts({ snapshot }: { snapshot: DirectorWorkspaceSnapshot }) {
-  const artifacts = Object.values(snapshot.current_artifacts);
-  return (
-    <section className="panel director-professional-facts" data-testid="director-shared-facts">
-      <div className="panel-header">
-        <div>
-          <span className="director-stage-kicker">Director 共享项目事实</span>
-          <h3>锁定版本、生产批次与证据</h3>
-        </div>
-        <strong>{snapshot.workflow.status}</strong>
-      </div>
-      <p className="muted">
-        快速创作与专业生产板读取同一 workflow 快照；专业模式只展开证据，不能绕过确认、预算或局部修复命令。
-      </p>
-      <dl className="director-fact-grid">
-        <dt>工作流</dt><dd data-testid="director-workflow-id"><code>{compactId(snapshot.workflow.id)}</code> · {snapshot.workflow.template_version}</dd>
-        <dt>当前阶段</dt><dd>{snapshot.workflow.current_stage}</dd>
-        <dt>下一动作</dt><dd>{snapshot.next_action}</dd>
-        <dt>画幅</dt><dd>{snapshot.aspect_ratio}</dd>
-      </dl>
-      <div className="director-professional-columns">
-        <section>
-          <h4>当前锁定版本</h4>
-          <ul className="dense">
-            {artifacts.map((artifact) => (
-              <li key={artifact.id}>
-                <span>{artifact.artifact_kind}</span>
-                <span>第 {artifact.revision_no} 版 · <code>{compactId(artifact.id)}</code></span>
-              </li>
-            ))}
-            {artifacts.length === 0 && <li className="muted">尚无已发布版本</li>}
-          </ul>
-        </section>
-        <section>
-          <h4>受控生产批次</h4>
-          <ul className="dense">
-            {snapshot.production_batches.map((batch) => (
-              <li key={batch.id}>
-                <span data-testid={`director-batch-${batch.id}`}>{batch.batch_kind} · {batch.status}</span>
-                <span>{batch.selected_shot_ids.length} 镜 · <code>{compactId(batch.id)}</code></span>
-              </li>
-            ))}
-            {snapshot.production_batches.length === 0 && <li className="muted">尚未物化试拍或正式生产批次</li>}
-          </ul>
-        </section>
-        <section>
-          <h4>预算保留</h4>
-          <ul className="dense">
-            {snapshot.budget_reservations.map((reservation) => (
-              <li key={reservation.id}>
-                <span data-testid={`director-reservation-${reservation.id}`}>{reservation.status} · {reservation.reserved_amount} {reservation.currency}</span>
-                <span>批次 <code>{compactId(reservation.batch_id)}</code></span>
-              </li>
-            ))}
-            {snapshot.budget_reservations.length === 0 && <li className="muted">尚无媒体预算保留</li>}
-          </ul>
-        </section>
-        <section>
-          <h4>步骤与质量问题</h4>
-          <ul className="dense">
-            {snapshot.step_runs.map((step) => (
-              <li key={step.id}><span>{step.step_key}</span><span>{step.status}</span></li>
-            ))}
-            {snapshot.issues.map((issue) => (
-              <li key={issue.id}><span>{issue.issue_type}</span><span>{issue.severity}</span></li>
-            ))}
-            {snapshot.step_runs.length === 0 && snapshot.issues.length === 0 && (
-              <li className="muted">尚无步骤运行或质量问题</li>
-            )}
-          </ul>
-        </section>
-      </div>
-    </section>
-  );
-}
-
 function ProductionPage() {
   const { projectId } = projectProductionRoute.useParams();
   const qc = useQueryClient();
-  const director = useQuery({
-    queryKey: directorWorkspaceKey(projectId),
-    queryFn: async () => {
-      try {
-        return await fetchDirectorWorkspace(projectId);
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 404) return null;
-        throw error;
-      }
-    },
-    enabled: Boolean(projectId && projectId !== "demo"),
-  });
-  const directorControlled = Boolean(director.data?.workflow.id);
+  const directorControlled = false;
   const [msg, setMsg] = useState<string | null>(null);
   const [lastExportId, setLastExportId] = useState<string | null>(null);
   const [downloadHint, setDownloadHint] = useState<string | null>(null);
@@ -295,6 +219,41 @@ function ProductionPage() {
     enabled: projectId !== "demo",
   });
 
+  const revisionShotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
+  const projectAssets = useQuery({
+    queryKey: ["project-assets", projectId],
+    queryFn: () => fetchProjectAssets(projectId),
+    enabled: projectId !== "demo",
+  });
+  const experiments = useQuery({
+    queryKey: ["experiments", projectId],
+    queryFn: () => fetchExperiments(projectId),
+    enabled: projectId !== "demo",
+  });
+  const directorBoard = useQuery({
+    queryKey: ["director-board", projectId, revisionShotId],
+    queryFn: () => fetchDirectorBoard(projectId, revisionShotId!),
+    enabled: projectId !== "demo" && Boolean(revisionShotId),
+  });
+  const reviewAnnotations = useQuery({
+    queryKey: ["review-annotations", projectId, revisionShotId],
+    queryFn: () => fetchReviewAnnotations(projectId, revisionShotId!),
+    enabled: projectId !== "demo" && Boolean(revisionShotId),
+  });
+  const availableModels = useQuery({
+    queryKey: ["models"],
+    queryFn: () => listModels(),
+  });
+  const openCutManifest = useQuery({
+    queryKey: ["opencut-manifest", projectId],
+    queryFn: () => fetchOpenCutManifest(projectId),
+    enabled: projectId !== "demo",
+  });
+  const canvasRevisions = useQuery({
+    queryKey: ["canvas-revisions", projectId, revisionShotId],
+    queryFn: () => fetchShotCanvasRevisions(projectId, revisionShotId!),
+    enabled: projectId !== "demo" && Boolean(revisionShotId),
+  });
   const importMut = useMutation({
     mutationFn: async () => {
       if (projectId === "demo") throw new Error("请从大厅创建真实项目");
@@ -412,33 +371,89 @@ function ProductionPage() {
         <div>
           <h2 style={{ margin: 0 }}>专业生产板</h2>
           <p className="muted" style={{ margin: "0.25rem 0 0" }}>
-            展开逐镜头、节点状态、媒体产物与执行血缘 · 与
-            <Link to="/projects/$projectId/quick" params={{ projectId }}>
-              {" "}
-              快速创作
-            </Link>{" "}
-            同一 Project
+            场景、镜头、资产、生产链、审片与交付共享同一 Project 事实源
           </p>
         </div>
       </div>
 
       <div className="callout">
-        这里读取与快速创作相同的 Project、Production Graph、NodeRun 和 Artifact；媒体生成、修复和导出仍由 AI 导演的确认与预算门控制。
+        这里直接操作 Project、Production Graph、NodeRun 和 Artifact；媒体生成、修复和导出仍受用户确认、Provider 能力和质量门控制。
       </div>
 
-      {directorControlled && (
-        <>
-          <div className="callout" data-testid="director-production-handoff">
-            此项目由 AI 导演流程控制。启动生成、局部返工和正式导出必须回到
-            <Link to="/projects/$projectId/quick" params={{ projectId }}>
-              快速创作的 AI 导演
-            </Link>
-            ，完成预算授权或选择修复方案后再回来查看逐镜证据。
-          </div>
-          <DirectorSharedFacts snapshot={director.data!} />
-        </>
-      )}
-
+      <ProfessionalWorkbench
+        projectId={projectId}
+        shots={shots.data ?? []}
+        snapshot={snapshot.data}
+        revisions={canvasRevisions.data ?? []}
+        assets={Array.isArray(projectAssets.data) ? projectAssets.data : []}
+        experiments={Array.isArray(experiments.data) ? experiments.data : []}
+        annotations={Array.isArray(reviewAnnotations.data) ? reviewAnnotations.data : []}
+        openCutManifest={openCutManifest.data}
+        models={Array.isArray(availableModels.data) ? availableModels.data : []}
+        directorBoard={directorBoard.data}
+        selectedShotId={selectedShotId}
+        onSelectShot={setSelectedShotId}
+        onCreateAsset={async (input) => {
+          await createProjectAsset(projectId, { kind: input.kind, name: input.name, description: input.description, metadata: { tags: input.tags }, status: "active" });
+          await qc.invalidateQueries({ queryKey: ["project-assets", projectId] });
+        }}
+        onUpdateAsset={async (asset, input) => {
+          await updateProjectAsset(projectId, asset.id, { expected_version: asset.version, kind: asset.kind, name: asset.name, description: asset.description, metadata: asset.metadata, status: input.status });
+          await qc.invalidateQueries({ queryKey: ["project-assets", projectId] });
+        }}
+        onCreateExperiment={async (input) => {
+          await createExperiment(projectId, { idempotency_key: `experiment-${Date.now()}-${input.name}`, name: input.name, source_shot_id: revisionShotId, selected_model: input.selected_model, parameters: { target_node_key: "video" } });
+          await qc.invalidateQueries({ queryKey: ["experiments", projectId] });
+        }}
+        onStartExperiment={async (experimentId, targetNodeKey) => {
+          await startExperiment(projectId, experimentId, targetNodeKey);
+          await qc.invalidateQueries({ queryKey: ["experiments", projectId] });
+          await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
+        }}
+        onDecideExperiment={async (experimentId, input) => {
+          await decideExperiment(projectId, experimentId, input);
+          await qc.invalidateQueries({ queryKey: ["experiments", projectId] });
+          await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
+          await qc.invalidateQueries({ queryKey: ["shots", projectId] });
+        }}
+        onCreateAnnotation={async (input) => {
+          if (!revisionShotId) return;
+          await createReviewAnnotation(projectId, revisionShotId, input);
+          await qc.invalidateQueries({ queryKey: ["review-annotations", projectId, revisionShotId] });
+        }}
+        onSaveDirectorBoard={async (input) => {
+          if (!revisionShotId) return;
+          await saveDirectorBoard(projectId, revisionShotId, { expected_version: directorBoard.data?.version ?? null, ...input });
+          await qc.invalidateQueries({ queryKey: ["director-board", projectId, revisionShotId] });
+        }}
+        onStart={(shotId) => void runShotOp("启动专业镜头", () => startProfessionalShot(projectId, shotId))}
+        onRerun={(shotId) => void runShotOp("局部重跑视频", () => rerunProfessionalShot(projectId, shotId, "video"))}
+        onSave={async (shot, input) => {
+          const result = await updateShotCanvas(projectId, shot.id, {
+            expected_version: shot.version,
+            visual_description: input.visual_description,
+            shot_type: input.shot_type,
+            camera_move: input.camera_move,
+            dialogue: input.dialogue,
+            source: "user",
+          });
+          await qc.invalidateQueries({ queryKey: ["shots", projectId] });
+          await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
+          await qc.invalidateQueries({ queryKey: ["canvas-revisions", projectId, shot.id] });
+          return result;
+        }}
+        onPropose={async (shot, input) => createShotChangeProposal(projectId, shot.id, {
+          idempotency_key: `canvas-${shot.id}-${shot.version}-${input.summary}`,
+          summary: input.summary,
+          expected_version: shot.version,
+          replacement_payload: input.replacement_payload,
+          affected_node_keys: input.affected_node_keys,
+          reusable_artifact_ids: input.reusable_artifact_ids,
+        })}
+        onConfirmProposal={(shotId, proposalId, revisionId) =>
+          confirmShotChangeProposal(projectId, shotId, proposalId, revisionId).then(() => undefined)
+        }
+      />
       <div className="pipeline-rail" aria-label="shot-p0-v1">
         {NODES.map((n) => (
           <span key={n} className={`pipeline-node ${nodeRailClass[n] ?? ""}`}>
@@ -623,7 +638,7 @@ function ProductionPage() {
               </div>
             ) : (
               <p className="muted">
-                尚无分镜。请先在快速创作中确认创作方案与拍摄方案。
+                尚无分镜。请在专业工作台导入剧本或创建镜头。
               </p>
             )}
           </div>
@@ -679,8 +694,6 @@ function ProductionPage() {
                         <dd>{formatTimestamp(run?.started_at ?? null)}</dd>
                         <dt>结束</dt>
                         <dd>{formatTimestamp(run?.finished_at ?? null)}</dd>
-                        <dt>Provider 成本</dt>
-                        <dd>{run ? run.provider_cost : "—"}</dd>
                         <dt>产物</dt>
                         <dd>
                           {artifact ? (
@@ -722,7 +735,7 @@ function ProductionPage() {
                   onClick={() =>
                     void runShotOp("启动", () => startShot(projectId, selectedShot.id))
                   }
-                  title={directorControlled ? "请通过 AI 导演的预算授权启动生产" : undefined}
+                  title={directorControlled ? "请使用上方专业工作台启动镜头" : undefined}
                 >
                   启动生产
                 </button>
@@ -826,7 +839,7 @@ function ProductionPage() {
                       </li>
                     ))}
                     {snapshot.data.artifacts.length === 0 && (
-                      <li className="muted">尚无产物 · 先快速首帧或正式生产</li>
+                      <li className="muted">尚无产物 · 请先启动当前镜头生产链</li>
                     )}
                   </ul>
                 </div>
@@ -851,3 +864,8 @@ function ProductionPage() {
     </div>
   );
 }
+
+
+
+
+

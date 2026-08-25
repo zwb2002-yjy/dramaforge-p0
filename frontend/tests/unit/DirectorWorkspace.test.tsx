@@ -15,13 +15,21 @@ function json(body: unknown, status = 200): Promise<Response> {
 afterEach(() => vi.restoreAllMocks());
 
 describe("AI Director workspace", () => {
-  it("renders four stages and the three novice creative entries from a recoverable snapshot", async () => {
+  it("redirects the retired quick route into the professional workspace", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/health")) return json({ status: "ok", db: "up" });
       if (url.includes("/snapshot") && !url.includes("workspace-snapshot")) {
         return json({ project_id: "project-1", name: "作品", node_runs: [], artifacts: [] });
       }
+      if (url.endsWith("/shots")) return json([]);
+      if (url.endsWith("/assets")) return json([]);
+      if (url.endsWith("/experiments")) return json([]);
+      if (url.includes("/annotations")) return json([]);
+      if (url.includes("/canvas-revisions")) return json([]);
+      if (url.includes("/director-board")) return json(null);
+      if (url.endsWith("/opencut-manifest")) return json({ schema_version: "opencut-manifest-v1", project_id: "project-1", official_line: "formal", shots: [] });
+      if (url.endsWith("/models")) return json([]);
       if (url.includes("/director/workspace-snapshot")) {
         return json({
           project_id: "project-1",
@@ -61,12 +69,9 @@ describe("AI Director workspace", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByTestId("quick-creation-workspace")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "创作方案", level: 1 })).toBeInTheDocument();
-    expect(screen.getByTestId("director-stage-rail").querySelectorAll("li")).toHaveLength(4);
-    expect(screen.getByRole("radio", { name: /我还没有想法/ })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /我有一句话创意/ })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /我有自己的剧本/ })).toBeInTheDocument();
-    expect(screen.getByText("尚未授权任何媒体预算")).toBeInTheDocument();
+    expect(await screen.findByTestId("professional-workbench")).toBeInTheDocument();
+    expect(screen.getByText("场景与镜头")).toBeInTheDocument();
+    expect(screen.queryByText(/预算|计费|费用/)).not.toBeInTheDocument();
   });
 });
+

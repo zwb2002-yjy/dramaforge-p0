@@ -59,6 +59,38 @@ router = APIRouter(tags=["director"], dependencies=[Depends(require_selected_wor
 
 
 @router.post(
+    "/projects/{project_id}/director/budget-authorizations",
+    response_model=BudgetAuthorizationRead,
+    status_code=status.HTTP_201_CREATED,
+    deprecated=True,
+)
+async def authorize_legacy_budget(
+    project_id: UUID,
+    body: BudgetAuthorizationCreate,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> BudgetAuthorizationRead:
+    """Historical quick-mode compatibility only.
+
+    The professional workbench never calls this route. Provider pricing and
+    settlement remain outside DramaForge; this route exists solely to replay
+    already-versioned legacy workflows during migration.
+    """
+    authorization = await DirectorService(session).authorize_budget(
+        project_id=project_id,
+        actor=user,
+        authorization_kind=body.authorization_kind,
+        idempotency_key=body.idempotency_key,
+        pricing_snapshot_id=body.pricing_snapshot_id,
+        limit_amount=body.limit_amount,
+        currency=body.currency,
+        expires_at=body.expires_at,
+    )
+    return BudgetAuthorizationRead.model_validate(authorization)
+
+
+@router.post(
     "/projects/{project_id}/director/workflow",
     response_model=WorkflowRead,
     status_code=status.HTTP_201_CREATED,
@@ -141,31 +173,6 @@ async def publish_artifact_version(
         source_run_id=None,
     )
     return ArtifactVersionRead.model_validate(version)
-
-
-@router.post(
-    "/projects/{project_id}/director/budget-authorizations",
-    response_model=BudgetAuthorizationRead,
-    status_code=status.HTTP_201_CREATED,
-)
-async def authorize_budget(
-    project_id: UUID,
-    body: BudgetAuthorizationCreate,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-) -> BudgetAuthorizationRead:
-    authorization = await DirectorService(session).authorize_budget(
-        project_id=project_id,
-        actor=user,
-        authorization_kind=body.authorization_kind,
-        idempotency_key=body.idempotency_key,
-        pricing_snapshot_id=body.pricing_snapshot_id,
-        limit_amount=body.limit_amount,
-        currency=body.currency,
-        expires_at=body.expires_at,
-    )
-    return BudgetAuthorizationRead.model_validate(authorization)
 
 
 @router.post(

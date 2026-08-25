@@ -46,6 +46,17 @@ def _git(repo_root: Path, *args: str) -> str:
 
 def capture_source(repo_root: Path) -> dict[str, Any]:
     root = repo_root.resolve()
+    # Containerized recovery drills may intentionally copy only the verifier
+    # scripts into an image without the repository's .git directory. The host
+    # supplies the commit identity explicitly; dirty defaults to true so this
+    # path can never masquerade as a clean release artifact.
+    override_commit = os.environ.get("DRAMAFORGE_EVIDENCE_SOURCE_COMMIT", "").strip()
+    if override_commit:
+        return {
+            "source_commit": override_commit,
+            "dirty": os.environ.get("DRAMAFORGE_EVIDENCE_DIRTY", "1") != "0",
+            "captured_at_utc": utc_now(),
+        }
     commit = _git(root, "rev-parse", "HEAD")
     status = _git(root, "status", "--porcelain=v1", "--untracked-files=normal")
     return {

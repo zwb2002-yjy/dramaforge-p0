@@ -20,6 +20,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
+from uuid import uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
 from minio import Minio
@@ -76,17 +77,42 @@ def _safe_member(name: str) -> bool:
 
 def _create_payload(settings: Any, payload_dir: Path) -> dict[str, Any]:
     dump = payload_dir / "database.dump"
-    subprocess.run(
-        [
-            "pg_dump",
-            "--format=custom",
-            "--no-owner",
-            "--file",
-            str(dump),
-            _pg_url(settings.database_url),
-        ],
-        check=True,
-    )
+    postgres_container = os.environ.get("DRAMAFORGE_PG_CONTAINER", "").strip()
+    if postgres_container:
+        # Development machines often run PostgreSQL only inside Compose and do
+        # not have the client binaries on the host. Stream the custom dump from
+        # the explicitly named Postgres container into the isolated temp file.
+        dump_user = os.environ.get("DRAMAFORGE_PG_DUMP_USER", "dramaforge")
+        dump_database = os.environ.get("DRAMAFORGE_PG_DUMP_DATABASE", "dramaforge")
+        completed = subprocess.run(
+            [
+                "docker",
+                "exec",
+                postgres_container,
+                "pg_dump",
+                "--format=custom",
+                "--no-owner",
+                "--username",
+                dump_user,
+                "--dbname",
+                dump_database,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        dump.write_bytes(completed.stdout)
+    else:
+        subprocess.run(
+            [
+                "pg_dump",
+                "--format=custom",
+                "--no-owner",
+                "--file",
+                str(dump),
+                _pg_url(settings.database_url),
+            ],
+            check=True,
+        )
     store, bucket = _minio(settings)
     object_dir = payload_dir / "objects"
     object_dir.mkdir()
@@ -207,18 +233,55 @@ def restore_verify(
         dump = payload / "database.dump"
         if _sha256_path(dump) != manifest["database"]["sha256"]:
             raise ValueError("database dump checksum does not match manifest")
-        subprocess.run(
-            [
+        postgres_container = os.environ.get("DRAMAFORGE_PG_CONTAINER", "").strip()
+        if postgres_container:
+            restore_user = os.environ.get("DRAMAFORGE_PG_DUMP_USER", "dramaforge")
+            target_database = _pg_url(target_database_url).rsplit("/", 1)[-1]
+            container_dump = f"/tmp/dramaforge-restore-{uuid4().hex}.dump"
+            subprocess.run(
+                ["docker", "cp", str(dump), f"{postgres_container}:{container_dump}"],
+                check=True,
+            )
+            restore_env = os.environ.copy()
+            restore_password = restore_env.get("DRAMAFORGE_PG_DUMP_PASSWORD", "")
+            restore_command = [
+                "docker",
+                "exec",
+                "-e",
+                f"PGPASSWORD={restore_password}",
+                postgres_container,
                 "pg_restore",
                 "--clean",
                 "--if-exists",
                 "--no-owner",
+                "--no-password",
                 "--dbname",
-                _pg_url(target_database_url),
-                str(dump),
-            ],
-            check=True,
-        )
+                target_database,
+                "--username",
+                restore_user,
+                container_dump,
+            ]
+            subprocess.run(
+                restore_command,
+                check=True,
+            )
+            subprocess.run(
+                ["docker", "exec", postgres_container, "rm", "-f", container_dump],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                [
+                    "pg_restore",
+                    "--clean",
+                    "--if-exists",
+                    "--no-owner",
+                    "--dbname",
+                    _pg_url(target_database_url),
+                    str(dump),
+                ],
+                check=True,
+            )
         if not target_store.bucket_exists(target_bucket):
             target_store.make_bucket(target_bucket)
         restored = 0

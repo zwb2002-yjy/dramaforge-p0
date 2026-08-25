@@ -161,7 +161,7 @@ function HomePage() {
     },
     onSuccess: async (project) => {
       await invalidateWorkspaceData();
-      void navigate({ to: "/projects/$projectId/quick", params: { projectId: project.project_id } });
+      void navigate({ to: "/projects/$projectId/production", params: { projectId: project.project_id } });
     },
     onError: (cause: Error) => setError(cause.message),
   });
@@ -271,7 +271,7 @@ function HomePage() {
             </form>
             <div className="project-list">
               {projects.data?.map((project) => (
-                <button className="project-row" type="button" key={project.id} onClick={() => void navigate({ to: "/projects/$projectId/quick", params: { projectId: project.id } })}>
+                <button className="project-row" type="button" key={project.id} onClick={() => void navigate({ to: "/projects/$projectId/production", params: { projectId: project.id } })}>
                   <span>{project.name}</span><span className="muted">{project.stage} · {project.aspect_ratio}</span>
                 </button>
               ))}
@@ -285,3 +285,4 @@ function HomePage() {
     </ProjectLobbyShell>
   );
 }
+

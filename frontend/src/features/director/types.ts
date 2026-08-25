@@ -188,6 +188,7 @@ export type DirectorWorkspaceSnapshot = {
     Record<DirectorArtifactKind, DirectorArtifactVersion<Record<string, unknown>>>
   >;
   approvals: ApprovalRecord[];
+  /** @deprecated legacy quick-mode compatibility; professional API omits it. */
   budget_authorizations: BudgetAuthorization[];
   pending_changes: ChangeProposalResult[];
   issues: Array<{
@@ -225,6 +226,7 @@ export type DirectorWorkspaceSnapshot = {
     selection_snapshot: Record<string, unknown>;
     semantic_hash: string;
   }>;
+  /** @deprecated legacy quick-mode compatibility; professional API omits it. */
   budget_reservations: Array<{
     id: string;
     batch_id: string;

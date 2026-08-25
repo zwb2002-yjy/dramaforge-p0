@@ -15,9 +15,7 @@ from app.execution import shot_review
 from app.runtime.scheduler import AgentRunScheduler
 from app.shared.errors import ValidationAppError
 
-router = APIRouter(
-    tags=["shot-ops"], dependencies=[Depends(require_selected_workspace)]
-)
+router = APIRouter(tags=["shot-ops"], dependencies=[Depends(require_selected_workspace)])
 
 ShotActionHandler = Callable[..., Awaitable[shot_review.ShotReviewResult]]
 EnqueueActionResult = list[UUID] | tuple[list[str], list[UUID]]
@@ -117,12 +115,14 @@ async def _run_shot_action_with_enqueue(
     message: str,
     handler: EnqueueActionHandler,
     changed_node_key: str | None = None,
+    legacy_guard: bool = True,
 ) -> ShotActionResponse:
     """Authorize, run a handler that returns new run_ids, enqueue them."""
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    await require_legacy_execution_allowed(
-        session, project_id=project_id, action="legacy_shot_media"
-    )
+    if legacy_guard:
+        await require_legacy_execution_allowed(
+            session, project_id=project_id, action="legacy_shot_media"
+        )
     if changed_node_key:
         result = await handler(
             session,
@@ -165,9 +165,7 @@ async def shot_status(
     session: SessionDep,
 ) -> ShotStatusResponse:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    data = await shot_review.shot_status_summary(
-        session, project_id=project_id, shot_id=shot_id
-    )
+    data = await shot_review.shot_status_summary(session, project_id=project_id, shot_id=shot_id)
     return ShotStatusResponse.model_validate(data)
 
 
@@ -189,9 +187,56 @@ async def start_shot(
         shot_id=shot_id,
         user=user,
         message="NodeRuns committed and enqueued for Worker",
+        handler=lambda s, **kw: shot_review.start_shot_nodes(s, node_keys=body.node_keys, **kw),
+    )
+
+
+@router.post(
+    "/projects/{project_id}/professional/shots/{shot_id}/start",
+    response_model=ShotActionResponse,
+)
+async def start_professional_shot(
+    project_id: UUID,
+    shot_id: UUID,
+    body: ShotActionBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ShotActionResponse:
+    return await _run_shot_action_with_enqueue(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        user=user,
+        message="professional NodeRuns committed and enqueued",
         handler=lambda s, **kw: shot_review.start_shot_nodes(
-            s, node_keys=body.node_keys, **kw
+            s, node_keys=body.node_keys, legacy_guard=False, **kw
         ),
+        legacy_guard=False,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/professional/shots/{shot_id}/rerun",
+    response_model=ShotActionResponse,
+)
+async def rerun_professional_shot(
+    project_id: UUID,
+    shot_id: UUID,
+    body: ShotActionBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ShotActionResponse:
+    return await _run_shot_action_with_enqueue(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        user=user,
+        message=f"professional local re-run from {body.changed_node_key}",
+        handler=lambda s, **kw: shot_review.local_rerun_from_node(s, legacy_guard=False, **kw),
+        changed_node_key=body.changed_node_key,
+        legacy_guard=False,
     )
 
 
@@ -278,7 +323,7 @@ async def rerun_shot(
         shot_id=shot_id,
         user=user,
         message=f"local re-run from {body.changed_node_key}",
-        handler=shot_review.local_rerun_from_node,
+        handler=lambda s, **kw: shot_review.local_rerun_from_node(s, **kw),
         changed_node_key=body.changed_node_key,
     )
 

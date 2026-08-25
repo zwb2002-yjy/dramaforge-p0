@@ -1,4 +1,4 @@
-﻿"""Per-shot review, lock, local re-run, and audited manual media (P0)."""
+"""Per-shot review, lock, local re-run, and audited manual media (P0)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.director.legacy_guard import require_legacy_execution_allowed
 from app.execution.artifact_lineage import get_or_create_artifact
+from app.execution.branches import branch_priority
 from app.execution.models import Artifact, NodeRun
 from app.execution.product_path import identity_priority_keyframe_prompt
 from app.execution.runtime_invariants import mark_stale_downstream
@@ -71,10 +72,17 @@ def _shot_runs(runs: list[NodeRun], shot_id: UUID) -> list[NodeRun]:
     ]
 
 
-def _latest_by_node_key(runs: list[NodeRun]) -> dict[str, NodeRun]:
-    """Map node_key → latest NodeRun (by attempt_no then created_at)."""
+def _latest_by_node_key(
+    runs: list[NodeRun],
+    *,
+    target_snapshot: dict[str, object] | None = None,
+) -> dict[str, NodeRun]:
+    """Map node_key → latest eligible NodeRun for one execution branch."""
     by_key: dict[str, NodeRun] = {}
     for r in runs:
+        priority = branch_priority(r.input_snapshot, target_snapshot)
+        if priority is None:
+            continue
         key = str((r.input_snapshot or {}).get("node_key") or "")
         if not key:
             continue
@@ -82,7 +90,13 @@ def _latest_by_node_key(runs: list[NodeRun]) -> dict[str, NodeRun]:
         if prev is None:
             by_key[key] = r
             continue
-        if int(r.attempt_no or 0) >= int(prev.attempt_no or 0):
+        previous_priority = branch_priority(prev.input_snapshot, target_snapshot) or 0
+        if (priority, int(r.attempt_no or 0), r.created_at, str(r.id)) >= (
+            previous_priority,
+            int(prev.attempt_no or 0),
+            prev.created_at,
+            str(prev.id),
+        ):
             by_key[key] = r
     return by_key
 
@@ -316,10 +330,15 @@ async def start_shot_nodes(
     node_keys: list[str] | None = None,
     force: bool = False,
     include_missing_dependencies: bool = False,
+    legacy_guard: bool = True,
+    experiment_id: UUID | None = None,
+    model_binding_id: UUID | None = None,
+    model_binding_node_key: str | None = None,
 ) -> list[UUID]:
-    await require_legacy_execution_allowed(
-        session, project_id=project_id, action="legacy_shot_media_service"
-    )
+    if legacy_guard:
+        await require_legacy_execution_allowed(
+            session, project_id=project_id, action="legacy_shot_media_service"
+        )
     """Queue missing shot-pipeline nodes with persisted Plan and Shot context.
 
     A normal start is idempotent: already queued or successful nodes are left
@@ -332,6 +351,14 @@ async def start_shot_nodes(
     for k in keys:
         if k not in SHOT_NODES:
             raise ValidationAppError(f"unknown node key: {k}")
+    if experiment_id is None and (model_binding_id is not None or model_binding_node_key):
+        raise ValidationAppError("model override requires an experiment branch")
+    if model_binding_node_key is not None and model_binding_node_key not in {
+        "keyframe",
+        "video",
+        "voice",
+    }:
+        raise ValidationAppError("model override node must be keyframe, video, or voice")
 
     from app.access.models import Project
     from app.production.models import GraphVersion, ProductionGraph
@@ -400,7 +427,13 @@ async def start_shot_nodes(
         .scalars()
         .all()
     )
-    latest_by_key = _latest_by_node_key(_shot_runs(existing_runs, shot_id))
+    target_snapshot: dict[str, object] = {}
+    if experiment_id is not None:
+        target_snapshot["experiment_id"] = str(experiment_id)
+    latest_by_key = _latest_by_node_key(
+        _shot_runs(existing_runs, shot_id),
+        target_snapshot=target_snapshot,
+    )
     if include_missing_dependencies:
         keys = [
             *keys,
@@ -517,6 +550,7 @@ async def start_shot_nodes(
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),
             "node_key": key,
+            "execution_branch": "experiment" if experiment_id is not None else "formal",
             "source_commit": get_settings().source_commit,
             "plan_id": definition.get("plan_id"),
             "prompt": prompt,
@@ -532,6 +566,15 @@ async def start_shot_nodes(
             "identity_evidence_policy": identity_evidence_policy_snapshot(),
             "model_profile": model_profile,
         }
+        if experiment_id is not None:
+            snapshot["experiment_id"] = str(experiment_id)
+        if model_binding_id is not None and key == model_binding_node_key:
+            snapshot["model_binding_id"] = str(model_binding_id)
+            snapshot["model_profile"] = {
+                **model_profile,
+                "model_binding_id": str(model_binding_id),
+                "source": "experiment_override",
+            }
         snapshot.update(canonical_binding)
         if canonical_locked_prompt:
             snapshot["canonical_locked_prompt"] = canonical_locked_prompt
@@ -565,10 +608,12 @@ async def local_rerun_from_node(
     shot_id: UUID,
     user_id: UUID,
     changed_node_key: str,
+    legacy_guard: bool = True,
 ) -> tuple[list[str], list[UUID]]:
-    await require_legacy_execution_allowed(
-        session, project_id=project_id, action="legacy_shot_rerun_service"
-    )
+    if legacy_guard:
+        await require_legacy_execution_allowed(
+            session, project_id=project_id, action="legacy_shot_rerun_service"
+        )
     """Mark correct downstream stale and return (keys, run_ids) that must re-run."""
     if await is_shot_locked(session, project_id=project_id, shot_id=shot_id):
         raise ValidationAppError("shot is human-locked")
@@ -589,6 +634,7 @@ async def local_rerun_from_node(
         node_keys=to_run,
         force=True,
         include_missing_dependencies=True,
+        legacy_guard=legacy_guard,
     )
     return to_run, run_ids
 

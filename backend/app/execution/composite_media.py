@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.storage.minio_store import ObjectStore
 
@@ -104,13 +105,18 @@ async def composite_inputs_pending(
     for source_run, source_node in rows:
         if str((source_run.input_snapshot or {}).get("shot_id") or "") != shot_id:
             continue
+        priority = branch_priority(source_run.input_snapshot, run.input_snapshot)
+        if priority is None:
+            continue
         key = source_node.node_key
         current = latest_by_key.get(key)
         if current is None or (
+            priority,
             source_run.attempt_no,
             source_run.created_at,
             str(source_run.id),
         ) > (
+            branch_priority(current.input_snapshot, run.input_snapshot) or 0,
             current.attempt_no,
             current.created_at,
             str(current.id),
@@ -153,12 +159,17 @@ async def resolve_composite_inputs(
         key = source_node.node_key
         if str((source_run.input_snapshot or {}).get("shot_id") or "") != shot_id:
             continue
+        priority = branch_priority(source_run.input_snapshot, run.input_snapshot)
+        if priority is None:
+            continue
         current = selected.get(key)
         if current is None or (
+            priority,
             source_run.attempt_no,
             source_run.created_at,
             str(source_run.id),
         ) > (
+            branch_priority(current[0].input_snapshot, run.input_snapshot) or 0,
             current[0].attempt_no,
             current[0].created_at,
             str(current[0].id),

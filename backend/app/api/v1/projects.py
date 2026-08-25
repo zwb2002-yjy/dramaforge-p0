@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -21,8 +20,6 @@ class ProjectCreate(BaseModel):
     workspace_id: UUID
     name: str = Field(min_length=1, max_length=160)
     aspect_ratio: str = Field(pattern="^(9:16|16:9)$")
-    budget_limit: Decimal = Field(default=Decimal("0"), ge=0)
-    budget_currency: str = Field(default="USD", min_length=3, max_length=3)
     target_platform: str = Field(default="general", max_length=40)
 
 
@@ -35,8 +32,6 @@ class ProjectRead(BaseModel):
     stage: ProjectStage
     aspect_ratio: str
     target_platform: str
-    budget_limit: Decimal
-    budget_currency: str
     provider_dispatch_frozen: bool
     version: int
 
@@ -70,8 +65,6 @@ async def create_project(
         name=body.name,
         aspect_ratio=body.aspect_ratio,
         actor=user,
-        budget_limit=body.budget_limit,
-        budget_currency=body.budget_currency,
         target_platform=body.target_platform,
     )
     await session.commit()

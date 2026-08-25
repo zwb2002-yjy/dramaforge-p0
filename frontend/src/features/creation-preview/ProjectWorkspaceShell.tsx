@@ -6,9 +6,7 @@ import {
   FolderKanban,
   Gauge,
   Menu,
-  Settings,
-  Sparkles,
-} from "lucide-react";
+  Settings,} from "lucide-react";
 
 import { StageStepper } from "./components";
 import type { PreviewStage } from "./types";
@@ -67,10 +65,6 @@ export function ProjectWorkspaceShell({
             <Gauge size={18} aria-hidden="true" />
             <span>项目总览</span>
           </a>
-          <a href={`${projectBase}/quick`} className={activeView === "quick" ? "active" : undefined} aria-current={activeView === "quick" ? "page" : undefined}>
-            <Sparkles size={18} aria-hidden="true" />
-            <span>快速创作</span>
-          </a>
           <a href={`${projectBase}/production`} className={activeView === "production" ? "active" : undefined} aria-current={activeView === "production" ? "page" : undefined}>
             <Clapperboard size={18} aria-hidden="true" />
             <span>专业生产</span>
@@ -126,3 +120,6 @@ export function ProjectWorkspaceShell({
     </div>
   );
 }
+
+
+

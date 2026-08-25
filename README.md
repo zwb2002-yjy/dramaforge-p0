@@ -1,6 +1,6 @@
 # DramaForge
 
-DramaForge 是面向零基础个人创作者的开源 AI 导演工作台。首版聚焦从一个想法完成一部
+DramaForge 是面向专业个人创作者的开源 AI 影视制作工作台。首版聚焦围绕场景、镜头和资产完成一部
 15–30 秒、真人写实风格、角色对白驱动的多镜头短剧：生成前确认创作与拍摄方案，用代表
 镜头试拍降低盲抽成本，失败后提供有证据和成本范围的局部修复，并保留完整产物血缘。
 
@@ -250,7 +250,7 @@ Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在�
 
 ## 产品阶段
 
-首版只稳定支持四阶段 AI 导演完成 15–30 秒真人对白短剧。资产库、故事板、候选治理、版本化时间线和专业后期能力保留为同一生产底座上的后续扩展层，不阻塞当前真实作品闭环。成员、邀请、共享、评论和任务指派不在当前个人创作者路线中。详细范围与进入条件只看 [`DramaForge总开发文档.md`](DramaForge总开发文档.md) 和 [`docs/current/`](docs/current/)。
+首版默认支持专业工作台：场景、镜头、资产卡、正式/实验分支、生产链、审片批注和 OpenCut Manifest。旧四阶段入口仅作为兼容路径保留，不是专业版默认体验。成员、邀请、共享、评论和任务指派不在当前个人创作者路线中。详细范围与进入条件只看 [`DramaForge总开发文档.md`](DramaForge总开发文档.md) 和 [`docs/current/`](docs/current/)。
 
 ## 开源治理
 
@@ -261,3 +261,4 @@ DramaForge 以 [Apache License 2.0](LICENSE) 开源。提交代码前请阅读
 仓库提供 AIOS/AISphere 的 Compose 交接描述，但尚未在真实 AIOS 环境验证，也没有冒充平台
 官方 manifest；边界与集成验收见
 [`docs/runbooks/docker-deployment.md`](docs/runbooks/docker-deployment.md)。
+

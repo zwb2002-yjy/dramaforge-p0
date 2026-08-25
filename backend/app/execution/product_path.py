@@ -37,6 +37,7 @@ from app.consistency.identity_policy import (
 from app.consistency.identity_review import identity_review_images
 from app.creation.models import CreationPlan
 from app.execution.artifact_lineage import get_or_create_artifact
+from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
 from app.execution.shot_pipeline import (
     SHOT_PIPELINE_TEMPLATE_KEY,
@@ -464,10 +465,16 @@ async def _bind_review_input_artifacts(
             candidate
             for candidate in sorted(
                 candidates,
-                key=lambda item: (item.created_at, str(item.id)),
+                key=lambda item: (
+                    branch_priority(item.input_snapshot, run.input_snapshot) or 0,
+                    item.attempt_no,
+                    item.created_at,
+                    str(item.id),
+                ),
                 reverse=True,
             )
             if str((candidate.input_snapshot or {}).get("shot_id") or "") == shot_id
+            and branch_priority(candidate.input_snapshot, run.input_snapshot) is not None
         ),
         None,
     )
@@ -1353,10 +1360,10 @@ async def _execute_unified_media_node_run(
                 "unified selection references missing connection/binding/catalog",
                 details={"code": "MODEL_BINDING_MISSING"},
             )
-        pricing_currency = _binding_pricing_currency(
-            binding,
-            required=director_context is not None,
-        )
+        # Provider owns pricing and settlement. Keep a best-effort raw currency
+        # for audit metadata, but never block a professional run on a local
+        # price snapshot or turn it into a DramaForge budget gate.
+        pricing_currency = _binding_pricing_currency(binding, required=False)
         plugin = get_plugin(provider_type, protocol_profile)
         cfg = await runtime_connection_settings(session, connection=connection)
         resolved = await ProviderRuntimeResolver(session).resolve(

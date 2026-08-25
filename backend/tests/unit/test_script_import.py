@@ -1,4 +1,4 @@
-﻿"""Golden script import → Episode/Scene/Shot + canonical character."""
+"""Golden script import → Episode/Scene/Shot + canonical character."""
 
 from __future__ import annotations
 
@@ -9,9 +9,22 @@ from uuid import uuid4
 import pytest
 from app.access.models import User, Workspace
 from app.access.projects import ProjectService
+from app.api.v1.scripts import (
+    ShotCanvasUpdateBody,
+    ShotChangeProposalCreate,
+    create_shot_change_proposal,
+    update_shot_canvas,
+)
 from app.assets import models as _am  # noqa: F401
 from app.assets.characters import register_lead_character, require_canonical_for_shot
-from app.assets.models import Episode, Scene, ScriptDocument, Shot
+from app.assets.models import (
+    CanvasRevision,
+    Episode,
+    Scene,
+    ScriptDocument,
+    Shot,
+    ShotChangeProposal,
+)
 from app.assets.script_import import import_script, parse_script_markdown
 from app.creation import models as _cm  # noqa: F401
 from app.creation.service import CreationService
@@ -21,7 +34,7 @@ from app.execution import models as _xm  # noqa: F401
 from app.production import models as _pm  # noqa: F401
 from app.providers.fake import FakeFluxAdapter
 from app.shared.base import Base
-from app.shared.errors import ValidationAppError
+from app.shared.errors import ConflictError, ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from sqlalchemy import select
@@ -240,3 +253,88 @@ async def test_canonical_required_for_shot(session: AsyncSession) -> None:
     assert ref.is_canonical
     assert ref.object_key == char.canonical_object_key
     assert ref.artifact_id == char.canonical_artifact_id
+@pytest.mark.asyncio
+async def test_canvas_revision_persists_with_optimistic_lock(session: AsyncSession) -> None:
+    user, project = await _project(session)
+    result = await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=GOLDEN.read_text(encoding="utf-8"),
+        actor=user,
+    )
+    await session.commit()
+    shot = (await session.execute(select(Shot).where(Shot.id == result.shot_ids[0]))).scalar_one()
+    original_version = shot.version
+    response = await update_shot_canvas(
+        project.id,
+        shot.id,
+        ShotCanvasUpdateBody(
+            expected_version=original_version,
+            visual_description="用户确认后的正式镜头语义",
+            shot_type=shot.shot_type,
+            camera_move="slow_push_in",
+            dialogue=shot.dialogue,
+        ),
+        user,
+        session,
+        None,
+    )
+    await session.commit()
+    assert response.revision_number == 1
+    assert response.shot.version == original_version + 1
+    revision = (
+        await session.execute(
+            select(CanvasRevision).where(CanvasRevision.id == response.revision_id)
+        )
+    ).scalar_one()
+    assert revision.visual_description == "用户确认后的正式镜头语义"
+    with pytest.raises(ConflictError):
+        await update_shot_canvas(
+            project.id,
+            shot.id,
+            ShotCanvasUpdateBody(
+                expected_version=original_version,
+                visual_description="过期编辑器覆盖",
+                shot_type=shot.shot_type,
+                camera_move="static",
+                dialogue=shot.dialogue,
+            ),
+            user,
+            session,
+            None,
+        )
+@pytest.mark.asyncio
+async def test_shot_change_proposal_is_idempotent_and_confirms_on_canvas_revision(
+    session: AsyncSession,
+) -> None:
+    user, project = await _project(session)
+    result = await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=GOLDEN.read_text(encoding="utf-8"),
+        actor=user,
+    )
+    await session.commit()
+    shot = (await session.execute(select(Shot).where(Shot.id == result.shot_ids[0]))).scalar_one()
+    body = ShotChangeProposalCreate(
+        idempotency_key="proposal-1",
+        summary="补齐动作因果",
+        expected_version=shot.version,
+        replacement_payload={"visual_description": "新的导演语义"},
+        affected_node_keys=["video"],
+        reusable_artifact_ids=["keyframe-1"],
+    )
+    first = await create_shot_change_proposal(project.id, shot.id, body, user, session, None)
+    second = await create_shot_change_proposal(project.id, shot.id, body, user, session, None)
+    assert first.proposal.id == second.proposal.id
+    assert first.proposal.status == "awaiting_confirmation"
+    stored = (
+        await session.execute(
+            select(ShotChangeProposal).where(ShotChangeProposal.id == first.proposal.id)
+        )
+    ).scalar_one()
+    assert stored.base_shot_version == shot.version

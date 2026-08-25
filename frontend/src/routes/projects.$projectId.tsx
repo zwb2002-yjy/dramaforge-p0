@@ -43,8 +43,7 @@ function workspaceStages(snapshot: DirectorWorkspaceSnapshot | undefined): Previ
 }
 
 function EvidenceInspector({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | undefined }) {
-  if (!snapshot) return <p className="muted">正在读取阶段、预算与生产证据。</p>;
-  const activeBudgets = snapshot.budget_authorizations.filter((item) => item.status === "active");
+  if (!snapshot) return <p className="muted">正在读取画布、版本与生产证据。</p>;
   const runningBatches = snapshot.production_batches.filter((item) => item.status === "running");
   return (
     <div className="qc-project-inspector-summary">
@@ -57,12 +56,11 @@ function EvidenceInspector({ snapshot }: { snapshot: DirectorWorkspaceSnapshot |
         <dt>画幅</dt><dd>{snapshot.aspect_ratio}</dd>
         <dt>锁定版本</dt><dd>{Object.keys(snapshot.current_artifacts).length}</dd>
         <dt>运行批次</dt><dd>{runningBatches.length}</dd>
-        <dt>有效预算授权</dt><dd>{activeBudgets.length}</dd>
         <dt>待处理问题</dt><dd>{snapshot.issues.filter((item) => item.status !== "resolved").length}</dd>
       </dl>
       <section>
         <h4>执行边界</h4>
-        <p className="muted">快速与专业模式共享 Workflow、Production Graph、NodeRun、Artifact 和费用证据。专业模式不能绕过确认或预算。</p>
+        <p className="muted">专业工作台共享 Workflow、Production Graph、NodeRun 和 Artifact；模型供应商负责价格与结算。</p>
       </section>
     </div>
   );
@@ -77,7 +75,7 @@ function ProjectOverview({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | u
       <header className="qc-page-heading">
         <p>项目总览</p>
         <h1>{snapshot?.project_name ?? "短剧项目"}</h1>
-        <span>从创作方案到完整交付，所有阶段、预算和媒体证据保留在同一个项目中。</span>
+        <span>从场景和镜头到完整交付，画布、版本和媒体证据保留在同一个项目中。</span>
       </header>
       <section className="qc-overview-band">
         <div>
@@ -87,10 +85,10 @@ function ProjectOverview({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | u
         </div>
         <div>
           <small>下一步</small>
-          <p>{snapshot?.next_action ?? "打开快速创作，继续当前导演流程。"}</p>
+          <p>{snapshot?.next_action ?? "打开专业工作台，继续当前导演流程。"}</p>
         </div>
-        <Link className="qc-overview-primary" to="/projects/$projectId/quick" params={{ projectId }}>
-          继续快速创作
+        <Link className="qc-overview-primary" to="/projects/$projectId/production" params={{ projectId }}>
+          继续专业制作
         </Link>
       </section>
       <section className="qc-overview-grid">
@@ -98,12 +96,12 @@ function ProjectOverview({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | u
           <span className="director-stage-kicker">快速模式</span>
           <h2>AI 导演工作区</h2>
           <p>完成四阶段、四次硬确认、试拍验收和正式生产授权。</p>
-          <Link to="/projects/$projectId/quick" params={{ projectId }}>进入快速创作</Link>
+          <Link to="/projects/$projectId/production" params={{ projectId }}>进入快速创作</Link>
         </article>
         <article>
           <span className="director-stage-kicker">专业模式</span>
           <h2>逐镜生产证据</h2>
-          <p>展开分镜、NodeRun、ProviderOperation、Artifact、成本和局部修复范围。</p>
+          <p>展开 Production Graph、NodeRun、ProviderOperation、Artifact 和局部修复范围。</p>
           <Link to="/projects/$projectId/production" params={{ projectId }}>进入专业生产</Link>
         </article>
       </section>
@@ -129,7 +127,11 @@ function ProjectLayout() {
         throw error;
       }
     },
-    enabled: projectId !== "demo" && !onQuick,
+    // The professional workbench is the primary product surface. It reads its
+    // own Project/Shot/Graph facts and must not probe the retired Director
+    // snapshot (which would create a noisy 404 for projects without a legacy
+    // workflow). The legacy overview may still use the snapshot when opened.
+    enabled: projectId !== "demo" && !onQuick && !onProduction,
     refetchInterval: (query) => {
       const status = query.state.data?.workflow.status;
       return status && ["trial_running", "production_running", "assembling"].includes(status)
@@ -157,3 +159,5 @@ function ProjectLayout() {
     </ProjectWorkspaceShell>
   );
 }
+
+

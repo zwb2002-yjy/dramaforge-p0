@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
 from app.config import Settings, get_settings
+from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
 from app.providers.models import ArtifactReferenceToken
 from app.shared.errors import NotFoundError, ValidationAppError
@@ -63,13 +64,26 @@ def _public_origin(settings: Settings) -> str:
     return origin
 
 
-def _latest_for_shot(rows: list[NodeRun], *, shot_id: str) -> NodeRun | None:
+def _latest_for_shot(
+    rows: list[NodeRun],
+    *,
+    shot_id: str,
+    target_snapshot: dict[str, object] | None = None,
+) -> NodeRun | None:
     matching = [
-        run for run in rows if str((run.input_snapshot or {}).get("shot_id") or "") == shot_id
+        run
+        for run in rows
+        if str((run.input_snapshot or {}).get("shot_id") or "") == shot_id
+        and branch_priority(run.input_snapshot, target_snapshot) is not None
     ]
     return max(
         matching,
-        key=lambda run: (run.attempt_no, run.created_at, str(run.id)),
+        key=lambda run: (
+            branch_priority(run.input_snapshot, target_snapshot) or 0,
+            run.attempt_no,
+            run.created_at,
+            str(run.id),
+        ),
         default=None,
     )
 
@@ -118,7 +132,11 @@ async def approved_first_frame_for_video(
         .scalars()
         .all()
     )
-    keyframe_run = _latest_for_shot(keyframe_runs, shot_id=shot_id)
+    keyframe_run = _latest_for_shot(
+        keyframe_runs,
+        shot_id=shot_id,
+        target_snapshot=video_run.input_snapshot,
+    )
     if keyframe_run is None or keyframe_run.result_artifact_id is None:
         raise ValidationAppError(
             "keyframe Artifact is missing",

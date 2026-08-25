@@ -114,6 +114,74 @@ class Shot(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
+class CanvasRevision(Base):
+    """Immutable user-visible revision of a shot's formal director canvas."""
+
+    __tablename__ = "canvas_revisions"
+    __table_args__ = (
+        UniqueConstraint("shot_id", "revision_number", name="uq_canvas_revision_number"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    shot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_shot_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    visual_description: Mapped[str] = mapped_column(Text, nullable=False)
+    shot_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    camera_move: Mapped[str] = mapped_column(String(80), nullable=False)
+    dialogue: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    source: Mapped[str] = mapped_column(String(24), nullable=False, default="user")
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ShotChangeProposal(Base):
+    """A reviewable assistant proposal for a localized shot-canvas change."""
+
+    __tablename__ = "shot_change_proposals"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "idempotency_key", name="uq_shot_change_proposal_idempotency"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    shot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    base_shot_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    replacement_payload: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    affected_node_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    reusable_artifact_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="awaiting_confirmation")
+    confirmed_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("canvas_revisions.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Asset(Base):
     __tablename__ = "assets"
     __table_args__ = (UniqueConstraint("project_id", "kind", "name", name="uq_asset_name"),)
@@ -136,6 +204,37 @@ class Asset(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+class AssetVersion(Base):
+    """Immutable project asset card revision used by the professional workspace."""
+
+    __tablename__ = "asset_versions"
+    __table_args__ = (
+        UniqueConstraint("asset_id", "version_number", name="uq_asset_version_number"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    asset_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assets.id", ondelete="CASCADE"), nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    metadata_json: Mapped[dict[str, object]] = mapped_column(
+        "metadata", JSON, nullable=False, default=dict
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class Character(Base):
