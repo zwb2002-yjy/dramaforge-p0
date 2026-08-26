@@ -96,9 +96,11 @@ def test_compose_defines_required_boot0_services() -> None:
     assert maintenance["environment"]["DATABASE_URL"].startswith(
         "postgresql+asyncpg://${POSTGRES_USER"
     )
-    assert "postgresql-client" in (REPO_ROOT / "backend" / "Dockerfile").read_text(
-        encoding="utf-8"
-    )
+    dockerfile = (REPO_ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
+    assert "postgresql-client" in dockerfile
+    # Maintenance mounts the repository read-only and must prove the actual
+    # mounted source identity instead of trusting an environment override.
+    assert "git" in dockerfile
     # GPU/ComfyUI must not be in the default compose file.
     assert "comfyui" not in services
 

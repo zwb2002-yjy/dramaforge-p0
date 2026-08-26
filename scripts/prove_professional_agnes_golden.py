@@ -15,6 +15,7 @@ import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
 
@@ -106,12 +107,13 @@ def wait_for_nodes(
     shot_id: str,
     node_keys: set[str],
     timeout_seconds: int,
+    headers: Mapping[str, str],
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last_snapshot: dict[str, Any] = {}
     while time.monotonic() < deadline:
         snapshot = require_ok(
-            client.get(f"/projects/{project_id}/snapshot"),
+            client.get(f"/projects/{project_id}/snapshot", headers=headers),
             "snapshot",
         )
         last_snapshot = snapshot
@@ -320,6 +322,7 @@ Camera: static
             shot_id=shot_id,
             node_keys={"prompt", "keyframe", "identity_review"},
             timeout_seconds=args.timeout,
+            headers=headers,
         )
         keyframe_runs = [
             public_run(run)
@@ -349,6 +352,7 @@ Camera: static
             shot_id=shot_id,
             node_keys={"video"},
             timeout_seconds=args.timeout,
+            headers=headers,
         )
         video_runs = [
             public_run(run)

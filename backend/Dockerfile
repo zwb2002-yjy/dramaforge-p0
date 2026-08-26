@@ -26,6 +26,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         curl \
         espeak-ng \
         ffmpeg \
+        git \
         postgresql-client; do \
         if [ "${attempt}" -ge 3 ]; then exit 1; fi; \
         attempt=$((attempt + 1)); \
