@@ -25,6 +25,7 @@ from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderModelBinding
+from app.security.models import EncryptedProviderCredential
 from app.shared.db import set_rls_context
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -132,13 +133,21 @@ async def test_execution_model_resolution_round_trips_in_node_run_snapshot_pg(
         documented_at=date.fromisoformat("2026-08-10"),
         contract_manifest_hash=hash_manifest(manifest),
     )
+    credential = EncryptedProviderCredential(
+        workspace_id=workspace.id,
+        provider="agnes",
+        ciphertext="test-ciphertext",
+        key_version="test-key-version",
+    )
+    pg_session.add(credential)
+    await pg_session.flush()
     connection = ProviderConnection(
         workspace_id=workspace.id,
         provider_type="agnes",
         display_name="Agnes",
         base_url="https://api.agnes-ai.cn",
         protocol_profile="agnes_cn_v1",
-        credential_id=uuid4(),
+        credential_id=credential.id,
         credential_revision=1,
         enabled=True,
         verification_status="verified",

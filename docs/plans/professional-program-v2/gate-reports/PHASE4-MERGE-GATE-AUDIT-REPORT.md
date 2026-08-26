@@ -69,7 +69,7 @@
 | B03 No Silent Fallback | ✅ 已关闭 | `_resolve` 在 `status != RESOLVED` 时抛 `ValidationAppError`；测试 `test_unavailable_profile_model_does_not_run_legacy_binding`、`test_unavailable_profile_model_stops_before_provider_submission`、`test_unbound_project_fails_closed_without_submit`（本日重跑 3 passed） |
 | B04 Credential Immutable Revision | ✅ 已关闭 | 迁移 `20260826_0041` + `tests/unit/test_credential_revisions.py`（4 用例） |
 | B05 ProviderConnectionRevision + Runtime 冻结 credential | ✅ 已关闭 | 迁移 `20260826_0042` + `tests/unit/test_connection_revisions.py`；MS5-C `test_unified_resume_never_recreates`（connection+credential 升到 rev2 后 resume 仍用 rev1） |
-| B06 Latest HEAD CI / Security green | ⏳ 进行中 | 已推送 `958addc` 到 `origin/dev`；GitHub Actions 正在新 HEAD 运行；本地 PostgreSQL 集成因 `TEST_PG_ENABLED` 未设置且 `127.0.0.1:5432` 不可达而如实 skip |
+| B06 Latest HEAD CI / Security green | ⏳ 进行中（本地证据已补齐） | 已修复：迁移 `20260826_0044` `asset_tag_links` RLS（EXISTS 经 `asset_tags.project_id`，与 `character_references` 联结表模式一致）；ci.yml 增加 `workflow_dispatch` 与 `postgres-integration` 的 `TEST_PG_ENABLED=1`；修正 `test_catalog_migration_pg.py` head 断言至 `20260826_0044`；`test_execution_model_resolution_pg.py` 改为引用真实 credential 行。本地真实 PostgreSQL 验证：`alembic upgrade head` 从空库成功、integration `23 passed`（无 skip）、unit `746 passed`；远端 CI/Security 待新 HEAD 运行确认（本报告不自行宣布通过） |
 
 ## §18 四个一票否决条件
 
@@ -83,6 +83,6 @@
 ## 复核结论
 
 - 文档的 6 个阻断项中 **B01–B05 已在本地 HEAD `958addc` 关闭**（文档基于旧远程 HEAD `9e0b27f` 才判定 MISSING/BLOCKED）。
-- **B06（CI/Security）** 取决于新 HEAD 的 GitHub Actions 结果；本报告如实记录为进行中，不替代远端 CI 判定。
+- **B06（CI/Security）** 本地证据已补齐（真实 PostgreSQL `alembic upgrade head` + integration `23 passed`），远端 CI/Security 待新 HEAD 的 GitHub Actions 结果确认；本报告如实记录，不替代远端 CI 判定，不自行宣布 Gate 通过。
 - 依据文档 §17 的 MG-P4 验收口径：本地证据（focused 101 passed；全量 746 passed；vitest 72；e2e 8）已覆盖 requested==resolved==binding==catalog==actual、fail-closed POST=0、credential/connection rev A→B→resume=A、multi reference、unknown slot、mode、idempotency、resume。
 - **本报告仍未自行宣布 Phase 4 Merge Gate 通过**；最终 `PROFESSIONAL_PHASE_4_MERGE_GATE` 判定以 Owner 基于新 HEAD（含远端 CI）的确认与文档 §17 口径为准。

@@ -9,6 +9,7 @@ on:
     branches:
       - dev
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -157,6 +158,7 @@ jobs:
       BYOK_FERNET_KEY: test-byok-fernet-key-replace==
       AGNES_ENABLED: "false"
       TEXT_LLM_ENABLED: "false"
+      TEST_PG_ENABLED: "1"
     defaults:
       run:
         working-directory: backend

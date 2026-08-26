@@ -55,6 +55,39 @@ def _disable_project_rls(table: str) -> None:
     op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
 
 
+def _enable_asset_tag_links_rls() -> None:
+    """Project-scope asset_tag_links via its tag (junction has no project_id).
+
+    Mirrors the existing character_references junction pattern: the policy
+    resolves the current project through the linked asset_tags row instead of
+    a direct project_id column.
+    """
+    op.execute("ALTER TABLE asset_tag_links ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE asset_tag_links FORCE ROW LEVEL SECURITY")
+    op.execute("DROP POLICY IF EXISTS asset_tag_links_project_scope ON asset_tag_links")
+    op.execute(
+        """
+        CREATE POLICY asset_tag_links_project_scope ON asset_tag_links
+        FOR ALL
+        USING (
+            EXISTS (
+                SELECT 1 FROM asset_tags t
+                WHERE t.id = asset_tag_links.tag_id
+                  AND t.project_id = app.current_project_id()
+            )
+        )
+        WITH CHECK (
+            EXISTS (
+                SELECT 1 FROM asset_tags t
+                WHERE t.id = asset_tag_links.tag_id
+                  AND t.project_id = app.current_project_id()
+            )
+        )
+        """
+    )
+
+
+
 def upgrade() -> None:
     op.create_table(
         "asset_version_references",
@@ -143,7 +176,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["asset_id"], ["assets.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tag_id"], ["asset_tags.id"], ondelete="CASCADE"),
     )
-    _enable_project_rls("asset_tag_links")
+    _enable_asset_tag_links_rls()
 
     op.create_table(
         "shot_reference_bindings",
