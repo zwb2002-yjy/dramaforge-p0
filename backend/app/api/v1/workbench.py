@@ -16,6 +16,7 @@ from app.assets.schemas import ShotDirectorState
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
 from app.production.models import GraphVersion
 from app.production.reference_intents import ShotReferenceIntent
+from app.production.repair_service import RepairPlanRead, RepairService
 from app.production.trace import ExecutionTraceRead, build_execution_trace
 from app.production.workbench_execution import (
     WorkbenchExecutionInput,
@@ -376,4 +377,67 @@ async def get_execution_trace(
         session,
         project_id=project_id,
         run_id=run_id,
+    )
+
+
+
+class RepairExecuteBody(BaseModel):
+    repair_option: Literal["rerun_video", "regenerate_keyframe_then_video"]
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+
+class RepairExecuteRead(BaseModel):
+    node_run_id: UUID
+    status: str
+    repair_option: str
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/repair-plan",
+    response_model=RepairPlanRead,
+)
+async def get_repair_plan(
+    project_id: UUID,
+    shot_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> RepairPlanRead:
+    """Compute a repair plan from open annotations (03 §57)."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    return await RepairService(session).build_repair_plan(
+        project=project,
+        shot_id=shot_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/repair",
+    response_model=RepairExecuteRead,
+)
+async def execute_repair(
+    project_id: UUID,
+    shot_id: UUID,
+    body: RepairExecuteBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> RepairExecuteRead:
+    """Execute a V1 repair rerun with an Idempotency-Key (03 §58)."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    run = await RepairService(session).execute_repair(
+        project=project,
+        user=user,
+        shot_id=shot_id,
+        repair_option=body.repair_option,
+        idempotency_key=body.idempotency_key,
+    )
+    await session.commit()
+    return RepairExecuteRead(
+        node_run_id=run.id,
+        status=run.status,
+        repair_option=body.repair_option,
     )
