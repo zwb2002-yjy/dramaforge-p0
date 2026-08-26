@@ -450,7 +450,7 @@ async def _seed_project_chain(
     session.add(run)
     await session.flush()
 
-    await store_credential(
+    credential = await store_credential(
         session,
         workspace_id=workspace.id,
         provider=FAKE_PROVIDER,
@@ -479,8 +479,8 @@ async def _seed_project_chain(
         display_name="Unified",
         base_url="https://unified.example.com",
         protocol_profile=FAKE_PROFILE,
-        credential_id=uuid4(),
-        credential_revision=1,
+        credential_id=credential.id,
+        credential_revision=credential.revision_no,
         enabled=True,
         verification_status="verified",
         created_by=user.id,
