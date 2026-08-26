@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -44,6 +45,7 @@ class ShotRead(BaseModel):
     camera_move: str
     visual_description: str
     dialogue: str
+    duration_seconds: Decimal
     sort_order: int
     status: str
     version: int
@@ -57,6 +59,7 @@ class CanvasRevisionRead(BaseModel):
     shot_type: str
     camera_move: str
     dialogue: str
+    duration_seconds: Decimal
     source: str
     created_at: datetime
 
@@ -93,6 +96,7 @@ class ShotCanvasUpdateBody(BaseModel):
     shot_type: str = Field(min_length=1, max_length=40)
     camera_move: str = Field(min_length=1, max_length=80)
     dialogue: str = ""
+    duration_seconds: Decimal | None = Field(default=None, gt=0, le=30, decimal_places=3)
     source: str = Field(default="user", pattern="^(user|assistant)$")
 
 
@@ -126,6 +130,7 @@ def _shot_read(shot: Shot) -> ShotRead:
         camera_move=shot.camera_move,
         visual_description=shot.visual_description,
         dialogue=shot.dialogue,
+        duration_seconds=shot.duration_seconds,
         sort_order=shot.sort_order,
         status=shot.status,
         version=shot.version,
@@ -346,6 +351,7 @@ async def update_shot_canvas(
         shot_type=body.shot_type,
         camera_move=body.camera_move,
         dialogue=body.dialogue,
+        duration_seconds=body.duration_seconds or shot.duration_seconds,
         source=body.source,
         created_by=user.id,
     )
@@ -353,6 +359,8 @@ async def update_shot_canvas(
     shot.shot_type = body.shot_type
     shot.camera_move = body.camera_move
     shot.dialogue = body.dialogue
+    if body.duration_seconds is not None:
+        shot.duration_seconds = body.duration_seconds
     shot.version += 1
     session.add(revision)
     await session.commit()
@@ -396,6 +404,7 @@ async def list_shot_canvas_revisions(
             shot_type=row.shot_type,
             camera_move=row.camera_move,
             dialogue=row.dialogue,
+            duration_seconds=row.duration_seconds,
             source=row.source,
             created_at=row.created_at,
         )

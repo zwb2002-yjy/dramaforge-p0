@@ -405,6 +405,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/director/budget-authorizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Authorize Legacy Budget
+         * @deprecated
+         * @description Historical quick-mode compatibility only.
+         *
+         *     The professional workbench never calls this route. Provider pricing and
+         *     settlement remain outside DramaForge; this route exists solely to replay
+         *     already-versioned legacy workflows during migration.
+         */
+        post: operations["authorize_legacy_budget_api_v1_projects__project_id__director_budget_authorizations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/director/workflow": {
         parameters: {
             query?: never;
@@ -2371,6 +2396,23 @@ export interface components {
              */
             audience: string;
         };
+        /** BudgetAuthorizationCreate */
+        BudgetAuthorizationCreate: {
+            authorization_kind: components["schemas"]["ApprovalKind"];
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Pricing Snapshot Id */
+            pricing_snapshot_id: string;
+            /** Limit Amount */
+            limit_amount: number | string;
+            /** Currency */
+            currency: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
         /** BudgetAuthorizationRead */
         BudgetAuthorizationRead: {
             /**
@@ -2460,6 +2502,8 @@ export interface components {
             camera_move: string;
             /** Dialogue */
             dialogue: string;
+            /** Duration Seconds */
+            duration_seconds: string;
             /** Source */
             source: string;
             /**
@@ -4393,6 +4437,8 @@ export interface components {
              * @default
              */
             dialogue: string;
+            /** Duration Seconds */
+            duration_seconds?: number | string | null;
             /**
              * Source
              * @default user
@@ -4493,6 +4539,8 @@ export interface components {
             visual_description: string;
             /** Dialogue */
             dialogue: string;
+            /** Duration Seconds */
+            duration_seconds: string;
             /** Sort Order */
             sort_order: number;
             /** Status */
@@ -5803,6 +5851,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    authorize_legacy_budget_api_v1_projects__project_id__director_budget_authorizations_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BudgetAuthorizationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetAuthorizationRead"];
                 };
             };
             /** @description Validation Error */

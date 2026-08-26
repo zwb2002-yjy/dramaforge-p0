@@ -135,6 +135,9 @@ class CanvasRevision(Base):
     shot_type: Mapped[str] = mapped_column(String(40), nullable=False)
     camera_move: Mapped[str] = mapped_column(String(80), nullable=False)
     dialogue: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    duration_seconds: Mapped[Decimal] = mapped_column(
+        Numeric(8, 3), nullable=False, default=Decimal("3")
+    )
     source: Mapped[str] = mapped_column(String(24), nullable=False, default="user")
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False

@@ -1322,7 +1322,11 @@ async def _execute_unified_media_node_run(
             if isinstance(raw_frozen_selection, dict)
             else None
         )
-        allow_trial_without_quality_gate = bool(
+        professional_trial_bootstrap_allowed = bool(
+            director_context is None
+            and snap.get("professional_trial_bootstrap_allowed") is True
+        )
+        allow_trial_without_quality_gate = professional_trial_bootstrap_allowed or bool(
             director_context is not None
             and director_context.trial_quality_gate_bootstrap_allowed
             and isinstance(frozen_evidence, dict)

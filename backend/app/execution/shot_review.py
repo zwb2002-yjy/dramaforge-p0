@@ -561,11 +561,14 @@ async def start_shot_nodes(
             "visual_description": visual,
             "visual": visual,
             "dialogue": dialogue,
+            "duration_seconds": str(shot.duration_seconds),
             "subtitle": dialogue,
             "lead_identity_required": lead_identity_required,
             "identity_evidence_policy": identity_evidence_policy_snapshot(),
             "model_profile": model_profile,
         }
+        if not legacy_guard:
+            snapshot["professional_trial_bootstrap_allowed"] = True
         if experiment_id is not None:
             snapshot["experiment_id"] = str(experiment_id)
         if model_binding_id is not None and key == model_binding_node_key:

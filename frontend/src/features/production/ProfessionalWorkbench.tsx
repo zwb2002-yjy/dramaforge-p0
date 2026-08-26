@@ -20,7 +20,7 @@ type ProfessionalWorkbenchProps = {
   onSelectShot: (shotId: string) => void;
   onRerun?: (shotId: string) => void;
   onStart?: (shotId: string) => void;
-  onSave?: (shot: ShotRead, input: { visual_description: string; shot_type: string; camera_move?: string; dialogue: string }) => Promise<CanvasSaveResult>;
+  onSave?: (shot: ShotRead, input: { visual_description: string; shot_type: string; camera_move?: string; dialogue: string; duration_seconds: string }) => Promise<CanvasSaveResult>;
   onPropose?: (shot: ShotRead, input: { summary: string; replacement_payload: Record<string, unknown>; affected_node_keys: string[]; reusable_artifact_ids: string[] }) => Promise<ShotChangeProposalResult>;
   onConfirmProposal?: (shotId: string, proposalId: string, revisionId: string) => Promise<void>;
   revisions?: CanvasRevisionRead[];
@@ -102,6 +102,8 @@ export function ProfessionalWorkbench({
   const [activeTab, setActiveTab] = useState<"canvas" | "assets" | "director" | "review">("canvas");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savedDrafts, setSavedDrafts] = useState<Record<string, string>>({});
+  const [durationDrafts, setDurationDrafts] = useState<Record<string, string>>({});
+  const [savedDurationDrafts, setSavedDurationDrafts] = useState<Record<string, string>>({});
   const [rejected, setRejected] = useState<Record<string, boolean>>({});
   const [accepted, setAccepted] = useState<Record<string, boolean>>({});
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -142,6 +144,16 @@ export function ProfessionalWorkbench({
       for (const shot of shots) next[shot.id] ??= shot.visual_description;
       return next;
     });
+    setDurationDrafts((current) => {
+      const next = { ...current };
+      for (const shot of shots) next[shot.id] ??= shot.duration_seconds ?? "3";
+      return next;
+    });
+    setSavedDurationDrafts((current) => {
+      const next = { ...current };
+      for (const shot of shots) next[shot.id] ??= shot.duration_seconds ?? "3";
+      return next;
+    });
   }, [shots]);
   useEffect(() => {
     if (!directorBoard) return;
@@ -158,7 +170,8 @@ export function ProfessionalWorkbench({
   const selectedShot = shots.find((shot) => shot.id === selectedShotId) ?? shots[0] ?? null;
   const selectedId = selectedShot?.id ?? null;
   const selectedText = selectedId ? drafts[selectedId] ?? selectedShot?.visual_description ?? "" : "";
-  const isDirty = selectedId ? selectedText !== (savedDrafts[selectedId] ?? selectedShot?.visual_description ?? "") : false;
+  const selectedDuration = selectedId ? durationDrafts[selectedId] ?? selectedShot?.duration_seconds ?? "3" : "3";
+  const isDirty = selectedId ? selectedText !== (savedDrafts[selectedId] ?? selectedShot?.visual_description ?? "") || selectedDuration !== (savedDurationDrafts[selectedId] ?? selectedShot?.duration_seconds ?? "3") : false;
   const selectedStatus = selectedShot ? shotRunStatus(selectedShot, snapshot) : "";
   const experimentModelRecord = models.find((model) => model.id === experimentModel);
   const imageArtifacts = (snapshot?.artifacts ?? []).filter((artifact) => artifact.mime_type.startsWith("image/"));
@@ -245,6 +258,7 @@ export function ProfessionalWorkbench({
         shot_type: selectedShot.shot_type,
         camera_move: selectedShot.camera_move ?? "static",
         dialogue: selectedShot.dialogue,
+        duration_seconds: selectedDuration,
       });
       const savedShot = saved && "shot" in saved ? saved.shot : saved;
       const revisionId = saved && "revision_id" in saved ? saved.revision_id : null;
@@ -258,6 +272,7 @@ export function ProfessionalWorkbench({
         setProposalImpacts((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${selectedId}:`))));
       }
       setSavedDrafts((current) => ({ ...current, [selectedId]: selectedText }));
+      setSavedDurationDrafts((current) => ({ ...current, [selectedId]: selectedDuration }));
       setSaveMessage(savedShot ? `画布版本已保存（v${savedShot.version}）。后续执行将以这份正式镜头语义为事实源。` : "画布版本已保存。后续执行将以这份正式镜头语义为事实源。");
     } catch (error) {
       setSaveMessage(error instanceof Error ? `保存失败：${error.message}` : "保存失败，请重试。");
@@ -342,6 +357,7 @@ export function ProfessionalWorkbench({
               <div className="canvas-editor panel">
                 <div className="panel-header"><div><span className="director-stage-kicker">导演语义</span><h3>正式画布内容</h3></div><span className={isDirty ? "canvas-dirty" : "canvas-saved"}>{isDirty ? "有未保存变更" : "已保存"}</span></div>
                 <textarea aria-label="镜头导演语义" value={selectedText} onChange={(event) => { setDrafts((current) => ({ ...current, [selectedId]: event.target.value })); setSaveMessage(null); }} rows={5} />
+                <label className="canvas-duration-field">镜头时长（秒）<input aria-label="镜头时长（秒）" type="number" min="0.1" max="30" step="0.1" value={selectedDuration} onChange={(event) => { setDurationDrafts((current) => ({ ...current, [selectedId]: event.target.value })); setSaveMessage(null); }} /></label>
                 <div className="canvas-editor-footer"><span className="muted">手动修改不会被助手覆盖，也不会自动重跑旧结果。</span><div><button type="button" className="df-btn ghost" onClick={() => onStart?.(selectedId)} disabled={!onStart}>启动镜头</button><button type="button" className="df-btn ghost" onClick={() => onRerun?.(selectedId)} disabled={!onRerun}>局部重跑视频</button><button type="button" className="df-btn primary" onClick={() => void saveCanvas()} disabled={!isDirty || !onSave}>保存画布版本</button></div></div>
                 {saveMessage && <div className="canvas-save-message" role="status">{saveMessage}</div>}
               </div>

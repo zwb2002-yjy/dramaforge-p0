@@ -1017,6 +1017,7 @@ export type ShotRead = {
   camera_move?: string;
   visual_description: string;
   dialogue: string;
+  duration_seconds?: string;
   sort_order: number;
   status: string;
   version: number;
@@ -1040,6 +1041,7 @@ export type CanvasRevisionRead = {
   shot_type: string;
   camera_move: string;
   dialogue: string;
+  duration_seconds: string;
   source: string;
   created_at: string;
 };
@@ -1117,6 +1119,7 @@ export async function updateShotCanvas(
     shot_type: string;
     camera_move?: string;
     dialogue: string;
+    duration_seconds: string;
     source?: "user" | "assistant";
   },
 ): Promise<ShotCanvasUpdateResponse> {

@@ -435,6 +435,7 @@ function ProductionPage() {
             shot_type: input.shot_type,
             camera_move: input.camera_move,
             dialogue: input.dialogue,
+            duration_seconds: input.duration_seconds,
             source: "user",
           });
           await qc.invalidateQueries({ queryKey: ["shots", projectId] });
