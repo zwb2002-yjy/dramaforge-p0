@@ -1385,15 +1385,29 @@ async def _execute_unified_media_node_run(
         # for audit metadata, but never block a professional run on a local
         # price snapshot or turn it into a DramaForge budget gate.
         pricing_currency = _binding_pricing_currency(binding, required=False)
-        plugin = get_plugin(provider_type, protocol_profile)
         cfg = await runtime_connection_settings(session, connection=connection)
-        resolved = await ProviderRuntimeResolver(session).resolve(
-            plugin=plugin,
-            connection=connection,
-            binding=binding,
-            entry=entry,
+        resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_model_binding(
+            model_binding_id=binding.id,
             settings=cfg,
         )
+        # Consume the identity returned by the binding-based resolver. The
+        # Professional path must not reconstruct runtime from provider/media or
+        # select a sibling seed manifest after model resolution.
+        if (
+            resolved.binding is None
+            or resolved.catalog_entry is None
+            or resolved.invoke_model_value is None
+        ):
+            raise ValidationAppError(
+                "binding-based runtime resolution returned incomplete identity",
+                details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
+            )
+        connection = resolved.connection
+        binding = resolved.binding
+        entry = resolved.catalog_entry
+        invoke_model_value = resolved.invoke_model_value
+        provider_type = connection.provider_type
+        protocol_profile = connection.protocol_profile
         runtime = resolved.runtime
         manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
         compiled: CompiledImageRequest | CompiledVideoRequest
