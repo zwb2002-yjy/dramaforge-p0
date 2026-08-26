@@ -722,3 +722,48 @@ async def create_production_experiment(
         experiment_type=experiment.experiment_type,
         status=experiment.status,
     )
+
+
+class ExperimentAdoptBody(BaseModel):
+    scope: Literal[
+        "current_result_only",
+        "keyframe_only",
+        "keyframe_and_rerun_video",
+        "design_only",
+        "full_shot",
+    ]
+
+
+class ExperimentAdoptRead(BaseModel):
+    id: UUID
+    status: str
+    adopted_scope: str
+
+
+@router.post(
+    "/projects/{project_id}/experiments/{experiment_id}/adopt",
+    response_model=ExperimentAdoptRead,
+)
+async def adopt_experiment(
+    project_id: UUID,
+    experiment_id: UUID,
+    body: ExperimentAdoptBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> ExperimentAdoptRead:
+    """Adopt selected experiment results onto the formal line (03 §50)."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    experiment = await ExperimentService(session).adopt_experiment(
+        project=project,
+        experiment_id=experiment_id,
+        scope=body.scope,
+    )
+    await session.commit()
+    return ExperimentAdoptRead(
+        id=experiment.id,
+        status=experiment.status,
+        adopted_scope=body.scope,
+    )

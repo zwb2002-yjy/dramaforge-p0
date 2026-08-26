@@ -351,3 +351,113 @@ async def test_create_model_swap_experiment_recompiles(session: AsyncSession) ->
     assert shot_exp.model_overrides["video.shot"] == "agnes-video-v2.0"
     assert "model_swap_recompile" in (shot_exp.comparison or {})
     assert isinstance(shot_exp.comparison["model_swap_recompile"], dict)
+
+
+
+async def _seed_experiment_with_results(
+    session: AsyncSession,
+    *,
+    project: Project,
+    user: User,
+    keyframe_artifact_id,
+    video_artifact_id,
+    shot: Shot,
+) -> object:
+    from app.production.experiment_service import ExperimentService
+
+    experiment = await ExperimentService(session).create_experiment(
+        project=project,
+        actor=user,
+        experiment_input=ExperimentCreateInput(
+            name="adopt-me",
+            shot_ids=[shot.id],
+            idempotency_key=f"adopt-{uuid4().hex}",
+        ),
+    )
+    shot_exp = (
+        await session.execute(
+            select(ShotExperiment).where(
+                ShotExperiment.production_experiment_id == experiment.id
+            )
+        )
+    ).scalars().one()
+    shot_exp.keyframe_artifact_id = keyframe_artifact_id
+    shot_exp.video_artifact_id = video_artifact_id
+    await session.flush()
+    return experiment
+
+
+@pytest.mark.asyncio
+async def test_adopt_keyframe_only_keeps_old_video(session: AsyncSession) -> None:
+    project, user = await _seed(session)
+    shot = await _shot(session, project=project)
+    old_video = uuid4()
+    shot.formal_video_artifact_id = old_video
+    await session.flush()
+    new_keyframe = uuid4()
+    experiment = await _seed_experiment_with_results(
+        session,
+        project=project,
+        user=user,
+        keyframe_artifact_id=new_keyframe,
+        video_artifact_id=uuid4(),
+        shot=shot,
+    )
+    await ExperimentService(session).adopt_experiment(
+        project=project,
+        experiment_id=experiment.id,
+        scope="keyframe_only",
+    )
+    await session.refresh(shot)
+    assert shot.formal_keyframe_artifact_id == new_keyframe
+    assert shot.formal_video_artifact_id == old_video  # old video preserved
+    shot_exp = (
+        await session.execute(
+            select(ShotExperiment).where(
+                ShotExperiment.production_experiment_id == experiment.id
+            )
+        )
+    ).scalars().one()
+    assert shot_exp.comparison["adoption"]["scope"] == "keyframe_only"
+
+
+@pytest.mark.asyncio
+async def test_adopt_full_shot_and_rerun_video(session: AsyncSession) -> None:
+    project, user = await _seed(session)
+    shot = await _shot(session, project=project)
+    new_keyframe = uuid4()
+    new_video = uuid4()
+    experiment = await _seed_experiment_with_results(
+        session,
+        project=project,
+        user=user,
+        keyframe_artifact_id=new_keyframe,
+        video_artifact_id=new_video,
+        shot=shot,
+    )
+    service = ExperimentService(session)
+    await service.adopt_experiment(
+        project=project,
+        experiment_id=experiment.id,
+        scope="full_shot",
+    )
+    await session.refresh(shot)
+    assert shot.formal_keyframe_artifact_id == new_keyframe
+    assert shot.formal_video_artifact_id == new_video
+
+    # rerun video clears the formal video for regeneration
+    experiment2 = await _seed_experiment_with_results(
+        session,
+        project=project,
+        user=user,
+        keyframe_artifact_id=new_keyframe,
+        video_artifact_id=new_video,
+        shot=shot,
+    )
+    await service.adopt_experiment(
+        project=project,
+        experiment_id=experiment2.id,
+        scope="keyframe_and_rerun_video",
+    )
+    await session.refresh(shot)
+    assert shot.formal_video_artifact_id is None

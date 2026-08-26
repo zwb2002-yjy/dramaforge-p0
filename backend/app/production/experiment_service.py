@@ -8,7 +8,8 @@ the formal shot.
 
 from __future__ import annotations
 
-from typing import cast
+from datetime import UTC, datetime
+from typing import Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -96,6 +97,21 @@ def recompile_controls_for_model(
         "unsupported_controls": [r.model_dump(mode="json") for r in compiled.unsupported],
         "translation_report": {},
     }
+
+
+AdoptScope = Literal[
+    "current_result_only",
+    "keyframe_only",
+    "keyframe_and_rerun_video",
+    "design_only",
+    "full_shot",
+]
+
+_ADOPT_KEYFRAME = frozenset(
+    {"current_result_only", "keyframe_only", "keyframe_and_rerun_video", "full_shot"}
+)
+_ADOPT_VIDEO = frozenset({"current_result_only", "full_shot"})
+_ADOPT_DESIGN = frozenset({"design_only", "full_shot"})
 
 
 class ExperimentService:
@@ -296,3 +312,69 @@ class ExperimentService:
             entry.capability_manifest_json
         )
         return to_v3_model_manifest(capability_manifest, transport_profile_id="experiment")
+
+    async def adopt_experiment(
+        self,
+        *,
+        project: Project,
+        experiment_id: UUID,
+        scope: AdoptScope,
+    ) -> ProductionExperiment:
+        """P5-06: adopt selected experiment results onto the formal line.
+
+        Never rewrites history: adoption copies the chosen results onto the formal
+        shot (keyframe / video / design). ``keyframe_only`` keeps the previous
+        formal video and marks it as based on a stale keyframe.
+        """
+        experiment = await self._session.scalar(
+            select(ProductionExperiment).where(
+                ProductionExperiment.id == experiment_id,
+                ProductionExperiment.project_id == project.id,
+            )
+        )
+        if experiment is None:
+            raise ValidationAppError(
+                "experiment not found in project",
+                details={"code": "EXPERIMENT_NOT_FOUND"},
+            )
+        shot_experiments = (
+            await self._session.execute(
+                select(ShotExperiment).where(
+                    ShotExperiment.production_experiment_id == experiment.id
+                )
+            )
+        ).scalars().all()
+        for shot_exp in shot_experiments:
+            shot = await self._session.get(Shot, shot_exp.shot_id)
+            if shot is None or shot.project_id != project.id:
+                continue
+            changed: list[str] = []
+            if scope in _ADOPT_KEYFRAME and shot_exp.keyframe_artifact_id is not None:
+                shot.formal_keyframe_artifact_id = shot_exp.keyframe_artifact_id
+                shot.version = (shot.version or 1) + 1
+                changed.append("keyframe")
+            if scope in _ADOPT_VIDEO and shot_exp.video_artifact_id is not None:
+                shot.formal_video_artifact_id = shot_exp.video_artifact_id
+                shot.version = (shot.version or 1) + 1
+                changed.append("video")
+            if scope == "keyframe_and_rerun_video":
+                shot.formal_video_artifact_id = None
+                shot.version = (shot.version or 1) + 1
+                changed.append("video_rerun_pending")
+            if scope in _ADOPT_DESIGN:
+                shot.director_state = dict(shot_exp.director_state or {})
+                prompts = dict(shot_exp.prompts or {})
+                if prompts.get("image_prompt") is not None:
+                    shot.image_prompt = str(prompts["image_prompt"])
+                if prompts.get("video_prompt") is not None:
+                    shot.video_prompt = str(prompts["video_prompt"])
+                shot.version = (shot.version or 1) + 1
+                changed.append("design")
+            comparison = dict(shot_exp.comparison or {})
+            comparison["adoption"] = {"scope": scope, "changed": changed}
+            shot_exp.comparison = comparison
+        experiment.status = "adopted"
+        experiment.decided_at = datetime.now(UTC)
+        await self._session.flush()
+        return experiment
+
