@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETED
 - **Program order:** `MS5-IDENTITY-A` → `MS5-IDENTITY-B` → `MS5-IDENTITY-C` → Phase 4 Merge Gate
 - **Task boundary:** Add immutable ProviderConnection revisions and freeze the revision identity on newly submitted Professional ProviderOperations. Do not implement ExecutionIdentitySnapshot, worker restart/resume reconstruction, poll/cancel runtime rebuilding, or Phase 4 merge work here.
 
@@ -75,15 +75,29 @@ Persist a lightweight immutable `ProviderConnectionRevision` for every effective
 - Worker restart/resume/poll/cancel reconstruction from frozen revisions.
 - New runtime/worker/generation abstractions, real Provider traffic, paid calls, or unrelated schema cleanup.
 
-## Verification gate
+## Completion evidence
 
-- Focused revision-creation and operation-freeze tests pass, including:
-  - initial revision 1;
-  - credential/base URL changes produce revision 2 while old revision remains unchanged;
-  - display/enabled-only changes do not create a revision;
-  - a retry keeps the original operation revision after the connection moves to revision 2;
-  - cross-workspace/foreign credential linkage fails closed.
-- Existing backend unit suite passes.
-- `ruff check app tests alembic/versions`, `mypy app`, directory compliance, migration offline SQL generation, and `git diff --check` pass.
-- PostgreSQL integration runs only when configured and reachable; otherwise record a truthful skip.
-- Record the exact commit and next bounded task (`MS5-IDENTITY-C`).
+- Added `ProviderConnectionRevision` ORM/table with immutable execution facts:
+  connection id, positive per-connection revision number, provider type,
+  protocol profile, base URL, and concrete credential revision id. The
+  migration `20260826_0042_provider_connection_revisions.py` backfills
+  revision 1 for existing connections, adds restrictive foreign keys,
+  uniqueness/check constraints, workspace-scoped RLS, and the nullable indexed
+  `ProviderOperation.provider_connection_revision_id` field.
+- `ProviderConnectionService.create_connection()` creates revision 1;
+  credential, base URL, and execution-relevant protocol changes create the
+  next revision; display-name and enabled-only changes do not. Credential
+  linkage is checked against the same workspace and plugin credential key.
+- New Professional unified ProviderOperations resolve and persist the current
+  connection revision immediately before first submission. Existing retries
+  retain their stored revision id and do not re-resolve current connection
+  configuration.
+- Focused revision/unified/provider tests: `26 passed, 1 warning`; backend unit
+  suite: `713 passed, 1 warning`; `ruff check app tests alembic/versions`,
+  `mypy app`, directory compliance, compile checks, offline migration SQL, and
+  `git diff --check` passed. PostgreSQL integration remains a truthful skip:
+  `TEST_PG_ENABLED` is unset and `127.0.0.1:5432` is unreachable.
+- Implementation commit: `db7f188` on local `dev`. The checkpoint update is
+  intentionally carried by the next bounded C contract because the initial
+  B ledger event predates the correctly encoded checkpoint path. Next task:
+  `MS5-IDENTITY-C` (Execution Identity Freeze / resume identity).
