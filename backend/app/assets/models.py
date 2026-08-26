@@ -285,3 +285,76 @@ class CharacterReference(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class AssetVersionReference(Base):
+    """Immutable artifact reference pinned to a specific asset version.
+
+    Phase 2: the canonical reference source for execution. Old
+    ``CharacterReference`` rows remain readable during the migration window and
+    are merged by ``AssetCardReadService`` without duplication.
+    """
+
+    __tablename__ = "asset_version_references"
+    __table_args__ = (
+        UniqueConstraint(
+            "asset_version_id",
+            "artifact_id",
+            name="uq_asset_version_reference_artifact",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    asset_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("asset_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    artifact_id: Mapped[UUID] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=False
+    )
+    reference_role: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str] = mapped_column(String(160), nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(
+        "metadata", JSON, nullable=False, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AssetTag(Base):
+    """Project-scoped tag vocabulary for asset filtering (V1: kind/tags/status/name)."""
+
+    __tablename__ = "asset_tags"
+    __table_args__ = (
+        UniqueConstraint("project_id", "normalized_name", name="uq_asset_tag_project_name"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AssetTagLink(Base):
+    """Many-to-many asset <-> tag link."""
+
+    __tablename__ = "asset_tag_links"
+
+    asset_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assets.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag_id: Mapped[UUID] = mapped_column(
+        ForeignKey("asset_tags.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

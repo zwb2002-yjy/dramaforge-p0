@@ -20,6 +20,7 @@ from app.api.v1 import (
     projects,
     provider_connections,
     provider_references,
+    references,
     review,
     scripts,
     shot_ops,
@@ -41,6 +42,7 @@ api_router.include_router(characters.router)
 api_router.include_router(credentials.router)
 api_router.include_router(provider_connections.router)
 api_router.include_router(provider_references.router)
+api_router.include_router(references.router)
 api_router.include_router(model_candidates.router)
 api_router.include_router(generations.router)
 api_router.include_router(model_profiles.router)

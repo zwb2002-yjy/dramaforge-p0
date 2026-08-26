@@ -7,7 +7,15 @@ import json
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -158,3 +166,104 @@ def assert_graph_version_mutable(version: GraphVersion) -> None:
 # Backward-compatible alias used by older imports during transition.
 Graph = ProductionGraph
 
+
+
+SHOT_REFERENCE_PURPOSES = (
+    "identity",
+    "clothing",
+    "scene_layout",
+    "scene_lighting",
+    "style",
+    "action",
+    "pose",
+    "camera_language",
+    "audio_rhythm",
+    "first_frame",
+    "last_frame",
+    "generic_reference",
+)
+SHOT_REFERENCE_STAGES = ("image", "video", "both")
+SHOT_REFERENCE_RESOLUTION_MODES = ("current_formal", "pinned_version", "direct_artifact")
+
+
+class ShotReferenceBinding(Base):
+    """Business-purpose reference from a shot to an asset/version/artifact.
+
+    The reference stores the *purpose* (identity/clothing/scene_layout/...) not
+    a provider role. Prompt ``@name`` text is human-readable only; execution
+    resolves this binding to a concrete artifact via ``resolution_mode``.
+    """
+
+    __tablename__ = "shot_reference_bindings"
+    __table_args__ = (
+        CheckConstraint(
+            "asset_id IS NOT NULL OR asset_version_id IS NOT NULL OR artifact_id IS NOT NULL",
+            name="ck_shot_reference_binding_source",
+        ),
+        CheckConstraint(
+            "(resolution_mode <> 'direct_artifact') OR artifact_id IS NOT NULL",
+            name="ck_shot_reference_binding_direct_artifact",
+        ),
+        CheckConstraint(
+            "(resolution_mode <> 'pinned_version') OR asset_version_id IS NOT NULL",
+            name="ck_shot_reference_binding_pinned_version",
+        ),
+        CheckConstraint(
+            "(resolution_mode <> 'current_formal') OR asset_id IS NOT NULL",
+            name="ck_shot_reference_binding_current_formal",
+        ),
+        CheckConstraint(
+            "stage IN ('image', 'video', 'both')",
+            name="ck_shot_reference_binding_stage",
+        ),
+        CheckConstraint(
+            "resolution_mode IN ('current_formal', 'pinned_version', 'direct_artifact')",
+            name="ck_shot_reference_binding_resolution_mode",
+        ),
+        CheckConstraint(
+            "purpose IN ('identity', 'clothing', 'scene_layout', 'scene_lighting', "
+            "'style', 'action', 'pose', 'camera_language', 'audio_rhythm', "
+            "'first_frame', 'last_frame', 'generic_reference')",
+            name="ck_shot_reference_binding_purpose",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    shot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("shots.id", ondelete="RESTRICT"), nullable=False
+    )
+    shot_experiment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("experiment_branches.id", ondelete="SET NULL"), nullable=True
+    )
+    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="both")
+    asset_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT"), nullable=True
+    )
+    asset_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("asset_versions.id", ondelete="RESTRICT"), nullable=True
+    )
+    artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
+    )
+    resolution_mode: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="current_formal"
+    )
+    purpose: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str] = mapped_column(String(160), nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(
+        "metadata", JSON, nullable=False, default=dict
+    )
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

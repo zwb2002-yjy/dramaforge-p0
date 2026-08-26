@@ -1,0 +1,138 @@
+"""P2-02 AssetCardReadService: version references + legacy CharacterReference merge."""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.access.models import User
+from app.access.projects import ProjectService
+from app.assets.models import (
+    Asset,
+    AssetVersion,
+    AssetVersionReference,
+    Character,
+    CharacterReference,
+)
+from app.shared.errors import NotFoundError
+
+
+class AssetCardReadService:
+    """Reads the merged asset card fact.
+
+    Migration window: version references are authoritative; legacy
+    ``CharacterReference`` rows are only merged for artifacts that the new
+    references do not already cover, so the same Artifact is never returned
+    twice. ``CharacterReference`` is never deleted.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def _require_project(self, *, project_id: UUID, actor: User) -> None:
+        await ProjectService(self._session).get_project_for_owner(
+            project_id=project_id, actor=actor
+        )
+
+    async def _get_asset(
+        self, *, project_id: UUID, asset_id: UUID, actor: User
+    ) -> Asset:
+        await self._require_project(project_id=project_id, actor=actor)
+        asset = (
+            await self._session.execute(
+                select(Asset).where(
+                    Asset.id == asset_id, Asset.project_id == project_id
+                )
+            )
+        ).scalar_one_or_none()
+        if asset is None:
+            raise NotFoundError("asset not found")
+        return asset
+
+    async def read_card(
+        self, *, project_id: UUID, asset_id: UUID, actor: User
+    ) -> dict[str, object]:
+        asset = await self._get_asset(project_id=project_id, asset_id=asset_id, actor=actor)
+        current: AssetVersion | None = None
+        if asset.current_version_id is not None:
+            current = (
+                await self._session.execute(
+                    select(AssetVersion).where(
+                        AssetVersion.id == asset.current_version_id,
+                        AssetVersion.project_id == project_id,
+                    )
+                )
+            ).scalar_one_or_none()
+
+        references: list[dict[str, object]] = []
+        seen_artifacts: set[UUID] = set()
+        if current is not None:
+            version_rows = (
+                await self._session.execute(
+                    select(AssetVersionReference)
+                    .where(
+                        AssetVersionReference.project_id == project_id,
+                        AssetVersionReference.asset_version_id == current.id,
+                    )
+                    .order_by(
+                        AssetVersionReference.sort_order,
+                        AssetVersionReference.label,
+                    )
+                )
+            ).scalars().all()
+            for version_ref in version_rows:
+                references.append(
+                    {
+                        "artifact_id": version_ref.artifact_id,
+                        "reference_role": version_ref.reference_role,
+                        "label": version_ref.label,
+                        "sort_order": version_ref.sort_order,
+                        "metadata": dict(version_ref.metadata_json),
+                        "source": "version",
+                    }
+                )
+                seen_artifacts.add(version_ref.artifact_id)
+
+        legacy_rows = (
+            await self._session.execute(
+                select(CharacterReference)
+                .join(Character, Character.id == CharacterReference.character_id)
+                .where(
+                    Character.id == asset.id,
+                    CharacterReference.artifact_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+        for legacy_ref in legacy_rows:
+            if legacy_ref.artifact_id is None or legacy_ref.artifact_id in seen_artifacts:
+                continue
+            references.append(
+                {
+                    "artifact_id": legacy_ref.artifact_id,
+                    "reference_role": (
+                        "primary" if legacy_ref.is_canonical else "legacy"
+                    ),
+                    "label": "",
+                    "sort_order": 0,
+                    "metadata": {},
+                    "source": "legacy",
+                }
+            )
+            seen_artifacts.add(legacy_ref.artifact_id)
+
+        return {
+            "asset_id": asset.id,
+            "project_id": asset.project_id,
+            "kind": asset.kind,
+            "name": asset.name,
+            "description": asset.description,
+            "status": asset.status,
+            "version": asset.version,
+            "metadata": dict(asset.metadata_json),
+            "current_version_id": asset.current_version_id,
+            "current_version_number": current.version_number if current else None,
+            "current_version_status": current.status if current else None,
+            "references": references,
+        }
