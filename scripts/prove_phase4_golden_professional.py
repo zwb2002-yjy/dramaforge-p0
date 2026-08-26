@@ -81,13 +81,21 @@ def wait_for_run(
     deadline = time.monotonic() + timeout_seconds
     last: dict[str, Any] = {}
     while time.monotonic() < deadline:
-        run = require_ok(
-            client.get(f"{base}/projects/{project_id}/runs/{run_id}", headers=headers),
-            "get run",
+        trace = require_ok(
+            client.get(
+                f"{base}/projects/{project_id}/runs/{run_id}/trace", headers=headers
+            ),
+            "get run trace",
         )
-        last = run
-        if run.get("status") in {"completed", "failed", "blocked", "cancelled"}:
-            return run
+        last = trace
+        status = trace.get("status")
+        if status in {"completed", "failed", "blocked", "cancelled"}:
+            artifact = trace.get("artifact") or {}
+            return {
+                "status": status,
+                "result_artifact_id": artifact.get("artifact_id"),
+                "trace": trace,
+            }
         time.sleep(3)
     raise TimeoutError(f"timed out waiting for run {run_id}; last={json.dumps(last)[:500]}")
 
@@ -121,28 +129,25 @@ def main() -> int:
 
     client = httpx.Client(base_url=base, timeout=60)
     try:
-        # 1) auth
-        try:
-            client.post(
-                "/auth/register",
-                json={"email": email, "password": password, "display_name": "Golden P4"},
+        # 1) auth: cookie session + CSRF + explicit workspace (current API).
+        bootstrap = require_ok(client.get("/auth/bootstrap-status"), "bootstrap-status")
+        if bootstrap.get("owner_initialized"):
+            require_ok(
+                client.post("/auth/login", json={"email": email, "password": password}),
+                "login",
             )
-        except Exception:  # noqa: BLE001
-            pass  # may already exist
-        login = require_ok(
-            client.post("/auth/login", json={"email": email, "password": password}),
-            "login",
-        )
-        token = login.get("access_token") or login.get("token")
-        if not token:
-            report["blockers"].append("login did not return a token")
-            step("auth", False, "no token")
-            _write_report(args.out, report)
-            return 2
-        headers = {"Authorization": f"Bearer {token}"}
-        workspaces = require_ok(client.get("/workspaces", headers=headers), "workspaces")
+        else:
+            require_ok(
+                client.post(
+                    "/auth/register",
+                    json={"email": email, "password": password, "display_name": "Golden P4"},
+                ),
+                "register",
+            )
+        csrf = require_ok(client.get("/auth/csrf"), "csrf")["csrf_token"]
+        workspaces = require_ok(client.get("/workspaces"), "workspaces")
         workspace_id = str(workspaces[0]["id"])
-        headers["X-Workspace-Id"] = workspace_id
+        headers = {"X-CSRF-Token": csrf, "X-Workspace-Id": workspace_id}
         step("auth", True, workspace_id)
 
         # 2) project
@@ -192,23 +197,30 @@ def main() -> int:
         )
         step("profile", True, f"video={model_b}")
 
-        # 5) create a shot (scene + shot)
-        scene = require_ok(
+        # 5) create scene + shot via script import (current API).
+        _ = require_ok(
             client.post(
-                f"/projects/{project_id}/scenes",
+                f"/projects/{project_id}/scripts/import",
                 headers=headers,
-                json={"name": "Golden Scene", "location_name": "Studio", "scene_number": 1},
+                json={
+                    "filename": "golden-p4.md",
+                    "text": (
+                        "# Episode 1 - Golden\n\n"
+                        "Lead: Lin Xia\n\n"
+                        "## Scene 1 - Studio / day\n"
+                        "Golden scene.\n\n"
+                        "### Shot 1 - medium\n"
+                        "Visual: character portrait\n"
+                        "Dialogue:\n"
+                        "Camera: static\n"
+                    ),
+                    "register_lead": False,
+                },
             ),
-            "create scene",
+            "import script",
         )
-        shot = require_ok(
-            client.post(
-                f"/projects/{project_id}/scenes/{scene['id']}/shots",
-                headers=headers,
-                json={"shot_number": 1, "visual_description": "Golden shot"},
-            ),
-            "create shot",
-        )
+        shots = require_ok(client.get(f"/projects/{project_id}/shots", headers=headers), "list shots")
+        shot = next((item for item in shots if item["id"]), shots[0])
         shot_id = str(shot["id"])
         step("shot", True, shot_id)
 
@@ -420,10 +432,11 @@ def _count_ops(
     project_id: str,
     headers: dict[str, str],
 ) -> int:
-    """Count provider operations for the project (best-effort via ops endpoint)."""
+    """Count provider operations for the project via the snapshot."""
     try:
-        ops = require_ok(client.get(f"/projects/{project_id}/operations", headers=headers), "ops")
-        return len(ops or [])
+        snap = require_ok(client.get(f"/projects/{project_id}/snapshot", headers=headers), "snapshot")
+        ops = snap.get("provider_operations") or []
+        return len(ops)
     except Exception:  # noqa: BLE001
         return -1
 

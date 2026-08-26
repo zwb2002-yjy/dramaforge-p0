@@ -1,0 +1,385 @@
+{
+  "schema_version": 1,
+  "proof": "professional-agnes-real-provider-golden-v1",
+  "started_at_utc": "2026-08-26T22:49:21.007212+00:00",
+  "source_commit": "01b53c00b21d59dc3a374a6fede2132486d711f8",
+  "dirty": true,
+  "paid_provider_calls": 2,
+  "provider_raw_cost_fields": [],
+  "steps": {
+    "canvas_duration": {
+      "duration_seconds": "5.000",
+      "canvas_version": 2
+    },
+    "keyframe_start": {
+      "run_ids": [
+        "c2681590-dfab-4129-9914-ed1bdd40aaa9",
+        "03c18543-44f2-40ae-ab37-84868a7bf971",
+        "e44aec99-7d42-4668-a82e-c7ab90345bfc"
+      ],
+      "job_ids": [
+        "node-run:496e56062150:c2681590-dfab-4129-9914-ed1bdd40aaa9",
+        "node-run:a2ff6d82be9c:03c18543-44f2-40ae-ab37-84868a7bf971",
+        "node-run:496e56062150:e44aec99-7d42-4668-a82e-c7ab90345bfc"
+      ]
+    },
+    "keyframe": {
+      "runs": [
+        {
+          "id": "e44aec99-7d42-4668-a82e-c7ab90345bfc",
+          "attempt_no": 1,
+          "status": "completed",
+          "node_key": "identity_review",
+          "result_artifact_id": "6663ec96-c77e-4f81-9dd7-f347dcf152e4",
+          "error_code": null,
+          "error_summary": null,
+          "input_hash": "1957f85497cae0246720dd39d5258b07e7765772e205958b0dcb9e24672b9e96",
+          "duration_seconds": "5.000",
+          "execution_branch": "formal",
+          "professional_trial_bootstrap_allowed": true,
+          "model_binding_id": null,
+          "model_profile": {},
+          "canonical_artifact_id": null
+        },
+        {
+          "id": "c2681590-dfab-4129-9914-ed1bdd40aaa9",
+          "attempt_no": 1,
+          "status": "completed",
+          "node_key": "prompt",
+          "result_artifact_id": "d0b30bba-e47c-49bc-ba4c-d59d81bfa385",
+          "error_code": null,
+          "error_summary": null,
+          "input_hash": "2af9c8862f7ee3e7347839036abe269ada43150a938bb82b19683511d63460e3",
+          "duration_seconds": "5.000",
+          "execution_branch": "formal",
+          "professional_trial_bootstrap_allowed": true,
+          "model_binding_id": null,
+          "model_profile": {},
+          "canonical_artifact_id": null
+        },
+        {
+          "id": "03c18543-44f2-40ae-ab37-84868a7bf971",
+          "attempt_no": 1,
+          "status": "completed",
+          "node_key": "keyframe",
+          "result_artifact_id": "96f5648f-8848-49d0-9ffc-f8a5658941a9",
+          "error_code": null,
+          "error_summary": null,
+          "input_hash": "04943b2daadc62e8b793aef1eaf5ee0211f9d958bd466fc715eefa8b7b1a4f8e",
+          "duration_seconds": "5.000",
+          "execution_branch": "formal",
+          "professional_trial_bootstrap_allowed": true,
+          "model_binding_id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+          "model_profile": {
+            "slot": "visual.keyframe",
+            "source": "system_default",
+            "model_id": "agnes/agnes-image-2.1-flash",
+            "capability": "image.generate",
+            "profile_id": null,
+            "native_options": {},
+            "profile_version": null
+          },
+          "canonical_artifact_id": null
+        }
+      ]
+    },
+    "video_start": {
+      "run_ids": [
+        "7b43e703-7647-456c-a65b-30068c6ba1b3"
+      ],
+      "job_ids": [
+        "node-run:a2ff6d82be9c:7b43e703-7647-456c-a65b-30068c6ba1b3"
+      ]
+    },
+    "video": {
+      "runs": [
+        {
+          "id": "7b43e703-7647-456c-a65b-30068c6ba1b3",
+          "attempt_no": 1,
+          "status": "completed",
+          "node_key": "video",
+          "result_artifact_id": "99777ef0-b4c1-403f-a9f1-f78c38e64f56",
+          "error_code": null,
+          "error_summary": null,
+          "input_hash": "42cb6c34a89bf939c9070aba9fce26b749c2837c309cadc77ba3b97faa69521c",
+          "duration_seconds": "5.000",
+          "execution_branch": "formal",
+          "professional_trial_bootstrap_allowed": true,
+          "model_binding_id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+          "model_profile": {
+            "slot": "video.shot",
+            "source": "system_default",
+            "model_id": "agnes/agnes-video-v2.0",
+            "capability": "video.image_to_video",
+            "profile_id": null,
+            "native_options": {},
+            "profile_version": null
+          },
+          "canonical_artifact_id": null
+        }
+      ]
+    }
+  },
+  "workspace_id": "c00b1899-b4ac-46c7-b4c7-25a230e9ebe2",
+  "project_id": "bea2fa3e-a2b8-4c28-964a-6d99b7f88b2c",
+  "shot_id": "e14d579a-e3b3-4945-b68b-0451b8b0108e",
+  "provider": {
+    "connection_id": "be635b80-72f2-4beb-85d1-fad4e488627d",
+    "connection_verification_status": "verified",
+    "bindings": {
+      "keyframe": {
+        "id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+        "model_id": "agnes-image-2.1-flash",
+        "purpose": "keyframe",
+        "account_verified": true,
+        "quality_gated": false,
+        "catalog_entry_id": "54968d1a-b018-4e3c-8de6-a8484a0f2dc4",
+        "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c"
+      },
+      "video": {
+        "id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+        "model_id": "agnes-video-v2.0",
+        "purpose": "video",
+        "account_verified": true,
+        "quality_gated": false,
+        "catalog_entry_id": "e5227118-9774-4d97-91f3-903d0203b355",
+        "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025"
+      }
+    }
+  },
+  "artifacts": [
+    {
+      "id": "99777ef0-b4c1-403f-a9f1-f78c38e64f56",
+      "content_hash": "12a5cd192af613b99482b184202bc0f726e6787aac97fe4e75ce1d991f2307ba",
+      "mime_type": "video/mp4",
+      "byte_size": 702291,
+      "width": 704,
+      "height": 1280,
+      "duration_seconds": "5.042",
+      "produced_by_run_id": "7b43e703-7647-456c-a65b-30068c6ba1b3"
+    },
+    {
+      "id": "6663ec96-c77e-4f81-9dd7-f347dcf152e4",
+      "content_hash": "f31423372be06176f42173612ef2a9c2f89b6dab8082cd0e75b2e798423ebc26",
+      "mime_type": "application/json",
+      "byte_size": 379,
+      "width": null,
+      "height": null,
+      "duration_seconds": null,
+      "produced_by_run_id": "e44aec99-7d42-4668-a82e-c7ab90345bfc"
+    },
+    {
+      "id": "96f5648f-8848-49d0-9ffc-f8a5658941a9",
+      "content_hash": "32dcfaf098f2b8e34c01bf59b00f4f628d1080d2db87286f8b0e37511d8f622b",
+      "mime_type": "image/png",
+      "byte_size": 1299970,
+      "width": 736,
+      "height": 1312,
+      "duration_seconds": null,
+      "produced_by_run_id": "03c18543-44f2-40ae-ab37-84868a7bf971"
+    },
+    {
+      "id": "d0b30bba-e47c-49bc-ba4c-d59d81bfa385",
+      "content_hash": "bb10243288d01be20c14d24788a2d8c7fa15378be79ebd77036160fd1b7d186d",
+      "mime_type": "application/json",
+      "byte_size": 117,
+      "width": null,
+      "height": null,
+      "duration_seconds": null,
+      "produced_by_run_id": "c2681590-dfab-4129-9914-ed1bdd40aaa9"
+    }
+  ],
+  "provider_operations": [
+    {
+      "id": "2214ea4a-d95f-44f1-bcf2-dd2df203fd68",
+      "node_run_id": "7b43e703-7647-456c-a65b-30068c6ba1b3",
+      "operation_kind": "video.generate",
+      "actual_provider": "agnes",
+      "actual_model": "agnes-video-v2.0",
+      "provider_request_id": "video_bGl0ZWxsbTpjdXN0b21fbGxtX3Byb3ZpZGVyOm9wZW5haTttb2RlbF9pZDphZ25lcy12aWRlby12Mi4wO3ZpZGVvX2lkOnZpZGVvXzAyNTJkNGZiMTIwNTRhYmY5YTU0ZjYzNjQ2ZDMyOThh",
+      "protocol_profile": "agnes_cn_v1",
+      "status": "succeeded",
+      "request_fingerprint": "1dbb4afc28571aa750603fe917390d95928195c4d479584a6a3d61c17b3eef62",
+      "request_summary": {
+        "kind": "video",
+        "execution_path": "unified-v1",
+        "compiled_request": {
+          "model": "agnes-video-v2.0",
+          "operation": "video.i2v",
+          "frame_rate": 24,
+          "num_frames": 121,
+          "aspect_ratio": "9:16",
+          "native_audio": false,
+          "duration_seconds": 5,
+          "reference_artifact_ids": [
+            "96f5648f-8848-49d0-9ffc-f8a5658941a9"
+          ],
+          "reference_fingerprints": [
+            "32dcfaf098f2b8e34c01bf59b00f4f628d1080d2db87286f8b0e37511d8f622b"
+          ],
+          "request_schema_version": "2026-08-10"
+        },
+        "effective_request": {
+          "model_id": "agnes-video-v2.0",
+          "operation": "video.generate",
+          "common_options": {
+            "frame_rate": 24,
+            "num_frames": 121,
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          },
+          "prompt_fingerprint": "9bbc7e70eaf134ca59eeb74578938e000fb15faa4a2144c03dd01b8ce7d912d5",
+          "reference_artifact_ids": [
+            "96f5648f-8848-49d0-9ffc-f8a5658941a9"
+          ],
+          "reference_fingerprints": [
+            "32dcfaf098f2b8e34c01bf59b00f4f628d1080d2db87286f8b0e37511d8f622b"
+          ]
+        },
+        "translation_report": {
+          "warnings": [],
+          "dropped_options": [],
+          "transformations": [],
+          "effective_options": {
+            "frame_rate": 24,
+            "num_frames": 121,
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          },
+          "requested_options": {
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          }
+        },
+        "reference_artifact_ids": [
+          "96f5648f-8848-49d0-9ffc-f8a5658941a9"
+        ],
+        "reference_fingerprints": [
+          "32dcfaf098f2b8e34c01bf59b00f4f628d1080d2db87286f8b0e37511d8f622b"
+        ],
+        "frozen_model_binding_id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+        "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025"
+      },
+      "response_summary": {
+        "create_status": "created",
+        "final_status": "succeeded",
+        "poll_count": 15,
+        "query_kind": "video_id",
+        "provider_reported_cost": null,
+        "cost_status": "not_reported"
+      },
+      "model_binding_id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+      "catalog_entry_id": "e5227118-9774-4d97-91f3-903d0203b355",
+      "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025",
+      "execution_path_version": "unified-v1",
+      "provider_cost": null,
+      "currency": "USD",
+      "submitted_at": "2026-08-26T22:49:40.256699+00:00",
+      "completed_at": "2026-08-26T22:50:57.043927+00:00"
+    },
+    {
+      "id": "b75ecf4f-c544-4fef-8d0c-02dd210bc655",
+      "node_run_id": "03c18543-44f2-40ae-ab37-84868a7bf971",
+      "operation_kind": "keyframe.generate",
+      "actual_provider": "agnes",
+      "actual_model": "agnes-image-2.1-flash",
+      "provider_request_id": "agnes-image-3bc258cf-43a7-49ff-83eb-ee8ef6517789",
+      "protocol_profile": "agnes_cn_v1",
+      "status": "succeeded",
+      "request_fingerprint": "25f17989e0d60b08631376e5525a9bdeec062b544b76d94507c42745691e54f2",
+      "request_summary": {
+        "kind": "keyframe",
+        "execution_path": "unified-v1",
+        "compiled_request": {
+          "size": "1K",
+          "model": "agnes-image-2.1-flash",
+          "operation": "image.t2i",
+          "aspect_ratio": "9:16",
+          "reference_artifact_ids": [],
+          "reference_fingerprints": [],
+          "request_schema_version": "2026-08-19",
+          "translation_transformations": [
+            {
+              "field": "size",
+              "reason": "frozen_manifest_native_size_tier",
+              "to_value": "1K",
+              "from_value": null
+            }
+          ]
+        },
+        "effective_request": {
+          "model_id": "agnes-image-2.1-flash",
+          "operation": "image.generate",
+          "common_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "prompt_fingerprint": "9bbc7e70eaf134ca59eeb74578938e000fb15faa4a2144c03dd01b8ce7d912d5",
+          "reference_artifact_ids": [],
+          "reference_fingerprints": []
+        },
+        "translation_report": {
+          "warnings": [],
+          "dropped_options": [],
+          "transformations": [
+            {
+              "field": "size",
+              "reason": "frozen_manifest_native_size_tier",
+              "to_value": "1K",
+              "from_value": null
+            }
+          ],
+          "effective_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "requested_options": {
+            "size": null,
+            "aspect_ratio": "9:16"
+          }
+        },
+        "reference_artifact_ids": [],
+        "reference_fingerprints": [],
+        "frozen_model_binding_id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+        "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c"
+      },
+      "response_summary": {
+        "create_status": "created",
+        "final_status": "succeeded",
+        "poll_count": 0,
+        "query_kind": null,
+        "provider_reported_cost": null,
+        "cost_status": "not_reported"
+      },
+      "model_binding_id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+      "catalog_entry_id": "54968d1a-b018-4e3c-8de6-a8484a0f2dc4",
+      "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c",
+      "execution_path_version": "unified-v1",
+      "provider_cost": null,
+      "currency": "USD",
+      "submitted_at": "2026-08-26T22:49:27.463331+00:00",
+      "completed_at": "2026-08-26T22:49:34.014458+00:00"
+    }
+  ],
+  "opencut": {
+    "schema_version": "opencut-manifest-v2",
+    "adapter": "dramaforge-opencut-adapter-v1",
+    "timeline": {
+      "duration_seconds": "5.000",
+      "frame_rate": 24,
+      "timebase": "1/24",
+      "aspect_ratio": "9:16"
+    },
+    "track_kinds": [
+      "video",
+      "audio",
+      "subtitle"
+    ],
+    "shot_count": 1
+  },
+  "finished_at_utc": "2026-08-26T22:50:58.470280+00:00",
+  "ok": true
+}

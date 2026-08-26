@@ -19,7 +19,7 @@
 | Frontend test | `vitest run` | **91 passed** |
 | Frontend build | `vite build` | OK |
 | Playwright | `playwright test` | **14 passed**（含 P10-07 5 个新 V1 spec） |
-| Golden real-provider run | `scripts/prove_phase4_golden_professional.py` | **环境门控，未实跑**（需重建 compose → 迁移 dev 库 0040→0049 → 真实 Agnes/DeepSeek 付费调用；见文末） |
+| Golden real-provider run | `scripts/prove_professional_agnes_golden.py`（+ `scripts/prove_phase4_golden_professional.py` 契约修复） | **已实跑：ok=true，2 次真实 Agnes 付费调用**（keyframe image + video 704×1280 5.04s）；证据 `docs/reviews/GOLDEN-REAL-PROVIDER-RUN-2026-08-27.json` |
 
 ## §95 逐条核对
 
@@ -79,17 +79,18 @@
 ### 验证
 - 上表全矩阵通过；Golden real-provider run 环境门控（见下）。
 
-## Golden real-provider run（环境门控项，未实跑）
+## Golden real-provider run（已实跑）
 
-§95 验证节要求「Golden real provider run」。当前运行栈为旧镜像（postgres `20260827_0040`，无 Phase 4–9 端点），需按以下步骤执行（涉及真实 Agnes/DeepSeek 付费调用）：
+§95 验证节要求「Golden real provider run」。2026-08-27 已执行：
 
-1. 重建 compose（新镜像 / 迁移到 `20260827_0049`）。
-2. 对 dev 库执行 `alembic upgrade head`。
-3. 运行 `scripts/prove_phase4_golden_professional.py`（真实 Agnes/DeepSeek）。
-4. 证据写入 `docs/reviews/`。
-
-**状态：未执行——不伪称通过。** 代码路径已由 `test_phase10_professional_resolution_no_bypass_pg.py`（resolver 冻结 resolution → worker 消费）与 `test_execution_model_resolution_pg.py`（真实 PG 快照往返）覆盖。
+1. 重建 `dramaforge-backend:local` 镜像（当前源码）并重建 api / worker-heavy / worker-default / dispatcher 容器。
+2. dev 库 `alembic upgrade head`：`20260826_0040` → `20260827_0049`（全部 additive）。
+3. 运行 `scripts/prove_professional_agnes_golden.py`（真实 Agnes 付费调用）：
+   - **ok=true**，`paid_provider_calls=2`（keyframe image `agnes-image-2.1-flash` + video `agnes-video-v2.0`，704×1280、5.042s mp4）。
+   - 全链 prompt → keyframe → identity_review → video 均 completed；ProviderOperation succeeded；OpenCut manifest v2 生成。
+   - 证据 `docs/reviews/GOLDEN-REAL-PROVIDER-RUN-2026-08-27.json`（无 secret，经扫描）。
+4. `scripts/prove_phase4_golden_professional.py` 认证/轮询/ops/场景创建契约已更新到当前 API（cookie session + CSRF + `X-Workspace-Id`、run trace 轮询、snapshot ops、`/scripts/import`）。**已知限制**：该脚本按单节点分发（execution-plan → executions），当前 shot 管线要求上游 run 先行（keyframe 依赖 prompt），完整对齐需按产品整链启动；已由整链 golden 实跑覆盖。
 
 ## 结论
 
-除「Golden real-provider run」环境门控项外，V1 Release Gate 全部子项均有自动化证据支持，当前 `dev` 全矩阵通过。
+V1 Release Gate 全部子项均有证据支持（含 Golden real-provider run 已实跑），当前 `dev` 全矩阵通过。
