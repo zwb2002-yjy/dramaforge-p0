@@ -14,15 +14,25 @@ from typing import Any, Literal, Protocol, cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field, JsonValue, model_validator
+from sqlalchemy import select
 
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.execution_identity import (
+    ExecutionIdentitySnapshot,
+    FrozenProviderConnection,
+)
 from app.providers.intents import (
     ImageGenerationIntent,
     VideoGenerationIntentV1,
 )
 from app.providers.manifest import ModelCapabilityManifest
-from app.providers.models import ProviderConnection, ProviderModelBinding
+from app.providers.models import (
+    ProviderConnection,
+    ProviderConnectionRevision,
+    ProviderModelBinding,
+)
 from app.providers.registry import ProviderPlugin
+from app.security.models import EncryptedProviderCredential
 from app.shared.errors import NotFoundError, ValidationAppError
 
 
@@ -300,6 +310,160 @@ class ProviderRuntimeResolver:
             entry=entry,
             settings=settings,
         )
+
+    async def resolve_runtime_for_identity(
+        self,
+        *,
+        identity: ExecutionIdentitySnapshot,
+        workspace_id: UUID,
+        operation: Any | None = None,
+        settings: Any = None,
+    ) -> ResolvedRuntime:
+        """Resolve runtime/compiler from a frozen execution identity.
+
+        The mutable ``ProviderConnection`` is joined only to authorize the
+        revision's workspace/connection ownership. Its current host, protocol,
+        and credential pointer are never used to build the runtime.
+        """
+        if operation is not None:
+            if operation.connection_id != identity.connection_id:
+                raise ValidationAppError(
+                    "operation and execution identity connection mismatch",
+                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+                )
+            if operation.provider_connection_revision_id != identity.connection_revision_id:
+                raise ValidationAppError(
+                    "operation and execution identity revision mismatch",
+                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+                )
+            if operation.actual_model != identity.invoke_model_value:
+                raise ValidationAppError(
+                    "operation and execution identity model mismatch",
+                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+                )
+
+        revision = await self._session.scalar(
+            select(ProviderConnectionRevision)
+            .join(
+                ProviderConnection,
+                ProviderConnection.id == ProviderConnectionRevision.connection_id,
+            )
+            .where(
+                ProviderConnectionRevision.id == identity.connection_revision_id,
+                ProviderConnectionRevision.connection_id == identity.connection_id,
+                ProviderConnection.workspace_id == workspace_id,
+            )
+        )
+        if revision is None:
+            raise ValidationAppError(
+                "frozen provider connection revision is unavailable",
+                details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
+            )
+        if revision.credential_revision_id != identity.credential_revision_id:
+            raise ValidationAppError(
+                "frozen connection and credential revisions do not match",
+                details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+            )
+
+        binding = await self._session.scalar(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.id == identity.provider_model_binding_id,
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.connection_id == identity.connection_id,
+            )
+        )
+        entry = (
+            await self._session.get(ModelCatalogEntry, identity.catalog_entry_id)
+            if binding is not None
+            else None
+        )
+        if (
+            binding is None
+            or entry is None
+            or binding.catalog_entry_id != identity.catalog_entry_id
+            or binding.model_id != identity.resolved_model.rsplit("/", 1)[-1]
+            or binding.invoke_model_value != identity.invoke_model_value
+            or entry.provider_type != revision.provider_type
+            or entry.protocol_profile != revision.protocol_profile
+            or entry.model_id != binding.model_id
+            or entry.model_revision != identity.model_revision
+            or entry.contract_manifest_hash != identity.manifest_hash
+        ):
+            raise ValidationAppError(
+                "frozen model identity is unavailable or has changed",
+                details={"code": "EXECUTION_IDENTITY_MODEL_UNAVAILABLE"},
+            )
+        credential = await self._session.scalar(
+            select(EncryptedProviderCredential).where(
+                EncryptedProviderCredential.id == identity.credential_revision_id,
+                EncryptedProviderCredential.workspace_id == workspace_id,
+            )
+        )
+        if credential is None:
+            raise ValidationAppError(
+                "frozen credential revision is unavailable",
+                details={"code": "EXECUTION_IDENTITY_CREDENTIAL_UNAVAILABLE"},
+            )
+        from app.providers.registry import get_plugin
+        from app.providers.workspace_credentials import runtime_connection_settings
+
+        plugin = get_plugin(revision.provider_type, revision.protocol_profile)
+        if credential.provider != plugin.credential_key:
+            raise ValidationAppError(
+                "frozen credential provider does not match connection protocol",
+                details={"code": "EXECUTION_IDENTITY_CREDENTIAL_MISMATCH"},
+            )
+        if operation is not None:
+            if operation.actual_provider != revision.provider_type:
+                raise ValidationAppError(
+                    "operation and frozen provider mismatch",
+                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+                )
+            if operation.protocol_profile != revision.protocol_profile:
+                raise ValidationAppError(
+                    "operation and frozen protocol mismatch",
+                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+                )
+
+        frozen_connection = FrozenProviderConnection(
+            id=identity.connection_id,
+            workspace_id=workspace_id,
+            provider_type=revision.provider_type,
+            protocol_profile=revision.protocol_profile,
+            base_url=revision.base_url,
+            credential_id=revision.credential_revision_id,
+            credential_revision=credential.revision_no,
+            enabled=True,
+        )
+        frozen_settings = await runtime_connection_settings(
+            self._session,
+            connection=frozen_connection,  # type: ignore[arg-type]
+            settings=settings,
+        )
+        return await self.resolve(
+            plugin=plugin,
+            connection=frozen_connection,  # type: ignore[arg-type]
+            binding=binding,
+            entry=entry,
+            settings=frozen_settings,
+        )
+
+    async def resume_runtime_for_identity(
+        self,
+        *,
+        identity: ExecutionIdentitySnapshot,
+        workspace_id: UUID,
+        operation: Any | None = None,
+        settings: Any = None,
+    ) -> ProviderRuntime:
+        """Rebuild only the runtime for an existing frozen operation."""
+        resolved = await self.resolve_runtime_for_identity(
+            identity=identity,
+            workspace_id=workspace_id,
+            operation=operation,
+            settings=settings,
+        )
+        return resolved.runtime
 
     async def resume_runtime(
         self,

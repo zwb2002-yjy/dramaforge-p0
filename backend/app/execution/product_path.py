@@ -1117,9 +1117,17 @@ async def _execute_unified_media_node_run(
     """
     from dataclasses import asdict
     from datetime import UTC, datetime
+    from types import SimpleNamespace
+    from typing import Any, cast
+
+    from pydantic import JsonValue
 
     from app.providers.catalog_models import ModelCatalogEntry
     from app.providers.connection_service import ProviderConnectionService
+    from app.providers.execution_identity import (
+        ExecutionIdentityReference,
+        ExecutionIdentitySnapshot,
+    )
     from app.providers.intents import (
         ArtifactReferenceIntent,
         ImageGenerationIntent,
@@ -1128,6 +1136,7 @@ async def _execute_unified_media_node_run(
         VideoOutputIntent,
     )
     from app.providers.manifest import ModelCapabilityManifest
+    from app.providers.model_resolution import ExecutionModelResolution
     from app.providers.models import ProviderConnection, ProviderModelBinding
     from app.providers.reference_delivery import approved_first_frame_for_video
     from app.providers.registry import get_plugin
@@ -1161,6 +1170,53 @@ async def _execute_unified_media_node_run(
         .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
         .limit(1)
     )
+    frozen_identity: ExecutionIdentitySnapshot | None = None
+    plan: Any = None
+    connection: Any = None
+    binding: Any = None
+    entry: Any = None
+    operation_identity = (
+        op.selection_plan.get("execution_identity")
+        if op is not None and isinstance(op.selection_plan, dict)
+        else None
+    )
+    request_identity = (
+        op.request_summary.get("execution_identity")
+        if op is not None and isinstance(op.request_summary, dict)
+        else None
+    )
+    run_identity = snap.get("execution_identity")
+    persisted_identities = [
+        value
+        for value in (operation_identity, request_identity, run_identity)
+        if value is not None
+    ]
+    if persisted_identities and any(
+        value != persisted_identities[0] for value in persisted_identities[1:]
+    ):
+        raise ValidationAppError(
+            "persisted execution identity evidence differs across run records",
+            details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+        )
+    raw_identity = operation_identity if operation_identity is not None else run_identity
+    if op is not None and operation_identity is not None and request_identity is None:
+        raise ValidationAppError(
+            "ProviderOperation execution identity evidence is incomplete",
+            details={"code": "EXECUTION_IDENTITY_INVALID"},
+        )
+    if raw_identity is not None:
+        if not isinstance(raw_identity, dict):
+            raise ValidationAppError(
+                "persisted execution identity is malformed",
+                details={"code": "EXECUTION_IDENTITY_INVALID"},
+            )
+        try:
+            frozen_identity = ExecutionIdentitySnapshot.model_validate(raw_identity)
+        except ValueError as exc:
+            raise ValidationAppError(
+                "persisted execution identity is invalid",
+                details={"code": "EXECUTION_IDENTITY_INVALID"},
+            ) from exc
 
     create_status = "created"
     remote = ""
@@ -1191,19 +1247,30 @@ async def _execute_unified_media_node_run(
                 error_summary=op.error_summary,
             )
             raise ValidationAppError("PROVIDER_SUBMISSION_UNKNOWN")
-        # Resume only. Never create a second remote task.
-        connection = (
-            await session.get(ProviderConnection, op.connection_id)
-            if op.connection_id is not None
-            else None
-        )
-        if connection is None:
-            raise ValidationAppError("unified operation connection is missing")
-        plugin = get_plugin(connection.provider_type, connection.protocol_profile)
-        cfg = await runtime_connection_settings(session, connection=connection)
-        runtime = await ProviderRuntimeResolver(session).resume_runtime(
-            plugin=plugin, connection=connection, settings=cfg
-        )
+        # Resume only. Never create a second remote task. New Professional
+        # operations rebuild exclusively from the frozen identity; legacy rows
+        # without that evidence retain the pre-C compatibility path.
+        if frozen_identity is not None:
+            runtime = await ProviderRuntimeResolver(
+                session
+            ).resume_runtime_for_identity(
+                identity=frozen_identity,
+                workspace_id=project.workspace_id,
+                operation=op,
+            )
+        else:
+            connection = (
+                await session.get(ProviderConnection, op.connection_id)
+                if op.connection_id is not None
+                else None
+            )
+            if connection is None:
+                raise ValidationAppError("unified operation connection is missing")
+            plugin = get_plugin(connection.provider_type, connection.protocol_profile)
+            cfg = await runtime_connection_settings(session, connection=connection)
+            runtime = await ProviderRuntimeResolver(session).resume_runtime(
+                plugin=plugin, connection=connection, settings=cfg
+            )
         if op.resume_token is not None:
             resume = ProviderResumeToken.model_validate(op.resume_token)
         remote = str(op.provider_operation_id or "")
@@ -1218,7 +1285,9 @@ async def _execute_unified_media_node_run(
             node=node,
         )
         frozen_binding_id = (
-            director_context.model_binding_id if director_context is not None else None
+            frozen_identity.provider_model_binding_id
+            if frozen_identity is not None
+            else director_context.model_binding_id if director_context is not None else None
         )
         if frozen_binding_id is None and snap.get("model_binding_id") is not None:
             try:
@@ -1317,7 +1386,11 @@ async def _execute_unified_media_node_run(
             )
 
         service = ModelSelectionService(session)
-        raw_frozen_selection = snap.get("selection_plan")
+        raw_frozen_selection = (
+            op.selection_plan
+            if op is not None and isinstance(op.selection_plan, dict)
+            else snap.get("selection_plan")
+        )
         frozen_evidence = (
             raw_frozen_selection.get("evidence")
             if isinstance(raw_frozen_selection, dict)
@@ -1333,85 +1406,153 @@ async def _execute_unified_media_node_run(
             and isinstance(frozen_evidence, dict)
             and frozen_evidence.get("trial_only_until_quality_gated") is True
         )
-        if node_type == "keyframe":
-            assert image_intent is not None
-            plan = await service.select_image(
-                project=project,
-                intent=image_intent,
-                allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+
+        if frozen_identity is not None:
+            if not isinstance(raw_frozen_selection, dict):
+                raise ValidationAppError(
+                    "frozen execution selection is missing",
+                    details={"code": "EXECUTION_IDENTITY_INVALID"},
+                )
+            selection_snapshot = json.loads(json.dumps(raw_frozen_selection))
+            raw_resolution = selection_snapshot.get("execution_model_resolution")
+            try:
+                frozen_resolution = ExecutionModelResolution.model_validate(raw_resolution)
+            except (TypeError, ValueError) as exc:
+                raise ValidationAppError(
+                    "frozen model resolution is invalid",
+                    details={"code": "EXECUTION_IDENTITY_INVALID"},
+                ) from exc
+            if (
+                frozen_resolution.provider_model_binding_id
+                != frozen_identity.provider_model_binding_id
+                or frozen_resolution.resolved_model_id
+                != frozen_identity.resolved_model
+                or frozen_resolution.manifest_hash != frozen_identity.manifest_hash
+                or frozen_resolution.invoke_model_value
+                != frozen_identity.invoke_model_value
+            ):
+                raise ValidationAppError(
+                    "frozen model resolution does not match execution identity",
+                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+                )
+            resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_identity(
+                identity=frozen_identity,
+                workspace_id=project.workspace_id,
+                operation=op,
             )
+            if (
+                resolved.binding is None
+                or resolved.catalog_entry is None
+                or resolved.invoke_model_value is None
+            ):
+                raise ValidationAppError(
+                    "frozen runtime resolution returned incomplete identity",
+                    details={"code": "EXECUTION_IDENTITY_MODEL_UNAVAILABLE"},
+                )
+            connection = resolved.connection
+            binding = resolved.binding
+            entry = resolved.catalog_entry
+            invoke_model_value = resolved.invoke_model_value
+            if (
+                resolved.manifest_hash != frozen_identity.manifest_hash
+                or resolved.invoke_model_value != frozen_identity.invoke_model_value
+            ):
+                raise ValidationAppError(
+                    "runtime resolution changed the frozen execution identity",
+                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+                )
+            provider_type = connection.provider_type
+            protocol_profile = connection.protocol_profile
+            runtime = resolved.runtime
+            plan = SimpleNamespace(
+                model_binding_id=frozen_identity.provider_model_binding_id,
+                provider_type=provider_type,
+                protocol_profile=protocol_profile,
+                catalog_entry_id=frozen_identity.catalog_entry_id,
+                model_id=frozen_identity.resolved_model,
+                invoke_model_value=frozen_identity.invoke_model_value,
+                connection_id=frozen_identity.connection_id,
+                execution_model_resolution=frozen_resolution,
+                mode_id=frozen_identity.mode_id,
+                manifest_hash=frozen_identity.manifest_hash,
+            )
+            pricing_currency = _binding_pricing_currency(binding, required=False)
         else:
-            assert video_intent is not None
-            plan = await service.select_video(
-                project=project,
-                intent=video_intent,
-                allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+            if node_type == "keyframe":
+                assert image_intent is not None
+                plan = await service.select_image(
+                    project=project,
+                    intent=image_intent,
+                    allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+                )
+            else:
+                assert video_intent is not None
+                plan = await service.select_video(
+                    project=project,
+                    intent=video_intent,
+                    allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+                )
+            if frozen_binding_id is not None and plan.model_binding_id != frozen_binding_id:
+                raise ValidationAppError(
+                    "unified selection changed the frozen model binding",
+                    details={"code": "MODEL_BINDING_SNAPSHOT_MISMATCH"},
+                )
+            selection_snapshot = json.loads(json.dumps(asdict(plan), default=str))
+            selection_snapshot["execution_model_resolution"] = (
+                plan.execution_model_resolution.model_dump(mode="json")
             )
-        if frozen_binding_id is not None and plan.model_binding_id != frozen_binding_id:
-            raise ValidationAppError(
-                "unified selection changed the frozen model binding",
-                details={"code": "MODEL_BINDING_SNAPSHOT_MISMATCH"},
+            invoke_model_value = plan.invoke_model_value
+            provider_type = plan.provider_type
+            protocol_profile = plan.protocol_profile
+            if invoke_model_value is None or provider_type is None or protocol_profile is None:
+                raise ValidationAppError("unified selection has no model/provider identity")
+            connection = await session.get(ProviderConnection, plan.connection_id)
+            binding = await session.get(ProviderModelBinding, plan.model_binding_id)
+            entry = await session.get(ModelCatalogEntry, plan.catalog_entry_id)
+            if connection is None or binding is None or entry is None:
+                raise ValidationAppError(
+                    "unified selection references missing connection/binding/catalog",
+                    details={"code": "MODEL_BINDING_MISSING"},
+                )
+            pricing_currency = _binding_pricing_currency(binding, required=False)
+            cfg = await runtime_connection_settings(session, connection=connection)
+            resolved = await ProviderRuntimeResolver(
+                session
+            ).resolve_runtime_for_model_binding(
+                model_binding_id=binding.id,
+                settings=cfg,
             )
-        # Freeze the single business resolution before compiler/runtime access.
-        # Later MS5 work will add immutable connection and credential revisions;
-        # this slice already prevents a second model-selection decision here.
-        selection_snapshot = json.loads(json.dumps(asdict(plan), default=str))
-        selection_snapshot["execution_model_resolution"] = (
-            plan.execution_model_resolution.model_dump(mode="json")
-        )
-        snap = {
-            **snap,
-            "model_binding_id": str(plan.model_binding_id),
-            "execution_model_resolution": plan.execution_model_resolution.model_dump(
-                mode="json"
-            ),
-            "selection_plan": selection_snapshot,
-        }
-        run.input_snapshot = snap
-        await session.flush()
-        invoke_model_value = plan.invoke_model_value
-        provider_type = plan.provider_type
-        protocol_profile = plan.protocol_profile
-        if invoke_model_value is None or provider_type is None or protocol_profile is None:
-            raise ValidationAppError("unified selection has no model/provider identity")
-        connection = await session.get(ProviderConnection, plan.connection_id)
-        binding = await session.get(ProviderModelBinding, plan.model_binding_id)
-        entry = await session.get(ModelCatalogEntry, plan.catalog_entry_id)
-        if connection is None or binding is None or entry is None:
-            raise ValidationAppError(
-                "unified selection references missing connection/binding/catalog",
-                details={"code": "MODEL_BINDING_MISSING"},
-            )
-        # Provider owns pricing and settlement. Keep a best-effort raw currency
-        # for audit metadata, but never block a professional run on a local
-        # price snapshot or turn it into a DramaForge budget gate.
-        pricing_currency = _binding_pricing_currency(binding, required=False)
-        cfg = await runtime_connection_settings(session, connection=connection)
-        resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_model_binding(
-            model_binding_id=binding.id,
-            settings=cfg,
-        )
-        # Consume the identity returned by the binding-based resolver. The
-        # Professional path must not reconstruct runtime from provider/media or
-        # select a sibling seed manifest after model resolution.
-        if (
-            resolved.binding is None
-            or resolved.catalog_entry is None
-            or resolved.invoke_model_value is None
-        ):
-            raise ValidationAppError(
-                "binding-based runtime resolution returned incomplete identity",
-                details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
-            )
-        connection = resolved.connection
-        binding = resolved.binding
-        entry = resolved.catalog_entry
-        invoke_model_value = resolved.invoke_model_value
-        provider_type = connection.provider_type
-        protocol_profile = connection.protocol_profile
-        runtime = resolved.runtime
+            if (
+                resolved.binding is None
+                or resolved.catalog_entry is None
+                or resolved.invoke_model_value is None
+            ):
+                raise ValidationAppError(
+                    "binding-based runtime resolution returned incomplete identity",
+                    details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
+                )
+            connection = resolved.connection
+            binding = resolved.binding
+            entry = resolved.catalog_entry
+            invoke_model_value = resolved.invoke_model_value
+            provider_type = connection.provider_type
+            protocol_profile = connection.protocol_profile
+            runtime = resolved.runtime
+
+        if frozen_identity is None:
+            snap = {
+                **snap,
+                "model_binding_id": str(plan.model_binding_id),
+                "execution_model_resolution": plan.execution_model_resolution.model_dump(
+                    mode="json"
+                ),
+                "selection_plan": selection_snapshot,
+            }
+            run.input_snapshot = snap
+            await session.flush()
         manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
         compiled: CompiledImageRequest | CompiledVideoRequest
+        identity_references: list[ExecutionIdentityReference] = []
         if node_type == "keyframe":
             image_compiler = resolved.image_compiler
             if image_compiler is None:
@@ -1432,6 +1573,15 @@ async def _execute_unified_media_node_run(
                         provider_type=provider_type,
                     )
                 )
+            identity_references = [
+                ExecutionIdentityReference(
+                    role=reference.role,
+                    artifact_id=reference.artifact_id,
+                    mime_type=reference.mime_type,
+                    fingerprint=reference.fingerprint,
+                )
+                for reference in refs
+            ]
             compiled = await image_compiler.compile(
                 image_intent,
                 manifest,
@@ -1444,22 +1594,32 @@ async def _execute_unified_media_node_run(
             video_compiler = resolved.video_compiler
             if video_compiler is None:
                 raise ValidationAppError("unified plugin has no video compiler")
+            video_references = [
+                await _unified_resolved_reference(
+                    session,
+                    project=project,
+                    run=run,
+                    role="first_frame",
+                    artifact=first_frame,
+                    content_bytes=frame_bytes,
+                    mime_type=first_frame.mime_type or "image/png",
+                    fingerprint=first_frame.content_hash,
+                    provider_type=provider_type,
+                )
+            ]
+            identity_references = [
+                ExecutionIdentityReference(
+                    role=reference.role,
+                    artifact_id=reference.artifact_id,
+                    mime_type=reference.mime_type,
+                    fingerprint=reference.fingerprint,
+                )
+                for reference in video_references
+            ]
             compiled = await video_compiler.compile(
                 video_intent,
                 manifest,
-                [
-                    await _unified_resolved_reference(
-                        session,
-                        project=project,
-                        run=run,
-                        role="first_frame",
-                        artifact=first_frame,
-                        content_bytes=frame_bytes,
-                        mime_type=first_frame.mime_type or "image/png",
-                        fingerprint=first_frame.content_hash,
-                        provider_type=provider_type,
-                    )
-                ],
+                video_references,
                 invoke_model_value=invoke_model_value,
             )
 
@@ -1523,6 +1683,70 @@ async def _execute_unified_media_node_run(
             "dropped_options": [],
             "warnings": [],
         }
+        if frozen_identity is None:
+            connection_revision = await ProviderConnectionService(
+                session
+            ).current_connection_revision(connection=connection)
+            identity = ExecutionIdentitySnapshot(
+                requested_model=(
+                    plan.execution_model_resolution.requested_model_id or plan.model_id
+                ),
+                resolved_model=(
+                    plan.execution_model_resolution.resolved_model_id
+                    or plan.model_id
+                    or invoke_model_value
+                ),
+                resolution_source=plan.execution_model_resolution.source,
+                provider_model_binding_id=binding.id,
+                catalog_entry_id=entry.id,
+                model_revision=entry.model_revision,
+                manifest_hash=entry.contract_manifest_hash,
+                invoke_model_value=invoke_model_value,
+                connection_id=connection.id,
+                connection_revision_id=connection_revision.id,
+                credential_revision_id=connection_revision.credential_revision_id,
+                capability=plan.execution_model_resolution.capability.value,
+                mode_id=plan.mode_id,
+                effective_options=cast(dict[str, JsonValue], effective_options),
+                resolved_references=identity_references,
+                translation_report=cast(dict[str, JsonValue], translation_report),
+                request_fingerprint=fingerprint,
+            )
+        else:
+            candidate_identity = ExecutionIdentitySnapshot(
+                requested_model=frozen_identity.requested_model,
+                resolved_model=frozen_identity.resolved_model,
+                resolution_source=frozen_identity.resolution_source,
+                provider_model_binding_id=frozen_identity.provider_model_binding_id,
+                catalog_entry_id=frozen_identity.catalog_entry_id,
+                model_revision=frozen_identity.model_revision,
+                manifest_hash=frozen_identity.manifest_hash,
+                invoke_model_value=frozen_identity.invoke_model_value,
+                connection_id=frozen_identity.connection_id,
+                connection_revision_id=frozen_identity.connection_revision_id,
+                credential_revision_id=frozen_identity.credential_revision_id,
+                capability=frozen_identity.capability,
+                mode_id=frozen_identity.mode_id,
+                effective_options=cast(dict[str, JsonValue], effective_options),
+                resolved_references=identity_references,
+                translation_report=cast(dict[str, JsonValue], translation_report),
+                request_fingerprint=fingerprint,
+            )
+            if candidate_identity != frozen_identity:
+                raise ValidationAppError(
+                    "retry changed its frozen execution identity",
+                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+                )
+            identity = frozen_identity
+        identity_json = identity.model_dump(mode="json")
+        selection_snapshot["execution_identity"] = identity_json
+        snap = {
+            **snap,
+            "execution_identity": identity_json,
+        }
+        if frozen_identity is not None:
+            snap["selection_plan"] = selection_snapshot
+        run.input_snapshot = snap
         # Revalidate after request compilation, immediately before persisting
         # the submission marker and making the paid call.
         if director_context is not None:
@@ -1531,11 +1755,7 @@ async def _execute_unified_media_node_run(
                 run=run,
                 node=node,
             )
-        connection_revision = None
         if op is None:
-            connection_revision = await ProviderConnectionService(
-                session
-            ).current_connection_revision(connection=connection)
             op = ProviderOperation(
                 node_run_id=run.id,
                 attempt_no=run.attempt_no,
@@ -1565,6 +1785,7 @@ async def _execute_unified_media_node_run(
                     "reference_fingerprints": list(compiled.reference_fingerprints),
                     "frozen_model_binding_id": str(binding.id),
                     "provider_connection_revision_id": str(connection_revision.id),
+                    "execution_identity": identity_json,
                     "capability_manifest_hash": plan.manifest_hash,
                     "execution_model_resolution": plan.execution_model_resolution.model_dump(
                         mode="json"
@@ -1691,7 +1912,11 @@ async def _execute_unified_media_node_run(
             and result.status == "succeeded"
             and result.artifact_uri is not None
         )
-        op.request_summary = {**op.request_summary, **result.request_summary}
+        op.request_summary = {
+            **op.request_summary,
+            **result.request_summary,
+            "execution_identity": identity_json,
+        }
         initial_status = str(result.status)
         await session.flush()
         await session.commit()

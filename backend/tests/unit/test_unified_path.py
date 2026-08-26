@@ -42,6 +42,7 @@ from app.production.service import GraphService
 from app.providers import registry as registry_module
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_seed_data import hash_manifest
+from app.providers.execution_identity import ExecutionIdentitySnapshot
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.models import (
@@ -147,6 +148,8 @@ class FakeUnifiedRuntime:
         self.poll_calls = 0
         self.submitted_image: CompiledImageRequest | None = None
         self.submitted_video: CompiledVideoRequest | None = None
+        self.factory_connection: object | None = None
+        self.factory_settings: Settings | None = None
 
     def _token(self, remote: str) -> ProviderResumeToken:
         return ProviderResumeToken(
@@ -326,6 +329,9 @@ _FAKE_RUNTIMES: list[FakeUnifiedRuntime] = []
 def _fake_plugin() -> ProviderPlugin:
     def _runtime_factory(**kwargs: object) -> FakeUnifiedRuntime:
         runtime = FakeUnifiedRuntime()
+        runtime.factory_connection = kwargs.get("connection")
+        raw_settings = kwargs.get("settings")
+        runtime.factory_settings = raw_settings if isinstance(raw_settings, Settings) else None
         _FAKE_RUNTIME_HOLDER["runtime"] = runtime
         _FAKE_RUNTIMES.append(runtime)
         return runtime
@@ -1346,6 +1352,20 @@ async def test_unified_keyframe_submits_once_and_completes(
     assert resolution_snapshot["mode_id"] == "text_to_image"
     assert resolution_snapshot["provider_model_binding_id"] == str(op.model_binding_id)
     assert op.request_summary["execution_model_resolution"] == resolution_snapshot
+    identity_snapshot = (run.input_snapshot or {}).get("execution_identity")
+    assert isinstance(identity_snapshot, dict)
+    assert op.selection_plan["execution_identity"] == identity_snapshot
+    assert op.request_summary["execution_identity"] == identity_snapshot
+    assert identity_snapshot["provider_connection_revision_id"] == str(
+        op.provider_connection_revision_id
+    )
+    frozen_revision = await session.get(
+        ProviderConnectionRevision, op.provider_connection_revision_id
+    )
+    assert frozen_revision is not None
+    assert identity_snapshot["credential_revision_id"] == str(
+        frozen_revision.credential_revision_id
+    )
     assert _current_runtime().submit_calls == 1
 
 
@@ -1946,7 +1966,8 @@ async def test_director_unified_submission_without_budget_context_is_blocked_bef
 
 
 @pytest.mark.asyncio
-async def test_unified_resume_never_recreates(
+@pytest.mark.asyncio
+async def test_unified_frozen_identity_mismatch_fails_before_provider_call(
     session: AsyncSession,
     fake_plugin: ProviderPlugin,
     monkeypatch: pytest.MonkeyPatch,
@@ -1955,6 +1976,43 @@ async def test_unified_resume_never_recreates(
     _enable_unified(monkeypatch)
     await _no_sleep(monkeypatch)
     _user, _workspace, run = await _seed_project_chain(session)
+    run.status = "queued"
+    run.input_snapshot = {"execution_identity": {"malformed": True}}
+    op = ProviderOperation(
+        node_run_id=run.id,
+        attempt_no=1,
+        purpose="primary",
+        operation_kind="keyframe.generate",
+        actual_provider=FAKE_PROVIDER,
+        actual_model="uni-img-model",
+        protocol_profile=FAKE_PROFILE,
+        request_fingerprint="f" * 64,
+        status="running",
+        request_summary={},
+        response_summary={},
+        provider_operation_id="uni-img-1",
+        selection_plan={"execution_identity": {"malformed": True}},
+        execution_path_version=UNIFIED_PATH_VERSION,
+    )
+    session.add(op)
+    await session.flush()
+
+    with pytest.raises(ValidationAppError) as caught:
+        await execute_media_node_run(session, node_run_id=run.id)
+    assert caught.value.details["code"] == "EXECUTION_IDENTITY_INVALID"
+    assert _FAKE_RUNTIME_HOLDER == {}
+
+
+@pytest.mark.asyncio
+async def test_unified_resume_never_recreates(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _byok(monkeypatch)
+    _enable_unified(monkeypatch)
+    await _no_sleep(monkeypatch)
+    user, _workspace, run = await _seed_project_chain(session)
     connection = await session.scalar(
         select(ProviderConnection).where(
             ProviderConnection.workspace_id == _workspace.id
@@ -1969,6 +2027,36 @@ async def test_unified_resume_never_recreates(
         .limit(1)
     )
     assert original_revision is not None
+    binding = await session.scalar(
+        select(ProviderModelBinding).where(
+            ProviderModelBinding.connection_id == connection.id,
+            ProviderModelBinding.purpose == "keyframe",
+        )
+    )
+    assert binding is not None and binding.catalog_entry_id is not None
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    identity = ExecutionIdentitySnapshot(
+        requested_model="uni-img-model",
+        resolved_model="uni-img-model",
+        resolution_source="request_override",
+        provider_model_binding_id=binding.id,
+        catalog_entry_id=entry.id,
+        model_revision=entry.model_revision,
+        manifest_hash=entry.contract_manifest_hash,
+        invoke_model_value=binding.invoke_model_value,
+        connection_id=connection.id,
+        connection_revision_id=original_revision.id,
+        credential_revision_id=original_revision.credential_revision_id,
+        capability="image.generate",
+        mode_id="text_to_image",
+        effective_options={},
+        resolved_references=[],
+        translation_report={},
+        request_fingerprint="f" * 64,
+    )
+    identity_json = identity.model_dump(mode="json")
+    run.input_snapshot = {"execution_identity": identity_json}
     run.status = "queued"
     op = ProviderOperation(
         node_run_id=run.id,
@@ -1980,12 +2068,32 @@ async def test_unified_resume_never_recreates(
         protocol_profile=FAKE_PROFILE,
         request_fingerprint="f" * 64,
         status="running",
-        request_summary={"kind": "keyframe"},
+        request_summary={"kind": "keyframe", "execution_identity": identity_json},
         response_summary={},
         submitted_at=None,
         provider_operation_id="uni-img-1",
         connection_id=connection_id,
         provider_connection_revision_id=original_revision.id,
+        selection_plan={
+            "execution_identity": identity_json,
+            "execution_model_resolution": {
+                "requested_model_id": "uni-img-model",
+                "resolved_model_id": "uni-img-model",
+                "source": "request_override",
+                "status": "RESOLVED",
+                "provider_model_binding_id": str(binding.id),
+                "provider_connection_id": str(connection.id),
+                "provider_connection_revision_id": str(original_revision.id),
+                "credential_revision_id": str(original_revision.credential_revision_id),
+                "catalog_entry_id": str(entry.id),
+                "model_revision": entry.model_revision,
+                "manifest_hash": entry.contract_manifest_hash,
+                "invoke_model_value": binding.invoke_model_value,
+                "capability": "image.generate",
+                "mode_id": "text_to_image",
+                "native_options": {},
+            },
+        },
         resume_token={
             "provider_type": FAKE_PROVIDER,
             "protocol_profile": FAKE_PROFILE,
@@ -2002,7 +2110,7 @@ async def test_unified_resume_never_recreates(
     await ProviderConnectionService(session).update_connection(
         workspace_id=_workspace.id,
         connection_id=connection.id,
-        actor=_user,
+        actor=user,
         display_name=None,
         enabled=None,
         base_url="https://connection-revision-two.example",
@@ -2016,6 +2124,20 @@ async def test_unified_resume_never_recreates(
     assert current_revision is not None
     assert current_revision.id != original_revision.id
 
+    await ProviderConnectionService(session).update_credential(
+        workspace_id=_workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        api_key="uni-secret-revision-two",
+    )
+    latest_revision = await session.scalar(
+        select(ProviderConnectionRevision)
+        .where(ProviderConnectionRevision.connection_id == connection.id)
+        .order_by(ProviderConnectionRevision.revision_no.desc())
+        .limit(1)
+    )
+    assert latest_revision is not None and latest_revision.id != original_revision.id
+
     result = await execute_media_node_run(session, node_run_id=run.id)
     assert result.node_type == "keyframe"
     # Resume must never call submit again.
@@ -2024,6 +2146,9 @@ async def test_unified_resume_never_recreates(
     refreshed = await session.get(ProviderOperation, op.id)
     assert refreshed is not None and refreshed.status == "succeeded"
     assert refreshed.provider_connection_revision_id == original_revision.id
+    frozen_runtime = _current_runtime()
+    assert frozen_runtime.factory_connection.base_url == original_revision.base_url
+    assert frozen_runtime.factory_settings.unified_test_api_key == "uni-secret"
 
 
 @pytest.mark.asyncio
