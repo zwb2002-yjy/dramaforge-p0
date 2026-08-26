@@ -42,6 +42,8 @@ from app.production.service import GraphService
 from app.providers import registry as registry_module
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_seed_data import hash_manifest
+from app.providers.model_profiles.orm import ProductionModelProfile
+from app.providers.model_profiles.slots import ModelSlot
 from app.providers.models import (
     ProjectProviderBinding,
     ProviderConnection,
@@ -1317,7 +1319,56 @@ async def test_unified_keyframe_submits_once_and_completes(
     assert op.selection_plan is not None
     assert op.selection_plan["invoke_model_value"] == "uni-img-model"
     assert op.capability_manifest_hash is not None
+    await session.refresh(run)
+    resolution_snapshot = (run.input_snapshot or {}).get("execution_model_resolution")
+    assert isinstance(resolution_snapshot, dict)
+    assert resolution_snapshot["status"] == "RESOLVED"
+    assert resolution_snapshot["provider_model_binding_id"] == str(op.model_binding_id)
+    assert op.request_summary["execution_model_resolution"] == resolution_snapshot
     assert _current_runtime().submit_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unavailable_profile_model_stops_before_provider_submission(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A declared Profile model X may not fall through to legacy binding Y."""
+    _byok(monkeypatch)
+    _enable_unified(monkeypatch)
+    await _no_sleep(monkeypatch)
+    user, workspace, run = await _seed_project_chain(session)
+    session.add(
+        ProductionModelProfile(
+            workspace_id=workspace.id,
+            project_id=None,
+            name="Missing keyframe model",
+            version=1,
+            is_default=True,
+            bindings={
+                ModelSlot.VISUAL_KEYFRAME.value: {
+                    "slot": ModelSlot.VISUAL_KEYFRAME.value,
+                    "model_id": f"{FAKE_PROVIDER}/missing-image-model",
+                    "native_options": {},
+                    "enabled": True,
+                }
+            },
+            created_by=user.id,
+            updated_by=user.id,
+        )
+    )
+    await session.flush()
+
+    with pytest.raises(ValidationAppError) as exc_info:
+        await execute_media_node_run(session, node_run_id=run.id)
+
+    assert exc_info.value.details["code"] == "MODEL_BINDING_UNAVAILABLE"
+    assert exc_info.value.details["source"] == "workspace_profile"
+    assert _FAKE_RUNTIME_HOLDER.get("runtime") is None
+    assert await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+    ) is None
 
 
 @pytest.mark.asyncio
