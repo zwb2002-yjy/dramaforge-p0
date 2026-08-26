@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Program order:** Professional P0 → Phase 1 (P1) → **Phase 2 (P2)** → Phase 3 (P3) → MS0 → MS1-R → MS1-C → MS2 → MS3 → MS4-LITE → MS5-R → MS5-IDENTITY-A/B/C → Phase 4 Merge Gate → P4
 - **Task boundary:** 完成 07 §4 Phase 2 全部组件：AssetVersion 生命周期服务、AssetVersionReference、AssetTag/AssetTagLink、ShotReferenceBinding、`@Asset` UUID 解析与前端引用。不进入 Phase 3（Scene Wall/Scene Workspace/Shot Workbench）、不调用真实模型。
 
@@ -62,12 +62,21 @@
 - 删除 `CharacterReference` 或旧 `/characters/lead` 兼容 API。
 - 额外总规划或并行改写共享 Schema。
 
-## Verification gate
+## 完成证据（实现摘要）
 
-- `promote` 原子性、唯一 formal、跨项目隔离、rejected 不可 promote 测试通过。
-- CharacterReference 兼容回填 + 合并读取不重复、未知 kind → `primary` 测试通过。
-- Tag 创建/绑定/过滤 + recycle/restore 测试通过。
-- ShotReferenceBinding 来源 XOR、purpose 词表、pinned old version、改名后绑定仍有效测试通过。
-- `@Asset` 解析服务输出可映射到 `ExecutionIdentityReference`（role + artifact_id）。
-- 后端全量 unit、`ruff`、`mypy`、directory compliance、编译、迁移链/offline SQL 通过；前端 `tsc`/`vite build`、vitest、eslint 通过；Playwright 既有用例通过。
-- PostgreSQL 集成仅在可达时执行，否则如实 skip；零真实 Provider 调用。
+- **P2-01**：`backend/app/assets/version_service.py`（create_candidate/promote/reject/list_history/resolve_current）；promote 原子地把旧 formal→historical、candidate→formal、`current_version_id` 指向候选；`test_asset_version_promotion.py` 覆盖唯一 formal、旧版本不删、rejected 不可 promote、跨项目隔离。
+- **P2-02**：`AssetVersionReference` ORM + 迁移 `20260826_0044` 对现有 Character 回填 AssetVersion v1（formal）+ AssetVersionReference（canonical→primary/known kind 保留/未知→primary）并设置 `current_version_id`；`AssetCardReadService` 迁移期合并读取（version 优先、legacy 仅补缺、同一 Artifact 不重复返回）；`CharacterReference` 未删除。
+- **P2-03**：`AssetTag`/`AssetTagLink` + `tag_service.py`；`POST /asset-tags`、`PUT /assets/{id}/tags`、`POST recycle/restore`；`GET /assets` 支持 kind/status/name/tags 过滤。
+- **P2-04**：`POST /assets/from-artifact` 显式“加入资产”（生成结果绝不自动成为 Asset）；`frontend/src/features/assets/` 资产卡面板（标签过滤、版本、回收/恢复、候选提升）。
+- **P2-05**：`ShotReferenceBinding` ORM（来源 XOR CHECK、purpose/stage/resolution_mode CHECK、版本乐观锁）；`backend/app/api/v1/references.py` CRUD + resolve；业务 purpose 词表 12 项，不存 provider role。
+- **P2-06**：`AssetMentionInput.tsx` / `AssetReferencePicker.tsx`；autocomplete 选中真实 Asset 才建立 Binding，未绑定手打 `@` 显示“未解析引用”；`test_asset_reference_resolution.py` 证明 current_formal 链、pinned_version 冻结、Asset 改名后绑定仍有效（UUID 绑定）。
+
+## Verification gate（全部通过）
+
+- 后端全量 unit：`738 passed / 1 warning`（+11 个 P2 测试）；P2 focused `11 passed`；`ruff`、`mypy`(193)、`compileall`、directory compliance、`git diff --check` 通过。
+- 迁移链单 head `20260826_0044`，offline `alembic upgrade head --sql` 生成/编译通过（含回填 SQL）。
+- 前端：`tsc --noEmit`、`vite build` 通过；vitest `68 passed`（+6 个 P2 组件测试）；eslint 0 errors（仅既有 CreativeStage Fast Refresh warning）；Playwright `8 passed`。
+- PostgreSQL 集成：`TEST_PG_ENABLED` 未设置且 `127.0.0.1:5432` 不可达，integration `6 passed / 17 skipped` 如实 skip；零真实 Provider 调用。
+- `@Asset` 解析输出（purpose/role/artifact_id/source/asset_id/asset_version_id）可映射到 `ExecutionIdentityReference`；执行期消费留待 P4。
+
+> 台账说明：`frontend/tests/unit/AssetMentionInput.test.tsx`、`AssetReferencePicker.test.tsx` 属测试目录，随实现提交登记（非台账 HEAD 证据提交）。
