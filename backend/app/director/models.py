@@ -378,3 +378,62 @@ class BudgetReservation(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DirectorThread(Base):
+    """Phase 7 Director Assistant conversation thread (03 §62).
+
+    A thread is scoped to a project, scene or shot; one thread per scope.
+    """
+
+    __tablename__ = "director_threads"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "scope_type",
+            "scope_entity_id",
+            name="uq_director_thread_scope",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_entity_id: Mapped[UUID] = mapped_column(nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="Director")
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class DirectorMessage(Base):
+    """One Director Assistant message in a thread (03 §62)."""
+
+    __tablename__ = "director_messages"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    thread_id: Mapped[UUID] = mapped_column(
+        ForeignKey("director_threads.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(
+        "metadata", JSON, nullable=False, default=dict
+    )
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
