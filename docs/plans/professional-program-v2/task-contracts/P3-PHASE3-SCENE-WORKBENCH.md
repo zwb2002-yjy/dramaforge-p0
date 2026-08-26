@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Program order:** Professional P0 → Phase 1 (P1) → Phase 2 (P2) → **Phase 3 (P3)** → MS0 → MS1-R → MS1-C → MS2 → MS3 → MS4-LITE → MS5-R → MS5-IDENTITY-A/B/C → Phase 4 Merge Gate → P4
 - **Task boundary:** 完成 07 §4 Phase 3：Scene Wall、Scene Workspace、Shot Workbench、Canvas、Asset bindings；仍不把 Provider 生成作为主要目标。Phase 3 是 Phase 4 Merge Gate 前置。
 
@@ -51,6 +51,8 @@
 - `docs/plans/professional-program-v2/task-contracts/P3-PHASE3-SCENE-WORKBENCH.md`
 - `docs/开发执行检查点.md`
 
+> 台账说明：`test_shot_workbench_snapshot.py` 的 shot workbench 用例合并在 `test_scene_workspace_snapshot.py`（同属 snapshot 聚合验证）；`frontend/tests/unit/SceneStoryboardWall.test.tsx`、`SceneWorkspace.test.tsx` 与 `routeTree.gen.ts` 随实现提交登记（非台账 HEAD 证据提交）。
+
 ## Explicitly out of scope
 
 - Provider 生成 / 真实模型调用；P4 WorkbenchExecutionPlan 执行期消费。
@@ -58,12 +60,23 @@
 - 语义搜索 / embedding / 自动推荐。
 - 额外总规划或并行改写共享 Schema。
 
-## Verification gate
+## 完成证据（实现摘要）
+
+- **P3-01**：`GET /projects/{id}/scenes` 返回 `SceneSummary`（shot_count/formal_keyframe_count/formal_video_count/risk_count/representative_artifact），单批聚合（一次 scene 查询 + 一次按 scene 分组的 shot 统计 + 一次 representative artifact 查询），无 per-scene N+1。
+- **P3-02**：`SceneStoryboardWall.tsx`（卡片=代表图/场景名/时间/shot count/状态；进入/拖拽排序/复制）。
+- **P3-03**：`assets/scene_service.py` 的 `SceneStructureService`：reorder/copy/split-preview/split/merge-preview/merge；split/merge 必须先 preview（affected shots/experiments/formal media）。
+- **P3-04**：`GET /projects/{id}/scenes/{scene_id}/workspace` 仅返回该场景数据（scene+shots+bindings+candidates+trace）。
+- **P3-05**：`SceneWorkspace.tsx` / `CinematicCanvas.tsx` / `ShotStrip.tsx` / `ShotProductionTrace.tsx` / `ShotDesignPanel.tsx`；布局=镜头序列/大画布/右侧导演面板/底部生产链轨迹；中央区域按 无→有→关键帧→视频 显示 占位/关键帧/播放器。
+- **P3-06**：`GET /projects/{id}/shots/{shot_id}/workbench` 后端聚合（Shot/Scene/Prompt/Director State/References/Formal Artifacts/Candidates/Trace/old-version warnings）；新 UI 不解析 runtime JSON。
+- **P3-07**：`/scenes/$sceneId` 路由接入；ShotDesignPanel 复用 P1 Shot Design PATCH（409 乐观锁），AssetReferencePicker 复用 P2 binding；根路由 last-view 恢复目标 `/scenes`。
+- 附带加固：`AssetReferencePicker` 对非数组 API 响应做防御（Array.isArray guard），避免 `{}.map` 崩溃。
+
+## Verification gate（全部通过）
 
 - Scene Summary 批量聚合正确（shot/formal/risk 计数、representative_artifact）、无 N+1（单批查询实现）。
 - Scene Workspace / Shot Workbench snapshot 仅返回 scene/shot 范围数据，不返回全项目 NodeRun 历史。
 - Split/Merge preview 先返回 affected shots/experiments/formal media，确认后才执行。
 - Shot Design（prompt/director_state）与 Asset Reference 编辑复用 P1/P2 端点，乐观锁仍 409。
-- 后端全量 unit、`ruff`、`mypy`、directory compliance、编译、迁移链检查通过（无新迁移）。
-- 前端 `tsc`/`vite build`、vitest（含 P3 组件测试）、eslint、Playwright 通过；Phase 3 Gate 流程可走通（场景墙→场景→Shot→改画面描述→改 prompt→选引用→保存→切换→重开继续）。
+- 后端全量 unit：`746 passed / 1 warning`（+8 个 P3 测试）；`ruff`、`mypy`(196)、`compileall`、directory compliance、`git diff --check` 通过；无新迁移（迁移链 head 仍为 `20260826_0044`）。
+- 前端：`tsc --noEmit`、`vite build` 通过；vitest `72 passed`（+4 个 P3 组件测试）；eslint 0 errors（仅既有 CreativeStage Fast Refresh warning）；Playwright `8 passed`。Phase 3 Gate 流程可走通（场景墙→场景→Shot→改画面描述→改 prompt→选引用→保存→切换→重开继续）。
 - PostgreSQL 集成仅在可达时执行，否则如实 skip；零真实 Provider 调用。
