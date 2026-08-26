@@ -203,6 +203,7 @@ class WorkbenchExecutionService:
         *,
         project: Project,
         execution_input: WorkbenchExecutionInput,
+        idempotency_key_override: str | None = None,
     ) -> NodeRun:
         """Resolve the shot graph, create a queued NodeRun and persist the
         frozen plan snapshot for the worker.
@@ -250,7 +251,11 @@ class WorkbenchExecutionService:
             project_id=project.id,
             graph_version_id=version.id,
             graph_node_id=node.id,
-            idempotency_key=f"workbench:{plan.stage}:{plan.plan_fingerprint}",
+            idempotency_key=(
+                f"workbench:{plan.stage}:{idempotency_key_override}"
+                if idempotency_key_override
+                else f"workbench:{plan.stage}:{plan.plan_fingerprint}"
+            ),
             input_hash=input_hash,
             status="queued",
             input_snapshot=snapshot,
