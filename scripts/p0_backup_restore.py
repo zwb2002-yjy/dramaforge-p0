@@ -310,16 +310,27 @@ def restore_verify(
         }
 
 
+def _write_report(report: dict[str, Any], destination: Path | None) -> None:
+    """Persist only the sanitized result summary under ignored evidence storage."""
+    if destination is None:
+        return
+    target = require_ignored_evidence_path(REPO, destination)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--key-env", default="P0_BACKUP_FERNET_KEY")
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("backup")
     create.add_argument("--out", type=Path, required=True)
+    create.add_argument("--report", type=Path)
     restore = commands.add_parser("restore-verify")
     restore.add_argument("--archive", type=Path, required=True)
     restore.add_argument("--restore-database-url", required=True)
     restore.add_argument("--restore-bucket", required=True)
+    restore.add_argument("--report", type=Path)
     args = parser.parse_args()
     if args.command == "backup":
         report = backup(args.out, key_env=args.key_env)
@@ -330,6 +341,7 @@ def main() -> int:
             target_bucket=args.restore_bucket,
             key_env=args.key_env,
         )
+    _write_report(report, args.report)
     print(json.dumps(report, ensure_ascii=True))
     return 0
 
