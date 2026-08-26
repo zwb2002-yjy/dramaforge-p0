@@ -57,3 +57,25 @@ Implement the smallest MS3 ordered-reference transport slice:
 ## Drift
 
 This Task closes bridge-level ordered multi-reference loss only. The broader P4 plan/reference distinction, mode identity and credential/connection immutable revisions remain later tasks.
+
+
+## Implementation Result (2026-08-26)
+
+- **Status：COMPLETED**。
+- `LegacyAdapterBridge` 现在以 `list[ResolvedReference]` 作为新的 `translate_v2` / 内部编译输入；`create` 不再把请求或 resolver 输出重建为 `dict[role, artifact]`，因此同 role 多参考会原样传入 Compiler。
+- 旧 `translate` mapping 调用保留为窄兼容层：只将已有 mapping 按插入顺序转换为 list；它不会声称能恢复调用方已经丢失的重复 role。
+- 新增 `OrderedReferenceAdapter` 可选协议，明确 MS3 的 list-based translation surface；现有旧 ModelAdapter、LiteLLM 和 bootstrap 适配器不被强制同时迁移。
+- Image Intent Bridge 对超过一张 reference image 返回稳定 `UNSUPPORTED_BY_LEGACY_BRIDGE`，不再静默取 `reference_images[0]`； Agnes/Ark image compiler 也移除 role-keyed reconstruction，并对多图显式拒绝。
+
+## Acceptance Evidence
+
+- Ordered bridge tests：`backend/tests/unit/test_v3_adapters_v2.py`，20 passed；覆盖 1 reference、3 个同 role reference、混合 image/video role、order/fingerprint preservation、resolver output 直达 Compiler、legacy image multi-reference rejection。
+- Existing compiler and identity regressions：`backend/tests/unit/test_compilers.py` + `backend/tests/unit/test_v3_identity.py`，19 passed。
+- Backend unit suite：693 passed，1 warning。
+- Static checks：`ruff check app tests alembic/versions` passed；`mypy app` passed；`git diff --check` passed；active seven-plan reference verifier and directory compliance passed。
+- No migration, Provider credential/runtime identity change or real Provider call was introduced.
+
+## Drift Closed / Deferred
+
+- 已关闭：Bridge `dict[role, artifact]` 覆盖同 role 多参考；resolver output 到 Compiler 的顺序/指纹丢失；Legacy image bridge 静默只取第一张。
+- 仍待后续合同：MS4-LITE mode identity/exclusivity；MS5-R / MS5-IDENTITY execution identity and immutable revisions；P4 `PlannedReference` 与 Workbench execution merge。
