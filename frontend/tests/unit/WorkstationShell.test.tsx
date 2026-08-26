@@ -114,7 +114,7 @@ describe("Workstation shell", () => {
     renderApp("/projects/demo/production");
     const panel = await screen.findByTestId("production-mode");
     expect(panel).toBeInTheDocument();
-    expect(panel).toHaveTextContent("专业生产板");
+    expect(panel).toHaveTextContent("跨场景生产监控");
     const projectShell = screen.getByTestId("project-workspace-shell");
     expect(projectShell).toBeInTheDocument();
     expect(projectShell).toHaveTextContent("演示项目");

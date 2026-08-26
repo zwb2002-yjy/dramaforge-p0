@@ -77,6 +77,9 @@ async function installProfessionalMock(page: Page): Promise<MockState> {
     if (path.endsWith("/snapshot")) {
       return json(route, { project_id: PROJECT_ID, name: "专业工作台验收", node_runs: [], artifacts: [], provider_operations: [] });
     }
+    if (path.endsWith("/scenes")) {
+      return json(route, [{ id: SCENE_ID, project_id: PROJECT_ID, episode_id: "episode-1", episode_number: 1, scene_number: 1, location_name: "雨夜街口", time_of_day: "night", synopsis: "", version: 1, shot_count: 1, formal_keyframe_count: 0, formal_video_count: 0, risk_count: 0, representative_artifact: null }]);
+    }
     if (path.endsWith("/shots")) {
       return json(route, [{ id: SHOT_ID, scene_id: SCENE_ID, shot_number: 1, shot_type: "中近景", camera_move: "static", visual_description: state.visual, dialogue: "我终于明白了。", sort_order: 1, status: "draft", version: state.shotVersion }]);
     }
@@ -169,11 +172,14 @@ test("professional workspace persists canvas proposals, assets, review, board, a
   await expect(page.getByText(/OpenCut/)).toBeVisible();
 });
 
-test("retired quick route redirects to professional workspace", async ({ page }) => {
+test("retired quick route shows legacy notice without redirect", async ({ page }) => {
   await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/quick`);
-  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/production`);
-  await expect(page.getByTestId("professional-workbench")).toBeVisible();
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/quick`);
+  await expect(page.getByTestId("quick-legacy")).toBeVisible();
+  await expect(page.getByText("Quick 模式已退役")).toBeVisible();
+  await expect(page.getByTestId("professional-workbench")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "进入场景工作区" })).toBeVisible();
 });
 
 

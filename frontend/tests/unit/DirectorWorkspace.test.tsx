@@ -15,7 +15,7 @@ function json(body: unknown, status = 200): Promise<Response> {
 afterEach(() => vi.restoreAllMocks());
 
 describe("AI Director workspace", () => {
-  it("redirects the retired quick route into the professional workspace", async () => {
+  it("shows a legacy notice on the retired quick route without redirect", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/health")) return json({ status: "ok", db: "up" });
@@ -69,8 +69,9 @@ describe("AI Director workspace", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByTestId("professional-workbench")).toBeInTheDocument();
-    expect(screen.getByText("场景与镜头")).toBeInTheDocument();
+    expect(await screen.findByTestId("quick-legacy")).toBeInTheDocument();
+    expect(screen.getByText("Quick 模式已退役")).toBeInTheDocument();
+    expect(screen.queryByTestId("professional-workbench")).not.toBeInTheDocument();
     expect(screen.queryByText(/预算|计费|费用/)).not.toBeInTheDocument();
   });
 });

@@ -20,6 +20,8 @@
 - `frontend/src/features/production/ProductionMonitor.tsx`
 - `frontend/tests/unit/ProductionMonitor.test.tsx`
 - `frontend/tests/e2e/director_workflow.spec.ts`
+- `frontend/tests/unit/WorkstationShell.test.tsx`
+- `frontend/tests/unit/DirectorWorkspace.test.tsx`
 - `docs/plans/professional-program-v2/task-contracts/P10-UI-CONSOLIDATION.md`
 - `docs/开发执行检查点.md`
 
