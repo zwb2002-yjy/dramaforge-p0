@@ -13,7 +13,11 @@ from app.config import clear_settings_cache, get_settings
 from app.main import create_app
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
-from app.providers.models import ProviderConnection, ProviderConnectionRevision, ProviderModelBinding
+from app.providers.models import (
+    ProviderConnection,
+    ProviderConnectionRevision,
+    ProviderModelBinding,
+)
 from app.shared.base import Base
 from app.shared.db import get_session
 from app.shared.security import CSRF_HEADER
@@ -78,9 +82,8 @@ def _seed_sync(factory: Any, workspace_id: str) -> str:
 
     async def _seed() -> str:
         async with factory() as session:
-            from sqlalchemy import select
-
             from app.access.models import User, Workspace
+            from sqlalchemy import select
 
             workspace = (
                 await session.execute(
@@ -218,16 +221,14 @@ def test_execution_plan_preview_returns_frozen_plan(api: tuple[TestClient, Any])
     assert len(data["plan_fingerprint"]) == 64
     assert data["plan"]["resolved_model"]["status"] == "RESOLVED"
     # preview never creates a NodeRun
-    from app.execution.models import NodeRun
 
     runs = _run(factory, _count_runs(factory))
     assert runs == 0
 
 
 async def _count_runs(factory: Any) -> int:
-    from sqlalchemy import func, select
-
     from app.execution.models import NodeRun
+    from sqlalchemy import func, select
 
     async with factory() as session:
         return (await session.execute(select(func.count()).select_from(NodeRun))).scalar_one()
@@ -273,9 +274,8 @@ def test_executions_dispatch_queued_run_and_revalidate_fingerprint(
     assert bad_resp.status_code == 422
 
     # 4) idempotency key lands on the NodeRun
-    from sqlalchemy import select
-
     from app.execution.models import NodeRun
+    from sqlalchemy import select
 
     async def _read() -> list[str]:
         async with factory() as session:
