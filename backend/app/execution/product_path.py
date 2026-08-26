@@ -46,6 +46,7 @@ from app.execution.shot_pipeline import (
 from app.production.service import GraphService
 from app.providers.base import ProviderAdapter
 from app.providers.fake import FakeFluxAdapter
+from app.providers.request_summary import normalize_request_summary
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
     AppError,
@@ -1766,7 +1767,7 @@ async def _execute_unified_media_node_run(
                 protocol_profile=protocol_profile,
                 request_fingerprint=fingerprint,
                 status="submission_started",
-                request_summary={
+                request_summary=normalize_request_summary({
                     "kind": kind,
                     "execution_path": UNIFIED_PATH_VERSION,
                     "intent": (
@@ -1790,7 +1791,7 @@ async def _execute_unified_media_node_run(
                     "execution_model_resolution": plan.execution_model_resolution.model_dump(
                         mode="json"
                     ),
-                },
+                }),
                 response_summary={},
                 submitted_at=now,
                 connection_id=connection.id,
