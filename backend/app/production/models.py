@@ -267,3 +267,107 @@ class ShotReferenceBinding(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+class ProductionExperiment(Base):
+    """Phase 5 project-level A/B experiment grouping shot experiments (03 §45).
+
+    Formal results are never overwritten by an experiment; adoption (P5-06)
+    explicitly copies selected results onto the formal line.
+    """
+
+    __tablename__ = "production_experiments"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "idempotency_key",
+            name="uq_production_experiment_idempotency",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    experiment_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="model_swap"
+    )
+    status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="draft"
+    )
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class ShotExperiment(Base):
+    """One shot's A/B experiment inside a :class:`ProductionExperiment` (03 §45).
+
+    Snapshots the source shot's execution inputs (version, director state,
+    prompts, references, common controls) and carries per-experiment model
+    overrides plus candidate result artifacts. Nothing here mutates the formal
+    shot graph.
+    """
+
+    __tablename__ = "shot_experiments"
+    __table_args__ = (
+        UniqueConstraint(
+            "production_experiment_id",
+            "shot_id",
+            name="uq_shot_experiment_shot",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    production_experiment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("production_experiments.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    shot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
+    )
+    source_shot_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    director_state: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    prompts: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    references: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    model_overrides: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    common_controls: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    keyframe_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
+    )
+    video_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
+    )
+    comparison: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
