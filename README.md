@@ -6,22 +6,14 @@ DramaForge 是面向专业个人创作者的开源 AI 影视制作工作台。�
 
 ## 当前状态
 
-仓库当前处于 **产品架构重置期**。旧 P0 已有 Production Graph、异步任务、Provider 插件、
-Artifact 血缘、审核、局部返工和交付等可复用底座，但快速流程、固定 10 Shot 和单一人脸
-阈值不代表新产品已经完成。2026-08-12 起按首版 AI 导演体验重构；在同一发布提交通过真实
-作品、三名目标用户、质量校准和跨平台部署 Gate 前，不得标记核心体验稳定。
+当前开发按项目 Owner 于 **2026-08-26** 指定并已内化的 Professional 七方案执行。产品、技术、模型供应与阶段顺序的唯一入口是：
 
-**状态语义：** 历史测试或专题实现通过，**不等于** 新版产品或用户价值已完成。唯一产品总纲见
-[`DramaForge总开发文档.md`](DramaForge总开发文档.md)，文档职责与阅读顺序见
-[`docs/README.md`](docs/README.md)，当前执行合同见 [`docs/current/`](docs/current/)，实时工程状态见
-[`docs/开发执行检查点.md`](docs/开发执行检查点.md)。
+- [`DramaForge总开发文档.md`](DramaForge总开发文档.md)；
+- [`docs/plans/professional-program-v2/README.md`](docs/plans/professional-program-v2/README.md)。
 
-首版不集成人脸 embedding、生物特征识别或相似度阈值。人物一致性先验证角色参考真实进入
-有效请求，再保存生成产物与视频首/中/末帧证据，由用户在试拍中验收；没有可信且校准过的
-自动评估器时，系统返回 `needs_human`，不会伪造通过分数。
+代码、迁移、测试和运行证据说明“现在实际是什么”；七方案与其 Review 修订决定“接下来必须成为什么”。任何历史 P0、旧总纲、旧 `docs/current/` 合同或旧 Release Board 的通过记录都不能替代当前七方案 Task 的完成证据。
 
-2026-09-15 首版发布标准见 [`docs/current/01-产品与发布契约.md`](docs/current/01-产品与发布契约.md)；
-不再以固定 10 Shot 作为产品完成条件。
+首版不集成人脸 embedding、生物特征识别或相似度阈值。人物一致性先验证角色参考真实进入有效请求，再保存生成产物与视频首/中/末帧证据，由用户在试拍中验收；没有可信且校准过的自动评估器时，系统返回 `needs_human`，不会伪造通过分数。
 
 ## 开发目录
 
@@ -229,9 +221,10 @@ python .\scripts\check_directory_compliance.py --demo-unregistered utils2 --demo
 
 1. [`agent.md`](agent.md)
 2. [`AGENT_EXECUTION_PROTOCOL.md`](AGENT_EXECUTION_PROTOCOL.md)
-3. 本机 `.agent-control/PROGRESS.jsonl` 尾部和 `open` 结果
-4. [`docs/开发执行检查点.md`](docs/开发执行检查点.md)
-5. 当前 Task 明确引用的 `docs/current/` 合同、ADR 和 Runbook
+3. [`docs/plans/professional-program-v2/README.md`](docs/plans/professional-program-v2/README.md)
+4. 当前 Task Contract，以及它按类型指定的七方案原文
+5. 本机 `.agent-control/PROGRESS.jsonl` 尾部和 `open` 结果
+6. 当前代码、迁移、测试、ADR 与仅作操作参考的 Runbook
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1 -Operation open
@@ -242,15 +235,15 @@ git branch --all
 git remote -v
 ```
 
-每个任务开始、完成、失败或暂停时，通过 `.agent-control/control.ps1 -Operation log` 追加事实记录。日常开发在根 worktree 的本地 `dev` 分支进行，提交后推送到 `origin/dev`；推送前本地 `dev` 可以领先远端。`main` 只保留经过验证的稳定版本，并且只能通过 `dev -> main` 的受保护 PR 更新。需要并行隔离或紧急修复时，才从当前本地 `dev`（紧急修复从 `main`）创建短期 `agent/<task-id>` 分支和 `.worktrees/<task-id>`，其 PR 先合回 `dev`（紧急修复合回 `main` 后也要同步回 `dev`）。Agent 不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以在批准并合并 PR 后记录该状态。GitHub Ruleset 配置见 [`docs/runbooks/github-ruleset.md`](docs/runbooks/github-ruleset.md)。
+每个任务开始、完成、失败或暂停时，通过 `.agent-control/control.ps1 -Operation log` 追加事实记录。日常开发在根 worktree 的本地 `dev` 分支进行；Task 合同和验证通过后提交。除非 Owner 明确要求，不推送到 `origin/dev`。`main` 只保留经过验证的稳定版本，并且只能通过 `dev -> main` 的受保护 PR 更新。需要并行隔离或紧急修复时，才从当前本地 `dev`（紧急修复从 `main`）创建短期 `agent/<task-id>` 分支和 `.worktrees/<task-id>`，其 PR 先合回 `dev`（紧急修复合回 `main` 后也要同步回 `dev`）。Agent 不得批准、合并或记录 `MERGED`；只有 `@zwb2002-yjy` 可以在批准并合并 PR 后记录该状态。GitHub Ruleset 配置见 [`docs/runbooks/github-ruleset.md`](docs/runbooks/github-ruleset.md)。
 
 发布或 tag 前，从候选 commit 的干净 worktree 执行 [`docs/runbooks/release-gate-board.md`](docs/runbooks/release-gate-board.md) 要求的自动化、真实 Provider、用户、离线和安装证据。报告写入 `tmp/p0-evidence/<sha>/`，并绑定 commit、dirty 状态、环境和 source 一致性；任何 `FAIL`、`BLOCKED` 或 source mismatch 都禁止发布。
 
-Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在开发检查点定义可观察效果和验收证据；完成并合并后重算当前 Gate，继续最高优先级的 `READY` Task。外部条件只暂停依赖它的路径；后续能力按当前总纲和架构确认表重新进入，不沿用已删除的旧阶段标签。
+Agent 不以完成一个 Task 作为停机条件。每个 Task 开始前先在当前计划目录的 Task Contract 定义可观察效果和验收证据；完成并提交后按七方案重算当前 Gate，继续最高优先级的 `READY` Task。外部条件只暂停依赖它的路径；后续能力按当前总纲和架构确认表重新进入，不沿用已删除的旧阶段标签。
 
 ## 产品阶段
 
-首版默认支持专业工作台：场景、镜头、资产卡、正式/实验分支、生产链、审片批注和 OpenCut Manifest。旧四阶段入口仅作为兼容路径保留，不是专业版默认体验。成员、邀请、共享、评论和任务指派不在当前个人创作者路线中。详细范围与进入条件只看 [`DramaForge总开发文档.md`](DramaForge总开发文档.md) 和 [`docs/current/`](docs/current/)。
+当前产品、技术与实施依据为 Owner 指定并已内化的七方案；请从 [`DramaForge总开发文档.md`](DramaForge总开发文档.md) 或 [`docs/plans/professional-program-v2/README.md`](docs/plans/professional-program-v2/README.md) 进入。旧 `docs/current/` 和此前总纲不再定义开发范围。
 
 ## 开源治理
 

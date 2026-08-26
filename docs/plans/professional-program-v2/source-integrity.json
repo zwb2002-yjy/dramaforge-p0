@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "program": "DramaForge Professional seven-plan program",
+  "internalized_at": "2026-08-26",
+  "sources": [
+    {
+      "internal_path": "docs/plans/professional-program-v2/01-DramaForge_专业版产品与开发最终方案_完整交互版.md",
+      "original_filename": "DramaForge_专业版产品与开发最终方案_完整交互版.md",
+      "sha256": "eb21725d4f4f5feebfe022f03b436697fd46de9348ed7055130fe65fb67a2605"
+    },
+    {
+      "internal_path": "docs/plans/professional-program-v2/02-DRAMAFORGE_PRO_DESIGN.md",
+      "original_filename": "DRAMAFORGE_PRO_DESIGN.md",
+      "sha256": "57fcd1e1fc5b71c9809da7d258c2872881062bc09e7ca9e8b3cdd71dcb5ca8c3"
+    },
+    {
+      "internal_path": "docs/plans/professional-program-v2/03-DRAMAFORGE_PRO_IMPLEMENTATION_PLAN.md",
+      "original_filename": "DRAMAFORGE_PRO_IMPLEMENTATION_PLAN.md",
+      "sha256": "5e500e08c639b5679075b415f1a131c793bab021a36a60d902356b1c128629de"
+    },
+    {
+      "internal_path": "docs/plans/professional-program-v2/04-DRAMAFORGE_MODEL_SUPPLY_DESIGN.md",
+      "original_filename": "DRAMAFORGE_MODEL_SUPPLY_DESIGN.md",
+      "sha256": "92f9b96fc67bb696d15400200e0579093851b4918082cc3e8cf58682ccc40829"
+    },
+    {
+      "internal_path": "docs/plans/professional-program-v2/05-DRAMAFORGE_MODEL_SUPPLY_IMPLEMENTATION_PLAN.md",
+      "original_filename": "DRAMAFORGE_MODEL_SUPPLY_IMPLEMENTATION_PLAN.md",
+      "sha256": "d7b08372233e85182fc3bdeebac5b57985528b1f5a7cec92d8e3ca6217bb172f"
+    },
+    {
+      "internal_path": "docs/plans/professional-program-v2/06-DRAMAFORGE_PRO_REVIEW_REVISED_DESIGN.md",
+      "original_filename": "DRAMAFORGE_PRO_REVIEW_REVISED_DESIGN.md",
+      "sha256": "df2ae72d1851a9f131dc4d658613c9f74fa3e2d5b9b9d52619dfe4f030477704"
+    },
+    {
+      "internal_path": "docs/plans/professional-program-v2/07-DRAMAFORGE_PRO_REVIEW_REVISED_IMPLEMENTATION_PLAN.md",
+      "original_filename": "DRAMAFORGE_PRO_REVIEW_REVISED_IMPLEMENTATION_PLAN.md",
+      "sha256": "73fd25dc599f991cad3282b13c6f1ce7fab25c2c65f59ce7b7240976cb42d146"
+    }
+  ]
+}

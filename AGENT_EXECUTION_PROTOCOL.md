@@ -18,7 +18,7 @@
 
 ## 2. Task 合同先于执行
 
-任何 Task 写入 `STARTED` 前，必须先在 [`docs/开发执行检查点.md`](docs/开发执行检查点.md) 写出 Task 合同，至少包含：
+任何 Task 写入 `STARTED` 前，必须先在 [`docs/plans/professional-program-v2/task-contracts/`](docs/plans/professional-program-v2/task-contracts/) 写出 Task 合同，至少包含：
 
 - 唯一且稳定的 Task ID。
 - 可由用户或测试观察的完成效果。
@@ -176,6 +176,6 @@ GitHub 保存团队共享的分支、提交、PR、审查和合并历史；`PROG
 
 ## 8. 当前状态入口
 
-本协议不写死 BOOT-0、S1 或任何一次性任务状态。当前产品阶段、工程 Gate、外部暂停项、`READY` 队列和唯一执行任务，以 [`docs/开发执行检查点.md`](docs/开发执行检查点.md) 为准。
+本协议不写死 BOOT-0、S1 或任何一次性任务状态。当前产品阶段、工程 Gate、外部暂停项、`READY` 队列和唯一执行任务，以 [`docs/plans/professional-program-v2/README.md`](docs/plans/professional-program-v2/README.md) 的七方案顺序和当前 Task Contract 为准。
 
-检查点每次 Task 合并后必须更新。它应回答：现在在哪个阶段、哪条 Gate 已有证据、哪条尚未关闭、当前 Task 要产生什么可观察效果、完成后自动进入什么任务。没有记录到检查点、本地账本或 Git 的口头完成声明一律不算完成。
+`docs/开发执行检查点.md` 只保存实现状态和证据摘要，不能定义产品、技术或实施阶段。每个 Task 合并后必须更新其 Task Contract、检查点和本地账本：应回答当前阶段、已有证据、尚未关闭的 Gate、当前 Task 的可观察效果和下一项 READY Task。没有记录到合同、账本或 Git 的口头完成声明一律不算完成。
