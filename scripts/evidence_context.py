@@ -30,8 +30,15 @@ def utc_now() -> str:
 
 
 def _git(repo_root: Path, *args: str) -> str:
+    # Recovery verifiers mount the host repository read-only into a Linux
+    # container. Its ownership naturally differs from the unprivileged image
+    # user, so pass Git's scoped safe-directory exception per invocation rather
+    # than mutating the mounted repository or relying on a global container
+    # setting. The path is resolved by the caller and never comes from evidence
+    # input.
+    root = repo_root.resolve()
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
+        ["git", "-c", f"safe.directory={root}", "-C", str(root), *args],
         check=False,
         capture_output=True,
         text=True,
