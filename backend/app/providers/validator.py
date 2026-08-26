@@ -21,6 +21,7 @@ from app.providers.contracts.video import (
 from app.providers.errors import (
     InvalidOptionCombinationError,
     UnsupportedInputSlotError,
+    UnsupportedModeError,
     UnsupportedOptionError,
 )
 from app.providers.manifest import CapabilitySpec, InputSlotSpec, ParameterSpec
@@ -278,7 +279,39 @@ def _when_matches(when: dict[str, Any], requested: dict[str, Any]) -> bool:
 
 
 class CapabilityValidator:
-    """Validates one V3 capability request against one :class:`CapabilitySpec`."""
+    """Validates one V3 capability request against one capability/mode contract."""
+
+    def validate_mode(
+        self,
+        request: Any,
+        spec: CapabilitySpec,
+        *,
+        mode_id: str | None = None,
+        resolved_references: list[ResolvedReference] | None = None,
+    ) -> None:
+        """Validate a request against an explicit mode when modes are declared.
+
+        A capability without modes retains the MS2 legacy contract. Once a
+        capability declares modes, omission or mistyping of ``mode_id`` fails
+        closed; the validator never guesses a mode from a flattened role set.
+        """
+        try:
+            selected = spec.mode_spec(mode_id)
+        except ValueError as exc:
+            raise UnsupportedModeError(mode_id) from exc
+        effective = CapabilitySpec(
+            capability=spec.capability,
+            input_slots=selected.input_slots,
+            common_options=selected.common_options,
+            native_options=selected.native_options,
+            constraints=selected.constraints,
+            transport_profile_id=spec.transport_profile_id,
+        )
+        self.validate(
+            request,
+            effective,
+            resolved_references=resolved_references,
+        )
 
     def validate(
         self,

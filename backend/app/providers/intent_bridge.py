@@ -78,6 +78,7 @@ def video_request_to_intent(
             prompt=request.prompt,
             output=_video_output(request),
             references=[],
+            mode_id=request.mode_id,
             selection=selection,
         )
     if isinstance(request, ImageToVideoRequest):
@@ -85,6 +86,7 @@ def video_request_to_intent(
             prompt=request.prompt,
             output=_video_output(request),
             references=[_ref(request.image, ReferenceRole.FIRST_FRAME)],
+            mode_id=request.mode_id,
             selection=selection,
         )
     if isinstance(request, FirstLastFrameVideoRequest):
@@ -95,6 +97,7 @@ def video_request_to_intent(
                 _ref(request.first_frame, ReferenceRole.FIRST_FRAME),
                 _ref(request.last_frame, ReferenceRole.LAST_FRAME),
             ],
+            mode_id=request.mode_id,
             selection=selection,
         )
     if isinstance(request, ReferenceToVideoRequest):
@@ -107,6 +110,7 @@ def video_request_to_intent(
             prompt=request.prompt,
             output=_video_output(request),
             references=references,
+            mode_id=request.mode_id,
             selection=selection,
         )
     raise CapabilityNotSupportedError(str(capability))
@@ -127,6 +131,7 @@ def image_request_to_intent(
             prompt=request.prompt,
             size=request.size,
             seed=request.seed,
+            mode_id=request.mode_id,
             reference_artifact_id=(
                 UUID(str(reference.artifact_id)) if reference is not None else None
             ),

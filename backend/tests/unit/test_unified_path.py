@@ -1,4 +1,4 @@
-﻿"""Stage B4 unified execution path tests: single-path submission, resume-no-
+"""Stage B4 unified execution path tests: single-path submission, resume-no-
 recreate, submission_started crash semantics, and unbound fail-closed.
 
 A fake provider plugin rides the whole unified chain (selection -> compiler ->
@@ -1323,6 +1323,7 @@ async def test_unified_keyframe_submits_once_and_completes(
     resolution_snapshot = (run.input_snapshot or {}).get("execution_model_resolution")
     assert isinstance(resolution_snapshot, dict)
     assert resolution_snapshot["status"] == "RESOLVED"
+    assert resolution_snapshot["mode_id"] == "text_to_image"
     assert resolution_snapshot["provider_model_binding_id"] == str(op.model_binding_id)
     assert op.request_summary["execution_model_resolution"] == resolution_snapshot
     assert _current_runtime().submit_calls == 1

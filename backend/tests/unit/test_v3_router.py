@@ -12,27 +12,37 @@ from app.providers.capabilities import Capability
 from app.providers.contracts import (
     ArtifactRef,
     ExecutionContext,
+    FirstLastFrameVideoRequest,
     GenerationStatus,
     ImageGenerateRequest,
     ImageToVideoRequest,
     ProviderCreateResult,
     ProviderPollResult,
     ReferenceToVideoRequest,
+    TextToVideoRequest,
 )
 from app.providers.errors import (
     InvalidOptionCombinationError,
     UnsupportedCapabilityError,
     UnsupportedInputSlotError,
+    UnsupportedModeError,
     UnsupportedOptionError,
 )
+from app.providers.intent_bridge import video_request_to_intent
 from app.providers.manifest import (
     CapabilitySpec,
     ConditionalConstraint,
     ConstraintSpec,
+    ExclusiveGroup,
+    InputModeSpec,
     InputSlotSpec,
+    ModelCapabilityManifest,
     ModelManifest,
+    OperationManifest,
     ParameterSpec,
+    ReferenceConstraint,
     SubmissionSemantics,
+    to_v3_model_manifest,
 )
 from app.providers.registry import ModelRegistry, UnknownModelError
 from app.providers.router import CapabilityRouter
@@ -136,7 +146,182 @@ def _video_manifest() -> ModelManifest:
     )
 
 
+def _mode_spec() -> CapabilitySpec:
+    common_options = {
+        "duration_seconds": ParameterSpec(type="number", enum=[5]),
+    }
+    return CapabilitySpec(
+        capability=Capability.VIDEO_REFERENCE_TO_VIDEO,
+        input_slots={},
+        common_options=common_options,
+        modes={
+            "text_to_video": InputModeSpec(
+                id="text_to_video",
+                title="Text to video",
+                common_options=common_options,
+            ),
+            "first_frame": InputModeSpec(
+                id="first_frame",
+                title="First frame",
+                input_slots={
+                    "first_frame": InputSlotSpec(required=True, minimum=1, maximum=1)
+                },
+                common_options=common_options,
+            ),
+            "first_last_frame": InputModeSpec(
+                id="first_last_frame",
+                title="First + last frame",
+                input_slots={
+                    "first_frame": InputSlotSpec(required=True, minimum=1, maximum=1),
+                    "last_frame": InputSlotSpec(required=True, minimum=1, maximum=1),
+                },
+                common_options=common_options,
+            ),
+            "omni_reference": InputModeSpec(
+                id="omni_reference",
+                title="Omni reference",
+                input_slots={
+                    "reference_image": InputSlotSpec(minimum=0, maximum=4),
+                    "reference_video": InputSlotSpec(minimum=0, maximum=2),
+                    "reference_audio": InputSlotSpec(minimum=0, maximum=1),
+                },
+                common_options=common_options,
+            ),
+        },
+        transport_profile_id="t1",
+    )
+
+
+def test_a_b_exclusive_group_converts_to_explicit_modes() -> None:
+    operation = OperationManifest(
+        operation="video.generate",
+        capabilities=[
+            "video.i2v.first_frame",
+            "video.i2v.last_frame",
+            "video.reference.image",
+            "video.reference.video",
+            "video.reference.audio",
+        ],
+        reference_constraints={
+            "first_frame": ReferenceConstraint(min=1, max=1),
+            "last_frame": ReferenceConstraint(min=1, max=1),
+            "reference_image": ReferenceConstraint(min=0, max=4),
+            "reference_video": ReferenceConstraint(min=0, max=2),
+            "reference_audio": ReferenceConstraint(min=0, max=1),
+        },
+        exclusive_groups=[
+            ExclusiveGroup(
+                name="frames-vs-omni",
+                members=[
+                    ["first_frame", "last_frame"],
+                    ["reference_image", "reference_video", "reference_audio"],
+                ],
+            )
+        ],
+    )
+    manifest = ModelCapabilityManifest(
+        manifest_version="1",
+        provider_type="test",
+        protocol_profile="test-v1",
+        model_id="mode-model",
+        model_revision="v1",
+        media_kind="video",
+        display_name="Mode model",
+        documented_at="2026-08-26",
+        operations={"video.generate": operation},
+    )
+    v3 = to_v3_model_manifest(manifest, transport_profile_id="test-v1")
+    spec = v3.capability_specs[Capability.VIDEO_FIRST_LAST_FRAME]
+    assert set(spec.modes) == {"first_last_frame", "omni_reference"}
+    assert spec.constraints.mutually_exclusive == []
+    assert set(spec.modes["first_last_frame"].input_slots) == {
+        "first_frame",
+        "last_frame",
+    }
+
+
+def test_bridge_carries_request_mode_id_into_intent() -> None:
+    request = ReferenceToVideoRequest(
+        prompt="p",
+        mode_id="omni_reference",
+        reference_images=[ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001")],
+    )
+    intent = video_request_to_intent(Capability.VIDEO_REFERENCE_TO_VIDEO, request)
+    assert intent.mode_id == "omni_reference"
+
+
 class TestValidator:
+    def test_mode_matrix_validates_text_frame_first_last_and_omni(self) -> None:
+        validator = CapabilityValidator()
+        spec = _mode_spec()
+        validator.validate_mode(
+            TextToVideoRequest(prompt="p", mode_id="text_to_video"),
+            spec,
+            mode_id="text_to_video",
+        )
+        validator.validate_mode(
+            ImageToVideoRequest(
+                prompt="p",
+                image=ArtifactRef(artifact_id="a"),
+                mode_id="first_frame",
+            ),
+            spec,
+            mode_id="first_frame",
+        )
+        validator.validate_mode(
+            FirstLastFrameVideoRequest(
+                prompt="p",
+                first_frame=ArtifactRef(artifact_id="a"),
+                last_frame=ArtifactRef(artifact_id="b"),
+                mode_id="first_last_frame",
+            ),
+            spec,
+            mode_id="first_last_frame",
+        )
+        validator.validate_mode(
+            ReferenceToVideoRequest(
+                prompt="p",
+                reference_images=[
+                    ArtifactRef(artifact_id="a"),
+                    ArtifactRef(artifact_id="b"),
+                    ArtifactRef(artifact_id="c"),
+                ],
+                mode_id="omni_reference",
+            ),
+            spec,
+            mode_id="omni_reference",
+        )
+
+    def test_mode_rejects_unknown_or_missing_mode(self) -> None:
+        validator = CapabilityValidator()
+        request = TextToVideoRequest(prompt="p")
+        with pytest.raises(UnsupportedModeError):
+            validator.validate_mode(request, _mode_spec(), mode_id="missing")
+        with pytest.raises(UnsupportedModeError):
+            validator.validate_mode(request, _mode_spec())
+
+    def test_mode_rejects_illegal_mixed_input_and_mode_option(self) -> None:
+        validator = CapabilityValidator()
+        with pytest.raises(UnsupportedInputSlotError):
+            validator.validate_mode(
+                ReferenceToVideoRequest(
+                    prompt="p",
+                    reference_images=[ArtifactRef(artifact_id="a")],
+                ),
+                _mode_spec(),
+                mode_id="first_last_frame",
+            )
+        with pytest.raises(UnsupportedOptionError):
+            validator.validate_mode(
+                ImageToVideoRequest(
+                    prompt="p",
+                    image=ArtifactRef(artifact_id="a"),
+                    duration_seconds=10,
+                ),
+                _mode_spec(),
+                mode_id="first_frame",
+            )
+
     def test_required_input_slot_missing(self) -> None:
         validator = CapabilityValidator()
         # Model requires BOTH first_frame and last_frame; an ImageToVideoRequest
@@ -474,6 +659,29 @@ class TestRouter:
                     reference_videos=[ArtifactRef(artifact_id="a")],
                 ),
                 context=ExecutionContext(trace_id="t"),
+            )
+        assert adapter.created == []
+
+    async def test_mode_validation_happens_before_adapter_create(self) -> None:
+        registry = ModelRegistry()
+        manifest = _image_manifest()
+        image_spec = manifest.capability_specs[Capability.IMAGE_GENERATE]
+        image_spec.modes = {
+            "text_to_image": InputModeSpec(
+                id="text_to_image",
+                title="Text to image",
+            )
+        }
+        image_spec.default_mode = None
+        adapter = _RecorderAdapter(manifest)
+        registry.register(manifest, adapter)
+        router = CapabilityRouter(registry=registry)
+        with pytest.raises(UnsupportedModeError):
+            await router.create(
+                capability=Capability.IMAGE_GENERATE,
+                request=ImageGenerateRequest(prompt="p"),
+                context=ExecutionContext(trace_id="t"),
+                mode_id="bad-mode",
             )
         assert adapter.created == []
 

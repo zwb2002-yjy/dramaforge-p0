@@ -372,5 +372,7 @@ async def test_real_video_model_with_first_frame_is_selectable(
     )
     plan = await ModelSelectionService(session).select_video(project=project, intent=intent)
     assert plan.invoke_model_value == "agnes-video-v2.0"
+    assert plan.mode_id == "first_frame"
+    assert plan.execution_model_resolution.mode_id == "first_frame"
     assert "video.i2v.first_frame" in plan.supported_capabilities
     assert plan.unmet_requirements == []

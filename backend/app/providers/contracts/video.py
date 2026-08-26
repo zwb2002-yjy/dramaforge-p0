@@ -24,6 +24,7 @@ class _VideoCommon(BaseModel):
     resolution: str | None = None
     aspect_ratio: str | None = None
     seed: int | None = None
+    mode_id: str | None = None
 
 
 class TextToVideoRequest(_VideoCommon):
@@ -64,4 +65,5 @@ class ReferenceToVideoRequest(BaseModel):
     resolution: str | None = None
     aspect_ratio: str | None = None
     seed: int | None = None
+    mode_id: str | None = None
     native_options: dict[str, Any] = Field(default_factory=dict)

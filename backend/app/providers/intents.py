@@ -67,6 +67,7 @@ class VideoGenerationIntentV1(BaseModel):
     references: list[ArtifactReferenceIntent] = Field(default_factory=list)
     requirements: VideoRequirements = Field(default_factory=VideoRequirements)
     preferences: VideoPreferences = Field(default_factory=VideoPreferences)
+    mode_id: str | None = None
     selection: ModelSelectionIntent
 
 
@@ -82,4 +83,5 @@ class ImageGenerationIntent(BaseModel):
     reference_mime: str | None = None
     requirements: VideoRequirements = Field(default_factory=VideoRequirements)
     preferences: VideoPreferences = Field(default_factory=VideoPreferences)
+    mode_id: str | None = None
     selection: ModelSelectionIntent

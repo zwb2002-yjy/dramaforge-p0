@@ -17,6 +17,7 @@ class ImageGenerateRequest(BaseModel):
     reference_images: list[ArtifactRef] = Field(default_factory=list)
     size: str | None = None
     seed: int | None = None
+    mode_id: str | None = None
     native_options: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -25,4 +26,5 @@ class ImageEditRequest(BaseModel):
 
     prompt: str
     image: ArtifactRef
+    mode_id: str | None = None
     native_options: dict[str, Any] = Field(default_factory=dict)

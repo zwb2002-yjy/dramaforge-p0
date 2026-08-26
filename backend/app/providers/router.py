@@ -58,6 +58,7 @@ class CapabilityRouter:
         context: ExecutionContext,
         model_id: str | None = None,
         policy: object | None = None,
+        mode_id: str | None = None,
         resolved_references: list[ResolvedReference] | None = None,
     ) -> ProviderCreateResult:
         model = self.selector.select(
@@ -69,7 +70,13 @@ class CapabilityRouter:
         spec = model.manifest.capability_specs.get(capability)
         if spec is None:
             raise UnsupportedCapabilityError(capability)
-        self.validator.validate(request, spec, resolved_references=resolved_references)
+        selected_mode_id = mode_id or getattr(request, "mode_id", None)
+        self.validator.validate_mode(
+            request,
+            spec,
+            mode_id=selected_mode_id,
+            resolved_references=resolved_references,
+        )
         return await model.adapter.create(capability, request, context)
 
     async def poll(

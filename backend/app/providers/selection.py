@@ -59,6 +59,7 @@ class SelectionPlan:
     intent_hash: str
     purpose: str
     mode: str
+    mode_id: str
     model_binding_id: UUID | None
     provider_type: str | None
     protocol_profile: str | None
@@ -101,6 +102,25 @@ def _resolution_capability(*, purpose: str, reference_roles: frozenset[str]) -> 
     return Capability.VIDEO_TEXT_TO_VIDEO
 
 
+def _video_mode_id(intent: VideoGenerationIntentV1) -> str:
+    if intent.mode_id:
+        return intent.mode_id
+    roles = {str(reference.role) for reference in intent.references}
+    if {"first_frame", "last_frame"} <= roles:
+        return "first_last_frame"
+    if roles & {"reference_image", "reference_video", "reference_audio"}:
+        return "omni_reference"
+    if "first_frame" in roles:
+        return "first_frame"
+    return "text_to_video"
+
+
+def _image_mode_id(intent: ImageGenerationIntent) -> str:
+    if intent.mode_id:
+        return intent.mode_id
+    return "reference_image" if intent.reference_artifact_id is not None else "text_to_image"
+
+
 class ModelSelectionService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -124,6 +144,7 @@ class ModelSelectionService:
             purpose="video",
             intent_hash=_intent_hash(intent),
             mode=intent.selection.mode,
+            mode_id=_video_mode_id(intent),
             requested_binding_id=intent.selection.model_binding_id,
             required_capabilities=normalized.required_capabilities,
             reference_roles=normalized.reference_roles,
@@ -150,6 +171,7 @@ class ModelSelectionService:
             purpose="keyframe",
             intent_hash=_intent_hash(intent),
             mode=intent.selection.mode,
+            mode_id=_image_mode_id(intent),
             requested_binding_id=intent.selection.model_binding_id,
             required_capabilities=normalized.required_capabilities,
             reference_roles=normalized.reference_roles,
@@ -165,6 +187,7 @@ class ModelSelectionService:
         purpose: str,
         intent_hash: str,
         mode: str,
+        mode_id: str,
         requested_binding_id: UUID | None,
         required_capabilities: frozenset[str],
         reference_roles: frozenset[str],
@@ -179,7 +202,7 @@ class ModelSelectionService:
                 reference_roles=reference_roles,
             ),
             purpose=purpose,
-            mode_id=mode,
+            mode_id=mode_id,
             requested_binding_id=requested_binding_id,
         )
         if resolution.status != "RESOLVED" or resolution.provider_model_binding_id is None:
@@ -246,6 +269,7 @@ class ModelSelectionService:
             intent_hash=intent_hash,
             purpose=purpose,
             mode=mode,
+            mode_id=mode_id,
             model_binding_id=binding.id,
             provider_type=connection.provider_type,
             protocol_profile=connection.protocol_profile,

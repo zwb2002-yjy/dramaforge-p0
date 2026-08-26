@@ -134,6 +134,18 @@ class InputSlotSpec(BaseModel):
     description: str | None = None
 
 
+def _canonicalize_input_slot_map(
+    input_slots: dict[str, InputSlotSpec],
+) -> dict[str, InputSlotSpec]:
+    normalized: dict[str, InputSlotSpec] = {}
+    for role, slot in input_slots.items():
+        normalized_role = canonical_reference_role(role) or role
+        if normalized_role in normalized and normalized[normalized_role] != slot:
+            raise ValueError(f"duplicate input slot aliases: {normalized_role}")
+        normalized[normalized_role] = slot
+    return normalized
+
+
 class ParameterSpec(BaseModel):
     """One validated option (common or native) in a capability (spec §16)."""
 
@@ -180,6 +192,23 @@ class ConstraintSpec(BaseModel):
     conditional: list[ConditionalConstraint] = Field(default_factory=list)
 
 
+class InputModeSpec(BaseModel):
+    """Mode-specific input contract inside one capability (MS4-LITE)."""
+
+    id: str
+    title: str
+    description: str | None = None
+    input_slots: dict[str, InputSlotSpec] = Field(default_factory=dict)
+    common_options: dict[str, ParameterSpec] = Field(default_factory=dict)
+    native_options: dict[str, ParameterSpec] = Field(default_factory=dict)
+    constraints: ConstraintSpec = Field(default_factory=ConstraintSpec)
+
+    @model_validator(mode="after")
+    def canonicalize_input_slots(self) -> InputModeSpec:
+        self.input_slots = _canonicalize_input_slot_map(self.input_slots)
+        return self
+
+
 class CapabilitySpec(BaseModel):
     """What one concrete model supports for one capability (spec §14)."""
 
@@ -188,18 +217,35 @@ class CapabilitySpec(BaseModel):
     common_options: dict[str, ParameterSpec] = Field(default_factory=dict)
     native_options: dict[str, ParameterSpec] = Field(default_factory=dict)
     constraints: ConstraintSpec = Field(default_factory=ConstraintSpec)
+    modes: dict[str, InputModeSpec] = Field(default_factory=dict)
+    default_mode: str | None = None
     transport_profile_id: str
 
     @model_validator(mode="after")
     def canonicalize_input_slots(self) -> CapabilitySpec:
-        normalized: dict[str, InputSlotSpec] = {}
-        for role, slot in self.input_slots.items():
-            normalized_role = canonical_reference_role(role) or role
-            if normalized_role in normalized and normalized[normalized_role] != slot:
-                raise ValueError(f"duplicate input slot aliases: {normalized_role}")
-            normalized[normalized_role] = slot
-        self.input_slots = normalized
+        self.input_slots = _canonicalize_input_slot_map(self.input_slots)
+        if self.default_mode is not None and self.default_mode not in self.modes:
+            raise ValueError(f"default mode is not declared: {self.default_mode}")
         return self
+
+    def mode_spec(self, mode_id: str | None = None) -> InputModeSpec:
+        """Return the selected mode, or the additive legacy contract."""
+        if not self.modes:
+            return InputModeSpec(
+                id=mode_id or "legacy",
+                title="Legacy capability contract",
+                input_slots=self.input_slots,
+                common_options=self.common_options,
+                native_options=self.native_options,
+                constraints=self.constraints,
+            )
+        selected = mode_id or self.default_mode
+        if selected is None:
+            raise ValueError("mode_id is required")
+        mode = self.modes.get(selected)
+        if mode is None:
+            raise ValueError(f"mode is not declared: {selected}")
+        return mode
 
 
 class SubmissionSemantics(BaseModel):
@@ -344,6 +390,56 @@ def _dedupe(values: list[Capability]) -> list[Capability]:
     return result
 
 
+def _mode_id_for_roles(roles: list[str], index: int) -> str:
+    role_set = frozenset(roles)
+    if role_set == {"first_frame"}:
+        return "first_frame"
+    if role_set == {"first_frame", "last_frame"}:
+        return "first_last_frame"
+    if role_set & {"reference_image", "reference_video", "reference_audio"}:
+        return "omni_reference"
+    return f"mode_{index + 1}"
+
+
+def _mode_title(mode_id: str) -> str:
+    return {
+        "text_to_video": "Text to video",
+        "first_frame": "First frame",
+        "first_last_frame": "First + last frame",
+        "omni_reference": "Omni reference",
+    }.get(mode_id, mode_id)
+
+
+def _modes_from_operation(
+    op_manifest: OperationManifest,
+    *,
+    input_slots: dict[str, InputSlotSpec],
+    common_options: dict[str, ParameterSpec],
+    native_options: dict[str, ParameterSpec],
+) -> dict[str, InputModeSpec]:
+    modes: dict[str, InputModeSpec] = {}
+    for index, group in enumerate(op_manifest.exclusive_groups or []):
+        for member in group.members:
+            roles = [
+                canonical_reference_role(role) or role
+                for role in member
+                if (canonical_reference_role(role) or role) in input_slots
+            ]
+            if not roles:
+                continue
+            mode_id = _mode_id_for_roles(roles, index)
+            modes[mode_id] = InputModeSpec(
+                id=mode_id,
+                title=_mode_title(mode_id),
+                description=f"Input mode from manifest group {group.name}",
+                input_slots={role: input_slots[role] for role in roles},
+                common_options=common_options,
+                native_options=native_options,
+                constraints=ConstraintSpec(),
+            )
+    return modes
+
+
 def _capability_spec_for(
     operation: str,
     op_manifest: OperationManifest,
@@ -370,16 +466,25 @@ def _capability_spec_for(
     native_options: dict[str, ParameterSpec] = {}
     for name, spec in (option_schema.options or {}).items():
         native_options[name] = _option_spec_to_parameter(spec)
+    modes = _modes_from_operation(
+        op_manifest,
+        input_slots=input_slots,
+        common_options=common_options,
+        native_options=native_options,
+    )
     mutually_exclusive: list[list[str]] = []
-    for group in op_manifest.exclusive_groups or []:
-        members = [member for item in group.members for member in item]
-        mutually_exclusive.append(members)
+    if not modes:
+        for group in op_manifest.exclusive_groups or []:
+            members = [member for item in group.members for member in item]
+            mutually_exclusive.append(members)
     return CapabilitySpec(
         capability=capability,
         input_slots=input_slots,
         common_options=common_options,
         native_options=native_options,
         constraints=ConstraintSpec(mutually_exclusive=mutually_exclusive),
+        modes=modes,
+        default_mode=None,
         transport_profile_id="",
     )
 

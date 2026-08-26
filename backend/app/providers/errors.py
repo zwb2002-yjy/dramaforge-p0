@@ -27,6 +27,7 @@ class ProviderErrorCode(StrEnum):
     UNSUPPORTED_CAPABILITY = "unsupported_capability"
     UNSUPPORTED_OPTION = "unsupported_option"
     UNSUPPORTED_INPUT_SLOT = "unsupported_input_slot"
+    UNSUPPORTED_MODE = "unsupported_mode"
     INVALID_OPTION_COMBINATION = "invalid_option_combination"
     CONTENT_POLICY = "content_policy"
     TIMEOUT = "timeout"
@@ -77,6 +78,19 @@ class UnsupportedOptionError(ProviderError):
             message,
             status_code=422,
             details={"option": option},
+        )
+
+
+class UnsupportedModeError(ProviderError):
+    def __init__(self, mode_id: str | None) -> None:
+        detail = {"code": "UNSUPPORTED_MODE"}
+        if mode_id is not None:
+            detail["mode_id"] = mode_id
+        super().__init__(
+            ProviderErrorCode.UNSUPPORTED_MODE,
+            "mode_id is required or is not declared by the capability manifest",
+            status_code=422,
+            details=detail,
         )
 
 
