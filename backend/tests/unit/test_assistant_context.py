@@ -80,12 +80,20 @@ async def test_context_reads_db_facts_and_messages(session: AsyncSession) -> Non
     )
     session.add(thread)
     await session.flush()
-    session.add_all([
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    session.add(
         DirectorMessage(thread_id=thread.id, project_id=project.id, role="user",
-                        content="建议改低机位", created_by=user.id),
+                        content="建议改低机位", created_by=user.id, created_at=now)
+    )
+    await session.flush()
+    session.add(
         DirectorMessage(thread_id=thread.id, project_id=project.id, role="assistant",
-                        content="proposal v1", created_by=None),
-    ])
+                        content="proposal v1", created_by=None,
+                        created_at=now + timedelta(seconds=1))
+    )
+    await session.flush()
     session.add(
         ReviewAnnotation(
             project_id=project.id, shot_id=shot.id, created_by=user.id,
