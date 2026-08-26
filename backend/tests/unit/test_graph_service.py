@@ -156,3 +156,50 @@ async def test_published_graph_relation_mismatch_is_not_repaired(
     await session.flush()
     with pytest.raises(ValidationAppError, match="published graph edges"):
         await service.materialize_definition(version_id=graph.current_version_id)
+
+
+@pytest.mark.asyncio
+async def test_shot_pipeline_graph_round_trip(session: AsyncSession) -> None:
+    """P4-06: scope_type=shot + SHOT_PIPELINE_TEMPLATE_KEY round-trips and
+    publishes nodes keyframe/video (reuses the existing Shot Pipeline)."""
+    from app.execution.shot_pipeline import (
+        SHOT_PIPELINE_TEMPLATE_KEY,
+        shot_pipeline_definition,
+    )
+
+    user, project = await _project(session)
+    service = GraphService(session)
+    shot_id = uuid4()
+    graph = await service.create_graph(
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=shot_id,
+        template_key=SHOT_PIPELINE_TEMPLATE_KEY,
+        created_by=user.id,
+        definition=shot_pipeline_definition(shot_id=str(shot_id)),
+    )
+    assert graph.scope_type == "shot"
+    assert graph.scope_entity_id == shot_id
+    assert graph.template_key == SHOT_PIPELINE_TEMPLATE_KEY
+    assert graph.current_version_id is not None
+    materialized = await service.materialize_definition(version_id=graph.current_version_id)
+    version = await service.publish(version_id=materialized.version.id, published_by=user.id)
+    assert version.status == "published"
+    assert "keyframe" in materialized.nodes
+    assert "video" in materialized.nodes
+    assert materialized.nodes["keyframe"].node_type == "keyframe"
+    assert materialized.nodes["video"].node_type == "video"
+
+
+@pytest.mark.asyncio
+async def test_graph_rejects_invalid_scope(session: AsyncSession) -> None:
+    user, project = await _project(session)
+    service = GraphService(session)
+    with pytest.raises(ValidationAppError, match="scope_type"):
+        await service.create_graph(
+            project_id=project.id,
+            scope_type="unknown",
+            scope_entity_id=uuid4(),
+            template_key="t",
+            created_by=user.id,
+        )
