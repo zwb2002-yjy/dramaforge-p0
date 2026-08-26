@@ -70,9 +70,11 @@ export function AssetReferencePicker({ projectId, shotId, purpose = "identity" }
     mutationFn: () => resolveShotReferences(projectId, shotId),
   });
 
-  const assetOptions = assets.data ?? [];
-  const rows = bindings.data ?? [];
-  const resolved = (resolve.data ?? []) as ResolvedReferenceRead[];
+  const assetOptions = Array.isArray(assets.data) ? assets.data : [];
+  const rows = Array.isArray(bindings.data) ? bindings.data : [];
+  const resolved = Array.isArray(resolve.data)
+    ? (resolve.data as ResolvedReferenceRead[])
+    : [];
 
   function labelFor(assetId: string): string {
     return `@${assetOptions.find((asset) => asset.id === assetId)?.name ?? assetId.slice(0, 8)}`;

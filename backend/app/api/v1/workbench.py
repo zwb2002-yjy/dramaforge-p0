@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.schemas import ShotDirectorState
+from app.workbench.scene_service import ShotWorkbenchService
 from app.workbench.shot_service import ShotDesignService
 from app.workbench.workspace_state_service import WorkspaceStateService
 
@@ -104,4 +105,19 @@ async def update_shot_design(
         image_prompt=shot.image_prompt,
         video_prompt=shot.video_prompt,
         updated_at=shot.updated_at,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/shots/{shot_id}/workbench",
+    response_model=dict[str, object],
+)
+async def get_shot_workbench(
+    project_id: UUID,
+    shot_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> dict[str, object]:
+    return await ShotWorkbenchService(session).get_workbench(
+        project_id=project_id, shot_id=shot_id, actor=user
     )

@@ -22,6 +22,7 @@ from app.api.v1 import (
     provider_references,
     references,
     review,
+    scenes,
     scripts,
     shot_ops,
     worker,
@@ -37,6 +38,7 @@ api_router.include_router(director.router)
 api_router.include_router(director_board.router)
 api_router.include_router(production.router)
 api_router.include_router(review.router)
+api_router.include_router(scenes.router)
 api_router.include_router(scripts.router)
 api_router.include_router(characters.router)
 api_router.include_router(credentials.router)

@@ -6,6 +6,7 @@ import { projectQuickRoute } from "./routes/projects.$projectId.quick";
 import { projectScriptRoute } from "./routes/projects.$projectId.script";
 import { projectAssetsRoute } from "./routes/projects.$projectId.assets";
 import { projectScenesRoute } from "./routes/projects.$projectId.scenes";
+import { projectSceneWorkspaceRoute } from "./routes/projects.$projectId.scenes.$sceneId";
 import { projectEditRoute } from "./routes/projects.$projectId.edit";
 import { designPreviewProductRoute, designPreviewRoute } from "./routes/design-preview";
 
@@ -14,6 +15,7 @@ const projectRouteWithChildren = projectRoute.addChildren([
   projectScriptRoute,
   projectAssetsRoute,
   projectScenesRoute,
+  projectSceneWorkspaceRoute,
   projectProductionRoute,
   projectEditRoute,
 ]);
