@@ -114,3 +114,52 @@ async def require_formal_keyframe(
             details={"code": "NO_FORMAL_KEYFRAME"},
         )
     return artifact
+
+
+async def set_formal_video(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    shot_id: UUID,
+    artifact_id: UUID,
+    expected_shot_version: int | None = None,
+) -> Shot:
+    """Validate and set ``Shot.formal_video_artifact_id`` (03 §39)."""
+    artifact = await session.get(Artifact, artifact_id)
+    if artifact is None or artifact.project_id != project_id:
+        raise ValidationAppError(
+            "artifact not found in project",
+            details={"code": "ARTIFACT_NOT_FOUND"},
+        )
+    row = (
+        await session.execute(
+            select(Artifact.id)
+            .join(NodeRun, NodeRun.id == Artifact.produced_by_run_id)
+            .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+            .join(GraphVersion, GraphVersion.id == GraphNode.graph_version_id)
+            .join(ProductionGraph, ProductionGraph.id == GraphVersion.graph_id)
+            .where(
+                Artifact.id == artifact_id,
+                Artifact.project_id == project_id,
+                GraphNode.node_type == "video",
+                ProductionGraph.scope_type == "shot",
+                ProductionGraph.scope_entity_id == shot_id,
+            )
+        )
+    ).first()
+    if row is None:
+        raise ValidationAppError(
+            "artifact is not a video result of this shot",
+            details={"code": "NOT_VIDEO_CANDIDATE"},
+        )
+    shot = await session.get(Shot, shot_id)
+    if shot is None or shot.project_id != project_id:
+        raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
+    if expected_shot_version is not None and (shot.version or 1) != expected_shot_version:
+        raise ValidationAppError(
+            "shot changed concurrently",
+            details={"code": "SHOT_VERSION_MISMATCH"},
+        )
+    shot.formal_video_artifact_id = artifact_id
+    shot.version = (shot.version or 1) + 1
+    return shot

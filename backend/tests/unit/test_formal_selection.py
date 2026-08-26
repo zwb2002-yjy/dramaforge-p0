@@ -17,6 +17,7 @@ from app.execution.shot_pipeline import (
 from app.production.formal_selection import (
     require_formal_keyframe,
     set_formal_keyframe,
+    set_formal_video,
 )
 from app.production.service import GraphService
 from app.shared.base import Base
@@ -176,4 +177,36 @@ async def test_set_formal_keyframe_rejects_stale_expected_version(session: Async
             shot_id=shot.id,
             artifact_id=artifact.id,
             expected_shot_version=99,
+        )
+
+
+@pytest.mark.asyncio
+async def test_set_formal_video_accepts_video_artifact(session: AsyncSession) -> None:
+    project, shot, user = await _seed(session)
+    artifact = await _make_keyframe_artifact(
+        session, project=project, shot_id=shot.id, user=user, node_type="video"
+    )
+    updated = await set_formal_video(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        artifact_id=artifact.id,
+        expected_shot_version=1,
+    )
+    assert updated.formal_video_artifact_id == artifact.id
+    assert updated.version == 2
+
+
+@pytest.mark.asyncio
+async def test_set_formal_video_rejects_keyframe_artifact(session: AsyncSession) -> None:
+    project, shot, user = await _seed(session)
+    artifact = await _make_keyframe_artifact(
+        session, project=project, shot_id=shot.id, user=user, node_type="keyframe"
+    )
+    with pytest.raises(ValidationAppError, match="video"):
+        await set_formal_video(
+            session,
+            project_id=project.id,
+            shot_id=shot.id,
+            artifact_id=artifact.id,
         )

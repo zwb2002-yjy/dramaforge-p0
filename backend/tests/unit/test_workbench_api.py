@@ -178,6 +178,94 @@ def _run(factory: Any, coro: Any) -> Any:
         loop.close()
 
 
+
+
+def _seed_shot_with_formal_keyframe(factory: Any, project_id: str) -> str:
+    """Create a Shot + keyframe artifact and mark it formal; return shot id."""
+
+    async def _seed() -> str:
+        from uuid import uuid4 as _uuid4
+
+        from app.access.models import Project, User, Workspace
+        from app.assets.models import Shot
+        from app.execution.models import Artifact, NodeRun
+        from app.execution.shot_pipeline import (
+            SHOT_PIPELINE_TEMPLATE_KEY,
+            shot_pipeline_definition,
+        )
+        from app.production.formal_selection import set_formal_keyframe
+        from app.production.service import GraphService
+
+        async with factory() as session:
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            workspace = await session.get(Workspace, project.workspace_id)
+            assert workspace is not None
+            owner = await session.get(User, workspace.owner_user_id)
+            assert owner is not None
+            shot = Shot(
+                project_id=project.id,
+                scene_id=_uuid4(),
+                shot_number=1,
+                version=1,
+                visual_description="API video shot",
+            )
+            session.add(shot)
+            await session.flush()
+            graphs = GraphService(session)
+            graph = await graphs.create_graph(
+                project_id=project.id,
+                scope_type="shot",
+                scope_entity_id=shot.id,
+                template_key=SHOT_PIPELINE_TEMPLATE_KEY,
+                created_by=owner.id,
+                definition=shot_pipeline_definition(shot_id=str(shot.id)),
+            )
+            assert graph.current_version_id is not None
+            materialized = await graphs.materialize_definition(
+                version_id=graph.current_version_id
+            )
+            version = await graphs.publish(
+                version_id=materialized.version.id,
+                published_by=owner.id,
+            )
+            node = materialized.nodes["keyframe"]
+            run = NodeRun(
+                project_id=project.id,
+                graph_version_id=version.id,
+                graph_node_id=node.id,
+                idempotency_key=f"api-kf:{_uuid4().hex}",
+                input_hash="a" * 64,
+                status="completed",
+                input_snapshot={},
+                created_by=owner.id,
+            )
+            session.add(run)
+            await session.flush()
+            artifact = Artifact(
+                project_id=project.id,
+                artifact_type="image",
+                storage_state="stored",
+                object_key=f"obj/{_uuid4().hex}",
+                content_hash="b" * 64,
+                mime_type="image/png",
+                byte_size=1,
+                produced_by_run_id=run.id,
+            )
+            session.add(artifact)
+            await session.flush()
+            await set_formal_keyframe(
+                session,
+                project_id=project.id,
+                shot_id=shot.id,
+                artifact_id=artifact.id,
+            )
+            await session.commit()
+            return str(shot.id)
+
+    return _run(factory, _seed())
+
+
 def _project_id(client: TestClient) -> str:
     resp = client.post(
         "/api/v1/projects",
@@ -211,8 +299,9 @@ def test_execution_plan_preview_returns_frozen_plan(api: tuple[TestClient, Any])
     workspace_id = client.headers["X-Workspace-Id"]
     binding_id = _seed_sync(factory, workspace_id)
     project_id = _project_id(client)
+    shot_id = _seed_shot_with_formal_keyframe(factory, project_id)
     resp = client.post(
-        f"/api/v1/projects/{project_id}/shots/{uuid4()}/execution-plan",
+        f"/api/v1/projects/{project_id}/shots/{shot_id}/execution-plan",
         headers={CSRF_HEADER: _csrf(client)},
         json=_plan_body(binding_id),
     )
@@ -220,18 +309,23 @@ def test_execution_plan_preview_returns_frozen_plan(api: tuple[TestClient, Any])
     data = resp.json()
     assert len(data["plan_fingerprint"]) == 64
     assert data["plan"]["resolved_model"]["status"] == "RESOLVED"
-    # preview never creates a NodeRun
-
-    runs = _run(factory, _count_runs(factory))
+    # preview never dispatches a workbench NodeRun
+    runs = _run(factory, _count_workbench_runs(factory))
     assert runs == 0
 
 
-async def _count_runs(factory: Any) -> int:
+async def _count_workbench_runs(factory: Any) -> int:
     from app.execution.models import NodeRun
     from sqlalchemy import func, select
 
     async with factory() as session:
-        return (await session.execute(select(func.count()).select_from(NodeRun))).scalar_one()
+        return (
+            await session.execute(
+                select(func.count())
+                .select_from(NodeRun)
+                .where(NodeRun.idempotency_key.like("workbench:%"))
+            )
+        ).scalar_one()
 
 
 def test_executions_dispatch_queued_run_and_revalidate_fingerprint(
@@ -242,7 +336,7 @@ def test_executions_dispatch_queued_run_and_revalidate_fingerprint(
     workspace_id = client.headers["X-Workspace-Id"]
     binding_id = _seed_sync(factory, workspace_id)
     project_id = _project_id(client)
-    shot_id = str(uuid4())
+    shot_id = _seed_shot_with_formal_keyframe(factory, project_id)
 
     # 1) preview
     preview = client.post(

@@ -13,7 +13,7 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Shot
 from app.assets.schemas import ShotDirectorState
-from app.production.formal_selection import set_formal_keyframe
+from app.production.formal_selection import set_formal_keyframe, set_formal_video
 from app.production.models import GraphVersion
 from app.production.reference_intents import ShotReferenceIntent
 from app.production.workbench_execution import (
@@ -312,5 +312,47 @@ async def set_shot_formal_keyframe(
     return FormalKeyframeRead(
         shot_id=shot.id,
         formal_keyframe_artifact_id=shot.formal_keyframe_artifact_id,
+        version=shot.version,
+    )
+
+
+
+class FormalVideoBody(BaseModel):
+    artifact_id: UUID
+    expected_shot_version: int | None = None
+
+
+class FormalVideoRead(BaseModel):
+    shot_id: UUID
+    formal_video_artifact_id: UUID
+    version: int
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/formal-video",
+    response_model=FormalVideoRead,
+)
+async def set_shot_formal_video(
+    project_id: UUID,
+    shot_id: UUID,
+    body: FormalVideoBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> FormalVideoRead:
+    """Mark one video artifact as the shot's formal video (03 §39)."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    shot = await set_formal_video(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=body.artifact_id,
+        expected_shot_version=body.expected_shot_version,
+    )
+    await session.commit()
+    assert shot.formal_video_artifact_id is not None
+    return FormalVideoRead(
+        shot_id=shot.id,
+        formal_video_artifact_id=shot.formal_video_artifact_id,
         version=shot.version,
     )

@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
+from app.assets.models import Shot
 from app.config import get_settings
 from app.execution.models import NodeRun
 from app.execution.shot_pipeline import (
@@ -34,6 +35,8 @@ from app.execution.shot_pipeline import (
 from app.production.execution_plan import (
     WorkbenchExecutionPlan,
 )
+from app.production.formal_selection import require_formal_keyframe
+from app.production.models import ProductionGraph
 from app.production.reference_intents import (
     ShotReferenceIntent,
     compile_references,
@@ -45,6 +48,7 @@ from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnectionRevision
+from app.shared.enums import GraphStatus
 from app.shared.errors import ValidationAppError
 
 PlanStage = Literal["image_keyframe", "video"]
@@ -161,10 +165,35 @@ class WorkbenchExecutionService:
             transport_profile_id="workbench",
         )
 
+        references = list(execution_input.references)
+        if execution_input.stage == "video":
+            # Video execution requires the shot formal keyframe; the latest
+            # image must never be used as a fallback (03 §38/§39).
+            shot = await self._session.get(Shot, execution_input.shot_id)
+            if shot is None or shot.project_id != project.id:
+                raise WorkbenchExecutionError("shot not found")
+            try:
+                formal = await require_formal_keyframe(
+                    self._session,
+                    project_id=project.id,
+                    shot_id=execution_input.shot_id,
+                )
+            except ValidationAppError as exc:
+                raise WorkbenchExecutionError(str(exc)) from exc
+            if not any(ref.artifact_id == formal.id for ref in references):
+                references.insert(
+                    0,
+                    ShotReferenceIntent(
+                        purpose="first_frame",
+                        artifact_id=formal.id,
+                        mime_type=formal.mime_type,
+                    ),
+                )
+
         compiled = compile_references(
             manifest=v3_manifest,
             capability=capability,
-            references=execution_input.references,
+            references=references,
             mode_id=execution_input.mode_id,
             accept_approximations=execution_input.accept_approximations,
         )
@@ -215,24 +244,36 @@ class WorkbenchExecutionService:
         _slot, _capability, _purpose, node_key = _STAGE_CONTRACT[execution_input.stage]
 
         graphs = GraphService(self._session)
-        graph = await graphs.create_graph(
-            project_id=project.id,
-            scope_type="shot",
-            scope_entity_id=execution_input.shot_id,
-            template_key=SHOT_PIPELINE_TEMPLATE_KEY,
-            created_by=self._user_id,
-            definition=shot_pipeline_definition(
-                shot_id=str(execution_input.shot_id),
-                shot={"prompt": execution_input.prompt},
-                workbench_plan=plan.model_dump(mode="json"),
-            ),
+        # One graph per shot scope (P4-06): reuse the existing shot graph when
+        # present, otherwise create it.
+        graph = await self._session.scalar(
+            select(ProductionGraph).where(
+                ProductionGraph.project_id == project.id,
+                ProductionGraph.scope_type == "shot",
+                ProductionGraph.scope_entity_id == execution_input.shot_id,
+            )
         )
+        if graph is None:
+            graph = await graphs.create_graph(
+                project_id=project.id,
+                scope_type="shot",
+                scope_entity_id=execution_input.shot_id,
+                template_key=SHOT_PIPELINE_TEMPLATE_KEY,
+                created_by=self._user_id,
+                definition=shot_pipeline_definition(
+                    shot_id=str(execution_input.shot_id),
+                    shot={"prompt": execution_input.prompt},
+                    workbench_plan=plan.model_dump(mode="json"),
+                ),
+            )
         assert graph.current_version_id is not None
         materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
-        version = await graphs.publish(
-            version_id=materialized.version.id,
-            published_by=self._user_id,
-        )
+        version = materialized.version
+        if version.status == GraphStatus.DRAFT.value:
+            version = await graphs.publish(
+                version_id=version.id,
+                published_by=self._user_id,
+            )
         node = materialized.nodes[node_key]
 
         snapshot: dict[str, object] = {

@@ -147,10 +147,11 @@ def _input(
 @pytest.mark.asyncio
 async def test_build_plan_resolved_and_frozen(session: AsyncSession) -> None:
     project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
     plan = await service.build_plan(
         project=project,
-        execution_input=_input(requested_binding_id=binding.id),
+        execution_input=_input(shot_id=shot.id, requested_binding_id=binding.id),
     )
     assert plan.resolved_model.status == "RESOLVED"
     assert plan.plan_fingerprint is not None
@@ -180,6 +181,7 @@ async def test_build_plan_fails_closed_on_fatal_reference_gap(session: AsyncSess
     from app.production.reference_intents import ShotReferenceIntent
 
     project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
     bad_reference = ShotReferenceIntent(
         purpose="brand_new_unknown_purpose",
@@ -189,6 +191,7 @@ async def test_build_plan_fails_closed_on_fatal_reference_gap(session: AsyncSess
         await service.build_plan(
             project=project,
             execution_input=_input(
+                shot_id=shot.id,
                 requested_binding_id=binding.id,
                 references=[bad_reference],
             ),
@@ -198,8 +201,9 @@ async def test_build_plan_fails_closed_on_fatal_reference_gap(session: AsyncSess
 @pytest.mark.asyncio
 async def test_create_and_dispatch_creates_queued_node_run(session: AsyncSession) -> None:
     project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
-    execution_input = _input(requested_binding_id=binding.id)
+    execution_input = _input(shot_id=shot.id, requested_binding_id=binding.id)
     run = await service.create_and_dispatch(
         project=project,
         execution_input=execution_input,
@@ -223,10 +227,11 @@ async def test_create_and_dispatch_creates_queued_node_run(session: AsyncSession
 @pytest.mark.asyncio
 async def test_snapshot_contains_no_secrets(session: AsyncSession) -> None:
     project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
     run = await service.create_and_dispatch(
         project=project,
-        execution_input=_input(requested_binding_id=binding.id),
+        execution_input=_input(shot_id=shot.id, requested_binding_id=binding.id),
     )
     forbidden = ("api_key", "apikey", "authorization", "ciphertext", "password", "bearer", "secret")
 
@@ -264,3 +269,115 @@ def test_service_has_no_legacy_gate_or_direct_provider_path() -> None:
     )
     hits = [token for token in forbidden if token in code]
     assert hits == []
+
+
+async def _seed_video_shot(
+    session: AsyncSession,
+    *,
+    project: Project,
+    user: User,
+) -> tuple[object, object]:
+    """Create a Shot + keyframe artifact and mark it formal (P4-08/09)."""
+    from uuid import uuid4 as _uuid4
+
+    from app.assets.models import Shot
+    from app.execution.models import Artifact, NodeRun
+    from app.execution.shot_pipeline import (
+        SHOT_PIPELINE_TEMPLATE_KEY,
+        shot_pipeline_definition,
+    )
+    from app.production.formal_selection import set_formal_keyframe
+    from app.production.service import GraphService
+
+    shot = Shot(
+        project_id=project.id,
+        scene_id=_uuid4(),
+        shot_number=1,
+        version=1,
+        visual_description="A video shot",
+    )
+    session.add(shot)
+    await session.flush()
+    graphs = GraphService(session)
+    graph = await graphs.create_graph(
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        template_key=SHOT_PIPELINE_TEMPLATE_KEY,
+        created_by=user.id,
+        definition=shot_pipeline_definition(shot_id=str(shot.id)),
+    )
+    assert graph.current_version_id is not None
+    materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
+    version = await graphs.publish(version_id=materialized.version.id, published_by=user.id)
+    node = materialized.nodes["keyframe"]
+    run = NodeRun(
+        project_id=project.id,
+        graph_version_id=version.id,
+        graph_node_id=node.id,
+        idempotency_key=f"video-kf:{_uuid4().hex}",
+        input_hash="a" * 64,
+        status="completed",
+        input_snapshot={},
+        created_by=user.id,
+    )
+    session.add(run)
+    await session.flush()
+    artifact = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="stored",
+        object_key=f"obj/{_uuid4().hex}",
+        content_hash="b" * 64,
+        mime_type="image/png",
+        byte_size=1,
+        produced_by_run_id=run.id,
+    )
+    session.add(artifact)
+    await session.flush()
+    await set_formal_keyframe(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        artifact_id=artifact.id,
+    )
+    await session.flush()
+    return shot, artifact
+
+
+@pytest.mark.asyncio
+async def test_video_plan_fails_closed_without_formal_keyframe(session: AsyncSession) -> None:
+    """P4-09: video execution without a formal keyframe must fail closed
+    (the latest image must never be used as a fallback)."""
+    project, binding, user = await _seed(session)
+    from app.assets.models import Shot
+
+    shot = Shot(
+        project_id=project.id,
+        scene_id=uuid4(),
+        shot_number=2,
+        version=1,
+        visual_description="No formal keyframe yet",
+    )
+    session.add(shot)
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    with pytest.raises(WorkbenchExecutionError, match="formal keyframe"):
+        await service.build_plan(
+            project=project,
+            execution_input=_input(shot_id=shot.id, requested_binding_id=binding.id),
+        )
+
+
+@pytest.mark.asyncio
+async def test_video_plan_injects_formal_keyframe_reference(session: AsyncSession) -> None:
+    project, binding, user = await _seed(session)
+    shot, artifact = await _seed_video_shot(session, project=project, user=user)
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(
+        project=project,
+        execution_input=_input(shot_id=shot.id, requested_binding_id=binding.id),
+    )
+    first_frame = [r for r in plan.planned_references if r.purpose == "first_frame"]
+    assert len(first_frame) == 1
+    assert first_frame[0].artifact_id == artifact.id
