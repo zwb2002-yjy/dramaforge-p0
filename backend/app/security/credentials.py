@@ -28,23 +28,28 @@ async def store_credential(
     keyring: ByokKeyring,
 ) -> EncryptedProviderCredential:
     encrypted = keyring.encrypt(plaintext)
-    record = await session.scalar(
-        select(EncryptedProviderCredential).where(
+    # Account credential changes are revisions, never updates.  Lock the
+    # current head when the backend supports row locks; the revision unique
+    # constraint remains the final guard for concurrent writers.
+    latest = await session.scalar(
+        select(EncryptedProviderCredential)
+        .where(
             EncryptedProviderCredential.workspace_id == workspace_id,
             EncryptedProviderCredential.provider == provider,
         )
+        .order_by(EncryptedProviderCredential.revision_no.desc())
+        .limit(1)
+        .with_for_update()
     )
-    if record is None:
-        record = EncryptedProviderCredential(
-            workspace_id=workspace_id,
-            provider=provider,
-            ciphertext=encrypted.ciphertext,
-            key_version=encrypted.key_version,
-        )
-        session.add(record)
-    else:
-        record.ciphertext = encrypted.ciphertext
-        record.key_version = encrypted.key_version
+    record = EncryptedProviderCredential(
+        workspace_id=workspace_id,
+        provider=provider,
+        revision_no=(latest.revision_no + 1) if latest is not None else 1,
+        supersedes_id=latest.id if latest is not None else None,
+        ciphertext=encrypted.ciphertext,
+        key_version=encrypted.key_version,
+    )
+    session.add(record)
     await session.flush()
     return record
 
@@ -56,10 +61,39 @@ async def read_credential(
     provider: str,
     keyring: ByokKeyring,
 ) -> str | None:
+    """Legacy provider-key lookup; Professional connections use ID lookup."""
     record = await session.scalar(
-        select(EncryptedProviderCredential).where(
+        select(EncryptedProviderCredential)
+        .where(
             EncryptedProviderCredential.workspace_id == workspace_id,
             EncryptedProviderCredential.provider == provider,
+        )
+        .order_by(EncryptedProviderCredential.revision_no.desc())
+        .limit(1)
+    )
+    if record is None:
+        return None
+    return keyring.decrypt(ciphertext=record.ciphertext, key_version=record.key_version)
+
+
+async def read_credential_by_id(
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    credential_id: UUID,
+    keyring: ByokKeyring,
+) -> str | None:
+    """Decrypt exactly the credential revision named by a connection.
+
+    The workspace predicate is deliberately repeated alongside the primary-key
+    lookup.  A UUID alone is not sufficient authorization for a credential
+    read, and a missing or cross-workspace row is treated as unavailable by
+    the concrete runtime callers.
+    """
+    record = await session.scalar(
+        select(EncryptedProviderCredential).where(
+            EncryptedProviderCredential.id == credential_id,
+            EncryptedProviderCredential.workspace_id == workspace_id,
         )
     )
     if record is None:

@@ -30,7 +30,7 @@ from app.providers.models import (
 from app.providers.reference_delivery import issue_artifact_reference
 from app.providers.registry import ProviderPlugin, get_plugin
 from app.providers.workspace_credentials import configured_byok_keyring
-from app.security.credentials import read_credential, store_credential
+from app.security.credentials import read_credential_by_id, store_credential
 from app.security.models import EncryptedProviderCredential
 from app.shared.db import set_artifact_rls_context
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
@@ -112,6 +112,7 @@ class ProviderConnectionService:
             base_url=host,
             protocol_profile=protocol_profile,
             credential_id=credential.id,
+            credential_revision=credential.revision_no,
             enabled=enabled,
             verification_status="unverified",
             created_by=actor.id,
@@ -189,15 +190,15 @@ class ProviderConnectionService:
         return connection
 
     async def credential_version(self, connection: ProviderConnection) -> str | None:
-        key_version = await self._session.scalar(
-            select(EncryptedProviderCredential.key_version).where(
+        credential = await self._session.scalar(
+            select(EncryptedProviderCredential).where(
                 EncryptedProviderCredential.id == connection.credential_id,
                 EncryptedProviderCredential.workspace_id == connection.workspace_id,
             )
         )
-        if not isinstance(key_version, str):
+        if credential is None:
             return None
-        return f"{connection.credential_revision}:{key_version}"
+        return f"{credential.revision_no}:{credential.key_version}"
 
     async def update_connection(
         self,
@@ -294,7 +295,7 @@ class ProviderConnectionService:
             keyring=configured_byok_keyring(),
         )
         connection.credential_id = credential.id
-        connection.credential_revision += 1
+        connection.credential_revision = credential.revision_no
         connection.updated_by = actor.id
         await self._invalidate_connection_evidence(connection=connection, actor=actor)
         await self._session.flush()
@@ -302,10 +303,10 @@ class ProviderConnectionService:
 
     async def _connection_settings(self, connection: ProviderConnection) -> Settings:
         plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
-        secret = await read_credential(
+        secret = await read_credential_by_id(
             self._session,
             workspace_id=connection.workspace_id,
-            provider=plugin.credential_key,
+            credential_id=connection.credential_id,
             keyring=configured_byok_keyring(),
         )
         if not secret:

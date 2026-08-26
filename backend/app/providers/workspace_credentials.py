@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.providers.models import ProviderConnection
 from app.security.byok_keyring import ByokKeyring, KeyringConfigurationError, parse_keyring
-from app.security.credentials import has_credential, read_credential
+from app.security.credentials import (
+    has_credential,
+    read_credential,
+    read_credential_by_id,
+)
 from app.shared.errors import AppError
 
 
@@ -20,8 +24,8 @@ class WorkspaceCredentialConfigurationError(AppError):
         super().__init__(
             code="WORKSPACE_BYOK_UNAVAILABLE",
             message=(
-                "workspace BYOK credential is stored but its keyring is unavailable; "
-                "restore retained key versions before retrying"
+                "workspace BYOK credential revision is unavailable; "
+                "restore the referenced credential and retained key versions before retrying"
             ),
             status_code=422,
         )
@@ -84,14 +88,17 @@ async def runtime_connection_settings(
 
     cfg = settings or get_settings()
     plugin = get_plugin(connection.provider_type, connection.protocol_profile)
-    credential = await read_credential(
+    credential = await read_credential_by_id(
         session,
         workspace_id=connection.workspace_id,
-        provider=plugin.credential_key,
+        credential_id=connection.credential_id,
         keyring=configured_byok_keyring(cfg),
     )
     if credential is None:
-        return cfg
+        # Do not fall back to the provider-key default or process environment:
+        # a concrete connection must either resolve its named revision or fail
+        # closed.
+        raise WorkspaceCredentialConfigurationError()
     prefix = plugin.prefix
     return cfg.model_copy(
         update={
