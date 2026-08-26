@@ -4,8 +4,8 @@ Thank you for helping make AI-assisted short-drama creation more reliable.
 
 ## Before opening a change
 
-- Read `DramaForge总开发文档.md`, `docs/README.md`, and the relevant contract under
-  `docs/current/`.
+- Read `DramaForge总开发文档.md`, `docs/README.md`, the seven-plan program under
+  `docs/plans/professional-program-v2/`, and the current Task Contract.
 - Open an issue for large product, schema, workflow, security, or Provider changes.
 - Never commit API keys, BYOK ciphertext/plaintext, private media, face embeddings,
   generated evidence containing personal data, or unlicensed model weights.

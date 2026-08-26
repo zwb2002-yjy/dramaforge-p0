@@ -12,7 +12,7 @@
 
 > 本文承接 v1.0 的执行目标，并根据当前仓库代码、数据库模型、Compose
 > 配置和无费用测试结果完成修订。它不是新的产品总纲或平行架构文档。
-> 产品与架构决定仍以 `DramaForge总开发文档.md` 和 `docs/current/` 为准；
+> 产品、架构和实施顺序以 [`../plans/professional-program-v2/README.md`](../plans/professional-program-v2/README.md) 的七方案为准；
 > 当前实现状态只在 `docs/开发执行检查点.md` 更新。
 
 ## 1. 本轮结论
@@ -64,9 +64,9 @@ Unified Media Path 是现有运行时架构中的媒体执行路径，不替代�
 本规格原 v1.0 中“当前代码高于正式文档”的表述修订为：
 
 ```text
-DramaForge总开发文档.md
-→ docs/current/ 当前合同
-→ 已接受且未被取代的 ADR
+docs/plans/professional-program-v2/README.md
+→ 当前 Task Contract
+→ 已接受且未被七方案覆盖的 ADR
 → 当前专项 Runbook / Task Contract
 → 数据库 Schema、代码、测试和运行证据所反映的当前实现事实
 → 历史文档

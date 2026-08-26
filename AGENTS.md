@@ -1,12 +1,12 @@
 # DramaForge Codex Rules
 
-## Authoritative Planning Documents
+## User-Authorized Planning Documents
 
-- Read `DramaForge总开发文档.md` first for product direction and scope.
-- Read only the task-relevant contract under `docs/current/` before changing product, runtime, quality, or roadmap behavior.
-- `docs/开发执行检查点.md` is the live implementation-status source, not a product-definition source.
-- Deleted legacy planning/specification documents remain available only through Git history. They cannot generate tasks or regain authority through restoration.
-- Do not create another parallel master plan. Update the active contract or add an ADR/Task Contract as routed by `docs/README.md`.
+- The current product, technical, and execution source is [`docs/plans/professional-program-v2/README.md`](docs/plans/professional-program-v2/README.md), which preserves the seven Owner-supplied plans verbatim and states their precedence.
+- Before changing product, runtime, model supply, quality, or roadmap behavior, read the Task-specific source order in that plan set and the current Task Contract under `docs/plans/professional-program-v2/task-contracts/`.
+- Code, migrations, tests, runtime state, and evidence establish current facts; the seven-plan program establishes the desired behavior and task order.
+- Historical planning, prior release boards, old checkpoints, ADRs, and legacy runbooks can explain old implementation or evidence, but cannot generate new work or override the seven-plan program.
+- Do not produce a parallel master plan. Update the seven-plan program only for an Owner-supplied revision; record implementation work in a bounded Task Contract.
 
 ## Image Evidence Handling
 
