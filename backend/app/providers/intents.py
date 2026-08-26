@@ -13,13 +13,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-ReferenceRole = Literal[
-    "first_frame",
-    "last_frame",
-    "reference_image",
-    "reference_video",
-    "reference_audio",
-]
+from app.providers.reference_roles import ReferenceRoleValue
+
+# Backward-compatible type alias; canonical ownership lives in reference_roles.
+ReferenceRole = ReferenceRoleValue
 
 
 class VideoOutputIntent(BaseModel):
@@ -38,7 +35,7 @@ class AllowedOutputSubstitution(BaseModel):
 
 class ArtifactReferenceIntent(BaseModel):
     artifact_id: UUID
-    role: ReferenceRole
+    role: ReferenceRoleValue
     required: bool = True
 
 

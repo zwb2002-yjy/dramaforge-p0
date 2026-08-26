@@ -55,13 +55,18 @@ def test_caller_declared_capabilities_union_with_derived() -> None:
     )
 
 
-def test_duplicate_reference_role_is_rejected() -> None:
-    ref = ArtifactReferenceIntent(artifact_id=uuid4(), role="first_frame")
-    result = normalize_video(
-        _video_intent(references=[ref, ref.model_copy(update={"artifact_id": uuid4()})])
+def test_repeated_reference_role_is_preserved_for_ms3() -> None:
+    ref = ArtifactReferenceIntent(artifact_id=uuid4(), role="reference_image")
+    intent = _video_intent(
+        references=[ref, ref.model_copy(update={"artifact_id": uuid4()})]
     )
-    assert not result.ok
-    assert any("duplicate reference role" in error for error in result.errors)
+    result = normalize_video(intent)
+    assert result.ok
+    assert result.reference_roles == frozenset({"reference_image"})
+    assert [item.artifact_id for item in intent.references] == [
+        ref.artifact_id,
+        intent.references[1].artifact_id,
+    ]
 
 
 def test_preview_purpose_is_rejected_in_stage_ab() -> None:

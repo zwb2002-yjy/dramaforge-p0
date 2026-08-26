@@ -56,3 +56,27 @@ Implement the smallest MS2 strict-validation slice:
 ## Drift
 
 This Task closes only canonical role identity, strict unknown-slot rejection, media-type validation at the resolved-artifact boundary and cardinality enforcement. Ordered multi-reference delivery remains MS3; mode identity and exclusivity remain MS4-LITE.
+
+
+## Implementation Result (2026-08-26)
+
+- **Status：COMPLETED**。
+- 新增 `backend/app/providers/reference_roles.py`，集中定义五个 canonical role、role→MIME 约束和复数请求字段到 singular role 的映射；`intents.py` 保留旧 `ReferenceRole` 类型别名兼容入口。
+- `manifest.py`、`normalizer.py`、`intent_bridge.py` 和 `validator.py` 统一使用 canonical role；Manifest / CapabilitySpec 在边界处归一化旧复数别名，重复 canonical reference 不在 MS2 被去重。
+- `CapabilityValidator` 现在对 Manifest 未声明的 request role 抛出 `UnsupportedInputSlotError`，details 含 `code=UNSUPPORTED_INPUT_SLOT` 与 `slot`；对 declared slot 执行 required/min/max cardinality；在提供 `ResolvedReference` 时校验 request/reference 数量一致和 MIME 类型。
+- `CapabilityRouter.create()` 可将已解析的 `ResolvedReference` 列表传入同一 strict validator；校验发生在 adapter `create()` 之前，失败不会产生 Provider submission。
+- 未改动 MS3 的 ordered reference transport、MS4-LITE mode/exclusivity 设计、Provider credential/connection/runtime identity 或任何真实 Provider 调用。
+
+## Acceptance Evidence
+
+- MS2 focused role/validator/router tests：`backend/tests/unit/test_v3_router.py`、`backend/tests/unit/test_intent_normalizer.py`、`backend/tests/unit/test_reference_roles.py`，35 passed。
+- Existing eligibility/compiler/registry regressions：77 passed。
+- MS1 resolver/selection/unified regression：34 passed。
+- Backend unit suite：689 passed，1 warning。
+- Static checks：`ruff check app tests alembic/versions` passed；`mypy app` passed；`git diff --check` passed；active seven-plan reference verifier and directory compliance passed。
+- PostgreSQL integration：本 Task 未改变持久化合同，不新增 migration；MS1 snapshot integration contract 继续按仓库规则在 `TEST_PG_ENABLED` 未开启且本机 PostgreSQL 不可达时 skip。
+
+## Drift Closed / Deferred
+
+- 已关闭：plural request field 与 canonical manifest role 的分叉；undeclared input slot 的 silent continue；resolved reference MIME 不校验；strict cardinality 只覆盖部分 role 的漂移。
+- 仍待后续合同：MS3 ordered multi-reference delivery / `list[ResolvedReference]` 全链路保持；MS4-LITE mode identity and exclusivity；MS5-R / MS5-IDENTITY execution identity and immutable revisions。

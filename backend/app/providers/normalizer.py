@@ -16,13 +16,14 @@ from app.providers.intents import (
     ImageGenerationIntent,
     VideoGenerationIntentV1,
 )
+from app.providers.reference_roles import ReferenceRole, canonical_reference_role
 
 _ROLE_TO_CAPABILITY = {
-    "first_frame": "video.i2v.first_frame",
-    "last_frame": "video.i2v.last_frame",
-    "reference_image": "video.reference.image",
-    "reference_video": "video.reference.video",
-    "reference_audio": "video.reference.audio",
+    ReferenceRole.FIRST_FRAME.value: "video.i2v.first_frame",
+    ReferenceRole.LAST_FRAME.value: "video.i2v.last_frame",
+    ReferenceRole.REFERENCE_IMAGE.value: "video.reference.image",
+    ReferenceRole.REFERENCE_VIDEO.value: "video.reference.video",
+    ReferenceRole.REFERENCE_AUDIO.value: "video.reference.audio",
 }
 
 
@@ -46,13 +47,14 @@ def normalize_reference_roles(
     roles: set[str] = set()
     errors: list[str] = []
     for ref in references:
-        role = ref.role
-        capability = _ROLE_TO_CAPABILITY.get(role)
-        if capability is None:
-            errors.append(f"unknown reference role: {role}")
+        role = canonical_reference_role(str(ref.role))
+        capability = _ROLE_TO_CAPABILITY.get(role or "")
+        if role is None or capability is None:
+            errors.append(f"unknown reference role: {ref.role}")
             continue
-        if role in roles:
-            errors.append(f"duplicate reference role: {role}")
+        # Repeated canonical roles are meaningful multi-reference input. The
+        # manifest validator owns min/max cardinality; normalization must not
+        # collapse or reject them before that contract is evaluated.
         roles.add(role)
         if ref.required:
             capabilities.add(capability)

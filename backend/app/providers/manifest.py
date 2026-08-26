@@ -12,9 +12,10 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, model_validator
 
 from app.providers.capabilities import Capability
+from app.providers.reference_roles import ROLE_MEDIA_TYPES, canonical_reference_role
 
 ManifestVersion = str
 MediaKind = Literal["image", "video", "text", "voice"]
@@ -65,15 +66,32 @@ class OperationManifest(BaseModel):
     reference_constraints: dict[str, ReferenceConstraint] = Field(default_factory=dict)
     exclusive_groups: list[ExclusiveGroup] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def canonicalize_reference_constraints(self) -> OperationManifest:
+        normalized: dict[str, ReferenceConstraint] = {}
+        for role, constraint in self.reference_constraints.items():
+            normalized_role = canonical_reference_role(role) or role
+            if normalized_role in normalized and normalized[normalized_role] != constraint:
+                raise ValueError(f"duplicate reference role aliases: {normalized_role}")
+            normalized[normalized_role] = constraint
+        self.reference_constraints = normalized
+        for group in self.exclusive_groups:
+            group.members = [
+                [canonical_reference_role(role) or role for role in member]
+                for member in group.members
+            ]
+        return self
+
     def reference_role_capability(self, role: str) -> str | None:
-        """Map an artifact reference role to its capability name, if any."""
+        """Map an artifact reference role to its canonical capability name."""
+        canonical_role = canonical_reference_role(role) or role
         return {
             "first_frame": "video.i2v.first_frame",
             "last_frame": "video.i2v.last_frame",
             "reference_image": "video.reference.image",
             "reference_video": "video.reference.video",
             "reference_audio": "video.reference.audio",
-        }.get(role)
+        }.get(canonical_role)
 
 
 class ModelCapabilityManifest(BaseModel):
@@ -172,6 +190,17 @@ class CapabilitySpec(BaseModel):
     constraints: ConstraintSpec = Field(default_factory=ConstraintSpec)
     transport_profile_id: str
 
+    @model_validator(mode="after")
+    def canonicalize_input_slots(self) -> CapabilitySpec:
+        normalized: dict[str, InputSlotSpec] = {}
+        for role, slot in self.input_slots.items():
+            normalized_role = canonical_reference_role(role) or role
+            if normalized_role in normalized and normalized[normalized_role] != slot:
+                raise ValueError(f"duplicate input slot aliases: {normalized_role}")
+            normalized[normalized_role] = slot
+        self.input_slots = normalized
+        return self
+
 
 class SubmissionSemantics(BaseModel):
     """Per-model idempotency/submission declaration (spec §49). Never inferred;
@@ -208,13 +237,7 @@ class ModelManifest(BaseModel):
 # V3 view used by the CapabilityRouter validator and the frontend manifest API.
 # ---------------------------------------------------------------------------
 
-_ROLE_MEDIA_TYPES: dict[str, str] = {
-    "first_frame": "image/*",
-    "last_frame": "image/*",
-    "reference_image": "image/*",
-    "reference_video": "video/*",
-    "reference_audio": "audio/*",
-}
+_ROLE_MEDIA_TYPES = ROLE_MEDIA_TYPES
 
 _EXECUTION_MODE_BY_KIND: dict[MediaKind, Literal["sync", "async_poll"]] = {
     "image": "sync",
@@ -330,11 +353,14 @@ def _capability_spec_for(
     """Build one V3 CapabilitySpec from an A+B operation manifest."""
     input_slots: dict[str, InputSlotSpec] = {}
     for role, constraint in (op_manifest.reference_constraints or {}).items():
-        input_slots[role] = InputSlotSpec(
+        canonical_role = canonical_reference_role(role) or role
+        input_slots[canonical_role] = InputSlotSpec(
             required=constraint.min > 0,
             minimum=constraint.min,
             maximum=constraint.max if constraint.max > 0 else None,
-            media_types=[_ROLE_MEDIA_TYPES.get(role, "")] if role in _ROLE_MEDIA_TYPES else [],
+            media_types=[_ROLE_MEDIA_TYPES[canonical_role]]
+            if canonical_role in _ROLE_MEDIA_TYPES
+            else [],
         )
     common_options: dict[str, ParameterSpec] = {}
     for name, value in (op_manifest.output_constraints or {}).items():

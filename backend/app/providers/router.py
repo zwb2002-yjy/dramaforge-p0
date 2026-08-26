@@ -22,6 +22,7 @@ from app.providers.contracts.common import (
 )
 from app.providers.errors import UnsupportedCapabilityError
 from app.providers.registry import ModelRegistry
+from app.providers.runtime import ResolvedReference
 from app.providers.selector import DefaultModelSelector
 from app.providers.validator import CapabilityValidator
 
@@ -57,6 +58,7 @@ class CapabilityRouter:
         context: ExecutionContext,
         model_id: str | None = None,
         policy: object | None = None,
+        resolved_references: list[ResolvedReference] | None = None,
     ) -> ProviderCreateResult:
         model = self.selector.select(
             capability=capability,
@@ -67,7 +69,7 @@ class CapabilityRouter:
         spec = model.manifest.capability_specs.get(capability)
         if spec is None:
             raise UnsupportedCapabilityError(capability)
-        self.validator.validate(request, spec)
+        self.validator.validate(request, spec, resolved_references=resolved_references)
         return await model.adapter.create(capability, request, context)
 
     async def poll(

@@ -26,6 +26,7 @@ from app.providers.intents import (
     VideoGenerationIntentV1,
     VideoOutputIntent,
 )
+from app.providers.reference_roles import ReferenceRole
 
 
 class CapabilityNotSupportedError(ValueError):
@@ -33,14 +34,18 @@ class CapabilityNotSupportedError(ValueError):
         super().__init__(f"no intent bridge for capability: {capability}")
 
 
-def _ref(artifact: ArtifactRef, role: str) -> ArtifactReferenceIntent:
+def _ref(artifact: ArtifactRef, role: ReferenceRole) -> ArtifactReferenceIntent:
     try:
         artifact_id = UUID(str(artifact.artifact_id))
     except (TypeError, ValueError) as exc:
         raise ValueError(
             f"artifact id must be a UUID string, got: {artifact.artifact_id!r}"
         ) from exc
-    return ArtifactReferenceIntent(artifact_id=artifact_id, role=role, required=True)  # type: ignore[arg-type]
+    return ArtifactReferenceIntent(
+        artifact_id=artifact_id,
+        role=role.value,
+        required=True,
+    )
 
 
 def _video_output(request: object) -> VideoOutputIntent:
@@ -79,7 +84,7 @@ def video_request_to_intent(
         return VideoGenerationIntentV1(
             prompt=request.prompt,
             output=_video_output(request),
-            references=[_ref(request.image, "first_frame")],
+            references=[_ref(request.image, ReferenceRole.FIRST_FRAME)],
             selection=selection,
         )
     if isinstance(request, FirstLastFrameVideoRequest):
@@ -87,16 +92,16 @@ def video_request_to_intent(
             prompt=request.prompt,
             output=_video_output(request),
             references=[
-                _ref(request.first_frame, "first_frame"),
-                _ref(request.last_frame, "last_frame"),
+                _ref(request.first_frame, ReferenceRole.FIRST_FRAME),
+                _ref(request.last_frame, ReferenceRole.LAST_FRAME),
             ],
             selection=selection,
         )
     if isinstance(request, ReferenceToVideoRequest):
         references = [
-            _ref(ref, "reference_image") for ref in request.reference_images
-        ] + [_ref(ref, "reference_audio") for ref in request.reference_audio] + [
-            _ref(ref, "reference_video") for ref in request.reference_videos
+            _ref(ref, ReferenceRole.REFERENCE_IMAGE) for ref in request.reference_images
+        ] + [_ref(ref, ReferenceRole.REFERENCE_AUDIO) for ref in request.reference_audio] + [
+            _ref(ref, ReferenceRole.REFERENCE_VIDEO) for ref in request.reference_videos
         ]
         return VideoGenerationIntentV1(
             prompt=request.prompt,

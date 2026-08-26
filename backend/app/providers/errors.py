@@ -26,6 +26,7 @@ class ProviderErrorCode(StrEnum):
     MODEL_UNAVAILABLE = "model_unavailable"
     UNSUPPORTED_CAPABILITY = "unsupported_capability"
     UNSUPPORTED_OPTION = "unsupported_option"
+    UNSUPPORTED_INPUT_SLOT = "unsupported_input_slot"
     INVALID_OPTION_COMBINATION = "invalid_option_combination"
     CONTENT_POLICY = "content_policy"
     TIMEOUT = "timeout"
@@ -76,6 +77,16 @@ class UnsupportedOptionError(ProviderError):
             message,
             status_code=422,
             details={"option": option},
+        )
+
+
+class UnsupportedInputSlotError(ProviderError):
+    def __init__(self, slot: str) -> None:
+        super().__init__(
+            ProviderErrorCode.UNSUPPORTED_INPUT_SLOT,
+            f"input slot is not declared by the manifest: {slot}",
+            status_code=422,
+            details={"code": "UNSUPPORTED_INPUT_SLOT", "slot": slot},
         )
 
 

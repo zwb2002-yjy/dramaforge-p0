@@ -20,9 +20,12 @@ from app.providers.contracts.video import (
 )
 from app.providers.errors import (
     InvalidOptionCombinationError,
+    UnsupportedInputSlotError,
     UnsupportedOptionError,
 )
 from app.providers.manifest import CapabilitySpec, InputSlotSpec, ParameterSpec
+from app.providers.reference_roles import canonical_reference_role
+from app.providers.runtime import ResolvedReference
 
 # Top-level request fields that count as "common options" for strict checking.
 # Artifact refs and prompt/inputs are validated separately (slots/contract).
@@ -42,7 +45,7 @@ _COMMON_OPTION_FIELDS: frozenset[str] = frozenset(
 
 
 def _role_counts(request: Any) -> dict[str, int]:
-    """Per-input-slot artifact counts for a V3 capability request."""
+    """Per-input-slot artifact counts, always keyed by canonical role."""
     counts: dict[str, int] = {}
     if isinstance(request, ImageToVideoRequest):
         counts["first_frame"] = 1
@@ -50,12 +53,35 @@ def _role_counts(request: Any) -> dict[str, int]:
         counts["first_frame"] = 1
         counts["last_frame"] = 1
     elif isinstance(request, ReferenceToVideoRequest):
-        counts["reference_images"] = len(request.reference_images)
-        counts["reference_audio"] = len(request.reference_audio)
-        counts["reference_videos"] = len(request.reference_videos)
-    elif isinstance(request, ImageGenerateRequest):
+        if request.reference_images:
+            counts["reference_image"] = len(request.reference_images)
+        if request.reference_audio:
+            counts["reference_audio"] = len(request.reference_audio)
+        if request.reference_videos:
+            counts["reference_video"] = len(request.reference_videos)
+    elif isinstance(request, ImageGenerateRequest) and request.reference_images:
         counts["reference_image"] = len(request.reference_images)
     return counts
+
+
+def _resolved_reference_roles(resolved_references: list[ResolvedReference]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for reference in resolved_references:
+        role = canonical_reference_role(reference.role)
+        if role is None:
+            raise UnsupportedInputSlotError(reference.role)
+        counts[role] = counts.get(role, 0) + 1
+    return counts
+
+
+def _mime_matches(mime_type: str, patterns: list[str]) -> bool:
+    mime = mime_type.lower().strip()
+    return any(
+        pattern == "*/*"
+        or pattern.lower() == mime
+        or (pattern.endswith("/*") and mime.startswith(pattern[:-1].lower()))
+        for pattern in patterns
+    )
 
 
 def _requested_options(request: Any) -> dict[str, Any]:
@@ -68,15 +94,30 @@ def _requested_options(request: Any) -> dict[str, Any]:
     }
 
 
-def _validate_input_slots(request: Any, spec: CapabilitySpec) -> None:
+def _validate_input_slots(
+    request: Any,
+    spec: CapabilitySpec,
+    *,
+    resolved_references: list[ResolvedReference] | None = None,
+) -> None:
     counts = _role_counts(request)
+    if resolved_references is not None:
+        resolved_counts = _resolved_reference_roles(resolved_references)
+        if resolved_counts != counts:
+            raise InvalidOptionCombinationError(
+                "resolved references do not match request references",
+                details={
+                    "code": "RESOLVED_REFERENCE_MISMATCH",
+                    "request_counts": counts,
+                    "resolved_counts": resolved_counts,
+                },
+            )
+        counts = resolved_counts
     for role, count in counts.items():
-        slot = spec.input_slots.get(role)
-        if slot is None:
-            # A reference role the model does not declare means the capability
-            # itself is not satisfied (the selector gate already guards this).
-            continue
-        _check_slot(slot, role, count)
+        canonical_role = canonical_reference_role(role)
+        if canonical_role is None or canonical_role not in spec.input_slots:
+            raise UnsupportedInputSlotError(role)
+        _check_slot(spec.input_slots[canonical_role], canonical_role, count)
     # Required slots must be present.
     for role, slot in spec.input_slots.items():
         if slot.required and counts.get(role, 0) < 1:
@@ -84,6 +125,23 @@ def _validate_input_slots(request: Any, spec: CapabilitySpec) -> None:
                 f"required input slot is missing: {role}",
                 details={"slot": role},
             )
+
+    if resolved_references is not None:
+        for reference in resolved_references:
+            reference_role = canonical_reference_role(reference.role)
+            if reference_role is None or reference_role not in spec.input_slots:
+                continue
+            slot = spec.input_slots[reference_role]
+            if slot.media_types and not _mime_matches(reference.mime_type, slot.media_types):
+                raise InvalidOptionCombinationError(
+                    f"input slot {reference_role} does not accept MIME type {reference.mime_type}",
+                    details={
+                        "code": "INPUT_MEDIA_TYPE_MISMATCH",
+                        "slot": reference_role,
+                        "mime_type": reference.mime_type,
+                        "media_types": slot.media_types,
+                    },
+                )
 
 
 def _check_slot(slot: InputSlotSpec, role: str, count: int) -> None:
@@ -222,7 +280,13 @@ def _when_matches(when: dict[str, Any], requested: dict[str, Any]) -> bool:
 class CapabilityValidator:
     """Validates one V3 capability request against one :class:`CapabilitySpec`."""
 
-    def validate(self, request: Any, spec: CapabilitySpec) -> None:
-        _validate_input_slots(request, spec)
+    def validate(
+        self,
+        request: Any,
+        spec: CapabilitySpec,
+        *,
+        resolved_references: list[ResolvedReference] | None = None,
+    ) -> None:
+        _validate_input_slots(request, spec, resolved_references=resolved_references)
         _validate_options(request, spec)
         _validate_constraints(request, spec)

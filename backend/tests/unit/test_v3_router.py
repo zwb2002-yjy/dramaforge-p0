@@ -17,10 +17,12 @@ from app.providers.contracts import (
     ImageToVideoRequest,
     ProviderCreateResult,
     ProviderPollResult,
+    ReferenceToVideoRequest,
 )
 from app.providers.errors import (
     InvalidOptionCombinationError,
     UnsupportedCapabilityError,
+    UnsupportedInputSlotError,
     UnsupportedOptionError,
 )
 from app.providers.manifest import (
@@ -34,6 +36,7 @@ from app.providers.manifest import (
 )
 from app.providers.registry import ModelRegistry, UnknownModelError
 from app.providers.router import CapabilityRouter
+from app.providers.runtime import ResolvedReference
 from app.providers.validator import CapabilityValidator
 
 
@@ -162,6 +165,138 @@ class TestValidator:
         )
         with pytest.raises(InvalidOptionCombinationError):
             validator.validate(request, spec)
+
+    def test_undeclared_request_role_fails_closed(self) -> None:
+        validator = CapabilityValidator()
+        spec = _video_manifest().capability_specs[Capability.VIDEO_IMAGE_TO_VIDEO]
+        request = ReferenceToVideoRequest(
+            prompt="p",
+            reference_images=[ArtifactRef(artifact_id="a")],
+        )
+        with pytest.raises(UnsupportedInputSlotError) as exc_info:
+            validator.validate(request, spec)
+        assert exc_info.value.code == "unsupported_input_slot"
+        assert exc_info.value.details == {
+            "code": "UNSUPPORTED_INPUT_SLOT",
+            "slot": "reference_image",
+        }
+
+    def test_plural_reference_containers_use_canonical_cardinality(self) -> None:
+        validator = CapabilityValidator()
+        spec = CapabilitySpec(
+            capability=Capability.VIDEO_REFERENCE_TO_VIDEO,
+            input_slots={
+                "reference_image": InputSlotSpec(minimum=1, maximum=4),
+            },
+            transport_profile_id="t1",
+        )
+        request = ReferenceToVideoRequest(
+            prompt="p",
+            reference_images=[
+                ArtifactRef(artifact_id="a"),
+                ArtifactRef(artifact_id="b"),
+                ArtifactRef(artifact_id="c"),
+            ],
+        )
+        validator.validate(request, spec)
+
+    def test_resolved_reference_cardinality_cannot_hide_request_input(self) -> None:
+        validator = CapabilityValidator()
+        spec = _image_manifest().capability_specs[Capability.IMAGE_GENERATE]
+        request = ImageGenerateRequest(
+            prompt="p",
+            reference_images=[ArtifactRef(artifact_id="a")],
+        )
+        with pytest.raises(InvalidOptionCombinationError) as exc_info:
+            validator.validate(request, spec, resolved_references=[])
+        assert exc_info.value.details["code"] == "RESOLVED_REFERENCE_MISMATCH"
+
+    def test_resolved_reference_mime_type_mismatch_fails_closed(self) -> None:
+        validator = CapabilityValidator()
+        spec = _image_manifest().capability_specs[Capability.IMAGE_GENERATE]
+        request = ImageGenerateRequest(
+            prompt="p",
+            reference_images=[ArtifactRef(artifact_id="a")],
+        )
+        resolved = ResolvedReference(
+            role="reference_image",
+            artifact_id="a",
+            mime_type="video/mp4",
+            content_bytes=b"video",
+        )
+        with pytest.raises(InvalidOptionCombinationError) as exc_info:
+            validator.validate(request, spec, resolved_references=[resolved])
+        assert exc_info.value.details == {
+            "code": "INPUT_MEDIA_TYPE_MISMATCH",
+            "slot": "reference_image",
+            "mime_type": "video/mp4",
+            "media_types": ["image/*"],
+        }
+
+    @pytest.mark.parametrize(
+        ("role", "mime_type", "accepted_media_type"),
+        [
+            ("reference_image", "video/mp4", "image/*"),
+            ("reference_video", "image/png", "video/*"),
+            ("reference_audio", "image/png", "audio/*"),
+        ],
+    )
+    def test_resolved_reference_media_types_fail_closed(
+        self,
+        role: str,
+        mime_type: str,
+        accepted_media_type: str,
+    ) -> None:
+        validator = CapabilityValidator()
+        spec = CapabilitySpec(
+            capability=Capability.VIDEO_REFERENCE_TO_VIDEO,
+            input_slots={
+                role: InputSlotSpec(
+                    minimum=1,
+                    maximum=1,
+                    media_types=[accepted_media_type],
+                ),
+            },
+            transport_profile_id="t1",
+        )
+        fields = {
+            "reference_image": "reference_images",
+            "reference_video": "reference_videos",
+            "reference_audio": "reference_audio",
+        }
+        request = ReferenceToVideoRequest(
+            prompt="p",
+            **{fields[role]: [ArtifactRef(artifact_id="a")]},
+        )
+        resolved = ResolvedReference(
+            role=role,
+            artifact_id="a",
+            mime_type=mime_type,
+            content_bytes=b"reference",
+        )
+        with pytest.raises(InvalidOptionCombinationError) as exc_info:
+            validator.validate(request, spec, resolved_references=[resolved])
+        assert exc_info.value.details["code"] == "INPUT_MEDIA_TYPE_MISMATCH"
+
+    def test_resolved_reference_mime_type_matches_manifest(self) -> None:
+        validator = CapabilityValidator()
+        spec = _image_manifest().capability_specs[Capability.IMAGE_GENERATE]
+        request = ImageGenerateRequest(
+            prompt="p",
+            reference_images=[ArtifactRef(artifact_id="a")],
+        )
+        validator.validate(
+            request,
+            spec,
+            resolved_references=[
+                ResolvedReference(
+                    role="reference_image",
+                    artifact_id="a",
+                    mime_type="image/png",
+                    content_bytes=b"image",
+                )
+            ],
+        )
 
     def test_unsupported_common_option_rejected(self) -> None:
         validator = CapabilityValidator()
@@ -328,6 +463,19 @@ class TestRouter:
                 request=ImageGenerateRequest(prompt="p"),
                 context=ExecutionContext(trace_id="t"),
             )
+
+    async def test_undeclared_input_slot_fails_before_adapter_create(self) -> None:
+        router, adapter = self._router()
+        with pytest.raises(UnsupportedInputSlotError):
+            await router.create(
+                capability=Capability.IMAGE_GENERATE,
+                request=ReferenceToVideoRequest(
+                    prompt="p",
+                    reference_videos=[ArtifactRef(artifact_id="a")],
+                ),
+                context=ExecutionContext(trace_id="t"),
+            )
+        assert adapter.created == []
 
     async def test_validation_happens_before_dispatch(self) -> None:
         router, adapter = self._router()
