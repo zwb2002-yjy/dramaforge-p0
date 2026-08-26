@@ -69,7 +69,7 @@
 | B03 No Silent Fallback | ✅ 已关闭 | `_resolve` 在 `status != RESOLVED` 时抛 `ValidationAppError`；测试 `test_unavailable_profile_model_does_not_run_legacy_binding`、`test_unavailable_profile_model_stops_before_provider_submission`、`test_unbound_project_fails_closed_without_submit`（本日重跑 3 passed） |
 | B04 Credential Immutable Revision | ✅ 已关闭 | 迁移 `20260826_0041` + `tests/unit/test_credential_revisions.py`（4 用例） |
 | B05 ProviderConnectionRevision + Runtime 冻结 credential | ✅ 已关闭 | 迁移 `20260826_0042` + `tests/unit/test_connection_revisions.py`；MS5-C `test_unified_resume_never_recreates`（connection+credential 升到 rev2 后 resume 仍用 rev1） |
-| B06 Latest HEAD CI / Security green | ⏳ 进行中（CI 已绿；Security 修复后待远端确认） | CI（`d04e23b`）全绿：`postgres-integration` 真实运行（alembic upgrade head + integration 23 passed）、backend-unit 746、backend-static、platform-baseline（3 OS）、frontend、frontend-smoke（含 Windows）、litellm-integration、policy 全部 success。Security 唯一失败为 `filesystem-scan`（trivy）命中 `backend/uv.lock` pytest 8.4.2 → CVE-2025-71176（MEDIUM、dev-only）；已升级 pytest 9.1.1 + pytest-asyncio 1.4.0，本地 unit 746 / PG integration 23 仍通过、trivy 0.70.0 复现命令退出 0；远端 Security 待新 HEAD 重跑确认（本报告不自行宣布通过） |
+| B06 Latest HEAD CI / Security green | ✅ 已关闭（push 触发 run） | `dc10525` 上 push 触发的 CI 与 Security 均 success：`REQUIRED_CHECKS`（policy、backend-static、backend-unit、postgres-integration、frontend、frontend-smoke、frontend-smoke-windows）全部通过；Security 的 secret-scan/filesystem-scan/python-dependencies/frontend-dependencies 全部通过。注：PR 触发的 Security 仅 `dependency-review` 失败，原因是仓库未启用 GitHub Dependency graph（`dependency-review-action` 报 "Dependency review is not supported on this repository"；8/21 起一直如此，属仓库设置项，不在 `REQUIRED_CHECKS` 内）——需 Owner 在 Settings → Code security and analysis 启用 Dependency graph 或明示接受该已知基建限制。本报告不自行宣布 Gate 通过 |
 
 ## §18 四个一票否决条件
 
@@ -83,6 +83,6 @@
 ## 复核结论
 
 - 文档的 6 个阻断项中 **B01–B05 已在本地 HEAD `958addc` 关闭**（文档基于旧远程 HEAD `9e0b27f` 才判定 MISSING/BLOCKED）。
-- **B06（CI/Security）** 远端 CI 已在 `d04e23b` 全绿；Security `filesystem-scan` 的 pytest CVE 已通过升级 pytest 9.1.1 修复（本地验证 trivy 退出 0），远端 Security 待新 HEAD 重跑确认；本报告如实记录，不替代远端判定，不自行宣布 Gate 通过。
+- **B06（CI/Security）** 已在 `dc10525` 关闭：push 触发的 CI 与 Security 全部 success（含真实 postgres-integration 与 trivy filesystem-scan）。唯一遗留为 PR 触发 Security 的 `dependency-review`，失败原因是仓库未启用 Dependency graph（设置项，非代码，8/21 起存在，不在 `REQUIRED_CHECKS` 内），需 Owner 启用或明示接受。本报告如实记录，不替代远端判定，不自行宣布 Gate 通过。
 - 依据文档 §17 的 MG-P4 验收口径：本地证据（focused 101 passed；全量 746 passed；vitest 72；e2e 8）已覆盖 requested==resolved==binding==catalog==actual、fail-closed POST=0、credential/connection rev A→B→resume=A、multi reference、unknown slot、mode、idempotency、resume。
 - **本报告仍未自行宣布 Phase 4 Merge Gate 通过**；最终 `PROFESSIONAL_PHASE_4_MERGE_GATE` 判定以 Owner 基于新 HEAD（含远端 CI）的确认与文档 §17 口径为准。
