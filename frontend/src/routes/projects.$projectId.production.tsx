@@ -207,8 +207,9 @@ function ProductionPage() {
   async function runShotOp(
     label: string,
     fn: () => Promise<{ status: string; message: string }>,
+    shotId: string | null = selectedShotId,
   ) {
-    if (!selectedShotId) return;
+    if (!shotId) return;
     setMsg(null);
     try {
       const r = await fn();
@@ -289,8 +290,8 @@ function ProductionPage() {
           await saveDirectorBoard(projectId, revisionShotId, { expected_version: directorBoard.data?.version ?? null, ...input });
           await qc.invalidateQueries({ queryKey: ["director-board", projectId, revisionShotId] });
         }}
-        onStart={(shotId) => void runShotOp("启动专业镜头", () => startProfessionalShot(projectId, shotId))}
-        onRerun={(shotId) => void runShotOp("局部重跑视频", () => rerunProfessionalShot(projectId, shotId, "video"))}
+        onStart={(shotId) => void runShotOp("启动专业镜头", () => startProfessionalShot(projectId, shotId), shotId)}
+        onRerun={(shotId) => void runShotOp("局部重跑视频", () => rerunProfessionalShot(projectId, shotId, "video"), shotId)}
         onSave={async (shot, input) => {
           const result = await updateShotCanvas(projectId, shot.id, {
             expected_version: shot.version,
