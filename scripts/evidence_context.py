@@ -161,7 +161,17 @@ def require_ignored_evidence_path(repo_root: Path, path: Path) -> Path:
     except ValueError:
         return resolved
     proc = subprocess.run(
-        ["git", "-C", str(root), "check-ignore", "--quiet", "--", relative.as_posix()],
+        [
+            "git",
+            "-c",
+            f"safe.directory={root}",
+            "-C",
+            str(root),
+            "check-ignore",
+            "--quiet",
+            "--",
+            relative.as_posix(),
+        ],
         check=False,
         capture_output=True,
         text=True,
