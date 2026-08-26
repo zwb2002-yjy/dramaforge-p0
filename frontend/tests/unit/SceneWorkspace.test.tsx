@@ -85,6 +85,7 @@ describe("SceneWorkspace", () => {
     expect(screen.getByTestId("shot-strip")).toBeInTheDocument();
     expect(screen.getByText("#1")).toBeInTheDocument();
     expect(screen.getByTestId("shot-placeholder")).toHaveTextContent("A turns");
+    expect(screen.getByTestId("no-formal-result")).toHaveTextContent("尚未选择正式结果");
     expect(screen.getByTestId("shot-design-panel")).toBeInTheDocument();
     expect(screen.getByTestId("shot-production-trace")).toBeInTheDocument();
     expect(screen.getByText("keyframe")).toBeInTheDocument();

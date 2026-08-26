@@ -31,6 +31,9 @@ export function CinematicCanvas({ projectId, shot }: CinematicCanvasProps) {
         <div className="qc-canvas-empty" data-testid="shot-placeholder">
           <h3>#{shot.shot_number} 导演构图预览</h3>
           <p>{shot.visual_description || "尚未生成关键帧。"}</p>
+          <p className="qc-canvas-hint" data-testid="no-formal-result">
+            尚未选择正式结果
+          </p>
         </div>
       )}
     </div>

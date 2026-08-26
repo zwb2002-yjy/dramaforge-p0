@@ -16,6 +16,7 @@
 ## Owned paths
 
 - `backend/tests/integration/test_phase10_migration_audit_pg.py`
+- `backend/tests/integration/test_catalog_migration_pg.py`（stale `upgrade head` 断言更新为当前 head 20260827_0049）
 - `frontend/src/features/workbench/CinematicCanvas.tsx`
 - `frontend/tests/unit/SceneWorkspace.test.tsx`
 - `docs/plans/professional-program-v2/task-contracts/P10-MIGRATION-NOGUESS-AUDIT.md`
