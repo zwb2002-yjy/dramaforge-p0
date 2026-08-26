@@ -58,3 +58,27 @@ Implement the bounded MS4-LITE slice:
 ## Drift
 
 This Task adds explicit mode contracts and snapshot identity only. Concrete runtime/provider connection revisions remain MS5-R / MS5-IDENTITY; broader capability vocabulary convergence and Workbench UI merge remain later phases.
+
+
+## Implementation Result (2026-08-26)
+
+- **Status：COMPLETED**。
+- `manifest.py` 新增 typed `InputModeSpec`，`CapabilitySpec` 增加 additive `modes` / `default_mode`，并保留无 modes 时的 legacy contract；A+B mode-like `ExclusiveGroup` 会转换为显式 `first_frame`、`first_last_frame` 或 `omni_reference` mode，不再 flatten 为 slot 互斥猜测。
+- V3 image/video request contracts 新增可选 `mode_id`；intent bridge 将其带入 A+B intent。`CapabilityRouter` 现在在 adapter `create()` 前调用 `validate_mode()`。
+- `CapabilityValidator.validate_mode()` 对 declared modes 执行 mode 存在性、required/min/max slot、option 和 constraint 校验；未声明或缺失 mode 以稳定 `UNSUPPORTED_MODE` fail-closed，跨 mode 输入以 `UNSUPPORTED_INPUT_SLOT` fail-closed。
+- `SelectionPlan` 新增独立的 input `mode_id`；Professional selection 根据显式 mode 或输入形状保存 `text_to_video`、`first_frame`、`first_last_frame`、`omni_reference`、`text_to_image` / `reference_image`，并由既有 `ExecutionModelResolution`、NodeRun snapshot、ProviderOperation selection/request evidence 继续冻结。
+- 未合并 capability vocabulary、未大规模迁移 Registry/provider contracts、未触碰 MS5 runtime identity/credential revision，也未进行真实 Provider 调用。
+
+## Acceptance Evidence
+
+- MS4 focused mode/manifest/router tests：`backend/tests/unit/test_v3_router.py`，31 passed。
+- Bridge/compiler/identity regressions：`backend/tests/unit/test_v3_adapters_v2.py`、`backend/tests/unit/test_v3_identity.py`、`backend/tests/unit/test_compilers.py`，39 passed。
+- Model selection / NodeRun snapshot mode identity：`backend/tests/unit/test_model_selection.py`、`backend/tests/unit/test_unified_path.py`，29 passed。
+- Backend unit suite：699 passed，1 warning。
+- Static checks：`ruff check app tests alembic/versions` passed；`mypy app` passed；active seven-plan reference verifier and directory compliance passed；`git diff --check` passed。
+- No migration, Provider call or paid execution was introduced.
+
+## Drift Closed / Deferred
+
+- 已关闭：flattened capability-only input contract；mode selection/validation 缺少稳定 identity；mode-specific required slot/cardinality/options 未在 dispatch 前统一验证；A+B mode-like exclusivity 被错误表达为普通互斥。
+- 仍待后续合同：MS5-R concrete runtime resolution、MS5-IDENTITY immutable credential/connection revisions、Phase 4 Merge Gate 与 Workbench UI 的完整 mode state。
