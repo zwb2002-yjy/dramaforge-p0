@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import base64
 from types import SimpleNamespace
+from typing import cast
+from uuid import UUID
 
 import pytest
 from app.providers.adapters_v2 import (
@@ -26,6 +28,7 @@ from app.providers.contracts import (
     GenerationStatus,
     ImageGenerateRequest,
     ImageToVideoRequest,
+    ReferenceToVideoRequest,
     ResolvedArtifact,
 )
 from app.providers.errors import (
@@ -38,9 +41,11 @@ from app.providers.manifest import (
 )
 from app.providers.runtime import (
     CancelResult,
+    CompiledVideoRequest,
     CostResult,
     PollResult,
     ProviderResumeToken,
+    ProviderRuntime,
     ResolvedReference,
     SubmissionResult,
 )
@@ -54,13 +59,11 @@ def _frame() -> ResolvedArtifact:
     )
 
 
-def _uuid_of(value: str):
-    from uuid import UUID
-
+def _uuid_of(value: str) -> UUID:
     try:
         return UUID(str(value))
-    except (TypeError, ValueError):
-        return None
+    except (TypeError, ValueError) as exc:
+        raise AssertionError(f"test fixture must contain a UUID: {value!r}") from exc
 
 
 def _bridge_for(provider_type: str, media: str) -> LegacyAdapterBridge:
@@ -339,6 +342,204 @@ def _runtime_bridge(
         resolver=resolver,  # type: ignore[arg-type]
     )
     return bridge, runtime
+
+
+class _RecordingVideoCompiler:
+    def __init__(self) -> None:
+        self.received: list[ResolvedReference] = []
+
+    def validate(self, intent: object, model: object) -> None:
+        return None
+
+    async def compile(
+        self,
+        intent: object,
+        model: object,
+        references: list[ResolvedReference],
+        *,
+        invoke_model_value: str,
+    ) -> CompiledVideoRequest:
+        self.received = list(references)
+        return CompiledVideoRequest(
+            provider_type="test",
+            protocol_profile="test",
+            model_id=invoke_model_value,
+            operation="video.generate",
+            wire_request={
+                "reference_ids": [str(reference.artifact_id) for reference in references]
+            },
+            request_schema_version="test-v1",
+            reference_artifact_ids=[reference.artifact_id for reference in references],
+            reference_fingerprints=[
+                reference.fingerprint or "" for reference in references
+            ],
+        )
+
+
+def _ordered_bridge(
+    *, runtime: _FakeRuntime | None = None, resolver: object | None = None
+) -> tuple[LegacyAdapterBridge, _RecordingVideoCompiler, _FakeRuntime | None]:
+    seed = seed_manifests_for(provider_type="agnes")
+    manifest = ModelCapabilityManifest.model_validate(seed[1])
+    v3 = to_v3_model_manifest(manifest, transport_profile_id="agnes-video-v1")
+    compiler = _RecordingVideoCompiler()
+    bridge = LegacyAdapterBridge(
+        v3,
+        BridgeComponents(
+            a_b_manifest=manifest,
+            image_compiler=None,
+            video_compiler=compiler,
+            runtime=cast(ProviderRuntime | None, runtime),
+        ),
+        invoke_model_value=manifest.model_id,
+        resolver=resolver,  # type: ignore[arg-type]
+    )
+    return bridge, compiler, runtime
+
+
+class TestOrderedReferenceTransport:
+    async def test_translate_v2_preserves_same_role_order_and_fingerprints(self) -> None:
+        bridge, compiler, _runtime = _ordered_bridge()
+        ids = ["00000000-0000-0000-0000-00000000000" + str(index) for index in (1, 2, 3)]
+        request = ReferenceToVideoRequest(
+            prompt="multi-reference",
+            reference_images=[ArtifactRef(artifact_id=artifact_id) for artifact_id in ids],
+        )
+        references = [
+            ResolvedReference(
+                role="reference_image",
+                artifact_id=_uuid_of(artifact_id),
+                mime_type="image/png",
+                content_url=f"https://cdn.example.com/{index}.png",
+                fingerprint=f"{index}" * 64,
+            )
+            for index, artifact_id in enumerate(ids, start=1)
+        ]
+
+        await bridge.translate_v2(
+            Capability.VIDEO_REFERENCE_TO_VIDEO,
+            request,
+            references,
+        )
+
+        assert [reference.artifact_id for reference in compiler.received] == [
+            reference.artifact_id for reference in references
+        ]
+        assert [reference.role for reference in compiler.received] == [
+            "reference_image",
+            "reference_image",
+            "reference_image",
+        ]
+        assert [reference.fingerprint for reference in compiler.received] == [
+            "1" * 64,
+            "2" * 64,
+            "3" * 64,
+        ]
+
+    async def test_create_keeps_resolver_output_as_ordered_list(self) -> None:
+        runtime = _FakeRuntime()
+        resolver_output = [
+            ResolvedReference(
+                role="reference_image",
+                artifact_id=_uuid_of(artifact_id),
+                mime_type="image/png",
+                content_url=f"https://cdn.example.com/{index}.png",
+                fingerprint=f"{index}" * 64,
+            )
+            for index, artifact_id in enumerate(
+                [
+                    "00000000-0000-0000-0000-000000000001",
+                    "00000000-0000-0000-0000-000000000002",
+                    "00000000-0000-0000-0000-000000000003",
+                ],
+                start=1,
+            )
+        ]
+
+        def resolver(
+            requested: list[tuple[str, ResolvedArtifact]],
+        ) -> list[ResolvedReference]:
+            assert len(requested) == 3
+            assert [artifact.artifact_id for _role, artifact in requested] == [
+                str(reference.artifact_id) for reference in resolver_output
+            ]
+            return list(resolver_output)
+
+        bridge, compiler, _runtime = _ordered_bridge(runtime=runtime, resolver=resolver)
+        request = ReferenceToVideoRequest(
+            prompt="multi-reference",
+            reference_images=[
+                ArtifactRef(artifact_id=str(reference.artifact_id))
+                for reference in resolver_output
+            ],
+        )
+        await bridge.create(
+            Capability.VIDEO_REFERENCE_TO_VIDEO,
+            request,
+            ExecutionContext(trace_id="ms3"),
+        )
+
+        assert [reference.artifact_id for reference in compiler.received] == [
+            reference.artifact_id for reference in resolver_output
+        ]
+        assert [reference.fingerprint for reference in compiler.received] == [
+            reference.fingerprint for reference in resolver_output
+        ]
+        assert len(runtime.submitted) == 1
+
+    async def test_translate_v2_preserves_mixed_reference_roles(self) -> None:
+        bridge, compiler, _runtime = _ordered_bridge()
+        image_id = "00000000-0000-0000-0000-000000000011"
+        video_id = "00000000-0000-0000-0000-000000000012"
+        request = ReferenceToVideoRequest(
+            prompt="image and video reference",
+            reference_images=[ArtifactRef(artifact_id=image_id)],
+            reference_videos=[ArtifactRef(artifact_id=video_id)],
+        )
+        references = [
+            ResolvedReference(
+                role="reference_image",
+                artifact_id=_uuid_of(image_id),
+                mime_type="image/png",
+                fingerprint="i" * 64,
+            ),
+            ResolvedReference(
+                role="reference_video",
+                artifact_id=_uuid_of(video_id),
+                mime_type="video/mp4",
+                fingerprint="v" * 64,
+            ),
+        ]
+
+        await bridge.translate_v2(
+            Capability.VIDEO_REFERENCE_TO_VIDEO,
+            request,
+            references,
+        )
+
+        assert [(reference.role, reference.fingerprint) for reference in compiler.received] == [
+            ("reference_image", "i" * 64),
+            ("reference_video", "v" * 64),
+        ]
+
+    async def test_legacy_image_bridge_rejects_multiple_references(self) -> None:
+        bridge = _bridge_for("agnes", "image")
+        request = ImageGenerateRequest(
+            prompt="multi-reference image",
+            reference_images=[
+                ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001"),
+                ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000002"),
+            ],
+        )
+        with pytest.raises(
+            ValueError,
+            match="UNSUPPORTED_BY_LEGACY_BRIDGE",
+        ):
+            await bridge.translate(
+                Capability.IMAGE_GENERATE,
+                request,
+                {"reference_image": _frame()},
+            )
 
 
 class TestReferenceResolverClosure:

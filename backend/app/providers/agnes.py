@@ -843,8 +843,14 @@ class AgnesImageCompiler:
         invoke_model_value: str,
     ) -> Any:
         self.validate(intent, model)
-        resolved = {ref.role: ref for ref in references}
-        ref_image = resolved.get("reference_image")
+        image_references = [
+            ref for ref in references if ref.role == "reference_image"
+        ]
+        if len(image_references) > 1:
+            raise ValueError(
+                "UNSUPPORTED_BY_LEGACY_BRIDGE: image compiler accepts at most one reference_image"
+            )
+        ref_image = image_references[0] if image_references else None
         expected_reference_id = intent.reference_artifact_id
         if expected_reference_id is None and ref_image is not None:
             raise ValueError("image compiler received an unexpected reference_image")

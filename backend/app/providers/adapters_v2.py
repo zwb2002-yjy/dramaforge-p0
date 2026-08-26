@@ -14,7 +14,7 @@ CapabilityRouter path fully owns submission (Phase 11/12).
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -86,6 +86,7 @@ def submission_status_to_v3(status: str) -> GenerationStatus:
 
 
 ArtifactResolver = Callable[[list[tuple[str, ResolvedArtifact]]], list[ResolvedReference]]
+ReferenceInput = Mapping[str, ResolvedArtifact] | Sequence[ResolvedReference]
 
 _COMPILER_AUDIT_OPTION_FIELDS = frozenset(
     {"aspect_ratio", "duration_seconds", "resolution", "generate_audio", "seed"}
@@ -298,16 +299,13 @@ class LegacyAdapterBridge:
         self,
         capability: Capability,
         request: Any,
-        resolved_artifacts: dict[str, ResolvedArtifact],
+        resolved_references: list[ResolvedReference],
     ) -> tuple[Any, TranslationResult]:
         intent = request_to_intent(capability, request)
         compiler = self._compiler_for(capability)
         a_b = self._components.a_b_manifest
         compiler.validate(intent, a_b)
-        references = [
-            _resolved_reference(role, artifact)
-            for role, artifact in resolved_artifacts.items()
-        ]
+        references = list(resolved_references)
         compiled = await compiler.compile(
             intent,
             a_b,
@@ -350,13 +348,43 @@ class LegacyAdapterBridge:
         )
         return compiled, translation
 
+    @staticmethod
+    def _coerce_reference_input(resolved_artifacts: ReferenceInput) -> list[ResolvedReference]:
+        """Convert the legacy mapping surface without reintroducing role dedupe.
+
+        A mapping is retained only for old callers and therefore cannot recover
+        duplicates that were already collapsed by that caller. New callers use
+        ``translate_v2`` and pass the ordered ``ResolvedReference`` list directly.
+        """
+        if isinstance(resolved_artifacts, Mapping):
+            return [
+                _resolved_reference(role, artifact)
+                for role, artifact in resolved_artifacts.items()
+            ]
+        return list(resolved_artifacts)
+
     async def translate(
         self,
         capability: Capability,
         request: Any,
-        resolved_artifacts: dict[str, ResolvedArtifact],
+        resolved_artifacts: ReferenceInput,
     ) -> TranslationResult:
-        _, translation = await self._compile(capability, request, resolved_artifacts)
+        """Compatibility surface for old mapping callers and ordered V2 input."""
+        _, translation = await self._compile(
+            capability,
+            request,
+            self._coerce_reference_input(resolved_artifacts),
+        )
+        return translation
+
+    async def translate_v2(
+        self,
+        capability: Capability,
+        request: Any,
+        resolved_references: list[ResolvedReference],
+    ) -> TranslationResult:
+        """Translate an ordered reference list without a role-keyed intermediary."""
+        _, translation = await self._compile(capability, request, list(resolved_references))
         return translation
 
     async def create(
@@ -370,27 +398,21 @@ class LegacyAdapterBridge:
                 "bridge has no runtime; use the DB-bound submission path "
                 "(Phase 5/6)"
             )
-        resolved: dict[str, ResolvedArtifact] = {
-            role: artifact for role, artifact in _request_reference_roles(request)
-        }
-        if resolved and self._resolver is not None:
-            # BLOCK-4: the resolver's ResolvedReference is the source of the
-            # delivery material. Rebuild ResolvedArtifact from it so the URL /
-            # bytes / fingerprint actually reach the compiler — never fall back
-            # to the identity-only placeholder.
-            resolved_refs = self._resolver(list(resolved.items()))
-            resolved = {
-                ref.role: ResolvedArtifact(
-                    artifact_id=str(ref.artifact_id),
-                    mime_type=ref.mime_type,
-                    sha256=ref.fingerprint,
-                    signed_url=ref.content_url,
-                    content_bytes=ref.content_bytes,
-                )
-                for ref in resolved_refs
-                if ref.role in resolved
-            }
-        compiled, _translation = await self._compile(capability, request, resolved)
+        requested_references = _request_reference_roles(request)
+        if requested_references and self._resolver is not None:
+            # BLOCK-4/MS3: resolver output stays an ordered list all the way to
+            # the compiler. Never rebuild it through dict[role, artifact].
+            resolved_references = list(self._resolver(requested_references))
+        else:
+            resolved_references = [
+                _resolved_reference(role, artifact)
+                for role, artifact in requested_references
+            ]
+        compiled, _translation = await self._compile(
+            capability,
+            request,
+            resolved_references,
+        )
         runtime = self._components.runtime
         if isinstance(compiled, CompiledImageRequest):
             result = await runtime.submit_image(compiled)

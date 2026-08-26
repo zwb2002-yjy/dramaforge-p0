@@ -118,6 +118,10 @@ def image_request_to_intent(
 ) -> ImageGenerationIntent:
     selection = ModelSelectionIntent(mode="explicit_binding")
     if isinstance(request, ImageGenerateRequest):
+        if len(request.reference_images) > 1:
+            raise ValueError(
+                "UNSUPPORTED_BY_LEGACY_BRIDGE: image intent supports at most one reference_image"
+            )
         reference = request.reference_images[0] if request.reference_images else None
         return ImageGenerationIntent(
             prompt=request.prompt,
