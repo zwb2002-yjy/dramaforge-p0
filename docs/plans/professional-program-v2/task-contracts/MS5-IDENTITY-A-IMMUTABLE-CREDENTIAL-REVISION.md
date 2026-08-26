@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETED
 - **Program order:** `MS5-R` → `MS5-IDENTITY-A` → `MS5-IDENTITY-B` → `MS5-IDENTITY-C` → Phase 4 Merge Gate
 - **Task boundary:** Implement only immutable credential revisions and the strict credential-id read path. Do not implement `ProviderConnectionRevision`, `ExecutionIdentitySnapshot`, resume reconstruction, or Phase 4 merge work in this contract.
 
@@ -75,9 +75,31 @@ Make each account credential update produce an immutable revision record while p
 - PostgreSQL integration is run only if the configured database is reachable; otherwise the result is recorded as skipped, never as passed.
 - `git diff --check` passes and no owned-path or plan-order guardrail fails.
 
-## Completion evidence to record
+## Completion evidence
 
-- Migration name and schema constraints.
-- Exact tests and static checks run, including any truthful PostgreSQL skip reason.
-- Proof that two account updates retain two decryptable rows and that concrete connection lookup selects the referenced revision rather than the provider’s latest default.
-- Commit SHA on `dev` and the next bounded task (`MS5-IDENTITY-B`).
+- Migration: `backend/alembic/versions/20260826_0041_immutable_credential_revisions.py`.
+  Existing rows are backfilled as revision 1; the old workspace/provider unique
+  constraint is removed; revision uniqueness, positive revision, self-link, and
+  composite same-workspace/provider predecessor constraints are installed.
+- `store_credential()` now always INSERTs a new row with the next
+  `revision_no` and `supersedes_id`; it never overwrites account ciphertext.
+  `rotate_credentials()` remains the separate key-rotation path and only
+  changes encryption state while retaining revision identity.
+- `read_credential_by_id()` enforces both credential id and workspace id.
+  `runtime_connection_settings()` and the ProviderConnection service settings
+  path use that strict helper and fail closed when the named revision is absent.
+- Evidence tests prove two account revisions remain decryptable, a connection
+  continues to resolve its named older revision after a newer provider revision
+  exists, cross-workspace reads return no credential, key rotation does not
+  create account revisions, and plaintext/ciphertext/API-key material is not
+  returned by the tested response/runtime boundaries.
+- Verification: focused identity/BYOK/provider/unified tests `35 passed, 1
+  warning`; backend unit suite `711 passed, 1 warning`; `ruff check app tests
+  alembic/versions` passed; `mypy app` passed; directory compliance passed;
+  migration offline SQL generation and compile checks passed; `git diff --check`
+  passed. PostgreSQL integration was not run because `TEST_PG_ENABLED` is unset
+  and local PostgreSQL port `127.0.0.1:5432` is unreachable; this is recorded as
+  a truthful skip, not a pass.
+- Commits: `b5fa93c` (implementation), `3e6ba83` (strict unified fixture
+  alignment), plus the final provider assertion commit on `dev`. Next bounded
+  task: `MS5-IDENTITY-B` (`ProviderConnectionRevision`).

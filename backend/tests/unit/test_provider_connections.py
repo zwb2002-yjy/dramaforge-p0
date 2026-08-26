@@ -184,12 +184,16 @@ async def test_credential_rotation_clears_capability_and_quality_flags(
     binding.quality_gated = True
     await session.flush()
 
+    previous_credential_id = connection.credential_id
+    previous_credential_revision = connection.credential_revision
     rotated = await service.update_credential(
         workspace_id=workspace.id,
         connection_id=connection.id,
         actor=user,
         api_key="second-secret",
     )
+    assert rotated.credential_id != previous_credential_id
+    assert rotated.credential_revision == previous_credential_revision + 1
     assert rotated.verification_status == "unverified"
     assert rotated.verified_at is None
     refreshed = await session.get(ProviderModelBinding, binding.id)
