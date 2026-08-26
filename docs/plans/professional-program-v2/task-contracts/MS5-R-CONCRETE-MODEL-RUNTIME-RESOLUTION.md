@@ -57,3 +57,25 @@ Implement the bounded MS5-R slice:
 ## Drift
 
 This Task closes concrete model-to-runtime resolution only. Immutable credential/connection revisions, restart identity and Phase 4 Merge Gate remain MS5-IDENTITY and later tasks.
+
+
+## Implementation Result (2026-08-26)
+
+- **Status：COMPLETED**。
+- `ProviderRuntimeResolver.resolve_runtime_for_model_binding(model_binding_id=...)` 新增为 Professional runtime 入口：从 concrete `ProviderModelBinding` 读取并校验 Connection 与 Catalog revision，不按 provider/media 搜索 seed manifest。
+- 新入口 fail-closed 校验 binding/connection enabled、workspace/connection/catalog/model/provider/profile/media 一致性、Catalog lifecycle、manifest hash 与 `invoke_model_value`；校验失败发生在 runtime factory 创建前。
+- 既有 `ResolvedRuntime` 增加 binding、catalog、concrete model id、invoke model value 与 manifest hash，未新增 ProfessionalRuntime / RuntimeV4 / 第二套 Worker 或 Generation 真相。
+- Professional unified execution path 已消费 binding-based resolver 返回的 concrete identity；旧 `workspace_router.resolve_workspace_bridge()` 的 provider/media seed lookup 保留并明确为 Legacy compatibility，不进入该路径。
+
+## Acceptance Evidence
+
+- Concrete two-model runtime identity：`backend/tests/unit/test_runtime_model_resolution.py`，8 passed；同一 Provider 的 model B 返回 model B / `wire-model-b`，catalog/provider/profile/hash/lifecycle/model/invoke 错误均在 runtime 创建前 fail-closed。
+- Professional unified execution regression：`backend/tests/unit/test_unified_path.py`，20 passed。
+- Backend unit suite：707 passed，1 warning。
+- Static checks：`ruff check app tests alembic/versions` passed；`mypy app` passed；active seven-plan reference verifier and directory compliance passed；`git diff --check` passed。
+- PostgreSQL snapshot contract from MS1 remains present; this Task did not add a migration, change credential/connection revisions, or invoke a real Provider.
+
+## Drift Closed / Deferred
+
+- 已关闭：Professional runtime 根据 provider_type + media_kind 选 first seed manifest；runtime resolver 对 concrete binding/catalog identity不校验；runtime result 不暴露 concrete model/invoke identity。
+- 仍待后续合同：MS5-IDENTITY immutable credential/connection revisions and restart identity；Phase 4 Merge Gate / P4 Manual Production Alpha。
