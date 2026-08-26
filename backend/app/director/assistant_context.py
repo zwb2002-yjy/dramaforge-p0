@@ -136,15 +136,14 @@ class AssistantContextBuilder:
                 select(DirectorMessage)
                 .where(DirectorMessage.thread_id == thread.id)
                 .order_by(
-                    DirectorMessage.created_at.desc(),
-                    DirectorMessage.id.desc(),
+                    DirectorMessage.created_at.asc(),
+                    DirectorMessage.id.asc(),
                 )
-                .limit(recent_limit)
             )
         ).scalars().all()
         ctx.recent_messages = [
             {"role": message.role, "content": message.content}
-            for message in reversed(messages)
+            for message in messages[-recent_limit:]
         ]
         return ctx
 
