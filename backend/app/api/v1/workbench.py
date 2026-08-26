@@ -13,6 +13,7 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Shot
 from app.assets.schemas import ShotDirectorState
+from app.production.formal_selection import set_formal_keyframe
 from app.production.models import GraphVersion
 from app.production.reference_intents import ShotReferenceIntent
 from app.production.workbench_execution import (
@@ -270,4 +271,46 @@ async def create_execution(
         graph_version_id=run.graph_version_id,
         status=run.status,
         plan_fingerprint=rebuilt.plan_fingerprint or "",
+    )
+
+
+
+class FormalKeyframeBody(BaseModel):
+    artifact_id: UUID
+    expected_shot_version: int | None = None
+
+
+class FormalKeyframeRead(BaseModel):
+    shot_id: UUID
+    formal_keyframe_artifact_id: UUID
+    version: int
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/formal-keyframe",
+    response_model=FormalKeyframeRead,
+)
+async def set_shot_formal_keyframe(
+    project_id: UUID,
+    shot_id: UUID,
+    body: FormalKeyframeBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> FormalKeyframeRead:
+    """Mark one keyframe artifact as the shot's formal keyframe (03 §38)."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    shot = await set_formal_keyframe(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=body.artifact_id,
+        expected_shot_version=body.expected_shot_version,
+    )
+    await session.commit()
+    assert shot.formal_keyframe_artifact_id is not None
+    return FormalKeyframeRead(
+        shot_id=shot.id,
+        formal_keyframe_artifact_id=shot.formal_keyframe_artifact_id,
+        version=shot.version,
     )
