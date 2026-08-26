@@ -203,3 +203,50 @@ async def test_graph_rejects_invalid_scope(session: AsyncSession) -> None:
             template_key="t",
             created_by=user.id,
         )
+
+
+@pytest.mark.asyncio
+async def test_shot_experiment_graph_independent_from_formal(session: AsyncSession) -> None:
+    """P5-02: formal shot graph A and shot_experiment graph B are independent;
+    publishing B does not change A.current_version."""
+    user, project = await _project(session)
+    service = GraphService(session)
+    shot_id = uuid4()
+    graph_a = await service.create_graph(
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=shot_id,
+        template_key="formal-shot",
+        created_by=user.id,
+        definition=_definition(),
+    )
+    assert graph_a.current_version_id is not None
+    mat_a = await service.materialize_definition(version_id=graph_a.current_version_id)
+    await service.publish(version_id=mat_a.version.id, published_by=user.id)
+    a_version_before = graph_a.current_version_id
+    a_status_before = (
+        await session.get(GraphVersion, graph_a.current_version_id)
+    ).status
+
+    experiment_id = uuid4()
+    graph_b = await service.create_graph(
+        project_id=project.id,
+        scope_type="shot_experiment",
+        scope_entity_id=experiment_id,
+        template_key="shot-experiment",
+        created_by=user.id,
+        definition=_definition(),
+    )
+    assert graph_b.current_version_id is not None
+    assert graph_b.id != graph_a.id
+    mat_b = await service.materialize_definition(version_id=graph_b.current_version_id)
+    await service.publish(version_id=mat_b.version.id, published_by=user.id)
+
+    # A is untouched
+    await session.refresh(graph_a)
+    assert graph_a.current_version_id == a_version_before
+    a_status_after = (await session.get(GraphVersion, graph_a.current_version_id)).status
+    assert a_status_after == a_status_before
+    # B is its own published graph
+    assert graph_b.scope_type == "shot_experiment"
+    assert graph_b.scope_entity_id == experiment_id
