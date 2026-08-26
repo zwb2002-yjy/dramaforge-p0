@@ -18,8 +18,8 @@ import pytest
 from sqlalchemy import create_engine, text
 
 BACKEND = Path(__file__).resolve().parents[2]
-DB_USER = "dramaforge"
-DB_PASSWORD = "dramaforge"
+DB_USER = os.environ.get("TEST_PG_USER", "dramaforge")
+DB_PASSWORD = os.environ.get("TEST_PG_PASSWORD", "dramaforge")
 
 
 def _pg_host() -> str:
@@ -83,8 +83,10 @@ def _alembic(dbname: str, *args: str) -> None:
 
 
 pytestmark = pytest.mark.skipif(
-    not _pg_available_sync(),
-    reason="PostgreSQL not reachable; start docker compose postgres",
+    os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available_sync(),
+    reason=(
+        "set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"
+    ),
 )
 
 

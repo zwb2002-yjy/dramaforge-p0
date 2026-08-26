@@ -68,7 +68,12 @@ def _pg_up() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(not _pg_up(), reason="PostgreSQL unavailable")
+pytestmark = pytest.mark.skipif(
+    os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_up(),
+    reason=(
+        "set TEST_PG_ENABLED=1 with an explicitly configured PostgreSQL target"
+    ),
+)
 
 
 @pytest.fixture

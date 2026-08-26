@@ -39,8 +39,10 @@ def _pg_available() -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    not _pg_available(),
-    reason="PostgreSQL not reachable at DATABASE_URL; start docker compose postgres",
+    os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available(),
+    reason=(
+        "set TEST_PG_ENABLED=1 with an explicitly configured PostgreSQL target"
+    ),
 )
 
 

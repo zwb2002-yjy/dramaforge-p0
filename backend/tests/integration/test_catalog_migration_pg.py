@@ -18,8 +18,8 @@ import pytest
 from sqlalchemy import create_engine, text
 
 BACKEND = Path(__file__).resolve().parents[2]
-DB_USER = "dramaforge"
-DB_PASSWORD = "dramaforge"
+DB_USER = os.environ.get("TEST_PG_USER", "dramaforge")
+DB_PASSWORD = os.environ.get("TEST_PG_PASSWORD", "dramaforge")
 
 
 def _pg_host() -> str:
@@ -75,8 +75,10 @@ def _alembic(dbname: str, *args: str) -> None:
 
 
 pytestmark = pytest.mark.skipif(
-    not _pg_available_sync(),
-    reason="PostgreSQL not reachable; start docker compose postgres",
+    os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available_sync(),
+    reason=(
+        "set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"
+    ),
 )
 
 
@@ -343,7 +345,7 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
         with engine.connect() as conn:
             assert (
                 conn.execute(text("select version_num from alembic_version")).scalar_one()
-                == "20260820_0029"
+                == "20260826_0040"
             )
             reupgraded = conn.execute(
                 text(

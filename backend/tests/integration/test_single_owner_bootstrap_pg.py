@@ -19,6 +19,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 BACKEND = Path(__file__).resolve().parents[2]
+DB_USER = os.environ.get("TEST_PG_USER", "dramaforge")
+DB_PASSWORD = os.environ.get("TEST_PG_PASSWORD", "dramaforge")
 
 
 def _pg_host() -> str:
@@ -30,17 +32,14 @@ def _pg_port() -> str:
 
 
 def _admin_url() -> str:
-    default = (
-        "postgresql://dramaforge:dramaforge"
-        f"@{_pg_host()}:{_pg_port()}/postgres"
-    )
+    default = f"postgresql://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/postgres"
     return os.environ.get("TEST_PG_ADMIN_URL", default)
 
 
 def _pg_available() -> bool:
     try:
         engine = create_engine(
-            "postgresql+psycopg://dramaforge:dramaforge"
+            f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
             f"@{_pg_host()}:{_pg_port()}/dramaforge",
             pool_pre_ping=True,
             connect_args={"connect_timeout": 2},
@@ -54,7 +53,10 @@ def _pg_available() -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    not _pg_available(), reason="PostgreSQL not reachable; start docker compose postgres"
+    os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available(),
+    reason=(
+        "set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"
+    ),
 )
 
 
@@ -70,9 +72,8 @@ async def test_first_owner_bootstrap_survives_users_force_rls() -> None:
         await admin.close()
 
     database_url = (
-        "postgresql+asyncpg://dramaforge:dramaforge"
-        f"@{_pg_host()}:{_pg_port()}/"
-        f"{database_name}"
+        f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}"
+        f"@{_pg_host()}:{_pg_port()}/{database_name}"
     )
     try:
         env = os.environ.copy()
