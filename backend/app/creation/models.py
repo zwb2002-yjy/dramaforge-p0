@@ -49,6 +49,7 @@ _agent_operation = Enum(
     "refine_brief",
     "draft_plan",
     "skill_execute",
+    "director_assist",
     name="agent_operation",
     create_constraint=False,
     native_enum=True,
@@ -198,9 +199,9 @@ class AgentRun(Base):
     initiated_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
-    planning_authorization_id: Mapped[UUID] = mapped_column(
+    planning_authorization_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("planning_authorizations.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
         unique=True,
     )
     operation: Mapped[str] = mapped_column(
