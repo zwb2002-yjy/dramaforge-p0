@@ -103,3 +103,6 @@ Make each account credential update produce an immutable revision record while p
 - Commits: `b5fa93c` (implementation), `3e6ba83` (strict unified fixture
   alignment), plus the final provider assertion commit on `dev`. Next bounded
   task: `MS5-IDENTITY-B` (`ProviderConnectionRevision`).
+- Closeout is recorded only after the working tree returned clean and the bounded
+  task remained within the seven-plan order; the checkpoint update is committed
+  alongside this contract.
