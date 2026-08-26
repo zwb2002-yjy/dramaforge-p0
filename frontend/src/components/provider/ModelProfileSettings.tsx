@@ -73,6 +73,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
     llm: "",
     image: "",
     video: "",
+    voice: "",
   });
 
   // Per-slot model choices in advanced mode, seeded from the current profile.
@@ -176,13 +177,13 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
     <section className="panel" data-testid="model-profile-settings">
       <div className="panel-header">
         <h3>AI 制作模型方案</h3>
-        <div className="muted">同一项目可配置 LLM / 图片 / 视频，按制作角色分别选择。</div>
+        <div className="muted">同一项目可配置默认语言 / 图片 / 视频 / 声音模型。</div>
       </div>
 
       {!advanced ? (
         <>
           <div className="status-grid">
-            {(["llm", "image", "video"] as const).map((group) => {
+            {(["llm", "image", "video", "voice"] as const).map((group) => {
               const slotsInGroup = SIMPLE_MODE_SLOT_GROUPS[group];
               const current =
                 slotsInGroup
@@ -191,7 +192,13 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
               return (
                 <label key={group} className="status-card" style={{ display: "grid", gap: "0.4rem" }}>
                   <span className="status-label">
-                    {group === "llm" ? "LLM（剧本 / 策划）" : group === "image" ? "图片模型" : "视频模型"}
+                    {group === "llm"
+                      ? "默认语言模型"
+                      : group === "image"
+                        ? "默认图片模型"
+                        : group === "video"
+                          ? "默认视频模型"
+                          : "默认声音模型"}
                   </span>
                   {renderModelSelect(slotsInGroup[0], simple[group] ?? current, (v) =>
                     setSimple((prev) => ({ ...prev, [group]: v })),
