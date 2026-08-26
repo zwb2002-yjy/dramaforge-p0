@@ -24,6 +24,7 @@ from app.providers.models import (
     ProjectProviderBinding,
     ProviderCapabilityEvidence,
     ProviderConnection,
+    ProviderConnectionRevision,
     ProviderModelBinding,
     ProviderQualityEvidence,
 )
@@ -120,6 +121,7 @@ class ProviderConnectionService:
         )
         self._session.add(connection)
         await self._session.flush()
+        await self.create_connection_revision(connection=connection)
         return connection
 
     async def list_connections(self, *, workspace_id: UUID) -> list[ProviderConnection]:
@@ -189,6 +191,75 @@ class ProviderConnectionService:
             raise NotFoundError("provider connection not found")
         return connection
 
+    async def create_connection_revision(
+        self,
+        *,
+        connection: ProviderConnection,
+    ) -> ProviderConnectionRevision:
+        """Persist the current executable connection configuration as a revision.
+
+        A revision is only valid when its credential is the concrete immutable
+        credential row for the same workspace and provider plugin.  This keeps
+        the light revision table from becoming a second mutable connection
+        truth while still making operation identity durable.
+        """
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        credential = await self._session.scalar(
+            select(EncryptedProviderCredential).where(
+                EncryptedProviderCredential.id == connection.credential_id,
+                EncryptedProviderCredential.workspace_id == connection.workspace_id,
+            )
+        )
+        if credential is None or credential.provider != plugin.credential_key:
+            raise ValidationAppError(
+                "provider connection credential revision is invalid",
+                details={"code": "PROVIDER_CONNECTION_CREDENTIAL_INVALID"},
+            )
+        latest = await self._session.scalar(
+            select(ProviderConnectionRevision)
+            .where(ProviderConnectionRevision.connection_id == connection.id)
+            .order_by(ProviderConnectionRevision.revision_no.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        revision = ProviderConnectionRevision(
+            connection_id=connection.id,
+            revision_no=(latest.revision_no + 1) if latest is not None else 1,
+            provider_type=connection.provider_type,
+            protocol_profile=connection.protocol_profile,
+            base_url=connection.base_url,
+            credential_revision_id=credential.id,
+        )
+        self._session.add(revision)
+        await self._session.flush()
+        return revision
+
+    async def current_connection_revision(
+        self,
+        *,
+        connection: ProviderConnection,
+    ) -> ProviderConnectionRevision:
+        """Return the latest revision for a workspace-owned connection."""
+        revision = await self._session.scalar(
+            select(ProviderConnectionRevision)
+            .join(
+                ProviderConnection,
+                ProviderConnection.id == ProviderConnectionRevision.connection_id,
+            )
+            .where(
+                ProviderConnectionRevision.connection_id == connection.id,
+                ProviderConnection.workspace_id == connection.workspace_id,
+            )
+            .order_by(ProviderConnectionRevision.revision_no.desc())
+            .limit(1)
+        )
+        if revision is None:
+            raise ValidationAppError(
+                "provider connection revision is missing",
+                details={"code": "PROVIDER_CONNECTION_REVISION_MISSING"},
+            )
+        return revision
+
     async def credential_version(self, connection: ProviderConnection) -> str | None:
         credential = await self._session.scalar(
             select(EncryptedProviderCredential).where(
@@ -209,6 +280,7 @@ class ProviderConnectionService:
         display_name: str | None,
         enabled: bool | None,
         base_url: str | None = None,
+        protocol_profile: str | None = None,
     ) -> ProviderConnection:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
@@ -217,13 +289,49 @@ class ProviderConnectionService:
             connection.display_name = display_name.strip() or connection.display_name
         if enabled is not None:
             connection.enabled = enabled
+        execution_changed = False
+        if protocol_profile is not None:
+            profile = protocol_profile.strip()
+            if not profile:
+                raise ValidationAppError("protocol_profile must not be empty")
+            if profile != connection.protocol_profile:
+                plugin = _resolve_plugin(connection.provider_type, profile)
+                duplicate = await self._session.scalar(
+                    select(ProviderConnection.id).where(
+                        ProviderConnection.workspace_id == workspace_id,
+                        ProviderConnection.provider_type == connection.provider_type,
+                        ProviderConnection.protocol_profile == profile,
+                        ProviderConnection.id != connection.id,
+                    )
+                )
+                if duplicate is not None:
+                    raise ConflictError(
+                        "provider connection already exists for this Workspace",
+                        details={"code": "PROVIDER_CONNECTION_EXISTS"},
+                    )
+                credential = await self._session.scalar(
+                    select(EncryptedProviderCredential).where(
+                        EncryptedProviderCredential.id == connection.credential_id,
+                        EncryptedProviderCredential.workspace_id == workspace_id,
+                    )
+                )
+                if credential is None or credential.provider != plugin.credential_key:
+                    raise ValidationAppError(
+                        "provider connection credential does not match protocol profile",
+                        details={"code": "PROVIDER_CONNECTION_CREDENTIAL_INVALID"},
+                    )
+                connection.protocol_profile = profile
+                execution_changed = True
         if base_url is not None:
             host = base_url.strip().rstrip("/")
             if not host:
                 raise ValidationAppError("base_url must not be empty")
             if host != connection.base_url:
                 connection.base_url = host
-                await self._invalidate_connection_evidence(connection=connection, actor=actor)
+                execution_changed = True
+        if execution_changed:
+            await self.create_connection_revision(connection=connection)
+            await self._invalidate_connection_evidence(connection=connection, actor=actor)
         connection.updated_by = actor.id
         await self._session.flush()
         return connection
@@ -296,6 +404,7 @@ class ProviderConnectionService:
         )
         connection.credential_id = credential.id
         connection.credential_revision = credential.revision_no
+        await self.create_connection_revision(connection=connection)
         connection.updated_by = actor.id
         await self._invalidate_connection_evidence(connection=connection, actor=actor)
         await self._session.flush()

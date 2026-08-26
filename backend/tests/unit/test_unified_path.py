@@ -47,6 +47,7 @@ from app.providers.model_profiles.slots import ModelSlot
 from app.providers.models import (
     ProjectProviderBinding,
     ProviderConnection,
+    ProviderConnectionRevision,
     ProviderModelBinding,
 )
 from app.providers.registry import ProviderPlugin, register_plugin
@@ -487,6 +488,17 @@ async def _seed_project_chain(
         updated_by=user.id,
     )
     session.add(connection)
+    await session.flush()
+    session.add(
+        ProviderConnectionRevision(
+            connection_id=connection.id,
+            revision_no=1,
+            provider_type=connection.provider_type,
+            protocol_profile=connection.protocol_profile,
+            base_url=connection.base_url,
+            credential_revision_id=credential.id,
+        )
+    )
     await session.flush()
     binding = ProviderModelBinding(
         workspace_id=workspace.id,
@@ -1233,6 +1245,14 @@ async def test_director_trial_materialization_reaches_unified_artifacts_once(
         assert operation.model_binding_id == expected_binding.id
         assert operation.catalog_entry_id == expected_entry.id
         assert operation.capability_manifest_hash == expected_entry.contract_manifest_hash
+        expected_revision = await session.scalar(
+            select(ProviderConnectionRevision)
+            .where(ProviderConnectionRevision.connection_id == operation.connection_id)
+            .order_by(ProviderConnectionRevision.revision_no.desc())
+            .limit(1)
+        )
+        assert expected_revision is not None
+        assert operation.provider_connection_revision_id == expected_revision.id
         assert operation.selection_plan is not None
         assert operation.resume_token is not None
         assert operation.request_summary["frozen_model_binding_id"] == str(
@@ -1935,13 +1955,20 @@ async def test_unified_resume_never_recreates(
     _enable_unified(monkeypatch)
     await _no_sleep(monkeypatch)
     _user, _workspace, run = await _seed_project_chain(session)
-    connection_id = (
-        await session.scalar(
-            select(ProviderConnection).where(
-                ProviderConnection.workspace_id == _workspace.id
-            )
+    connection = await session.scalar(
+        select(ProviderConnection).where(
+            ProviderConnection.workspace_id == _workspace.id
         )
-    ).id
+    )
+    assert connection is not None
+    connection_id = connection.id
+    original_revision = await session.scalar(
+        select(ProviderConnectionRevision)
+        .where(ProviderConnectionRevision.connection_id == connection.id)
+        .order_by(ProviderConnectionRevision.revision_no.desc())
+        .limit(1)
+    )
+    assert original_revision is not None
     run.status = "queued"
     op = ProviderOperation(
         node_run_id=run.id,
@@ -1958,6 +1985,7 @@ async def test_unified_resume_never_recreates(
         submitted_at=None,
         provider_operation_id="uni-img-1",
         connection_id=connection_id,
+        provider_connection_revision_id=original_revision.id,
         resume_token={
             "provider_type": FAKE_PROVIDER,
             "protocol_profile": FAKE_PROFILE,
@@ -1969,6 +1997,25 @@ async def test_unified_resume_never_recreates(
     session.add(op)
     await session.flush()
 
+    from app.providers.connection_service import ProviderConnectionService
+
+    await ProviderConnectionService(session).update_connection(
+        workspace_id=_workspace.id,
+        connection_id=connection.id,
+        actor=_user,
+        display_name=None,
+        enabled=None,
+        base_url="https://connection-revision-two.example",
+    )
+    current_revision = await session.scalar(
+        select(ProviderConnectionRevision)
+        .where(ProviderConnectionRevision.connection_id == connection.id)
+        .order_by(ProviderConnectionRevision.revision_no.desc())
+        .limit(1)
+    )
+    assert current_revision is not None
+    assert current_revision.id != original_revision.id
+
     result = await execute_media_node_run(session, node_run_id=run.id)
     assert result.node_type == "keyframe"
     # Resume must never call submit again.
@@ -1976,6 +2023,7 @@ async def test_unified_resume_never_recreates(
     assert _current_runtime().poll_calls >= 1
     refreshed = await session.get(ProviderOperation, op.id)
     assert refreshed is not None and refreshed.status == "succeeded"
+    assert refreshed.provider_connection_revision_id == original_revision.id
 
 
 @pytest.mark.asyncio

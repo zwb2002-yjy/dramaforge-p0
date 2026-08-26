@@ -331,6 +331,11 @@ class ProviderOperation(Base):
         nullable=True,
         index=True,
     )
+    provider_connection_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_connection_revisions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     model_binding_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("provider_model_bindings.id", ondelete="RESTRICT"),
         nullable=True,

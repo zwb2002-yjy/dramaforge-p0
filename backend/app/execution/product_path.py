@@ -1119,6 +1119,7 @@ async def _execute_unified_media_node_run(
     from datetime import UTC, datetime
 
     from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.connection_service import ProviderConnectionService
     from app.providers.intents import (
         ArtifactReferenceIntent,
         ImageGenerationIntent,
@@ -1530,7 +1531,11 @@ async def _execute_unified_media_node_run(
                 run=run,
                 node=node,
             )
+        connection_revision = None
         if op is None:
+            connection_revision = await ProviderConnectionService(
+                session
+            ).current_connection_revision(connection=connection)
             op = ProviderOperation(
                 node_run_id=run.id,
                 attempt_no=run.attempt_no,
@@ -1559,6 +1564,7 @@ async def _execute_unified_media_node_run(
                     ],
                     "reference_fingerprints": list(compiled.reference_fingerprints),
                     "frozen_model_binding_id": str(binding.id),
+                    "provider_connection_revision_id": str(connection_revision.id),
                     "capability_manifest_hash": plan.manifest_hash,
                     "execution_model_resolution": plan.execution_model_resolution.model_dump(
                         mode="json"
@@ -1567,6 +1573,7 @@ async def _execute_unified_media_node_run(
                 response_summary={},
                 submitted_at=now,
                 connection_id=connection.id,
+                provider_connection_revision_id=connection_revision.id,
                 model_binding_id=binding.id,
                 catalog_entry_id=entry.id,
                 capability_manifest_hash=plan.manifest_hash,

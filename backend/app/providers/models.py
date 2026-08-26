@@ -64,6 +64,41 @@ class ProviderConnection(Base):
     )
 
 
+class ProviderConnectionRevision(Base):
+    """Immutable execution configuration for one ProviderConnection."""
+
+    __tablename__ = "provider_connection_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "connection_id",
+            "revision_no",
+            name="uq_provider_connection_revision_no",
+        ),
+        CheckConstraint(
+            "revision_no > 0",
+            name="ck_provider_connection_revision_positive",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    connection_id: Mapped[UUID] = mapped_column(
+        ForeignKey("provider_connections.id", ondelete="CASCADE"), nullable=False
+    )
+    revision_no: Mapped[int] = mapped_column(
+        nullable=False, default=1, server_default="1"
+    )
+    provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(240), nullable=False)
+    credential_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ProviderCapabilityEvidence(Base):
     __tablename__ = "provider_capability_evidence"
 
