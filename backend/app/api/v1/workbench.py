@@ -16,6 +16,7 @@ from app.assets.schemas import ShotDirectorState
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
 from app.production.models import GraphVersion
 from app.production.reference_intents import ShotReferenceIntent
+from app.production.trace import ExecutionTraceRead, build_execution_trace
 from app.production.workbench_execution import (
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
@@ -355,4 +356,24 @@ async def set_shot_formal_video(
         shot_id=shot.id,
         formal_video_artifact_id=shot.formal_video_artifact_id,
         version=shot.version,
+    )
+
+
+
+@router.get(
+    "/projects/{project_id}/runs/{run_id}/trace",
+    response_model=ExecutionTraceRead,
+)
+async def get_execution_trace(
+    project_id: UUID,
+    run_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> ExecutionTraceRead:
+    """Structured execution trace for one NodeRun (03 §40)."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await build_execution_trace(
+        session,
+        project_id=project_id,
+        run_id=run_id,
     )
