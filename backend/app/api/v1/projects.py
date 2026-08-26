@@ -9,11 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.api.v1 import workbench as _workbench
 from app.shared.enums import ExperienceMode, ProjectStage
 
 router = APIRouter(
     tags=["projects"], dependencies=[Depends(require_selected_workspace)]
 )
+
+router.include_router(_workbench.router)
 
 
 class ProjectCreate(BaseModel):

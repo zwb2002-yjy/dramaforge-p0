@@ -1,17 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, Outlet, createRoute, useRouterState } from "@tanstack/react-router";
+import { Link, Navigate, Outlet, createRoute, useRouterState } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProjectWorkspaceShell } from "../features/creation-preview/ProjectWorkspaceShell";
-import type { PreviewStage } from "../features/creation-preview/types";
 import {
-  DIRECTOR_STAGES,
   WORKFLOW_STATUS_ZH,
   stageForStatus,
-  stageState,
 } from "../features/director/stageMap";
 import { fetchDirectorWorkspace } from "../features/director/api";
 import type { DirectorWorkspaceSnapshot } from "../features/director/types";
+import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
 import { ApiError, getSelectedWorkspaceId } from "../lib/api";
 import { rootRoute } from "./__root";
 
@@ -20,27 +19,6 @@ export const projectRoute = createRoute({
   path: "/projects/$projectId",
   component: ProjectLayout,
 });
-
-function workspaceStages(snapshot: DirectorWorkspaceSnapshot | undefined): PreviewStage[] {
-  if (!snapshot) {
-    return DIRECTOR_STAGES.map((stage, index) => ({
-      id: stage.id,
-      label: stage.title,
-      caption: stage.confirmation,
-      state: index === 0 ? "active" : "upcoming",
-    }));
-  }
-  const current = stageForStatus(snapshot.workflow.status);
-  return DIRECTOR_STAGES.map((stage) => {
-    const state = stageState(stage.id, current, snapshot.workflow.status);
-    return {
-      id: stage.id,
-      label: stage.title,
-      caption: stage.confirmation,
-      state: state === "done" ? "done" : state === "active" ? "active" : "upcoming",
-    };
-  });
-}
 
 function EvidenceInspector({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | undefined }) {
   if (!snapshot) return <p className="muted">正在读取画布、版本与生产证据。</p>;
@@ -68,8 +46,9 @@ function EvidenceInspector({ snapshot }: { snapshot: DirectorWorkspaceSnapshot |
 
 function ProjectOverview({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | undefined }) {
   const { projectId } = projectRoute.useParams();
+  const { lastView } = useProjectWorkspaceState(projectId);
   const currentStage = snapshot ? stageForStatus(snapshot.workflow.status) : "creative";
-  const stage = DIRECTOR_STAGES.find((item) => item.id === currentStage);
+  const restoreTarget = lastView ?? "scenes";
   return (
     <div data-testid="project-panel" className="qc-project-overview">
       <header className="qc-page-heading">
@@ -80,15 +59,15 @@ function ProjectOverview({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | u
       <section className="qc-overview-band">
         <div>
           <small>当前阶段</small>
-          <strong>{stage ? `阶段 ${stage.number} · ${stage.title}` : "正在读取"}</strong>
+          <strong>{currentStage === "creative" ? "专业制作" : "专业制作"}</strong>
           <p>{snapshot ? WORKFLOW_STATUS_ZH[snapshot.workflow.status] : "正在恢复项目事实"}</p>
         </div>
         <div>
-          <small>下一步</small>
-          <p>{snapshot?.next_action ?? "打开专业工作台，继续当前导演流程。"}</p>
+          <small>继续上次查看</small>
+          <p>{lastView ? `回到 ${lastView} 视图` : "首次进入项目，默认进入场景总览。"}</p>
         </div>
-        <Link className="qc-overview-primary" to="/projects/$projectId/production" params={{ projectId }}>
-          继续专业制作
+        <Link className="qc-overview-primary" to={`/projects/$projectId/${restoreTarget}`} params={{ projectId }}>
+          {lastView ? "继续上次查看" : "进入场景总览"}
         </Link>
       </section>
       <section className="qc-overview-grid">
@@ -114,9 +93,12 @@ function ProjectOverview({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | u
 
 function ProjectLayout() {
   const { projectId } = projectRoute.useParams();
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const location = useRouterState({ select: (state) => state.location });
+  const pathname = location.pathname;
   const onQuick = pathname.includes("/quick");
-  const onProduction = pathname.includes("/production");
+  const view = workspaceViewFromPath(pathname);
+  const atRoot = view === null && !onQuick;
+  const ws = useProjectWorkspaceState(projectId);
   const workspace = useQuery({
     queryKey: ["director-workspace", projectId],
     queryFn: async () => {
@@ -131,7 +113,7 @@ function ProjectLayout() {
     // own Project/Shot/Graph facts and must not probe the retired Director
     // snapshot (which would create a noisy 404 for projects without a legacy
     // workflow). The legacy overview may still use the snapshot when opened.
-    enabled: projectId !== "demo" && !onQuick && !onProduction,
+    enabled: projectId !== "demo" && !onQuick && atRoot,
     refetchInterval: (query) => {
       const status = query.state.data?.workflow.status;
       return status && ["trial_running", "production_running", "assembling"].includes(status)
@@ -140,24 +122,43 @@ function ProjectLayout() {
     },
   });
 
+  // Remember the current professional view so the next visit restores it.
+  const lastRemembered = useRef<string | null>(null);
+  useEffect(() => {
+    if (view && lastRemembered.current !== view) {
+      lastRemembered.current = view;
+      ws.rememberLastView(view);
+    }
+  }, [view, ws]);
+
   if (onQuick) return <Outlet />;
 
   const snapshot = workspace.data ?? undefined;
+
+  // Project root restores the last professional view unless the user explicitly
+  // requested an anchor (e.g. model settings via #model-settings).
+  if (atRoot && ws.lastView && !location.hash) {
+    return (
+      <Navigate
+        to={`/projects/$projectId/${ws.lastView}`}
+        params={{ projectId }}
+        replace
+      />
+    );
+  }
+
   return (
     <ProjectWorkspaceShell
       projectId={projectId}
       projectName={snapshot?.project_name ?? (projectId === "demo" ? "演示项目" : "短剧项目")}
-      activeView={onProduction ? "production" : "overview"}
-      stages={workspaceStages(snapshot)}
+      activeView={view ?? "overview"}
       inspector={<EvidenceInspector snapshot={snapshot} />}
-      modeLabel={onProduction ? "专业模式" : "项目总览"}
+      modeLabel={view === "production" ? "专业模式" : view ?? "项目总览"}
     >
       {workspace.isError && (
         <div className="flash err">无法读取 Director 项目事实：{workspace.error instanceof Error ? workspace.error.message : "未知错误"}</div>
       )}
-      {onProduction ? <Outlet /> : <ProjectOverview snapshot={snapshot} />}
+      {atRoot ? <ProjectOverview snapshot={snapshot} /> : <Outlet />}
     </ProjectWorkspaceShell>
   );
 }
-
-

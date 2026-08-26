@@ -153,6 +153,9 @@ class UserProjectPreference(Base):
         default=ExperienceMode.WORKBENCH,
     )
     last_guided_step: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    workspace_state: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

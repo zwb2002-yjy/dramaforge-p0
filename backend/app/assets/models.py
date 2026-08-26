@@ -75,6 +75,9 @@ class Scene(Base):
     location_name: Mapped[str] = mapped_column(String(160), nullable=False)
     time_of_day: Mapped[str] = mapped_column(String(40), nullable=False)
     synopsis: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    design_state: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -105,6 +108,20 @@ class Shot(Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    director_state: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    image_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    video_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    formal_keyframe_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
+    )
+    formal_video_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
+    )
+    formal_composite_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -207,6 +224,9 @@ class Asset(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    current_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("asset_versions.id", ondelete="RESTRICT"), nullable=True
+    )
 
 
 class AssetVersion(Base):

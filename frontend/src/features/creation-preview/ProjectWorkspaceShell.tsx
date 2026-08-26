@@ -3,33 +3,54 @@ import {
   Aperture,
   ChevronLeft,
   Clapperboard,
+  FileText,
+  Film,
   FolderKanban,
   Gauge,
   Menu,
-  Settings,} from "lucide-react";
+  Package,
+  Scissors,
+  Settings,
+} from "lucide-react";
 
-import { StageStepper } from "./components";
-import type { PreviewStage } from "./types";
 import "./quick-creation-preview.css";
+
+export type ProjectWorkspaceView =
+  | "overview"
+  | "script"
+  | "assets"
+  | "scenes"
+  | "production"
+  | "edit";
 
 type ProjectWorkspaceShellProps = {
   projectId: string;
   projectName: string;
-  activeView: "overview" | "quick" | "production";
-  stages: PreviewStage[];
+  activeView: ProjectWorkspaceView;
   children: ReactNode;
   inspector?: ReactNode;
   modeLabel?: string;
 };
 
+const NAV_ITEMS: Array<{
+  view: Exclude<ProjectWorkspaceView, "overview">;
+  label: string;
+  icon: typeof Clapperboard;
+}> = [
+  { view: "script", label: "剧本", icon: FileText },
+  { view: "assets", label: "资产", icon: Package },
+  { view: "scenes", label: "场景", icon: Film },
+  { view: "production", label: "专业生产", icon: Clapperboard },
+  { view: "edit", label: "剪辑", icon: Scissors },
+];
+
 export function ProjectWorkspaceShell({
   projectId,
   projectName,
   activeView,
-  stages,
   children,
   inspector,
-  modeLabel = activeView === "production" ? "专业模式" : "项目总览",
+  modeLabel = activeView === "production" ? "专业模式" : "项目工作区",
 }: ProjectWorkspaceShellProps) {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
@@ -61,14 +82,20 @@ export function ProjectWorkspaceShell({
             <FolderKanban size={18} aria-hidden="true" />
             <span>项目大厅</span>
           </a>
-          <a href={projectBase} className={activeView === "overview" ? "active" : undefined} aria-current={activeView === "overview" ? "page" : undefined}>
-            <Gauge size={18} aria-hidden="true" />
-            <span>项目总览</span>
-          </a>
-          <a href={`${projectBase}/production`} className={activeView === "production" ? "active" : undefined} aria-current={activeView === "production" ? "page" : undefined}>
-            <Clapperboard size={18} aria-hidden="true" />
-            <span>专业生产</span>
-          </a>
+          {NAV_ITEMS.map(({ view, label, icon: Icon }) => {
+            const active = activeView === view;
+            return (
+              <a
+                key={view}
+                href={`${projectBase}/${view}`}
+                className={active ? "active" : undefined}
+                aria-current={active ? "page" : undefined}
+              >
+                <Icon size={18} aria-hidden="true" />
+                <span>{label}</span>
+              </a>
+            );
+          })}
         </nav>
         <div className="qc-sidebar-bottom">
           <a href={`${projectBase}#model-settings`}>
@@ -87,10 +114,7 @@ export function ProjectWorkspaceShell({
         </header>
 
         <div className={`qc-content-grid${inspector ? "" : " no-inspector"}`}>
-          <main className="qc-main-canvas qc-project-canvas">
-            <StageStepper stages={stages} testId="director-stage-rail" />
-            {children}
-          </main>
+          <main className="qc-main-canvas qc-project-canvas">{children}</main>
           {inspector && (
             <aside className={`qc-director-panel${inspectorCollapsed ? " collapsed" : ""}`} data-testid="project-evidence-inspector">
               {inspectorCollapsed ? (
@@ -120,6 +144,3 @@ export function ProjectWorkspaceShell({
     </div>
   );
 }
-
-
-
