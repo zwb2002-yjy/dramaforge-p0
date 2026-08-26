@@ -18,6 +18,10 @@ from app.assets.models import Shot
 from app.execution.branches import experiment_id as run_experiment_id
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.execution.shot_review import start_shot_nodes
+from app.production.experiment_service import (
+    ExperimentCreateInput,
+    ExperimentService,
+)
 from app.production.models import ExperimentBranch
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.models import ProviderConnection, ProviderModelBinding
@@ -685,3 +689,36 @@ async def decide_experiment(
     if downstream_run_ids:
         await _enqueue(session, downstream_run_ids)
     return _read(row, candidate_artifact_ids=candidate_ids, comparison=row.comparison)
+
+
+class ExperimentCreateRead(BaseModel):
+    id: UUID
+    name: str
+    experiment_type: str
+    status: str
+
+
+@router.post("/projects/{project_id}/experiments", response_model=ExperimentCreateRead)
+async def create_production_experiment(
+    project_id: UUID,
+    body: ExperimentCreateInput,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> ExperimentCreateRead:
+    """Create a Phase 5 experiment with per-shot snapshots (03 §47)."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    experiment = await ExperimentService(session).create_experiment(
+        project=project,
+        actor=user,
+        experiment_input=body,
+    )
+    await session.commit()
+    return ExperimentCreateRead(
+        id=experiment.id,
+        name=experiment.name,
+        experiment_type=experiment.experiment_type,
+        status=experiment.status,
+    )
