@@ -15,10 +15,10 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
+from app.providers.capabilities import Capability
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.eligibility import (
     IMAGE_GENERATE,
@@ -30,10 +30,9 @@ from app.providers.intents import (
     VideoGenerationIntentV1,
 )
 from app.providers.manifest import ModelCapabilityManifest
-from app.providers.model_profiles.models import ModelSlotBinding
 from app.providers.model_profiles.slots import ModelSlot
+from app.providers.model_resolution import ExecutionModelResolution, ExecutionModelResolver
 from app.providers.models import (
-    ProjectProviderBinding,
     ProviderConnection,
     ProviderModelBinding,
 )
@@ -67,6 +66,7 @@ class SelectionPlan:
     model_id: str | None
     invoke_model_value: str | None
     connection_id: UUID | None
+    execution_model_resolution: ExecutionModelResolution
     supported_capabilities: list[str] = field(default_factory=list)
     met_requirements: list[str] = field(default_factory=list)
     unmet_requirements: list[str] = field(default_factory=list)
@@ -86,6 +86,19 @@ def _intent_hash(intent: Any) -> str:
         default=str,
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _resolution_capability(*, purpose: str, reference_roles: frozenset[str]) -> Capability:
+    """Use the concrete input shape when freezing the business capability."""
+    if purpose == "keyframe":
+        return Capability.IMAGE_GENERATE
+    if {"first_frame", "last_frame"} <= reference_roles:
+        return Capability.VIDEO_FIRST_LAST_FRAME
+    if "first_frame" in reference_roles:
+        return Capability.VIDEO_IMAGE_TO_VIDEO
+    if reference_roles:
+        return Capability.VIDEO_REFERENCE_TO_VIDEO
+    return Capability.VIDEO_TEXT_TO_VIDEO
 
 
 class ModelSelectionService:
@@ -158,12 +171,31 @@ class ModelSelectionService:
         preferred_capabilities: frozenset[str],
         allow_trial_without_quality_gate: bool,
     ) -> SelectionPlan:
-        binding = await self._resolve_binding(
+        resolution = await ExecutionModelResolver(self._session).resolve(
             project=project,
+            slot=_PURPOSE_SLOT[purpose],
+            capability=_resolution_capability(
+                purpose=purpose,
+                reference_roles=reference_roles,
+            ),
             purpose=purpose,
-            mode=mode,
+            mode_id=mode,
             requested_binding_id=requested_binding_id,
         )
+        if resolution.status != "RESOLVED" or resolution.provider_model_binding_id is None:
+            raise ValidationAppError(
+                "selected execution model is unavailable",
+                details={
+                    "code": resolution.reason or "MODEL_BINDING_UNAVAILABLE",
+                    "requested_model_id": resolution.requested_model_id,
+                    "source": resolution.source,
+                },
+            )
+        binding = await self._session.get(
+            ProviderModelBinding, resolution.provider_model_binding_id
+        )
+        if binding is None:
+            raise NotFoundError("resolved provider model binding not found")
         connection = await self._session.get(ProviderConnection, binding.connection_id)
         if connection is None:
             raise NotFoundError("provider connection not found")
@@ -221,6 +253,7 @@ class ModelSelectionService:
             model_id=binding.model_id,
             invoke_model_value=binding.invoke_model_value,
             connection_id=connection.id,
+            execution_model_resolution=resolution,
             supported_capabilities=sorted(supported),
             met_requirements=sorted(required_capabilities & supported),
             unmet_requirements=sorted(required_capabilities - supported),
@@ -232,95 +265,3 @@ class ModelSelectionService:
             manifest_hash=entry.contract_manifest_hash if entry is not None else None,
             compiled_by=manifest.catalog_source if manifest is not None else None,
         )
-
-    async def _resolve_binding(
-        self,
-        *,
-        project: Project,
-        purpose: str,
-        mode: str,
-        requested_binding_id: UUID | None,
-    ) -> ProviderModelBinding:
-        binding_id = requested_binding_id
-        if binding_id is None:
-            # Profile-driven (spec §134 rule 6): if the project's
-            # ProductionModelProfile binds a model to this purpose's slot, prefer
-            # the matching credentialed ProviderModelBinding. Fall back to the
-            # project binding when no credentialed match exists (the profile
-            # model may lack a connection for its provider).
-            profile_binding = await self._profile_binding_for_purpose(project, purpose)
-            if profile_binding is not None:
-                provider_type, sep, model_name = profile_binding.model_id.partition("/")
-                if sep and provider_type and model_name:
-                    matching = await self._session.scalar(
-                        select(ProviderModelBinding)
-                        .join(
-                            ProviderConnection,
-                            ProviderConnection.id == ProviderModelBinding.connection_id,
-                        )
-                        .where(
-                            ProviderModelBinding.workspace_id == project.workspace_id,
-                            ProviderModelBinding.enabled.is_(True),
-                            ProviderModelBinding.model_id == model_name,
-                            ProviderConnection.provider_type == provider_type,
-                        )
-                        .order_by(ProviderModelBinding.updated_at.desc())
-                    )
-                    if matching is not None:
-                        return matching
-            project_binding = await self._session.scalar(
-                select(ProjectProviderBinding).where(
-                    ProjectProviderBinding.project_id == project.id,
-                    ProjectProviderBinding.purpose == purpose,
-                )
-            )
-            if project_binding is None:
-                raise ValidationAppError(
-                    "project has no Provider binding for this purpose",
-                    details={
-                        "code": "MODEL_BINDING_MISSING",
-                        "purpose": purpose,
-                    },
-                )
-            binding_id = project_binding.model_binding_id
-        binding = await self._session.scalar(
-            select(ProviderModelBinding).where(
-                ProviderModelBinding.id == binding_id,
-                ProviderModelBinding.workspace_id == project.workspace_id,
-                ProviderModelBinding.purpose == purpose,
-            )
-        )
-        if binding is None:
-            raise NotFoundError("model binding not found")
-        return binding
-
-    async def _profile_binding_for_purpose(
-        self, project: Project, purpose: str
-    ) -> ModelSlotBinding | None:
-        """The project's effective model-profile binding for a media purpose, or
-        None. Project profile wins over the workspace default (spec §15)."""
-        from app.providers.model_profiles.orm import ProductionModelProfile
-        from app.providers.model_profiles.service import parse_bindings
-
-        slot = _PURPOSE_SLOT.get(purpose)
-        if slot is None:
-            return None
-        profile = await self._session.scalar(
-            select(ProductionModelProfile).where(
-                ProductionModelProfile.project_id == project.id,
-            )
-        )
-        if profile is None:
-            profile = await self._session.scalar(
-                select(ProductionModelProfile).where(
-                    ProductionModelProfile.workspace_id == project.workspace_id,
-                    ProductionModelProfile.project_id.is_(None),
-                    ProductionModelProfile.is_default.is_(True),
-                )
-            )
-        if profile is None:
-            return None
-        binding = parse_bindings(profile.bindings).get(slot)
-        if binding is None or not binding.enabled:
-            return None
-        return binding

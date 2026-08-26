@@ -196,11 +196,10 @@ async def test_profile_binding_drives_media_selection_without_project_binding(
 
 
 @pytest.mark.asyncio
-async def test_profile_binding_without_credential_falls_back_to_project_binding(
+async def test_profile_binding_without_concrete_binding_fails_closed(
     session: AsyncSession,
 ) -> None:
-    """A profile model with no matching credentialed ProviderModelBinding falls
-    back to the project binding (fix for finding #1)."""
+    """Profile X is authoritative: legacy project binding Y must not run."""
     project, binding = await _seed(session)
     from app.providers.model_profiles.models import ModelSlotBinding
     from app.providers.model_profiles.service import ProductionModelProfileService
@@ -234,11 +233,10 @@ async def test_profile_binding_without_credential_falls_back_to_project_binding(
         )
     )
     await session.flush()
-    plan = await ModelSelectionService(session).select_video(
-        project=project, intent=_intent()
-    )
-    assert plan.model_binding_id == binding.id
-    assert plan.invoke_model_value == "agnes-video-v2.0"
+    with pytest.raises(ValidationAppError) as exc_info:
+        await ModelSelectionService(session).select_video(project=project, intent=_intent())
+    assert exc_info.value.details["code"] == "MODEL_BINDING_UNAVAILABLE"
+    assert exc_info.value.details["source"] == "workspace_profile"
 
 
 @pytest.mark.asyncio

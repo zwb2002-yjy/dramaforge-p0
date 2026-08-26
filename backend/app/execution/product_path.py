@@ -1351,6 +1351,23 @@ async def _execute_unified_media_node_run(
                 "unified selection changed the frozen model binding",
                 details={"code": "MODEL_BINDING_SNAPSHOT_MISMATCH"},
             )
+        # Freeze the single business resolution before compiler/runtime access.
+        # Later MS5 work will add immutable connection and credential revisions;
+        # this slice already prevents a second model-selection decision here.
+        selection_snapshot = json.loads(json.dumps(asdict(plan), default=str))
+        selection_snapshot["execution_model_resolution"] = (
+            plan.execution_model_resolution.model_dump(mode="json")
+        )
+        snap = {
+            **snap,
+            "model_binding_id": str(plan.model_binding_id),
+            "execution_model_resolution": plan.execution_model_resolution.model_dump(
+                mode="json"
+            ),
+            "selection_plan": selection_snapshot,
+        }
+        run.input_snapshot = snap
+        await session.flush()
         invoke_model_value = plan.invoke_model_value
         provider_type = plan.provider_type
         protocol_profile = plan.protocol_profile
@@ -1529,6 +1546,9 @@ async def _execute_unified_media_node_run(
                     "reference_fingerprints": list(compiled.reference_fingerprints),
                     "frozen_model_binding_id": str(binding.id),
                     "capability_manifest_hash": plan.manifest_hash,
+                    "execution_model_resolution": plan.execution_model_resolution.model_dump(
+                        mode="json"
+                    ),
                 },
                 response_summary={},
                 submitted_at=now,
@@ -1536,7 +1556,7 @@ async def _execute_unified_media_node_run(
                 model_binding_id=binding.id,
                 catalog_entry_id=entry.id,
                 capability_manifest_hash=plan.manifest_hash,
-                selection_plan=json.loads(json.dumps(asdict(plan), default=str)),
+                selection_plan=selection_snapshot,
                 execution_path_version=UNIFIED_PATH_VERSION,
                 currency=pricing_currency or "USD",
             )
