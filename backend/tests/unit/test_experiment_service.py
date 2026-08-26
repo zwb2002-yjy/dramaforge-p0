@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
@@ -12,10 +12,18 @@ from app.assets.models import Shot
 from app.production.experiment_service import (
     ExperimentCreateInput,
     ExperimentService,
+    recompile_controls_for_model,
 )
 from app.production.models import (
     ShotExperiment,
     ShotReferenceBinding,
+)
+from app.providers.capabilities import Capability
+from app.providers.manifest import (
+    CapabilitySpec,
+    InputSlotSpec,
+    ModelManifest,
+    SubmissionSemantics,
 )
 from app.shared.base import Base
 from app.shared.errors import ValidationAppError
@@ -166,3 +174,180 @@ async def test_create_experiment_idempotent_and_requires_shots(session: AsyncSes
                 name="c", shot_ids=[], idempotency_key=f"exp-{uuid4().hex}"
             ),
         )
+
+
+
+def _model_b_manifest() -> ModelManifest:
+    return ModelManifest(
+        manifest_version="1",
+        id="agnes/video-model-b",
+        provider_id="agnes",
+        model_name="video-model-b",
+        display_name="Video Model B",
+        capability_specs={
+            Capability.VIDEO_IMAGE_TO_VIDEO: CapabilitySpec(
+                capability=Capability.VIDEO_IMAGE_TO_VIDEO,
+                transport_profile_id="t1",
+                input_slots={
+                    "first_frame": InputSlotSpec(minimum=0, maximum=1, media_types=["image/*"]),
+                    "reference_image": InputSlotSpec(minimum=0, maximum=4, media_types=["image/*"]),
+                },
+                common_options={
+                    "duration_seconds": {"type": "integer", "ui_component": "number"}
+                },
+            )
+        },
+        execution_mode="async_poll",
+        submission_semantics=SubmissionSemantics(),
+    )
+
+
+def test_recompile_drops_model_a_native_options_and_preserves_semantic() -> None:
+    manifest = _model_b_manifest()
+    result = recompile_controls_for_model(
+        manifest=manifest,
+        capability=Capability.VIDEO_IMAGE_TO_VIDEO,
+        references=[],
+        common_controls={
+            "aspect_ratio": "9:16",
+            "duration_seconds": 10,
+            "seed": 7,
+            "seed_mode": "fixed",
+        },
+        mode_id="explicit_binding",
+    )
+    controls = result["common_controls"]
+    assert controls.get("aspect_ratio") == "9:16"
+    assert controls.get("duration_seconds") == 10
+    assert "seed" not in controls
+    assert "seed_mode" not in controls
+    assert result["dropped_native_options"] == ["seed", "seed_mode"]
+
+
+def test_recompile_surfaces_unsupported_reference() -> None:
+    manifest = _model_b_manifest()
+    result = recompile_controls_for_model(
+        manifest=manifest,
+        capability=Capability.VIDEO_IMAGE_TO_VIDEO,
+        references=[{"purpose": "action", "artifact_id": str(uuid4()), "mime_type": "video/mp4"}],
+        common_controls={},
+        mode_id="explicit_binding",
+    )
+    assert result["unsupported_controls"]
+
+
+
+async def _seed_with_model_b(session: AsyncSession) -> tuple[Project, User, str]:
+    from datetime import date
+
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
+    from app.providers.models import ProviderConnection, ProviderModelBinding
+
+    user = User(
+        email=f"swap-{uuid4().hex}@example.com",
+        display_name="Swap",
+        password_hash=hash_password("x"),
+    )
+    session.add(user)
+    await session.flush()
+    workspace = Workspace(owner_user_id=user.id, name=f"W-{uuid4().hex[:8]}")
+    session.add(workspace)
+    await session.flush()
+    project = await ProjectService(session).create_project(
+        workspace_id=workspace.id,
+        name=f"P-{uuid4().hex[:8]}",
+        aspect_ratio="9:16",
+        actor=user,
+    )
+    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
+    entry = ModelCatalogEntry(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-video-v2.0",
+        model_revision="v1",
+        display_name="Agnes Video",
+        media_kind="video",
+        lifecycle="active",
+        catalog_source="official_static",
+        capability_manifest_json=manifest,
+        option_schema_json={},
+        documented_at=date.fromisoformat("2026-08-10"),
+        contract_manifest_hash=hash_manifest(manifest),
+    )
+    session.add(entry)
+    await session.flush()
+    connection = ProviderConnection(
+        workspace_id=workspace.id,
+        provider_type="agnes",
+        display_name="Agnes",
+        base_url="https://api.agnes-ai.cn",
+        protocol_profile="agnes_cn_v1",
+        credential_id=uuid4(),
+        credential_revision=1,
+        enabled=True,
+        verification_status="verified",
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(connection)
+    await session.flush()
+    binding = ProviderModelBinding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        media_type="video",
+        model_id="agnes-video-v2.0",
+        purpose="video",
+        enabled=True,
+        documented=True,
+        contract_tested=True,
+        account_verified=True,
+        quality_gated=True,
+        catalog_entry_id=entry.id,
+        capability_manifest_hash=entry.contract_manifest_hash,
+        remote_resource_kind="model",
+        remote_resource_id="agnes-video-v2.0",
+        invoke_model_value="agnes-video-v2.0",
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(binding)
+    await session.flush()
+    shot = Shot(
+        project_id=project.id,
+        scene_id=uuid4(),
+        shot_number=1,
+        version=1,
+        visual_description="Swap shot",
+        director_state={"camera": "static"},
+        image_prompt="keyframe",
+        video_prompt="video",
+    )
+    session.add(shot)
+    await session.flush()
+    return project, user, str(shot.id)
+
+
+@pytest.mark.asyncio
+async def test_create_model_swap_experiment_recompiles(session: AsyncSession) -> None:
+    project, user, shot_id = await _seed_with_model_b(session)
+    experiment = await ExperimentService(session).create_model_swap_experiment(
+        project=project,
+        actor=user,
+        experiment_input=ExperimentCreateInput(
+            name="Swap to B",
+            shot_ids=[UUID(shot_id)],
+            model_overrides={"video.shot": "agnes-video-v2.0"},
+            idempotency_key=f"swap-{uuid4().hex}",
+        ),
+    )
+    shot_exp = (
+        await session.execute(
+            select(ShotExperiment).where(
+                ShotExperiment.production_experiment_id == experiment.id
+            )
+        )
+    ).scalars().one()
+    assert shot_exp.model_overrides["video.shot"] == "agnes-video-v2.0"
+    assert "model_swap_recompile" in (shot_exp.comparison or {})
+    assert isinstance(shot_exp.comparison["model_swap_recompile"], dict)

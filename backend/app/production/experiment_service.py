@@ -8,6 +8,7 @@ the formal shot.
 
 from __future__ import annotations
 
+from typing import cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,6 +21,9 @@ from app.production.models import (
     ProductionExperiment,
     ShotExperiment,
 )
+from app.production.reference_intents import ShotReferenceIntent, compile_references
+from app.providers.capabilities import Capability
+from app.providers.manifest import ModelManifest
 from app.shared.errors import ValidationAppError
 
 
@@ -36,7 +40,66 @@ class ExperimentCreateInput(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=160)
 
 
+
+
+def recompile_controls_for_model(
+    *,
+    manifest: ModelManifest,
+    capability: Capability,
+    references: list[dict[str, object]],
+    common_controls: dict[str, object],
+    mode_id: str | None = None,
+) -> dict[str, object]:
+    """P5-04: recompile experiment inputs for a new model.
+
+    - semantic prompt / asset refs / common controls are preserved;
+    - native options not declared by the new model manifest are dropped;
+    - references are re-compiled against the new model via P4-02;
+    - unsupported controls/references are surfaced, never silently dropped.
+    """
+    intents: list[ShotReferenceIntent] = []
+    for reference in references:
+        artifact_id = reference.get("artifact_id")
+        if artifact_id is None:
+            continue
+        intents.append(
+            ShotReferenceIntent(
+                purpose=str(reference.get("purpose", "generic_reference")),
+                artifact_id=UUID(str(artifact_id)),
+                resolution_mode=str(reference.get("resolution_mode", "current_formal")),
+                mime_type=str(reference.get("mime_type", "image/png")),
+            )
+        )
+    compiled = compile_references(
+        manifest=manifest,
+        capability=capability,
+        references=intents,
+        mode_id=mode_id,
+        accept_approximations=False,
+    )
+
+    spec = manifest.capability_specs.get(capability)
+    declared = set((spec.mode_spec(mode_id).common_options).keys()) if spec is not None else set()
+    # Semantic controls that survive are those the new model declares; aspect
+    # ratio is a product-level control kept across swaps.
+    kept = {
+        key: value
+        for key, value in common_controls.items()
+        if key in declared or key in {"aspect_ratio", "duration_seconds"}
+    }
+    dropped = sorted(set(common_controls) - set(kept))
+
+    return {
+        "common_controls": kept,
+        "dropped_native_options": dropped,
+        "reference_delivery": [r.model_dump(mode="json") for r in compiled.planned_references],
+        "unsupported_controls": [r.model_dump(mode="json") for r in compiled.unsupported],
+        "translation_report": {},
+    }
+
+
 class ExperimentService:
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -144,3 +207,92 @@ class ExperimentService:
             }
             for row in rows
         ]
+
+
+
+    async def create_model_swap_experiment(
+        self,
+        *,
+        project: Project,
+        actor: User,
+        experiment_input: ExperimentCreateInput,
+    ) -> ProductionExperiment:
+        """P5-04: create an experiment and recompile each swapped shot's
+        inputs against the target model manifest (drop model A native options)."""
+        experiment = await self.create_experiment(
+            project=project,
+            actor=actor,
+            experiment_input=experiment_input,
+        )
+        shot_experiments = (
+            await self._session.execute(
+                select(ShotExperiment).where(
+                    ShotExperiment.production_experiment_id == experiment.id
+                )
+            )
+        ).scalars().all()
+        for shot_exp in shot_experiments:
+            target_model = self._target_model_override(shot_exp)
+            if not target_model:
+                continue
+            capability = Capability.VIDEO_IMAGE_TO_VIDEO
+            manifest = await self._manifest_for_model(
+                workspace_id=project.workspace_id,
+                model_id=target_model,
+            )
+            if manifest is None:
+                continue
+            recompiled = recompile_controls_for_model(
+                manifest=manifest,
+                capability=capability,
+                references=list(shot_exp.references or []),
+                common_controls=dict(shot_exp.common_controls or {}),
+                mode_id="explicit_binding",
+            )
+            shot_exp.common_controls = cast(
+                dict[str, object], recompiled["common_controls"]
+            )
+            comparison = dict(shot_exp.comparison or {})
+            comparison["model_swap_recompile"] = recompiled
+            shot_exp.comparison = comparison
+        await self._session.flush()
+        return experiment
+
+    @staticmethod
+    def _target_model_override(shot_exp: ShotExperiment) -> str | None:
+        overrides = shot_exp.model_overrides or {}
+        for slot in ("video.shot", "visual.keyframe"):
+            model_id = overrides.get(slot)
+            if model_id:
+                return str(model_id)
+        return None
+
+    async def _manifest_for_model(
+        self,
+        *,
+        workspace_id: UUID,
+        model_id: str,
+    ) -> ModelManifest | None:
+        from app.providers.catalog_models import ModelCatalogEntry
+        from app.providers.manifest import (
+            ModelCapabilityManifest,
+            to_v3_model_manifest,
+        )
+        from app.providers.models import ProviderModelBinding
+
+        binding = await self._session.scalar(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.model_id == model_id,
+                ProviderModelBinding.enabled.is_(True),
+            )
+        )
+        if binding is None or binding.catalog_entry_id is None:
+            return None
+        entry = await self._session.get(ModelCatalogEntry, binding.catalog_entry_id)
+        if entry is None:
+            return None
+        capability_manifest = ModelCapabilityManifest.model_validate(
+            entry.capability_manifest_json
+        )
+        return to_v3_model_manifest(capability_manifest, transport_profile_id="experiment")
