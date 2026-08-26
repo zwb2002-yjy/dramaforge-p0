@@ -41,6 +41,7 @@ from app.providers.contracts.video import (
 from app.providers.errors import ProviderStateMappingError, ResumeTokenUnavailableError
 from app.providers.intent_bridge import request_to_intent
 from app.providers.manifest import ModelCapabilityManifest, ModelManifest
+from app.providers.reference_roles import ReferenceRole
 from app.providers.runtime import (
     CompiledImageRequest,
     ProviderResumeToken,
@@ -218,26 +219,44 @@ def _request_reference_roles(request: Any) -> list[tuple[str, ResolvedArtifact]]
 
     roles: list[tuple[str, ResolvedArtifact]] = []
     if isinstance(request, ImageToVideoRequest):
-        roles.append(("first_frame", slot(request.image.artifact_id, "image/*")))
+        roles.append(
+            (ReferenceRole.FIRST_FRAME.value, slot(request.image.artifact_id, "image/*"))
+        )
     elif isinstance(request, FirstLastFrameVideoRequest):
-        roles.append(("first_frame", slot(request.first_frame.artifact_id, "image/*")))
-        roles.append(("last_frame", slot(request.last_frame.artifact_id, "image/*")))
+        roles.append(
+            (ReferenceRole.FIRST_FRAME.value, slot(request.first_frame.artifact_id, "image/*"))
+        )
+        roles.append(
+            (ReferenceRole.LAST_FRAME.value, slot(request.last_frame.artifact_id, "image/*"))
+        )
     elif isinstance(request, ReferenceToVideoRequest):
         roles.extend(
-            ("reference_image", ResolvedArtifact(artifact_id=ref.artifact_id, mime_type="image/*"))
+            (
+                ReferenceRole.REFERENCE_IMAGE.value,
+                ResolvedArtifact(artifact_id=ref.artifact_id, mime_type="image/*"),
+            )
             for ref in request.reference_images
         )
         roles.extend(
-            ("reference_audio", ResolvedArtifact(artifact_id=ref.artifact_id, mime_type="audio/*"))
+            (
+                ReferenceRole.REFERENCE_AUDIO.value,
+                ResolvedArtifact(artifact_id=ref.artifact_id, mime_type="audio/*"),
+            )
             for ref in request.reference_audio
         )
         roles.extend(
-            ("reference_video", ResolvedArtifact(artifact_id=ref.artifact_id, mime_type="video/*"))
+            (
+                ReferenceRole.REFERENCE_VIDEO.value,
+                ResolvedArtifact(artifact_id=ref.artifact_id, mime_type="video/*"),
+            )
             for ref in request.reference_videos
         )
     elif isinstance(request, ImageGenerateRequest):
         roles.extend(
-            ("reference_image", ResolvedArtifact(artifact_id=ref.artifact_id, mime_type="image/*"))
+            (
+                ReferenceRole.REFERENCE_IMAGE.value,
+                ResolvedArtifact(artifact_id=ref.artifact_id, mime_type="image/*"),
+            )
             for ref in request.reference_images
         )
     return roles
