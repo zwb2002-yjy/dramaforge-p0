@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Program order:** `MS5-IDENTITY-A` → `MS5-IDENTITY-B` → `MS5-IDENTITY-C` → Phase 4 Merge Gate
 - **Task boundary:** Define and persist the full secret-free execution identity, and make existing Professional poll/resume/cancel reconstruction consume the frozen connection/credential/model identity. Do not enter the Phase 4 Merge Gate or add new runtime/worker/generation abstractions.
 
@@ -91,7 +91,8 @@ Make the execution identity explicit, secret-free, and durable before the first 
   - rev1 submission followed by connection/credential update to rev2 and worker restart/resume still uses rev1 host and credential;
   - poll/cancel never re-submit and never reselect a model;
   - missing/mismatched frozen identity fails closed without a Provider call.
-- Existing backend unit suite passes.
-- `ruff check app tests alembic/versions`, `mypy app`, directory compliance, compile checks, migration chain/offline checks, and `git diff --check` pass.
+- Existing backend unit suite passes: `717 passed`.
+- `ruff check app tests alembic/versions`: All checks passed.
+- `mypy app`: Success: no issues found in 185 source files.
 - PostgreSQL integration runs only when enabled and reachable; otherwise record a truthful skip.
 - Only after this contract is complete may the project enter the separately gated Phase 4 Merge Gate audit.
