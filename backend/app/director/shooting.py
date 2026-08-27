@@ -99,7 +99,10 @@ class StoryboardShot(BaseModel):
     time_of_day: str = Field(min_length=1, max_length=80)
     shot_type: Literal["wide", "medium", "medium_close", "close", "over_shoulder", "insert"]
     camera_move: Literal["static", "push_in", "pull_out", "pan", "tracking"]
-    characters: list[str] = Field(min_length=1, max_length=2)
+    # WF5: the 2-character cap is a template constraint, not a system truth.
+    # This is a platform safety limit (max 4 visible controlled characters);
+    # a template may be stricter (e.g. two-character-dialogue-v1 = 2).
+    characters: list[str] = Field(min_length=1, max_length=4)
     action: str = Field(min_length=1, max_length=500)
     dialogue: list[ShotDialogue] = Field(default_factory=list, max_length=4)
     image_prompt: str = Field(min_length=1, max_length=3000)
