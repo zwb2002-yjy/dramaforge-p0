@@ -8,6 +8,7 @@ from app.api.v1 import (
     characters,
     creation,
     credentials,
+    creative_capabilities,
     director,
     director_board,
     events,
@@ -57,6 +58,7 @@ api_router.include_router(events.router)
 api_router.include_router(experiments.router)
 api_router.include_router(workflow_planning.router)
 api_router.include_router(workflow_overview.router)
+api_router.include_router(creative_capabilities.router)
 
 
 @api_router.get("/status", tags=["system"])

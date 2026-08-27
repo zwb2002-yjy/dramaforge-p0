@@ -8,6 +8,8 @@ Database facts always take priority over old chat.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +32,7 @@ class AssistantContextRead(BaseModel):
     scene: dict[str, object] | None = None
     shot: dict[str, object] | None = None
     model_capability: dict[str, object] = Field(default_factory=dict)
+    creative_capabilities: dict[str, object] = Field(default_factory=dict)
     experiments: list[dict[str, object]] = Field(default_factory=list)
     open_annotations: list[dict[str, object]] = Field(default_factory=list)
     recent_messages: list[dict[str, object]] = Field(default_factory=list)
@@ -91,6 +94,14 @@ class AssistantContextBuilder:
         except Exception:  # noqa: BLE001 - no profile yet is not fatal
             ctx.model_capability = {"bindings": {}}
 
+        # Active creative capability provenance (CC10): frozen identities from
+        # Scene.design_state / Shot.director_state (read-only). The assistant
+        # reads these so it never invents hidden skills or silently overrides
+        # the user's explicit capability selection.
+        ctx.creative_capabilities = await self._creative_capability_facts(
+            project=project, scope_type=thread.scope_type, scope_entity_id=thread.scope_entity_id
+        )
+
         # Current experiments for the shot scope.
         if scope_type == "shot":
             rows = (
@@ -146,6 +157,42 @@ class AssistantContextBuilder:
             for message in messages[-recent_limit:]
         ]
         return ctx
+
+    async def _creative_capability_facts(
+        self,
+        *,
+        project: Project,
+        scope_type: str,
+        scope_entity_id: UUID,
+    ) -> dict[str, object]:
+        """Read frozen creative-capability provenance (read-only, no Provider).
+
+        The provenance is written by the CreativeCapabilityCompiler into
+        ``Scene.design_state`` / ``Shot.director_state`` under the
+        ``creative_capabilities`` key.  If none is frozen yet, the assistant
+        simply sees an empty selection (no hidden skill, no silent override).
+        """
+        state: dict[str, object] = {}
+        if scope_type == "scene":
+            scene = await self._session.get(Scene, scope_entity_id)
+            if scene is not None:
+                state = dict(scene.design_state or {})
+        elif scope_type == "shot":
+            shot = await self._session.get(Shot, scope_entity_id)
+            if shot is not None:
+                state = dict(shot.director_state or {})
+                scene = await self._session.get(Scene, shot.scene_id)
+                if scene is not None and isinstance(scene.design_state, dict):
+                    state.setdefault("creative_capabilities", {})
+                    state.setdefault("design", dict(scene.design_state or {}))
+        frozen_raw = state.get("creative_capabilities")
+        frozen = dict(frozen_raw) if isinstance(frozen_raw, dict) else {}
+        # Lift any genre/skill/style provenance that may live under design.
+        design = state.get("design")
+        if isinstance(design, dict) and isinstance(design.get("creative_capabilities"), dict):
+            for key, value in design["creative_capabilities"].items():
+                frozen.setdefault(key, value)
+        return frozen
 
     async def _shot_facts(self, project: Project, shot: Shot) -> dict[str, object]:
         formal_keyframe: dict[str, object] | None = None
