@@ -1,7 +1,7 @@
 {
   "ok": true,
-  "source_commit": "25a663dc8cfd3480411fff57e9ccc1ffa5621e40",
-  "dirty": true,
+  "source_commit": "942b380c54f07cacb5b9a4885104210f59517cc3",
+  "dirty": false,
   "skill_composition": {
     "status": "RESOLVED",
     "keys": [
