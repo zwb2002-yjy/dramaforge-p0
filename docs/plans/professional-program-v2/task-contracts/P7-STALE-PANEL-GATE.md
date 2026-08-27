@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p7-stale-panel-gate`
 - **Program order:** P7-06/07（COMPLETED）→ **P7-08/09 + Phase 7 Gate（本任务）** → Phase 8
 - **Task boundary:** P7-08 每 item 带 expected_target_version，手动改版后旧 proposal stale；P7-09 导演面板关闭语义（已提交 run 继续、Agent 不主动提新建议、未确认 proposal 不执行）；Phase 7 Gate（§70 E2E：接受 2 项拒绝 1 项 → 只改 2 项、model 不变、version 正确；手动改版后旧建议 stale）。

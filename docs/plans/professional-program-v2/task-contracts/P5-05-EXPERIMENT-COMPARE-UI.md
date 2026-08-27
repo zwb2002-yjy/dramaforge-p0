@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p5-05-experiment-compare-ui`
 - **Program order:** P5-04（COMPLETED）→ **P5-05 Experiment Compare UI（本任务）** → P5-06 → …
 - **Task boundary:** `ExperimentCompare.tsx` 对比列（正式 / 实验A / 实验B）：image、video、model、prompt、translation warning、references。

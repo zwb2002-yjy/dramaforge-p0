@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p5-02-shot-experiment-graph-scope`
 - **Program order:** P5-01（COMPLETED）→ **P5-02 shot_experiment Graph Scope（本任务）** → P5-03 → …
 - **Task boundary:** GraphService 允许 `scope_type="shot_experiment"`；证明正式图 A 与实验图 B 完全独立（发布 B 不改 A.current_version）。

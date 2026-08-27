@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p10-golden-real-run`
 - **Program order:** V1 Release Gate（COMPLETED，Golden 项标为环境门控）→ **本任务（真实 provider 实跑 + 证据）**
 - **Task boundary:** 重建 dev 栈到当前代码（后端镜像 + 迁移 dev 库 0040→0049），运行真实 Agnes 关键帧/视频 golden 实跑，修补 `prove_phase4_golden_professional.py` 的过时认证/轮询/场景创建契约，证据写入 `docs/reviews/`，回填 V1 Gate 报告。

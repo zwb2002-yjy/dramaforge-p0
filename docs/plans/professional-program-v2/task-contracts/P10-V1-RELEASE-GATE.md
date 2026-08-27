@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p10-v1-release-gate`
 - **Program order:** P10-07 V1 E2E（COMPLETED）→ **本任务（V1 Release Gate）** → 完成（Golden 真实 provider 运行属环境门控项，需重建 compose + 真实 Agnes/DeepSeek，单独记录）
 - **Task boundary:** 全矩阵验证（§95 验证节）并产出 `docs/reviews/V1-RELEASE-GATE-REPORT.md`，逐条映射 §95 架构/手动生产/资产/模型/实验/审片/导演智能体/导演台/剪辑/验证 到证据（各阶段 Gate 测试、audit 测试、提交、全量套件结果）。

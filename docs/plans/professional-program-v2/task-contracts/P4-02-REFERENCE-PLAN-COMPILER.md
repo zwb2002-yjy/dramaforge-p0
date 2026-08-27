@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-02-reference-plan-compiler`
 - **Program order:** P4-01（COMPLETED）→ **P4-02 ReferencePlanCompiler（本任务）** → P4-03/MS8 → …
 - **Task boundary:** 只实现业务 purpose → ModelManifest input slot 的翻译（exact/approximate/unsupported）；不接 API、不改 Provider 调用。

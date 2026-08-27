@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-05-workbench-execution-service`
 - **Program order:** P4-04（COMPLETED）→ **P4-05 WorkbenchExecutionService（本任务）** → P4-06 → …
 - **Task boundary:** 实现 `backend/app/production/workbench_execution.py`：Build Plan、Freeze inputs、resolve graph、Create NodeRun、Persist snapshot、Dispatch worker；禁止 legacy 预算/代理审批/直接 Provider HTTP。

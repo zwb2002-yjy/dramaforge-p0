@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p9-opencut-editing`
 - **Program order:** Phase 8（COMPLETED）→ **Phase 9 OpenCut 剪辑（本任务）** → Phase 10
 - **Task boundary:** P9-00 OpenCut Integration ADR（审计当前代码 + 选型）；P9-01 EditingAdapter（backend/app/editing/: create_session/load_timeline/save_timeline/export）；P9-02 Production → Edit Timeline（formal shot → edit session）；Phase 9 Gate（auto timeline → 手动剪辑 → 保存 → 重开 → export，production lineage 不变）。

@@ -4,7 +4,7 @@
 
 - **Task id:** `mg-p4-ci-postgres-green`（原 `mg-p4-ci-postgres-fix` 因 STARTED owned paths 遗漏 `backend/tests/integration/test_execution_model_resolution_pg.py` 而标记 FAILED，本任务重建并补齐 owned paths；实现内容一致）
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Program order:** … Phase 4 Merge Gate（证据审计已完成）→ **B06 CI/Security green（本任务）** → Owner Gate 确认 → P4 Manual Production Alpha
 - **Task boundary:** 只修 Merge Gate B06 所需的 CI 工作流与 PostgreSQL 集成证据链：让 `postgres-integration` 在真实 PG 上可运行且通过、提供 `workflow_dispatch` 手动触发 CI；**不宣布 merge gate 通过**，不进入 P4。
 

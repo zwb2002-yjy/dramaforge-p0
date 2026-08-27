@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p7-03-assistant-context`
 - **Program order:** P7-02（COMPLETED）→ **P7-03 Assistant Context Builder（本任务）** → P7-04 → …
 - **Task boundary:** `backend/app/director/assistant_context.py`：每轮重读 Project/Visual Standard/Scene/Shot/Formal Assets/References/Current Model Capability/Current Experiments/Open Annotations + recent messages + current message；DB facts 优先。

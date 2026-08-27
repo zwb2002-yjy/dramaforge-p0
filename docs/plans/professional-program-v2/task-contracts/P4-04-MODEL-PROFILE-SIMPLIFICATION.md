@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-04-model-profile-simplification`
 - **Program order:** P4-03（COMPLETED）→ **P4-04 Model Profile 简化（本任务）** → P4-05 → …
 - **Task boundary:** 只在既有 Simple Mode 上补 `voice`（audio.tts slot）并统一"默认X模型"文案；不改后端 slot 语义。

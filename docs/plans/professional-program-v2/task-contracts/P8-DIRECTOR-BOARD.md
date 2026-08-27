@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p8-director-board`
 - **Program order:** Phase 7（COMPLETED）→ **Phase 8 导演台（本任务）** → Phase 9
 - **Task boundary:** P8-01 2D SVG 导演画布（角色/摄影机/场景对象/朝向/动作路径/视线/构图边界 → Scene.design_state.blocking_2d + Shot.director_state）；P8-02/03 Camera/Pose/Gaze 控件类型；P8-04 DirectorControlPackage（composition/camera/pose/gaze/blocking → WorkbenchExecutionPlan，exact/approximate）；P8-07 SceneAssembler（语义 SceneLayoutSpec → 确定性坐标，禁止 LLM 直接生成最终坐标）；Phase 8 Gate（多人复杂场景 6 项）。

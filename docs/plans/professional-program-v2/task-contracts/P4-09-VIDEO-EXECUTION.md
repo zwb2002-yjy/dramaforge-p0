@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-09-video-execution`
 - **Program order:** P4-08（COMPLETED）→ **P4-09 Video Execution（本任务）** → P4-10 → …
 - **Task boundary:** 视频执行计划强制携带正式关键帧（无正式关键帧 fail-closed，禁止 latest-image 兜底）；`POST .../formal-video` 设置 `formal_video_artifact_id`。

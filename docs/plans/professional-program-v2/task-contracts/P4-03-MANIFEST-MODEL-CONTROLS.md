@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-03-manifest-model-controls`
 - **Program order:** P4-02（COMPLETED）→ **P4-03/MS8 Dynamic Model Controls（本任务）** → P4-04 → …
 - **Task boundary:** 只做前端 Manifest 驱动控件（ModelPicker / DynamicCapabilityForm / AdvancedModelOptions / ReferencePurposeEditor）；不接执行 API。

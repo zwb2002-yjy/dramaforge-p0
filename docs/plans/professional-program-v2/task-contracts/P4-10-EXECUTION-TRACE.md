@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-10-execution-trace`
 - **Program order:** P4-09（COMPLETED）→ **P4-10 Execution Trace（本任务）** → P4-11 → …
 - **Task boundary:** `GET /projects/{id}/runs/{run_id}/trace` 返回结构化执行轨迹（Director Intent / Prompt / Resolved Asset Versions / Model Binding / Capability / Approximation / Actual Provider / Actual Model / Redacted Effective Request / Artifact）。

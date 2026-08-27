@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p10-ui-consolidation`
 - **Program order:** Phase 9（COMPLETED）→ **Phase 10 UI 收口（本任务）** → P10-03..07 审计 / Golden / E2E / V1 Gate
 - **Task boundary:** P10-01 `/quick` Legacy UI 降级（不删除、不默认入口、加 Legacy 说明、不再开发新功能）；P10-02 `projects.$projectId.production.tsx` 收口为「跨场景 Production Monitor」（移除 Script Import / 预算证据主面板 / 旧大 Storyboard 主工作区，这些能力已迁到新 Scene Workbench）。

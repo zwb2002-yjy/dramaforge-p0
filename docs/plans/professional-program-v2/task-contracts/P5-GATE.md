@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p5-gate`
 - **Program order:** P5-01…P5-06（COMPLETED）→ **Phase 5 Gate（本任务）** → Phase 6
 - **Task boundary:** 用 Phase 5 实现证明 03 §51 六项：实验不覆盖正式；换模型不复制 raw payload；A/B 可并存；可部分采纳；旧正式保留历史血缘；场景实验可只采纳某些 Shot。

@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p10-golden-project`
 - **Program order:** P10-05 RLS（COMPLETED）→ **本任务（P10-06 Golden Project）** → P10-07 V1 E2E → V1 Release Gate
 - **Task boundary:** 建立一套稳定真实验收项目（03 §93）：脚本 / 2+ Scene / 同一主角 / 2+角色参考角度 / 场景资产 / 多 Shot / 关键帧 / 视频 / 实验 / 审片修复 / Director Proposal / 2D 导演台 / 剪辑 / 导出。

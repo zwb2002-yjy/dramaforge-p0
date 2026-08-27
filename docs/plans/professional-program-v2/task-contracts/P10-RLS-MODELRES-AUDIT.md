@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p10-rls-modelres-audit`
 - **Program order:** P10-03/04（COMPLETED）→ **本任务（P10-05 RLS + 07 §23 Model Resolution）** → Golden / E2E / V1 Gate
 - **Task boundary:** P10-05 RLS Audit（workspace state / asset version / tag / binding / experiment / annotation / director assistant / proposal：tenant isolation + FORCE RLS + cross-project negative test）；07 §23 Final Model Resolution Audit（Professional 正式路径不存在绕过 ExecutionModelResolver 的真实媒体调用；worker 消费冻结 resolution）。

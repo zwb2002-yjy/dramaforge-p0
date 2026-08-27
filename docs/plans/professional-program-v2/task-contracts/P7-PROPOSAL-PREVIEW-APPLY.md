@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p7-proposal-preview-apply`
 - **Program order:** P7-04/05（COMPLETED）→ **P7-06/07 Proposal Preview UI + Partial Apply（本任务）** → P7-08 → …
 - **Task boundary:** `ProposalPreview.tsx`/`ProposalItem.tsx`（每项显示 建议/原因/收益/代价/风险/影响范围 + 接受/拒绝）；后端 partial apply 只执行 Accepted 项。

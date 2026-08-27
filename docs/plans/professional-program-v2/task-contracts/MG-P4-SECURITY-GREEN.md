@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `mg-p4-security-green`
 - **Program order:** … Phase 4 Merge Gate（证据审计 + B06 CI 已绿）→ **B06 Security filesystem-scan（本任务）** → Owner Gate 确认 → P4 Manual Production Alpha
 - **Task boundary:** 只修 GitHub Actions Security `filesystem-scan`（trivy）失败；**不宣布 merge gate 通过**，不进入 P4。

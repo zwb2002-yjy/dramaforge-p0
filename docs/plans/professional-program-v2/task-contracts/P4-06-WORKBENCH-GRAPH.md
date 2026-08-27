@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-06-workbench-graph`
 - **Program order:** P4-05（COMPLETED）→ **P4-06 Workbench Graph（本任务）** → P4-07 → …
 - **Task boundary:** 确认/补测 GraphService 的 `scope_type=shot` 路径（沿用既有 Shot Pipeline，不重写 `shot_pipeline.py`）。

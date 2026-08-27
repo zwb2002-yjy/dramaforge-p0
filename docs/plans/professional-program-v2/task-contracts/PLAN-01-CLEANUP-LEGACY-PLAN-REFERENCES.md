@@ -1,5 +1,9 @@
 # Task: PLAN-01-CLEANUP-LEGACY-PLAN-REFERENCES
 
+## Status
+
+- **State:** COMPLETE
+
 ## Read first
 
 - [`../README.md`](../README.md)

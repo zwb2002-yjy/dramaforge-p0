@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-07-execution-api`
 - **Program order:** P4-06（COMPLETED）→ **P4-07 New Execution API（本任务）** → P4-08 → …
 - **Task boundary:** 新增 `POST /projects/{id}/shots/{sid}/execution-plan`（预览，不调用 Provider）与 `POST .../executions`（执行，`Idempotency-Key` + 服务器重校验 plan fingerprint / expected shot version / accepted approximations）。

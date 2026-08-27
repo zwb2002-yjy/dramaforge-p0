@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p7-proposal-orm-commands`
 - **Program order:** P7-03（COMPLETED）→ **P7-04/05 Proposal ORM + Commands（本任务）** → P7-06 → …
 - **Task boundary:** `DirectorProposal` + `DirectorProposalItem` ORM（迁移 + RLS）；`ProposalCommandRegistry` 白名单命令（shot.update_director_state / shot.update_image_prompt / shot.update_video_prompt / shot.set_model_override / shot_reference.add / shot_reference.remove / asset_version.promote / scene.update_design / experiment.create）；禁止 raw SQL / 任意 JSON patch / 表写入。

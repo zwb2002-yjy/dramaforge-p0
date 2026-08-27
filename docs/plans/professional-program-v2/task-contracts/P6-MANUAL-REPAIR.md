@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p6-manual-repair`
 - **Program order:** P6-02/03（COMPLETED）→ **P6-04/05/06 Manual Repair（本任务）** → Phase 6 Gate
 - **Task boundary:** `POST .../repair-plan`（依据 annotations → repair option / affected nodes / retained assets / expected rerun scope）+ `POST .../repair`（Idempotency-Key；V1 仅 rerun_video / regenerate_keyframe_then_video；不做局部 inpaint）。

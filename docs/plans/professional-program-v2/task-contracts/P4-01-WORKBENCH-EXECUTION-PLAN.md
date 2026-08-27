@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-01-workbench-execution-plan`
 - **Program order:** Phase 4 Merge Gate（PASSED）→ **P4-01 WorkbenchExecutionPlan（本任务）** → P4-02 → … → P4-11 → §17 Golden Professional Test
 - **Task boundary:** 只建立 P4-01 纯 Pydantic 合同（`WorkbenchExecutionPlan` / `CapabilityGap` / `ControlTranslation` / `PlannedReference`）；不实现编译器、不接 API、不改 Provider 调用。

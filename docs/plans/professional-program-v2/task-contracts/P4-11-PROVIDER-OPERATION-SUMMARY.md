@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-11-provider-operation-summary`
 - **Program order:** P4-10（COMPLETED）→ **P4-11 ProviderOperation Summary 标准化（本任务）** → §17 Golden Professional Test
 - **Task boundary:** 不改 ProviderOperation 表；统一 `request_summary` 结构（translation_report / effective_request_redacted / reference_delivery / semantic_fingerprint），禁止 secret。

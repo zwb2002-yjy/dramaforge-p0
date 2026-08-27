@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p10-migration-noguess-audit`
 - **Program order:** Phase 10 UI 收口（COMPLETED）→ **本任务（P10-03/04 审计）** → P10-05 RLS + 07 §23 Model Resolution Audit → Golden / E2E / V1 Gate
 - **Task boundary:** P10-03 Historical Project Migration Audit（旧 Project 的 script/scene/shot/character/canonical/node run/provider operation/artifact/export 均可被新 Workbench 读取）；P10-04 No Guess Backfill Audit（无自动猜 Formal Keyframe/Video；NULL 可存在；UI 显示「尚未选择正式结果」）。

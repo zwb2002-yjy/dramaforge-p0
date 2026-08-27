@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-golden-professional-test`
 - **Program order:** P4-01…P4-11（COMPLETED）→ **§17 Golden Professional Test（本任务）** → Phase 5
 - **Task boundary:** 真实最小项目垂直切片（1 character / 1 scene / 2 shots；image 模型 + video 模型 A+B；profile video=model B）→ Asset bindings → Keyframe → Formal keyframe → Video → Formal video → Trace；验证 requested==resolved==binding==actual、reference N preserved、manifest/connection/credential revision frozen、page refresh/worker restart/resume/history trace；Negative（Profile X unavailable + Legacy Y 存在 → fail，POST=0）。

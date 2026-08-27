@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p4-08-keyframe-formal-selection`
 - **Program order:** P4-07（COMPLETED）→ **P4-08 Keyframe Formal Selection（本任务）** → P4-09 → …
 - **Task boundary:** `POST .../formal-keyframe` 设置 `formal_keyframe_artifact_id`（候选来自 NodeRun+Artifact，不建 Candidate 表）；视频默认用正式关键帧，无正式关键帧不允许用"最新图"兜底。

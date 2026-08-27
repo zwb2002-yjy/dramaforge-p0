@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p5-03-create-experiment-api`
 - **Program order:** P5-02（COMPLETED）→ **P5-03 Create Experiment API（本任务）** → P5-04 → …
 - **Task boundary:** `POST /projects/{id}/experiments`：单 shot 复制 shot version / director state / prompts / references / common model settings 为 ShotExperiment；场景为指定 Shot 批量创建 ShotExperiment。

@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p6-gate`
 - **Program order:** P6-01…P6-06（COMPLETED）→ **Phase 6 Gate（本任务）** → Phase 7
 - **Task boundary:** 证明 §59 E2E：视频 2.3–3.1s 人物漂移标注 → Repair Plan → 重做关键帧后整段视频 → 新 Keyframe candidate → 用户确认 → 新视频 → 旧正式结果仍在历史。

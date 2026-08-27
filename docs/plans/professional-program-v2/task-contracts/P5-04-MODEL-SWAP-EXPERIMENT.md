@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p5-04-model-swap-experiment`
 - **Program order:** P5-03（COMPLETED）→ **P5-04 Model Swap Experiment（本任务）** → P5-05 → …
 - **Task boundary:** "换模型验证" = create ShotExperiment + model_overrides；保留 semantic prompt / asset refs / common controls；丢弃 model A native options；按 Model B Manifest 重编译。

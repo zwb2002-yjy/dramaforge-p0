@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p7-01-agentrun-compat`
 - **Program order:** Phase 6（COMPLETED）→ **P7-01 AgentRun Compatibility（本任务）** → P7-02 → …
 - **Task boundary:** `agent_runs.planning_authorization_id` 改 nullable；`agent_operation` 枚举加 `director_assist`；旧路径（skill_execute 等）仍要求 Planning Authorization；新 Assistant 不要求 Budget Authorization。

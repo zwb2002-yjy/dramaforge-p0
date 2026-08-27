@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Parent bounded task:** `MS5-IDENTITY-A-IMMUTABLE-CREDENTIAL-REVISION`
 - **Purpose:** Align the existing unified-path unit fixture with the new strict credential identity contract. This is test-only support for MS5-IDENTITY-A; it does not introduce a second implementation task or change production behavior.
 

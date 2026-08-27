@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p7-02-director-thread`
 - **Program order:** P7-01（COMPLETED）→ **P7-02 DirectorThread / DirectorMessage（本任务）** → P7-03 → …
 - **Task boundary:** `DirectorThread`（scope project/scene/shot）+ `DirectorMessage` ORM 与迁移（project RLS）。

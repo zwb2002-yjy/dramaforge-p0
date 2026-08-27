@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p5-06-adopt-experiment`
 - **Program order:** P5-05（COMPLETED）→ **P5-06 Adopt Experiment API（本任务）** → Phase 5 Gate
 - **Task boundary:** `POST /projects/{id}/experiments/{id}/adopt`，支持 current_result_only / keyframe_only / keyframe_and_rerun_video / design_only / full_shot；keyframe_only 场景保留旧正式视频并暴露"仍基于旧关键帧"状态。

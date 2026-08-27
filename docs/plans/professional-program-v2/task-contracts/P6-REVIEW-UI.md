@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p6-review-ui`
 - **Program order:** Phase 5（COMPLETED）→ **P6-02/03 Review UI（本任务）** → P6-04/05/06 修复 → Phase 6 Gate
 - **Task boundary:** P6-01（ReviewAnnotation ORM，image_region x/y/w/h、video_time time_start/end）已由既有 `app/delivery/models.py` + `review.py` API + 迁移 0037/0039 满足（审计确认，不重做）。本任务实现前端 `MediaReviewCanvas.tsx`（图片批注，归一化矩形/点）与 `VideoReviewTimeline.tsx`（视频时间点/范围/文字）。

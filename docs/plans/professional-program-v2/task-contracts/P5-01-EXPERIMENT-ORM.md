@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `p5-01-experiment-orm`
 - **Program order:** Phase 4（P4-01…P4-11 + Golden Test 交付）→ **P5-01 Experiment ORM（本任务）** → P5-02 → …
 - **Task boundary:** 新增 `ProductionExperiment` + `ShotExperiment` ORM 与迁移（project RLS）；不改既有 ExperimentBranch。
