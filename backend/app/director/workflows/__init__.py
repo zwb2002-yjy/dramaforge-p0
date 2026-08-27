@@ -25,6 +25,20 @@ from app.director.workflows.contracts import (
     WorkflowTemplateSpec,
     workflow_template_contract_hash,
 )
+from app.director.workflows.layered_planning import (
+    PLATFORM_MAX_SCENES_PER_EPISODE,
+    PLATFORM_MAX_SHOTS_PER_SCENE,
+    EpisodePlanPayload,
+    ProductionProfile,
+    ScenePlanPayload,
+    SceneStoryboardPlanPayload,
+    ShotPlanPayload,
+)
+from app.director.workflows.layered_production_service import (
+    materialize_episode_plan,
+    materialize_scene_storyboard,
+    require_episode_scene,
+)
 from app.director.workflows.library import (
     build_workflow_registry,
     dialogue_graph_factory,
@@ -80,6 +94,13 @@ __all__ = [
     "WorkflowTemplateSpec",
     "CameraMotion",
     "ComplexityLevel",
+    "EpisodePlanPayload",
+    "PLATFORM_MAX_SCENES_PER_EPISODE",
+    "PLATFORM_MAX_SHOTS_PER_SCENE",
+    "ProductionProfile",
+    "ScenePlanPayload",
+    "SceneStoryboardPlanPayload",
+    "ShotPlanPayload",
     "ComplexityStrategy",
     "ShotComplexityAssessment",
     "ShotDirectorIntent",
@@ -91,8 +112,11 @@ __all__ = [
     "dialogue_graph_factory",
     "dialogue_post_dub_spec",
     "get_default_registry",
+    "materialize_episode_plan",
+    "materialize_scene_storyboard",
     "max_subject_references",
     "participation_director_state",
+    "require_episode_scene",
     "required_subject_references",
     "workflow_template_contract_hash",
 ]
