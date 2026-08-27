@@ -22,6 +22,7 @@ from app.director.creative_capabilities.contracts import (
     SkillCategory,
     contract_hash,
 )
+from app.director.creative_capabilities.pack_registry import PackRegistry
 from app.director.creative_capabilities.packs import (
     CameraBehavior,
     DialogDensity,
@@ -39,6 +40,21 @@ from app.director.creative_capabilities.packs_library import (
 from app.director.creative_capabilities.registry import (
     CreativeSkillRegistry,
     build_skill_registry,
+)
+from app.director.creative_capabilities.shot_language import (
+    QualityDimension,
+    QualityDimensionKind,
+    QualityPolicyRegistry,
+    QualityPolicySpec,
+    ShotDirectorIntentPatch,
+    ShotLanguagePackSpec,
+)
+from app.director.creative_capabilities.shot_language_compiler import (
+    ShotLanguageCompiler,
+)
+from app.director.creative_capabilities.shot_language_library import (
+    QUALITY_POLICIES,
+    SHOT_LANGUAGE_PACKS,
 )
 from app.director.creative_capabilities.skill_library import BASELINE_SKILLS
 from app.director.creative_capabilities.visual_bible import (
@@ -62,9 +78,19 @@ __all__ = [
     "GenreProfileSpec",
     "MergePolicy",
     "MotionFeel",
+    "PackRegistry",
+    "QUALITY_POLICIES",
+    "QualityDimension",
+    "QualityDimensionKind",
+    "QualityPolicyRegistry",
+    "QualityPolicySpec",
     "ResolutionStatus",
+    "SHOT_LANGUAGE_PACKS",
     "STYLE_PACKS",
     "ScenePacing",
+    "ShotDirectorIntentPatch",
+    "ShotLanguageCompiler",
+    "ShotLanguagePackSpec",
     "SkillCategory",
     "SkillEntry",
     "StoryRhythm",
