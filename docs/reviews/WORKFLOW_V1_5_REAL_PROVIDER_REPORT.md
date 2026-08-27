@@ -119,9 +119,9 @@ Provider POST. Both single-source the limit from the catalog manifest's
   canonical image call intermittently returns `PROVIDER_UNAVAILABLE` (upstream
   Agnes 5xx). The golden retries with backoff; the evidence captured is from a
   successful run.
-- **`dirty` was true at evidence capture** because the gate code was not yet
-  committed. The commit strategy commits the gate before the evidence is
-  re-captured clean.
+- **Evidence is clean (`dirty=false`) at commit `d3d945f`.** The gate code was
+  committed first, then the evidence re-captured from the completed project run.
+  The work is reproducible from a committed baseline.
 
 ---
 
