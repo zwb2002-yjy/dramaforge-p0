@@ -72,7 +72,7 @@ Part A delivered:
 
 ## 5. Tests / CI / Security / Real provider
 
-- **Backend unit:** 946 passed (baseline 895 + 51 across creative/provenance +
+- **Backend unit:** 951 passed (baseline 895 + 56 across creative/provenance +
   planning). **Backend static:** ruff app tests clean; mypy 248 source files clean.
 - **Backend integration (postgres):** 29 passed.
 - **Frontend:** 91 unit + 16 e2e + typecheck + build pass.
