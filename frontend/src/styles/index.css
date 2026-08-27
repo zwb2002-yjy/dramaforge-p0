@@ -1455,6 +1455,15 @@ code {
 .workflow-shot-main { display:grid; gap:.08rem; min-width:0; }.workflow-shot-template { font-size:.7rem; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }.workflow-shot-main small { color:var(--muted); font-size:.6rem; }
 .workflow-shot-status { font-size:.62rem; white-space:nowrap; }
 .workflow-nav-footer { margin-top:.6rem; padding-top:.5rem; border-top:1px solid var(--border); color:var(--muted); font-size:.62rem; }
+.creative-capabilities-panel { margin:0 0 .9rem; padding:.75rem .8rem; border:1px solid var(--border); border-radius:10px; background:var(--df-surface-0); }
+.creative-capability-form { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:.55rem; align-items:end; }
+.creative-capability-form label { display:grid; gap:.2rem; color:var(--text); font-size:.68rem; }
+.creative-capability-form select, .creative-capability-form input { border:1px solid var(--border); border-radius:6px; padding:.32rem .4rem; background:var(--df-surface-0); color:var(--text); font-size:.7rem; }
+.creative-skill-list { grid-column:1 / -1; display:grid; grid-template-columns:repeat(auto-fill, minmax(190px,1fr)); gap:.25rem; padding:.4rem; border:1px solid var(--border); border-radius:8px; }
+.creative-skill-toggle { display:flex; align-items:center; gap:.35rem; font-size:.66rem; color:var(--text); }
+.creative-provenance { margin-top:.6rem; padding:.5rem; border:1px solid var(--border); border-radius:8px; background:var(--df-surface-2); }
+.creative-provenance small { color:var(--muted); font-size:.62rem; }
+.creative-provenance pre { margin:.35rem 0 0; font-size:.6rem; white-space:pre-wrap; word-break:break-all; color:var(--muted); }
 .asset-card-workspace,
 .review-annotation-workspace,
 .director-board-workspace {

@@ -315,3 +315,40 @@ export function fetchShotWorkflowState(
     `/api/v1/projects/${projectId}/shots/${shotId}/workflow-state`,
   );
 }
+
+// --- CC10 creative capability functional UI -----------------------------------
+
+export type CreativeProvenanceRead = Record<string, object>;
+
+export function fetchCreativeProvenance(
+  projectId: string,
+  params: { scene_id?: string; shot_id?: string } = {},
+): Promise<{ creative_capabilities: CreativeProvenanceRead; target: string }> {
+  const qs = new URLSearchParams();
+  if (params.scene_id) qs.set("scene_id", params.scene_id);
+  if (params.shot_id) qs.set("shot_id", params.shot_id);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiGet(`/api/v1/projects/${projectId}/creative-capabilities/provenance${suffix}`);
+}
+
+export async function freezeCreativeCapabilities(
+  projectId: string,
+  input: {
+    genre_key?: string;
+    style_key?: string;
+    shot_language_key?: string;
+    quality_policy_key?: string;
+    skill_keys: string[];
+    scene_id?: string;
+    shot_id?: string;
+    user_intent?: Record<string, unknown>;
+  },
+): Promise<{ creative_capabilities: CreativeProvenanceRead; target: string }> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/creative-capabilities/freeze`,
+    input,
+    csrf,
+  );
+}

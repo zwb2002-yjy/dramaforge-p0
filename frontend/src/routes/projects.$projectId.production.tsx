@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ProductionMonitor } from "../features/production/ProductionMonitor";
 import { ProfessionalWorkbench } from "../features/production/ProfessionalWorkbench";
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
+import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
 import { fetchScenes } from "../features/workbench/api";
 import {
   confirmShotChangeProposal,
@@ -135,6 +136,8 @@ function ProductionPage() {
   });
 
   const revisionShotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
+  const selectedShot = (shots.data ?? []).find((s) => s.id === revisionShotId) ?? null;
+  const selectedSceneId = selectedShot?.scene_id ?? null;
   const projectAssets = useQuery({
     queryKey: ["project-assets", projectId],
     queryFn: () => fetchProjectAssets(projectId),
@@ -238,6 +241,14 @@ function ProductionPage() {
       </div>
 
       <WorkflowNavigator projectId={projectId} />
+
+      {revisionShotId && (
+        <CreativeCapabilitiesPanel
+          projectId={projectId}
+          sceneId={selectedSceneId}
+          shotId={revisionShotId}
+        />
+      )}
 
       <ProductionMonitor
         projectId={projectId}
