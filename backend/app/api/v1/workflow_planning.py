@@ -89,13 +89,37 @@ async def get_shot_workflow_state(
     user: CurrentUser,
     session: SessionDep,
 ) -> dict[str, object]:
-    """Wire-visible workflow state for one shot (read-only aggregation)."""
-    _shot, episode_id = await _shot_with_episode(
+    """Wire-visible workflow state for one shot (read-only aggregation).
+
+    Resolves the workspace keyframe manifest so ``capability_assessment`` is a
+    deterministic read (mirrors the planning freeze), letting the UI surface the
+    EXACT / APPROXIMATE / UNSUPPORTED status honestly without a provider call.
+    """
+    from app.providers.manifest import ModelManifest
+    from app.providers.workspace_router import resolve_workspace_bridge
+
+    shot, episode_id = await _shot_with_episode(
         session, project_id=project_id, shot_id=shot_id, actor_user=user
     )
-    shot = await session.get(Shot, shot_id)
-    assert shot is not None
-    state = build_shot_workflow_state(shot=shot, episode_id=episode_id)
+    project = await session.get(Project, project_id)
+    assert project is not None
+    assessment_manifest: ModelManifest | None = None
+    try:
+        bridge = await resolve_workspace_bridge(
+            session,
+            workspace_id=project.workspace_id,
+            provider_type="agnes",
+            media_kind="image",
+        )
+        if isinstance(bridge.manifest, ModelManifest):
+            assessment_manifest = bridge.manifest
+    except Exception:  # noqa: BLE001 - a read model must never fail a page
+        assessment_manifest = None
+    state = build_shot_workflow_state(
+        shot=shot,
+        episode_id=episode_id,
+        assessment_manifest=assessment_manifest,
+    )
     return {"workflow_state": state.model_dump(mode="json")}
 
 

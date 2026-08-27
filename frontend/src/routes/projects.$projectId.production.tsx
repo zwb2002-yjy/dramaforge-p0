@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { ProductionMonitor } from "../features/production/ProductionMonitor";
 import { ProfessionalWorkbench } from "../features/production/ProfessionalWorkbench";
+import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { fetchScenes } from "../features/workbench/api";
 import {
   confirmShotChangeProposal,
@@ -235,6 +236,8 @@ function ProductionPage() {
       <div className="callout">
         此处监控 Project 生产全貌（NodeRun / Artifact / 正式结果 / 实验）。剧本导入与旧分镜主工作区已迁移到场景工作区；媒体生成、修复和导出仍受用户确认、Provider 能力和质量门控制。
       </div>
+
+      <WorkflowNavigator projectId={projectId} />
 
       <ProductionMonitor
         projectId={projectId}

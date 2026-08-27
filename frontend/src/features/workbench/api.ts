@@ -212,3 +212,106 @@ export async function updateShotDesign(
     csrf,
   );
 }
+
+// --- WF13-02 wire-visible workflow read models -------------------------------
+
+export type CapabilityAssessmentRead = {
+  status: "EXACT" | "APPROXIMATE" | "UNSUPPORTED";
+  required_subject_references: number;
+  max_subject_references: number;
+  reason: string;
+  approximate_strategy_id: string | null;
+};
+
+export type ParticipationRead = {
+  character_id: string;
+  asset_version_id: string | null;
+  screen_role: string;
+  importance: number;
+  wardrobe_asset_version_id: string | null;
+  position: string;
+  pose: string;
+  gaze_target: string;
+  action: string;
+  expression: string;
+  dialogue_role: string;
+};
+
+export type ShotWorkflowStateRead = {
+  shot_id: string;
+  scene_id: string;
+  episode_id: string;
+  shot_number: number;
+  status: string;
+  workflow_template_key: string | null;
+  template_version: string | null;
+  template_contract_hash: string | null;
+  template_resolution_status: string;
+  quality_policy_id: string | null;
+  repair_policy_id: string | null;
+  required_reference_roles: string[];
+  supported_character_count: number[];
+  intent_tags: string[];
+  participations: ParticipationRead[];
+  capability_assessment: CapabilityAssessmentRead | null;
+};
+
+export type SceneProductionStatusRead = {
+  scene_id: string;
+  episode_id: string;
+  state: "draft" | "ready" | "producing" | "review" | "complete" | "blocked";
+  total_shots: number;
+  formal_shots: number;
+  failed_shots: number;
+  review_required: number;
+  blocked_shots: number;
+  reasons: string[];
+};
+
+export type SceneWorkflowViewRead = {
+  scene_id: string;
+  episode_id: string;
+  episode_number: number;
+  scene_number: number;
+  location_name: string;
+  time_of_day: string;
+  synopsis: string;
+  production_status: SceneProductionStatusRead;
+  shots: ShotWorkflowStateRead[];
+};
+
+export type EpisodeWorkflowSummaryRead = {
+  episode_id: string;
+  episode_number: number;
+  title: string;
+  synopsis: string;
+  scene_count: number;
+  total_shots: number;
+};
+
+export type WorkflowOverviewRead = {
+  project_id: string;
+  episodes: EpisodeWorkflowSummaryRead[];
+  scenes: SceneWorkflowViewRead[];
+  total_shots: number;
+  formal_shots: number;
+  blocked_scenes: number;
+  review_required_scenes: number;
+  unsupported_capability_shots: number;
+  available_staged_strategies: string[];
+};
+
+export function fetchWorkflowOverview(projectId: string): Promise<WorkflowOverviewRead> {
+  return apiGet<{ overview: WorkflowOverviewRead }>(
+    `/api/v1/projects/${projectId}/workflow-overview`,
+  ).then((body) => body.overview);
+}
+
+export function fetchShotWorkflowState(
+  projectId: string,
+  shotId: string,
+): Promise<{ workflow_state: ShotWorkflowStateRead }> {
+  return apiGet<{ workflow_state: ShotWorkflowStateRead }>(
+    `/api/v1/projects/${projectId}/shots/${shotId}/workflow-state`,
+  );
+}

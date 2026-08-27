@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.access.models import Project
 from app.access.projects import ProjectService
 from app.api.deps import CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Episode, Scene, Shot
@@ -38,6 +39,9 @@ async def get_workflow_overview(
     session: SessionDep,
 ) -> WorkflowOverviewResponse:
     """Episode → Scene → Shot workflow state + scene production statuses."""
+    from app.providers.manifest import ModelManifest
+    from app.providers.workspace_router import resolve_workspace_bridge
+
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     rows = (
         await session.execute(
@@ -59,9 +63,27 @@ async def get_workflow_overview(
     shots_by_scene: dict[UUID, list[Shot]] = {}
     for shot in shots:
         shots_by_scene.setdefault(shot.scene_id, []).append(shot)
+    # Resolve the workspace keyframe manifest once so each scene's shots carry an
+    # honest EXACT / APPROXIMATE / UNSUPPORTED capability assessment (read-only).
+    manifests_by_scene: dict[UUID, ModelManifest] = {}
+    try:
+        project = await session.get(Project, project_id)
+        if project is not None:
+            bridge = await resolve_workspace_bridge(
+                session,
+                workspace_id=project.workspace_id,
+                provider_type="agnes",
+                media_kind="image",
+            )
+            if isinstance(bridge.manifest, ModelManifest):
+                scene_ids = {scene.id for _, scene in rows}
+                manifests_by_scene = {sid: bridge.manifest for sid in scene_ids}
+    except Exception:  # noqa: BLE001 - a read model must never fail a page
+        manifests_by_scene = {}
     overview = build_project_workflow_overview(
         project_id=project_id,
         scenes=list(rows),
         shots_by_scene=shots_by_scene,
+        manifests_by_scene=manifests_by_scene,
     )
     return WorkflowOverviewResponse(overview=overview.model_dump(mode="json"))
