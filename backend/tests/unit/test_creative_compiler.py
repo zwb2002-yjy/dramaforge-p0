@@ -75,6 +75,23 @@ def test_genre_story_guidance_respects_user_override() -> None:
     assert "hook_strategy" in result.story_guidance  # no user value -> default
 
 
+def test_genre_hook_and_turn_respect_user_override() -> None:
+    """The priority gate (explicit user > pack default) applies to every genre
+    field, not just story_rhythm/scene_pacing (G-CC-03 / review finding A)."""
+    genre = _genre("short_drama_suspense_v1")
+    compiler = CreativeCapabilityCompiler()
+    result = compiler.compile(
+        user_intent={"hook_strategy": "user's own hook", "turn_frequency": "user"},
+        project_context={"story_rhythm": "project_value"},
+        genre=genre,
+    )
+    # User's explicit hook/turn win over the genre default -> suppressed.
+    assert "hook_strategy" not in result.story_guidance
+    assert "turn_frequency" not in result.story_guidance
+    # Project's story_rhythm is explicit and wins over the genre default too.
+    assert "story_rhythm" not in result.story_guidance
+
+
 def test_provenance_froze_all_pack_identities() -> None:
     style = _style("cinematic_realism_v1")
     genre = _genre("short_drama_suspense_v1")

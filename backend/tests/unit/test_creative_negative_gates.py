@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
+
 from app.director.creative_capabilities.composer import (
     CreativeSkillComposer,
     ResolutionStatus,
@@ -136,3 +140,38 @@ def test_cc11_golden_composition_resolves_to_execution_reference() -> None:
     assert "graph" not in fields
     # The two-character workflow template key is a plan hint, not a graph.
     assert result.story_guidance
+
+
+# --- Evidence no-secret guard -------------------------------------------------
+# The golden scripts emit only a field-allowlisted report (see
+# public_operation in scripts/prove_professional_wf13_golden.py).  This test
+# makes the no-secret guarantee automated (not construction-only) so a future
+# un-redacted field fails CI (review finding B).
+
+_SECRET_PATTERN = re.compile(
+    r"(?:api[_-]?key|password|credential|secret|token|bearer|authorization)"
+    r"\s*[:=]\s*[A-Za-z0-9_\-\./\+]{8,}",
+    re.IGNORECASE,
+)
+
+
+def _scan_json(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    # Parse to ensure it is well-formed JSON; ignore token-only false positives
+    # like a bare "csrf" or an empty value.
+    json.loads(text)
+    return [m.group(0) for m in _SECRET_PATTERN.finditer(text)]
+
+
+def test_evidence_has_no_secret_values() -> None:
+    repo = Path(__file__).resolve().parents[3]  # repo root
+    for name in (
+        "WORKFLOW_V1_5_REAL_PROVIDER_GOLDEN.json",
+        "CREATIVE_CAPABILITY_GOLDEN.json",
+    ):
+        path = repo / "docs" / "reviews" / name
+        assert path.exists(), f"missing committed evidence {name}"
+        hits = _scan_json(path)
+        assert not hits, f"{name} leaks a secret-like value: {hits[:3]}"

@@ -72,14 +72,19 @@ class CreativeCapabilityCompiler:
         project = dict(project_context or {})
 
         # --- story guidance: genre defaults only where user/project silent ------
+        # Priority gate: explicit user value > project override > pack default.
+        # A genre default is applied only when neither the user nor the project
+        # already made an explicit choice.
         story_guidance: dict[str, object] = {}
         if genre is not None:
             if user.get("story_rhythm") is None and project.get("story_rhythm") is None:
                 story_guidance["story_rhythm"] = genre.story_rhythm.value
             if user.get("scene_pacing") is None and project.get("scene_pacing") is None:
                 story_guidance["scene_pacing"] = genre.scene_pacing.value
-            story_guidance["hook_strategy"] = genre.hook_strategy
-            story_guidance["turn_frequency"] = genre.turn_frequency
+            if user.get("hook_strategy") is None and project.get("hook_strategy") is None:
+                story_guidance["hook_strategy"] = genre.hook_strategy
+            if user.get("turn_frequency") is None and project.get("turn_frequency") is None:
+                story_guidance["turn_frequency"] = genre.turn_frequency
 
         # --- VisualBible patch: style default, respecting explicit values.
         # priority gate: explicit user value > project override > pack default.
