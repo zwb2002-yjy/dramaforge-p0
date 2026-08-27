@@ -59,6 +59,13 @@ from app.director.workflows.reference_capability import (
 )
 from app.director.workflows.registry import WorkflowTemplateRegistry, build_registry
 from app.director.workflows.resolver import WorkflowTemplateResolver
+from app.director.workflows.scene_orchestration import (
+    SCENE_CONCURRENCY_LIMIT,
+    SceneProductionState,
+    SceneProductionStatus,
+    is_scene_failure_isolated,
+    scene_production_status,
+)
 from app.director.workflows.shot_complexity import (
     CameraMotion,
     ComplexityLevel,
@@ -82,6 +89,9 @@ __all__ = [
     "ShotCharacterParticipation",
     "ShotParticipationPlan",
     "TemplateResolveSource",
+    "SCENE_CONCURRENCY_LIMIT",
+    "SceneProductionState",
+    "SceneProductionStatus",
     "TemplateResolveStatus",
     "WorkflowScope",
     "WorkflowTemplateEligibility",
@@ -112,11 +122,13 @@ __all__ = [
     "dialogue_graph_factory",
     "dialogue_post_dub_spec",
     "get_default_registry",
+    "is_scene_failure_isolated",
     "materialize_episode_plan",
     "materialize_scene_storyboard",
     "max_subject_references",
     "participation_director_state",
     "require_episode_scene",
+    "scene_production_status",
     "required_subject_references",
     "workflow_template_contract_hash",
 ]
