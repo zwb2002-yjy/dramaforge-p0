@@ -62,8 +62,11 @@ from app.director.workflows.reference_capability import (
     MultiCharacterCapabilityStatus,
     ReferenceCapabilityAssessment,
     assess_multi_character_capability,
+    dispatch_capability_gate,
     max_subject_references,
+    max_subject_references_from_catalog_manifest,
     required_subject_references,
+    visible_subject_count_from_snapshot,
 )
 from app.director.workflows.registry import WorkflowTemplateRegistry, build_registry
 from app.director.workflows.resolver import WorkflowTemplateResolver
@@ -138,11 +141,14 @@ __all__ = [
     "materialize_episode_plan",
     "materialize_scene_storyboard",
     "max_subject_references",
+    "max_subject_references_from_catalog_manifest",
     "participation_director_state",
     "persist_continuity_context",
     "require_episode_scene",
     "scene_production_status",
     "required_subject_references",
+    "visible_subject_count_from_snapshot",
+    "dispatch_capability_gate",
     "workflow_template_contract_hash",
     "ContinuityVerdict",
 ]

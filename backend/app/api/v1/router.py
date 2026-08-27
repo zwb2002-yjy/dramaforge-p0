@@ -26,6 +26,8 @@ from app.api.v1 import (
     scripts,
     shot_ops,
     worker,
+    workflow_overview,
+    workflow_planning,
 )
 
 api_router = APIRouter()
@@ -53,6 +55,8 @@ api_router.include_router(shot_ops.router)
 api_router.include_router(worker.router)
 api_router.include_router(events.router)
 api_router.include_router(experiments.router)
+api_router.include_router(workflow_planning.router)
+api_router.include_router(workflow_overview.router)
 
 
 @api_router.get("/status", tags=["system"])

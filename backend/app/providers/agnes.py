@@ -895,6 +895,17 @@ class AgnesImageCompiler:
             schema_version=model.manifest_version,
         )
         summary.update({"size": size, "aspect_ratio": ratio})
+        # Publish the effective-options envelope alongside the transformation list.
+        # The legacy bridge adapter's fail-closed compiler-evidence check
+        # (``adapters_v2._compiler_translation_evidence``) requires that
+        # ``effective_common_options`` and ``translation_transformations`` appear
+        # together; publishing only the latter made the canonical-generation
+        # bridge reject the compile with "compiler translation evidence is
+        # incomplete".  ``aspect_ratio``/``size`` are bounded audit strings.
+        summary["effective_common_options"] = {
+            "aspect_ratio": ratio if isinstance(ratio, str) else "9:16",
+            "size": size,
+        }
         summary["translation_transformations"] = [
             {
                 "field": "size",

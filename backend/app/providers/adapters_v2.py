@@ -90,12 +90,13 @@ ArtifactResolver = Callable[[list[tuple[str, ResolvedArtifact]]], list[ResolvedR
 ReferenceInput = Mapping[str, ResolvedArtifact] | Sequence[ResolvedReference]
 
 _COMPILER_AUDIT_OPTION_FIELDS = frozenset(
-    {"aspect_ratio", "duration_seconds", "resolution", "generate_audio", "seed"}
+    {"aspect_ratio", "duration_seconds", "resolution", "generate_audio", "seed", "size"}
 )
 _COMPILER_AUDIT_REASON_CODES = frozenset(
     {
         "provider_inherits_aspect_ratio_from_first_frame",
         "provider_applies_documented_default",
+        "frozen_manifest_native_size_tier",
     }
 )
 
@@ -127,7 +128,7 @@ def _compiler_translation_evidence(
     def safe_value(field: str, value: object) -> bool:
         if value is None:
             return True
-        if field in {"aspect_ratio", "resolution"}:
+        if field in {"aspect_ratio", "resolution", "size"}:
             return isinstance(value, str) and 0 < len(value) <= 32
         if field == "duration_seconds":
             return (

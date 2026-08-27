@@ -1116,6 +1116,7 @@ async def _execute_unified_media_node_run(
     remote id (crash between commit and response) is escalated to
     ``unknown_submission`` for manual reconciliation instead of a duplicate POST.
     """
+    from collections.abc import Mapping
     from dataclasses import asdict
     from datetime import UTC, datetime
     from types import SimpleNamespace
@@ -1552,6 +1553,54 @@ async def _execute_unified_media_node_run(
             run.input_snapshot = snap
             await session.flush()
         manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        # Dispatch-time multi-subject fail-closed gate (G-WF-05 / G-WF-06).
+        # The keyframe must not be submitted when the shot's frozen participation
+        # plan carries more visible controlled subjects than this model's catalog
+        # manifest can bind as reference images.  A silent single-reference POST
+        # would prove only character A survived (the banned "只发角色 A 后宣称
+        # multi-character PASS" outcome).  Planning surfaces are advisory; this is
+        # the authoritative boundary and it raises before any Provider request.
+        # The frozen plan lives in ``Shot.director_state``; we read it here, not
+        # from the snapshot, because the snapshot is deliberately minimized.
+        if node_type == "keyframe":
+            from app.assets.models import Shot as _ShotModel
+            from app.director.workflows.reference_capability import dispatch_capability_gate
+
+            participation_snapshot: Mapping[str, object] = {}
+            raw_shot_id = snap.get("shot_id")
+            if isinstance(raw_shot_id, str) and raw_shot_id:
+                try:
+                    shot_row = await session.get(_ShotModel, UUID(raw_shot_id))
+                except (ValueError, TypeError):
+                    # A non-UUID (or missing) shot id means the run is not backed
+                    # by a real shot with a participation plan; there is nothing to
+                    # gate, so dispatch proceeds exactly as before.
+                    shot_row = None
+                if shot_row is not None:
+                    participation_snapshot = {
+                        "workflow_participations": (
+                            shot_row.director_state or {}
+                        ).get("workflow_participations")
+                    }
+            gate = dispatch_capability_gate(
+                snapshot=participation_snapshot,
+                operations=cast(Mapping[str, object], manifest.operations),
+            )
+            if gate is not None:
+                await _commit_terminal_failure(
+                    session,
+                    run=run,
+                    error_code="MULTI_SUBJECT_UNSUPPORTED",
+                    error_summary=gate.reason,
+                )
+                raise ValidationAppError(
+                    f"MULTI_SUBJECT_UNSUPPORTED: {gate.reason}",
+                    details={
+                        "code": "MULTI_SUBJECT_UNSUPPORTED",
+                        "required_subject_references": gate.required_subject_references,
+                        "max_subject_references": gate.max_subject_references,
+                    },
+                )
         compiled: CompiledImageRequest | CompiledVideoRequest
         identity_references: list[ExecutionIdentityReference] = []
         if node_type == "keyframe":
