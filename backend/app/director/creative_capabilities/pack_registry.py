@@ -37,7 +37,15 @@ class PackRegistry(Generic[T]):
         return str(getattr(spec, self._key_field))
 
     def _version(self, spec: T) -> str:
-        return str(getattr(spec, "version" if hasattr(spec, "version") else "pack_version"))
+        for field in ("version", "pack_version", "style_version", "genre_version"):
+            value = getattr(spec, field, None)
+            if value is not None:
+                return str(value)
+        # The contract hash is unique per version; fall back to it as the version.
+        contract = getattr(spec, "contract_hash", None)
+        if contract is not None:
+            return str(contract)
+        raise ValueError(f"{type(spec).__name__} has no version field")
 
     def register(self, spec: T) -> T:
         key = self._key(spec)
