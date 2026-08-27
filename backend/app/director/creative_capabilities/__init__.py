@@ -22,14 +22,32 @@ from app.director.creative_capabilities.contracts import (
     SkillCategory,
     contract_hash,
 )
+from app.director.creative_capabilities.packs import (
+    CameraBehavior,
+    DialogDensity,
+    GenreProfileSpec,
+    MotionFeel,
+    ScenePacing,
+    StoryRhythm,
+    StylePackSpec,
+    VisualBiblePatch,
+)
+from app.director.creative_capabilities.packs_library import (
+    GENRE_PROFILES,
+    STYLE_PACKS,
+)
 from app.director.creative_capabilities.registry import (
     CreativeSkillRegistry,
     build_skill_registry,
 )
 from app.director.creative_capabilities.skill_library import BASELINE_SKILLS
+from app.director.creative_capabilities.visual_bible import (
+    VisualBibleCompiler,
+)
 
 __all__ = [
     "BASELINE_SKILLS",
+    "CameraBehavior",
     "ContentStage",
     "CreativeInputField",
     "CreativeOutputField",
@@ -39,10 +57,20 @@ __all__ = [
     "CreativeSkillSpec",
     "CreativeSkillStack",
     "CreativeSkillStackResolution",
+    "DialogDensity",
+    "GENRE_PROFILES",
+    "GenreProfileSpec",
     "MergePolicy",
+    "MotionFeel",
     "ResolutionStatus",
+    "STYLE_PACKS",
+    "ScenePacing",
     "SkillCategory",
     "SkillEntry",
+    "StoryRhythm",
+    "StylePackSpec",
+    "VisualBibleCompiler",
+    "VisualBiblePatch",
     "build_skill_registry",
     "contract_hash",
 ]
