@@ -11,7 +11,10 @@ from pydantic import BaseModel, Field
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.creation.service import CreationService
-from app.director.legacy_guard import require_legacy_execution_allowed
+from app.director.legacy_guard import (
+    require_legacy_execution_allowed,
+    require_recovery_only_project,
+)
 from app.shared.enums import ExperienceMode
 
 router = APIRouter(
@@ -23,7 +26,7 @@ class StartProjectRequest(BaseModel):
     workspace_id: UUID
     name: str = Field(min_length=1, max_length=160)
     aspect_ratio: str = Field(pattern="^(9:16|16:9)$")
-    experience_mode: ExperienceMode = ExperienceMode.QUICK
+    experience_mode: ExperienceMode = ExperienceMode.WORKBENCH
     idea: str = ""
 
 
@@ -262,6 +265,9 @@ async def confirm_plan(
     await require_legacy_execution_allowed(
         session, project_id=project_id, action="legacy_confirm_plan_media"
     )
+    await require_recovery_only_project(
+        session, user_id=user.id, project_id=project_id, action="legacy_confirm_plan_media"
+    )
     result = await CreationService(session).confirm_plan_and_materialize(
         project_id=project_id,
         plan_id=plan_id,
@@ -365,3 +371,4 @@ async def generate_plan_agent(
         context_hash=plan.context_hash,
         source="agent",
     )
+

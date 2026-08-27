@@ -595,7 +595,7 @@ export async function startProject(input: {
       workspace_id: input.workspace_id,
       name: input.name,
       aspect_ratio: input.aspect_ratio,
-      experience_mode: "quick",
+      experience_mode: "workbench",
       idea: input.idea ?? "",
     },
     csrf,
@@ -1455,4 +1455,5 @@ export async function createGeneration(
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as GenerationCreateResult;
 }
+
 

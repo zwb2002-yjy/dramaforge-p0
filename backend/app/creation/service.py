@@ -103,7 +103,7 @@ class CreationService:
         name: str,
         aspect_ratio: str,
         actor: User,
-        experience_mode: ExperienceMode = ExperienceMode.QUICK,
+        experience_mode: ExperienceMode = ExperienceMode.WORKBENCH,
         idea: str = "",
     ) -> StartProjectResult:
         await set_rls_context(
@@ -1339,3 +1339,4 @@ def _extract_json_object(text: str) -> dict[str, object]:
         except json.JSONDecodeError:
             return {}
     return {}
+
