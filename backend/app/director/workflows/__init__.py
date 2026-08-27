@@ -45,6 +45,15 @@ from app.director.workflows.reference_capability import (
 )
 from app.director.workflows.registry import WorkflowTemplateRegistry, build_registry
 from app.director.workflows.resolver import WorkflowTemplateResolver
+from app.director.workflows.shot_complexity import (
+    CameraMotion,
+    ComplexityLevel,
+    ComplexityStrategy,
+    ShotComplexityAssessment,
+    ShotDirectorIntent,
+    assess_shot_complexity,
+    complexity_director_state,
+)
 
 __all__ = [
     "DialogueRole",
@@ -69,9 +78,16 @@ __all__ = [
     "WorkflowTemplateResolution",
     "WorkflowTemplateResolver",
     "WorkflowTemplateSpec",
+    "CameraMotion",
+    "ComplexityLevel",
+    "ComplexityStrategy",
+    "ShotComplexityAssessment",
+    "ShotDirectorIntent",
     "assess_multi_character_capability",
+    "assess_shot_complexity",
     "build_registry",
     "build_workflow_registry",
+    "complexity_director_state",
     "dialogue_graph_factory",
     "dialogue_post_dub_spec",
     "get_default_registry",
