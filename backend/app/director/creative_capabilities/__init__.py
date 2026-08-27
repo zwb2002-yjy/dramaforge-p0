@@ -22,6 +22,10 @@ from app.director.creative_capabilities.contracts import (
     SkillCategory,
     contract_hash,
 )
+from app.director.creative_capabilities.creative_compiler import (
+    CompiledCreativeIntent,
+    CreativeCapabilityCompiler,
+)
 from app.director.creative_capabilities.pack_registry import PackRegistry
 from app.director.creative_capabilities.packs import (
     CameraBehavior,
@@ -64,7 +68,9 @@ from app.director.creative_capabilities.visual_bible import (
 __all__ = [
     "BASELINE_SKILLS",
     "CameraBehavior",
+    "CompiledCreativeIntent",
     "ContentStage",
+    "CreativeCapabilityCompiler",
     "CreativeInputField",
     "CreativeOutputField",
     "CreativeSkillComposer",
