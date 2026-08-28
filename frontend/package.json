@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "api:generate": "node ../scripts/generate-openapi-types.mjs",
+    "api:check": "npm run api:generate && git diff --exit-code -- src/shared/api/generated.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.8",

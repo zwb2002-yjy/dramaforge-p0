@@ -8,6 +8,12 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.api.v1.schemas.scenes import (
+    SceneActionRead,
+    SceneOperationPreviewRead,
+    SceneSummaryRead,
+    SceneWorkspaceRead,
+)
 from app.assets.scene_service import SceneStructureService, SceneSummaryService
 from app.workbench.scene_service import SceneWorkspaceService
 
@@ -29,35 +35,37 @@ class SceneMergeBody(BaseModel):
     target_scene_id: UUID
 
 
-@router.get("/projects/{project_id}/scenes", response_model=list[dict[str, object]])
+@router.get("/projects/{project_id}/scenes", response_model=list[SceneSummaryRead])
 async def list_scene_summaries(
     project_id: UUID,
     user: CurrentUser,
     session: SessionDep,
-) -> list[dict[str, object]]:
-    return await SceneSummaryService(session).list_summaries(
+) -> list[SceneSummaryRead]:
+    summaries = await SceneSummaryService(session).list_summaries(
         project_id=project_id, actor=user
     )
+    return [SceneSummaryRead(**s) for s in summaries]
 
 
 @router.get(
     "/projects/{project_id}/scenes/{scene_id}/workspace",
-    response_model=dict[str, object],
+    response_model=SceneWorkspaceRead,
 )
 async def get_scene_workspace(
     project_id: UUID,
     scene_id: UUID,
     user: CurrentUser,
     session: SessionDep,
-) -> dict[str, object]:
-    return await SceneWorkspaceService(session).get_workspace(
+) -> SceneWorkspaceRead:
+    workspace = await SceneWorkspaceService(session).get_workspace(
         project_id=project_id, scene_id=scene_id, actor=user
     )
+    return SceneWorkspaceRead(**workspace)
 
 
 @router.post(
     "/projects/{project_id}/scenes/{scene_id}/reorder",
-    response_model=dict[str, object],
+    response_model=SceneActionRead,
 )
 async def reorder_scene(
     project_id: UUID,
@@ -66,7 +74,7 @@ async def reorder_scene(
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
-) -> dict[str, object]:
+) -> SceneActionRead:
     scene = await SceneStructureService(session).reorder(
         project_id=project_id,
         scene_id=scene_id,
@@ -74,12 +82,12 @@ async def reorder_scene(
         new_scene_number=body.new_scene_number,
     )
     await session.commit()
-    return {"id": scene.id, "scene_number": scene.scene_number}
+    return SceneActionRead(id=scene.id, scene_number=scene.scene_number)
 
 
 @router.post(
     "/projects/{project_id}/scenes/{scene_id}/copy",
-    response_model=dict[str, object],
+    response_model=SceneActionRead,
     status_code=201,
 )
 async def copy_scene(
@@ -88,17 +96,17 @@ async def copy_scene(
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
-) -> dict[str, object]:
+) -> SceneActionRead:
     scene = await SceneStructureService(session).copy(
         project_id=project_id, scene_id=scene_id, actor=user
     )
     await session.commit()
-    return {"id": scene.id, "scene_number": scene.scene_number}
+    return SceneActionRead(id=scene.id, scene_number=scene.scene_number)
 
 
 @router.post(
     "/projects/{project_id}/scenes/{scene_id}/split-preview",
-    response_model=dict[str, object],
+    response_model=SceneOperationPreviewRead,
 )
 async def split_scene_preview(
     project_id: UUID,
@@ -106,18 +114,19 @@ async def split_scene_preview(
     body: SceneSplitBody,
     user: CurrentUser,
     session: SessionDep,
-) -> dict[str, object]:
-    return await SceneStructureService(session).split_preview(
+) -> SceneOperationPreviewRead:
+    preview = await SceneStructureService(session).split_preview(
         project_id=project_id,
         scene_id=scene_id,
         actor=user,
         at_shot_number=body.at_shot_number,
     )
+    return SceneOperationPreviewRead(**preview)
 
 
 @router.post(
     "/projects/{project_id}/scenes/{scene_id}/split",
-    response_model=dict[str, object],
+    response_model=SceneActionRead,
     status_code=201,
 )
 async def split_scene(
@@ -127,7 +136,7 @@ async def split_scene(
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
-) -> dict[str, object]:
+) -> SceneActionRead:
     scene = await SceneStructureService(session).split(
         project_id=project_id,
         scene_id=scene_id,
@@ -138,12 +147,12 @@ async def split_scene(
         time_of_day=body.time_of_day,
     )
     await session.commit()
-    return {"id": scene.id, "scene_number": scene.scene_number}
+    return SceneActionRead(id=scene.id, scene_number=scene.scene_number)
 
 
 @router.post(
     "/projects/{project_id}/scenes/{scene_id}/merge-preview",
-    response_model=dict[str, object],
+    response_model=SceneOperationPreviewRead,
 )
 async def merge_scene_preview(
     project_id: UUID,
@@ -151,18 +160,19 @@ async def merge_scene_preview(
     body: SceneMergeBody,
     user: CurrentUser,
     session: SessionDep,
-) -> dict[str, object]:
-    return await SceneStructureService(session).merge_preview(
+) -> SceneOperationPreviewRead:
+    preview = await SceneStructureService(session).merge_preview(
         project_id=project_id,
         scene_id=scene_id,
         target_scene_id=body.target_scene_id,
         actor=user,
     )
+    return SceneOperationPreviewRead(**preview)
 
 
 @router.post(
     "/projects/{project_id}/scenes/{scene_id}/merge",
-    response_model=dict[str, object],
+    response_model=SceneActionRead,
 )
 async def merge_scene(
     project_id: UUID,
@@ -171,7 +181,7 @@ async def merge_scene(
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
-) -> dict[str, object]:
+) -> SceneActionRead:
     scene = await SceneStructureService(session).merge(
         project_id=project_id,
         scene_id=scene_id,
@@ -179,4 +189,4 @@ async def merge_scene(
         actor=user,
     )
     await session.commit()
-    return {"id": scene.id, "scene_number": scene.scene_number}
+    return SceneActionRead(id=scene.id, scene_number=scene.scene_number)

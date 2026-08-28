@@ -1,7 +1,18 @@
 type ShotProductionTraceProps = {
   shotId: string;
-  trace: Array<Record<string, unknown>>;
+  trace: unknown[];
 };
+
+type TraceRow = {
+  node_run_id?: unknown;
+  node_key?: unknown;
+  status?: unknown;
+  error_code?: unknown;
+};
+
+function rowOf(value: unknown): TraceRow {
+  return (typeof value === "object" && value !== null ? value : {}) as TraceRow;
+}
 
 /** Bottom production chain trace: node runs for the selected shot. */
 export function ShotProductionTrace({ shotId, trace }: ShotProductionTraceProps) {
@@ -16,13 +27,16 @@ export function ShotProductionTrace({ shotId, trace }: ShotProductionTraceProps)
         <p className="muted">该镜头尚无执行记录。</p>
       ) : (
         <ol>
-          {rows.map((run) => (
-            <li key={String(run.node_run_id)}>
-              <span>{String(run.node_key ?? "node")}</span>
-              <em>{String(run.status ?? "")}</em>
-              {run.error_code ? <code>{String(run.error_code)}</code> : null}
-            </li>
-          ))}
+          {rows.map((run, index) => {
+            const row = rowOf(run);
+            return (
+              <li key={String(row.node_run_id ?? index)}>
+                <span>{String(row.node_key ?? "node")}</span>
+                <em>{String(row.status ?? "")}</em>
+                {row.error_code ? <code>{String(row.error_code)}</code> : null}
+              </li>
+            );
+          })}
         </ol>
       )}
     </div>

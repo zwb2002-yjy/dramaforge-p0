@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, JsonValue
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.api.v1.schemas.workbench import ShotWorkbenchRead
 from app.assets.models import Shot
 from app.assets.schemas import ShotDirectorState
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
@@ -123,17 +124,18 @@ async def update_shot_design(
 
 @router.get(
     "/projects/{project_id}/shots/{shot_id}/workbench",
-    response_model=dict[str, object],
+    response_model=ShotWorkbenchRead,
 )
 async def get_shot_workbench(
     project_id: UUID,
     shot_id: UUID,
     user: CurrentUser,
     session: SessionDep,
-) -> dict[str, object]:
-    return await ShotWorkbenchService(session).get_workbench(
+) -> ShotWorkbenchRead:
+    workbench = await ShotWorkbenchService(session).get_workbench(
         project_id=project_id, shot_id=shot_id, actor=user
     )
+    return ShotWorkbenchRead(**workbench)
 
 
 # ---------------------------------------------------------------------------

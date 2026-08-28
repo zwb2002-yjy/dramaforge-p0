@@ -70,7 +70,7 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
             onDragOver={(event) => event.preventDefault()}
             onDrop={() => onDrop(index)}
           >
-            <SceneThumbnail scene={scene} />
+            <SceneThumbnail scene={scene} projectId={projectId} />
             <header>
               <a href={`/projects/${projectId}/scenes/${scene.id}`} className="qc-scene-enter">
                 {scene.location_name}
@@ -97,13 +97,13 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   );
 }
 
-function SceneThumbnail({ scene }: { scene: SceneSummary }) {
+function SceneThumbnail({ scene, projectId }: { scene: SceneSummary; projectId: string }) {
   const artifact = scene.representative_artifact;
   return (
     <div className="qc-scene-thumb" data-testid="scene-thumb">
       {artifact ? (
         <img
-          src={artifactContentUrl(scene.project_id ?? "", artifact.id)}
+          src={artifactContentUrl(projectId, artifact.id)}
           alt={`${scene.location_name} 代表画面`}
           data-testid="scene-representative"
         />

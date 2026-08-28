@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -209,6 +210,20 @@ async def test_get_script_workspace_deterministic_latest_document(session: Async
         actor=user,
     )
     await session.commit()
+    # Force the first document's created_at clearly earlier so the ordering rule
+    # (created_at DESC, id DESC) is deterministic regardless of the clock-tick
+    # tie and the random uuid4 id (which would otherwise make the "latest"
+    # ambiguous when both docs share the same created_at).
+    first_doc = (
+        await session.execute(
+            select(ScriptDocument).where(
+                ScriptDocument.project_id == project.id, ScriptDocument.filename == "p0_10_shots.md"
+            )
+        )
+    ).scalar_one()
+    old = datetime(2020, 1, 1, tzinfo=UTC)
+    first_doc.created_at = old
+    await session.commit()
     await import_script(
         session,
         project_id=project.id,
@@ -221,7 +236,7 @@ async def test_get_script_workspace_deterministic_latest_document(session: Async
 
     ws = await get_project_script(project.id, user, session)
     assert ws.document is not None
-    # The latest import (newer content_hash) wins via created_at DESC, id DESC.
+    # The latest import (newer created_at) wins via created_at DESC, id DESC.
     assert ws.document.content_hash == hash_of(second_text)
     assert ws.document.filename == "p0_10_shots_2.md"
     docs = (

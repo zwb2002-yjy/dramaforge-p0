@@ -1,63 +1,13 @@
 /** Phase 3 feature-local API client — scene domain (scene wall / scene workspace). */
 
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
-import type { ShotLite } from "../shots/api";
+import type { components } from "../../shared/api/generated";
 
 export type { ShotLite } from "../shots/api";
 
-export type SceneSummary = {
-  id: string;
-  project_id: string;
-  episode_id: string;
-  episode_number: number;
-  scene_number: number;
-  location_name: string;
-  time_of_day: string;
-  synopsis: string;
-  version: number;
-  shot_count: number;
-  formal_keyframe_count: number;
-  formal_video_count: number;
-  risk_count: number;
-  representative_artifact: {
-    id: string;
-    artifact_type: string;
-    mime_type: string;
-    content_hash: string;
-    byte_size: number;
-    storage_state: string;
-  } | null;
-};
-
-export type BindingLite = {
-  id: string;
-  purpose: string;
-  label: string;
-  asset_id: string | null;
-  asset_version_id: string | null;
-  artifact_id: string | null;
-  resolution_mode: string;
-  stage: string;
-  version: number;
-};
-
-export type SceneWorkspaceRead = {
-  scene: {
-    id: string;
-    episode_id: string;
-    episode_number: number;
-    scene_number: number;
-    location_name: string;
-    time_of_day: string;
-    synopsis: string;
-    version: number;
-    design_state: Record<string, unknown>;
-  };
-  shots: ShotLite[];
-  references: Record<string, BindingLite[]>;
-  candidates: Record<string, Array<Record<string, unknown>>>;
-  trace: Record<string, Array<Record<string, unknown>>>;
-};
+export type SceneSummary = components["schemas"]["SceneSummaryRead"];
+export type SceneWorkspaceRead = components["schemas"]["SceneWorkspaceRead"];
+export type BindingLite = components["schemas"]["app__api__v1__schemas__workbench__BindingRead"];
 
 export function fetchScenes(projectId: string): Promise<SceneSummary[]> {
   return apiGet<SceneSummary[]>(`/api/v1/projects/${projectId}/scenes`);
