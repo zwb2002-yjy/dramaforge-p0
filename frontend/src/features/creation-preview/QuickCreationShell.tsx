@@ -14,7 +14,8 @@ import {
 
 import { StageStepper } from "./components";
 import type { PreviewStage } from "./types";
-import "./quick-creation-preview.css";
+import "../../components/workstation/project-shell.css";
+import "./mock-preview.css";
 
 type DirectorControls = {
   collapsed: boolean;
@@ -78,7 +79,11 @@ export function QuickCreationShell({
             aria-label={sidebarExpanded ? "收起导航" : "展开导航"}
             aria-expanded={sidebarExpanded}
           >
-            {sidebarExpanded ? <ChevronLeft size={19} aria-hidden="true" /> : <Menu size={19} aria-hidden="true" />}
+            {sidebarExpanded ? (
+              <ChevronLeft size={19} aria-hidden="true" />
+            ) : (
+              <Menu size={19} aria-hidden="true" />
+            )}
           </button>
         </div>
         <nav>
@@ -120,7 +125,9 @@ export function QuickCreationShell({
           <span className="qc-project-name">{projectName}</span>
           <span className="qc-project-save">{live ? "已连接项目事实" : "已保存"}</span>
           <span className="qc-project-mode">快速模式</span>
-          <button type="button" className="qc-avatar" aria-label="账户菜单">{avatarText}</button>
+          <button type="button" className="qc-avatar" aria-label="账户菜单">
+            {avatarText}
+          </button>
         </header>
 
         <div className="qc-content-grid">
@@ -129,11 +136,21 @@ export function QuickCreationShell({
             {children}
           </main>
 
-          {renderDirector ? renderDirector({ collapsed: directorCollapsed, toggle: toggleDirector }) : (
-            <aside className={`qc-director-panel${directorCollapsed ? " collapsed" : ""}`} data-testid="director-panel">
+          {renderDirector ? (
+            renderDirector({ collapsed: directorCollapsed, toggle: toggleDirector })
+          ) : (
+            <aside
+              className={`qc-director-panel${directorCollapsed ? " collapsed" : ""}`}
+              data-testid="director-panel"
+            >
               {directorCollapsed ? (
                 <>
-                  <button type="button" className="qc-icon-button" onClick={toggleDirector} aria-label="展开 AI 导演">
+                  <button
+                    type="button"
+                    className="qc-icon-button"
+                    onClick={toggleDirector}
+                    aria-label="展开 AI 导演"
+                  >
                     <ChevronLeft size={19} aria-hidden="true" />
                   </button>
                   <Sparkles size={19} aria-hidden="true" />
@@ -142,9 +159,19 @@ export function QuickCreationShell({
               ) : (
                 <>
                   <header className="qc-director-header">
-                    <span className="qc-director-mark"><Sparkles size={17} aria-hidden="true" /></span>
-                    <span><strong>AI 导演</strong><small>当前项目事实</small></span>
-                    <button type="button" className="qc-icon-button" onClick={toggleDirector} aria-label="收起 AI 导演">
+                    <span className="qc-director-mark">
+                      <Sparkles size={17} aria-hidden="true" />
+                    </span>
+                    <span>
+                      <strong>AI 导演</strong>
+                      <small>当前项目事实</small>
+                    </span>
+                    <button
+                      type="button"
+                      className="qc-icon-button"
+                      onClick={toggleDirector}
+                      aria-label="收起 AI 导演"
+                    >
                       <ChevronLeft size={19} aria-hidden="true" />
                     </button>
                   </header>

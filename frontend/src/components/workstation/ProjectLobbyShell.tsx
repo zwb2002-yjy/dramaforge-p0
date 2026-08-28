@@ -1,14 +1,7 @@
 import { useState, type ReactNode } from "react";
-import {
-  Aperture,
-  ChevronLeft,
-  Clapperboard,
-  FolderKanban,
-  Menu,
-  Settings,
-} from "lucide-react";
+import { Aperture, ChevronLeft, Clapperboard, FolderKanban, Menu, Settings } from "lucide-react";
 
-import "./quick-creation-preview.css";
+import "./project-shell.css";
 
 export function ProjectLobbyShell({
   apiLive,
@@ -37,7 +30,11 @@ export function ProjectLobbyShell({
             aria-label={sidebarExpanded ? "收起导航" : "展开导航"}
             aria-expanded={sidebarExpanded}
           >
-            {sidebarExpanded ? <ChevronLeft size={19} aria-hidden="true" /> : <Menu size={19} aria-hidden="true" />}
+            {sidebarExpanded ? (
+              <ChevronLeft size={19} aria-hidden="true" />
+            ) : (
+              <Menu size={19} aria-hidden="true" />
+            )}
           </button>
         </div>
         <nav>
@@ -67,7 +64,9 @@ export function ProjectLobbyShell({
             {apiLive ? "服务就绪" : "服务未就绪"}
           </span>
         </header>
-        <main className="qc-lobby-main" id="workspace">{children}</main>
+        <main className="qc-lobby-main" id="workspace">
+          {children}
+        </main>
       </div>
     </div>
   );

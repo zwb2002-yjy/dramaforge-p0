@@ -13,15 +13,10 @@ import {
   Settings,
 } from "lucide-react";
 
-import "./quick-creation-preview.css";
+import "./project-shell.css";
 
 export type ProjectWorkspaceView =
-  | "overview"
-  | "script"
-  | "assets"
-  | "scenes"
-  | "production"
-  | "edit";
+  "overview" | "script" | "assets" | "scenes" | "production" | "edit";
 
 type ProjectWorkspaceShellProps = {
   projectId: string;
@@ -74,7 +69,11 @@ export function ProjectWorkspaceShell({
             aria-label={sidebarExpanded ? "收起导航" : "展开导航"}
             aria-expanded={sidebarExpanded}
           >
-            {sidebarExpanded ? <ChevronLeft size={19} aria-hidden="true" /> : <Menu size={19} aria-hidden="true" />}
+            {sidebarExpanded ? (
+              <ChevronLeft size={19} aria-hidden="true" />
+            ) : (
+              <Menu size={19} aria-hidden="true" />
+            )}
           </button>
         </div>
         <nav>
@@ -110,16 +109,26 @@ export function ProjectWorkspaceShell({
           <span className="qc-project-name">{projectName}</span>
           <span className="qc-project-save">已连接项目事实</span>
           <span className="qc-project-mode">{modeLabel}</span>
-          <span className="qc-avatar qc-owner-avatar" aria-label="单用户 Owner">创</span>
+          <span className="qc-avatar qc-owner-avatar" aria-label="单用户 Owner">
+            创
+          </span>
         </header>
 
         <div className={`qc-content-grid${inspector ? "" : " no-inspector"}`}>
           <main className="qc-main-canvas qc-project-canvas">{children}</main>
           {inspector && (
-            <aside className={`qc-director-panel${inspectorCollapsed ? " collapsed" : ""}`} data-testid="project-evidence-inspector">
+            <aside
+              className={`qc-director-panel${inspectorCollapsed ? " collapsed" : ""}`}
+              data-testid="project-evidence-inspector"
+            >
               {inspectorCollapsed ? (
                 <>
-                  <button type="button" className="qc-icon-button" onClick={() => setInspectorCollapsed(false)} aria-label="展开项目证据">
+                  <button
+                    type="button"
+                    className="qc-icon-button"
+                    onClick={() => setInspectorCollapsed(false)}
+                    aria-label="展开项目证据"
+                  >
                     <ChevronLeft size={19} aria-hidden="true" />
                   </button>
                   <Gauge size={19} aria-hidden="true" />
@@ -128,9 +137,19 @@ export function ProjectWorkspaceShell({
               ) : (
                 <>
                   <header className="qc-director-header">
-                    <span className="qc-director-mark"><Gauge size={17} aria-hidden="true" /></span>
-                    <span><strong>项目证据</strong><small>同一事实源</small></span>
-                    <button type="button" className="qc-icon-button" onClick={() => setInspectorCollapsed(true)} aria-label="收起项目证据">
+                    <span className="qc-director-mark">
+                      <Gauge size={17} aria-hidden="true" />
+                    </span>
+                    <span>
+                      <strong>项目证据</strong>
+                      <small>同一事实源</small>
+                    </span>
+                    <button
+                      type="button"
+                      className="qc-icon-button"
+                      onClick={() => setInspectorCollapsed(true)}
+                      aria-label="收起项目证据"
+                    >
                       <ChevronLeft size={19} aria-hidden="true" />
                     </button>
                   </header>
