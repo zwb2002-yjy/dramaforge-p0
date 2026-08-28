@@ -5,7 +5,7 @@ import {
   type SceneWorkflowViewRead,
   type ShotWorkflowStateRead,
   type WorkflowOverviewRead,
-} from "../workbench/api";
+} from "./workflow-api";
 
 const CAPABILITY_LABEL: Record<string, string> = {
   EXACT: "可双人",
@@ -65,8 +65,14 @@ function ShotWorkflowRow({ shot }: { shot: ShotWorkflowStateRead }) {
           {shot.template_version ? ` · v${shot.template_version}` : ""}
         </small>
       </span>
-      <span className={`workflow-shot-status status-chip ${cap ? CAPABILITY_TONE[cap.status] ?? "idle" : "idle"}`}>
-        {cap ? CAPABILITY_LABEL[cap.status] ?? cap.status : shot.template_resolution_status === "RESOLVED" ? "已定" : "—"}
+      <span
+        className={`workflow-shot-status status-chip ${cap ? (CAPABILITY_TONE[cap.status] ?? "idle") : "idle"}`}
+      >
+        {cap
+          ? (CAPABILITY_LABEL[cap.status] ?? cap.status)
+          : shot.template_resolution_status === "RESOLVED"
+            ? "已定"
+            : "—"}
       </span>
     </li>
   );
@@ -121,7 +127,9 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
       <div className="workflow-navigator-header">
         <span>Workflow Navigator</span>
         <small>
-          {data ? `${data.total_shots} 镜头 · 正式 ${data.formal_shots} · 阻塞 ${data.blocked_scenes} 场景` : "…"}
+          {data
+            ? `${data.total_shots} 镜头 · 正式 ${data.formal_shots} · 阻塞 ${data.blocked_scenes} 场景`
+            : "…"}
         </small>
       </div>
       <div className="workflow-episode-list">
@@ -129,10 +137,21 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
           <p className="muted">暂无剧本。可在场景工作区导入剧本后回看镜头工作流状态。</p>
         )}
         {episodes.map((episode) => (
-          <section key={episode.episode_id} className="workflow-episode" data-testid={`workflow-episode-${episode.episode_number}`}>
-            <header className="workflow-episode-header" data-testid={`workflow-episode-${episode.episode_number}-title`}>
-              <strong>EP{episode.episode_number} · {episode.title || `第 ${episode.episode_number} 集`}</strong>
-              <small>{episode.scene_count} 场景 · {episode.total_shots} 镜头</small>
+          <section
+            key={episode.episode_id}
+            className="workflow-episode"
+            data-testid={`workflow-episode-${episode.episode_number}`}
+          >
+            <header
+              className="workflow-episode-header"
+              data-testid={`workflow-episode-${episode.episode_number}-title`}
+            >
+              <strong>
+                EP{episode.episode_number} · {episode.title || `第 ${episode.episode_number} 集`}
+              </strong>
+              <small>
+                {episode.scene_count} 场景 · {episode.total_shots} 镜头
+              </small>
             </header>
             <div className="workflow-scene-groups">
               {scenes
@@ -145,9 +164,7 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
         ))}
       </div>
       <div className="workflow-nav-footer">
-        <small>
-          未声明的多角色镜头不会静默降级；UNSUPPORTED 时 Provider POST=0
-        </small>
+        <small>未声明的多角色镜头不会静默降级；UNSUPPORTED 时 Provider POST=0</small>
       </div>
     </div>
   );

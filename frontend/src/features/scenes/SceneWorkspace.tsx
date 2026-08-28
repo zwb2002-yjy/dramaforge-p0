@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { AssetReferencePicker } from "../../components/assets/AssetReferencePicker";
-import { CinematicCanvas } from "./CinematicCanvas";
-import { ShotDesignPanel } from "./ShotDesignPanel";
-import { ShotProductionTrace } from "./ShotProductionTrace";
-import { ShotStrip } from "./ShotStrip";
+import { CinematicCanvas } from "../shots/CinematicCanvas";
+import { ShotDesignPanel } from "../shots/ShotDesignPanel";
+import { ShotProductionTrace } from "../shots/ShotProductionTrace";
+import { ShotStrip } from "../shots/ShotStrip";
 import { fetchSceneWorkspace, type SceneWorkspaceRead, type ShotLite } from "./api";
 
 type SceneWorkspaceProps = {
@@ -23,7 +23,9 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   });
   const data = workspace.data as SceneWorkspaceRead | undefined;
   const shots = data?.shots ?? [];
-  const selected = (shots.find((shot) => shot.id === selectedShotId) ?? shots[0] ?? null) as ShotLite | null;
+  const selected = (shots.find((shot) => shot.id === selectedShotId) ??
+    shots[0] ??
+    null) as ShotLite | null;
   const trace = selected ? (data?.trace?.[selected.id] ?? []) : [];
 
   return (
@@ -36,7 +38,9 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
         </span>
       </header>
 
-      {workspace.isError && <div className="flash err">无法读取场景工作区：{String(workspace.error)}</div>}
+      {workspace.isError && (
+        <div className="flash err">无法读取场景工作区：{String(workspace.error)}</div>
+      )}
 
       <div className="qc-scene-layout">
         <ShotStrip
@@ -53,9 +57,7 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
               onSaved={() => void workspace.refetch()}
             />
           )}
-          {selected && (
-            <AssetReferencePicker projectId={projectId} shotId={selected.id} />
-          )}
+          {selected && <AssetReferencePicker projectId={projectId} shotId={selected.id} />}
         </aside>
       </div>
 

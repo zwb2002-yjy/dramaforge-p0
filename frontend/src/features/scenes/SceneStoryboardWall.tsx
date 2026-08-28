@@ -2,12 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { artifactContentUrl } from "../../lib/api";
-import {
-  copyScene,
-  fetchScenes,
-  reorderScene,
-  type SceneSummary,
-} from "./api";
+import { copyScene, fetchScenes, reorderScene, type SceneSummary } from "./api";
 
 type SceneStoryboardWallProps = {
   projectId: string;
@@ -77,10 +72,7 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
           >
             <SceneThumbnail scene={scene} />
             <header>
-              <a
-                href={`/projects/${projectId}/scenes/${scene.id}`}
-                className="qc-scene-enter"
-              >
+              <a href={`/projects/${projectId}/scenes/${scene.id}`} className="qc-scene-enter">
                 {scene.location_name}
               </a>
               <span>
@@ -121,4 +113,3 @@ function SceneThumbnail({ scene }: { scene: SceneSummary }) {
     </div>
   );
 }
-

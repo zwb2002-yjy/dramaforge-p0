@@ -7,12 +7,19 @@
  * big storyboard workspace were removed from this surface.
  */
 import type { ProjectSnapshot } from "../../lib/api";
-import type { SceneSummary } from "../workbench/api";
+import type { SceneSummary } from "../scenes/api";
 
 type ProductionMonitorProps = {
   projectId: string;
   scenes: SceneSummary[];
-  shots: Array<{ id: string; scene_id: string; shot_number: number; sort_order: number; shot_type: string; status: string }>;
+  shots: Array<{
+    id: string;
+    scene_id: string;
+    shot_number: number;
+    sort_order: number;
+    shot_type: string;
+    status: string;
+  }>;
   snapshot?: ProjectSnapshot;
   experimentCount: number;
 };
@@ -58,11 +65,15 @@ export function ProductionMonitor({
         </div>
         <div className="status-card">
           <span className="status-label">NodeRun 完成</span>
-          <strong className="status-ok" data-testid="stat-completed">{completedRuns}</strong>
+          <strong className="status-ok" data-testid="stat-completed">
+            {completedRuns}
+          </strong>
         </div>
         <div className="status-card">
           <span className="status-label">进行中</span>
-          <strong className="status-pending" data-testid="stat-running">{runningRuns}</strong>
+          <strong className="status-pending" data-testid="stat-running">
+            {runningRuns}
+          </strong>
         </div>
         <div className="status-card">
           <span className="status-label">失败 / 风险</span>
@@ -108,7 +119,9 @@ export function ProductionMonitor({
                   <td>{scene.shot_count}</td>
                   <td>{scene.formal_keyframe_count ?? 0}</td>
                   <td>{scene.formal_video_count ?? 0}</td>
-                  <td className={scene.risk_count ? "status-bad" : undefined}>{scene.risk_count ?? 0}</td>
+                  <td className={scene.risk_count ? "status-bad" : undefined}>
+                    {scene.risk_count ?? 0}
+                  </td>
                   <td>
                     <a className="df-btn ghost" href={`/projects/${projectId}/scenes/${scene.id}`}>
                       场景工作区

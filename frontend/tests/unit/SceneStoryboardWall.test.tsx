@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SceneStoryboardWall } from "../../src/features/workbench/SceneStoryboardWall";
+import { SceneStoryboardWall } from "../../src/features/scenes/SceneStoryboardWall";
 
 function json(body: unknown, status = 200) {
   return Promise.resolve(
@@ -91,9 +91,7 @@ describe("SceneStoryboardWall", () => {
     await screen.findAllByTestId("scene-card");
     fireEvent.click(screen.getAllByRole("button", { name: "复制" })[0]);
     await waitFor(() => {
-      expect(
-        calls.some((call) => call.method === "POST" && call.url.includes("/copy")),
-      ).toBe(true);
+      expect(calls.some((call) => call.method === "POST" && call.url.includes("/copy"))).toBe(true);
     });
   });
 });

@@ -1,6 +1,6 @@
 import { createRoute } from "@tanstack/react-router";
 
-import { SceneStoryboardWall } from "../features/workbench/SceneStoryboardWall";
+import { SceneStoryboardWall } from "../features/scenes/SceneStoryboardWall";
 import { projectRoute } from "./projects.$projectId";
 
 export const projectScenesRoute = createRoute({

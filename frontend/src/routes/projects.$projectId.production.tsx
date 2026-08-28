@@ -6,7 +6,7 @@ import { ProductionMonitor } from "../features/production/ProductionMonitor";
 import { ProfessionalWorkbench } from "../features/production/ProfessionalWorkbench";
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
-import { fetchScenes } from "../features/workbench/api";
+import { fetchScenes } from "../features/scenes/api";
 import {
   confirmShotChangeProposal,
   createExperiment,
@@ -86,9 +86,7 @@ function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, str
     else if (matching.some((run) => ["queued", "running", "leased"].includes(run.status)))
       map[node] = "run";
     else if (
-      matching.some((run) =>
-        ["completed", "cached", "completed_after_cancel"].includes(run.status),
-      )
+      matching.some((run) => ["completed", "cached", "completed_after_cancel"].includes(run.status))
     )
       map[node] = "done";
     else map[node] = "";
@@ -184,9 +182,7 @@ function ProductionPage() {
         `导出完成 timeline=${r.timeline_hash.slice(0, 12)}… items=${r.export_item_count} mp4=${r.mp4_error ? "失败" : "有"}`,
       );
       setDownloadHint(
-        r.mp4_error
-          ? `MP4：${r.mp4_error}（仍可下载 timeline/SRT）`
-          : "可申请 timeline 下载授权",
+        r.mp4_error ? `MP4：${r.mp4_error}（仍可下载 timeline/SRT）` : "可申请 timeline 下载授权",
       );
     },
     onError: (e: Error) => setMsg(e.message),
@@ -237,7 +233,9 @@ function ProductionPage() {
       </div>
 
       <div className="callout">
-        此处监控 Project 生产全貌（NodeRun / Artifact / 正式结果 / 实验）。剧本导入与旧分镜主工作区已迁移到场景工作区；媒体生成、修复和导出仍受用户确认、Provider 能力和质量门控制。
+        此处监控 Project 生产全貌（NodeRun / Artifact / 正式结果 /
+        实验）。剧本导入与旧分镜主工作区已迁移到场景工作区；媒体生成、修复和导出仍受用户确认、Provider
+        能力和质量门控制。
       </div>
 
       <WorkflowNavigator projectId={projectId} />
@@ -272,15 +270,34 @@ function ProductionPage() {
         selectedShotId={selectedShotId}
         onSelectShot={setSelectedShotId}
         onCreateAsset={async (input) => {
-          await createProjectAsset(projectId, { kind: input.kind, name: input.name, description: input.description, metadata: { tags: input.tags }, status: "active" });
+          await createProjectAsset(projectId, {
+            kind: input.kind,
+            name: input.name,
+            description: input.description,
+            metadata: { tags: input.tags },
+            status: "active",
+          });
           await qc.invalidateQueries({ queryKey: ["project-assets", projectId] });
         }}
         onUpdateAsset={async (asset, input) => {
-          await updateProjectAsset(projectId, asset.id, { expected_version: asset.version, kind: asset.kind, name: asset.name, description: asset.description, metadata: asset.metadata, status: input.status });
+          await updateProjectAsset(projectId, asset.id, {
+            expected_version: asset.version,
+            kind: asset.kind,
+            name: asset.name,
+            description: asset.description,
+            metadata: asset.metadata,
+            status: input.status,
+          });
           await qc.invalidateQueries({ queryKey: ["project-assets", projectId] });
         }}
         onCreateExperiment={async (input) => {
-          await createExperiment(projectId, { idempotency_key: `experiment-${Date.now()}-${input.name}`, name: input.name, source_shot_id: revisionShotId, selected_model: input.selected_model, parameters: { target_node_key: "video" } });
+          await createExperiment(projectId, {
+            idempotency_key: `experiment-${Date.now()}-${input.name}`,
+            name: input.name,
+            source_shot_id: revisionShotId,
+            selected_model: input.selected_model,
+            parameters: { target_node_key: "video" },
+          });
           await qc.invalidateQueries({ queryKey: ["experiments", projectId] });
         }}
         onStartExperiment={async (experimentId, targetNodeKey) => {
@@ -297,15 +314,28 @@ function ProductionPage() {
         onCreateAnnotation={async (input) => {
           if (!revisionShotId) return;
           await createReviewAnnotation(projectId, revisionShotId, input);
-          await qc.invalidateQueries({ queryKey: ["review-annotations", projectId, revisionShotId] });
+          await qc.invalidateQueries({
+            queryKey: ["review-annotations", projectId, revisionShotId],
+          });
         }}
         onSaveDirectorBoard={async (input) => {
           if (!revisionShotId) return;
-          await saveDirectorBoard(projectId, revisionShotId, { expected_version: directorBoard.data?.version ?? null, ...input });
+          await saveDirectorBoard(projectId, revisionShotId, {
+            expected_version: directorBoard.data?.version ?? null,
+            ...input,
+          });
           await qc.invalidateQueries({ queryKey: ["director-board", projectId, revisionShotId] });
         }}
-        onStart={(shotId) => void runShotOp("启动专业镜头", () => startProfessionalShot(projectId, shotId), shotId)}
-        onRerun={(shotId) => void runShotOp("局部重跑视频", () => rerunProfessionalShot(projectId, shotId, "video"), shotId)}
+        onStart={(shotId) =>
+          void runShotOp("启动专业镜头", () => startProfessionalShot(projectId, shotId), shotId)
+        }
+        onRerun={(shotId) =>
+          void runShotOp(
+            "局部重跑视频",
+            () => rerunProfessionalShot(projectId, shotId, "video"),
+            shotId,
+          )
+        }
         onSave={async (shot, input) => {
           const result = await updateShotCanvas(projectId, shot.id, {
             expected_version: shot.version,
@@ -321,14 +351,16 @@ function ProductionPage() {
           await qc.invalidateQueries({ queryKey: ["canvas-revisions", projectId, shot.id] });
           return result;
         }}
-        onPropose={async (shot, input) => createShotChangeProposal(projectId, shot.id, {
-          idempotency_key: `canvas-${shot.id}-${shot.version}-${input.summary}`,
-          summary: input.summary,
-          expected_version: shot.version,
-          replacement_payload: input.replacement_payload,
-          affected_node_keys: input.affected_node_keys,
-          reusable_artifact_ids: input.reusable_artifact_ids,
-        })}
+        onPropose={async (shot, input) =>
+          createShotChangeProposal(projectId, shot.id, {
+            idempotency_key: `canvas-${shot.id}-${shot.version}-${input.summary}`,
+            summary: input.summary,
+            expected_version: shot.version,
+            replacement_payload: input.replacement_payload,
+            affected_node_keys: input.affected_node_keys,
+            reusable_artifact_ids: input.reusable_artifact_ids,
+          })
+        }
         onConfirmProposal={(shotId, proposalId, revisionId) =>
           confirmShotChangeProposal(projectId, shotId, proposalId, revisionId).then(() => undefined)
         }
@@ -342,26 +374,28 @@ function ProductionPage() {
         ))}
       </div>
 
-      {!directorControlled && <div className="toolbar">
-        <button
-          type="button"
-          className="accent"
-          data-testid="export-project"
-          onClick={() => exportMut.mutate()}
-          disabled={exportMut.isPending || directorControlled}
-          title={directorControlled ? "请通过 AI 导演导出已验收的正式生产批次" : undefined}
-        >
-          {exportMut.isPending ? "导出中…" : "② 导出 timeline / SRT / 包"}
-        </button>
-        <button
-          type="button"
-          data-testid="download-export"
-          onClick={() => downloadMut.mutate()}
-          disabled={!lastExportId || downloadMut.isPending}
-        >
-          ③ 授权下载 timeline
-        </button>
-      </div>}
+      {!directorControlled && (
+        <div className="toolbar">
+          <button
+            type="button"
+            className="accent"
+            data-testid="export-project"
+            onClick={() => exportMut.mutate()}
+            disabled={exportMut.isPending || directorControlled}
+            title={directorControlled ? "请通过 AI 导演导出已验收的正式生产批次" : undefined}
+          >
+            {exportMut.isPending ? "导出中…" : "② 导出 timeline / SRT / 包"}
+          </button>
+          <button
+            type="button"
+            data-testid="download-export"
+            onClick={() => downloadMut.mutate()}
+            disabled={!lastExportId || downloadMut.isPending}
+          >
+            ③ 授权下载 timeline
+          </button>
+        </div>
+      )}
 
       {msg && (
         <div className="flash ok" data-testid="production-msg">

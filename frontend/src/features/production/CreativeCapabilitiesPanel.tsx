@@ -1,10 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import {
-  fetchCreativeProvenance,
-  freezeCreativeCapabilities,
-} from "../workbench/api";
+import { fetchCreativeProvenance, freezeCreativeCapabilities } from "./workflow-api";
 
 const GENRES = [
   "short_drama_romance_v1",
@@ -86,7 +83,11 @@ export function CreativeCapabilitiesPanel({
   const targetId = shotId ?? sceneId ?? null;
   const provenance = useQuery({
     queryKey: ["creative-provenance", projectId, targetId],
-    queryFn: () => fetchCreativeProvenance(projectId, { shot_id: shotId ?? undefined, scene_id: sceneId ?? undefined }),
+    queryFn: () =>
+      fetchCreativeProvenance(projectId, {
+        shot_id: shotId ?? undefined,
+        scene_id: sceneId ?? undefined,
+      }),
     enabled: Boolean(projectId) && Boolean(targetId),
   });
   const prov = provenance.data?.creative_capabilities ?? {};
@@ -126,28 +127,56 @@ export function CreativeCapabilitiesPanel({
       </header>
 
       <div className="creative-capability-form">
-        <label>Genre
+        <label>
+          Genre
           <select aria-label="Genre" value={genre} onChange={(e) => setGenre(e.target.value)}>
             <option value="">默认</option>
-            {GENRES.map((g) => <option key={g} value={g}>{g}</option>)}
+            {GENRES.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
           </select>
         </label>
-        <label>Style
+        <label>
+          Style
           <select aria-label="Style" value={style} onChange={(e) => setStyle(e.target.value)}>
             <option value="">默认</option>
-            {STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {STYLES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
           </select>
         </label>
-        <label>Shot Language
-          <select aria-label="Shot Language" value={shotLanguage} onChange={(e) => setShotLanguage(e.target.value)}>
+        <label>
+          Shot Language
+          <select
+            aria-label="Shot Language"
+            value={shotLanguage}
+            onChange={(e) => setShotLanguage(e.target.value)}
+          >
             <option value="">默认</option>
-            {SHOT_LANGUAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {SHOT_LANGUAGES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
           </select>
         </label>
-        <label>Quality Policy
-          <select aria-label="Quality Policy" value={quality} onChange={(e) => setQuality(e.target.value)}>
+        <label>
+          Quality Policy
+          <select
+            aria-label="Quality Policy"
+            value={quality}
+            onChange={(e) => setQuality(e.target.value)}
+          >
             <option value="">默认</option>
-            {QUALITY_POLICIES.map((q) => <option key={q} value={q}>{q}</option>)}
+            {QUALITY_POLICIES.map((q) => (
+              <option key={q} value={q}>
+                {q}
+              </option>
+            ))}
           </select>
         </label>
 
@@ -155,16 +184,29 @@ export function CreativeCapabilitiesPanel({
           <small>Active Skills</small>
           {SKILLS.map((key) => (
             <label key={key} className="creative-skill-toggle">
-              <input type="checkbox" checked={skills.includes(key)} onChange={() => toggleSkill(key)} />
+              <input
+                type="checkbox"
+                checked={skills.includes(key)}
+                onChange={() => toggleSkill(key)}
+              />
               <span>{key}</span>
             </label>
           ))}
         </div>
 
-        <button type="button" className="df-btn primary" onClick={() => freeze.mutate()} disabled={freeze.isPending || !targetId}>
+        <button
+          type="button"
+          className="df-btn primary"
+          onClick={() => freeze.mutate()}
+          disabled={freeze.isPending || !targetId}
+        >
           {freeze.isPending ? "冻结中…" : "冻结创意能力"}
         </button>
-        {msg && <div className="canvas-save-message" role="status">{msg}</div>}
+        {msg && (
+          <div className="canvas-save-message" role="status">
+            {msg}
+          </div>
+        )}
       </div>
 
       {prov && Object.keys(prov).length > 0 && (

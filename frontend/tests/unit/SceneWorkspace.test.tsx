@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SceneWorkspace } from "../../src/features/workbench/SceneWorkspace";
+import { SceneWorkspace } from "../../src/features/scenes/SceneWorkspace";
 
 function json(body: unknown, status = 200) {
   return Promise.resolve(
@@ -58,7 +58,14 @@ function mockBackend() {
         candidates: { "shot-1": [] },
         trace: {
           "shot-1": [
-            { node_run_id: "run-1", node_key: "keyframe", status: "completed", error_code: null, finished_at: null, result_artifact_id: null },
+            {
+              node_run_id: "run-1",
+              node_key: "keyframe",
+              status: "completed",
+              error_code: null,
+              finished_at: null,
+              result_artifact_id: null,
+            },
           ],
         },
       });
@@ -104,9 +111,9 @@ describe("SceneWorkspace", () => {
     fireEvent.change(image, { target: { value: "close up, eye level" } });
     fireEvent.click(screen.getByRole("button", { name: "保存设计" }));
     await waitFor(() => {
-      expect(
-        calls.some((call) => call.method === "PATCH" && call.url.endsWith("/design")),
-      ).toBe(true);
+      expect(calls.some((call) => call.method === "PATCH" && call.url.endsWith("/design"))).toBe(
+        true,
+      );
     });
     expect(await screen.findByText(/已保存设计/)).toBeInTheDocument();
   });
