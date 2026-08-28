@@ -3013,6 +3013,8 @@ export interface components {
             references: {
                 [key: string]: unknown;
             }[];
+            /** Missing Reference Roles */
+            missing_reference_roles: string[];
         };
         /** AssetCreateBody */
         AssetCreateBody: {

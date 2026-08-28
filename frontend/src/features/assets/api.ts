@@ -48,6 +48,7 @@ export type AssetCardRead = {
   current_version_number: number | null;
   current_version_status: string | null;
   references: Array<Record<string, unknown>>;
+  missing_reference_roles: string[];
 };
 
 export function fetchAssetTags(projectId: string): Promise<AssetTagRead[]> {
@@ -75,12 +76,22 @@ export async function setAssetTags(
 
 export async function recycleAsset(projectId: string, assetId: string): Promise<AssetRead> {
   const csrf = await fetchCsrf();
-  return apiSend<AssetRead>("POST", `/api/v1/projects/${projectId}/assets/${assetId}/recycle`, {}, csrf);
+  return apiSend<AssetRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/assets/${assetId}/recycle`,
+    {},
+    csrf,
+  );
 }
 
 export async function restoreAsset(projectId: string, assetId: string): Promise<AssetRead> {
   const csrf = await fetchCsrf();
-  return apiSend<AssetRead>("POST", `/api/v1/projects/${projectId}/assets/${assetId}/restore`, {}, csrf);
+  return apiSend<AssetRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/assets/${assetId}/restore`,
+    {},
+    csrf,
+  );
 }
 
 export async function createAssetCandidate(
@@ -92,7 +103,11 @@ export async function createAssetCandidate(
   return apiSend<AssetVersionRead>(
     "POST",
     `/api/v1/projects/${projectId}/assets/${assetId}/versions`,
-    { name: input.name ?? null, description: input.description ?? null, metadata: input.metadata ?? {} },
+    {
+      name: input.name ?? null,
+      description: input.description ?? null,
+      metadata: input.metadata ?? {},
+    },
     csrf,
   );
 }
@@ -115,7 +130,10 @@ export function fetchAssetCard(projectId: string, assetId: string): Promise<Asse
   return apiGet<AssetCardRead>(`/api/v1/projects/${projectId}/assets/${assetId}/card`);
 }
 
-export function fetchAssetVersions(projectId: string, assetId: string): Promise<AssetVersionRead[]> {
+export function fetchAssetVersions(
+  projectId: string,
+  assetId: string,
+): Promise<AssetVersionRead[]> {
   return apiGet<AssetVersionRead[]>(`/api/v1/projects/${projectId}/assets/${assetId}/versions`);
 }
 

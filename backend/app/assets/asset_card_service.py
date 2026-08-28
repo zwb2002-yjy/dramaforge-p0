@@ -18,6 +18,34 @@ from app.assets.models import (
 )
 from app.shared.errors import NotFoundError
 
+# Canonical expected reference roles per asset kind (aligned with the
+# vocabulary in migration 20260826_0044_phase2_asset_references.py).
+_CHARACTER_ROLES = (
+    "front_face",
+    "three_quarter",
+    "profile",
+    "half_body",
+    "full_body",
+    "expression",
+    "outfit",
+)
+_SCENE_ROLES = (
+    "layout_reference",
+    "lighting_reference",
+    "style_reference",
+    "scene_reference",
+)
+
+
+def _expected_roles(kind: str) -> tuple[str, ...]:
+    if kind == "scene":
+        return _SCENE_ROLES
+    return _CHARACTER_ROLES  # character, prop, and unknown kinds get the character set
+
+
+def _missing_roles(kind: str, present: set[str]) -> list[str]:
+    return [role for role in _expected_roles(kind) if role not in present]
+
 
 class AssetCardReadService:
     """Reads the merged asset card fact.
@@ -135,4 +163,7 @@ class AssetCardReadService:
             "current_version_number": current.version_number if current else None,
             "current_version_status": current.status if current else None,
             "references": references,
+            "missing_reference_roles": _missing_roles(
+                asset.kind, {r["reference_role"] for r in references}
+            ),
         }

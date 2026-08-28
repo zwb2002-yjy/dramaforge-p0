@@ -260,6 +260,7 @@ class AssetCardRead(BaseModel):
     current_version_number: int | None
     current_version_status: str | None
     references: list[dict[str, object]]
+    missing_reference_roles: list[str]
 
 
 class AssetCandidateBody(BaseModel):

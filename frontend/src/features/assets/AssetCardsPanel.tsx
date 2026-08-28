@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { apiGet, type AssetRead } from "../../lib/api";
 import {
   createAssetCandidate,
+  fetchAssetCard,
   fetchAssetTags,
   fetchAssetVersions,
   promoteAssetVersion,
@@ -11,6 +12,20 @@ import {
   restoreAsset,
   setAssetTags,
 } from "./api";
+
+const ROLE_LABEL: Record<string, string> = {
+  front_face: "正面",
+  three_quarter: "四分之三",
+  profile: "侧面",
+  half_body: "半身",
+  full_body: "全身",
+  expression: "表情",
+  outfit: "服装",
+  layout_reference: "布局",
+  lighting_reference: "灯光",
+  style_reference: "风格",
+  scene_reference: "场景",
+};
 
 type AssetCardsPanelProps = {
   projectId: string;
@@ -26,9 +41,7 @@ function fetchAssetsFiltered(
   if (filters.name) params.set("name", filters.name);
   if (filters.tags) params.set("tags", filters.tags);
   const query = params.toString();
-  return apiGet<AssetRead[]>(
-    `/api/v1/projects/${projectId}/assets${query ? `?${query}` : ""}`,
-  );
+  return apiGet<AssetRead[]>(`/api/v1/projects/${projectId}/assets${query ? `?${query}` : ""}`);
 }
 
 export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
@@ -154,7 +167,9 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
           <li key={asset.id} className="qc-asset-card" data-testid="asset-card">
             <header>
               <strong>{asset.name}</strong>
-              <span>{asset.kind} · v{asset.version}</span>
+              <span>
+                {asset.kind} · v{asset.version}
+              </span>
             </header>
             <p className="muted">{asset.description || "（无描述）"}</p>
             <footer>
@@ -164,9 +179,13 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
                 onSave={(names) => setTags.mutate({ assetId: asset.id, names })}
               />
               {asset.status === "recycled" ? (
-                <button type="button" onClick={() => restore.mutate(asset.id)}>恢复</button>
+                <button type="button" onClick={() => restore.mutate(asset.id)}>
+                  恢复
+                </button>
               ) : (
-                <button type="button" onClick={() => recycle.mutate(asset.id)}>回收</button>
+                <button type="button" onClick={() => recycle.mutate(asset.id)}>
+                  回收
+                </button>
               )}
               <VersionControls
                 asset={asset}
@@ -178,7 +197,9 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
           </li>
         ))}
       </ul>
-      {rows.length === 0 && <p className="muted">暂无资产。生成结果需显式“加入资产”才会出现在这里。</p>}
+      {rows.length === 0 && (
+        <p className="muted">暂无资产。生成结果需显式“加入资产”才会出现在这里。</p>
+      )}
     </div>
   );
 }
@@ -236,6 +257,11 @@ function VersionControls({
     queryFn: () => fetchAssetVersions(projectId, asset.id),
     enabled: showVersions,
   });
+  const card = useQuery({
+    queryKey: ["asset-card", projectId, asset.id],
+    queryFn: () => fetchAssetCard(projectId, asset.id),
+    enabled: showVersions,
+  });
   const rows = versions.data ?? [];
   return (
     <div>
@@ -263,13 +289,25 @@ function VersionControls({
           <ul>
             {rows.map((version) => (
               <li key={version.id}>
-                <span>v{version.version_number} · {version.name} · {version.status}</span>
+                <span>
+                  v{version.version_number} · {version.name} · {version.status}
+                </span>
                 {version.status === "candidate" && (
-                  <button type="button" onClick={() => onPromote(version.id)}>提升为正式</button>
+                  <button type="button" onClick={() => onPromote(version.id)}>
+                    提升为正式
+                  </button>
                 )}
               </li>
             ))}
           </ul>
+          {card.data?.missing_reference_roles?.length ? (
+            <p className="muted" data-testid="asset-missing-roles">
+              缺失：
+              {card.data.missing_reference_roles
+                .map((role) => ROLE_LABEL[role] ?? role)
+                .join(" / ")}
+            </p>
+          ) : null}
         </div>
       )}
     </div>
