@@ -13,6 +13,7 @@ from app.api.v1.scripts import (
     ShotCanvasUpdateBody,
     ShotChangeProposalCreate,
     create_shot_change_proposal,
+    get_project_script,
     update_shot_canvas,
 )
 from app.assets import models as _am  # noqa: F401
@@ -156,6 +157,84 @@ async def test_import_same_script_twice_is_idempotent(session: AsyncSession) -> 
     ).scalars().all()
     assert len(documents) == 1
     assert len(shots) == 10
+
+
+@pytest.mark.asyncio
+async def test_get_script_workspace_reads_text_and_episodes(session: AsyncSession) -> None:
+    user, project = await _project(session)
+    text = GOLDEN.read_text(encoding="utf-8")
+    await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=text,
+        actor=user,
+    )
+    await session.commit()
+
+    ws = await get_project_script(project.id, user, session)
+    assert ws.document is not None
+    assert ws.document.raw_text == text
+    assert ws.document.filename == "p0_10_shots.md"
+    assert len(ws.document.content_hash) == 64
+    assert len(ws.episodes) == 1
+    episode = ws.episodes[0]
+    assert episode.episode_number == 1
+    assert episode.title == "Neon Rain Lead"
+    assert len(episode.scenes) == 3
+    assert [scene.shot_count for scene in episode.scenes] == [3, 4, 3]
+
+
+@pytest.mark.asyncio
+async def test_get_script_workspace_empty_when_no_import(session: AsyncSession) -> None:
+    user, project = await _project(session)
+    ws = await get_project_script(project.id, user, session)
+    assert ws.document is None
+    assert ws.episodes == []
+
+
+@pytest.mark.asyncio
+async def test_get_script_workspace_deterministic_latest_document(session: AsyncSession) -> None:
+    user, project = await _project(session)
+    first_text = GOLDEN.read_text(encoding="utf-8")
+    # A second, different script that parses to a valid scene/shot structure.
+    second_text = first_text.replace("Lin Xia", "Han Yu").replace("Neon Rain Lead", "Old Town")
+    await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=first_text,
+        actor=user,
+    )
+    await session.commit()
+    await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots_2.md",
+        text=second_text,
+        actor=user,
+    )
+    await session.commit()
+
+    ws = await get_project_script(project.id, user, session)
+    assert ws.document is not None
+    # The latest import (newer content_hash) wins via created_at DESC, id DESC.
+    assert ws.document.content_hash == hash_of(second_text)
+    assert ws.document.filename == "p0_10_shots_2.md"
+    docs = (
+        await session.execute(
+            select(ScriptDocument).where(ScriptDocument.project_id == project.id)
+        )
+    ).scalars().all()
+    assert len(docs) == 2
+
+
+def hash_of(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @pytest.mark.asyncio

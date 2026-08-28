@@ -12,7 +12,14 @@ from sqlalchemy import func, select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
-from app.assets.models import CanvasRevision, Shot, ShotChangeProposal
+from app.assets.models import (
+    CanvasRevision,
+    Episode,
+    Scene,
+    ScriptDocument,
+    Shot,
+    ShotChangeProposal,
+)
 from app.assets.script_import import import_script
 from app.shared.errors import ConflictError, NotFoundError
 
@@ -49,6 +56,39 @@ class ShotRead(BaseModel):
     sort_order: int
     status: str
     version: int
+
+
+class SceneRead(BaseModel):
+    id: UUID
+    scene_number: int
+    location_name: str
+    time_of_day: str
+    synopsis: str
+    shot_count: int
+    version: int
+
+
+class EpisodeRead(BaseModel):
+    id: UUID
+    episode_number: int
+    title: str | None
+    synopsis: str
+    scenes: list[SceneRead]
+    version: int
+
+
+class ScriptDocumentRead(BaseModel):
+    script_document_id: UUID
+    filename: str
+    content_hash: str
+    format: str
+    raw_text: str
+    version: int
+
+
+class ScriptWorkspaceRead(BaseModel):
+    document: ScriptDocumentRead | None
+    episodes: list[EpisodeRead]
 
 
 class CanvasRevisionRead(BaseModel):
@@ -135,6 +175,92 @@ def _shot_read(shot: Shot) -> ShotRead:
         status=shot.status,
         version=shot.version,
     )
+
+
+@router.get("/projects/{project_id}/script", response_model=ScriptWorkspaceRead)
+async def get_project_script(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> ScriptWorkspaceRead:
+    """Return the Script workspace for reading (raw text + Episodes/Scenes).
+
+    This is a read-only workspace. It returns HTTP 200 with ``document=None`` and
+    ``episodes=[]`` when no script has been imported yet — the frontend treats
+    that as the empty state, not an error. Safe script replacement / re-parse
+    (which must reconcile stale Scene/Shot rows) is a later Story-domain task and
+    is NOT satisfied by re-POSTing ``/scripts/import`` here.
+    """
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+
+    doc = (
+        await session.execute(
+            select(ScriptDocument)
+            .where(ScriptDocument.project_id == project_id)
+            .order_by(ScriptDocument.created_at.desc(), ScriptDocument.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    episode_rows = (
+        await session.execute(
+            select(Episode)
+            .where(Episode.project_id == project_id)
+            .order_by(Episode.episode_number, Episode.id)
+        )
+    ).scalars().all()
+
+    episodes: list[EpisodeRead] = []
+    for episode in episode_rows:
+        scene_rows = (
+            await session.execute(
+                select(Scene)
+                .where(Scene.episode_id == episode.id)
+                .order_by(Scene.scene_number, Scene.id)
+            )
+        ).scalars().all()
+        scenes: list[SceneRead] = []
+        for scene in scene_rows:
+            shot_count = (
+                await session.execute(
+                    select(func.count(Shot.id)).where(Shot.scene_id == scene.id)
+                )
+            ).scalar_one()
+            scenes.append(
+                SceneRead(
+                    id=scene.id,
+                    scene_number=scene.scene_number,
+                    location_name=scene.location_name,
+                    time_of_day=scene.time_of_day,
+                    synopsis=scene.synopsis,
+                    shot_count=shot_count,
+                    version=scene.version,
+                )
+            )
+        episodes.append(
+            EpisodeRead(
+                id=episode.id,
+                episode_number=episode.episode_number,
+                title=episode.title,
+                synopsis=episode.synopsis,
+                scenes=scenes,
+                version=episode.version,
+            )
+        )
+
+    document = (
+        ScriptDocumentRead(
+            script_document_id=doc.id,
+            filename=doc.filename,
+            content_hash=doc.content_hash,
+            format=doc.format,
+            raw_text=doc.raw_text,
+            version=doc.version,
+        )
+        if doc is not None
+        else None
+    )
+    return ScriptWorkspaceRead(document=document, episodes=episodes)
 
 
 @router.post("/projects/{project_id}/scripts/import", response_model=ScriptImportResponse)
