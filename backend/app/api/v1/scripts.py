@@ -7,7 +7,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
 from app.access.projects import ProjectService
@@ -21,7 +21,7 @@ from app.assets.models import (
     ShotChangeProposal,
 )
 from app.assets.script_import import import_script
-from app.shared.errors import ConflictError, NotFoundError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["scripts"], dependencies=[Depends(require_selected_workspace)])
 
@@ -110,6 +110,26 @@ class ShotChangeProposalCreate(BaseModel):
     replacement_payload: dict[str, object]
     affected_node_keys: list[str] = Field(default_factory=list, max_length=20)
     reusable_artifact_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class ShotChangePayload(BaseModel):
+    """Strict, validated *partial* replacement of the Shot canvas.
+
+    ``extra="forbid"`` so an unknown field fails closed rather than being
+    silently ignored. Each canvas field is optional — a proposal may override
+    only a subset (e.g. just ``visual_description``); apply computes the complete
+    resulting state as current Shot + present overrides. Field constraints mirror
+    ``ShotCanvasUpdateBody``. Validated at proposal creation and re-validated at
+    confirm/apply time (the persisted JSON may predate a schema change).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    visual_description: str | None = Field(default=None, min_length=1)
+    shot_type: str | None = Field(default=None, min_length=1, max_length=40)
+    camera_move: str | None = Field(default=None, min_length=1, max_length=80)
+    dialogue: str | None = None
+    duration_seconds: Decimal | None = Field(default=None, gt=0, le=30, decimal_places=3)
 
 
 class ShotChangeProposalRead(BaseModel):
@@ -338,6 +358,15 @@ async def create_shot_change_proposal(
             "shot change proposal base version conflict",
             details={"expected_version": body.expected_version, "actual_version": shot.version},
         )
+    # Validate the replacement payload at the boundary: unknown/invalid fields
+    # fail closed here so no malformed proposal is persisted.
+    try:
+        ShotChangePayload.model_validate(dict(body.replacement_payload))
+    except Exception as exc:  # noqa: BLE001 — surface a domain-consistent error
+        raise ValidationAppError(
+            f"invalid shot change replacement payload: {exc}",
+            details={"code": "INVALID_SHOT_CHANGE_PAYLOAD"},
+        ) from exc
     proposal = ShotChangeProposal(
         project_id=project_id,
         shot_id=shot.id,
@@ -393,11 +422,23 @@ async def confirm_shot_change_proposal(
     project_id: UUID,
     shot_id: UUID,
     proposal_id: UUID,
-    revision_id: UUID,
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> ShotChangeProposalRead:
+    """Apply a confirmed agent proposal atomically (§19.5).
+
+    User acceptance is the operation that applies the proposal: lock the Shot,
+    require the proposal to be ``awaiting_confirmation`` and its base version to
+    still match the Shot, validate the persisted replacement payload, compute the
+    complete resulting Shot canvas state (current Shot + validated overrides),
+    write that exact state to both a new ``source="assistant"`` CanvasRevision
+    and the Shot, bump the Shot version, and mark the proposal applied — all in
+    one transaction. Confirming an already-applied proposal is idempotent: it
+    returns the existing result without creating another revision or bumping the
+    version. A stale proposal whose base version no longer matches the Shot fails
+    with Conflict and never overwrites newer user edits.
+    """
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     proposal = (
         await session.execute(
@@ -410,23 +451,86 @@ async def confirm_shot_change_proposal(
     ).scalar_one_or_none()
     if proposal is None:
         raise NotFoundError("shot change proposal not found")
-    revision = (
-        await session.execute(
-            select(CanvasRevision).where(
-                CanvasRevision.id == revision_id,
-                CanvasRevision.project_id == project_id,
-                CanvasRevision.shot_id == shot_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if revision is None:
-        raise NotFoundError("canvas revision not found")
     if proposal.status == "applied":
+        # Idempotent retry: no new revision, no version bump.
         return _proposal_read(proposal)
     if proposal.status != "awaiting_confirmation":
         raise ConflictError("shot change proposal is not awaiting confirmation")
-    if revision.base_shot_version != proposal.base_shot_version:
-        raise ConflictError("canvas revision does not match proposal base version")
+
+    shot = (
+        await session.execute(
+            select(Shot)
+            .where(Shot.id == shot_id, Shot.project_id == project_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if shot is None:
+        raise NotFoundError("shot not found")
+    if shot.version != proposal.base_shot_version:
+        raise ConflictError(
+            "shot change proposal base version conflict",
+            details={
+                "expected_version": proposal.base_shot_version,
+                "actual_version": shot.version,
+            },
+        )
+
+    # Re-validate the persisted payload (defense-in-depth against legacy JSON).
+    try:
+        payload = ShotChangePayload.model_validate(dict(proposal.replacement_payload))
+    except Exception as exc:  # noqa: BLE001 — surface a domain-consistent error
+        raise ValidationAppError(
+            f"invalid shot change replacement payload: {exc}",
+            details={"code": "INVALID_SHOT_CHANGE_PAYLOAD"},
+        ) from exc
+
+    # Complete resulting state = current Shot canvas + validated overrides.
+    # A proposal is a partial replacement; fields not present keep the current
+    # Shot value, and the exact same complete state goes to both the CanvasRevision
+    # and the Shot.
+    new_visual = (
+        payload.visual_description
+        if payload.visual_description is not None
+        else shot.visual_description
+    )
+    new_shot_type = payload.shot_type if payload.shot_type is not None else shot.shot_type
+    new_camera_move = payload.camera_move if payload.camera_move is not None else shot.camera_move
+    new_dialogue = payload.dialogue if payload.dialogue is not None else shot.dialogue
+    if payload.duration_seconds is not None:
+        new_duration = payload.duration_seconds
+    else:
+        new_duration = shot.duration_seconds
+
+    latest_revision = (
+        await session.execute(
+            select(func.max(CanvasRevision.revision_number)).where(
+                CanvasRevision.shot_id == shot.id
+            )
+        )
+    ).scalar_one()
+    revision = CanvasRevision(
+        project_id=project_id,
+        shot_id=shot.id,
+        revision_number=int(latest_revision or 0) + 1,
+        base_shot_version=shot.version,
+        visual_description=new_visual,
+        shot_type=new_shot_type,
+        camera_move=new_camera_move,
+        dialogue=new_dialogue,
+        duration_seconds=new_duration,
+        source="assistant",
+        created_by=user.id,
+    )
+    session.add(revision)
+    await session.flush()
+
+    shot.visual_description = new_visual
+    shot.shot_type = new_shot_type
+    shot.camera_move = new_camera_move
+    shot.dialogue = new_dialogue
+    shot.duration_seconds = new_duration
+    shot.version += 1
+
     proposal.status = "applied"
     proposal.confirmed_revision_id = revision.id
     proposal.confirmed_at = datetime.now(UTC)

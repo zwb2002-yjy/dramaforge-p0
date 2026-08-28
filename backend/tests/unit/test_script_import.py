@@ -13,6 +13,7 @@ from app.access.projects import ProjectService
 from app.api.v1.scripts import (
     ShotCanvasUpdateBody,
     ShotChangeProposalCreate,
+    confirm_shot_change_proposal,
     create_shot_change_proposal,
     get_project_script,
     update_shot_canvas,
@@ -39,7 +40,7 @@ from app.shared.base import Base
 from app.shared.errors import ConflictError, ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 REPO = Path(__file__).resolve().parents[3]
@@ -432,3 +433,206 @@ async def test_shot_change_proposal_is_idempotent_and_confirms_on_canvas_revisio
         )
     ).scalar_one()
     assert stored.base_shot_version == shot.version
+
+
+@pytest.mark.asyncio
+async def test_confirm_applies_proposal_and_creates_assistant_canvas_revision(
+    session: AsyncSession,
+) -> None:
+    user, project = await _project(session)
+    result = await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=GOLDEN.read_text(encoding="utf-8"),
+        actor=user,
+    )
+    await session.commit()
+    shot = (await session.execute(select(Shot).where(Shot.id == result.shot_ids[0]))).scalar_one()
+    original_version = shot.version
+    body = ShotChangeProposalCreate(
+        idempotency_key="proposal-apply",
+        summary="导演助手建议的正式镜头语义",
+        expected_version=original_version,
+        replacement_payload={"visual_description": "新的导演语义"},
+        affected_node_keys=["video"],
+        reusable_artifact_ids=[],
+    )
+    created = await create_shot_change_proposal(project.id, shot.id, body, user, session, None)
+    await session.commit()
+    # Before-accept invariant: the Shot is unchanged by proposal creation.
+    shot_before = (
+        await session.execute(select(Shot).where(Shot.id == shot.id))
+    ).scalar_one()
+    assert shot_before.visual_description != "新的导演语义"
+    assert shot_before.version == original_version
+
+    confirmed = await confirm_shot_change_proposal(
+        project.id, shot.id, created.proposal.id, user, session, None
+    )
+    await session.commit()
+    assert confirmed.status == "applied"
+    assert confirmed.confirmed_revision_id is not None
+    assert confirmed.confirmed_at is not None
+    applied = (
+        await session.execute(select(Shot).where(Shot.id == shot.id))
+    ).scalar_one()
+    assert applied.visual_description == "新的导演语义"
+    assert applied.version == original_version + 1
+    # The assistant CanvasRevision carries the complete resulting state, not just
+    # the overridden field.
+    revisions = (
+        await session.execute(
+            select(CanvasRevision)
+            .where(CanvasRevision.shot_id == shot.id)
+            .order_by(CanvasRevision.revision_number)
+        )
+    ).scalars().all()
+    assert len(revisions) == 1
+    rev = revisions[0]
+    assert rev.source == "assistant"
+    assert rev.visual_description == "新的导演语义"
+    assert rev.shot_type == applied.shot_type
+    assert rev.camera_move == applied.camera_move
+    assert rev.dialogue == applied.dialogue
+    assert rev.base_shot_version == original_version
+
+
+@pytest.mark.asyncio
+async def test_confirm_is_idempotent_no_new_revision_or_version_bump(
+    session: AsyncSession,
+) -> None:
+    user, project = await _project(session)
+    result = await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=GOLDEN.read_text(encoding="utf-8"),
+        actor=user,
+    )
+    await session.commit()
+    shot = (await session.execute(select(Shot).where(Shot.id == result.shot_ids[0]))).scalar_one()
+    body = ShotChangeProposalCreate(
+        idempotency_key="proposal-idem",
+        summary="建议",
+        expected_version=shot.version,
+        replacement_payload={"visual_description": "幂等语义"},
+        affected_node_keys=[],
+        reusable_artifact_ids=[],
+    )
+    created = await create_shot_change_proposal(project.id, shot.id, body, user, session, None)
+    await session.commit()
+    first = await confirm_shot_change_proposal(
+        project.id, shot.id, created.proposal.id, user, session, None
+    )
+    await session.commit()
+    shot_after_first = (
+        await session.execute(select(Shot).where(Shot.id == shot.id))
+    ).scalar_one()
+    version_after_first = shot_after_first.version
+    revision_count_after_first = (
+        await session.execute(
+            select(func.count())
+            .select_from(CanvasRevision)
+            .where(CanvasRevision.shot_id == shot.id)
+        )
+    ).scalar_one()
+
+    second = await confirm_shot_change_proposal(
+        project.id, shot.id, created.proposal.id, user, session, None
+    )
+    await session.commit()
+    shot_after_second = (
+        await session.execute(select(Shot).where(Shot.id == shot.id))
+    ).scalar_one()
+    revision_count_after_second = (
+        await session.execute(
+            select(func.count())
+            .select_from(CanvasRevision)
+            .where(CanvasRevision.shot_id == shot.id)
+        )
+    ).scalar_one()
+    assert second.id == first.id
+    assert second.status == "applied"
+    assert shot_after_second.version == version_after_first
+    assert revision_count_after_second == revision_count_after_first
+
+
+@pytest.mark.asyncio
+async def test_confirm_stale_proposal_fails_without_overwriting(session: AsyncSession) -> None:
+    user, project = await _project(session)
+    result = await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=GOLDEN.read_text(encoding="utf-8"),
+        actor=user,
+    )
+    await session.commit()
+    shot = (await session.execute(select(Shot).where(Shot.id == result.shot_ids[0]))).scalar_one()
+    original_version = shot.version
+    body = ShotChangeProposalCreate(
+        idempotency_key="proposal-stale",
+        summary="过期建议",
+        expected_version=original_version,
+        replacement_payload={"visual_description": "过期覆盖"},
+        affected_node_keys=[],
+        reusable_artifact_ids=[],
+    )
+    created = await create_shot_change_proposal(project.id, shot.id, body, user, session, None)
+    await session.commit()
+    # User edits the shot first, bumping the version → proposal becomes stale.
+    await update_shot_canvas(
+        project.id,
+        shot.id,
+        ShotCanvasUpdateBody(
+            expected_version=original_version,
+            visual_description="用户更新的正式语义",
+            shot_type=shot.shot_type,
+            camera_move="static",
+            dialogue=shot.dialogue,
+        ),
+        user,
+        session,
+        None,
+    )
+    await session.commit()
+    with pytest.raises(ConflictError):
+        await confirm_shot_change_proposal(
+            project.id, shot.id, created.proposal.id, user, session, None
+        )
+    await session.commit()
+    stale_shot = (
+        await session.execute(select(Shot).where(Shot.id == shot.id))
+    ).scalar_one()
+    # The stale proposal must not overwrite the newer user edit.
+    assert stale_shot.visual_description == "用户更新的正式语义"
+    assert stale_shot.version == original_version + 1
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_rejects_unknown_payload_field(session: AsyncSession) -> None:
+    user, project = await _project(session)
+    result = await import_script(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        filename="p0_10_shots.md",
+        text=GOLDEN.read_text(encoding="utf-8"),
+        actor=user,
+    )
+    await session.commit()
+    shot = (await session.execute(select(Shot).where(Shot.id == result.shot_ids[0]))).scalar_one()
+    body = ShotChangeProposalCreate(
+        idempotency_key="proposal-bad",
+        summary="非法负载",
+        expected_version=shot.version,
+        replacement_payload={"visual_description": "ok", "unknown_field": "nope"},
+        affected_node_keys=[],
+        reusable_artifact_ids=[],
+    )
+    with pytest.raises(ValidationAppError, match="invalid shot change replacement payload"):
+        await create_shot_change_proposal(project.id, shot.id, body, user, session, None)

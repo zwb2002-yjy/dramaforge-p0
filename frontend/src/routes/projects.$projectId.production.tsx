@@ -361,8 +361,8 @@ function ProductionPage() {
             reusable_artifact_ids: input.reusable_artifact_ids,
           })
         }
-        onConfirmProposal={(shotId, proposalId, revisionId) =>
-          confirmShotChangeProposal(projectId, shotId, proposalId, revisionId).then(() => undefined)
+        onConfirmProposal={(shotId, proposalId) =>
+          confirmShotChangeProposal(projectId, shotId, proposalId).then(() => undefined)
         }
       />
 

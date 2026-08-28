@@ -417,9 +417,7 @@ export function listModelSlots(): Promise<ModelSlotRead[]> {
   return apiGet<ModelSlotRead[]>("/api/v1/model-slots");
 }
 
-export function listWorkspaceModelProfiles(
-  workspaceId: string,
-): Promise<ModelProfileSummary[]> {
+export function listWorkspaceModelProfiles(workspaceId: string): Promise<ModelProfileSummary[]> {
   return apiGet(`/api/v1/workspaces/${workspaceId}/model-profiles`);
 }
 
@@ -503,9 +501,7 @@ export async function putProjectModelProfile(
   return apiSend("PUT", `/api/v1/projects/${projectId}/model-profile`, body, csrf);
 }
 
-export function getEffectiveBindings(
-  projectId: string,
-): Promise<EffectiveBindingRead[]> {
+export function getEffectiveBindings(projectId: string): Promise<EffectiveBindingRead[]> {
   return apiGet(`/api/v1/projects/${projectId}/model-bindings/effective`);
 }
 
@@ -867,22 +863,48 @@ export function fetchProjectAssets(projectId: string): Promise<AssetRead[]> {
 
 export async function createProjectAsset(
   projectId: string,
-  input: { kind: string; name: string; description: string; metadata?: Record<string, unknown>; status?: "draft" | "active" | "archived" },
+  input: {
+    kind: string;
+    name: string;
+    description: string;
+    metadata?: Record<string, unknown>;
+    status?: "draft" | "active" | "archived";
+  },
 ): Promise<AssetRead> {
   const csrf = await fetchCsrf();
-  return apiSend("POST", `/api/v1/projects/${projectId}/assets`, { ...input, metadata: input.metadata ?? {}, status: input.status ?? "draft" }, csrf);
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/assets`,
+    { ...input, metadata: input.metadata ?? {}, status: input.status ?? "draft" },
+    csrf,
+  );
 }
 
 export async function updateProjectAsset(
   projectId: string,
   assetId: string,
-  input: { expected_version: number; kind: string; name: string; description: string; metadata?: Record<string, unknown>; status?: "draft" | "active" | "archived" },
+  input: {
+    expected_version: number;
+    kind: string;
+    name: string;
+    description: string;
+    metadata?: Record<string, unknown>;
+    status?: "draft" | "active" | "archived";
+  },
 ): Promise<AssetRead> {
   const csrf = await fetchCsrf();
-  return apiSend("PATCH", `/api/v1/projects/${projectId}/assets/${assetId}`, { ...input, metadata: input.metadata ?? {}, status: input.status ?? "draft" }, csrf);
+  return apiSend(
+    "PATCH",
+    `/api/v1/projects/${projectId}/assets/${assetId}`,
+    { ...input, metadata: input.metadata ?? {}, status: input.status ?? "draft" },
+    csrf,
+  );
 }
 
-export function fetchAssetVersions(projectId: string, assetId: string): Promise<AssetVersionRead[]> {
+export function fetchAssetVersions(
+  projectId: string,
+  assetId: string,
+): Promise<AssetVersionRead[]> {
   return apiGet(`/api/v1/projects/${projectId}/assets/${assetId}/versions`);
 }
 export type ExperimentRead = {
@@ -906,10 +928,18 @@ export function fetchExperiments(projectId: string): Promise<ExperimentRead[]> {
   return apiGet(`/api/v1/projects/${projectId}/experiments`);
 }
 
-export async function createExperiment(projectId: string, input: {
-  idempotency_key: string; name: string; branch_type?: string; source_shot_id?: string | null;
-  source_artifact_ids?: string[]; parameters?: Record<string, unknown>; selected_model?: string | null;
-}): Promise<ExperimentRead> {
+export async function createExperiment(
+  projectId: string,
+  input: {
+    idempotency_key: string;
+    name: string;
+    branch_type?: string;
+    source_shot_id?: string | null;
+    source_artifact_ids?: string[];
+    parameters?: Record<string, unknown>;
+    selected_model?: string | null;
+  },
+): Promise<ExperimentRead> {
   const csrf = await fetchCsrf();
   return apiSend("POST", `/api/v1/projects/${projectId}/experiments`, input, csrf);
 }
@@ -945,42 +975,103 @@ export async function decideExperiment(
   },
 ): Promise<ExperimentRead> {
   const csrf = await fetchCsrf();
-  return apiSend("POST", `/api/v1/projects/${projectId}/experiments/${experimentId}/decision`, input, csrf);
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/experiments/${experimentId}/decision`,
+    input,
+    csrf,
+  );
 }
 
 export type ReviewAnnotationRead = {
-  id: string; shot_id: string; artifact_id: string | null; target_kind: "shot" | "video_time" | "image_point" | "image_region";
-  time_start: string | null; time_end: string | null; x: string | null; y: string | null; width: string | null; height: string | null;
-  note: string; severity: string; status: string; created_by: string; created_at: string; resolved_at: string | null;
+  id: string;
+  shot_id: string;
+  artifact_id: string | null;
+  target_kind: "shot" | "video_time" | "image_point" | "image_region";
+  time_start: string | null;
+  time_end: string | null;
+  x: string | null;
+  y: string | null;
+  width: string | null;
+  height: string | null;
+  note: string;
+  severity: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+  resolved_at: string | null;
 };
 
-export function fetchReviewAnnotations(projectId: string, shotId: string): Promise<ReviewAnnotationRead[]> {
+export function fetchReviewAnnotations(
+  projectId: string,
+  shotId: string,
+): Promise<ReviewAnnotationRead[]> {
   return apiGet(`/api/v1/projects/${projectId}/shots/${shotId}/annotations`);
 }
 
-export async function createReviewAnnotation(projectId: string, shotId: string, input: {
-  artifact_id?: string | null; target_kind?: "shot" | "video_time" | "image_point" | "image_region";
-  time_start?: string | null; time_end?: string | null; x?: string | null; y?: string | null; width?: string | null; height?: string | null;
-  note: string; severity?: "note" | "warning" | "blocker";
-}): Promise<ReviewAnnotationRead> {
+export async function createReviewAnnotation(
+  projectId: string,
+  shotId: string,
+  input: {
+    artifact_id?: string | null;
+    target_kind?: "shot" | "video_time" | "image_point" | "image_region";
+    time_start?: string | null;
+    time_end?: string | null;
+    x?: string | null;
+    y?: string | null;
+    width?: string | null;
+    height?: string | null;
+    note: string;
+    severity?: "note" | "warning" | "blocker";
+  },
+): Promise<ReviewAnnotationRead> {
   const csrf = await fetchCsrf();
   return apiSend("POST", `/api/v1/projects/${projectId}/shots/${shotId}/annotations`, input, csrf);
 }
 
 export type OpenCutManifestRead = {
-  schema_version: string; adapter: string; project_id: string; official_line: string;
-  timeline: { duration_seconds: string; frame_rate: number; timebase: string; aspect_ratio: string };
+  schema_version: string;
+  adapter: string;
+  project_id: string;
+  official_line: string;
+  timeline: {
+    duration_seconds: string;
+    frame_rate: number;
+    timebase: string;
+    aspect_ratio: string;
+  };
   tracks: Array<{
-    id: string; kind: "video" | "audio" | "subtitle" | string; name: string; locked: boolean; muted: boolean;
+    id: string;
+    kind: "video" | "audio" | "subtitle" | string;
+    name: string;
+    locked: boolean;
+    muted: boolean;
     clips: Array<{
-      id: string; shot_id: string; scene_id: string; track_kind: string; timeline_start_seconds: string; timeline_end_seconds: string;
-      source_in_seconds: string; duration_seconds: string; artifact_id: string | null; source_url: string | null; mime_type: string | null;
-      text: string | null; trace: Record<string, unknown>;
+      id: string;
+      shot_id: string;
+      scene_id: string;
+      track_kind: string;
+      timeline_start_seconds: string;
+      timeline_end_seconds: string;
+      source_in_seconds: string;
+      duration_seconds: string;
+      artifact_id: string | null;
+      source_url: string | null;
+      mime_type: string | null;
+      text: string | null;
+      trace: Record<string, unknown>;
     }>;
   }>;
   shots: Array<{
-    shot_id: string; shot_number: number; scene_id: string; timeline_start_seconds: string; duration_seconds: string;
-    dialogue: string; status: string; artifact_ids: string[]; formal_artifacts: Record<string, string>;
+    shot_id: string;
+    shot_number: number;
+    scene_id: string;
+    timeline_start_seconds: string;
+    duration_seconds: string;
+    dialogue: string;
+    status: string;
+    artifact_ids: string[];
+    formal_artifacts: Record<string, string>;
   }>;
 };
 
@@ -998,16 +1089,31 @@ export type DirectorBoardRead = {
   updated_at: string;
 };
 
-export function fetchDirectorBoard(projectId: string, shotId: string): Promise<DirectorBoardRead | null> {
+export function fetchDirectorBoard(
+  projectId: string,
+  shotId: string,
+): Promise<DirectorBoardRead | null> {
   return apiGet(`/api/v1/projects/${projectId}/shots/${shotId}/director-board`);
 }
 
-export async function saveDirectorBoard(projectId: string, shotId: string, input: {
-  expected_version?: number | null; mode: "2d" | "rough_3d"; camera: Record<string, unknown>;
-  characters: Array<Record<string, unknown>>; scene: Record<string, unknown>;
-}): Promise<DirectorBoardRead> {
+export async function saveDirectorBoard(
+  projectId: string,
+  shotId: string,
+  input: {
+    expected_version?: number | null;
+    mode: "2d" | "rough_3d";
+    camera: Record<string, unknown>;
+    characters: Array<Record<string, unknown>>;
+    scene: Record<string, unknown>;
+  },
+): Promise<DirectorBoardRead> {
   const csrf = await fetchCsrf();
-  return apiSend("PUT", `/api/v1/projects/${projectId}/shots/${shotId}/director-board`, input, csrf);
+  return apiSend(
+    "PUT",
+    `/api/v1/projects/${projectId}/shots/${shotId}/director-board`,
+    input,
+    csrf,
+  );
 }
 export type ShotRead = {
   id: string;
@@ -1100,12 +1206,11 @@ export async function confirmShotChangeProposal(
   projectId: string,
   shotId: string,
   proposalId: string,
-  revisionId: string,
 ): Promise<ShotChangeProposalRead> {
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
-    `/api/v1/projects/${projectId}/shots/${shotId}/change-proposals/${proposalId}/confirm?revision_id=${encodeURIComponent(revisionId)}`,
+    `/api/v1/projects/${projectId}/shots/${shotId}/change-proposals/${proposalId}/confirm`,
     {},
     csrf,
   );
@@ -1359,14 +1464,7 @@ export interface ParameterSpecRead {
   minimum?: number | null;
   maximum?: number | null;
   ui_component?:
-    | "switch"
-    | "select"
-    | "number"
-    | "slider"
-    | "input"
-    | "textarea"
-    | "multi_select"
-    | null;
+    "switch" | "select" | "number" | "slider" | "input" | "textarea" | "multi_select" | null;
 }
 
 export interface InputSlotSpecRead {
@@ -1455,5 +1553,3 @@ export async function createGeneration(
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as GenerationCreateResult;
 }
-
-

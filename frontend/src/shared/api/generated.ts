@@ -1574,7 +1574,21 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Confirm Shot Change Proposal */
+        /**
+         * Confirm Shot Change Proposal
+         * @description Apply a confirmed agent proposal atomically (§19.5).
+         *
+         *     User acceptance is the operation that applies the proposal: lock the Shot,
+         *     require the proposal to be ``awaiting_confirmation`` and its base version to
+         *     still match the Shot, validate the persisted replacement payload, compute the
+         *     complete resulting Shot canvas state (current Shot + validated overrides),
+         *     write that exact state to both a new ``source="assistant"`` CanvasRevision
+         *     and the Shot, bump the Shot version, and mark the proposal applied — all in
+         *     one transaction. Confirming an already-applied proposal is idempotent: it
+         *     returns the existing result without creating another revision or bumping the
+         *     version. A stale proposal whose base version no longer matches the Shot fails
+         *     with Conflict and never overwrites newer user edits.
+         */
         post: operations["confirm_shot_change_proposal_api_v1_projects__project_id__shots__shot_id__change_proposals__proposal_id__confirm_post"];
         delete?: never;
         options?: never;
@@ -10829,8 +10843,7 @@ export interface operations {
     };
     confirm_shot_change_proposal_api_v1_projects__project_id__shots__shot_id__change_proposals__proposal_id__confirm_post: {
         parameters: {
-            query: {
-                revision_id: string;
+            query?: {
                 workspace_id?: string | null;
             };
             header?: {
