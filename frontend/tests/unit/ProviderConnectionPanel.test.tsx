@@ -140,6 +140,8 @@ describe("Provider connection contract revisions", () => {
               stage: "planning",
               aspect_ratio: "9:16",
               target_platform: "other",
+              provider_dispatch_frozen: false,
+              version: 1,
               budget_limit: "10",
               budget_currency: "USD",
             },

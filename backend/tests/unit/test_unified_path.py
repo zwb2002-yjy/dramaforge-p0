@@ -1366,6 +1366,15 @@ async def test_unified_keyframe_submits_once_and_completes(
     assert identity_snapshot["credential_revision_id"] == str(
         frozen_revision.credential_revision_id
     )
+    # The runtime that reaches the Provider boundary is rebuilt from the
+    # immutable connection revision, rather than retaining the mutable
+    # ProviderConnection object used during selection.
+    assert (
+        type(_current_runtime().factory_connection).__name__
+        == "FrozenProviderConnection"
+    )
+    assert _current_runtime().factory_connection.base_url == frozen_revision.base_url
+    assert _current_runtime().factory_settings.unified_test_api_key == "uni-secret"
     assert _current_runtime().submit_calls == 1
 
 
@@ -2361,7 +2370,7 @@ async def test_unified_429_marks_rejected_and_retry_resubmits(
 
     _byok(monkeypatch)
     _enable_unified(monkeypatch)
-    _user, _workspace, run = await _seed_project_chain(session)
+    user, workspace, run = await _seed_project_chain(session)
 
     _FAKE_IMAGE_PLAN.append("PROVIDER_RATE_LIMITED")
     with pytest.raises(ProviderRateLimitedError):
@@ -2374,6 +2383,33 @@ async def test_unified_429_marks_rejected_and_retry_resubmits(
     ).scalar_one()
     assert op.status == "rejected"
     assert op.provider_operation_id is None
+    assert op.provider_connection_revision_id is not None
+    frozen_revision = await session.get(
+        ProviderConnectionRevision, op.provider_connection_revision_id
+    )
+    assert frozen_revision is not None
+
+    # A rejected create has no remote task and may be resubmitted, but it is
+    # still the same execution: current connection/credential changes must not
+    # replace its already-frozen revision.
+    from app.providers.connection_service import ProviderConnectionService
+
+    connection = await session.get(ProviderConnection, op.connection_id)
+    assert connection is not None
+    await ProviderConnectionService(session).update_connection(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        display_name=None,
+        enabled=None,
+        base_url="https://retry-revision-two.example",
+    )
+    await ProviderConnectionService(session).update_credential(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        api_key="uni-secret-retry-revision-two",
+    )
 
     # Scheduler requeues the run; the retry resubmits the same op (no duplicate).
     run.status = "queued"
@@ -2384,6 +2420,9 @@ async def test_unified_429_marks_rejected_and_retry_resubmits(
     assert refreshed is not None
     assert refreshed.status == "succeeded"
     assert refreshed.provider_operation_id == "uni-img-1"
+    assert refreshed.provider_connection_revision_id == frozen_revision.id
+    assert _current_runtime().factory_connection.base_url == frozen_revision.base_url
+    assert _current_runtime().factory_settings.unified_test_api_key == "uni-secret"
     # Exactly two submission attempts total (one refused, one accepted).
     assert _current_runtime().submit_calls == 1
     ops = (

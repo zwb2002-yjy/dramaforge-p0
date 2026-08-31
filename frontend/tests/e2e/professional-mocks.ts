@@ -328,10 +328,48 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     if (path.endsWith("/opencut-manifest")) {
       return json(route, {
         schema_version: "opencut-manifest-v1",
+        adapter: "opencut",
         project_id: PROJECT_ID,
         official_line: "formal",
-        shots: [{ shot_id: SHOT_ID, shot_number: 1, scene_id: SCENE_ID, duration_seconds: "5", dialogue: "我终于明白了。", status: "draft", artifact_ids: [] }],
-        tracks: [{ kind: "video", clip_count: 1 }],
+        timeline: {
+          duration_seconds: "5",
+          frame_rate: 24,
+          timebase: "1/24",
+          aspect_ratio: "16:9",
+        },
+        shots: [{
+          shot_id: SHOT_ID,
+          shot_number: 1,
+          scene_id: SCENE_ID,
+          timeline_start_seconds: "0",
+          duration_seconds: "5",
+          dialogue: "我终于明白了。",
+          status: "draft",
+          artifact_ids: ["artifact-video-1"],
+          formal_artifacts: { video: "artifact-video-1" },
+        }],
+        tracks: [{
+          id: "video-track-1",
+          kind: "video",
+          name: "正式视频",
+          locked: false,
+          muted: false,
+          clips: [{
+            id: "video-clip-1",
+            shot_id: SHOT_ID,
+            scene_id: SCENE_ID,
+            track_kind: "video",
+            timeline_start_seconds: "0",
+            timeline_end_seconds: "5",
+            source_in_seconds: "0",
+            duration_seconds: "5",
+            artifact_id: "artifact-video-1",
+            source_url: null,
+            mime_type: "video/mp4",
+            text: null,
+            trace: {},
+          }],
+        }],
       });
     }
     if (path.includes("/professional/shots/") && method === "POST") {

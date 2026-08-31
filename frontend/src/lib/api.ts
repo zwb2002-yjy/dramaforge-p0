@@ -1,5 +1,7 @@
 /** REST client with cookie session + CSRF for DramaForge product path. */
 
+import type { components } from "../shared/api/generated";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const SELECTED_WORKSPACE_STORAGE_KEY = "dramaforge.selected-workspace-id";
 
@@ -108,114 +110,23 @@ export function fetchBootstrapStatus(): Promise<BootstrapStatusRead> {
 }
 
 export type CsrfResponse = { csrf_token: string };
-export type UserRead = {
-  id: string;
-  email: string;
-  display_name: string;
-};
-
-export type WorkspaceRead = {
-  id: string;
-  owner_user_id: string;
-  name: string;
-};
-
-export type ProviderConnectionRead = {
-  id: string;
-  workspace_id: string;
-  provider_type: string;
-  display_name: string;
-  base_url: string;
-  protocol_profile: string;
-  enabled: boolean;
-  credential_configured: boolean;
-  credential_key_version: string | null;
-  verification_status: string;
-  verified_at: string | null;
-};
-
-export type ProviderPluginModelRead = {
-  catalog_entry_id: string;
-  capability_manifest_hash: string;
-  model_id: string;
-  display_name: string;
-  media_type: string;
-  model_revision: string;
-  lifecycle: string;
-  catalog_source: string;
-  capabilities: string[];
-  option_schema: Record<string, unknown>;
-};
-
-export type ProviderPluginRead = {
-  provider_type: string;
-  protocol_profile: string;
-  display_name: string;
-  default_base_url: string;
-  implemented: boolean;
-  paid_capabilities: string[];
-  capabilities: string[];
-  model_list_path: string;
-  models: ProviderPluginModelRead[];
-};
+export type UserRead = components["schemas"]["UserRead"];
+export type WorkspaceRead = components["schemas"]["WorkspaceRead"];
+export type ProviderConnectionRead = components["schemas"]["ConnectionRead"];
+export type ProviderPluginModelRead = components["schemas"]["ProviderPluginModelRead"];
+export type ProviderPluginRead = components["schemas"]["ProviderPluginRead"];
 
 export function listProviderPlugins(): Promise<ProviderPluginRead[]> {
   return apiGet("/api/v1/provider-plugins");
 }
 
-export type ProviderProbeRead = {
-  probe_id: string;
-  capability: string;
-  status: string;
-  evidence_level: string;
-  http_status: number | null;
-  provider_request_id: string | null;
-  reference_artifact_id: string | null;
-  remote_query_kind: string | null;
-  request_fingerprint: string;
-  tested_at: string;
-  error_code: string | null;
-};
-
-export type ProviderModelBindingRead = {
-  id: string;
-  connection_id: string;
-  media_type: string;
-  model_id: string;
-  purpose: string;
-  enabled: boolean;
-  documented: boolean;
-  contract_tested: boolean;
-  account_verified: boolean;
-  quality_gated: boolean;
+export type ProviderProbeRead = components["schemas"]["ProbeRead"];
+export type ProviderModelBindingRead = components["schemas"]["ModelBindingRead"] & {
   /** @deprecated historical fixture compatibility; pricing is owned by Provider. */
   pricing_snapshot?: Record<string, unknown>;
-  catalog_entry_id: string | null;
-  capability_manifest_hash: string | null;
-  remote_resource_kind: string | null;
-  remote_resource_id: string | null;
-  invoke_model_value: string | null;
 };
-
-export type ProviderQualityEvidenceRead = {
-  id: string;
-  model_binding_id: string;
-  node_run_id: string;
-  artifact_id: string;
-  evidence_kind: string;
-  policy_id: string;
-  score: string | null;
-  approved_by: string;
-  created_at: string;
-};
-
-export type ProjectProviderBindingRead = {
-  id: string;
-  project_id: string;
-  purpose: string;
-  model_binding_id: string;
-  fallback_policy: string;
-};
+export type ProviderQualityEvidenceRead = components["schemas"]["QualityEvidenceRead"];
+export type ProjectProviderBindingRead = components["schemas"]["ProjectBindingRead"];
 
 export function listProviderConnections(workspaceId: string): Promise<ProviderConnectionRead[]> {
   return apiGet(`/api/v1/workspaces/${workspaceId}/provider-connections`);
@@ -505,13 +416,7 @@ export function getEffectiveBindings(projectId: string): Promise<EffectiveBindin
   return apiGet(`/api/v1/projects/${projectId}/model-bindings/effective`);
 }
 
-export type ProjectRead = {
-  id: string;
-  workspace_id: string;
-  name: string;
-  stage: string;
-  aspect_ratio: string;
-  target_platform: string;
+export type ProjectRead = components["schemas"]["ProjectRead"] & {
   /** @deprecated historical fixture compatibility; server no longer returns this field. */
   budget_limit?: string;
   /** @deprecated historical fixture compatibility; server no longer returns this field. */
@@ -569,13 +474,11 @@ export function listWorkspaceProjects(workspaceId: string): Promise<ProjectRead[
   return apiGet<ProjectRead[]>(`/api/v1/workspaces/${workspaceId}/projects`);
 }
 
-export type StartProjectResponse = {
-  project_id: string;
-  experience_mode: string;
-  brief_id: string;
-  brief_revision_id: string;
-  text_provider_operations: number;
-};
+export function fetchProject(projectId: string): Promise<ProjectRead> {
+  return apiGet<ProjectRead>(`/api/v1/projects/${projectId}`);
+}
+
+export type StartProjectResponse = components["schemas"]["StartProjectResponse"];
 
 export async function startProject(input: {
   workspace_id: string;
@@ -714,16 +617,7 @@ export async function confirmPlan(projectId: string, planId: string): Promise<Co
   );
 }
 
-export type ConfirmPlanResponse = {
-  node_run_id: string;
-  graph_id: string;
-  graph_version_id?: string;
-  node_run_ids?: string[];
-  graph_ids?: string[];
-  graph_version_ids?: string[];
-  shot_ids?: string[];
-  materialization_ops?: string[];
-};
+export type ConfirmPlanResponse = components["schemas"]["ConfirmPlanResponse"];
 
 export async function enqueueNodeRun(
   projectId: string,
@@ -731,14 +625,6 @@ export async function enqueueNodeRun(
 ): Promise<{ node_run_id: string; status: string; job_id: string }> {
   const csrf = await fetchCsrf();
   return apiSend("POST", `/api/v1/projects/${projectId}/node-runs/${nodeRunId}/enqueue`, {}, csrf);
-}
-
-export async function executeNodeRun(
-  projectId: string,
-  nodeRunId: string,
-): Promise<{ status: string; result_artifact_id?: string }> {
-  const csrf = await fetchCsrf();
-  return apiSend("POST", `/api/v1/projects/${projectId}/node-runs/${nodeRunId}/execute`, {}, csrf);
 }
 
 export type ProjectSnapshot = {
@@ -983,24 +869,7 @@ export async function decideExperiment(
   );
 }
 
-export type ReviewAnnotationRead = {
-  id: string;
-  shot_id: string;
-  artifact_id: string | null;
-  target_kind: "shot" | "video_time" | "image_point" | "image_region";
-  time_start: string | null;
-  time_end: string | null;
-  x: string | null;
-  y: string | null;
-  width: string | null;
-  height: string | null;
-  note: string;
-  severity: string;
-  status: string;
-  created_by: string;
-  created_at: string;
-  resolved_at: string | null;
-};
+export type ReviewAnnotationRead = components["schemas"]["AnnotationRead"];
 
 export function fetchReviewAnnotations(
   projectId: string,
@@ -1029,51 +898,7 @@ export async function createReviewAnnotation(
   return apiSend("POST", `/api/v1/projects/${projectId}/shots/${shotId}/annotations`, input, csrf);
 }
 
-export type OpenCutManifestRead = {
-  schema_version: string;
-  adapter: string;
-  project_id: string;
-  official_line: string;
-  timeline: {
-    duration_seconds: string;
-    frame_rate: number;
-    timebase: string;
-    aspect_ratio: string;
-  };
-  tracks: Array<{
-    id: string;
-    kind: "video" | "audio" | "subtitle" | string;
-    name: string;
-    locked: boolean;
-    muted: boolean;
-    clips: Array<{
-      id: string;
-      shot_id: string;
-      scene_id: string;
-      track_kind: string;
-      timeline_start_seconds: string;
-      timeline_end_seconds: string;
-      source_in_seconds: string;
-      duration_seconds: string;
-      artifact_id: string | null;
-      source_url: string | null;
-      mime_type: string | null;
-      text: string | null;
-      trace: Record<string, unknown>;
-    }>;
-  }>;
-  shots: Array<{
-    shot_id: string;
-    shot_number: number;
-    scene_id: string;
-    timeline_start_seconds: string;
-    duration_seconds: string;
-    dialogue: string;
-    status: string;
-    artifact_ids: string[];
-    formal_artifacts: Record<string, string>;
-  }>;
-};
+export type OpenCutManifestRead = components["schemas"]["OpenCutManifest"];
 
 export function fetchOpenCutManifest(projectId: string): Promise<OpenCutManifestRead> {
   return apiGet(`/api/v1/projects/${projectId}/opencut-manifest`);
@@ -1236,16 +1061,7 @@ export async function updateShotCanvas(
     csrf,
   );
 }
-export type ExportResponse = {
-  export_id: string;
-  timeline_hash: string;
-  srt_hash: string;
-  package_hash: string;
-  mp4_object_key: string | null;
-  mp4_hash: string | null;
-  mp4_error: string | null;
-  export_item_count: number;
-};
+export type ExportResponse = components["schemas"]["ExportResponse"];
 
 export async function exportProject(projectId: string): Promise<ExportResponse> {
   const csrf = await fetchCsrf();

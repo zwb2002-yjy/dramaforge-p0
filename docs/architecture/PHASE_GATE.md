@@ -89,3 +89,30 @@ chore(architecture): freeze canonical product path and legacy inventory
 **Recorded, non-blocking notes for Phase 1+ (not Phase 0 gates):** `characters/lead` runs the image Provider synchronously in-request (accepted in the V1 program; a later task may defer it to the Worker); `characters`/`character_references` are COMPAT and must stop receiving writes before they can be removed in Phase 8; `Shot.status` is not yet normalized to the §13.1 six-value set; the unified/V3 config flags default False in code but are overridden `true` in the gitignored `.env`. These are enumerated in §4b and do not block Phase 0.
 
 **Phase 1 resume points (from the frozen facts):** migrate the two `creation-preview` shells (`ProjectWorkspaceShell`, `ProjectLobbyShell`) into `components/workstation/` / `app/layouts/`; establish real Script/Edit surface; split `features/workbench/*` into `features/scenes/` + `features/shots/`; ensure formal code stops importing `creation-preview`. (These are Phase 1 targets, not done here.)
+
+---
+
+# Phase 5 Gate (append — Unified Media Production engineering-gap + verification)
+
+**Branch:** `dev` · **Gate HEAD:** `550aa7c+` · **Alembic head:** `20260827_0049`（无新增迁移） · **Date:** 2026-08-29
+
+> Owner 选定 Phase 5 scope = 「补工程 gap + 验证（推荐）」：不新增真实 Provider 调用、不花新的 Provider 钱；复用 old-HEAD 真实 golden 证据，repro 非自动化。完整报告：`docs/reviews/PHASE5_MERGE_GATE_AUTONOMOUS_RUN_REPORT.md`。
+
+## Phase 5 Gate 清单
+
+| Gate item | Evidence | Status |
+|---|---|---|
+| 用户选择 X，实际执行就是 X | dispatch 冻结 `model_binding_id`（`shot_review._freeze_execution_model_resolution`）+ worker `explicit_binding`；PG 测试证明旧 run 用冻结 B1 而非新 B2 | **PASS** |
+| Provider 账户版本可追踪 | `execution_identity`（connection/credential revision）+ dispatch 冻结 `execution_model_resolution` | **PASS** |
+| 请求参数可追踪 | `request_fingerprint` + `effective_request` + `translation_report`（既有） | **PASS** |
+| 费用可追踪 | **已取消**（V2 修订，Owner 2026-08-29）——本阶段不产生真实成本证据，不构成 Gate | **N/A（取消）** |
+| Artifact 可追踪 | `get_or_create_artifact` + `produced_by_run_id`（既有） | **PASS** |
+| Worker 重启可恢复 | PG 测试 `test_worker_restart_requeues_resumable_unified_run_pg`（真实 `resumable_provider_node_run_contexts()` SQL） | **PASS** |
+| API 重启不丢任务 | PG 测试 `test_api_restart_outbox_reenqueues_pending_node_run_pg`（持久 Outbox→publish） | **PASS** |
+| 旧任务不会读取新的 Binding | PG 测试 `test_old_task_never_reads_new_binding_pg`（dispatch 冻结 B1，改指 B2 后仍以 B1 提交） | **PASS** |
+| Formal Artifact 必须人工确认 | 既有 promote 显式动作（Phase 4 继承） | **PASS** |
+| 真实 Provider 证据 | 复用 `GOLDEN-REAL-PROVIDER-RUN-2026-08-27.json`（2 paid calls, HEAD `01b53c0`）+ `WORKFLOW_V1_5_REAL_PROVIDER_GOLDEN.json`（HEAD `d3d945f`）；**repro 非自动化**；当前 HEAD 由 mock/plugin 测试证明，零真实调用 | **PASS（复用）** |
+
+**`PHASE_5_GATE = PASSED` → `READY_FOR_PHASE_6 (Review / Repair) = YES`.**
+
+> 修订注记：费用可追踪从 Phase 5 取消（2026-08-29 Owner 确认）——见 V2 Gate 清单修订与歧义表「成本如何认定」行。真实 Provider 链恢复运行时，按 Owner 决定补成本证据。

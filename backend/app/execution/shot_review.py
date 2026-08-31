@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.models import Project
 from app.assets.models import Shot
 from app.config import get_settings
 from app.consistency.identity_policy import identity_evidence_policy_snapshot
@@ -142,6 +143,69 @@ def _missing_required_prerequisites(
     for key in requested_keys:
         visit(key)
     return [key for key in SHOT_NODES if key in required and key not in requested]
+
+
+async def _freeze_execution_model_resolution(
+    session: AsyncSession,
+    *,
+    project: Project,
+    node_key: str,
+) -> dict[str, object]:
+    """Freeze the concrete ProviderModelBinding for unified media nodes at dispatch.
+
+    V2 §Phase 5 boundary: NodeRun creation must pin the binding/catalog/connection
+    identity so the worker cannot re-resolve a newer binding at submission time
+    (Gate: 旧任务不会读取新的 Binding). The worker already treats a snapshot
+    ``model_binding_id`` as ``explicit_binding`` and fail-closes on mismatch, so
+    this freeze is the missing dispatch half. Voice/TTS has no A+B media binding
+    (local TTS / manual media own it), so only keyframe/video freeze here.
+    Never raises — an unavailable resolution is recorded as an explicit audit
+    marker, and execution fail-closes with MODEL_BINDING_UNAVAILABLE (never
+    silently runs a different model).
+    """
+    from app.providers.capabilities import Capability
+    from app.providers.model_profiles.slots import ModelSlot
+    from app.providers.model_resolution import ExecutionModelResolver
+
+    slot_cap_purpose: dict[str, tuple[ModelSlot, Capability, str]] = {
+        "keyframe": (ModelSlot.VISUAL_KEYFRAME, Capability.IMAGE_GENERATE, "keyframe"),
+        # P0 shots always carry a keyframe as the video's first frame.
+        "video": (
+            ModelSlot.VIDEO_SHOT,
+            Capability.VIDEO_IMAGE_TO_VIDEO,
+            "video",
+        ),
+    }
+    pair = slot_cap_purpose.get(node_key)
+    if pair is None:
+        return {}
+    slot, capability, purpose = pair
+    try:
+        resolution = await ExecutionModelResolver(session).resolve(
+            project=project,
+            slot=slot,
+            capability=capability,
+            purpose=purpose,
+            mode_id="explicit_binding",
+        )
+    except Exception as exc:  # noqa: BLE001 - audit path, never block dispatch
+        return {
+            "model_binding_id": None,
+            "model_resolution_unavailable_reason": (
+                f"{type(exc).__name__}: {str(exc)[:120]}"
+            ),
+        }
+    if resolution.status != "RESOLVED" or resolution.provider_model_binding_id is None:
+        return {
+            "model_binding_id": None,
+            "model_resolution_unavailable_reason": (
+                resolution.reason or resolution.status
+            ),
+        }
+    return {
+        "model_binding_id": str(resolution.provider_model_binding_id),
+        "execution_model_resolution": resolution.model_dump(mode="json"),
+    }
 
 
 async def assert_shot_approvable(session: AsyncSession, *, project_id: UUID, shot_id: UUID) -> None:
@@ -527,6 +591,7 @@ async def start_shot_nodes(
                 canonical_locked_prompt=canonical_locked_prompt,
             )
         model_profile: dict[str, object] = {}
+        execution_freeze: dict[str, object] = {}
         if key in {"keyframe", "video", "voice"}:
             from app.providers.model_profiles.node_snapshot import (
                 derive_video_capability,
@@ -547,6 +612,15 @@ async def start_shot_nodes(
                 node_key=key,
                 video_capability=video_capability,
             )
+        if key in {"keyframe", "video"}:
+            # V2 §Phase 5: freeze the concrete binding at dispatch so the worker
+            # submits against the same model the operator reviewed, never a newer
+            # binding picked up after the run was created.
+            execution_freeze = await _freeze_execution_model_resolution(
+                session,
+                project=project,
+                node_key=key,
+            )
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),
             "node_key": key,
@@ -566,12 +640,14 @@ async def start_shot_nodes(
             "lead_identity_required": lead_identity_required,
             "identity_evidence_policy": identity_evidence_policy_snapshot(),
             "model_profile": model_profile,
+            **execution_freeze,
         }
         if not legacy_guard:
             snapshot["professional_trial_bootstrap_allowed"] = True
         if experiment_id is not None:
             snapshot["experiment_id"] = str(experiment_id)
         if model_binding_id is not None and key == model_binding_node_key:
+            # Explicit experiment override always wins over the resolver freeze.
             snapshot["model_binding_id"] = str(model_binding_id)
             snapshot["model_profile"] = {
                 **model_profile,

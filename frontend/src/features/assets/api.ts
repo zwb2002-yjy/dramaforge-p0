@@ -1,55 +1,12 @@
 /** Phase 2 feature-local API client (kept out of the shared lib/api.ts). */
 
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import type { components } from "../../shared/api/generated";
 
-export type AssetRead = {
-  id: string;
-  project_id: string;
-  kind: string;
-  name: string;
-  description: string;
-  metadata: Record<string, unknown>;
-  status: string;
-  version: number;
-  created_at: string;
-  updated_at: string;
-};
-
-export type AssetTagRead = {
-  id: string;
-  project_id: string;
-  name: string;
-  normalized_name: string;
-};
-
-export type AssetVersionRead = {
-  id: string;
-  asset_id: string;
-  version_number: number;
-  kind: string;
-  name: string;
-  description: string;
-  metadata: Record<string, unknown>;
-  status: string;
-  created_by: string;
-  created_at: string;
-};
-
-export type AssetCardRead = {
-  asset_id: string;
-  project_id: string;
-  kind: string;
-  name: string;
-  description: string;
-  status: string;
-  version: number;
-  metadata: Record<string, unknown>;
-  current_version_id: string | null;
-  current_version_number: number | null;
-  current_version_status: string | null;
-  references: Array<Record<string, unknown>>;
-  missing_reference_roles: string[];
-};
+export type AssetRead = components["schemas"]["AssetRead"];
+export type AssetTagRead = components["schemas"]["AssetTagRead"];
+export type AssetVersionRead = components["schemas"]["AssetVersionRead"];
+export type AssetCardRead = components["schemas"]["AssetCardRead"];
 
 export function fetchAssetTags(projectId: string): Promise<AssetTagRead[]> {
   return apiGet<AssetTagRead[]>(`/api/v1/projects/${projectId}/asset-tags`);
@@ -137,24 +94,7 @@ export function fetchAssetVersions(
   return apiGet<AssetVersionRead[]>(`/api/v1/projects/${projectId}/assets/${assetId}/versions`);
 }
 
-export type ShotBindingRead = {
-  id: string;
-  project_id: string;
-  shot_id: string;
-  shot_experiment_id: string | null;
-  stage: string;
-  asset_id: string | null;
-  asset_version_id: string | null;
-  artifact_id: string | null;
-  resolution_mode: string;
-  purpose: string;
-  label: string;
-  sort_order: number;
-  metadata: Record<string, unknown>;
-  version: number;
-  created_at: string;
-  updated_at: string;
-};
+export type ShotBindingRead = components["schemas"]["app__api__v1__references__BindingRead"];
 
 export function fetchShotReferences(projectId: string, shotId: string): Promise<ShotBindingRead[]> {
   return apiGet<ShotBindingRead[]>(`/api/v1/projects/${projectId}/shots/${shotId}/references`);
@@ -190,15 +130,7 @@ export async function createShotReference(
   );
 }
 
-export type ResolvedReferenceRead = {
-  purpose: string;
-  role: string;
-  artifact_id: string;
-  label: string;
-  source: string;
-  asset_id: string | null;
-  asset_version_id: string | null;
-};
+export type ResolvedReferenceRead = components["schemas"]["ResolvedReferenceRead"];
 
 export async function resolveShotReferences(
   projectId: string,

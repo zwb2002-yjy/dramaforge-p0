@@ -1139,7 +1139,11 @@ async def _execute_unified_media_node_run(
     )
     from app.providers.manifest import ModelCapabilityManifest
     from app.providers.model_resolution import ExecutionModelResolution
-    from app.providers.models import ProviderConnection, ProviderModelBinding
+    from app.providers.models import (
+        ProviderConnection,
+        ProviderConnectionRevision,
+        ProviderModelBinding,
+    )
     from app.providers.reference_delivery import approved_first_frame_for_video
     from app.providers.registry import get_plugin
     from app.providers.runtime import (
@@ -1175,6 +1179,7 @@ async def _execute_unified_media_node_run(
     frozen_identity: ExecutionIdentitySnapshot | None = None
     plan: Any = None
     connection: Any = None
+    connection_revision: ProviderConnectionRevision | None = None
     binding: Any = None
     entry: Any = None
     operation_identity = (
@@ -1455,6 +1460,20 @@ async def _execute_unified_media_node_run(
             binding = resolved.binding
             entry = resolved.catalog_entry
             invoke_model_value = resolved.invoke_model_value
+            connection_revision = await session.get(
+                ProviderConnectionRevision,
+                frozen_identity.connection_revision_id,
+            )
+            if (
+                connection_revision is None
+                or connection_revision.connection_id != frozen_identity.connection_id
+                or connection_revision.credential_revision_id
+                != frozen_identity.credential_revision_id
+            ):
+                raise ValidationAppError(
+                    "frozen provider connection revision is unavailable",
+                    details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
+                )
             if (
                 resolved.manifest_hash != frozen_identity.manifest_hash
                 or resolved.invoke_model_value != frozen_identity.invoke_model_value
@@ -1517,6 +1536,9 @@ async def _execute_unified_media_node_run(
                     details={"code": "MODEL_BINDING_MISSING"},
                 )
             pricing_currency = _binding_pricing_currency(binding, required=False)
+            connection_revision = await ProviderConnectionService(
+                session
+            ).current_connection_revision(connection=connection)
             cfg = await runtime_connection_settings(session, connection=connection)
             resolved = await ProviderRuntimeResolver(
                 session
@@ -1734,9 +1756,6 @@ async def _execute_unified_media_node_run(
             "warnings": [],
         }
         if frozen_identity is None:
-            connection_revision = await ProviderConnectionService(
-                session
-            ).current_connection_revision(connection=connection)
             identity = ExecutionIdentitySnapshot(
                 requested_model=(
                     plan.execution_model_resolution.requested_model_id or plan.model_id
@@ -1762,6 +1781,27 @@ async def _execute_unified_media_node_run(
                 translation_report=cast(dict[str, JsonValue], translation_report),
                 request_fingerprint=fingerprint,
             )
+            # The selection resolver above is allowed to inspect mutable
+            # configuration, but the network boundary must consume the exact
+            # immutable revision captured in the identity.  Rebuild the
+            # runtime from that identity before persisting submission_started
+            # so an endpoint/credential update between selection and submit
+            # cannot change the first Provider request.
+            resolved = await ProviderRuntimeResolver(
+                session
+            ).resolve_runtime_for_identity(
+                identity=identity,
+                workspace_id=project.workspace_id,
+            )
+            runtime = resolved.runtime
+            connection = resolved.connection
+            binding = resolved.binding
+            entry = resolved.catalog_entry
+            if binding is None or entry is None:
+                raise ValidationAppError(
+                    "frozen runtime resolution returned incomplete identity",
+                    details={"code": "EXECUTION_IDENTITY_MODEL_UNAVAILABLE"},
+                )
         else:
             candidate_identity = ExecutionIdentitySnapshot(
                 requested_model=frozen_identity.requested_model,
@@ -1788,6 +1828,11 @@ async def _execute_unified_media_node_run(
                     details={"code": "EXECUTION_IDENTITY_MISMATCH"},
                 )
             identity = frozen_identity
+        if connection_revision is None:
+            raise ValidationAppError(
+                "unified execution has no frozen provider connection revision",
+                details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
+            )
         identity_json = identity.model_dump(mode="json")
         selection_snapshot["execution_identity"] = identity_json
         snap = {

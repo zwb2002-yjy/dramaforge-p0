@@ -13,6 +13,7 @@ export const WORKSPACE_VIEWS = [
   "assets",
   "scenes",
   "production",
+  "review",
   "edit",
 ] as const;
 

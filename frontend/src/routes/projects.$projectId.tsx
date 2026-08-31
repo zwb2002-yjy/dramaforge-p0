@@ -4,11 +4,8 @@ import { useEffect, useRef } from "react";
 
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProjectWorkspaceShell } from "../components/workstation/ProjectWorkspaceShell";
-import { WORKFLOW_STATUS_ZH, stageForStatus } from "../features/director/stageMap";
-import { fetchDirectorWorkspace } from "../features/director/api";
-import type { DirectorWorkspaceSnapshot } from "../features/director/types";
 import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
-import { ApiError, getSelectedWorkspaceId } from "../lib/api";
+import { ApiError, fetchProject, getSelectedWorkspaceId, type ProjectRead } from "../lib/api";
 import { rootRoute } from "./__root";
 
 export const projectRoute = createRoute({
@@ -17,25 +14,22 @@ export const projectRoute = createRoute({
   component: ProjectLayout,
 });
 
-function EvidenceInspector({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | undefined }) {
-  if (!snapshot) return <p className="muted">正在读取画布、版本与生产证据。</p>;
-  const runningBatches = snapshot.production_batches.filter((item) => item.status === "running");
+function EvidenceInspector({ project }: { project: ProjectRead | undefined }) {
+  if (!project) return <p className="muted">正在读取项目与工作区事实。</p>;
   return (
     <div className="qc-project-inspector-summary">
       <section>
         <span className="director-stage-kicker">当前状态</span>
-        <h3>{WORKFLOW_STATUS_ZH[snapshot.workflow.status]}</h3>
-        <p>{snapshot.next_action}</p>
+        <h3>{project.stage}</h3>
+        <p>项目、场景、镜头与生产证据来自同一 canonical 数据源。</p>
       </section>
       <dl>
         <dt>画幅</dt>
-        <dd>{snapshot.aspect_ratio}</dd>
-        <dt>锁定版本</dt>
-        <dd>{Object.keys(snapshot.current_artifacts).length}</dd>
-        <dt>运行批次</dt>
-        <dd>{runningBatches.length}</dd>
-        <dt>待处理问题</dt>
-        <dd>{snapshot.issues.filter((item) => item.status !== "resolved").length}</dd>
+        <dd>{project.aspect_ratio}</dd>
+        <dt>项目版本</dt>
+        <dd>{project.version}</dd>
+        <dt>目标平台</dt>
+        <dd>{project.target_platform}</dd>
       </dl>
       <section>
         <h4>执行边界</h4>
@@ -47,23 +41,22 @@ function EvidenceInspector({ snapshot }: { snapshot: DirectorWorkspaceSnapshot |
   );
 }
 
-function ProjectOverview({ snapshot }: { snapshot: DirectorWorkspaceSnapshot | undefined }) {
+function ProjectOverview({ project }: { project: ProjectRead | undefined }) {
   const { projectId } = projectRoute.useParams();
   const { lastView } = useProjectWorkspaceState(projectId);
-  const currentStage = snapshot ? stageForStatus(snapshot.workflow.status) : "creative";
   const restoreTarget = lastView ?? "scenes";
   return (
     <div data-testid="project-panel" className="qc-project-overview">
       <header className="qc-page-heading">
         <p>项目总览</p>
-        <h1>{snapshot?.project_name ?? "短剧项目"}</h1>
+        <h1>{project?.name ?? "短剧项目"}</h1>
         <span>从场景和镜头到完整交付，画布、版本和媒体证据保留在同一个项目中。</span>
       </header>
       <section className="qc-overview-band">
         <div>
           <small>当前阶段</small>
-          <strong>{currentStage === "creative" ? "专业制作" : "专业制作"}</strong>
-          <p>{snapshot ? WORKFLOW_STATUS_ZH[snapshot.workflow.status] : "正在恢复项目事实"}</p>
+          <strong>专业制作</strong>
+          <p>{project?.stage ?? "正在恢复项目事实"}</p>
         </div>
         <div>
           <small>继续上次查看</small>
@@ -110,27 +103,17 @@ function ProjectLayout() {
   const view = workspaceViewFromPath(pathname);
   const atRoot = view === null && !onQuick;
   const ws = useProjectWorkspaceState(projectId);
-  const workspace = useQuery({
-    queryKey: ["director-workspace", projectId],
+  const project = useQuery({
+    queryKey: ["project", projectId],
     queryFn: async () => {
       try {
-        return await fetchDirectorWorkspace(projectId);
+        return await fetchProject(projectId);
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) return null;
         throw error;
       }
     },
-    // The professional workbench is the primary product surface. It reads its
-    // own Project/Shot/Graph facts and must not probe the retired Director
-    // snapshot (which would create a noisy 404 for projects without a legacy
-    // workflow). The legacy overview may still use the snapshot when opened.
     enabled: projectId !== "demo" && !onQuick && atRoot,
-    refetchInterval: (query) => {
-      const status = query.state.data?.workflow.status;
-      return status && ["trial_running", "production_running", "assembling"].includes(status)
-        ? 2_500
-        : false;
-    },
   });
 
   // Remember the current professional view so the next visit restores it.
@@ -144,7 +127,7 @@ function ProjectLayout() {
 
   if (onQuick) return <Outlet />;
 
-  const snapshot = workspace.data ?? undefined;
+  const projectRead = project.data ?? undefined;
 
   // Project root restores the last professional view unless the user explicitly
   // requested an anchor (e.g. model settings via #model-settings).
@@ -155,18 +138,18 @@ function ProjectLayout() {
   return (
     <ProjectWorkspaceShell
       projectId={projectId}
-      projectName={snapshot?.project_name ?? (projectId === "demo" ? "演示项目" : "短剧项目")}
+      projectName={projectRead?.name ?? (projectId === "demo" ? "演示项目" : "短剧项目")}
       activeView={view ?? "overview"}
-      inspector={<EvidenceInspector snapshot={snapshot} />}
+      inspector={<EvidenceInspector project={projectRead} />}
       modeLabel={view === "production" ? "专业模式" : (view ?? "项目总览")}
     >
-      {workspace.isError && (
+      {project.isError && (
         <div className="flash err">
-          无法读取 Director 项目事实：
-          {workspace.error instanceof Error ? workspace.error.message : "未知错误"}
+          无法读取项目事实：
+          {project.error instanceof Error ? project.error.message : "未知错误"}
         </div>
       )}
-      {atRoot ? <ProjectOverview snapshot={snapshot} /> : <Outlet />}
+      {atRoot ? <ProjectOverview project={projectRead} /> : <Outlet />}
     </ProjectWorkspaceShell>
   );
 }

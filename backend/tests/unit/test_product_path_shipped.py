@@ -617,3 +617,202 @@ def test_rls_migration_and_worker_jobs_registered() -> None:
     assert "ENABLE ROW LEVEL SECURITY" in text
     names = {getattr(f, "__name__", str(f)) for f in JOB_FUNCTIONS}
     assert "execute_node_run" in names
+
+
+@pytest.mark.asyncio
+async def test_start_shot_nodes_freezes_model_binding_at_dispatch(
+    session: AsyncSession,
+) -> None:
+    """V2 §Phase 5: dispatch must freeze the concrete binding, not re-resolve later.
+
+    ``start_shot_nodes`` writes ``model_binding_id`` + the full
+    ``execution_model_resolution`` into the keyframe/video NodeRun snapshot so
+    the worker's ``explicit_binding`` selection never reads a newer binding.
+    """
+    from datetime import date
+
+    from app.assets.models import Episode, Scene
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
+    from app.providers.models import (
+        ProjectProviderBinding,
+        ProviderConnection,
+        ProviderModelBinding,
+    )
+    from app.security.models import EncryptedProviderCredential
+
+    user, workspace_id = await _seed_user_workspace(session)
+    project = await ProjectService(session).create_project(
+        workspace_id=workspace_id,
+        name=f"Freeze-{uuid4().hex[:6]}",
+        aspect_ratio="9:16",
+        actor=user,
+    )
+    await session.flush()
+    episode = Episode(project_id=project.id, episode_number=1, title="E")
+    session.add(episode)
+    await session.flush()
+    scene = Scene(episode_id=episode.id, scene_number=1, location_name="L", time_of_day="day")
+    session.add(scene)
+    await session.flush()
+    shot = Shot(
+        project_id=project.id,
+        scene_id=scene.id,
+        shot_number=1,
+        sort_order=1,
+        visual_description="portrait",
+        dialogue="",
+        status="draft",
+        duration_seconds=5,
+    )
+    session.add(shot)
+    await session.flush()
+
+    manifest = next(
+        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+    )
+    credential = EncryptedProviderCredential(
+        workspace_id=workspace_id,
+        provider="agnes",
+        ciphertext="x",
+        key_version="test",
+    )
+    session.add(credential)
+    await session.flush()
+    entry = ModelCatalogEntry(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-image-2.1-flash",
+        model_revision="v2",
+        display_name="Agnes Image Flash",
+        media_kind="image",
+        lifecycle="active",
+        catalog_source="official_static",
+        capability_manifest_json=manifest,
+        option_schema_json={},
+        documented_at=date.fromisoformat("2026-08-10"),
+        contract_manifest_hash=hash_manifest(manifest),
+    )
+    session.add(entry)
+    await session.flush()
+    connection = ProviderConnection(
+        workspace_id=workspace_id,
+        provider_type="agnes",
+        display_name="Agnes",
+        base_url="https://api.agnes-ai.cn",
+        protocol_profile="agnes_cn_v1",
+        credential_id=credential.id,
+        credential_revision=1,
+        enabled=True,
+        verification_status="verified",
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(connection)
+    await session.flush()
+    binding = ProviderModelBinding(
+        workspace_id=workspace_id,
+        connection_id=connection.id,
+        media_type="image",
+        model_id="agnes-image-2.1-flash",
+        purpose="keyframe",
+        enabled=True,
+        documented=True,
+        contract_tested=True,
+        account_verified=True,
+        quality_gated=True,
+        catalog_entry_id=entry.id,
+        capability_manifest_hash=entry.contract_manifest_hash,
+        remote_resource_kind="model",
+        remote_resource_id="agnes-image-2.1-flash",
+        invoke_model_value="agnes-image-2.1-flash",
+        pricing_snapshot_json={"unit_amount": "1", "currency": "USD", "billing_unit": "image"},
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(binding)
+    await session.flush()
+    session.add(
+        ProjectProviderBinding(
+            project_id=project.id,
+            workspace_id=workspace_id,
+            purpose="keyframe",
+            model_binding_id=binding.id,
+            selection_strategy="explicit_binding",
+            fallback_policy="none",
+            updated_by=user.id,
+        )
+    )
+    await session.commit()
+
+    run_ids = await start_shot_nodes(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        user_id=user.id,
+        node_keys=["keyframe"],
+        legacy_guard=False,
+    )
+    assert len(run_ids) == 1
+    run = await session.get(NodeRun, run_ids[0])
+    assert run is not None and run.status == "queued"
+    snapshot = run.input_snapshot or {}
+    assert snapshot["model_binding_id"] == str(binding.id)
+    resolution = snapshot["execution_model_resolution"]
+    assert isinstance(resolution, dict)
+    assert resolution["provider_model_binding_id"] == str(binding.id)
+    assert resolution["invoke_model_value"] == "agnes-image-2.1-flash"
+    assert resolution["manifest_hash"] == entry.contract_manifest_hash
+
+
+@pytest.mark.asyncio
+async def test_start_shot_nodes_records_unavailable_binding_marker(
+    session: AsyncSession,
+) -> None:
+    """No eligible binding => dispatch records an explicit audit marker (no silent Y)."""
+    from app.assets.models import Episode, Scene
+
+    user, workspace_id = await _seed_user_workspace(session)
+    project = await ProjectService(session).create_project(
+        workspace_id=workspace_id,
+        name=f"NoBind-{uuid4().hex[:6]}",
+        aspect_ratio="9:16",
+        actor=user,
+    )
+    await session.flush()
+    episode = Episode(project_id=project.id, episode_number=1, title="E")
+    session.add(episode)
+    await session.flush()
+    scene = Scene(episode_id=episode.id, scene_number=1, location_name="L", time_of_day="day")
+    session.add(scene)
+    await session.flush()
+    shot = Shot(
+        project_id=project.id,
+        scene_id=scene.id,
+        shot_number=1,
+        sort_order=1,
+        visual_description="portrait",
+        dialogue="",
+        status="draft",
+        duration_seconds=5,
+    )
+    session.add(shot)
+    await session.flush()
+    await session.commit()
+
+    run_ids = await start_shot_nodes(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        user_id=user.id,
+        node_keys=["keyframe"],
+        legacy_guard=False,
+    )
+    run = await session.get(NodeRun, run_ids[0])
+    assert run is not None
+    snapshot = run.input_snapshot or {}
+    assert snapshot["model_binding_id"] is None
+    assert snapshot.get("model_resolution_unavailable_reason") in {
+        "MODEL_BINDING_MISSING",
+        "MODEL_BINDING_UNAVAILABLE",
+    }

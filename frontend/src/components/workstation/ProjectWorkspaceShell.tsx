@@ -9,6 +9,7 @@ import {
   Gauge,
   Menu,
   Package,
+  SearchCheck,
   Scissors,
   Settings,
 } from "lucide-react";
@@ -16,7 +17,7 @@ import {
 import "./project-shell.css";
 
 export type ProjectWorkspaceView =
-  "overview" | "script" | "assets" | "scenes" | "production" | "edit";
+  "overview" | "script" | "assets" | "scenes" | "production" | "review" | "edit";
 
 type ProjectWorkspaceShellProps = {
   projectId: string;
@@ -36,6 +37,7 @@ const NAV_ITEMS: Array<{
   { view: "assets", label: "资产", icon: Package },
   { view: "scenes", label: "场景", icon: Film },
   { view: "production", label: "专业生产", icon: Clapperboard },
+  { view: "review", label: "审片", icon: SearchCheck },
   { view: "edit", label: "剪辑", icon: Scissors },
 ];
 

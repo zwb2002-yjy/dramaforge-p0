@@ -13,6 +13,8 @@ test("professional edit: OpenCut manifest readable and edit route reachable", as
 
   // The edit workspace route is reachable from the project shell.
   await page.goto(`/projects/${PROJECT_ID}/edit`);
-  await expect(page.getByTestId("project-edit-page")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "剪辑工作区" })).toBeVisible();
+  await expect(page.getByTestId("editing-workspace")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "OpenCut 剪辑交接" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "正式时间线" })).toBeVisible();
+  await expect(page.getByTestId("editing-api-blocker")).toBeVisible();
 });

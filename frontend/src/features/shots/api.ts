@@ -9,8 +9,10 @@ export type ShotDesignRead = components["schemas"]["ShotDesignRead"];
 export function fetchShotWorkbench(
   projectId: string,
   shotId: string,
-): Promise<Record<string, unknown>> {
-  return apiGet<Record<string, unknown>>(`/api/v1/projects/${projectId}/shots/${shotId}/workbench`);
+): Promise<components["schemas"]["ShotWorkbenchRead"]> {
+  return apiGet<components["schemas"]["ShotWorkbenchRead"]>(
+    `/api/v1/projects/${projectId}/shots/${shotId}/workbench`,
+  );
 }
 
 export async function updateShotDesign(
