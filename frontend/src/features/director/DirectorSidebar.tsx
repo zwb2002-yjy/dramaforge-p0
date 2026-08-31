@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import {
@@ -43,6 +43,14 @@ export function DirectorSidebar({
   onWorkspaceRefresh,
 }: DirectorSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [designDirty, setDesignDirty] = useState(false);
+
+  // The panel is keyed by Shot identity, but the sidebar itself is not. Reset
+  // the sibling production guard whenever selection changes so Shot A's draft
+  // can never block or authorize Shot B.
+  useEffect(() => {
+    setDesignDirty(false);
+  }, [shot?.id]);
 
   return (
     <aside
@@ -86,6 +94,7 @@ export function DirectorSidebar({
                 projectId={projectId}
                 shot={shot}
                 onSaved={onWorkspaceRefresh}
+                onDirtyChange={setDesignDirty}
               />
             ) : (
               <p className="muted">选择一个镜头查看设计。</p>
@@ -124,6 +133,7 @@ export function DirectorSidebar({
                 shot={shot}
                 references={references}
                 referencesReady={referencesReady}
+                dirty={designDirty}
                 onExecuted={onWorkspaceRefresh}
               />
             ) : (
