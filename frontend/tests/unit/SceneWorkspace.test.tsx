@@ -207,6 +207,195 @@ describe("SceneWorkspace", () => {
       expected_shot_version: 1,
     });
   });
+
+  it("submits only the selected shot's resolved references", async () => {
+    const shot2 = {
+      ...SHOT_1,
+      id: "shot-2",
+      shot_number: 2,
+      sort_order: 2,
+      visual_description: "B looks back",
+      image_prompt: "second keyframe",
+    };
+    const calls: Array<{ method: string; url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      calls.push({ method, url, body });
+      if (url.endsWith("/workspace") && method === "GET") {
+        return json({
+          scene: {
+            id: "scene-1",
+            episode_id: "episode-1",
+            episode_number: 1,
+            scene_number: 1,
+            location_name: "Studio",
+            time_of_day: "day",
+            synopsis: "intro",
+            version: 1,
+            design_state: {},
+          },
+          shots: [SHOT_1, shot2],
+          references: { "shot-1": [], "shot-2": [] },
+          candidates: { "shot-1": [], "shot-2": [] },
+          trace: { "shot-1": [], "shot-2": [] },
+        });
+      }
+      if (url.endsWith("/assets") && method === "GET") {
+        return json([
+          {
+            id: "asset-a",
+            project_id: "project-1",
+            kind: "character",
+            name: "A",
+            description: "",
+            metadata: {},
+            status: "active",
+            version: 1,
+            created_at: "",
+            updated_at: "",
+          },
+          {
+            id: "asset-b",
+            project_id: "project-1",
+            kind: "character",
+            name: "B",
+            description: "",
+            metadata: {},
+            status: "active",
+            version: 1,
+            created_at: "",
+            updated_at: "",
+          },
+        ]);
+      }
+      if (url.endsWith("/shots/shot-1/references") && method === "GET") {
+        return json([
+          {
+            id: "binding-a",
+            project_id: "project-1",
+            shot_id: "shot-1",
+            shot_experiment_id: null,
+            stage: "both",
+            asset_id: "asset-a",
+            asset_version_id: "version-a",
+            artifact_id: null,
+            resolution_mode: "current_formal",
+            purpose: "identity",
+            label: "A",
+            sort_order: 0,
+            metadata: {},
+            version: 1,
+            created_at: "",
+            updated_at: "",
+          },
+        ]);
+      }
+      if (url.endsWith("/shots/shot-2/references") && method === "GET") {
+        return json([
+          {
+            id: "binding-b",
+            project_id: "project-1",
+            shot_id: "shot-2",
+            shot_experiment_id: null,
+            stage: "both",
+            asset_id: "asset-b",
+            asset_version_id: "version-b",
+            artifact_id: null,
+            resolution_mode: "current_formal",
+            purpose: "identity",
+            label: "B",
+            sort_order: 0,
+            metadata: {},
+            version: 1,
+            created_at: "",
+            updated_at: "",
+          },
+        ]);
+      }
+      if (url.endsWith("/shots/shot-1/references/resolve") && method === "POST") {
+        return json([
+          {
+            binding_id: "binding-a",
+            purpose: "identity",
+            role: "front_face",
+            artifact_id: "artifact-a",
+            label: "A",
+            source: "current_formal",
+            asset_id: "asset-a",
+            asset_version_id: "version-a",
+            mime_type: "image/png",
+            fingerprint: "fingerprint-a",
+          },
+        ]);
+      }
+      if (url.endsWith("/shots/shot-2/references/resolve") && method === "POST") {
+        return json([
+          {
+            binding_id: "binding-b",
+            purpose: "identity",
+            role: "front_face",
+            artifact_id: "artifact-b",
+            label: "B",
+            source: "current_formal",
+            asset_id: "asset-b",
+            asset_version_id: "version-b",
+            mime_type: "image/png",
+            fingerprint: "fingerprint-b",
+          },
+        ]);
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) {
+        return json({ plan: { accepted_approximations: [] }, plan_fingerprint: "a".repeat(64) });
+      }
+      if (url.endsWith("/executions")) {
+        return json({
+          node_run_id: "run-1",
+          graph_id: "graph-1",
+          graph_version_id: "version-graph-1",
+          status: "queued",
+          plan_fingerprint: "a".repeat(64),
+        });
+      }
+      return json({});
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SceneWorkspace projectId="project-1" sceneId="scene-1" />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("artifact-a");
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    await screen.findByTestId("shot-production-status");
+    const firstPlan = calls.find(
+      (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),
+    );
+    expect(firstPlan?.body.references).toMatchObject([
+      { binding_id: "binding-a", artifact_id: "artifact-a" },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /#2/ }));
+    await screen.findByText("artifact-b");
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    await waitFor(() => {
+      const plans = calls.filter(
+        (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),
+      );
+      expect(plans).toHaveLength(2);
+    });
+    const secondPlan = calls.filter(
+      (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),
+    )[1];
+    expect(secondPlan.body.references).toMatchObject([
+      { binding_id: "binding-b", artifact_id: "artifact-b" },
+    ]);
+  });
 });
 
 afterEach(() => vi.restoreAllMocks());

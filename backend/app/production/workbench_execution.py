@@ -25,9 +25,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
-from app.assets.models import Shot
+from app.assets.models import Asset, AssetVersion, AssetVersionReference, Shot
 from app.config import get_settings
-from app.execution.models import NodeRun
+from app.execution.models import Artifact, NodeRun
 from app.execution.shot_pipeline import (
     SHOT_PIPELINE_TEMPLATE_KEY,
     shot_pipeline_definition,
@@ -36,7 +36,7 @@ from app.production.execution_plan import (
     WorkbenchExecutionPlan,
 )
 from app.production.formal_selection import require_formal_keyframe
-from app.production.models import ProductionGraph
+from app.production.models import ProductionGraph, ShotReferenceBinding
 from app.production.reference_intents import (
     ShotReferenceIntent,
     compile_references,
@@ -110,6 +110,175 @@ class WorkbenchExecutionService:
         self._session = session
         self._user_id = user_id
 
+    async def _hydrate_and_validate_references(
+        self,
+        *,
+        project: Project,
+        shot_id: UUID,
+        stage: PlanStage,
+        references: list[ShotReferenceIntent],
+    ) -> list[ShotReferenceIntent]:
+        """Validate reference lineage before model resolution or graph writes.
+
+        ``ShotReferenceIntent`` deliberately carries identity rather than
+        bytes/URLs.  UUID foreign keys therefore are not enough to prove that
+        a reference belongs to this Project/Shot.  Resolve the persisted
+        Binding/AssetVersion relationship here and hydrate MIME/fingerprint
+        from the authoritative Artifact row so the compiler and the frozen
+        plan cannot be driven by client-supplied display metadata.
+        """
+
+        shot = await self._session.scalar(
+            select(Shot).where(Shot.id == shot_id, Shot.project_id == project.id)
+        )
+        if shot is None:
+            raise WorkbenchExecutionError(
+                "shot not found",
+                details={"code": "SHOT_NOT_FOUND"},
+            )
+        if not references:
+            return []
+
+        binding_ids = {reference.binding_id for reference in references if reference.binding_id}
+        bindings: dict[UUID, ShotReferenceBinding] = {}
+        if binding_ids:
+            binding_rows = (
+                await self._session.execute(
+                    select(ShotReferenceBinding).where(
+                        ShotReferenceBinding.id.in_(binding_ids),
+                        ShotReferenceBinding.project_id == project.id,
+                        ShotReferenceBinding.shot_id == shot.id,
+                    )
+                )
+            ).scalars().all()
+            bindings = {binding.id: binding for binding in binding_rows}
+
+        artifact_ids = {
+            reference.artifact_id for reference in references if reference.artifact_id
+        }
+        artifact_rows = (
+            await self._session.execute(
+                select(Artifact).where(
+                    Artifact.id.in_(artifact_ids),
+                    Artifact.project_id == project.id,
+                )
+            )
+        ).scalars().all()
+        artifacts = {artifact.id: artifact for artifact in artifact_rows}
+
+        version_ids = {
+            reference.asset_version_id
+            for reference in references
+            if reference.asset_version_id
+        }
+        versions: dict[UUID, AssetVersion] = {}
+        if version_ids:
+            version_rows = (
+                await self._session.execute(
+                    select(AssetVersion).where(
+                        AssetVersion.id.in_(version_ids),
+                        AssetVersion.project_id == project.id,
+                    )
+                )
+            ).scalars().all()
+            versions = {version.id: version for version in version_rows}
+
+        hydrated: list[ShotReferenceIntent] = []
+        expected_stage = "image" if stage == "image_keyframe" else "video"
+        for reference in references:
+            if reference.artifact_id is None:
+                raise WorkbenchExecutionError(
+                    "reference is missing a concrete artifact_id",
+                    details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
+                )
+            artifact = artifacts.get(reference.artifact_id)
+            if artifact is None:
+                raise WorkbenchExecutionError(
+                    "reference artifact does not belong to the current project",
+                    details={"code": "REFERENCE_PROJECT_MISMATCH"},
+                )
+
+            binding: ShotReferenceBinding | None = None
+            if reference.binding_id is not None:
+                binding = bindings.get(reference.binding_id)
+                if binding is None:
+                    raise WorkbenchExecutionError(
+                        "reference binding does not belong to the current shot",
+                        details={"code": "REFERENCE_BINDING_MISMATCH"},
+                    )
+                if binding.purpose != reference.purpose:
+                    raise WorkbenchExecutionError(
+                        "reference purpose does not match its binding",
+                        details={"code": "REFERENCE_BINDING_MISMATCH"},
+                    )
+                if binding.stage not in {"both", expected_stage}:
+                    raise WorkbenchExecutionError(
+                        "reference binding is not enabled for this execution stage",
+                        details={"code": "REFERENCE_STAGE_MISMATCH"},
+                    )
+
+            version_id = reference.asset_version_id
+            if binding is not None:
+                if binding.resolution_mode == "direct_artifact":
+                    if binding.artifact_id != artifact.id:
+                        raise WorkbenchExecutionError(
+                            "reference artifact does not match its binding",
+                            details={"code": "REFERENCE_LINEAGE_MISMATCH"},
+                        )
+                elif binding.resolution_mode == "pinned_version":
+                    version_id = binding.asset_version_id
+                else:
+                    asset = await self._session.scalar(
+                        select(Asset).where(
+                            Asset.id == binding.asset_id,
+                            Asset.project_id == project.id,
+                        )
+                    )
+                    if asset is None or asset.current_version_id is None:
+                        raise WorkbenchExecutionError(
+                            "reference asset has no current formal version",
+                            details={"code": "REFERENCE_NOT_RESOLVED"},
+                        )
+                    version_id = asset.current_version_id
+
+            if version_id is not None:
+                version = versions.get(version_id)
+                if version is None:
+                    version = await self._session.scalar(
+                        select(AssetVersion).where(
+                            AssetVersion.id == version_id,
+                            AssetVersion.project_id == project.id,
+                        )
+                    )
+                if version is None:
+                    raise WorkbenchExecutionError(
+                        "reference asset version does not belong to the current project",
+                        details={"code": "REFERENCE_PROJECT_MISMATCH"},
+                    )
+                linked = await self._session.scalar(
+                    select(AssetVersionReference.id).where(
+                        AssetVersionReference.asset_version_id == version.id,
+                        AssetVersionReference.artifact_id == artifact.id,
+                        AssetVersionReference.project_id == project.id,
+                    )
+                )
+                if linked is None:
+                    raise WorkbenchExecutionError(
+                        "reference artifact is not part of the selected asset version",
+                        details={"code": "REFERENCE_LINEAGE_MISMATCH"},
+                    )
+
+            hydrated.append(
+                reference.model_copy(
+                    update={
+                        "asset_version_id": version_id,
+                        "mime_type": artifact.mime_type or reference.mime_type,
+                        "fingerprint": artifact.content_hash,
+                    }
+                )
+            )
+        return hydrated
+
     async def build_plan(
         self,
         *,
@@ -121,6 +290,12 @@ class WorkbenchExecutionService:
         Fails closed (raises) when the model is unavailable or when capability
         gaps remain (unsupported references are never silently dropped).
         """
+        references = await self._hydrate_and_validate_references(
+            project=project,
+            shot_id=execution_input.shot_id,
+            stage=execution_input.stage,
+            references=list(execution_input.references),
+        )
         slot, capability, purpose, _node_key = _STAGE_CONTRACT[execution_input.stage]
         resolution = await ExecutionModelResolver(self._session).resolve(
             project=project,
@@ -185,7 +360,6 @@ class WorkbenchExecutionService:
             transport_profile_id="workbench",
         )
 
-        references = list(execution_input.references)
         if execution_input.stage == "video":
             # Video execution requires the shot formal keyframe; the latest
             # image must never be used as a fallback (03 §38/§39).
@@ -310,6 +484,13 @@ class WorkbenchExecutionService:
 
         snapshot: dict[str, object] = {
             "workbench_plan": plan.model_dump(mode="json"),
+            # Keep the compiled selection visible at the NodeRun boundary as
+            # well as inside the typed plan.  The Worker consumes this frozen
+            # list; it must never re-resolve mutable Asset/Binding state.
+            "references": [
+                reference.model_dump(mode="json")
+                for reference in plan.planned_references
+            ],
             "plan_fingerprint": plan.plan_fingerprint,
             "stage": plan.stage,
             "mode_id": plan.mode_id,

@@ -38,7 +38,7 @@ from app.execution.product_path import (
     execute_media_node_run,
 )
 from app.production import models as _pm  # noqa: F401
-from app.production.execution_plan import WorkbenchExecutionPlan
+from app.production.execution_plan import PlannedReference, WorkbenchExecutionPlan
 from app.production.service import GraphService
 from app.providers import registry as registry_module
 from app.providers.capabilities import Capability
@@ -1513,6 +1513,135 @@ async def test_professional_workbench_node_uses_frozen_unified_provider_path(
     assert operation.actual_provider not in {"flux", "kling"}
     assert _current_runtime().submit_calls == 1
     assert type(_current_runtime().factory_connection).__name__ == "FrozenProviderConnection"
+
+
+@pytest.mark.asyncio
+async def test_professional_workbench_reference_reaches_fake_compiler_and_runtime(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A frozen Workbench reference is transported into the existing compiler."""
+
+    _byok(monkeypatch)
+    monkeypatch.setattr(
+        "app.execution.product_path.get_settings",
+        lambda: Settings(provider_unified_path_enabled=False),
+    )
+    await _no_sleep(monkeypatch)
+    user, _workspace, run = await _seed_project_chain(session)
+    binding = await session.scalar(
+        select(ProviderModelBinding).where(ProviderModelBinding.purpose == "keyframe")
+    )
+    assert binding is not None
+    connection = await session.get(ProviderConnection, binding.connection_id)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert connection is not None and entry is not None
+    revision = await session.scalar(
+        select(ProviderConnectionRevision).where(
+            ProviderConnectionRevision.connection_id == connection.id
+        )
+    )
+    assert revision is not None
+
+    reference_bytes = b"workbench-reference-image"
+    stored = await get_object_store().put_bytes(
+        object_key=f"projects/{run.project_id}/references/{uuid4()}.png",
+        data=reference_bytes,
+        mime_type="image/png",
+    )
+    reference_artifact = Artifact(
+        project_id=run.project_id,
+        artifact_type="image",
+        storage_state="available",
+        object_key=stored.object_key,
+        content_hash=stored.content_hash,
+        mime_type=stored.mime_type,
+        byte_size=stored.byte_size,
+    )
+    session.add(reference_artifact)
+    await session.flush()
+
+    resolution = ExecutionModelResolution(
+        requested_model=f"{FAKE_PROVIDER}/{binding.model_id}",
+        resolved_model_id=f"{FAKE_PROVIDER}/{binding.model_id}",
+        source="request_override",
+        status="RESOLVED",
+        provider_model_binding_id=binding.id,
+        provider_connection_id=connection.id,
+        provider_connection_revision_id=revision.id,
+        credential_revision_id=revision.credential_revision_id,
+        catalog_entry_id=entry.id,
+        model_revision=entry.model_revision,
+        manifest_hash=entry.contract_manifest_hash,
+        invoke_model_value=binding.invoke_model_value,
+        capability=Capability.IMAGE_GENERATE,
+        mode_id="text_to_image",
+    )
+    workbench_plan = WorkbenchExecutionPlan(
+        project_id=run.project_id,
+        shot_id=run.project_id,
+        stage="image_keyframe",
+        prompt="workbench reference keyframe",
+        mode_id="text_to_image",
+        resolved_model=resolution,
+        capability=Capability.IMAGE_GENERATE,
+        planned_references=[
+            PlannedReference(
+                purpose="identity",
+                role="reference_image",
+                artifact_id=reference_artifact.id,
+                mime_type=reference_artifact.mime_type,
+                fingerprint=reference_artifact.content_hash,
+            )
+        ],
+        connection_revision_id=revision.id,
+        credential_revision_id=revision.credential_revision_id,
+    ).freeze()
+    resolution_json = resolution.model_dump(mode="json")
+    run.input_snapshot = {
+        **run.input_snapshot,
+        "professional_unified": True,
+        "workbench_plan": workbench_plan.model_dump(mode="json"),
+        "references": [
+            reference.model_dump(mode="json")
+            for reference in workbench_plan.planned_references
+        ],
+        "model_binding_id": str(binding.id),
+        "execution_model_resolution": resolution_json,
+        "selection_plan": {
+            "purpose": "keyframe",
+            "mode": "text_to_image",
+            "mode_id": "text_to_image",
+            "model_binding_id": str(binding.id),
+            "provider_type": FAKE_PROVIDER,
+            "protocol_profile": FAKE_PROFILE,
+            "catalog_entry_id": str(entry.id),
+            "model_id": f"{FAKE_PROVIDER}/{binding.model_id}",
+            "invoke_model_value": binding.invoke_model_value,
+            "connection_id": str(connection.id),
+            "manifest_hash": entry.contract_manifest_hash,
+            "execution_model_resolution": resolution_json,
+            "evidence": {"professional_unified": True},
+        },
+    }
+    await session.flush()
+
+    result = await execute_media_node_run(session, node_run_id=run.id)
+
+    assert result.node_type == "keyframe"
+    submitted = _current_runtime().submitted_image
+    assert submitted is not None
+    assert submitted.reference_artifact_ids == [reference_artifact.id]
+    operation = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+    )
+    assert operation is not None
+    request_summary = operation.request_summary
+    assert request_summary["reference_artifact_ids"] == [str(reference_artifact.id)]
+    assert request_summary["compiled_request"]["reference_artifact_ids"] == [
+        str(reference_artifact.id)
+    ]
 
 
 @pytest.mark.asyncio

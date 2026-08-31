@@ -138,6 +138,104 @@ describe("AssetReferencePicker", () => {
     expect(resolved).toHaveTextContent("identity / front_face / current_formal");
     expect(resolved).toHaveTextContent("artifact-1");
   });
+
+  it("removes the binding and clears the execution references", async () => {
+    let bindingPresent = true;
+    let emitted: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/assets") && method === "GET") {
+        return json([
+          {
+            id: "asset-linmo",
+            project_id: "project-1",
+            kind: "character",
+            name: "林墨",
+            description: "",
+            metadata: {},
+            status: "active",
+            version: 1,
+            created_at: "",
+            updated_at: "",
+          },
+        ]);
+      }
+      if (url.endsWith("/shots/shot-1/references") && method === "GET") {
+        return json(
+          bindingPresent
+            ? [
+                {
+                  id: "binding-1",
+                  project_id: "project-1",
+                  shot_id: "shot-1",
+                  shot_experiment_id: null,
+                  stage: "both",
+                  asset_id: "asset-linmo",
+                  asset_version_id: "version-1",
+                  artifact_id: null,
+                  resolution_mode: "current_formal",
+                  purpose: "identity",
+                  label: "@林墨",
+                  sort_order: 0,
+                  metadata: {},
+                  version: 1,
+                  created_at: "",
+                  updated_at: "",
+                },
+              ]
+            : [],
+        );
+      }
+      if (url.endsWith("/shots/shot-1/references/resolve") && method === "POST") {
+        return json(
+          bindingPresent
+            ? [
+                {
+                  binding_id: "binding-1",
+                  purpose: "identity",
+                  role: "front_face",
+                  artifact_id: "artifact-1",
+                  label: "@林墨",
+                  source: "current_formal",
+                  asset_id: "asset-linmo",
+                  asset_version_id: "version-1",
+                  mime_type: "image/png",
+                  fingerprint: "fingerprint-1",
+                },
+              ]
+            : [],
+        );
+      }
+      if (url.endsWith("/references/binding-1") && method === "DELETE") {
+        bindingPresent = false;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return json({});
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AssetReferencePicker
+          projectId="project-1"
+          shotId="shot-1"
+          onReferencesChange={(references) => {
+            emitted = references;
+          }}
+        />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("artifact-1");
+    expect(emitted).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /删除引用/ }));
+    await waitFor(() => expect(bindingPresent).toBe(false));
+    await waitFor(() => expect(emitted).toEqual([]));
+    expect(screen.getByText("尚未绑定资产引用。")).toBeInTheDocument();
+  });
 });
 
 afterEach(() => vi.restoreAllMocks());

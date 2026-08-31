@@ -6,12 +6,15 @@ import {
   SHOT_PRODUCTION_TRACE_QUERY_KEY,
   type ShotExecutionRead,
   type ShotExecutionStage,
+  type ShotExecutionReference,
   type ShotLite,
 } from "./api";
 
 type ShotProductionActionsProps = {
   projectId: string;
   shot: ShotLite;
+  references?: ShotExecutionReference[];
+  referencesReady?: boolean;
   onExecuted?: (result: ShotExecutionRead) => void | Promise<void>;
 };
 
@@ -47,7 +50,13 @@ function errorMessage(error: unknown): string {
  * that exact fingerprint.  This component never chooses an artifact for video
  * and never promotes a queued run to a successful result in local state.
  */
-export function ShotProductionActions({ projectId, shot, onExecuted }: ShotProductionActionsProps) {
+export function ShotProductionActions({
+  projectId,
+  shot,
+  references = [],
+  referencesReady = true,
+  onExecuted,
+}: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
 
@@ -63,6 +72,11 @@ export function ShotProductionActions({ projectId, shot, onExecuted }: ShotProdu
       if (!prompt) {
         throw new Error(`请先填写${STAGE_LABEL[stage]}提示词`);
       }
+
+      // Snapshot the selected Shot's concrete references at click time.  The
+      // same immutable input object is used for both preview and execution;
+      // a later picker refresh cannot make the two requests diverge.
+      const executionReferences = references.map((reference) => ({ ...reference }));
 
       return createShotExecution(
         projectId,
@@ -82,7 +96,7 @@ export function ShotProductionActions({ projectId, shot, onExecuted }: ShotProdu
           requested_model_id: null,
           requested_binding_id: null,
           accept_approximations: false,
-          references: [],
+          references: executionReferences,
           expected_shot_version: shot.version,
         },
         idempotencyKey(projectId, shot.id, stage),
@@ -150,7 +164,7 @@ export function ShotProductionActions({ projectId, shot, onExecuted }: ShotProdu
           type="button"
           data-testid="generate-keyframe"
           onClick={() => produce.mutate("image_keyframe")}
-          disabled={produce.isPending}
+          disabled={produce.isPending || !referencesReady}
         >
           {activeStage === "image_keyframe" ? "关键帧入队中…" : "生成关键帧"}
         </button>
@@ -158,7 +172,7 @@ export function ShotProductionActions({ projectId, shot, onExecuted }: ShotProdu
           type="button"
           data-testid="generate-video"
           onClick={() => produce.mutate("video")}
-          disabled={produce.isPending}
+          disabled={produce.isPending || !referencesReady}
         >
           {activeStage === "video" ? "视频入队中…" : "生成视频"}
         </button>
@@ -167,6 +181,11 @@ export function ShotProductionActions({ projectId, shot, onExecuted }: ShotProdu
       <p className="qc-shot-production-hint">
         视频只使用后端确认的正式关键帧；未选择时由后端拒绝，不会自动改用其他图片。
       </p>
+      {!referencesReady && (
+        <p className="qc-shot-production-hint" role="status">
+          正在解析当前镜头的资产引用；解析完成前不会提交生产请求。
+        </p>
+      )}
 
       {feedback?.kind === "success" && (
         <p className="qc-shot-production-status" data-testid="shot-production-status" role="status">

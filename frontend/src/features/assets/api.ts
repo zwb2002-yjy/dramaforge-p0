@@ -95,6 +95,13 @@ export function fetchAssetVersions(
 }
 
 export type ShotBindingRead = components["schemas"]["app__api__v1__references__BindingRead"];
+export type ShotExecutionReference = components["schemas"]["ShotReferenceIntent"];
+export type ResolvedShotReference = components["schemas"]["ResolvedReferenceRead"] & {
+  /** Optional server lineage fields retained for forward-compatible responses. */
+  binding_id?: string | null;
+  mime_type?: string;
+  fingerprint?: string | null;
+};
 
 export function fetchShotReferences(projectId: string, shotId: string): Promise<ShotBindingRead[]> {
   return apiGet<ShotBindingRead[]>(`/api/v1/projects/${projectId}/shots/${shotId}/references`);
@@ -130,7 +137,17 @@ export async function createShotReference(
   );
 }
 
-export type ResolvedReferenceRead = components["schemas"]["ResolvedReferenceRead"];
+export async function deleteShotReference(projectId: string, bindingId: string): Promise<void> {
+  const csrf = await fetchCsrf();
+  await apiSend<void>(
+    "DELETE",
+    `/api/v1/projects/${projectId}/references/${bindingId}`,
+    undefined,
+    csrf,
+  );
+}
+
+export type ResolvedReferenceRead = ResolvedShotReference;
 
 export async function resolveShotReferences(
   projectId: string,

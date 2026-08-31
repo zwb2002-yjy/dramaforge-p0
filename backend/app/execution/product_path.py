@@ -1255,6 +1255,10 @@ async def _execute_unified_media_node_run(
     result: SubmissionResult | None = None
     director_context: DirectorMediaExecutionContext | None = None
 
+    workbench_planned_references = (
+        list(workbench_plan.planned_references) if workbench_plan is not None else []
+    )
+
     resubmit = bool(op is not None and op.status == "rejected" and not op.provider_operation_id)
     if op is not None and not resubmit:
         # A crash between the submission_started commit and the remote-id write
@@ -1330,12 +1334,26 @@ async def _execute_unified_media_node_run(
         image_intent: ImageGenerationIntent | None = None
         video_intent: VideoGenerationIntentV1 | None = None
         if node_type == "keyframe":
-            canonical_artifact_id = snap.get("canonical_artifact_id")
+            workbench_image_reference = next(
+                (
+                    reference
+                    for reference in workbench_planned_references
+                    if reference.role == "reference_image"
+                    and reference.artifact_id is not None
+                    and reference.delivery != "unsupported"
+                ),
+                None,
+            )
+            canonical_artifact_id = (
+                workbench_image_reference.artifact_id
+                if workbench_image_reference is not None
+                else snap.get("canonical_artifact_id")
+            )
             reference_uuid: UUID | None = None
-            if isinstance(canonical_artifact_id, str):
+            if canonical_artifact_id is not None:
                 try:
-                    reference_uuid = UUID(canonical_artifact_id)
-                except ValueError:
+                    reference_uuid = UUID(str(canonical_artifact_id))
+                except (TypeError, ValueError, AttributeError):
                     reference_uuid = None
             raw_ratio = str(snap.get("aspect_ratio") or project.aspect_ratio or "")
             image_ratio: Literal["9:16", "16:9"] | None = (
@@ -1353,11 +1371,17 @@ async def _execute_unified_media_node_run(
                 seed=None,
                 reference_artifact_id=reference_uuid,
                 reference_fingerprint=(
-                    hashlib.sha256(canonical_image_bytes).hexdigest()
+                    workbench_image_reference.fingerprint
+                    if workbench_image_reference is not None
+                    else hashlib.sha256(canonical_image_bytes).hexdigest()
                     if canonical_image_bytes is not None
                     else None
                 ),
-                reference_mime=str(snap.get("canonical_mime_type") or "image/png"),
+                reference_mime=(
+                    workbench_image_reference.mime_type
+                    if workbench_image_reference is not None
+                    else str(snap.get("canonical_mime_type") or "image/png")
+                ),
                 selection=ModelSelectionIntent(
                     mode="explicit_binding",
                     model_binding_id=frozen_binding_id,
@@ -1393,6 +1417,54 @@ async def _execute_unified_media_node_run(
                     "Director video request has an unsupported aspect ratio",
                     details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
                 )
+            planned_video_references = [
+                reference
+                for reference in workbench_planned_references
+                if reference.artifact_id is not None
+                and reference.role is not None
+                and reference.delivery != "unsupported"
+            ]
+            planned_first_frame = next(
+                (
+                    reference
+                    for reference in planned_video_references
+                    if reference.role == "first_frame"
+                ),
+                None,
+            )
+            if (
+                planned_first_frame is not None
+                and planned_first_frame.artifact_id != first_frame.id
+            ):
+                raise ValidationAppError(
+                    "frozen Workbench first_frame does not match the formal keyframe",
+                    details={"code": "FORMAL_KEYFRAME_SNAPSHOT_MISMATCH"},
+                )
+            intent_references = [
+                ArtifactReferenceIntent(
+                    artifact_id=cast(UUID, reference.artifact_id),
+                    role=cast(
+                        Literal[
+                            "first_frame",
+                            "last_frame",
+                            "reference_image",
+                            "reference_video",
+                            "reference_audio",
+                        ],
+                        reference.role,
+                    ),
+                    required=True,
+                )
+                for reference in planned_video_references
+            ]
+            if not intent_references:
+                intent_references = [
+                    ArtifactReferenceIntent(
+                        artifact_id=first_frame.id,
+                        role="first_frame",
+                        required=True,
+                    )
+                ]
             video_intent = VideoGenerationIntentV1(
                 prompt=prompt,
                 output=VideoOutputIntent(
@@ -1400,13 +1472,7 @@ async def _execute_unified_media_node_run(
                     duration_seconds=duration_seconds,
                     generate_audio=False,
                 ),
-                references=[
-                    ArtifactReferenceIntent(
-                        artifact_id=first_frame.id,
-                        role="first_frame",
-                        required=True,
-                    )
-                ],
+                references=intent_references,
                 selection=ModelSelectionIntent(
                     mode="explicit_binding",
                     model_binding_id=frozen_binding_id,
@@ -1793,13 +1859,97 @@ async def _execute_unified_media_node_run(
                 )
         compiled: CompiledImageRequest | CompiledVideoRequest
         identity_references: list[ExecutionIdentityReference] = []
+
+        async def _load_workbench_reference(
+            reference: Any,
+            *,
+            existing_artifact: Artifact | None = None,
+            existing_bytes: bytes | None = None,
+        ) -> ResolvedReference:
+            """Load one frozen Workbench artifact for the existing compiler.
+
+            The plan has already validated project/asset lineage.  At the
+            worker boundary we additionally verify the immutable storage hash
+            before handing bytes/URL transport to the provider adapter, so a
+            later Asset/Binding change cannot alter a queued run.
+            """
+
+            artifact_id = getattr(reference, "artifact_id", None)
+            role = getattr(reference, "role", None)
+            if artifact_id is None or not isinstance(role, str) or not role:
+                raise ValidationAppError(
+                    "frozen Workbench reference identity is incomplete",
+                    details={"code": "REFERENCE_IDENTITY_INVALID"},
+                )
+            artifact = existing_artifact or await session.get(Artifact, artifact_id)
+            if (
+                artifact is None
+                or artifact.project_id != project.id
+                or artifact.storage_state != "available"
+                or artifact.deleted_at is not None
+            ):
+                raise ValidationAppError(
+                    "frozen Workbench reference artifact is unavailable",
+                    details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
+                )
+            frozen_mime = getattr(reference, "mime_type", None)
+            frozen_fingerprint = getattr(reference, "fingerprint", None)
+            if frozen_mime and frozen_mime != artifact.mime_type:
+                raise ValidationAppError(
+                    "frozen Workbench reference MIME does not match the artifact",
+                    details={"code": "REFERENCE_METADATA_MISMATCH"},
+                )
+            if frozen_fingerprint and frozen_fingerprint != artifact.content_hash:
+                raise ValidationAppError(
+                    "frozen Workbench reference fingerprint does not match the artifact",
+                    details={"code": "REFERENCE_METADATA_MISMATCH"},
+                )
+            content_bytes: bytes | None = None
+            if provider_type != "volcengine":
+                content_bytes = existing_bytes if artifact.id == artifact_id else None
+                if content_bytes is None:
+                    try:
+                        content_bytes = await obj_store.get_bytes(
+                            object_key=artifact.object_key
+                        )
+                    except Exception as exc:
+                        raise ValidationAppError(
+                            "frozen Workbench reference bytes are unavailable",
+                            details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
+                        ) from exc
+                if (
+                    not content_bytes
+                    or hashlib.sha256(content_bytes).hexdigest() != artifact.content_hash
+                ):
+                    raise ValidationAppError(
+                        "frozen Workbench reference hash mismatch",
+                        details={"code": "ARTIFACT_HASH_MISMATCH"},
+                    )
+            return await _unified_resolved_reference(
+                session,
+                project=project,
+                run=run,
+                role=role,
+                artifact=artifact,
+                content_bytes=content_bytes,
+                mime_type=str(getattr(reference, "mime_type", None) or artifact.mime_type),
+                fingerprint=str(getattr(reference, "fingerprint", None) or artifact.content_hash),
+                provider_type=provider_type,
+            )
+
         if node_type == "keyframe":
             image_compiler = resolved.image_compiler
             if image_compiler is None:
                 raise ValidationAppError("unified plugin has no image compiler")
             assert image_intent is not None
             refs: list[ResolvedReference] = []
-            if has_canonical_binding and canonical_image_bytes is not None:
+            if workbench_planned_references:
+                refs = [
+                    await _load_workbench_reference(reference)
+                    for reference in workbench_planned_references
+                    if reference.delivery != "unsupported"
+                ]
+            elif has_canonical_binding and canonical_image_bytes is not None:
                 refs.append(
                     await _unified_resolved_reference(
                         session,
@@ -1834,19 +1984,36 @@ async def _execute_unified_media_node_run(
             video_compiler = resolved.video_compiler
             if video_compiler is None:
                 raise ValidationAppError("unified plugin has no video compiler")
-            video_references = [
-                await _unified_resolved_reference(
-                    session,
-                    project=project,
-                    run=run,
-                    role="first_frame",
-                    artifact=first_frame,
-                    content_bytes=frame_bytes,
-                    mime_type=first_frame.mime_type or "image/png",
-                    fingerprint=first_frame.content_hash,
-                    provider_type=provider_type,
-                )
-            ]
+            if workbench_planned_references:
+                video_references = [
+                    await _load_workbench_reference(
+                        reference,
+                        existing_artifact=first_frame
+                        if reference.artifact_id == first_frame.id
+                        else None,
+                        existing_bytes=frame_bytes
+                        if reference.artifact_id == first_frame.id
+                        else None,
+                    )
+                    for reference in workbench_planned_references
+                    if reference.delivery != "unsupported"
+                ]
+            else:
+                # Historical unified runs without a P4 plan retain the formal
+                # first-frame path exactly as before.
+                video_references = [
+                    await _unified_resolved_reference(
+                        session,
+                        project=project,
+                        run=run,
+                        role="first_frame",
+                        artifact=first_frame,
+                        content_bytes=frame_bytes,
+                        mime_type=first_frame.mime_type or "image/png",
+                        fingerprint=first_frame.content_hash,
+                        provider_type=provider_type,
+                    )
+                ]
             identity_references = [
                 ExecutionIdentityReference(
                     role=reference.role,
@@ -1862,6 +2029,18 @@ async def _execute_unified_media_node_run(
                 video_references,
                 invoke_model_value=invoke_model_value,
             )
+
+        if workbench_planned_references:
+            expected_reference_ids = [
+                reference.artifact_id
+                for reference in workbench_planned_references
+                if reference.delivery != "unsupported" and reference.artifact_id is not None
+            ]
+            if list(compiled.reference_artifact_ids) != expected_reference_ids:
+                raise ValidationAppError(
+                    "Provider compiler did not preserve the frozen Workbench references",
+                    details={"code": "REFERENCE_COMPILER_MISMATCH"},
+                )
 
         kind = node_type
         fingerprint = hashlib.sha256(
