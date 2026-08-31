@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ShotProductionActions } from "../../src/features/shots/ShotProductionActions";
+import type { ShotExecutionReference } from "../../src/features/shots/api";
 
 const SHOT = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -34,13 +35,13 @@ function json(body: unknown, status = 200) {
   );
 }
 
-function renderActions() {
+function renderActions(references: ShotExecutionReference[] = []) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={queryClient}>
-      <ShotProductionActions projectId={SHOT.project_id} shot={SHOT} />
+      <ShotProductionActions projectId={SHOT.project_id} shot={SHOT} references={references} />
     </QueryClientProvider>,
   );
 }
@@ -110,7 +111,8 @@ describe("ShotProductionActions", () => {
         return json(
           {
             code: "VALIDATION_ERROR",
-            detail: "shot has no formal keyframe artifact; select a formal keyframe before video generation",
+            detail:
+              "shot has no formal keyframe artifact; select a formal keyframe before video generation",
           },
           422,
         );
@@ -130,5 +132,47 @@ describe("ShotProductionActions", () => {
       mode_id: "first_frame",
       expected_shot_version: SHOT.version,
     });
+  });
+
+  it("carries the same concrete references through plan and execution", async () => {
+    const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      calls.push({ url, method, body });
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) {
+        return json({ plan: { accepted_approximations: [] }, plan_fingerprint: "b".repeat(64) });
+      }
+      if (url.endsWith("/executions")) {
+        return json({
+          node_run_id: "33333333-3333-4333-8333-333333333333",
+          graph_id: "44444444-4444-4444-8444-444444444444",
+          graph_version_id: "55555555-5555-4555-8555-555555555555",
+          status: "queued",
+          plan_fingerprint: "b".repeat(64),
+        });
+      }
+      return json({});
+    });
+
+    const reference: ShotExecutionReference = {
+      binding_id: "binding-1",
+      purpose: "identity",
+      asset_version_id: "version-1",
+      artifact_id: "artifact-1",
+      resolution_mode: "current_formal",
+      mime_type: "image/png",
+      fingerprint: "artifact-fingerprint",
+    };
+    renderActions([reference]);
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+
+    await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
+    const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
+    const execution = calls.find((call) => call.url.endsWith("/executions"));
+    expect(plan?.body.references).toEqual([reference]);
+    expect(execution?.body.references).toEqual([reference]);
   });
 });

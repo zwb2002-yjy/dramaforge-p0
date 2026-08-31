@@ -4,6 +4,7 @@ import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type ShotLite = components["schemas"]["ShotLiteRead"];
+export type ShotExecutionReference = components["schemas"]["ShotReferenceIntent"];
 export type ShotDesignRead = components["schemas"]["ShotDesignRead"];
 export type ShotExecutionStage = components["schemas"]["ExecutionPlanBody"]["stage"];
 export type ShotExecutionRead = components["schemas"]["ExecutionRead"];
@@ -101,10 +102,14 @@ export async function createShotExecution(
   idempotencyKey: string,
 ): Promise<ShotExecutionRead> {
   const csrf = await fetchCsrf();
+  const frozenInput: ShotExecutionInput = {
+    ...input,
+    references: (input.references ?? []).map((reference) => ({ ...reference })),
+  };
   const preview = await apiSend<components["schemas"]["ExecutionPlanRead"]>(
     "POST",
     `/api/v1/projects/${projectId}/shots/${shotId}/execution-plan`,
-    input,
+    frozenInput,
     csrf,
   );
   const acceptedApproximations = Array.isArray(preview.plan.accepted_approximations)
@@ -116,7 +121,7 @@ export async function createShotExecution(
     "POST",
     `/api/v1/projects/${projectId}/shots/${shotId}/executions`,
     {
-      ...input,
+      ...frozenInput,
       plan_fingerprint: preview.plan_fingerprint,
       accepted_approximations: acceptedApproximations,
     },

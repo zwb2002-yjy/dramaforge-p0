@@ -18,8 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
-from app.assets.models import AssetVersion, AssetVersionReference, Shot
+from app.assets.models import Asset, AssetVersion, AssetVersionReference, Shot
 from app.assets.version_service import AssetVersionService
+from app.execution.models import Artifact
 from app.production.models import (
     SHOT_REFERENCE_PURPOSES,
     SHOT_REFERENCE_RESOLUTION_MODES,
@@ -133,6 +134,57 @@ def _validate_binding_source(
         raise ValidationAppError("direct_artifact bindings require artifact_id")
 
 
+async def _validate_binding_source_ownership(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    asset_id: UUID | None,
+    asset_version_id: UUID | None,
+    artifact_id: UUID | None,
+) -> None:
+    """Keep persisted bindings inside the project they claim to reference.
+
+    The source columns are UUIDs, so the database foreign keys alone do not
+    establish project ownership.  Without this check a binding could point at
+    another project's Asset/Version/Artifact and later resolve to an empty or
+    foreign execution input.
+    """
+
+    if asset_id is not None:
+        asset = await session.scalar(
+            select(Asset.id).where(Asset.id == asset_id, Asset.project_id == project_id)
+        )
+        if asset is None:
+            raise ValidationAppError(
+                "reference asset does not belong to the current project",
+                details={"code": "REFERENCE_PROJECT_MISMATCH"},
+            )
+    if asset_version_id is not None:
+        version = await session.scalar(
+            select(AssetVersion.id).where(
+                AssetVersion.id == asset_version_id,
+                AssetVersion.project_id == project_id,
+            )
+        )
+        if version is None:
+            raise ValidationAppError(
+                "reference asset version does not belong to the current project",
+                details={"code": "REFERENCE_PROJECT_MISMATCH"},
+            )
+    if artifact_id is not None:
+        artifact = await session.scalar(
+            select(Artifact.id).where(
+                Artifact.id == artifact_id,
+                Artifact.project_id == project_id,
+            )
+        )
+        if artifact is None:
+            raise ValidationAppError(
+                "reference artifact does not belong to the current project",
+                details={"code": "REFERENCE_PROJECT_MISMATCH"},
+            )
+
+
 class ShotReferenceService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -195,6 +247,13 @@ class ShotReferenceService:
             asset_version_id=body.asset_version_id,
             artifact_id=body.artifact_id,
             resolution_mode=body.resolution_mode,
+        )
+        await _validate_binding_source_ownership(
+            self._session,
+            project_id=project_id,
+            asset_id=body.asset_id,
+            asset_version_id=body.asset_version_id,
+            artifact_id=body.artifact_id,
         )
         binding = ShotReferenceBinding(
             project_id=project_id,
@@ -273,6 +332,13 @@ class ShotReferenceService:
             artifact_id=new_artifact_id,
             resolution_mode=new_mode,
         )
+        await _validate_binding_source_ownership(
+            self._session,
+            project_id=project_id,
+            asset_id=new_asset_id,
+            asset_version_id=new_version_id,
+            artifact_id=new_artifact_id,
+        )
         if new_purpose not in SHOT_REFERENCE_PURPOSES:
             raise ValidationAppError("unknown reference purpose")
         if new_stage not in SHOT_REFERENCE_STAGES:
@@ -329,6 +395,14 @@ class ShotReferenceService:
     ) -> list[ResolvedReferenceRead]:
         if binding.resolution_mode == "direct_artifact":
             if binding.artifact_id is None:
+                return []
+            artifact_exists = await self._session.scalar(
+                select(Artifact.id).where(
+                    Artifact.id == binding.artifact_id,
+                    Artifact.project_id == project_id,
+                )
+            )
+            if artifact_exists is None:
                 return []
             return [
                 ResolvedReferenceRead(

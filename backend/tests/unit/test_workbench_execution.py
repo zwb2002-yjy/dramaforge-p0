@@ -199,6 +199,205 @@ async def test_build_plan_fails_closed_on_fatal_reference_gap(session: AsyncSess
 
 
 @pytest.mark.asyncio
+async def test_reference_identity_is_hydrated_and_frozen_in_node_run_snapshot(
+    session: AsyncSession,
+) -> None:
+    """A persisted Binding resolves to a concrete artifact before queueing."""
+
+    project, video_binding, user = await _seed(session)
+    from app.assets.models import Asset, AssetVersion, AssetVersionReference, Shot
+    from app.execution.models import Artifact
+    from app.production.models import ShotReferenceBinding
+    from app.production.reference_intents import ShotReferenceIntent
+
+    # The shared seed only needs one additional image binding to exercise the
+    # keyframe path; no provider call is made by WorkbenchExecutionService.
+    image_manifest = next(
+        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+    )
+    image_entry = ModelCatalogEntry(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-image-2.1-flash",
+        model_revision="v2",
+        display_name="Agnes Image",
+        media_kind="image",
+        lifecycle="active",
+        catalog_source="official_static",
+        capability_manifest_json=image_manifest,
+        option_schema_json={},
+        documented_at=date.fromisoformat("2026-08-19"),
+        contract_manifest_hash=hash_manifest(image_manifest),
+    )
+    session.add(image_entry)
+    await session.flush()
+    image_binding = ProviderModelBinding(
+        workspace_id=project.workspace_id,
+        connection_id=video_binding.connection_id,
+        media_type="image",
+        model_id="agnes-image-2.1-flash",
+        purpose="keyframe",
+        enabled=True,
+        documented=True,
+        contract_tested=True,
+        account_verified=True,
+        quality_gated=True,
+        catalog_entry_id=image_entry.id,
+        capability_manifest_hash=image_entry.contract_manifest_hash,
+        remote_resource_kind="model",
+        remote_resource_id="agnes-image-2.1-flash",
+        invoke_model_value="agnes-image-2.1-flash",
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(image_binding)
+    await session.flush()
+
+    shot = Shot(
+        project_id=project.id,
+        scene_id=uuid4(),
+        shot_number=11,
+        version=1,
+        visual_description="Reference keyframe",
+    )
+    session.add(shot)
+    await session.flush()
+    asset = Asset(
+        project_id=project.id,
+        kind="character",
+        name="Reference character",
+        description="",
+        status="active",
+        metadata_json={},
+    )
+    session.add(asset)
+    await session.flush()
+    version = AssetVersion(
+        project_id=project.id,
+        asset_id=asset.id,
+        version_number=1,
+        kind="character",
+        name="Reference character v1",
+        description="",
+        metadata_json={},
+        status="formal",
+        created_by=user.id,
+    )
+    session.add(version)
+    await session.flush()
+    asset.current_version_id = version.id
+    artifact = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="c" * 64,
+        mime_type="image/png",
+        byte_size=1,
+    )
+    session.add(artifact)
+    await session.flush()
+    session.add(
+        AssetVersionReference(
+            project_id=project.id,
+            asset_version_id=version.id,
+            artifact_id=artifact.id,
+            reference_role="front_face",
+            label="front",
+            sort_order=0,
+            metadata_json={},
+        )
+    )
+    reference_binding = ShotReferenceBinding(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="image",
+        asset_id=asset.id,
+        resolution_mode="current_formal",
+        purpose="identity",
+        label="Reference character",
+        metadata_json={},
+        created_by=user.id,
+    )
+    session.add(reference_binding)
+    await session.flush()
+
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    execution_input = _input(
+        shot_id=shot.id,
+        stage="image_keyframe",
+        requested_binding_id=image_binding.id,
+        mode_id="text_to_image",
+        references=[
+            ShotReferenceIntent(
+                binding_id=reference_binding.id,
+                purpose="identity",
+                asset_version_id=version.id,
+                artifact_id=artifact.id,
+                mime_type="image/jpeg",  # server must hydrate the real MIME
+            )
+        ],
+    )
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    assert len(plan.planned_references) == 1
+    planned = plan.planned_references[0]
+    assert planned.binding_id == reference_binding.id
+    assert planned.artifact_id == artifact.id
+    assert planned.asset_version_id == version.id
+    assert planned.mime_type == artifact.mime_type
+    assert planned.fingerprint == artifact.content_hash
+
+    run = await service.create_and_dispatch(
+        project=project,
+        execution_input=execution_input,
+    )
+    snapshot = run.input_snapshot or {}
+    assert snapshot["references"] == snapshot["workbench_plan"]["planned_references"]
+    assert snapshot["references"][0]["artifact_id"] == str(artifact.id)
+
+
+@pytest.mark.asyncio
+async def test_cross_project_reference_fails_before_plan_or_graph_write(
+    session: AsyncSession,
+) -> None:
+    project, _binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    from app.execution.models import Artifact
+
+    foreign = Artifact(
+        project_id=uuid4(),
+        artifact_type="image",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="d" * 64,
+        mime_type="image/png",
+        byte_size=1,
+    )
+    session.add(foreign)
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    from app.production.reference_intents import ShotReferenceIntent
+
+    with pytest.raises(WorkbenchExecutionError, match="current project"):
+        await service.build_plan(
+            project=project,
+            execution_input=_input(
+                shot_id=shot.id,
+                references=[
+                    ShotReferenceIntent(
+                        purpose="identity",
+                        artifact_id=foreign.id,
+                    )
+                ],
+            ),
+        )
+    from app.production.models import ProductionGraph
+
+    graphs = (await session.execute(select(ProductionGraph))).scalars().all()
+    assert len(graphs) == 1
+
+
+@pytest.mark.asyncio
 async def test_create_and_dispatch_creates_queued_node_run(session: AsyncSession) -> None:
     project, binding, user = await _seed(session)
     shot, _artifact = await _seed_video_shot(session, project=project, user=user)
