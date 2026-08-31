@@ -10,6 +10,7 @@ injected behind the same typed seam once that policy is explicitly approved.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
@@ -44,22 +45,52 @@ _FORBIDDEN_KEYS = frozenset(
         "artifact",
         "artifact_id",
         "artifact_ids",
+        "artifact_url",
         "column",
         "execution",
         "execution_id",
+        "execution_plan",
         "node_run",
         "node_run_id",
+        "node_run_ids",
         "provider",
+        "provider_model_id",
+        "provider_model_ids",
         "provider_operation",
         "provider_operation_id",
         "provider_request",
         "raw_sql",
         "runtime",
+        "runtime_id",
         "sql",
+        "sql_query",
         "table",
         "worker",
+        "worker_queue",
     }
 )
+_FORBIDDEN_PREFIXES = (
+    "artifact_",
+    "execution_",
+    "node_run_",
+    "provider_",
+    "runtime_",
+    "sql_",
+    "worker_",
+)
+
+
+def _normalized_field_name(key: object) -> str:
+    """Normalize snake/camel/kebab field spellings before policy matching."""
+
+    text = str(key).strip().replace("-", "_").replace(" ", "_")
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
+    return re.sub(r"_+", "_", text).lower()
+
+
+def _is_forbidden_field(key: object) -> bool:
+    normalized = _normalized_field_name(key)
+    return normalized in _FORBIDDEN_KEYS or normalized.startswith(_FORBIDDEN_PREFIXES)
 
 
 def _reject_execution_fields(value: object, *, path: str = "suggestion") -> None:
@@ -67,8 +98,7 @@ def _reject_execution_fields(value: object, *, path: str = "suggestion") -> None
 
     if isinstance(value, Mapping):
         for key, nested in value.items():
-            normalized = str(key).strip().lower()
-            if normalized in _FORBIDDEN_KEYS:
+            if _is_forbidden_field(key):
                 raise ValueError(f"{path} contains forbidden design field: {key}")
             _reject_execution_fields(nested, path=f"{path}.{key}")
     elif isinstance(value, list | tuple):

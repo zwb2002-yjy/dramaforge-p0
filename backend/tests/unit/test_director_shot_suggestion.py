@@ -192,6 +192,91 @@ async def test_invalid_structured_output_fails_closed_without_shot_mutation(
     assert raised.value.details["code"] == "INVALID_DIRECTOR_SUGGESTION"
     assert shot.version == 5
     assert shot.image_prompt == "A cinematic keyframe"
+    assert shot.video_prompt == "A slow turn toward the window"
+    assert shot.director_state == {
+        "framing": {"shot_size": "medium", "angle": "eye_level"},
+        "action": {"description": "turns"},
+        "workflow_template_key": "single-pass-v1",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_name", "container"),
+    [
+        ("provider_model_id", "expression"),
+        ("providerModelId", "expression"),
+        ("execution_plan", "continuity_constraints"),
+        ("executionPlan", "continuity_constraints"),
+        ("runtime_id", "video_reference_risk"),
+        ("runtimeId", "video_reference_risk"),
+        ("artifact_url", "expression"),
+        ("artifactUrl", "expression"),
+        ("worker_queue", "continuity_constraints"),
+        ("workerQueue", "continuity_constraints"),
+        ("node_run_ids", "expression"),
+        ("nodeRunIds", "expression"),
+        ("nodeRunId", "continuity_constraints"),
+        ("sql_query", "expression"),
+        ("sqlQuery", "expression"),
+    ],
+)
+async def test_nested_forbidden_field_families_fail_closed(
+    session: AsyncSession,
+    field_name: str,
+    container: str,
+) -> None:
+    user, project, scene, shot = await _seed(session)
+
+    class InvalidTransport:
+        async def generate(self, _context: ShotDirectorSuggestionContext) -> object:
+            nested: dict[str, object] = {field_name: "must be rejected"}
+            state: dict[str, object]
+            if container == "continuity_constraints":
+                state = {container: [{"nested": nested}]}
+            elif container == "video_reference_risk":
+                state = {container: {"nested": nested}}
+            else:
+                state = {container: {"nested": nested}}
+            return {
+                "base_shot_version": shot.version,
+                "suggested_image_prompt": "new image",
+                "suggested_video_prompt": "new video",
+                "suggested_director_state": state,
+                "change_summary": "invalid field test",
+            }
+
+    with pytest.raises(ValidationAppError) as raised:
+        await ShotDirectorSuggestionService(session, transport=InvalidTransport()).suggest(
+            project_id=project.id,
+            actor=user,
+            request=_request(scene, shot),
+        )
+    assert raised.value.details["code"] == "INVALID_DIRECTOR_SUGGESTION"
+    assert shot.version == 5
+    assert shot.image_prompt == "A cinematic keyframe"
+    assert shot.video_prompt == "A slow turn toward the window"
+    assert shot.director_state["workflow_template_key"] == "single-pass-v1"
+
+
+@pytest.mark.asyncio
+async def test_existing_design_extensions_are_preserved_in_valid_suggestion(
+    session: AsyncSession,
+) -> None:
+    user, project, scene, shot = await _seed(session)
+    result = await ShotDirectorSuggestionService(session).suggest(
+        project_id=project.id,
+        actor=user,
+        request=_request(scene, shot),
+    )
+    assert result.suggested_director_state.root["workflow_template_key"] == "single-pass-v1"
+    assert result.suggested_director_state.root["framing"] == {
+        "shot_size": "medium",
+        "angle": "eye_level",
+    }
+    assert shot.version == 5
+    assert shot.image_prompt == "A cinematic keyframe"
+    assert shot.video_prompt == "A slow turn toward the window"
 
 
 def test_request_rejects_canonical_design_fields() -> None:
