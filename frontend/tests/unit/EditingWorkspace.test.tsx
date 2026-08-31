@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EditingWorkspace } from "../../src/features/editing/EditingWorkspace";
@@ -8,6 +8,7 @@ import type { OpenCutManifestRead } from "../../src/lib/api";
 const PROJECT_ID = "project-1";
 const SCENE_ID = "scene-1";
 const SHOT_ID = "shot-1";
+const SESSION_ID = "edit-session-1";
 
 function json(body: unknown, status = 200): Promise<Response> {
   return Promise.resolve(
@@ -88,6 +89,36 @@ function formalClip(artifactId: string, shotId = SHOT_ID): Record<string, unknow
   };
 }
 
+const DEFAULT_SESSION_TIMELINE = {
+  clips: [
+    {
+      id: "clip-1",
+      episode_id: "episode-1",
+      scene_id: SCENE_ID,
+      shot_id: SHOT_ID,
+      artifact_id: "artifact-formal",
+      order: 1,
+      duration_seconds: 3,
+      subtitle: "Hello",
+      audio_id: null,
+      transition: null,
+    },
+    {
+      id: "clip-2",
+      episode_id: "episode-1",
+      scene_id: SCENE_ID,
+      shot_id: "shot-2",
+      artifact_id: "artifact-formal-2",
+      order: 2,
+      duration_seconds: 4,
+      subtitle: "World",
+      audio_id: "audio-2",
+      transition: { kind: "cut" },
+    },
+  ],
+  metadata: { auto_built: true },
+};
+
 function shot(shotId = SHOT_ID, artifactId?: string): Record<string, unknown> {
   return {
     shot_id: shotId,
@@ -114,7 +145,42 @@ function renderWorkspace() {
   return queryClient;
 }
 
-afterEach(() => vi.restoreAllMocks());
+function persistedSession(timeline: Record<string, unknown> = DEFAULT_SESSION_TIMELINE) {
+  return {
+    id: SESSION_ID,
+    project_id: PROJECT_ID,
+    name: "Director Cut",
+    status: "draft",
+    timeline,
+    production_lineage: {
+      lineage_readonly: true,
+      clips: [{ shot_id: SHOT_ID, artifact_id: "artifact-formal" }],
+    },
+    created_at: "2026-08-31T00:00:00Z",
+    updated_at: "2026-08-31T00:00:00Z",
+  };
+}
+
+function renderPersistedSession(onSessionCreated?: (sessionId: string) => void) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <EditingWorkspace
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+        onSessionCreated={onSessionCreated}
+      />
+    </QueryClientProvider>,
+  );
+  return queryClient;
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  window.sessionStorage.clear();
+});
 
 describe("EditingWorkspace", () => {
   it("loads the real manifest GET and renders project, scene, shot, and storage lineage", async () => {
@@ -135,6 +201,235 @@ describe("EditingWorkspace", () => {
     ).toBeInTheDocument();
     expect(calls).toEqual([{ method: "GET", url: "/api/v1/projects/project-1/opencut-manifest" }]);
     expect(screen.getByTestId("editing-read-only")).toHaveTextContent("只读");
+    expect(screen.getByTestId("create-edit-session")).toBeEnabled();
+  });
+
+  it("creates a persisted session only after an explicit click and sends no production input", async () => {
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined;
+      calls.push({ method, url, body });
+      if (url.endsWith("/opencut-manifest")) {
+        return json(manifest([formalClip("artifact-formal")], [shot(SHOT_ID, "artifact-formal")]));
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-create" });
+      if (url.endsWith("/edit-sessions")) return json(persistedSession(), 201);
+      return json({});
+    });
+    const onSessionCreated = vi.fn();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EditingWorkspace projectId={PROJECT_ID} onSessionCreated={onSessionCreated} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("create-edit-session")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("create-edit-session"));
+
+    await waitFor(() => expect(onSessionCreated).toHaveBeenCalledWith(SESSION_ID));
+    const createRequest = calls.find((call) => call.url.endsWith("/edit-sessions"));
+    expect(createRequest?.method).toBe("POST");
+    expect(createRequest?.body).toEqual({});
+    expect(calls.filter((call) => call.url.includes("/shots/")).length).toBe(0);
+    expect(
+      calls.some(
+        (call) => call.url.includes("/artifacts/") || call.url.includes("production_lineage"),
+      ),
+    ).toBe(false);
+  });
+
+  it("loads the exact persisted session and keeps lineage visibly read-only", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      return json({});
+    });
+    renderPersistedSession();
+
+    expect(await screen.findByTestId("edit-session-facts")).toHaveTextContent("Director Cut");
+    expect(screen.getByTestId("editing-workspace")).toHaveAttribute("data-session-id", SESSION_ID);
+    expect(screen.getByTestId("edit-session-lineage")).toHaveTextContent("lineage_readonly");
+    expect(screen.getAllByTestId("edit-session-clip")).toHaveLength(2);
+    expect(calls).toEqual([`/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}`]);
+  });
+
+  it("edits only local clip order/duration until an explicit save", async () => {
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      calls.push({ method: init?.method ?? "GET", url });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+
+    fireEvent.change(screen.getByLabelText("镜头 1 时长"), { target: { value: "2.25" } });
+    fireEvent.click(screen.getByTestId("move-clip-down-0"));
+    expect(screen.getByTestId("edit-session-dirty")).toHaveTextContent("未保存");
+    expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain(`/edit-sessions/${SESSION_ID}`);
+    expect(screen.getByTestId("save-edit-timeline")).toBeEnabled();
+  });
+
+  it("saves only clips and metadata, then resets clean baseline from server response", async () => {
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    const serverResponse = persistedSession({
+      clips: [
+        {
+          ...DEFAULT_SESSION_TIMELINE.clips[0],
+          duration_seconds: 2.25,
+          order: 2,
+        },
+        {
+          ...DEFAULT_SESSION_TIMELINE.clips[1],
+          order: 1,
+        },
+      ],
+      metadata: { auto_built: true, edited: true },
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined;
+      calls.push({ method: init?.method ?? "GET", url, body });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-save" });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}/timeline`)) return json(serverResponse);
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByLabelText("镜头 1 时长"), { target: { value: "2.25" } });
+    fireEvent.click(screen.getByTestId("save-edit-timeline"));
+
+    await waitFor(() => expect(screen.getByTestId("save-edit-timeline")).toBeDisabled());
+    const patch = calls.find((call) => call.url.endsWith("/timeline"));
+    expect(patch?.method).toBe("PATCH");
+    expect(patch?.body).toEqual({
+      timeline: {
+        clips: [
+          {
+            id: "clip-1",
+            episode_id: "episode-1",
+            scene_id: SCENE_ID,
+            shot_id: SHOT_ID,
+            artifact_id: "artifact-formal",
+            order: 1,
+            duration_seconds: 2.25,
+            subtitle: "Hello",
+            audio_id: null,
+            transition: null,
+          },
+          {
+            id: "clip-2",
+            episode_id: "episode-1",
+            scene_id: SCENE_ID,
+            shot_id: "shot-2",
+            artifact_id: "artifact-formal-2",
+            order: 2,
+            duration_seconds: 4,
+            subtitle: "World",
+            audio_id: "audio-2",
+            transition: { kind: "cut" },
+          },
+        ],
+        metadata: { auto_built: true },
+      },
+    });
+    expect(patch?.body).not.toHaveProperty("production_lineage");
+    expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
+    expect(screen.getByText(/服务器响应已成为新的 clean baseline/)).toBeInTheDocument();
+  });
+
+  it("reopens the exact session from the server instead of merging a fresh manifest", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) {
+        return json(
+          persistedSession({
+            clips: [{ ...DEFAULT_SESSION_TIMELINE.clips[1], duration_seconds: 1.75 }],
+            metadata: { edited: true },
+          }),
+        );
+      }
+      if (url.endsWith("/opencut-manifest")) {
+        return json(
+          manifest([formalClip("new-manifest-artifact")], [shot(SHOT_ID, "new-manifest-artifact")]),
+        );
+      }
+      return json({});
+    });
+    renderPersistedSession();
+    expect(await screen.findByDisplayValue("1.75")).toBeInTheDocument();
+    expect(calls.some((url) => url.endsWith("/opencut-manifest"))).toBe(false);
+    expect(screen.getByTestId("edit-session-lineage")).toHaveTextContent("lineage_readonly");
+  });
+
+  it("exports the persisted session by exact id and displays only manifest summary", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      calls.push({ method: init?.method ?? "GET", url });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}/export`)) {
+        return json({
+          session_id: SESSION_ID,
+          format: "dramaforge-edit-v1",
+          clip_count: 2,
+          duration_seconds: 7.5,
+          clips: DEFAULT_SESSION_TIMELINE.clips,
+          production_lineage: persistedSession().production_lineage,
+        });
+      }
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.click(screen.getByTestId("export-edit-session"));
+    const exportPanel = await screen.findByTestId("edit-session-export");
+    expect(exportPanel).toHaveTextContent("dramaforge-edit-v1");
+    expect(exportPanel).toHaveTextContent("7.5");
+    expect(exportPanel).toHaveTextContent("2");
+    expect(within(exportPanel).queryByText("artifact-formal")).not.toBeInTheDocument();
+    expect(calls).toEqual([
+      { method: "GET", url: `/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}` },
+      { method: "GET", url: `/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}/export` },
+    ]);
+  });
+
+  it("keeps a dirty draft after save failure and shows the real server error", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-save" });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}/timeline`)) {
+        return json(
+          { detail: "timeline save rejected by server", code: "EDIT_TIMELINE_INVALID" },
+          422,
+        );
+      }
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByLabelText("镜头 1 时长"), { target: { value: "2.25" } });
+    fireEvent.click(screen.getByTestId("save-edit-timeline"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("timeline save rejected by server");
+    expect(screen.getByTestId("edit-session-dirty")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
   });
 
   it("surfaces an empty project and partial formal-video hand-off", async () => {
