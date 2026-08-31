@@ -95,7 +95,7 @@ jobs:
             case "$HEAD_REF" in
               agent/*) ;;
               *)
-                echo "Only short-lived agent/<task-id> branches may target dev by PR. Routine work is pushed directly to dev."
+                echo "Only short-lived agent/<task-id> branches may target dev by PR; direct pushes are not part of the routine branch flow."
                 exit 1
                 ;;
             esac
@@ -133,6 +133,29 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked --extra dev
       - run: uv run pytest tests/unit -q
+
+  api-contract:
+    name: api-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - name: Sync backend dependencies
+        working-directory: backend
+        run: uv sync --locked --extra dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - name: Check generated API contract
+        working-directory: frontend
+        run: npm run api:check
 
   postgres-integration:
     name: postgres-integration
@@ -207,7 +230,6 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npm run api:check
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test

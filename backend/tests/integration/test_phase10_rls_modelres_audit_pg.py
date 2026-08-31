@@ -46,7 +46,11 @@ from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
-from app.providers.models import ProviderConnection, ProviderModelBinding
+from app.providers.models import (
+    ProviderConnection,
+    ProviderConnectionRevision,
+    ProviderModelBinding,
+)
 from app.security.models import EncryptedProviderCredential
 from app.shared.db import set_rls_context
 from app.shared.security import hash_password
@@ -466,13 +470,14 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
         documented_at=date.fromisoformat("2026-08-10"),
         contract_manifest_hash=hash_manifest(manifest),
     )
-    credential = EncryptedProviderCredential(
+    credential_revision = EncryptedProviderCredential(
         workspace_id=workspace.id,
         provider="agnes",
+        revision_no=1,
         ciphertext="test-ciphertext",
         key_version="test-key-version",
     )
-    session.add_all([entry, credential])
+    session.add_all([entry, credential_revision])
     await session.flush()
     connection = ProviderConnection(
         workspace_id=workspace.id,
@@ -480,14 +485,27 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
         display_name="Agnes",
         base_url="https://api.agnes-ai.cn",
         protocol_profile="agnes_cn_v1",
-        credential_id=credential.id,
-        credential_revision=1,
+        credential_id=credential_revision.id,
+        credential_revision=credential_revision.revision_no,
         enabled=True,
         verification_status="verified",
         created_by=user.id,
         updated_by=user.id,
     )
     session.add(connection)
+    await session.flush()
+    # New Professional execution requires the exact immutable connection
+    # revision.  Keep this PG seed aligned with the production service rather
+    # than weakening the fail-closed missing-revision behavior.
+    connection_revision = ProviderConnectionRevision(
+        connection_id=connection.id,
+        revision_no=1,
+        provider_type=connection.provider_type,
+        protocol_profile=connection.protocol_profile,
+        base_url=connection.base_url,
+        credential_revision_id=credential_revision.id,
+    )
+    session.add(connection_revision)
     await session.flush()
     binding = ProviderModelBinding(
         workspace_id=workspace.id,
@@ -534,6 +552,8 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
         "shot": shot,
         "binding": binding,
         "keyframe": keyframe,
+        "credential_revision": credential_revision,
+        "connection_revision": connection_revision,
     }
 
 
@@ -546,6 +566,8 @@ async def test_phase10_professional_resolution_no_bypass_pg(pg_session: AsyncSes
     shot = seed["shot"]
     binding = seed["binding"]
     user = seed["user"]
+    credential_revision = seed["credential_revision"]
+    connection_revision = seed["connection_revision"]
     await set_rls_context(
         pg_session, user_id=user.id, workspace_id=seed["workspace"].id, project_id=project.id
     )
@@ -570,6 +592,10 @@ async def test_phase10_professional_resolution_no_bypass_pg(pg_session: AsyncSes
     }
     assert plan.resolved_model.provider_model_binding_id == binding.id
     assert plan.resolved_model.catalog_entry_id is not None
+    assert plan.connection_revision_id == connection_revision.id
+    assert plan.credential_revision_id == credential_revision.id
+    assert plan.resolved_model.provider_connection_revision_id == connection_revision.id
+    assert plan.resolved_model.credential_revision_id == credential_revision.id
     assert not plan.capability_gaps
 
     run = await service.create_and_dispatch(
@@ -591,6 +617,8 @@ async def test_phase10_professional_resolution_no_bypass_pg(pg_session: AsyncSes
     assert workbench_plan.get("resolved_model", {}).get("provider_model_binding_id") == str(
         binding.id
     )
+    assert workbench_plan.get("connection_revision_id") == str(connection_revision.id)
+    assert workbench_plan.get("credential_revision_id") == str(credential_revision.id)
     # frozen identity travels to the worker; no direct provider HTTP at dispatch.
     assert run.status == "queued"
     assert stored.get("node_key") == "video"

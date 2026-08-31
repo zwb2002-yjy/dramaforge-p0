@@ -27,8 +27,16 @@ MODULE = FRONTEND / "src" / "shared" / "api"
 
 
 def _python() -> str:
-    if sys.platform == "win32":
-        venv = BACKEND / ".venv" / "Scripts" / "python.exe"
+    # ``uv sync`` creates a project-local environment on every CI runner, but
+    # the layout is platform-specific.  Prefer that interpreter so the
+    # exporter can import FastAPI when this script is launched from the
+    # frontend job; falling back to PATH keeps the script usable before deps
+    # are installed.
+    venv_candidates = (
+        BACKEND / ".venv" / "Scripts" / "python.exe",
+        BACKEND / ".venv" / "bin" / "python",
+    )
+    for venv in venv_candidates:
         if venv.exists():
             return str(venv)
     return "python"
