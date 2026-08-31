@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.base import Base
@@ -20,6 +20,9 @@ class EditSession(Base):
     """
 
     __tablename__ = "edit_sessions"
+    __table_args__ = (
+        CheckConstraint("version > 0", name="ck_edit_sessions_version_positive"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(
@@ -27,6 +30,7 @@ class EditSession(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False, default="Edit")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     timeline: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )

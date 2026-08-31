@@ -90,6 +90,9 @@ class ProposalService:
                     expected_target_version=item.expected_target_version,
                 )
             except ProposalCommandError as exc:
+                if exc.details.get("code") == "PROPOSAL_STALE":
+                    item.status = "stale"
+                    item.decided_at = datetime.now(UTC)
                 result.failed.append(
                     {"item_id": str(item.id), "error": str(exc)}
                 )
@@ -102,7 +105,6 @@ class ProposalService:
         proposal.decided_at = datetime.now(UTC)
         await self._session.flush()
         return result
-
 
     async def mark_proposals_stale_for_shot(
         self,

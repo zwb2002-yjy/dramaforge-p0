@@ -50,6 +50,7 @@ class EditingAdapter:
             project_id=project_id,
             name=name,
             status="draft",
+            version=1,
             timeline=dict(timeline or {"clips": [], "metadata": {}}),
             production_lineage=dict(production_lineage or {}),
             created_by=user_id,
@@ -78,6 +79,7 @@ class EditingAdapter:
     ) -> EditSession:
         row = await self.load_timeline(project_id=project_id, session_id=session_id)
         row.timeline = dict(timeline)
+        row.version += 1
         row.updated_at = datetime.now(UTC)
         await self._session.flush()
         return row
