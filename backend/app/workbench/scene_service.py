@@ -12,6 +12,7 @@ from app.access.projects import ProjectService
 from app.assets.models import Asset, AssetVersion, Episode, Scene, Shot
 from app.assets.scene_service import _artifact_summary
 from app.execution.models import Artifact, NodeRun
+from app.production.formal_selection import list_formal_candidates
 from app.production.models import ExperimentBranch, ShotReferenceBinding
 from app.shared.errors import NotFoundError
 
@@ -86,7 +87,15 @@ class SceneWorkspaceService:
             for binding in binding_rows:
                 bindings.setdefault(binding.shot_id, []).append(binding)
 
-        candidates: dict[UUID, list[ExperimentBranch]] = {}
+        # Concrete formal candidates come from the existing NodeRun ->
+        # Artifact lineage.  Experiment branches remain in this opaque
+        # collection for backwards-compatible workspace consumers, but never
+        # substitute for an Artifact candidate in the formal action.
+        candidates: dict[UUID, list[dict[str, object]]] = await list_formal_candidates(
+            self._session,
+            project_id=project_id,
+            shot_ids=shot_ids,
+        )
         if shot_ids:
             exp_rows = (
                 await self._session.execute(
@@ -100,7 +109,15 @@ class SceneWorkspaceService:
             ).scalars().all()
             for branch in exp_rows:
                 if branch.source_shot_id is not None:
-                    candidates.setdefault(branch.source_shot_id, []).append(branch)
+                    candidates.setdefault(branch.source_shot_id, []).append(
+                        {
+                            "id": branch.id,
+                            "name": branch.name,
+                            "branch_type": branch.branch_type,
+                            "status": branch.status,
+                            "selected_model": branch.selected_model,
+                        }
+                    )
 
         trace = await self._load_trace(project_id=project_id, shot_ids=shot_ids)
 
@@ -135,17 +152,7 @@ class SceneWorkspaceService:
                 for shot_id in shot_ids
             },
             "candidates": {
-                str(shot_id): [
-                    {
-                        "id": branch.id,
-                        "name": branch.name,
-                        "branch_type": branch.branch_type,
-                        "status": branch.status,
-                        "selected_model": branch.selected_model,
-                    }
-                    for branch in candidates.get(shot_id, [])
-                ]
-                for shot_id in shot_ids
+                str(shot_id): candidates.get(shot_id, []) for shot_id in shot_ids
             },
             "trace": trace,
         }

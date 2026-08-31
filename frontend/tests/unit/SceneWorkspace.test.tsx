@@ -117,6 +117,92 @@ describe("SceneWorkspace", () => {
     });
     expect(await screen.findByText(/已保存设计/)).toBeInTheDocument();
   });
+
+  it("binds formal confirmation to the currently selected shot", async () => {
+    const shot2 = {
+      ...SHOT_1,
+      id: "shot-2",
+      shot_number: 2,
+      sort_order: 2,
+      visual_description: "B looks back",
+      image_prompt: "second keyframe",
+    };
+    const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      calls.push({ url, method, body });
+      if (url.endsWith("/workspace") && method === "GET") {
+        return json({
+          scene: {
+            id: "scene-1",
+            episode_id: "episode-1",
+            episode_number: 1,
+            scene_number: 1,
+            location_name: "Studio",
+            time_of_day: "day",
+            synopsis: "intro",
+            version: 1,
+            design_state: {},
+          },
+          shots: [SHOT_1, shot2],
+          references: { "shot-1": [], "shot-2": [] },
+          candidates: {
+            "shot-1": [
+              {
+                artifact_id: "artifact-1",
+                node_run_id: "run-1",
+                stage: "image_keyframe",
+                status: "completed",
+                artifact_type: "image",
+              },
+            ],
+            "shot-2": [
+              {
+                artifact_id: "artifact-2",
+                node_run_id: "run-2",
+                stage: "image_keyframe",
+                status: "completed",
+                artifact_type: "image",
+              },
+            ],
+          },
+          trace: { "shot-1": [], "shot-2": [] },
+        });
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/formal-keyframe")) {
+        return json({
+          shot_id: "shot-2",
+          formal_keyframe_artifact_id: "artifact-2",
+          version: 2,
+        });
+      }
+      return json({});
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SceneWorkspace projectId="project-1" sceneId="scene-1" />
+      </QueryClientProvider>,
+    );
+    await screen.findByTestId("formal-candidate-artifact-1");
+    fireEvent.click(screen.getByRole("button", { name: /#2/ }));
+    await screen.findByTestId("formal-candidate-artifact-2");
+    fireEvent.click(screen.getByRole("button", { name: "设为正式关键帧" }));
+    await screen.findByTestId("formal-output-success");
+
+    const confirmation = calls.find((call) => call.url.endsWith("/formal-keyframe"));
+    expect(confirmation?.url).toContain("/projects/project-1/shots/shot-2/");
+    expect(confirmation?.body).toMatchObject({
+      artifact_id: "artifact-2",
+      expected_shot_version: 1,
+    });
+  });
 });
 
 afterEach(() => vi.restoreAllMocks());

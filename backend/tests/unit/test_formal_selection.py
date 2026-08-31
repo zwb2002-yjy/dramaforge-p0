@@ -15,14 +15,17 @@ from app.execution.shot_pipeline import (
     shot_pipeline_definition,
 )
 from app.production.formal_selection import (
+    list_formal_candidates,
     require_formal_keyframe,
     set_formal_keyframe,
     set_formal_video,
 )
+from app.production.models import ProductionGraph
 from app.production.service import GraphService
 from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -74,19 +77,35 @@ async def _make_keyframe_artifact(
     user: User,
     node_type: str = "keyframe",
     shot_scope: bool = True,
+    run_status: str = "completed",
+    artifact_type: str | None = None,
+    snapshot_stage: str | None = None,
+    attempt_no: int = 1,
 ) -> Artifact:
     graphs = GraphService(session)
-    graph = await graphs.create_graph(
-        project_id=project.id,
-        scope_type="shot" if shot_scope else "episode",
-        scope_entity_id=shot_id if shot_scope else uuid4(),
-        template_key=SHOT_PIPELINE_TEMPLATE_KEY,
-        created_by=user.id,
-        definition=shot_pipeline_definition(shot_id=str(shot_id)),
+    scope_type = "shot" if shot_scope else "episode"
+    scope_entity_id = shot_id if shot_scope else uuid4()
+    graph = await session.scalar(
+        select(ProductionGraph).where(
+            ProductionGraph.project_id == project.id,
+            ProductionGraph.scope_type == scope_type,
+            ProductionGraph.scope_entity_id == scope_entity_id,
+        )
     )
+    if graph is None:
+        graph = await graphs.create_graph(
+            project_id=project.id,
+            scope_type=scope_type,
+            scope_entity_id=scope_entity_id,
+            template_key=SHOT_PIPELINE_TEMPLATE_KEY,
+            created_by=user.id,
+            definition=shot_pipeline_definition(shot_id=str(shot_id)),
+        )
     assert graph.current_version_id is not None
     materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
-    version = await graphs.publish(version_id=materialized.version.id, published_by=user.id)
+    version = materialized.version
+    if version.status == "draft":
+        version = await graphs.publish(version_id=version.id, published_by=user.id)
     node = (
         materialized.nodes["keyframe"]
         if node_type == "keyframe"
@@ -98,23 +117,30 @@ async def _make_keyframe_artifact(
         graph_node_id=node.id,
         idempotency_key=f"keyframe:{uuid4().hex}",
         input_hash="a" * 64,
-        status="completed",
-        input_snapshot={},
+        attempt_no=attempt_no,
+        status=run_status,
+        input_snapshot={
+            "shot_id": str(shot_id),
+            "stage": snapshot_stage
+            or ("image_keyframe" if node_type == "keyframe" else "video"),
+        },
         created_by=user.id,
     )
     session.add(run)
     await session.flush()
     artifact = Artifact(
         project_id=project.id,
-        artifact_type="image",
+        artifact_type=artifact_type or ("video" if node_type == "video" else "image"),
         storage_state="stored",
         object_key=f"obj/{uuid4().hex}",
-        content_hash="b" * 64,
+        content_hash=uuid4().hex * 2,
         mime_type="image/png",
         byte_size=1,
         produced_by_run_id=run.id,
     )
     session.add(artifact)
+    await session.flush()
+    run.result_artifact_id = artifact.id
     await session.flush()
     return artifact
 
@@ -170,7 +196,7 @@ async def test_require_formal_keyframe_fails_closed_without_one(session: AsyncSe
 async def test_set_formal_keyframe_rejects_stale_expected_version(session: AsyncSession) -> None:
     project, shot, user = await _seed(session)
     artifact = await _make_keyframe_artifact(session, project=project, shot_id=shot.id, user=user)
-    with pytest.raises(ValidationAppError, match="concurrently"):
+    with pytest.raises(ValidationAppError, match="concurrently") as caught:
         await set_formal_keyframe(
             session,
             project_id=project.id,
@@ -178,6 +204,8 @@ async def test_set_formal_keyframe_rejects_stale_expected_version(session: Async
             artifact_id=artifact.id,
             expected_shot_version=99,
         )
+    assert caught.value.status_code == 409
+    assert caught.value.code == "CONFLICT"
 
 
 @pytest.mark.asyncio
@@ -210,3 +238,74 @@ async def test_set_formal_video_rejects_keyframe_artifact(session: AsyncSession)
             shot_id=shot.id,
             artifact_id=artifact.id,
         )
+
+
+@pytest.mark.asyncio
+async def test_formal_selection_rejects_failed_running_wrong_type_and_stage(
+    session: AsyncSession,
+) -> None:
+    project, shot, user = await _seed(session)
+    failed = await _make_keyframe_artifact(
+        session,
+        project=project,
+        shot_id=shot.id,
+        user=user,
+        run_status="failed",
+    )
+    running = await _make_keyframe_artifact(
+        session,
+        project=project,
+        shot_id=shot.id,
+        user=user,
+        run_status="running",
+        attempt_no=2,
+    )
+    wrong_type = await _make_keyframe_artifact(
+        session,
+        project=project,
+        shot_id=shot.id,
+        user=user,
+        artifact_type="video",
+        attempt_no=3,
+    )
+    wrong_stage = await _make_keyframe_artifact(
+        session,
+        project=project,
+        shot_id=shot.id,
+        user=user,
+        snapshot_stage="video",
+        attempt_no=4,
+    )
+    for artifact in (failed, running, wrong_type, wrong_stage):
+        with pytest.raises(ValidationAppError, match="keyframe"):
+            await set_formal_keyframe(
+                session,
+                project_id=project.id,
+                shot_id=shot.id,
+                artifact_id=artifact.id,
+            )
+
+
+@pytest.mark.asyncio
+async def test_list_formal_candidates_returns_only_successful_real_artifacts(
+    session: AsyncSession,
+) -> None:
+    project, shot, user = await _seed(session)
+    accepted = await _make_keyframe_artifact(
+        session, project=project, shot_id=shot.id, user=user
+    )
+    await _make_keyframe_artifact(
+        session,
+        project=project,
+        shot_id=shot.id,
+        user=user,
+        run_status="failed",
+        attempt_no=2,
+    )
+    candidates = await list_formal_candidates(
+        session,
+        project_id=project.id,
+        shot_ids=[shot.id],
+    )
+    assert [row["artifact_id"] for row in candidates[shot.id]] == [accepted.id]
+    assert candidates[shot.id][0]["stage"] == "image_keyframe"

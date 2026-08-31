@@ -7,6 +7,8 @@ export type ShotLite = components["schemas"]["ShotLiteRead"];
 export type ShotDesignRead = components["schemas"]["ShotDesignRead"];
 export type ShotExecutionStage = components["schemas"]["ExecutionPlanBody"]["stage"];
 export type ShotExecutionRead = components["schemas"]["ExecutionRead"];
+export type FormalKeyframeRead = components["schemas"]["FormalKeyframeRead"];
+export type FormalVideoRead = components["schemas"]["FormalVideoRead"];
 
 export const SHOT_PRODUCTION_TRACE_QUERY_KEY = "shot-production-trace" as const;
 
@@ -45,6 +47,40 @@ export async function updateShotDesign(
     "PATCH",
     `/api/v1/projects/${projectId}/shots/${shotId}/design`,
     input,
+    csrf,
+  );
+}
+
+/**
+ * Confirm a concrete NodeRun -> Artifact candidate on the formal shot line.
+ * The backend owns lineage, stage, status, media type, and version checks.
+ */
+export async function setShotFormalKeyframe(
+  projectId: string,
+  shotId: string,
+  artifactId: string,
+  expectedShotVersion: number,
+): Promise<FormalKeyframeRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<FormalKeyframeRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/formal-keyframe`,
+    { artifact_id: artifactId, expected_shot_version: expectedShotVersion },
+    csrf,
+  );
+}
+
+export async function setShotFormalVideo(
+  projectId: string,
+  shotId: string,
+  artifactId: string,
+  expectedShotVersion: number,
+): Promise<FormalVideoRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<FormalVideoRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/formal-video`,
+    { artifact_id: artifactId, expected_shot_version: expectedShotVersion },
     csrf,
   );
 }
