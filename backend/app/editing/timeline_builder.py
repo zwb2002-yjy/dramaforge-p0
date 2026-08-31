@@ -33,9 +33,16 @@ async def build_edit_session_from_shots(
         if shot.formal_video_artifact_id is None:
             continue
         artifact = await session.get(Artifact, shot.formal_video_artifact_id)
+        if (
+            artifact is None
+            or artifact.project_id != project_id
+            or artifact.artifact_type != "video"
+            or artifact.deleted_at is not None
+        ):
+            continue
         duration = (
             float(artifact.duration_seconds)
-            if artifact and artifact.duration_seconds
+            if artifact.duration_seconds
             else 0.0
         )
         clips.append(
@@ -118,12 +125,19 @@ async def build_edit_session_for_project(
                 ).scalars().all()
             )
             for shot in shots:
-                if shot.formal_video_artifact_id is None:
+                if shot.project_id != project_id or shot.formal_video_artifact_id is None:
                     continue
                 artifact = await session.get(Artifact, shot.formal_video_artifact_id)
+                if (
+                    artifact is None
+                    or artifact.project_id != project_id
+                    or artifact.artifact_type != "video"
+                    or artifact.deleted_at is not None
+                ):
+                    continue
                 duration = (
                     float(artifact.duration_seconds)
-                    if artifact and artifact.duration_seconds
+                    if artifact.duration_seconds
                     else 0.0
                 )
                 clips.append(

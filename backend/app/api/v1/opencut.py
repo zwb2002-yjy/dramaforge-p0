@@ -11,13 +11,14 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CurrentUser, SessionDep, require_selected_workspace
-from app.assets.models import Shot
+from app.assets.models import Episode, Scene, Shot
 from app.execution.branches import experiment_id as run_experiment_id
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 
 router = APIRouter(tags=["opencut"], dependencies=[Depends(require_selected_workspace)])
 
 _DONE = frozenset({"completed", "cached", "completed_after_cancel"})
+_AVAILABLE_ARTIFACT_STATES = frozenset({"available", "stored"})
 
 
 class OpenCutTrace(BaseModel):
@@ -135,6 +136,64 @@ def _latest_formal_runs(
     return selected
 
 
+def _formal_video_run(
+    rows: list[tuple[NodeRun, GraphNode]],
+    *,
+    shot_id: UUID,
+    artifact_id: UUID,
+) -> NodeRun | None:
+    """Find the successful run that produced a Shot's formal video.
+
+    The Shot pointer is the selection authority.  This lookup is only for
+    production lineage (trace fields); it must never select a different or
+    newer result when the pointer is present.  Experiment output is therefore
+    valid here when it has explicitly been adopted into the formal pointer.
+    """
+    selected: NodeRun | None = None
+    for run, node in rows:
+        if (
+            run.result_artifact_id != artifact_id
+            or run.status not in _DONE
+            or node.node_type != "video"
+        ):
+            continue
+        snapshot = dict(run.input_snapshot or {})
+        snapshot_shot_id = snapshot.get("shot_id")
+        if snapshot_shot_id is not None and str(snapshot_shot_id) != str(shot_id):
+            continue
+        snapshot_stage = snapshot.get("stage")
+        if snapshot_stage is not None and str(snapshot_stage) != "video":
+            continue
+        if selected is None or (
+            run.attempt_no,
+            run.created_at,
+            str(run.id),
+        ) > (
+            selected.attempt_no,
+            selected.created_at,
+            str(selected.id),
+        ):
+            selected = run
+    return selected
+
+
+def _available_formal_video(
+    artifact: Artifact | None,
+    *,
+    project_id: UUID,
+) -> Artifact | None:
+    """Return only a usable video artifact explicitly pointed to by a Shot."""
+    if (
+        artifact is None
+        or artifact.project_id != project_id
+        or artifact.artifact_type != "video"
+        or artifact.storage_state not in _AVAILABLE_ARTIFACT_STATES
+        or artifact.deleted_at is not None
+    ):
+        return None
+    return artifact
+
+
 async def _trace_for_run(
     *,
     project_id: UUID,
@@ -143,7 +202,10 @@ async def _trace_for_run(
     operation_by_run: dict[UUID, ProviderOperation],
 ) -> OpenCutTrace:
     if run is None:
-        return OpenCutTrace(source_kind="script")
+        return OpenCutTrace(
+            artifact_id=artifact.id if artifact is not None else None,
+            source_kind="formal_artifact" if artifact is not None else "script",
+        )
     snapshot = dict(run.input_snapshot or {})
     operation = operation_by_run.get(run.id)
     raw_experiment = snapshot.get("adopted_from_experiment_id")
@@ -192,8 +254,16 @@ async def opencut_manifest(
         (
             await session.execute(
                 select(Shot)
+                .join(Scene, Scene.id == Shot.scene_id)
+                .join(Episode, Episode.id == Scene.episode_id)
                 .where(Shot.project_id == project_id)
-                .order_by(Shot.sort_order, Shot.shot_number)
+                .where(Episode.project_id == project_id)
+                .order_by(
+                    Episode.episode_number,
+                    Scene.scene_number,
+                    Shot.sort_order,
+                    Shot.shot_number,
+                )
             )
         )
         .scalars()
@@ -243,10 +313,20 @@ async def opencut_manifest(
         for run, _node in run_rows
         if run.result_artifact_id is not None
     }
+    artifact_ids.update(
+        shot.formal_video_artifact_id
+        for shot in shots
+        if shot.formal_video_artifact_id is not None
+    )
     artifacts = (
         list(
             (
-                await session.execute(select(Artifact).where(Artifact.id.in_(artifact_ids)))
+                await session.execute(
+                    select(Artifact).where(
+                        Artifact.id.in_(artifact_ids),
+                        Artifact.project_id == project_id,
+                    )
+                )
             )
             .scalars()
             .all()
@@ -263,13 +343,39 @@ async def opencut_manifest(
     cursor = Decimal("0")
     for shot in shots:
         formal_runs = _latest_formal_runs(run_rows, shot_id=shot.id)
-        formal_artifacts = {
-            node_key: run.result_artifact_id
-            for node_key, run in formal_runs.items()
-            if run.result_artifact_id is not None
-        }
+        video_artifact = _available_formal_video(
+            artifact_by_id.get(shot.formal_video_artifact_id)
+            if shot.formal_video_artifact_id is not None
+            else None,
+            project_id=project_id,
+        )
+        video_run = (
+            _formal_video_run(
+                run_rows,
+                shot_id=shot.id,
+                artifact_id=video_artifact.id,
+            )
+            if video_artifact is not None
+            else None
+        )
+        # A pointer backed by execution lineage is only usable when that
+        # lineage is a successful video run for this exact shot.  Hand-created
+        # legacy formal rows without a produced-by pointer remain readable,
+        # but a mismatched/cross-scope run fails closed.
+        if (
+            video_artifact is not None
+            and video_artifact.produced_by_run_id is not None
+            and video_run is None
+        ):
+            video_artifact = None
+        # ``formal_artifacts`` deliberately reports only the selected formal
+        # video.  Latest successful output and formal keyframes are not edit
+        # timeline inputs; they remain available through their own workbench
+        # surfaces.
+        formal_artifacts = {"video": video_artifact.id} if video_artifact else {}
+        formal_artifact_ids = [video_artifact.id] if video_artifact else []
         duration = Decimal(str(shot.duration_seconds))
-        end = cursor + duration
+        end = cursor + duration if video_artifact is not None else cursor
         shot_items.append(
             OpenCutShot(
                 shot_id=shot.id,
@@ -279,18 +385,12 @@ async def opencut_manifest(
                 duration_seconds=str(duration),
                 dialogue=shot.dialogue,
                 status=shot.status,
-                artifact_ids=list(dict.fromkeys(formal_artifacts.values())),
+                artifact_ids=formal_artifact_ids,
                 formal_artifacts=formal_artifacts,
             )
         )
 
-        video_run = formal_runs.get("composite") or formal_runs.get("video")
-        video_artifact = (
-            artifact_by_id.get(video_run.result_artifact_id)
-            if video_run is not None and video_run.result_artifact_id is not None
-            else None
-        )
-        if video_run is not None and video_artifact is not None:
+        if video_artifact is not None:
             video_clips.append(
                 OpenCutClip(
                     id=f"video-{shot.id}",
@@ -312,7 +412,10 @@ async def opencut_manifest(
                 )
             )
 
-        voice_run = formal_runs.get("voice")
+        # Audio/subtitle are auxiliary tracks for a formal video shot.  A shot
+        # without a formal video is skipped from every edit track so a partial
+        # project cannot look like a playable timeline.
+        voice_run = formal_runs.get("voice") if video_artifact is not None else None
         voice_artifact = (
             artifact_by_id.get(voice_run.result_artifact_id)
             if voice_run is not None and voice_run.result_artifact_id is not None
@@ -340,13 +443,15 @@ async def opencut_manifest(
                 )
             )
 
-        subtitle_run = formal_runs.get("subtitle")
+        subtitle_run = formal_runs.get("subtitle") if video_artifact is not None else None
         subtitle_artifact = (
             artifact_by_id.get(subtitle_run.result_artifact_id)
             if subtitle_run is not None and subtitle_run.result_artifact_id is not None
             else None
         )
-        if shot.dialogue or subtitle_artifact is not None:
+        if video_artifact is not None and (
+            shot.dialogue or subtitle_artifact is not None
+        ):
             subtitle_clips.append(
                 OpenCutClip(
                     id=f"subtitle-{shot.id}",

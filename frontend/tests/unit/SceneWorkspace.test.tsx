@@ -96,6 +96,10 @@ describe("SceneWorkspace", () => {
     expect(screen.getByTestId("shot-design-panel")).toBeInTheDocument();
     expect(screen.getByTestId("shot-production-trace")).toBeInTheDocument();
     expect(screen.getByText("keyframe")).toBeInTheDocument();
+    expect(screen.getByTestId("scene-edit-entry")).toHaveAttribute(
+      "href",
+      "/projects/project-1/edit",
+    );
   });
 
   it("saves image/video prompt edits via the design panel", async () => {

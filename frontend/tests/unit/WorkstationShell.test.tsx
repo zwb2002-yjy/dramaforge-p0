@@ -121,6 +121,31 @@ describe("Workstation shell", () => {
     expect(screen.getByRole("link", { name: "专业生产" })).toHaveAttribute("aria-current", "page");
   });
 
+  it("keeps the project id when entering the read-only edit hand-off", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (String(input).includes("/opencut-manifest")) {
+        return json({
+          schema_version: "opencut-manifest-v2",
+          adapter: "dramaforge-opencut-adapter-v1",
+          project_id: "project-1",
+          official_line: "formal",
+          timeline: { duration_seconds: "0", frame_rate: 24, timebase: "1/24", aspect_ratio: "16:9" },
+          tracks: [],
+          shots: [],
+        });
+      }
+      return json({});
+    });
+    renderApp("/projects/project-1/edit");
+
+    expect(await screen.findByTestId("editing-workspace")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "剪辑" })).toHaveAttribute(
+      "href",
+      "/projects/project-1/edit",
+    );
+    expect(screen.getByRole("link", { name: "剪辑" })).toHaveAttribute("aria-current", "page");
+  });
+
   it("shows the professional facts without reviving the legacy Director budget surface", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
