@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AssetReferencePicker } from "../../components/assets/AssetReferencePicker";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotDesignPanel } from "../shots/ShotDesignPanel";
 import { ShotProductionTrace } from "../shots/ShotProductionTrace";
+import { ShotProductionActions } from "../shots/ShotProductionActions";
 import { ShotStrip } from "../shots/ShotStrip";
 import { fetchSceneWorkspace, type SceneWorkspaceRead, type ShotLite } from "./api";
 
@@ -21,6 +22,9 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
     queryFn: () => fetchSceneWorkspace(projectId, sceneId),
     enabled: Boolean(projectId) && Boolean(sceneId) && projectId !== "demo",
   });
+  useEffect(() => {
+    setSelectedShotId(null);
+  }, [projectId, sceneId]);
   const data = workspace.data as SceneWorkspaceRead | undefined;
   const shots = data?.shots ?? [];
   const selected = (shots.find((shot) => shot.id === selectedShotId) ??
@@ -55,6 +59,15 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
               projectId={projectId}
               shot={selected}
               onSaved={() => void workspace.refetch()}
+            />
+          )}
+          {selected && (
+            <ShotProductionActions
+              projectId={projectId}
+              shot={selected}
+              onExecuted={async () => {
+                await workspace.refetch();
+              }}
             />
           )}
           {selected && <AssetReferencePicker projectId={projectId} shotId={selected.id} />}

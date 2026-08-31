@@ -68,12 +68,14 @@ export async function apiSend<T>(
   path: string,
   body?: unknown,
   csrf?: string | null,
+  extraHeaders?: Record<string, string>,
 ): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
   };
   if (csrf) headers["X-CSRF-Token"] = csrf;
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   Object.assign(headers, workspaceHeaders());
   const response = await fetch(`${API_BASE}${path}`, {
     method,
