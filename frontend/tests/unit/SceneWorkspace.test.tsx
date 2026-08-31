@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SceneWorkspace } from "../../src/features/scenes/SceneWorkspace";
@@ -93,8 +93,18 @@ describe("SceneWorkspace", () => {
     expect(screen.getByText("#1")).toBeInTheDocument();
     expect(screen.getByTestId("shot-placeholder")).toHaveTextContent("A turns");
     expect(screen.getByTestId("no-formal-result")).toHaveTextContent("尚未选择正式结果");
-    expect(screen.getByTestId("shot-design-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("shot-production-trace")).toBeInTheDocument();
+    const sidebar = screen.getByTestId("director-sidebar");
+    expect(sidebar).toBeInTheDocument();
+    expect(within(sidebar).getByTestId("director-section-design")).toBeInTheDocument();
+    expect(within(sidebar).getByTestId("director-section-references")).toBeInTheDocument();
+    expect(within(sidebar).getByTestId("director-section-production")).toBeInTheDocument();
+    expect(within(sidebar).getByTestId("director-section-output")).toBeInTheDocument();
+    expect(within(sidebar).getByTestId("shot-design-panel")).toBeInTheDocument();
+    expect(within(sidebar).getByTestId("shot-production-trace")).toBeInTheDocument();
+    const canvas = screen.getByTestId("cinematic-canvas");
+    expect(within(canvas).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(within(canvas).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(within(canvas).queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByText("keyframe")).toBeInTheDocument();
     expect(screen.getByTestId("scene-edit-entry")).toHaveAttribute(
       "href",
@@ -371,6 +381,9 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("artifact-a");
+    fireEvent.change(screen.getByLabelText("图片提示词"), {
+      target: { value: "A draft must stay on A" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
     await screen.findByTestId("shot-production-status");
     const firstPlan = calls.find(
@@ -382,6 +395,17 @@ describe("SceneWorkspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /#2/ }));
     await screen.findByText("artifact-b");
+    expect(screen.getByLabelText("图片提示词")).toHaveValue("second keyframe");
+    expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-2");
+    expect(screen.getByTestId("cinematic-canvas")).toHaveTextContent("B looks back");
+    expect(screen.getByTestId("director-sidebar")).toHaveAttribute("data-shot-id", "shot-2");
+    expect(screen.getByTestId("asset-reference-picker")).toHaveAttribute("data-shot-id", "shot-2");
+    expect(
+      within(screen.getByTestId("director-sidebar")).getByTestId("shot-production-actions"),
+    ).toHaveAttribute("data-shot-id", "shot-2");
+    expect(
+      within(screen.getByTestId("director-sidebar")).getByTestId("shot-production-trace"),
+    ).toHaveAttribute("data-shot-id", "shot-2");
     fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
     await waitFor(() => {
       const plans = calls.filter(

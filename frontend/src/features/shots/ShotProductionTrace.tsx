@@ -14,11 +14,15 @@ function rowOf(value: unknown): TraceRow {
   return (typeof value === "object" && value !== null ? value : {}) as TraceRow;
 }
 
-/** Bottom production chain trace: node runs for the selected shot. */
+/** Production chain trace for the selected shot. */
 export function ShotProductionTrace({ shotId, trace }: ShotProductionTraceProps) {
   const rows = trace ?? [];
   return (
-    <div className="qc-production-trace" data-testid="shot-production-trace">
+    <div
+      className="qc-production-trace"
+      data-testid="shot-production-trace"
+      data-shot-id={shotId || undefined}
+    >
       <header>
         <strong>生产链轨迹 · {shotId.slice(0, 8)}</strong>
         <span>后端聚合，不再解析 runtime JSON</span>

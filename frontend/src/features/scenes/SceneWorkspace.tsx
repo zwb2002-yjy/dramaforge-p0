@@ -1,16 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 
-import {
-  AssetReferencePicker,
-  type ReferenceResolutionState,
-} from "../../components/assets/AssetReferencePicker";
+import { DirectorSidebar } from "../director/DirectorSidebar";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
-import { ShotDesignPanel } from "../shots/ShotDesignPanel";
-import { ShotProductionTrace } from "../shots/ShotProductionTrace";
-import { ShotProductionActions } from "../shots/ShotProductionActions";
-import { ShotFormalOutputActions } from "../shots/ShotFormalOutputActions";
 import { ShotStrip } from "../shots/ShotStrip";
+import type { ReferenceResolutionState } from "../../components/assets/AssetReferencePicker";
 import type { ShotExecutionReference } from "../shots/api";
 import { fetchSceneWorkspace, type SceneWorkspaceRead, type ShotLite } from "./api";
 
@@ -20,23 +14,27 @@ type SceneWorkspaceProps = {
 };
 
 type ShotReferenceContext = {
-  shotId: string | null;
   references: ShotExecutionReference[];
   ready: boolean;
 };
+
+const EMPTY_REFERENCE_CONTEXT: ShotReferenceContext = { references: [], ready: false };
 
 function sameReferences(left: ShotExecutionReference[], right: ShotExecutionReference[]): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-/** Phase 3 scene workspace: shot strip + central canvas + design panel + trace. */
+/**
+ * Scene workspace composition root.
+ *
+ * The selected Shot is the only interaction identity shared by all three
+ * columns.  Scene/Shot/Artifact/NodeRun state stays in the scene snapshot;
+ * the small per-shot map is only a draft transport context for references
+ * while a picker is resolving them.
+ */
 export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
-  const [referenceContext, setReferenceContext] = useState<ShotReferenceContext>({
-    shotId: null,
-    references: [],
-    ready: false,
-  });
+  const [referenceDrafts, setReferenceDrafts] = useState<Record<string, ShotReferenceContext>>({});
   const workspace = useQuery({
     queryKey: ["scene-workspace", projectId, sceneId],
     queryFn: () => fetchSceneWorkspace(projectId, sceneId),
@@ -44,7 +42,7 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   });
   useEffect(() => {
     setSelectedShotId(null);
-    setReferenceContext({ shotId: null, references: [], ready: false });
+    setReferenceDrafts({});
   }, [projectId, sceneId]);
   const data = workspace.data as SceneWorkspaceRead | undefined;
   const shots = data?.shots ?? [];
@@ -54,32 +52,34 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   const selectedShotKey = selected?.id ?? null;
 
   // The fallback first Shot is still a selected Shot from the user's point of
-  // view.  Establish its context as soon as the workspace snapshot arrives,
-  // and clear it whenever the selected identity changes.
+  // view. Establish a draft context as soon as the snapshot arrives. Drafts
+  // are keyed by Shot so returning to A can restore A's in-flight references,
+  // while a switch to B can never read A's context.
   useEffect(() => {
-    setReferenceContext((current) =>
-      current.shotId === selectedShotKey
+    if (selectedShotKey === null) return;
+    setReferenceDrafts((current) =>
+      current[selectedShotKey]
         ? current
-        : { shotId: selectedShotKey, references: [], ready: false },
+        : { ...current, [selectedShotKey]: { ...EMPTY_REFERENCE_CONTEXT } },
     );
   }, [selectedShotKey]);
 
   const selectShot = useCallback((shotId: string) => {
     setSelectedShotId(shotId);
-    setReferenceContext({ shotId, references: [], ready: false });
   }, []);
 
   const updateSelectedReferences = useCallback(
     (references: ShotExecutionReference[]) => {
       if (selectedShotKey === null) return;
-      setReferenceContext((current) => {
-        if (current.shotId !== selectedShotKey || sameReferences(current.references, references)) {
-          return current;
-        }
+      setReferenceDrafts((current) => {
+        const previous = current[selectedShotKey] ?? EMPTY_REFERENCE_CONTEXT;
+        if (sameReferences(previous.references, references)) return current;
         return {
-          shotId: selectedShotKey,
-          references: references.map((reference) => ({ ...reference })),
-          ready: current.ready,
+          ...current,
+          [selectedShotKey]: {
+            references: references.map((reference) => ({ ...reference })),
+            ready: previous.ready,
+          },
         };
       });
     },
@@ -88,22 +88,23 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   const updateReferenceResolutionState = useCallback(
     (state: ReferenceResolutionState) => {
       if (selectedShotKey === null) return;
-      setReferenceContext((current) => {
-        if (current.shotId !== null && current.shotId !== selectedShotKey) return current;
-        if (current.shotId === selectedShotKey && current.ready === (state === "ready")) {
-          return current;
-        }
+      setReferenceDrafts((current) => {
+        const previous = current[selectedShotKey] ?? EMPTY_REFERENCE_CONTEXT;
+        const ready = state === "ready";
+        if (previous.ready === ready) return current;
         return {
           ...current,
-          shotId: selectedShotKey,
-          ready: state === "ready",
+          [selectedShotKey]: { ...previous, ready },
         };
       });
     },
     [selectedShotKey],
   );
-  const selectedReferences =
-    referenceContext.shotId === selectedShotKey ? referenceContext.references : [];
+  const selectedReferenceContext =
+    (selectedShotKey && referenceDrafts[selectedShotKey]) || EMPTY_REFERENCE_CONTEXT;
+  const selectedReferences = selectedReferenceContext.references;
+  const selectedReferencesReady = selectedReferenceContext.ready;
+  const candidates = selected ? (data?.candidates?.[selected.id] ?? []) : [];
   const trace = selected ? (data?.trace?.[selected.id] ?? []) : [];
 
   return (
@@ -126,54 +127,49 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
       {workspace.isError && (
         <div className="flash err">无法读取场景工作区：{String(workspace.error)}</div>
       )}
+      {workspace.isLoading && !data && (
+        <p className="qc-scene-loading" data-testid="scene-workspace-loading">
+          正在读取场景与镜头事实…
+        </p>
+      )}
 
-      <div className="qc-scene-layout">
-        <ShotStrip shots={shots} selectedShotId={selectedShotKey} onSelectShot={selectShot} />
-        <CinematicCanvas projectId={projectId} shot={selected} />
-        <aside className="qc-scene-side">
-          {selected && (
-            <ShotDesignPanel
-              projectId={projectId}
-              shot={selected}
-              onSaved={() => void workspace.refetch()}
-            />
-          )}
-          {selected && (
-            <ShotFormalOutputActions
-              key={`formal:${selected.id}`}
-              projectId={projectId}
-              shot={selected}
-              candidates={data?.candidates?.[selected.id] ?? []}
-              onConfirmed={async () => {
-                await workspace.refetch();
-              }}
-            />
-          )}
-          {selected && (
-            <ShotProductionActions
-              key={`production:${selected.id}`}
-              projectId={projectId}
-              shot={selected}
-              references={selectedReferences}
-              referencesReady={referenceContext.ready}
-              onExecuted={async () => {
-                await workspace.refetch();
-              }}
-            />
-          )}
-          {selected && (
-            <AssetReferencePicker
-              key={`references:${selected.id}`}
-              projectId={projectId}
-              shotId={selected.id}
-              onReferencesChange={updateSelectedReferences}
-              onResolutionStateChange={updateReferenceResolutionState}
-            />
-          )}
+      <div className="qc-scene-layout" data-selected-shot-id={selectedShotKey ?? undefined}>
+        <aside
+          className="qc-scene-navigation"
+          data-testid="scene-navigation"
+          aria-label="场景镜头导航"
+        >
+          <section className="qc-scene-context" data-testid="scene-context">
+            <span className="director-stage-kicker">Scene context</span>
+            <strong>
+              {data?.scene.episode_number}.{data?.scene.scene_number} ·{" "}
+              {data?.scene.location_name ?? "场景"}
+            </strong>
+            <span>{data?.scene.time_of_day ?? "—"}</span>
+            {data?.scene.synopsis && <p>{data.scene.synopsis}</p>}
+          </section>
+          <ShotStrip shots={shots} selectedShotId={selectedShotKey} onSelectShot={selectShot} />
         </aside>
+        <CinematicCanvas
+          projectId={projectId}
+          shot={selected}
+          candidates={candidates}
+          trace={trace}
+        />
+        <DirectorSidebar
+          projectId={projectId}
+          shot={selected}
+          candidates={candidates}
+          trace={trace}
+          references={selectedReferences}
+          referencesReady={selectedReferencesReady}
+          onReferencesChange={updateSelectedReferences}
+          onResolutionStateChange={updateReferenceResolutionState}
+          onWorkspaceRefresh={async () => {
+            await workspace.refetch();
+          }}
+        />
       </div>
-
-      <ShotProductionTrace shotId={selected?.id ?? ""} trace={trace} />
     </div>
   );
 }

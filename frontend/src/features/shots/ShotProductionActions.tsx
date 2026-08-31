@@ -143,7 +143,11 @@ export function ShotProductionActions({
   const activeStage = produce.isPending ? produce.variables : null;
 
   return (
-    <section className="qc-shot-production-actions" data-testid="shot-production-actions">
+    <section
+      className="qc-shot-production-actions"
+      data-testid="shot-production-actions"
+      data-shot-id={shot.id}
+    >
       <header>
         <div>
           <span className="director-stage-kicker">当前镜头生产</span>
