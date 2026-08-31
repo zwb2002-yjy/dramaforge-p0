@@ -6,6 +6,7 @@ import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotDesignPanel } from "../shots/ShotDesignPanel";
 import { ShotProductionTrace } from "../shots/ShotProductionTrace";
 import { ShotProductionActions } from "../shots/ShotProductionActions";
+import { ShotFormalOutputActions } from "../shots/ShotFormalOutputActions";
 import { ShotStrip } from "../shots/ShotStrip";
 import { fetchSceneWorkspace, type SceneWorkspaceRead, type ShotLite } from "./api";
 
@@ -59,6 +60,17 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
               projectId={projectId}
               shot={selected}
               onSaved={() => void workspace.refetch()}
+            />
+          )}
+          {selected && (
+            <ShotFormalOutputActions
+              key={selected.id}
+              projectId={projectId}
+              shot={selected}
+              candidates={data?.candidates?.[selected.id] ?? []}
+              onConfirmed={async () => {
+                await workspace.refetch();
+              }}
             />
           )}
           {selected && (
