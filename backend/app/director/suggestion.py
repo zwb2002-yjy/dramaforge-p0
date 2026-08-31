@@ -74,6 +74,7 @@ _FORBIDDEN_PREFIXES = (
     "execution_",
     "node_run_",
     "provider_",
+    "raw_sql_",
     "runtime_",
     "sql_",
     "worker_",
@@ -84,6 +85,7 @@ def _normalized_field_name(key: object) -> str:
     """Normalize snake/camel/kebab field spellings before policy matching."""
 
     text = str(key).strip().replace("-", "_").replace(" ", "_")
+    text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", text)
     text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
     return re.sub(r"_+", "_", text).lower()
 
