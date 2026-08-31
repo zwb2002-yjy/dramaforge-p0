@@ -1486,3 +1486,26 @@ code {
 .director-board-stage > span { justify-self: start; align-self: start; padding: .35rem; font-size: .62rem; }
 .director-board-character { padding: 1rem; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--text); font-size: .7rem; }
 .experiment-branch-panel { margin-top: 1rem; }
+
+/* Single-shot Director suggestion preview (proposal-only; no persistence). */
+.qc-shot-director-suggestion { display: grid; gap: .55rem; margin-top: .85rem; padding-top: .85rem; border-top: 1px solid var(--border); }
+.qc-shot-director-suggestion > header, .qc-shot-director-suggestion-proposal > header { display: flex; justify-content: space-between; align-items: flex-start; gap: .65rem; }
+.qc-shot-director-suggestion > header > div { display: grid; gap: .15rem; }
+.qc-shot-director-suggestion label { display: grid; gap: .25rem; font-size: .72rem; }
+.qc-shot-director-suggestion textarea { min-height: 65px; width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid var(--border); border-radius: 7px; padding: .45rem .55rem; background: var(--df-surface-0); color: var(--text); font: inherit; font-size: .72rem; line-height: 1.45; }
+.qc-shot-director-suggestion button { justify-self: start; }
+.qc-shot-director-suggestion-proposal { display: grid; gap: .5rem; padding: .65rem; border: 1px solid var(--df-warning-border); border-radius: 8px; background: var(--df-warning-dim); }
+.qc-shot-director-suggestion-proposal > p { margin: 0; color: var(--muted); font-size: .7rem; line-height: 1.45; }
+.qc-shot-director-suggestion-stale { color: var(--df-danger-text); font-size: .68rem; }
+.qc-shot-director-suggestion-diff { display: grid; gap: .55rem; }
+.qc-shot-director-suggestion-diff section { display: grid; gap: .3rem; min-width: 0; }
+.qc-shot-director-suggestion-diff h4 { margin: 0; font-size: .7rem; }
+.qc-shot-director-suggestion-diff section > div { display: grid; grid-template-columns: 25px minmax(0, 1fr); gap: .35rem; align-items: start; }
+.qc-shot-director-suggestion-diff section > div > span { color: var(--muted); font-size: .66rem; }
+.qc-shot-director-suggestion-diff pre { margin: 0; min-width: 0; max-height: 115px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .64rem; line-height: 1.4; }
+.qc-shot-director-suggestion-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.qc-shot-director-suggestion-hint, .qc-shot-director-suggestion-message, .qc-shot-director-suggestion-error, .qc-shot-director-suggestion-footer { margin: 0; font-size: .66rem; line-height: 1.4; }
+.qc-shot-director-suggestion-hint { color: var(--df-warning-text); }
+.qc-shot-director-suggestion-message { color: var(--df-success-text); }
+.qc-shot-director-suggestion-error { color: var(--df-danger-text); }
+.qc-shot-director-suggestion-footer { color: var(--muted); }

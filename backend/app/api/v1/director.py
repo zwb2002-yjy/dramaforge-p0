@@ -53,6 +53,11 @@ from app.director.schemas import (
 from app.director.service import DirectorService
 from app.director.shooting_service import DirectorShootingService
 from app.director.snapshot_service import DirectorSnapshotService
+from app.director.suggestion import (
+    ShotDirectorSuggestion,
+    ShotDirectorSuggestionRequest,
+    ShotDirectorSuggestionService,
+)
 from app.shared.errors import ValidationAppError
 
 router = APIRouter(tags=["director"], dependencies=[Depends(require_selected_workspace)])
@@ -134,6 +139,38 @@ async def get_director_workspace_snapshot(
     session: SessionDep,
 ) -> DirectorWorkspaceSnapshot:
     return await DirectorSnapshotService(session).get(project_id=project_id, actor=user)
+
+
+@router.post(
+    "/projects/{project_id}/director/shots/{shot_id}/suggestion",
+    response_model=ShotDirectorSuggestion,
+)
+async def suggest_shot_design(
+    project_id: UUID,
+    shot_id: UUID,
+    body: ShotDirectorSuggestionRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ShotDirectorSuggestion:
+    """Return one read-only Director suggestion for the selected Shot.
+
+    The service re-reads canonical Shot prompts/state and verifies the route
+    Shot id, scene id, project and expected version.  This endpoint never
+    persists the suggestion, starts an execution, or changes the Shot; the
+    browser must apply the returned design to its draft and use the existing
+    explicit Shot Design save command if the user wants to keep it.
+    """
+    if body.shot_id != shot_id:
+        raise ValidationAppError(
+            "shot id in the request body does not match the route",
+            details={"code": "SHOT_SUGGESTION_SCOPE_MISMATCH"},
+        )
+    return await ShotDirectorSuggestionService(session).suggest(
+        project_id=project_id,
+        actor=user,
+        request=body,
+    )
 
 
 @router.post(
