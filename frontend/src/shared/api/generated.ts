@@ -800,6 +800,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/director/shots/{shot_id}/suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest Shot Design
+         * @description Return one read-only Director suggestion for the selected Shot.
+         *
+         *     The service re-reads canonical Shot prompts/state and verifies the route
+         *     Shot id, scene id, project and expected version.  This endpoint never
+         *     persists the suggestion, starts an execution, or changes the Shot; the
+         *     browser must apply the returned design to its draft and use the existing
+         *     explicit Shot Design save command if the user wants to keep it.
+         */
+        post: operations["suggest_shot_design_api_v1_projects__project_id__director_shots__shot_id__suggestion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/director/artifact-versions": {
         parameters: {
             query?: never;
@@ -6242,6 +6268,41 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /**
+         * ShotDirectorSuggestion
+         * @description The complete, non-persistent proposal returned to the Shot UI.
+         */
+        ShotDirectorSuggestion: {
+            /** Base Shot Version */
+            base_shot_version: number;
+            /** Suggested Image Prompt */
+            suggested_image_prompt: string;
+            /** Suggested Video Prompt */
+            suggested_video_prompt: string;
+            suggested_director_state: components["schemas"]["SuggestionDirectorState"];
+            /** Change Summary */
+            change_summary: string;
+        };
+        /**
+         * ShotDirectorSuggestionRequest
+         * @description Client request; canonical Shot prompts/state are never accepted here.
+         */
+        ShotDirectorSuggestionRequest: {
+            /**
+             * Scene Id
+             * Format: uuid
+             */
+            scene_id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Expected Shot Version */
+            expected_shot_version: number;
+            /** User Instruction */
+            user_instruction: string;
+        };
         /** ShotFramingState */
         ShotFramingState: {
             /**
@@ -6547,6 +6608,17 @@ export interface components {
              * @default 1.0.0
              */
             template_version: string;
+        };
+        /**
+         * SuggestionDirectorState
+         * @description A design-only state map preserving existing Shot state extensions.
+         *
+         *     Shot.director_state already carries versioned design extensions such as
+         *     workflow participation and creative-capability provenance.  Keep those
+         *     keys intact while rejecting execution/provider payloads recursively.
+         */
+        SuggestionDirectorState: {
+            [key: string]: unknown;
         };
         /** UpstreamDependencyRead */
         UpstreamDependencyRead: {
@@ -8915,6 +8987,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DirectorWorkspaceSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suggest_shot_design_api_v1_projects__project_id__director_shots__shot_id__suggestion_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotDirectorSuggestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotDirectorSuggestion"];
                 };
             };
             /** @description Validation Error */

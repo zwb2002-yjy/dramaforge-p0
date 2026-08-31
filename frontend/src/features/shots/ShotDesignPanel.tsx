@@ -9,6 +9,18 @@ type ShotDesignPanelProps = {
   shot: ShotLite;
   onSaved?: () => void | Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * One-shot external draft replacement used by the Director suggestion
+   * preview. Applying it only changes this editor's local draft; save remains
+   * the existing explicit /design mutation.
+   */
+  applyDraft?: ShotDesignDraft | null;
+};
+
+export type ShotDesignDraft = {
+  image_prompt: string;
+  video_prompt: string;
+  director_state: Record<string, unknown>;
 };
 
 function serializeDirectorState(state: Record<string, unknown> | null | undefined): string {
@@ -40,6 +52,7 @@ export function ShotDesignPanel({
   shot,
   onSaved,
   onDirtyChange,
+  applyDraft,
 }: ShotDesignPanelProps) {
   const [visual, setVisual] = useState(shot.visual_description);
   const [imagePrompt, setImagePrompt] = useState(shot.image_prompt);
@@ -76,6 +89,14 @@ export function ShotDesignPanel({
   useEffect(() => {
     setMessage("");
   }, [shot.id]);
+
+  useEffect(() => {
+    if (!applyDraft) return;
+    setImagePrompt(applyDraft.image_prompt);
+    setVideoPrompt(applyDraft.video_prompt);
+    setDirectorStateText(serializeDirectorState(applyDraft.director_state));
+    setMessage("建议已应用到草稿；请保存镜头设计后才会成为服务器事实");
+  }, [applyDraft]);
 
   // Keep the sibling production controls informed without persisting a
   // second copy of the design. The callback is deliberately effect-based so

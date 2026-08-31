@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import {
@@ -6,6 +6,8 @@ import {
   type ReferenceResolutionState,
 } from "../../components/assets/AssetReferencePicker";
 import { ShotDesignPanel } from "../shots/ShotDesignPanel";
+import { ShotDirectorSuggestionPanel } from "./ShotDirectorSuggestionPanel";
+import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
 import { ShotFormalOutputActions } from "../shots/ShotFormalOutputActions";
 import { ShotProductionActions } from "../shots/ShotProductionActions";
 import { ShotProductionTrace } from "../shots/ShotProductionTrace";
@@ -44,13 +46,30 @@ export function DirectorSidebar({
 }: DirectorSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [designDirty, setDesignDirty] = useState(false);
+  const [suggestionDraft, setSuggestionDraft] = useState<ShotDesignDraft | null>(null);
 
   // The panel is keyed by Shot identity, but the sidebar itself is not. Reset
   // the sibling production guard whenever selection changes so Shot A's draft
   // can never block or authorize Shot B.
   useEffect(() => {
     setDesignDirty(false);
+    setSuggestionDraft(null);
   }, [shot?.id]);
+
+  const applySuggestionDraft = useCallback((draft: ShotDesignDraft) => {
+    // This is intentionally a local editor hand-off. ShotDesignPanel owns the
+    // draft and its existing explicit save mutation remains the only write.
+    setSuggestionDraft({
+      image_prompt: draft.image_prompt,
+      video_prompt: draft.video_prompt,
+      director_state: { ...draft.director_state },
+    });
+  }, []);
+
+  const handleDesignSaved = useCallback(async () => {
+    setSuggestionDraft(null);
+    await onWorkspaceRefresh?.();
+  }, [onWorkspaceRefresh]);
 
   return (
     <aside
@@ -93,12 +112,22 @@ export function DirectorSidebar({
                 key={`design:${shot.id}`}
                 projectId={projectId}
                 shot={shot}
-                onSaved={onWorkspaceRefresh}
+                applyDraft={suggestionDraft}
+                onSaved={handleDesignSaved}
                 onDirtyChange={setDesignDirty}
               />
             ) : (
               <p className="muted">选择一个镜头查看设计。</p>
             )}
+            {shot ? (
+              <ShotDirectorSuggestionPanel
+                key={`suggestion:${shot.id}`}
+                projectId={projectId}
+                shot={shot}
+                dirty={designDirty}
+                onApplyDraft={applySuggestionDraft}
+              />
+            ) : null}
           </section>
 
           <section

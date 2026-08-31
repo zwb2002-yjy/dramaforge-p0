@@ -1,5 +1,14 @@
 export type DirectorStage = "creative" | "shooting" | "trial" | "production";
 
+/** A non-persistent, single-shot design proposal returned by Director. */
+export type ShotDirectorSuggestion = {
+  base_shot_version: number;
+  suggested_image_prompt: string;
+  suggested_video_prompt: string;
+  suggested_director_state: Record<string, unknown>;
+  change_summary: string;
+};
+
 export type DirectorWorkflowStatus =
   | "drafting_creative"
   | "awaiting_creative_confirmation"
@@ -343,7 +352,8 @@ export type RiskReportPayload = {
   risks: Array<{
     risk_id: string;
     shot_id: string | null;
-    category: "identity" | "multi_person" | "motion" | "lip_sync" | "continuity" | "duration" | "model";
+    category:
+      "identity" | "multi_person" | "motion" | "lip_sync" | "continuity" | "duration" | "model";
     severity: "info" | "warning" | "blocking";
     evidence: string;
     mitigation: string;
@@ -542,7 +552,8 @@ export function shootingReadiness(snapshot: DirectorWorkspaceSnapshot): {
     reasons.push("分镜尚未形成可执行的 3–6 镜方案");
   }
   if (!risk || risk.status !== "ready") reasons.push("风险预审尚未达到可试拍状态");
-  if (!selection || selection.status !== "ready") reasons.push("所需图片、视频或声音能力尚未配置并验证");
+  if (!selection || selection.status !== "ready")
+    reasons.push("所需图片、视频或声音能力尚未配置并验证");
   if (!cost) {
     reasons.push("成本与价格快照尚未形成");
   } else if (cost.trial.some((line) => line.status !== "known") || cost.trial_total === null) {

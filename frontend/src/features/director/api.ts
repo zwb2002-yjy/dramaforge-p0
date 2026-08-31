@@ -20,6 +20,7 @@ import type {
   RepairOptionContract,
   ChangeProposalResult,
   DirectorArtifactKind,
+  ShotDirectorSuggestion,
 } from "./types";
 
 const directorPath = (projectId: string, suffix: string) =>
@@ -64,12 +65,7 @@ export async function interpretPreferences(
   },
 ): Promise<DirectorArtifactVersion<PreferenceUnderstandingPayload>> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    directorPath(projectId, "/creative/preferences/interpret"),
-    input,
-    csrf,
-  );
+  return apiSend("POST", directorPath(projectId, "/creative/preferences/interpret"), input, csrf);
 }
 
 export async function generateCreativePackage(
@@ -126,6 +122,33 @@ export async function proposeDirectorChange(
   const csrf = await fetchCsrf();
   return apiSend("POST", directorPath(projectId, "/change-proposals"), input, csrf);
 }
+
+/**
+ * Ask for one read-only suggestion for the selected Shot. The backend reads
+ * canonical prompts/state itself; this input contains only scope, version,
+ * and the creator's instruction.
+ */
+export async function suggestShotDesign(
+  projectId: string,
+  shotId: string,
+  input: {
+    scene_id: string;
+    shot_id: string;
+    expected_shot_version: number;
+    user_instruction: string;
+  },
+): Promise<ShotDirectorSuggestion> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    directorPath(projectId, `/shots/${encodeURIComponent(shotId)}/suggestion`),
+    input,
+    csrf,
+  );
+}
+
+/** Explicit alias for callers that prefer the request-oriented name. */
+export const requestShotDirectorSuggestion = suggestShotDesign;
 
 export async function confirmDirectorChange(
   projectId: string,
@@ -284,12 +307,7 @@ export async function generateShootingPackage(
   input: { authorize_text_calls: boolean; idempotency_key: string },
 ): Promise<ShootingPackageResult> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    directorPath(projectId, "/shooting/package/generate"),
-    input,
-    csrf,
-  );
+  return apiSend("POST", directorPath(projectId, "/shooting/package/generate"), input, csrf);
 }
 
 export async function regenerateStoryReview(
