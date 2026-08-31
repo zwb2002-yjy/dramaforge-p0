@@ -11,6 +11,7 @@ from app.api.v1 import (
     credentials,
     director,
     director_board,
+    editing,
     events,
     experiments,
     generations,
@@ -39,6 +40,7 @@ api_router.include_router(projects.router)
 api_router.include_router(creation.router)
 api_router.include_router(director.router)
 api_router.include_router(director_board.router)
+api_router.include_router(editing.router)
 api_router.include_router(production.router)
 api_router.include_router(review.router)
 api_router.include_router(scenes.router)

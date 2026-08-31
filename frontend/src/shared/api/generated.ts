@@ -1188,6 +1188,77 @@ export interface paths {
         patch: operations["update_director_board_p8_api_v1_projects__project_id__scenes__scene_id__shots__shot_id__director_board_patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/edit-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Edit Session
+         * @description Build one edit timeline from the project's current formal production.
+         */
+        post: operations["create_edit_session_api_v1_projects__project_id__edit_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Edit Session */
+        get: operations["get_edit_session_api_v1_projects__project_id__edit_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Save Edit Timeline */
+        patch: operations["save_edit_timeline_api_v1_projects__project_id__edit_sessions__session_id__timeline_patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Edit Session */
+        get: operations["export_edit_session_api_v1_projects__project_id__edit_sessions__session_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/artifacts/{artifact_id}/content": {
         parameters: {
             query?: never;
@@ -3928,6 +3999,89 @@ export interface components {
             token: string;
             /** Expires At */
             expires_at: number;
+        };
+        /** EditExportRead */
+        EditExportRead: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Format */
+            format: string;
+            /** Clip Count */
+            clip_count: number;
+            /** Duration Seconds */
+            duration_seconds: number;
+            /** Clips */
+            clips: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Production Lineage */
+            production_lineage: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /** EditSessionCreateRequest */
+        EditSessionCreateRequest: {
+            /**
+             * Name
+             * @default Long-form Edit
+             */
+            name: string;
+        };
+        /** EditSessionRead */
+        EditSessionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Timeline */
+            timeline: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Production Lineage */
+            production_lineage: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * EditTimelinePayload
+         * @description The adapter's editable timeline body, restricted to JSON-safe values.
+         */
+        EditTimelinePayload: {
+            /** Clips */
+            clips?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Metadata */
+            metadata?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /** EditTimelineUpdateRequest */
+        EditTimelineUpdateRequest: {
+            timeline: components["schemas"]["EditTimelinePayload"];
         };
         /** EffectiveBindingRead */
         EffectiveBindingRead: {
@@ -9974,6 +10128,169 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["P8DirectorBoardRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_edit_session_api_v1_projects__project_id__edit_sessions_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditSessionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_edit_session_api_v1_projects__project_id__edit_sessions__session_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_edit_timeline_api_v1_projects__project_id__edit_sessions__session_id__timeline_patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditTimelineUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_edit_session_api_v1_projects__project_id__edit_sessions__session_id__export_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditExportRead"];
                 };
             };
             /** @description Validation Error */
