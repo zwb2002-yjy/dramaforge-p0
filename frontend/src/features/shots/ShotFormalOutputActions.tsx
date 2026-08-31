@@ -123,7 +123,11 @@ export function ShotFormalOutputActions({
   const activeArtifactId = confirm.isPending ? confirm.variables?.artifactId : null;
 
   return (
-    <section className="qc-shot-formal-output-actions" data-testid="shot-formal-output-actions">
+    <section
+      className="qc-shot-formal-output-actions"
+      data-testid="shot-formal-output-actions"
+      data-shot-id={shot.id}
+    >
       <header>
         <div>
           <span className="director-stage-kicker">正式结果确认</span>

@@ -44,7 +44,7 @@ export function ShotDesignPanel({ projectId, shot, onSaved }: ShotDesignPanelPro
   });
 
   return (
-    <div className="qc-shot-design-panel" data-testid="shot-design-panel">
+    <div className="qc-shot-design-panel" data-testid="shot-design-panel" data-shot-id={shot.id}>
       <header>
         <strong>#{shot.shot_number} 镜头设计</strong>
         <span>v{shot.version}</span>

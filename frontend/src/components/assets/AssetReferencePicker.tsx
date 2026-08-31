@@ -166,7 +166,7 @@ export function AssetReferencePicker({
   const bindingLabels = rows.map((binding) => binding.label);
 
   return (
-    <div className="qc-reference-picker" data-testid="asset-reference-picker">
+    <div className="qc-reference-picker" data-testid="asset-reference-picker" data-shot-id={shotId}>
       <header>
         <strong>镜头资产引用</strong>
         <span>保存业务目的，不保存 provider role；@文本仅供人类阅读。</span>
