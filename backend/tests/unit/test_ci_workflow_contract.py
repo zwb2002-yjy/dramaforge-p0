@@ -73,3 +73,27 @@ def test_frontend_job_keeps_only_frontend_quality_gates() -> None:
     assert "npm run api:check" not in frontend_job
     for command in ("lint", "typecheck", "test", "build"):
         assert f"- run: npm run {command}" in frontend_job
+
+
+def test_postgres_integration_job_checks_schema_before_integration_tests() -> None:
+    workflow = _WORKFLOW.read_text(encoding="utf-8")
+    postgres_job = _job(workflow, "postgres-integration")
+
+    assert "image: postgres:15" in postgres_job
+    assert "- run: uv run alembic upgrade head" in postgres_job
+    assert "- run: uv run alembic check" in postgres_job
+    assert "- run: uv run pytest tests/integration -q -rs --fail-on-skip" in postgres_job
+
+    # Schema drift and integration failures are required gates.  Do not make
+    # either command advisory or conditionally skippable.
+    assert "continue-on-error:" not in postgres_job
+    assert "if:" not in postgres_job
+    assert "skip: true" not in postgres_job
+    assert "|| true" not in postgres_job
+
+    upgrade = postgres_job.index("uv run alembic upgrade head")
+    schema_check = postgres_job.index("uv run alembic check")
+    integration = postgres_job.index(
+        "uv run pytest tests/integration -q -rs --fail-on-skip"
+    )
+    assert upgrade < schema_check < integration
