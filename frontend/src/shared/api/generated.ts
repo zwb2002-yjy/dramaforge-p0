@@ -4046,6 +4046,8 @@ export interface components {
             name: string;
             /** Status */
             status: string;
+            /** Version */
+            version: number;
             /** Timeline */
             timeline: {
                 [key: string]: components["schemas"]["JsonValue"];

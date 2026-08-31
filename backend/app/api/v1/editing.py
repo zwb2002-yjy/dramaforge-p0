@@ -61,6 +61,7 @@ class EditSessionRead(BaseModel):
     project_id: UUID
     name: str
     status: str
+    version: int
     timeline: dict[str, JsonValue]
     production_lineage: dict[str, JsonValue]
     created_at: datetime
@@ -107,6 +108,7 @@ def _edit_session_read(row: EditSession) -> EditSessionRead:
         project_id=row.project_id,
         name=row.name,
         status=row.status,
+        version=row.version,
         timeline=cast(dict[str, JsonValue], dict(row.timeline or {})),
         production_lineage=cast(dict[str, JsonValue], dict(row.production_lineage or {})),
         created_at=row.created_at,
