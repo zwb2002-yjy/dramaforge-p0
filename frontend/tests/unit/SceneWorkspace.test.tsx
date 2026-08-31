@@ -36,9 +36,11 @@ const SHOT_1 = {
 
 function mockBackend() {
   const calls: Array<{ method: string; url: string }> = [];
+  let serverShot = { ...SHOT_1, director_state: { ...SHOT_1.director_state } };
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
     calls.push({ method, url });
     if (url.endsWith("/workspace") && method === "GET") {
       return json({
@@ -53,7 +55,7 @@ function mockBackend() {
           version: 1,
           design_state: {},
         },
-        shots: [SHOT_1],
+        shots: [serverShot],
         references: { "shot-1": [] },
         candidates: { "shot-1": [] },
         trace: {
@@ -71,7 +73,19 @@ function mockBackend() {
       });
     }
     if (url.endsWith("/design") && method === "PATCH") {
-      return json({ ...SHOT_1, version: 2 });
+      serverShot = {
+        ...serverShot,
+        version: serverShot.version + 1,
+        image_prompt:
+          typeof body.image_prompt === "string" ? body.image_prompt : serverShot.image_prompt,
+        video_prompt:
+          typeof body.video_prompt === "string" ? body.video_prompt : serverShot.video_prompt,
+        director_state:
+          body.director_state && typeof body.director_state === "object"
+            ? (body.director_state as Record<string, unknown>)
+            : serverShot.director_state,
+      };
+      return json({ ...serverShot });
     }
     return json({});
   });
@@ -381,9 +395,6 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("artifact-a");
-    fireEvent.change(screen.getByLabelText("图片提示词"), {
-      target: { value: "A draft must stay on A" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
     await screen.findByTestId("shot-production-status");
     const firstPlan = calls.find(

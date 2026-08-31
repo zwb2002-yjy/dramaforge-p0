@@ -15,6 +15,8 @@ type ShotProductionActionsProps = {
   shot: ShotLite;
   references?: ShotExecutionReference[];
   referencesReady?: boolean;
+  /** Block production until the selected Shot design has been persisted. */
+  dirty?: boolean;
   onExecuted?: (result: ShotExecutionRead) => void | Promise<void>;
 };
 
@@ -55,6 +57,7 @@ export function ShotProductionActions({
   shot,
   references = [],
   referencesReady = true,
+  dirty = false,
   onExecuted,
 }: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
@@ -66,6 +69,12 @@ export function ShotProductionActions({
 
   const produce = useMutation({
     mutationFn: async (stage: ShotExecutionStage) => {
+      if (dirty) {
+        // The disabled attribute is the normal UI path; keep the same guard
+        // in the mutation so an imperative/event-level trigger cannot bypass
+        // the unsaved-design production gate.
+        throw new Error("请先保存镜头设计，再生成关键帧或视频。");
+      }
       const configuredPrompt =
         stage === "image_keyframe" ? (shot.image_prompt ?? "") : (shot.video_prompt ?? "");
       const prompt = configuredPrompt.trim() || (shot.visual_description ?? "").trim();
@@ -168,7 +177,7 @@ export function ShotProductionActions({
           type="button"
           data-testid="generate-keyframe"
           onClick={() => produce.mutate("image_keyframe")}
-          disabled={produce.isPending || !referencesReady}
+          disabled={produce.isPending || !referencesReady || dirty}
         >
           {activeStage === "image_keyframe" ? "关键帧入队中…" : "生成关键帧"}
         </button>
@@ -176,7 +185,7 @@ export function ShotProductionActions({
           type="button"
           data-testid="generate-video"
           onClick={() => produce.mutate("video")}
-          disabled={produce.isPending || !referencesReady}
+          disabled={produce.isPending || !referencesReady || dirty}
         >
           {activeStage === "video" ? "视频入队中…" : "生成视频"}
         </button>
@@ -188,6 +197,11 @@ export function ShotProductionActions({
       {!referencesReady && (
         <p className="qc-shot-production-hint" role="status">
           正在解析当前镜头的资产引用；解析完成前不会提交生产请求。
+        </p>
+      )}
+      {dirty && (
+        <p className="qc-shot-production-hint" data-testid="shot-production-unsaved" role="status">
+          请先保存镜头设计，再生成关键帧或视频。
         </p>
       )}
 
