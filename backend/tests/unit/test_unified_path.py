@@ -82,6 +82,8 @@ FAKE_PROFILE = "u_test_v1"
 # marks one submission as a 429; anything else = success).
 _FAKE_IMAGE_PLAN: list[str | SubmissionResult] = []
 _FAKE_COST_PLAN: list[CostResult] = []
+_FAKE_IMAGE_SUBMISSION_NO = 0
+_FAKE_VIDEO_SUBMISSION_NO = 0
 
 
 _FAKE_IMAGE_MANIFEST = {
@@ -163,9 +165,10 @@ class FakeUnifiedRuntime:
         )
 
     async def submit_image(self, request: CompiledImageRequest) -> SubmissionResult:
+        global _FAKE_IMAGE_SUBMISSION_NO
+
         self.submit_calls += 1
         self.submitted_image = request
-        remote = "uni-img-1"
         if _FAKE_IMAGE_PLAN:
             outcome = _FAKE_IMAGE_PLAN.pop(0)
             if isinstance(outcome, SubmissionResult):
@@ -180,6 +183,10 @@ class FakeUnifiedRuntime:
                     request_fingerprint="f" * 64,
                     request_summary={"operation": "image.t2i", "model": "uni-img-model"},
                 )
+        # A rejected submission creates no remote task.  Only successful
+        # submissions consume a remote-id sequence number.
+        _FAKE_IMAGE_SUBMISSION_NO += 1
+        remote = f"uni-img-{_FAKE_IMAGE_SUBMISSION_NO}"
         return SubmissionResult(
             remote_task_id=remote,
             status="succeeded",
@@ -190,9 +197,12 @@ class FakeUnifiedRuntime:
         )
 
     async def submit_video(self, request: CompiledVideoRequest) -> SubmissionResult:
+        global _FAKE_VIDEO_SUBMISSION_NO
+
         self.submit_calls += 1
         self.submitted_video = request
-        remote = "uni-vid-1"
+        _FAKE_VIDEO_SUBMISSION_NO += 1
+        remote = f"uni-vid-{_FAKE_VIDEO_SUBMISSION_NO}"
         return SubmissionResult(
             remote_task_id=remote,
             status="queued",
@@ -368,10 +378,14 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.fixture
 def fake_plugin() -> ProviderPlugin:
+    global _FAKE_IMAGE_SUBMISSION_NO, _FAKE_VIDEO_SUBMISSION_NO
+
     _FAKE_RUNTIME_HOLDER.clear()
     _FAKE_RUNTIMES.clear()
     _FAKE_IMAGE_PLAN.clear()
     _FAKE_COST_PLAN.clear()
+    _FAKE_IMAGE_SUBMISSION_NO = 0
+    _FAKE_VIDEO_SUBMISSION_NO = 0
     plugin = _fake_plugin()
     register_plugin(plugin)
     try:
@@ -382,6 +396,8 @@ def fake_plugin() -> ProviderPlugin:
         _FAKE_RUNTIMES.clear()
         _FAKE_IMAGE_PLAN.clear()
         _FAKE_COST_PLAN.clear()
+        _FAKE_IMAGE_SUBMISSION_NO = 0
+        _FAKE_VIDEO_SUBMISSION_NO = 0
 
 
 def _current_runtime() -> FakeUnifiedRuntime:
@@ -731,7 +747,9 @@ async def _attach_canonical_source(
         graph_version_id=run.graph_version_id,
         graph_node_id=run.graph_node_id,
         production_batch_id=batch.id,
-        attempt_no=1,
+        # ``_seed_project_chain`` already owns attempt 1 for this graph node;
+        # the canonical source is the next valid attempt.
+        attempt_no=2,
         idempotency_key=f"canonical:{uuid4()}",
         input_hash="c" * 64,
         status="completed",

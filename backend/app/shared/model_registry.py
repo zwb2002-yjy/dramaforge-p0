@@ -8,6 +8,7 @@ def load_all_models() -> None:
     from app.access import models as access_models
     from app.assets import models as assets_models
     from app.creation import models as creation_models
+    from app.creation import schema_tables as creation_schema_tables
     from app.delivery import models as delivery_models
     from app.director import models as director_models
     from app.director import proposal_models as director_proposal_models
@@ -24,6 +25,7 @@ def load_all_models() -> None:
         access_models,
         assets_models,
         creation_models,
+        creation_schema_tables,
         delivery_models,
         director_models,
         director_proposal_models,

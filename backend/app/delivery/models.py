@@ -6,11 +6,21 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+from app.shared.db_types import JSON_DOCUMENT
 
 
 class ReviewAnnotation(Base):
@@ -60,7 +70,9 @@ class Export(Base):
     requested_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
-    manifest: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    manifest: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     result_artifact_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
     )
@@ -87,5 +99,13 @@ class ExportItem(Base):
     )
     role: Mapped[str] = mapped_column(String(80), nullable=False)
     metadata_json: Mapped[dict[str, object]] = mapped_column(
-        "metadata", JSON, nullable=False, default=dict
+        "metadata", JSON_DOCUMENT, nullable=False, default=dict
     )
+
+
+Index(
+    "idx_review_annotations_project_shot",
+    ReviewAnnotation.__table__.c.project_id,
+    ReviewAnnotation.__table__.c.shot_id,
+    ReviewAnnotation.__table__.c.created_at,
+)

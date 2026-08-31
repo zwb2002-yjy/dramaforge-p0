@@ -7,9 +7,9 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+from app.shared.db_types import JSON_DOCUMENT
 
 
 class EditSession(Base):
@@ -27,9 +27,11 @@ class EditSession(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False, default="Edit")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
-    timeline: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    timeline: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     production_lineage: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
+        JSON_DOCUMENT, nullable=False, default=dict
     )
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False

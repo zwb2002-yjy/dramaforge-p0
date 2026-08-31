@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+from app.shared.db_types import JSON_DOCUMENT
 
 
 class ScriptDocument(Base):
@@ -114,13 +116,28 @@ class Shot(Base):
     image_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     video_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     formal_keyframe_artifact_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
+        ForeignKey(
+            "artifacts.id",
+            name="fk_shots_formal_keyframe_artifact",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
     )
     formal_video_artifact_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
+        ForeignKey(
+            "artifacts.id",
+            name="fk_shots_formal_video_artifact",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
     )
     formal_composite_artifact_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
+        ForeignKey(
+            "artifacts.id",
+            name="fk_shots_formal_composite_artifact",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -188,10 +205,14 @@ class ShotChangeProposal(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     base_shot_version: Mapped[int] = mapped_column(Integer, nullable=False)
     replacement_payload: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
+        JSON_DOCUMENT, nullable=False, default=dict
     )
-    affected_node_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    reusable_artifact_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    affected_node_keys: Mapped[list[str]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    reusable_artifact_ids: Mapped[list[str]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="awaiting_confirmation")
     confirmed_revision_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("canvas_revisions.id", ondelete="SET NULL"), nullable=True
@@ -215,7 +236,7 @@ class Asset(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     metadata_json: Mapped[dict[str, object]] = mapped_column(
-        "metadata", JSON, nullable=False, default=dict
+        "metadata", JSON_DOCUMENT, nullable=False, default=dict
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -225,7 +246,13 @@ class Asset(Base):
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     current_version_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("asset_versions.id", ondelete="RESTRICT"), nullable=True
+        ForeignKey(
+            "asset_versions.id",
+            name="fk_assets_current_version",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        nullable=True,
     )
 
 
@@ -249,7 +276,7 @@ class AssetVersion(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     metadata_json: Mapped[dict[str, object]] = mapped_column(
-        "metadata", JSON, nullable=False, default=dict
+        "metadata", JSON_DOCUMENT, nullable=False, default=dict
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     created_by: Mapped[UUID] = mapped_column(
@@ -318,7 +345,7 @@ class AssetVersionReference(Base):
     label: Mapped[str] = mapped_column(String(160), nullable=False, default="")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     metadata_json: Mapped[dict[str, object]] = mapped_column(
-        "metadata", JSON, nullable=False, default=dict
+        "metadata", JSON_DOCUMENT, nullable=False, default=dict
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -358,3 +385,48 @@ class AssetTagLink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+# Indexes are declared explicitly so standalone Alembic metadata retains the
+# names and ordering chosen by the historical migrations.
+Index(
+    "idx_shots_project_scene",
+    Shot.__table__.c.project_id,
+    Shot.__table__.c.scene_id,
+    Shot.__table__.c.shot_number,
+)
+Index(
+    "idx_canvas_revisions_project_shot",
+    CanvasRevision.__table__.c.project_id,
+    CanvasRevision.__table__.c.shot_id,
+    CanvasRevision.__table__.c.revision_number,
+)
+Index(
+    "idx_shot_change_proposals_project_shot",
+    ShotChangeProposal.__table__.c.project_id,
+    ShotChangeProposal.__table__.c.shot_id,
+    ShotChangeProposal.__table__.c.created_at,
+)
+Index(
+    "idx_asset_versions_project_asset",
+    AssetVersion.__table__.c.project_id,
+    AssetVersion.__table__.c.asset_id,
+    AssetVersion.__table__.c.version_number,
+)
+Index("ix_assets_current_version_id", Asset.__table__.c.current_version_id)
+Index(
+    "ix_shots_formal_keyframe_artifact_id",
+    Shot.__table__.c.formal_keyframe_artifact_id,
+)
+Index(
+    "ix_shots_formal_video_artifact_id",
+    Shot.__table__.c.formal_video_artifact_id,
+)
+Index(
+    "ix_shots_formal_composite_artifact_id",
+    Shot.__table__.c.formal_composite_artifact_id,
+)
+Index(
+    "ix_asset_version_references_version",
+    AssetVersionReference.__table__.c.asset_version_id,
+)

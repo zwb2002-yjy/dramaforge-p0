@@ -308,7 +308,9 @@ async def test_canonical_source_must_be_completed_image_in_same_batch(
         graph_node_id=run.graph_node_id,
         production_batch_id=run.production_batch_id,
         budget_reservation_id=reservation.id,
-        attempt_no=1,
+        # ``_base_run`` already owns attempt 1 for this graph node; the
+        # canonical source is a later execution attempt.
+        attempt_no=2,
         idempotency_key=f"canonical:{uuid4()}",
         input_hash="c" * 64,
         status="completed",
@@ -363,7 +365,7 @@ async def test_canonical_source_must_be_completed_image_in_same_batch(
         graph_node_id=run.graph_node_id,
         production_batch_id=run.production_batch_id,
         budget_reservation_id=reservation.id,
-        attempt_no=2,
+        attempt_no=3,
         idempotency_key=f"canonical-reused:{uuid4()}",
         input_hash="d" * 64,
         status="cached",
@@ -380,7 +382,7 @@ async def test_canonical_source_must_be_completed_image_in_same_batch(
         graph_node_id=run.graph_node_id,
         production_batch_id=run.production_batch_id,
         budget_reservation_id=reservation.id,
-        attempt_no=3,
+        attempt_no=4,
         idempotency_key=f"canonical-twice-reused:{uuid4()}",
         input_hash="e" * 64,
         status="cached",

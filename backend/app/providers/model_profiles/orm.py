@@ -15,10 +15,12 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -32,15 +34,16 @@ class ProductionModelProfile(Base):
         UniqueConstraint(
             "workspace_id", "name", "project_id", name="uq_model_profile_workspace_name"
         ),
+        UniqueConstraint("project_id", name="uq_model_profile_project"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     workspace_id: Mapped[UUID] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     # NULL = workspace-level profile; non-NULL = this project's profile.
     project_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, unique=True
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -60,3 +63,15 @@ class ProductionModelProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+Index(
+    "ix_production_model_profiles_workspace_id",
+    ProductionModelProfile.__table__.c.workspace_id,
+)
+Index(
+    "uq_model_profile_workspace_default",
+    ProductionModelProfile.__table__.c.workspace_id,
+    unique=True,
+    postgresql_where=text("is_default AND project_id IS NULL"),
+)

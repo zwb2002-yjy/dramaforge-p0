@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+from app.shared.db_types import JSON_DOCUMENT
 from app.shared.enums import OutboxStatus
 from app.shared.pg_enums import OUTBOX_STATUS, col_enum
 
@@ -29,7 +29,9 @@ class EventLog(Base):
     actor_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    payload: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -45,7 +47,9 @@ class OutboxEvent(Base):
     )
     topic: Mapped[str] = mapped_column(String(120), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    payload: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     status: Mapped[str] = mapped_column(
         col_enum(OUTBOX_STATUS), nullable=False, default=OutboxStatus.PENDING.value
     )
@@ -76,9 +80,18 @@ class OutboxDeadLetter(Base):
         ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
     topic: Mapped[str] = mapped_column(String(120), nullable=False)
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    payload: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
     last_error_summary: Mapped[str] = mapped_column(Text, nullable=False)
     dead_lettered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+Index(
+    "idx_event_log_project_occurred",
+    EventLog.__table__.c.project_id,
+    EventLog.__table__.c.occurred_at,
+)

@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     PrimaryKeyConstraint,
@@ -24,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+from app.shared.db_types import CURRENCY_CODE, JSON_DOCUMENT
 from app.shared.enums import ExperienceMode, ProjectStage
 
 # PG native enums (create_type=False — Alembic owns types); SQLite uses string values.
@@ -124,9 +126,13 @@ class Project(Base):
     )
     aspect_ratio: Mapped[str] = mapped_column(String(8), nullable=False)
     target_platform: Mapped[str] = mapped_column(String(40), nullable=False, default="general")
-    style_bible: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    style_bible: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     budget_limit: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
-    budget_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    budget_currency: Mapped[str] = mapped_column(
+        CURRENCY_CODE, nullable=False, default="USD"
+    )
     provider_dispatch_frozen: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -162,3 +168,10 @@ class UserProjectPreference(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+Index(
+    "idx_projects_workspace_stage",
+    Project.__table__.c.workspace_id,
+    Project.__table__.c.stage,
+)

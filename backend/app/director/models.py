@@ -10,6 +10,7 @@ from sqlalchemy import (
     CHAR,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+from app.shared.db_types import JSON_DOCUMENT
 
 
 class DirectorWorkflowRun(Base):
@@ -153,7 +155,14 @@ class ApprovalRecord(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    invalidated_by_proposal_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    invalidated_by_proposal_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "change_proposals.id",
+            name="fk_approval_invalidating_proposal",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
 
 
 class ChangeProposal(Base):
@@ -429,7 +438,7 @@ class DirectorMessage(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_json: Mapped[dict[str, object]] = mapped_column(
-        "metadata", JSON, nullable=False, default=dict
+        "metadata", JSON_DOCUMENT, nullable=False, default=dict
     )
     created_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -437,3 +446,6 @@ class DirectorMessage(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+Index("ix_director_messages_thread", DirectorMessage.__table__.c.thread_id)

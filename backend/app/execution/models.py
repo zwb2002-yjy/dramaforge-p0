@@ -14,17 +14,20 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+from app.shared.db_types import CURRENCY_CODE, HASH_64, JSON_DOCUMENT
 
 _node_type = Enum(
     "prompt_compose",
@@ -125,11 +128,27 @@ class GraphNode(Base):
         _node_type.with_variant(String(40), "sqlite"), nullable=False
     )
     display_name: Mapped[str] = mapped_column(String(160), nullable=False)
-    input_schema: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    output_schema: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    config: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    input_schema: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    output_schema: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    config: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     cacheable: Mapped[bool] = mapped_column(nullable=False, default=True)
-    latest_successful_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    latest_successful_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "node_runs.id",
+            name="fk_graph_nodes_latest_successful_run",
+            ondelete="SET NULL",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -145,14 +164,14 @@ class GraphEdge(Base):
             "downstream_node_id",
             "input_port",
             "position",
-            name="uq_graph_edges_identity",
+            name="graph_edges_graph_version_id_upstream_node_id_output_port_d_key",
         ),
         UniqueConstraint(
             "graph_version_id",
             "downstream_node_id",
             "input_port",
             "position",
-            name="uq_graph_edges_input_position",
+            name="graph_edges_graph_version_id_downstream_node_id_input_port__key",
         ),
     )
 
@@ -199,13 +218,23 @@ class Artifact(Base):
         default="quarantined",
     )
     object_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
     mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
     byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_seconds: Mapped[Decimal | None] = mapped_column(Numeric(10, 3), nullable=True)
-    produced_by_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    produced_by_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "node_runs.id",
+            name="fk_artifacts_produced_by_run",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delete_reason: Mapped[str | None] = mapped_column(String(240), nullable=True)
     legal_hold: Mapped[bool] = mapped_column(nullable=False, default=False)
@@ -218,6 +247,9 @@ class NodeRun(Base):
     __tablename__ = "node_runs"
     __table_args__ = (
         UniqueConstraint("project_id", "idempotency_key", name="uq_node_runs_idempotency"),
+        UniqueConstraint(
+            "graph_node_id", "attempt_no", name="node_runs_graph_node_id_attempt_no_key"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -231,26 +263,39 @@ class NodeRun(Base):
         ForeignKey("graph_nodes.id", ondelete="RESTRICT"), nullable=False
     )
     production_batch_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("production_batches.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "production_batches.id",
+            name="fk_node_runs_production_batch",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
-        index=True,
     )
     budget_reservation_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("budget_reservations.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "budget_reservations.id",
+            name="fk_node_runs_budget_reservation",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
         nullable=True,
-        index=True,
     )
-    parent_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    parent_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("node_runs.id", ondelete="SET NULL"), nullable=True
+    )
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
-    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
     status: Mapped[str] = mapped_column(
         _node_run_status.with_variant(String(40), "sqlite"),
         nullable=False,
         default="queued",
     )
-    input_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    output_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    input_snapshot: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    output_summary: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -267,8 +312,20 @@ class NodeRun(Base):
     avoided_cost_estimate: Mapped[Decimal] = mapped_column(
         Numeric(20, 6), nullable=False, default=Decimal("0")
     )
-    result_artifact_id: Mapped[UUID | None] = mapped_column(nullable=True)
-    reused_from_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    result_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "artifacts.id",
+            name="fk_node_runs_result_artifact",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
+    reused_from_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("node_runs.id", ondelete="RESTRICT"), nullable=True
+    )
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -322,29 +379,41 @@ class ProviderOperation(Base):
     provider_operation_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     remote_secondary_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     protocol_profile: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(HASH_64, nullable=False)
     # Stage A+B: persisted execution provenance + resume context. Resume is
     # driven by these snapshots, never by current Feature Flags or Project
     # bindings. All snapshots are immutable once submission starts.
     connection_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("provider_connections.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "provider_connections.id",
+            name="fk_provider_operations_connection",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
-        index=True,
     )
     provider_connection_revision_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("provider_connection_revisions.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "provider_connection_revisions.id",
+            name="fk_provider_operations_connection_revision",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
-        index=True,
     )
     model_binding_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("provider_model_bindings.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "provider_model_bindings.id",
+            name="fk_provider_operations_model_binding",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
-        index=True,
     )
     catalog_entry_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("provider_model_catalog_entries.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "provider_model_catalog_entries.id",
+            name="fk_provider_operations_catalog_entry",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
-        index=True,
     )
     capability_manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     selection_plan: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
@@ -355,9 +424,15 @@ class ProviderOperation(Base):
         nullable=False,
         default="created",
     )
-    request_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    response_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    token_usage: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    request_summary: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    response_summary: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    token_usage: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -365,7 +440,7 @@ class ProviderOperation(Base):
         DateTime(timezone=True), nullable=True
     )
     provider_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    currency: Mapped[str] = mapped_column(CURRENCY_CODE, nullable=False, default="USD")
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -374,3 +449,65 @@ class ProviderOperation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+Index(
+    "idx_graph_edges_downstream",
+    GraphEdge.__table__.c.graph_version_id,
+    GraphEdge.__table__.c.downstream_node_id,
+    GraphEdge.__table__.c.input_port,
+    GraphEdge.__table__.c.position,
+)
+Index(
+    "idx_artifacts_project_state",
+    Artifact.__table__.c.project_id,
+    Artifact.__table__.c.storage_state,
+)
+Index(
+    "idx_node_runs_cache_lookup",
+    NodeRun.__table__.c.project_id,
+    NodeRun.__table__.c.graph_node_id,
+    NodeRun.__table__.c.input_hash,
+    NodeRun.__table__.c.status,
+    NodeRun.__table__.c.finished_at.desc(),
+)
+Index(
+    "idx_node_runs_reused_from",
+    NodeRun.__table__.c.reused_from_run_id,
+    postgresql_where=text("reused_from_run_id IS NOT NULL"),
+)
+Index("ix_node_runs_production_batch_id", NodeRun.__table__.c.production_batch_id)
+Index("ix_node_runs_budget_reservation_id", NodeRun.__table__.c.budget_reservation_id)
+Index("ix_provider_operations_connection_id", ProviderOperation.__table__.c.connection_id)
+Index(
+    "ix_provider_operations_connection_revision_id",
+    ProviderOperation.__table__.c.provider_connection_revision_id,
+)
+Index(
+    "ix_provider_operations_model_binding_id",
+    ProviderOperation.__table__.c.model_binding_id,
+)
+Index(
+    "ix_provider_operations_catalog_entry_id",
+    ProviderOperation.__table__.c.catalog_entry_id,
+)
+Index(
+    "uq_provider_operations_node_run",
+    ProviderOperation.__table__.c.node_run_id,
+    unique=True,
+    postgresql_where=text("node_run_id IS NOT NULL"),
+)
+Index(
+    "uq_provider_operations_agent_attempt",
+    ProviderOperation.__table__.c.agent_run_id,
+    ProviderOperation.__table__.c.attempt_no,
+    unique=True,
+    postgresql_where=text("agent_run_id IS NOT NULL"),
+)
+Index(
+    "uq_provider_operations_remote",
+    ProviderOperation.__table__.c.actual_provider,
+    ProviderOperation.__table__.c.provider_operation_id,
+    unique=True,
+    postgresql_where=text("provider_operation_id IS NOT NULL"),
+)

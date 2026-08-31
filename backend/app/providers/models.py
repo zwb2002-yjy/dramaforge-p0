@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Numeric,
     String,
     UniqueConstraint,
@@ -82,7 +83,12 @@ class ProviderConnectionRevision(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     connection_id: Mapped[UUID] = mapped_column(
-        ForeignKey("provider_connections.id", ondelete="CASCADE"), nullable=False
+        ForeignKey(
+            "provider_connections.id",
+            name="fk_provider_connection_revision_connection",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
     )
     revision_no: Mapped[int] = mapped_column(
         nullable=False, default=1, server_default="1"
@@ -91,7 +97,11 @@ class ProviderConnectionRevision(Base):
     protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
     base_url: Mapped[str] = mapped_column(String(240), nullable=False)
     credential_revision_id: Mapped[UUID] = mapped_column(
-        ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "encrypted_provider_credentials.id",
+            name="fk_provider_connection_revision_credential",
+            ondelete="RESTRICT",
+        ),
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -123,9 +133,12 @@ class ProviderCapabilityEvidence(Base):
     # Binding-scoped probe evidence: exactly which model binding (and catalog
     # revision) this capability proof belongs to. Never advances other bindings.
     model_binding_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("provider_model_bindings.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "provider_model_bindings.id",
+            name="fk_provider_capability_evidence_model_binding",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
-        index=True,
     )
     capability_manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     credential_revision: Mapped[int | None] = mapped_column(nullable=True)
@@ -176,9 +189,12 @@ class ProviderModelBinding(Base):
     # Immutable catalog snapshot: which catalog revision this binding uses and
     # what value is actually written to the wire request ``model`` field.
     catalog_entry_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("provider_model_catalog_entries.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "provider_model_catalog_entries.id",
+            name="fk_provider_model_bindings_catalog_entry",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
-        index=True,
     )
     capability_manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     remote_resource_kind: Mapped[str | None] = mapped_column(
@@ -308,3 +324,17 @@ class ArtifactReferenceToken(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+Index(
+    "ix_provider_connection_revisions_connection_id",
+    ProviderConnectionRevision.__table__.c.connection_id,
+)
+Index(
+    "ix_provider_model_bindings_catalog_entry_id",
+    ProviderModelBinding.__table__.c.catalog_entry_id,
+)
+Index(
+    "ix_provider_capability_evidence_model_binding_id",
+    ProviderCapabilityEvidence.__table__.c.model_binding_id,
+)

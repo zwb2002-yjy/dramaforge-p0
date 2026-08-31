@@ -15,6 +15,7 @@ from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProjectProviderBinding, ProviderConnection, ProviderModelBinding
+from app.security.models import EncryptedProviderCredential
 from app.shared.base import Base
 from app.shared.security import hash_password
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -50,6 +51,15 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     )
     session.add(project)
     await session.flush()
+    credential = EncryptedProviderCredential(
+        workspace_id=workspace.id,
+        provider="agnes",
+        revision_no=1,
+        ciphertext="test-ciphertext",
+        key_version="test-v1",
+    )
+    session.add(credential)
+    await session.flush()
     manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
     entry = ModelCatalogEntry(
         provider_type="agnes",
@@ -73,8 +83,8 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
         display_name="Agnes",
         base_url="https://api.agnes-ai.cn",
         protocol_profile="agnes_cn_v1",
-        credential_id=uuid4(),
-        credential_revision=1,
+        credential_id=credential.id,
+        credential_revision=credential.revision_no,
         enabled=True,
         verification_status="verified",
         created_by=user.id,

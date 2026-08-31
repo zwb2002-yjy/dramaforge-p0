@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
@@ -94,3 +95,9 @@ class KeyRotationAudit(Base):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+Index(
+    "ix_encrypted_provider_credential_supersedes_id",
+    EncryptedProviderCredential.__table__.c.supersedes_id,
+)

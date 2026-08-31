@@ -11,15 +11,16 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+from app.shared.db_types import HASH_64, JSON_DOCUMENT
 from app.shared.enums import GraphStatus
 from app.shared.errors import ValidationAppError
 from app.shared.pg_enums import GRAPH_STATUS, col_enum
@@ -81,11 +82,21 @@ class ExperimentBranch(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     branch_type: Mapped[str] = mapped_column(String(32), nullable=False, default="model_experiment")
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
-    source_artifact_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    candidate_artifact_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    comparison: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    adopted_shot_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    parameters: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    source_artifact_ids: Mapped[list[str]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    candidate_artifact_ids: Mapped[list[str]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    comparison: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    adopted_shot_ids: Mapped[list[str]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    parameters: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     selected_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -107,9 +118,15 @@ class DirectorBoardState(Base):
         ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
     )
     mode: Mapped[str] = mapped_column(String(16), nullable=False, default="2d")
-    camera: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    characters: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
-    scene: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    camera: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    characters: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    scene: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
@@ -137,9 +154,11 @@ class GraphVersion(Base):
     status: Mapped[str] = mapped_column(
         col_enum(GRAPH_STATUS), nullable=False, default=GraphStatus.DRAFT.value
     )
-    definition_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    definition_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
     # In-memory / JSON definition body used by app layer (not a free simplified table).
-    definition: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    definition: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
@@ -255,7 +274,7 @@ class ShotReferenceBinding(Base):
     label: Mapped[str] = mapped_column(String(160), nullable=False, default="")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     metadata_json: Mapped[dict[str, object]] = mapped_column(
-        "metadata", JSON, nullable=False, default=dict
+        "metadata", JSON_DOCUMENT, nullable=False, default=dict
     )
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
@@ -338,19 +357,19 @@ class ShotExperiment(Base):
     )
     source_shot_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     director_state: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
+        JSON_DOCUMENT, nullable=False, default=dict
     )
     prompts: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
+        JSON_DOCUMENT, nullable=False, default=dict
     )
     references: Mapped[list[dict[str, object]]] = mapped_column(
-        JSON, nullable=False, default=list
+        JSON_DOCUMENT, nullable=False, default=list
     )
     model_overrides: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
+        JSON_DOCUMENT, nullable=False, default=dict
     )
     common_controls: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
+        JSON_DOCUMENT, nullable=False, default=dict
     )
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
     keyframe_artifact_id: Mapped[UUID | None] = mapped_column(
@@ -360,7 +379,7 @@ class ShotExperiment(Base):
         ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
     )
     comparison: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
+        JSON_DOCUMENT, nullable=False, default=dict
     )
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
@@ -371,3 +390,12 @@ class ShotExperiment(Base):
     decided_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+Index(
+    "idx_experiment_branches_project",
+    ExperimentBranch.__table__.c.project_id,
+    ExperimentBranch.__table__.c.created_at,
+)
+Index("ix_shot_reference_bindings_shot", ShotReferenceBinding.__table__.c.shot_id)
+Index("ix_shot_experiments_shot", ShotExperiment.__table__.c.shot_id)

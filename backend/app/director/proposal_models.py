@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import JSON
 
 from app.shared.base import Base
+from app.shared.db_types import JSON_DOCUMENT
 
 
 class DirectorProposal(Base):
@@ -54,7 +54,9 @@ class DirectorProposalItem(Base):
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     command: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    payload: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
     expected_target_version: Mapped[int | None] = mapped_column(nullable=True)
     rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
     benefit: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -68,3 +70,14 @@ class DirectorProposalItem(Base):
     decided_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+Index(
+    "ix_director_proposals_scope",
+    DirectorProposal.__table__.c.scope_type,
+    DirectorProposal.__table__.c.scope_entity_id,
+)
+Index(
+    "ix_director_proposal_items_proposal",
+    DirectorProposalItem.__table__.c.proposal_id,
+)
