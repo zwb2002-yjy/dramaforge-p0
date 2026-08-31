@@ -41,6 +41,13 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
         <span>
           {data?.scene.episode_number}.{data?.scene.scene_number} · {data?.scene.time_of_day}
         </span>
+        <a
+          className="qc-overview-primary"
+          href={`/projects/${projectId}/edit`}
+          data-testid="scene-edit-entry"
+        >
+          进入剪辑
+        </a>
       </header>
 
       {workspace.isError && (

@@ -12,9 +12,11 @@ from __future__ import annotations
 import os
 import socket
 from collections.abc import AsyncGenerator
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from app.api.v1.opencut import opencut_manifest
 from app.assets.models import Character, CharacterReference
 from app.delivery.models import Export
 from app.director.models import DirectorMessage, DirectorThread
@@ -179,3 +181,64 @@ async def test_golden_professional_project_covers_p10_06_pg(pg_session: AsyncSes
     # Export.
     export = await pg_session.get(Export, golden.export.id)
     assert export is not None and export.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_opencut_manifest_uses_formal_video_pointer_pg(pg_session: AsyncSession) -> None:
+    """A successful video -> formal command -> GET manifest chain stays formal-only."""
+    golden = await seed_golden_project(pg_session, suffix=uuid4().hex[:8])
+    await set_rls_context(
+        pg_session,
+        user_id=golden.user.id,
+        workspace_id=golden.workspace.id,
+        project_id=golden.project.id,
+    )
+    assert golden.video is not None and golden.keyframe is not None
+    shot = golden.shots[0]
+    await pg_session.refresh(shot)
+    assert shot.formal_video_artifact_id == golden.video.id
+
+    # A newer successful result is only a candidate until the formal command
+    # updates the Shot pointer; it must not displace the selected video.
+    formal_run = await pg_session.get(NodeRun, golden.video.produced_by_run_id)
+    assert formal_run is not None
+    candidate_run_id = uuid4()
+    candidate_artifact_id = uuid4()
+    candidate_run = NodeRun(
+        id=candidate_run_id,
+        project_id=golden.project.id,
+        graph_version_id=formal_run.graph_version_id,
+        graph_node_id=formal_run.graph_node_id,
+        attempt_no=2,
+        idempotency_key=f"opencut-candidate-{uuid4().hex}",
+        input_hash="c" * 64,
+        status="completed",
+        input_snapshot={"shot_id": str(shot.id), "stage": "video", "node_key": "video"},
+        output_summary={"status": "completed"},
+        result_artifact_id=candidate_artifact_id,
+        created_by=golden.user.id,
+    )
+    candidate = Artifact(
+        id=candidate_artifact_id,
+        project_id=golden.project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=f"golden/{uuid4().hex}/candidate.mp4",
+        content_hash="d" * 64,
+        mime_type="video/mp4",
+        byte_size=1024,
+        duration_seconds=Decimal("5.000"),
+        produced_by_run_id=candidate_run_id,
+    )
+    pg_session.add_all([candidate_run, candidate])
+    await pg_session.flush()
+
+    manifest = await opencut_manifest(golden.project.id, golden.user, pg_session)
+    video_track = next(track for track in manifest.tracks if track.kind == "video")
+    assert [clip.shot_id for clip in video_track.clips] == [shot.id]
+    assert [clip.artifact_id for clip in video_track.clips] == [golden.video.id]
+    assert golden.keyframe.id not in [clip.artifact_id for clip in video_track.clips]
+    assert candidate.id not in [clip.artifact_id for clip in video_track.clips]
+    assert video_track.clips[0].source_url == (
+        f"/api/v1/projects/{golden.project.id}/artifacts/{golden.video.id}/content"
+    )
