@@ -47,7 +47,7 @@ from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
-from app.providers.models import ProviderConnectionRevision
+from app.providers.models import ProviderConnection, ProviderConnectionRevision
 from app.shared.enums import GraphStatus
 from app.shared.errors import ValidationAppError
 
@@ -141,6 +141,13 @@ class WorkbenchExecutionService:
         connection_revision_id: UUID | None = None
         credential_revision_id: UUID | None = None
         if resolution.provider_connection_id is not None:
+            connection = await self._session.get(
+                ProviderConnection, resolution.provider_connection_id
+            )
+            if connection is None or connection.workspace_id != project.workspace_id:
+                raise WorkbenchExecutionError(
+                    "resolved provider connection is unavailable"
+                )
             current_revision = await self._session.scalar(
                 select(ProviderConnectionRevision)
                 .where(
@@ -153,6 +160,19 @@ class WorkbenchExecutionService:
             if current_revision is not None:
                 connection_revision_id = current_revision.id
                 credential_revision_id = current_revision.credential_revision_id
+        if connection_revision_id is None or credential_revision_id is None:
+            raise WorkbenchExecutionError(
+                "resolved provider connection revision is unavailable"
+            )
+        # Carry the immutable revision identity with the typed model
+        # resolution.  The worker must be able to reconstruct the exact
+        # Provider runtime without resolving the mutable connection again.
+        resolution = resolution.model_copy(
+            update={
+                "provider_connection_revision_id": connection_revision_id,
+                "credential_revision_id": credential_revision_id,
+            }
+        )
 
         entry = await self._session.get(ModelCatalogEntry, resolution.catalog_entry_id)
         if entry is None:
@@ -275,6 +295,18 @@ class WorkbenchExecutionService:
                 published_by=self._user_id,
             )
         node = materialized.nodes[node_key]
+        provider_connection_id = plan.resolved_model.provider_connection_id
+        if provider_connection_id is None:
+            raise WorkbenchExecutionError(
+                "frozen execution model has no provider connection"
+            )
+        provider_connection = await self._session.get(
+            ProviderConnection, provider_connection_id
+        )
+        if provider_connection is None or provider_connection.workspace_id != project.workspace_id:
+            raise WorkbenchExecutionError(
+                "frozen provider connection is unavailable"
+            )
 
         snapshot: dict[str, object] = {
             "workbench_plan": plan.model_dump(mode="json"),
@@ -286,7 +318,43 @@ class WorkbenchExecutionService:
             "shot_id": str(execution_input.shot_id),
             "node_key": node_key,
             "source_commit": get_settings().source_commit,
+            # Professional Workbench media NodeRuns always enter the unified
+            # Provider path.  These compatibility keys make the frozen
+            # resolution explicit at the worker boundary; legacy NodeRuns do
+            # not carry this marker and retain their old adapter path.
+            "professional_unified": True,
+            "execution_path": "unified-v1",
+            "model_binding_id": str(plan.resolved_model.provider_model_binding_id),
+            "capability_manifest_hash": plan.resolved_model.manifest_hash,
+            "connection_revision_id": str(plan.connection_revision_id),
+            "credential_revision_id": str(plan.credential_revision_id),
+            "execution_model_resolution": plan.resolved_model.model_dump(mode="json"),
+            "selection_plan": {
+                "purpose": "keyframe" if plan.stage == "image_keyframe" else "video",
+                "mode": plan.mode_id,
+                "mode_id": plan.mode_id,
+                "model_binding_id": str(plan.resolved_model.provider_model_binding_id),
+                "provider_type": provider_connection.provider_type,
+                "protocol_profile": provider_connection.protocol_profile,
+                "catalog_entry_id": str(plan.resolved_model.catalog_entry_id),
+                "model_id": plan.resolved_model.resolved_model_id.rsplit("/", 1)[-1]
+                if plan.resolved_model.resolved_model_id
+                else None,
+                "invoke_model_value": plan.resolved_model.invoke_model_value,
+                "connection_id": str(plan.resolved_model.provider_connection_id),
+                "manifest_hash": plan.resolved_model.manifest_hash,
+                "execution_model_resolution": plan.resolved_model.model_dump(mode="json"),
+                "evidence": {"professional_unified": True},
+            },
+            "plan": {"prompt": plan.prompt},
         }
+        if plan.stage == "video":
+            # The current Workbench API intentionally exposes no separate
+            # duration control.  The verified video manifests use the
+            # canonical five-second product intent, which is also the safe
+            # default used by the unified compiler.
+            snapshot["duration_seconds"] = 5
+            snapshot["aspect_ratio"] = project.aspect_ratio
         input_hash = _node_run_input_hash(snapshot)
         node_run = NodeRun(
             project_id=project.id,

@@ -135,7 +135,7 @@ async def get_shot_workbench(
     workbench = await ShotWorkbenchService(session).get_workbench(
         project_id=project_id, shot_id=shot_id, actor=user
     )
-    return ShotWorkbenchRead(**workbench)
+    return ShotWorkbenchRead.model_validate(workbench)
 
 
 # ---------------------------------------------------------------------------

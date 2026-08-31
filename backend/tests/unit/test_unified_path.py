@@ -38,13 +38,16 @@ from app.execution.product_path import (
     execute_media_node_run,
 )
 from app.production import models as _pm  # noqa: F401
+from app.production.execution_plan import WorkbenchExecutionPlan
 from app.production.service import GraphService
 from app.providers import registry as registry_module
+from app.providers.capabilities import Capability
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_seed_data import hash_manifest
 from app.providers.execution_identity import ExecutionIdentitySnapshot
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
+from app.providers.model_resolution import ExecutionModelResolution
 from app.providers.models import (
     ProjectProviderBinding,
     ProviderConnection,
@@ -1376,6 +1379,122 @@ async def test_unified_keyframe_submits_once_and_completes(
     assert _current_runtime().factory_connection.base_url == frozen_revision.base_url
     assert _current_runtime().factory_settings.unified_test_api_key == "uni-secret"
     assert _current_runtime().submit_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_professional_workbench_node_uses_frozen_unified_provider_path(
+    session: AsyncSession,
+    fake_plugin: ProviderPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued P4 Workbench NodeRun must never fall through to Flux/Kling.
+
+    The test keeps the feature flag off and makes both legacy adapter factories
+    fail if touched.  The persisted Workbench plan is the only model decision;
+    the fake Provider runtime proves the request still completes through the
+    registry/resolver/compiler chain.
+    """
+    _byok(monkeypatch)
+    monkeypatch.setattr(
+        "app.execution.product_path.get_settings",
+        lambda: Settings(provider_unified_path_enabled=False),
+    )
+    await _no_sleep(monkeypatch)
+    _user, _workspace, run = await _seed_project_chain(session)
+    binding = await session.scalar(
+        select(ProviderModelBinding).where(ProviderModelBinding.purpose == "keyframe")
+    )
+    assert binding is not None
+    connection = await session.get(ProviderConnection, binding.connection_id)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert connection is not None and entry is not None
+    revision = await session.scalar(
+        select(ProviderConnectionRevision).where(
+            ProviderConnectionRevision.connection_id == connection.id
+        )
+    )
+    assert revision is not None
+    resolution = ExecutionModelResolution(
+        requested_model=f"{FAKE_PROVIDER}/{binding.model_id}",
+        resolved_model_id=f"{FAKE_PROVIDER}/{binding.model_id}",
+        source="request_override",
+        status="RESOLVED",
+        provider_model_binding_id=binding.id,
+        provider_connection_id=connection.id,
+        provider_connection_revision_id=revision.id,
+        credential_revision_id=revision.credential_revision_id,
+        catalog_entry_id=entry.id,
+        model_revision=entry.model_revision,
+        manifest_hash=entry.contract_manifest_hash,
+        invoke_model_value=binding.invoke_model_value,
+        capability=Capability.IMAGE_GENERATE,
+        mode_id="text_to_image",
+    )
+    workbench_plan = WorkbenchExecutionPlan(
+        project_id=run.project_id,
+        shot_id=run.project_id,
+        stage="image_keyframe",
+        prompt="workbench frozen keyframe",
+        mode_id="text_to_image",
+        resolved_model=resolution,
+        capability=Capability.IMAGE_GENERATE,
+        connection_revision_id=revision.id,
+        credential_revision_id=revision.credential_revision_id,
+    ).freeze()
+    resolution_json = resolution.model_dump(mode="json")
+    run.input_snapshot = {
+        **run.input_snapshot,
+        "professional_unified": True,
+        "workbench_plan": workbench_plan.model_dump(mode="json"),
+        "model_binding_id": str(binding.id),
+        "execution_model_resolution": resolution_json,
+        "selection_plan": {
+            "purpose": "keyframe",
+            "mode": "text_to_image",
+            "mode_id": "text_to_image",
+            "model_binding_id": str(binding.id),
+            "provider_type": FAKE_PROVIDER,
+            "protocol_profile": FAKE_PROFILE,
+            "catalog_entry_id": str(entry.id),
+            "model_id": f"{FAKE_PROVIDER}/{binding.model_id}",
+            "invoke_model_value": binding.invoke_model_value,
+            "connection_id": str(connection.id),
+            "manifest_hash": entry.contract_manifest_hash,
+            "execution_model_resolution": resolution_json,
+            "evidence": {"professional_unified": True},
+        },
+    }
+    await session.flush()
+
+    import app.providers.flux as flux_module
+    import app.providers.kling as kling_module
+
+    async def legacy_factory_must_not_run(*args: object, **kwargs: object) -> object:
+        raise AssertionError("Professional Workbench touched a legacy adapter")
+
+    monkeypatch.setattr(
+        flux_module,
+        "get_flux_adapter_for_workspace",
+        legacy_factory_must_not_run,
+    )
+    monkeypatch.setattr(
+        kling_module,
+        "get_kling_adapter_for_workspace",
+        legacy_factory_must_not_run,
+    )
+
+    result = await execute_media_node_run(session, node_run_id=run.id)
+
+    assert result.node_type == "keyframe"
+    operation = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+    )
+    assert operation is not None
+    assert operation.execution_path_version == UNIFIED_PATH_VERSION
+    assert operation.actual_provider == FAKE_PROVIDER
+    assert operation.actual_provider not in {"flux", "kling"}
+    assert _current_runtime().submit_calls == 1
+    assert type(_current_runtime().factory_connection).__name__ == "FrozenProviderConnection"
 
 
 @pytest.mark.asyncio

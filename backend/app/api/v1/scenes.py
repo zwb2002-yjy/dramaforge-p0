@@ -44,7 +44,7 @@ async def list_scene_summaries(
     summaries = await SceneSummaryService(session).list_summaries(
         project_id=project_id, actor=user
     )
-    return [SceneSummaryRead(**s) for s in summaries]
+    return [SceneSummaryRead.model_validate(summary) for summary in summaries]
 
 
 @router.get(
@@ -60,7 +60,7 @@ async def get_scene_workspace(
     workspace = await SceneWorkspaceService(session).get_workspace(
         project_id=project_id, scene_id=scene_id, actor=user
     )
-    return SceneWorkspaceRead(**workspace)
+    return SceneWorkspaceRead.model_validate(workspace)
 
 
 @router.post(
@@ -121,7 +121,7 @@ async def split_scene_preview(
         actor=user,
         at_shot_number=body.at_shot_number,
     )
-    return SceneOperationPreviewRead(**preview)
+    return SceneOperationPreviewRead.model_validate(preview)
 
 
 @router.post(
@@ -167,7 +167,7 @@ async def merge_scene_preview(
         target_scene_id=body.target_scene_id,
         actor=user,
     )
-    return SceneOperationPreviewRead(**preview)
+    return SceneOperationPreviewRead.model_validate(preview)
 
 
 @router.post(

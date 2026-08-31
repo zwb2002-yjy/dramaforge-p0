@@ -1124,6 +1124,7 @@ async def _execute_unified_media_node_run(
 
     from pydantic import JsonValue
 
+    from app.production.execution_plan import WorkbenchExecutionPlan
     from app.providers.catalog_models import ModelCatalogEntry
     from app.providers.connection_service import ProviderConnectionService
     from app.providers.execution_identity import (
@@ -1155,7 +1156,7 @@ async def _execute_unified_media_node_run(
         ProviderRuntimeResolver,
         SubmissionResult,
     )
-    from app.providers.selection import ModelSelectionService
+    from app.providers.selection import ModelSelectionService, SelectionPlan
     from app.providers.translation import RequestTransformation
     from app.providers.workspace_credentials import runtime_connection_settings
     from app.shared.errors import ProviderRateLimitedError, ProviderTaskPendingError
@@ -1223,6 +1224,26 @@ async def _execute_unified_media_node_run(
             raise ValidationAppError(
                 "persisted execution identity is invalid",
                 details={"code": "EXECUTION_IDENTITY_INVALID"},
+            ) from exc
+
+    # Workbench NodeRuns persist a frozen P4 plan before a ProviderOperation is
+    # created.  Parse it once at the worker boundary so execution can consume
+    # that exact ExecutionModelResolution rather than asking the selection
+    # service to choose from mutable profile state again.
+    raw_workbench_plan = snap.get("workbench_plan")
+    workbench_plan: WorkbenchExecutionPlan | None = None
+    if raw_workbench_plan is not None:
+        if not isinstance(raw_workbench_plan, dict):
+            raise ValidationAppError(
+                "professional workbench plan is malformed",
+                details={"code": "EXECUTION_PLAN_INVALID"},
+            )
+        try:
+            workbench_plan = WorkbenchExecutionPlan.model_validate(raw_workbench_plan)
+        except ValueError as exc:
+            raise ValidationAppError(
+                "professional workbench plan is invalid",
+                details={"code": "EXECUTION_PLAN_INVALID"},
             ) from exc
 
     create_status = "created"
@@ -1499,69 +1520,216 @@ async def _execute_unified_media_node_run(
             )
             pricing_currency = _binding_pricing_currency(binding, required=False)
         else:
-            if node_type == "keyframe":
-                assert image_intent is not None
-                plan = await service.select_image(
-                    project=project,
-                    intent=image_intent,
-                    allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+            if workbench_plan is not None:
+                # P4 Workbench plans are already frozen at queue time.  Their
+                # ExecutionModelResolution and connection/credential revision
+                # must be consumed verbatim; re-running ModelSelectionService
+                # here could silently observe a newer profile binding.
+                frozen_resolution = workbench_plan.resolved_model
+                if (
+                    frozen_resolution.status != "RESOLVED"
+                    or frozen_resolution.provider_model_binding_id is None
+                    or frozen_resolution.provider_connection_id is None
+                    or frozen_resolution.catalog_entry_id is None
+                    or frozen_resolution.provider_connection_revision_id is None
+                    or frozen_resolution.credential_revision_id is None
+                    or workbench_plan.connection_revision_id
+                    != frozen_resolution.provider_connection_revision_id
+                    or workbench_plan.credential_revision_id
+                    != frozen_resolution.credential_revision_id
+                ):
+                    raise ValidationAppError(
+                        "professional workbench plan has incomplete frozen identity",
+                        details={"code": "EXECUTION_IDENTITY_INVALID"},
+                    )
+                if (
+                    frozen_binding_id is not None
+                    and frozen_resolution.provider_model_binding_id != frozen_binding_id
+                ):
+                    raise ValidationAppError(
+                        "professional workbench plan changed its model binding",
+                        details={"code": "MODEL_BINDING_SNAPSHOT_MISMATCH"},
+                    )
+                connection = await session.get(
+                    ProviderConnection, frozen_resolution.provider_connection_id
+                )
+                binding = await session.get(
+                    ProviderModelBinding, frozen_resolution.provider_model_binding_id
+                )
+                entry = await session.get(
+                    ModelCatalogEntry, frozen_resolution.catalog_entry_id
+                )
+                if connection is None or binding is None or entry is None:
+                    raise ValidationAppError(
+                        "professional workbench plan references missing identity",
+                        details={"code": "MODEL_BINDING_MISSING"},
+                    )
+                if (
+                    connection.workspace_id != project.workspace_id
+                    or binding.workspace_id != project.workspace_id
+                    or binding.connection_id != connection.id
+                    or connection.enabled is not True
+                ):
+                    raise ValidationAppError(
+                        "professional workbench provider identity is unavailable",
+                        details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
+                    )
+                provider_type = connection.provider_type
+                protocol_profile = connection.protocol_profile
+                invoke_model_value = binding.invoke_model_value
+                if (
+                    invoke_model_value is None
+                    or frozen_resolution.resolved_model_id is None
+                    or frozen_resolution.manifest_hash is None
+                    or frozen_resolution.model_revision is None
+                    or frozen_resolution.provider_connection_id != connection.id
+                    or frozen_resolution.invoke_model_value != invoke_model_value
+                    or frozen_resolution.resolved_model_id
+                    != f"{connection.provider_type}/{binding.model_id}"
+                    or frozen_resolution.manifest_hash != entry.contract_manifest_hash
+                    or frozen_resolution.model_revision != entry.model_revision
+                ):
+                    raise ValidationAppError(
+                        "professional workbench model identity is unavailable",
+                        details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
+                    )
+                connection_revision = await session.get(
+                    ProviderConnectionRevision,
+                    frozen_resolution.provider_connection_revision_id,
+                )
+                if (
+                    connection_revision is None
+                    or connection_revision.connection_id != connection.id
+                    or connection_revision.provider_type != connection.provider_type
+                    or connection_revision.protocol_profile != connection.protocol_profile
+                    or connection_revision.credential_revision_id
+                    != frozen_resolution.credential_revision_id
+                ):
+                    raise ValidationAppError(
+                        "professional workbench connection revision is unavailable",
+                        details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
+                    )
+                pricing_currency = _binding_pricing_currency(binding, required=False)
+                resolved = await ProviderRuntimeResolver(
+                    session
+                ).resolve_runtime_for_resolution(
+                    resolution=frozen_resolution,
+                    workspace_id=project.workspace_id,
+                    connection_revision_id=connection_revision.id,
+                    credential_revision_id=connection_revision.credential_revision_id,
+                )
+                if (
+                    resolved.binding is None
+                    or resolved.catalog_entry is None
+                    or resolved.invoke_model_value is None
+                ):
+                    raise ValidationAppError(
+                        "professional workbench runtime resolution is incomplete",
+                        details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
+                    )
+                connection = resolved.connection
+                binding = resolved.binding
+                entry = resolved.catalog_entry
+                invoke_model_value = resolved.invoke_model_value
+                runtime = resolved.runtime
+                provider_type = connection.provider_type
+                protocol_profile = connection.protocol_profile
+                plan = SelectionPlan(
+                    intent_hash=workbench_plan.plan_fingerprint or "",
+                    purpose="keyframe" if node_type == "keyframe" else "video",
+                    mode=workbench_plan.mode_id,
+                    mode_id=workbench_plan.mode_id,
+                    model_binding_id=frozen_resolution.provider_model_binding_id,
+                    provider_type=provider_type,
+                    protocol_profile=protocol_profile,
+                    catalog_entry_id=frozen_resolution.catalog_entry_id,
+                    model_id=binding.model_id,
+                    invoke_model_value=invoke_model_value,
+                    connection_id=connection.id,
+                    execution_model_resolution=frozen_resolution,
+                    manifest_hash=frozen_resolution.manifest_hash,
+                    compiled_by=entry.catalog_source,
+                )
+                raw_frozen_selection = snap.get("selection_plan")
+                if not isinstance(raw_frozen_selection, dict):
+                    raise ValidationAppError(
+                        "professional workbench selection snapshot is missing",
+                        details={"code": "EXECUTION_IDENTITY_INVALID"},
+                    )
+                selection_snapshot = json.loads(json.dumps(raw_frozen_selection))
+                selection_snapshot["execution_model_resolution"] = (
+                    frozen_resolution.model_dump(mode="json")
                 )
             else:
-                assert video_intent is not None
-                plan = await service.select_video(
-                    project=project,
-                    intent=video_intent,
-                    allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+                if node_type == "keyframe":
+                    assert image_intent is not None
+                    plan = await service.select_image(
+                        project=project,
+                        intent=image_intent,
+                        allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+                    )
+                else:
+                    assert video_intent is not None
+                    plan = await service.select_video(
+                        project=project,
+                        intent=video_intent,
+                        allow_trial_without_quality_gate=allow_trial_without_quality_gate,
+                    )
+                if frozen_binding_id is not None and plan.model_binding_id != frozen_binding_id:
+                    raise ValidationAppError(
+                        "unified selection changed the frozen model binding",
+                        details={"code": "MODEL_BINDING_SNAPSHOT_MISMATCH"},
+                    )
+                selection_snapshot = json.loads(json.dumps(asdict(plan), default=str))
+                selection_snapshot["execution_model_resolution"] = (
+                    plan.execution_model_resolution.model_dump(mode="json")
                 )
-            if frozen_binding_id is not None and plan.model_binding_id != frozen_binding_id:
-                raise ValidationAppError(
-                    "unified selection changed the frozen model binding",
-                    details={"code": "MODEL_BINDING_SNAPSHOT_MISMATCH"},
+                invoke_model_value = plan.invoke_model_value
+                provider_type = plan.provider_type
+                protocol_profile = plan.protocol_profile
+                if invoke_model_value is None or provider_type is None or protocol_profile is None:
+                    raise ValidationAppError("unified selection has no model/provider identity")
+                connection = await session.get(ProviderConnection, plan.connection_id)
+                binding = await session.get(ProviderModelBinding, plan.model_binding_id)
+                entry = await session.get(ModelCatalogEntry, plan.catalog_entry_id)
+                if connection is None or binding is None or entry is None:
+                    raise ValidationAppError(
+                        "unified selection references missing connection/binding/catalog",
+                        details={"code": "MODEL_BINDING_MISSING"},
+                    )
+                pricing_currency = _binding_pricing_currency(binding, required=False)
+                connection_revision = await ProviderConnectionService(
+                    session
+                ).current_connection_revision(connection=connection)
+                if connection_revision is None:
+                    raise ValidationAppError(
+                        "unified selection has no provider connection revision",
+                        details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
+                    )
+                resolved = await ProviderRuntimeResolver(
+                    session
+                ).resolve_runtime_for_resolution(
+                    resolution=plan.execution_model_resolution,
+                    workspace_id=project.workspace_id,
+                    connection_revision_id=connection_revision.id,
+                    credential_revision_id=connection_revision.credential_revision_id,
                 )
-            selection_snapshot = json.loads(json.dumps(asdict(plan), default=str))
-            selection_snapshot["execution_model_resolution"] = (
-                plan.execution_model_resolution.model_dump(mode="json")
-            )
-            invoke_model_value = plan.invoke_model_value
-            provider_type = plan.provider_type
-            protocol_profile = plan.protocol_profile
-            if invoke_model_value is None or provider_type is None or protocol_profile is None:
-                raise ValidationAppError("unified selection has no model/provider identity")
-            connection = await session.get(ProviderConnection, plan.connection_id)
-            binding = await session.get(ProviderModelBinding, plan.model_binding_id)
-            entry = await session.get(ModelCatalogEntry, plan.catalog_entry_id)
-            if connection is None or binding is None or entry is None:
-                raise ValidationAppError(
-                    "unified selection references missing connection/binding/catalog",
-                    details={"code": "MODEL_BINDING_MISSING"},
-                )
-            pricing_currency = _binding_pricing_currency(binding, required=False)
-            connection_revision = await ProviderConnectionService(
-                session
-            ).current_connection_revision(connection=connection)
-            cfg = await runtime_connection_settings(session, connection=connection)
-            resolved = await ProviderRuntimeResolver(
-                session
-            ).resolve_runtime_for_model_binding(
-                model_binding_id=binding.id,
-                settings=cfg,
-            )
-            if (
-                resolved.binding is None
-                or resolved.catalog_entry is None
-                or resolved.invoke_model_value is None
-            ):
-                raise ValidationAppError(
-                    "binding-based runtime resolution returned incomplete identity",
-                    details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
-                )
-            connection = resolved.connection
-            binding = resolved.binding
-            entry = resolved.catalog_entry
-            invoke_model_value = resolved.invoke_model_value
-            provider_type = connection.provider_type
-            protocol_profile = connection.protocol_profile
-            runtime = resolved.runtime
+                if (
+                    resolved.binding is None
+                    or resolved.catalog_entry is None
+                    or resolved.invoke_model_value is None
+                ):
+                    raise ValidationAppError(
+                        "binding-based runtime resolution returned incomplete identity",
+                        details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
+                    )
+                connection = resolved.connection
+                binding = resolved.binding
+                entry = resolved.catalog_entry
+                invoke_model_value = resolved.invoke_model_value
+                provider_type = connection.provider_type
+                protocol_profile = connection.protocol_profile
+                runtime = resolved.runtime
 
         if frozen_identity is None:
             snap = {
@@ -2349,9 +2517,26 @@ async def execute_media_node_run(
         "keyframe",
         "video",
     }
+    # P4 Workbench NodeRuns carry a frozen plan and are always Professional
+    # unified executions.  They must not fall through to the legacy
+    # media-based Flux/Kling compatibility adapters, even when the migration
+    # feature flag is disabled.
+    raw_professional_plan = snap.get("workbench_plan")
+    professional_workbench_unified = (
+        node_type in {"keyframe", "video"}
+        and isinstance(raw_professional_plan, dict)
+        and (
+            snap.get("professional_unified") is True
+            or "resolved_model" in raw_professional_plan
+        )
+    )
     if _unified_op is not None or (
         node_type in {"keyframe", "video"}
-        and (force_director_unified or get_settings().provider_unified_path_enabled)
+        and (
+            force_director_unified
+            or professional_workbench_unified
+            or get_settings().provider_unified_path_enabled
+        )
     ):
         return await _execute_unified_media_node_run(
             session,

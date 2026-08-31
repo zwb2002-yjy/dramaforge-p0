@@ -10,7 +10,7 @@ never by current Feature Flags or the current Project binding.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field, JsonValue, model_validator
@@ -34,6 +34,9 @@ from app.providers.models import (
 from app.providers.registry import ProviderPlugin
 from app.security.models import EncryptedProviderCredential
 from app.shared.errors import NotFoundError, ValidationAppError
+
+if TYPE_CHECKING:
+    from app.providers.model_resolution import ExecutionModelResolution
 
 
 class ProviderResumeToken(BaseModel):
@@ -311,6 +314,72 @@ class ProviderRuntimeResolver:
             settings=settings,
         )
 
+    async def resolve_runtime_for_resolution(
+        self,
+        *,
+        resolution: ExecutionModelResolution,
+        workspace_id: UUID,
+        connection_revision_id: UUID | None = None,
+        credential_revision_id: UUID | None = None,
+        settings: Any = None,
+    ) -> ResolvedRuntime:
+        """Build a runtime from a frozen model resolution and connection revision.
+
+        This is the pre-submission counterpart to
+        :meth:`resolve_runtime_for_identity`.  Workbench NodeRuns persist a
+        typed ``ExecutionModelResolution`` before a ProviderOperation exists;
+        they still must not build a runtime from the mutable current
+        ``ProviderConnection``.  A provisional, secret-free identity lets the
+        same revision-aware validation path construct the compiler/runtime.
+        The final request fingerprint and reference evidence are frozen by the
+        caller immediately before submission.
+        """
+        if (
+            resolution.status != "RESOLVED"
+            or resolution.provider_model_binding_id is None
+            or resolution.provider_connection_id is None
+            or resolution.catalog_entry_id is None
+            or resolution.resolved_model_id is None
+            or resolution.model_revision is None
+            or resolution.manifest_hash is None
+            or resolution.invoke_model_value is None
+        ):
+            raise ValidationAppError(
+                "frozen execution model resolution is incomplete",
+                details={"code": "EXECUTION_IDENTITY_MODEL_UNAVAILABLE"},
+            )
+        revision_id = connection_revision_id or resolution.provider_connection_revision_id
+        credential_id = credential_revision_id or resolution.credential_revision_id
+        if revision_id is None or credential_id is None:
+            raise ValidationAppError(
+                "frozen execution model has no connection revision",
+                details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
+            )
+        identity = ExecutionIdentitySnapshot(
+            requested_model=resolution.requested_model_id,
+            resolved_model=resolution.resolved_model_id,
+            resolution_source=resolution.source,
+            provider_model_binding_id=resolution.provider_model_binding_id,
+            catalog_entry_id=resolution.catalog_entry_id,
+            model_revision=resolution.model_revision,
+            manifest_hash=resolution.manifest_hash,
+            invoke_model_value=resolution.invoke_model_value,
+            connection_id=resolution.provider_connection_id,
+            connection_revision_id=revision_id,
+            credential_revision_id=credential_id,
+            capability=resolution.capability.value,
+            mode_id=resolution.mode_id or "resolved",
+            effective_options=cast(
+                dict[str, JsonValue], resolution.native_options
+            ),
+            request_fingerprint="0" * 64,
+        )
+        return await self.resolve_runtime_for_identity(
+            identity=identity,
+            workspace_id=workspace_id,
+            settings=settings,
+        )
+
     async def resolve_runtime_for_identity(
         self,
         *,
@@ -407,7 +476,13 @@ class ProviderRuntimeResolver:
         from app.providers.registry import get_plugin
         from app.providers.workspace_credentials import runtime_connection_settings
 
-        plugin = get_plugin(revision.provider_type, revision.protocol_profile)
+        try:
+            plugin = get_plugin(revision.provider_type, revision.protocol_profile)
+        except LookupError as exc:
+            raise ValidationAppError(
+                "frozen provider plugin is unavailable",
+                details={"code": "PROVIDER_PLUGIN_UNKNOWN"},
+            ) from exc
         if credential.provider != plugin.credential_key:
             raise ValidationAppError(
                 "frozen credential provider does not match connection protocol",

@@ -150,6 +150,12 @@ class AssetCardReadService:
             )
             seen_artifacts.add(legacy_ref.artifact_id)
 
+        present_roles: set[str] = set()
+        for reference in references:
+            role = reference.get("reference_role")
+            if isinstance(role, str):
+                present_roles.add(role)
+
         return {
             "asset_id": asset.id,
             "project_id": asset.project_id,
@@ -163,7 +169,5 @@ class AssetCardReadService:
             "current_version_number": current.version_number if current else None,
             "current_version_status": current.status if current else None,
             "references": references,
-            "missing_reference_roles": _missing_roles(
-                asset.kind, {r["reference_role"] for r in references}
-            ),
+            "missing_reference_roles": _missing_roles(asset.kind, present_roles),
         }
