@@ -17,7 +17,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
-from app.api.deps import CurrentUser, SelectedWorkspace, SessionDep, require_selected_workspace
+from app.api.deps import (
+    CurrentUser,
+    SelectedWorkspace,
+    SessionDep,
+    SettingsDep,
+    require_selected_workspace,
+)
 from app.director.legacy_guard import require_legacy_execution_allowed
 from app.providers.bootstrap import default_v3_registry
 from app.providers.capabilities import Capability
@@ -131,6 +137,7 @@ async def list_models(
     capability: str | None = None,
     workspace: SelectedWorkspace = None,  # type: ignore[assignment]
     session: SessionDep = None,  # type: ignore[assignment]
+    settings: SettingsDep = None,  # type: ignore[assignment]
 ) -> list[ModelRead]:
     registry = _registry()
     if capability is not None:
@@ -158,14 +165,29 @@ async def list_models(
             .all()
         )
         configured = {row.provider_type for row in rows}
+    # The LiteLLM gateway is process-level configuration, not a workspace
+    # ProviderConnection. Keep this read surface aligned with ModelProfile reads.
+    litellm_configured = bool(
+        settings is not None
+        and settings.litellm_gateway_url.strip()
+        and settings.litellm_api_key.strip()
+    )
     return [
         ModelRead(
             id=model.manifest.id,
             provider_id=model.manifest.provider_id,
             display_name=model.manifest.display_name,
             enabled=True,
-            configured=model.manifest.provider_id in configured,
-            available=model.manifest.provider_id in configured,
+            configured=(
+                litellm_configured
+                if model.manifest.provider_id == "litellm"
+                else model.manifest.provider_id in configured
+            ),
+            available=(
+                litellm_configured
+                if model.manifest.provider_id == "litellm"
+                else model.manifest.provider_id in configured
+            ),
             capabilities=sorted(str(cap) for cap in model.manifest.capability_specs),
         )
         for model in selected
