@@ -27,6 +27,23 @@ const ROLE_LABEL: Record<string, string> = {
   scene_reference: "场景",
 };
 
+const ASSET_KIND_LABEL: Record<string, string> = {
+  character: "角色",
+  scene: "场景",
+  costume: "服装",
+  prop: "道具",
+  action: "动作",
+  expression: "表情",
+  audio: "音频",
+  prompt: "提示词方案",
+};
+
+const ASSET_STATUS_LABEL: Record<string, string> = {
+  active: "已启用",
+  draft: "草稿",
+  recycled: "已回收",
+};
+
 type AssetCardsPanelProps = {
   projectId: string;
 };
@@ -106,7 +123,7 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
       <header className="qc-page-heading">
         <p>资产</p>
         <h1>项目资产</h1>
-        <span>版本化资产卡：标签过滤、候选版本与正式提升；生成结果必须显式“加入资产”。</span>
+        <span>管理版本、标签与正式提升；生成结果需显式加入资产。</span>
       </header>
 
       <section className="qc-asset-filters">
@@ -168,12 +185,18 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
             <header>
               <strong>{asset.name}</strong>
               <span>
-                {asset.kind} · v{asset.version}
+                {ASSET_KIND_LABEL[asset.kind] ?? asset.kind} · v{asset.version}
               </span>
             </header>
             <p className="muted">{asset.description || "（无描述）"}</p>
             <footer>
-              <span className={`qc-asset-status ${asset.status}`}>{asset.status}</span>
+              <span
+                className={`qc-asset-status ${asset.status}`}
+                data-status={asset.status}
+                title={asset.status}
+              >
+                {ASSET_STATUS_LABEL[asset.status] ?? asset.status}
+              </span>
               <TagEditor
                 options={tagOptions}
                 onSave={(names) => setTags.mutate({ assetId: asset.id, names })}

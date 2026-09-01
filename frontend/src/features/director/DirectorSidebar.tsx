@@ -147,7 +147,7 @@ export function DirectorSidebar({
     >
       <header className="qc-director-sidebar-header">
         <div>
-          <span className="director-stage-kicker">Selected Shot</span>
+          <span className="director-stage-kicker">当前镜头</span>
           <strong>{shot ? `#${shot.shot_number} 镜头操作` : "镜头操作"}</strong>
         </div>
         <button

@@ -52,7 +52,7 @@ export function ProductionMonitor({
           <strong data-testid="stat-scenes">{sceneCount}</strong>
         </div>
         <div className="status-card">
-          <span className="status-label">分镜 Shot</span>
+          <span className="status-label">镜头</span>
           <strong data-testid="stat-shots">{shots.length}</strong>
         </div>
         <div className="status-card">
@@ -64,7 +64,7 @@ export function ProductionMonitor({
           <strong data-testid="stat-formal-videos">{formalVideos}</strong>
         </div>
         <div className="status-card">
-          <span className="status-label">NodeRun 完成</span>
+          <span className="status-label">已完成</span>
           <strong className="status-ok" data-testid="stat-completed">
             {completedRuns}
           </strong>
@@ -82,7 +82,7 @@ export function ProductionMonitor({
           </strong>
         </div>
         <div className="status-card">
-          <span className="status-label">Artifacts</span>
+          <span className="status-label">媒体结果</span>
           <strong data-testid="stat-artifacts">{artifacts.length}</strong>
         </div>
         <div className="status-card">
