@@ -1396,3 +1396,445 @@
     grid-column: auto;
   }
 }
+
+/* P10 Scene/Shot Workbench: stage-first composition. The outer project shell
+   keeps its evidence inspector for every other view; Scene Workbench owns one
+   compact operation panel and gives the central stage the available width. */
+.qc-project-shell.scene-view .qc-project-canvas {
+  width: 100%;
+  max-width: none;
+  padding: var(--df-space-4) clamp(var(--df-space-4), 2.2vw, var(--df-space-8)) var(--df-space-8);
+}
+
+.qc-project-shell.scene-view .qc-content-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.qc-scene-workspace {
+  display: grid;
+  gap: var(--df-space-4);
+  min-width: 0;
+}
+
+.qc-scene-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--df-space-4);
+  padding: var(--df-space-2) 0 var(--df-space-3);
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+
+.qc-scene-header .qc-scene-context {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.qc-scene-header .qc-scene-context h1 {
+  margin: 0;
+  font-family: var(--df-font-display);
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+  line-height: 1.2;
+}
+
+.qc-scene-header .qc-scene-context > span:not(.director-stage-kicker) {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+}
+
+.qc-scene-header .qc-scene-context p {
+  max-width: 60rem;
+  margin: var(--df-space-1) 0 0;
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+  line-height: 1.45;
+}
+
+.qc-scene-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-3);
+  flex: 0 0 auto;
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+}
+
+.qc-scene-header-actions .qc-overview-primary {
+  min-height: 34px;
+  padding-block: var(--df-space-1);
+}
+
+.qc-scene-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 380px);
+  gap: var(--df-space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.qc-scene-layout:has(.qc-director-sidebar.is-collapsed) {
+  grid-template-columns: minmax(0, 1fr) 52px;
+}
+
+.qc-scene-stage {
+  display: grid;
+  grid-template-rows: minmax(420px, 62vh) auto auto;
+  gap: var(--df-space-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.qc-scene-stage .qc-cinematic-canvas {
+  min-height: 0;
+  height: 100%;
+  border-radius: var(--df-radius-sm);
+}
+
+.qc-shot-candidate-tray,
+.qc-shot-strip-panel {
+  min-width: 0;
+  border: 1px solid var(--df-border);
+  background: var(--df-surface-1);
+}
+
+.qc-shot-candidate-tray {
+  display: grid;
+  gap: var(--df-space-2);
+  padding: var(--df-space-3);
+  border-radius: var(--df-radius-sm);
+}
+
+.qc-shot-candidate-tray-header,
+.qc-shot-strip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--df-space-3);
+}
+
+.qc-shot-candidate-tray-header > div,
+.qc-shot-strip-header > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.qc-shot-candidate-count,
+.qc-shot-strip-header > span {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+  white-space: nowrap;
+}
+
+.qc-shot-candidate-list {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(152px, 1fr);
+  grid-template-rows: 1fr;
+  gap: var(--df-space-2);
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.qc-shot-candidate-card {
+  display: grid;
+  gap: var(--df-space-2);
+  min-width: 0;
+  padding: var(--df-space-2);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-sm);
+  background: var(--df-surface-0);
+}
+
+.qc-shot-candidate-card.selected {
+  border-color: var(--df-brass);
+  box-shadow: inset 0 0 0 1px var(--df-brass-dim);
+}
+
+.qc-shot-candidate-preview {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-sm);
+  background: var(--df-surface-2);
+  color: var(--df-text-primary);
+  text-align: left;
+}
+
+.qc-shot-candidate-preview:hover,
+.qc-shot-candidate-preview:focus-visible {
+  border-color: var(--df-brass);
+}
+
+.qc-shot-candidate-preview img,
+.qc-shot-candidate-preview video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: var(--df-surface-2);
+}
+
+.qc-shot-candidate-badge {
+  position: absolute;
+  right: var(--df-space-1);
+  bottom: var(--df-space-1);
+  padding: 2px var(--df-space-1);
+  background: rgb(12 16 20 / 82%);
+  color: var(--df-ivory);
+  font-size: 10px;
+}
+
+.qc-shot-candidate-meta {
+  display: flex;
+  gap: var(--df-space-1);
+  min-width: 0;
+  color: var(--df-text-muted);
+  font-size: 10px;
+}
+
+.qc-shot-candidate-meta code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qc-shot-candidate-confirm {
+  width: 100%;
+  min-height: 28px;
+  padding: var(--df-space-1) var(--df-space-2);
+  font-size: var(--df-text-xs);
+}
+
+.qc-shot-candidate-success,
+.qc-shot-candidate-error {
+  margin: 0;
+  font-size: var(--df-text-xs);
+  line-height: 1.45;
+}
+
+.qc-shot-candidate-success {
+  color: var(--df-success);
+}
+
+.qc-shot-candidate-error {
+  overflow-wrap: anywhere;
+  color: var(--df-danger-text);
+}
+
+.qc-shot-strip-panel {
+  display: grid;
+  gap: var(--df-space-2);
+  padding: var(--df-space-3);
+  border-radius: var(--df-radius-sm);
+}
+
+.qc-shot-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(180px, 220px);
+  grid-template-columns: none;
+  gap: var(--df-space-2);
+  margin: 0;
+  padding: 0 0 2px;
+  overflow-x: auto;
+  list-style: none;
+}
+
+.qc-shot-strip li {
+  min-width: 0;
+}
+
+.qc-shot-strip button {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: var(--df-space-1) var(--df-space-2);
+  width: 100%;
+  min-height: 76px;
+  padding: var(--df-space-2);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-sm);
+  background: var(--df-surface-0);
+  color: var(--df-text-secondary);
+  text-align: left;
+}
+
+.qc-shot-strip button.active {
+  border-color: var(--df-brass);
+  color: var(--df-text-primary);
+  box-shadow: inset 2px 0 0 var(--df-brass);
+}
+
+.qc-shot-strip-thumb {
+  display: grid;
+  grid-row: 1 / -1;
+  place-items: center;
+  min-width: 0;
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  background: var(--df-surface-2);
+  color: var(--df-text-muted);
+  font-size: 10px;
+}
+
+.qc-shot-strip-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.qc-shot-strip-copy {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--df-space-1);
+  min-width: 0;
+}
+
+.qc-shot-strip-copy span,
+.qc-shot-strip-copy small {
+  overflow: hidden;
+  color: var(--df-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qc-shot-strip-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--df-space-2);
+  grid-column: 2;
+  min-width: 0;
+}
+
+.qc-shot-strip-status em {
+  color: var(--df-text-muted);
+  font-size: 10px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.qc-shot-strip-status em.ready {
+  color: var(--df-success);
+}
+
+.qc-shot-strip-status em.risk {
+  color: var(--df-danger-text);
+}
+
+.qc-director-sidebar {
+  max-height: calc(100vh - 8.5rem);
+  border-radius: var(--df-radius-sm);
+}
+
+.qc-director-sidebar-header {
+  padding: var(--df-space-3);
+}
+
+.qc-director-sidebar-content {
+  gap: var(--df-space-2);
+  padding: var(--df-space-2);
+}
+
+.qc-director-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--df-border-subtle);
+  background: var(--df-surface-2);
+}
+
+.qc-director-tabs button {
+  min-height: 32px;
+  padding: var(--df-space-1) var(--df-space-2);
+  border: 0;
+  background: transparent;
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+}
+
+.qc-director-tabs button.active,
+.qc-director-tabs button:hover,
+.qc-director-tabs button:focus-visible {
+  background: var(--df-surface-1);
+  color: var(--df-text-primary);
+}
+
+.qc-director-tabs button.active {
+  box-shadow: inset 0 -2px 0 var(--df-brass);
+}
+
+.qc-director-tab-panel {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.qc-director-tab-panel .qc-director-sidebar-section {
+  gap: var(--df-space-2);
+}
+
+.qc-director-tab-panel .qc-shot-design-panel,
+.qc-director-tab-panel .qc-shot-production-actions,
+.qc-director-tab-panel .qc-reference-picker,
+.qc-director-tab-panel .qc-production-trace {
+  padding: var(--df-space-3);
+  border-radius: var(--df-radius-sm);
+}
+
+.qc-director-tab-panel .qc-production-trace {
+  margin-top: 0;
+}
+
+@media (max-width: 1080px) {
+  .qc-scene-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+  }
+}
+
+@media (max-width: 900px) {
+  .qc-scene-layout,
+  .qc-scene-layout:has(.qc-director-sidebar.is-collapsed) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qc-scene-stage {
+    grid-template-rows: minmax(360px, 58vh) auto auto;
+  }
+
+  .qc-director-sidebar,
+  .qc-director-sidebar.is-collapsed {
+    max-height: none;
+  }
+
+  .qc-director-sidebar.is-collapsed {
+    display: grid;
+  }
+}
+
+@media (max-width: 620px) {
+  .qc-scene-header {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .qc-scene-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .qc-scene-stage {
+    grid-template-rows: minmax(300px, 52vh) auto auto;
+  }
+}

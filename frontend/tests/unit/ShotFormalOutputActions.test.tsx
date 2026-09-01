@@ -92,10 +92,10 @@ describe("ShotFormalOutputActions", () => {
     const queryClient = renderActions();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     fireEvent.click(screen.getByRole("button", { name: "设为正式关键帧" }));
-    await screen.findByTestId("formal-output-success");
+    await screen.findByTestId("shot-candidate-success");
     fireEvent.click(screen.getByRole("button", { name: "设为正式视频" }));
     await waitFor(() =>
-      expect(screen.getByTestId("formal-output-success")).toHaveTextContent("artifact-video"),
+      expect(screen.getByTestId("shot-candidate-success")).toHaveTextContent("artifact-video"),
     );
 
     expect(calls.find((call) => call.url.endsWith("/formal-keyframe"))).toMatchObject({
@@ -130,7 +130,7 @@ describe("ShotFormalOutputActions", () => {
 
     renderActions();
     fireEvent.click(screen.getByRole("button", { name: "设为正式关键帧" }));
-    expect(await screen.findByTestId("formal-output-error")).toHaveTextContent(
+    expect(await screen.findByTestId("shot-candidate-error")).toHaveTextContent(
       "shot changed concurrently",
     );
   });

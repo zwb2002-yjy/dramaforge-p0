@@ -52,10 +52,11 @@ export function ProjectWorkspaceShell({
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const projectBase = `/projects/${projectId}`;
+  const showInspector = Boolean(inspector) && activeView !== "scenes";
 
   return (
     <div
-      className={`qc-preview-shell qc-project-shell${sidebarExpanded ? " sidebar-expanded" : ""}${inspectorCollapsed ? " director-collapsed" : ""}`}
+      className={`qc-preview-shell qc-project-shell${activeView === "scenes" ? " scene-view" : ""}${sidebarExpanded ? " sidebar-expanded" : ""}${inspectorCollapsed ? " director-collapsed" : ""}`}
       data-testid="project-workspace-shell"
     >
       <aside className="qc-sidebar" aria-label="项目工作区导航">
@@ -116,9 +117,9 @@ export function ProjectWorkspaceShell({
           </span>
         </header>
 
-        <div className={`qc-content-grid${inspector ? "" : " no-inspector"}`}>
+        <div className={`qc-content-grid${showInspector ? "" : " no-inspector"}`}>
           <main className="qc-main-canvas qc-project-canvas">{children}</main>
-          {inspector && (
+          {showInspector && (
             <aside
               className={`qc-director-panel${inspectorCollapsed ? " collapsed" : ""}`}
               data-testid="project-evidence-inspector"
