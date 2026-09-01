@@ -68,7 +68,7 @@
 
 - `npm run lint` — passed with the two pre-existing Fast Refresh warnings.
 - `npm run typecheck` — passed.
-- `npm run test` — 34 files / 136 tests passed.
+- `npm run test` — 34 files / 138 tests passed.
 - `npm run api:check` — passed; generated API types unchanged.
 - `npm run build` — passed.
 - `npm run test:e2e` — 16 Chromium tests passed.
@@ -95,3 +95,26 @@ Correction evidence:
   a later candidate click is a no-write temporary preview.
 - No backend, API, ORM, migration, runtime, Provider, Worker, or
   `codex-with-chatgpt/` files changed.
+
+## Shot-version parity correction — 2026-09-02
+
+The final Scene E2E mock now follows the same optimistic-lock chain as the
+existing frontend/API contract. The mock rejects stale `/design` requests
+with a conflict before changing any draft state, applies a valid design then
+increments `state.shotVersion`, and returns that incremented version. The
+manual flow proves the complete selected-Shot sequence:
+
+```text
+initial Shot v1
+  -> PATCH /design expected_version=1 -> refetch Shot v2
+  -> execution-plan expected_shot_version=2
+  -> executions expected_shot_version=2
+  -> formal-keyframe expected_shot_version=2 -> Shot v3
+```
+
+The successful candidate remains in the candidate projection after formal
+selection, so the refetched Canvas returns to the formal keyframe at v3;
+clicking that retained candidate again is a local, zero-POST temporary
+preview. Formal-video mock requests use the same stale conflict guard. This
+correction changed only `professional-mocks.ts`, `professional-manual.spec.ts`
+and this contract; production frontend and backend remain untouched.

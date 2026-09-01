@@ -512,18 +512,52 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       });
     }
     if (path.endsWith("/design") && method === "PATCH") {
+      if (body.expected_version !== state.shotVersion) {
+        return json(
+          route,
+          {
+            code: "CONFLICT",
+            detail: "shot changed concurrently",
+            details: { code: "SHOT_VERSION_MISMATCH" },
+          },
+          409,
+        );
+      }
       state.visual = String(body.visual_description ?? state.visual);
       state.imagePrompt = String(body.image_prompt ?? state.imagePrompt);
       state.videoPrompt = String(body.video_prompt ?? state.videoPrompt);
-      return json(route, { ...shotRow(state, state.shotVersion), version: state.shotVersion + 1 });
+      state.shotVersion += 1;
+      return json(route, shotRow(state, state.shotVersion));
     }
     if (path.endsWith("/execution-plan") && method === "POST") {
+      if (body.expected_shot_version !== state.shotVersion) {
+        return json(
+          route,
+          {
+            code: "CONFLICT",
+            detail: "shot changed concurrently",
+            details: { code: "SHOT_VERSION_MISMATCH" },
+          },
+          409,
+        );
+      }
       return json(route, {
         plan: { accepted_approximations: [] },
         plan_fingerprint: "a".repeat(64),
       });
     }
     if (path.endsWith("/executions") && method === "POST") {
+      if (body.expected_shot_version !== state.shotVersion) {
+        return json(
+          route,
+          {
+            code: "CONFLICT",
+            detail: "shot changed concurrently",
+            details: { code: "SHOT_VERSION_MISMATCH" },
+          },
+          409,
+        );
+      }
       if (body.stage === "image_keyframe") {
         state.candidates = [
           {
@@ -546,6 +580,17 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       });
     }
     if (path.endsWith("/formal-keyframe") && method === "POST") {
+      if (body.expected_shot_version !== state.shotVersion) {
+        return json(
+          route,
+          {
+            code: "CONFLICT",
+            detail: "shot changed concurrently",
+            details: { code: "SHOT_VERSION_MISMATCH" },
+          },
+          409,
+        );
+      }
       state.formalKeyframeArtifactId = String(body.artifact_id);
       state.shotVersion += 1;
       return json(route, {
@@ -555,6 +600,17 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       });
     }
     if (path.endsWith("/formal-video") && method === "POST") {
+      if (body.expected_shot_version !== state.shotVersion) {
+        return json(
+          route,
+          {
+            code: "CONFLICT",
+            detail: "shot changed concurrently",
+            details: { code: "SHOT_VERSION_MISMATCH" },
+          },
+          409,
+        );
+      }
       state.formalVideoArtifactId = String(body.artifact_id);
       state.shotVersion += 1;
       return json(route, {
