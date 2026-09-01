@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from app.api.deps import settings_dep
 from app.config import clear_settings_cache, get_settings
 from app.main import create_app
 from app.shared.base import Base
@@ -107,6 +108,30 @@ class TestReadSurface:
         assert "volcengine/doubao-seedream-4-0-250828" in ids
         assert "minimax/image-01" in ids
         assert all(item["provider_id"] in {"agnes", "minimax", "volcengine"} for item in models)
+
+    def test_litellm_models_use_gateway_configuration(
+        self, api: tuple[TestClient, Any]
+    ) -> None:
+        client, _ = api
+        _register(client)
+        gateway_settings = get_settings().model_copy(
+            update={
+                "litellm_gateway_url": "http://litellm.test",
+                "litellm_api_key": "gateway-key",
+            }
+        )
+        client.app.dependency_overrides[settings_dep] = lambda: gateway_settings
+        try:
+            response = client.get(
+                "/api/v1/models", params={"capability": "text.generate"}
+            )
+        finally:
+            client.app.dependency_overrides.pop(settings_dep, None)
+        assert response.status_code == 200, response.text
+        models = response.json()
+        litellm = [item for item in models if item["provider_id"] == "litellm"]
+        assert litellm
+        assert all(item["configured"] and item["available"] for item in litellm)
 
     def test_get_model_manifest(self, api: tuple[TestClient, Any]) -> None:
         client, _ = api
