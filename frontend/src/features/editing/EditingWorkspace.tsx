@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchOpenCutManifest, type OpenCutManifestRead } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
@@ -7,10 +7,12 @@ import {
   createEditSession,
   exportEditSession,
   fetchEditSession,
+  requestEditingDirectorSuggestion,
   saveEditTimeline,
   type EditExportRead,
   type EditSessionRead,
   type EditTimelinePayload,
+  type EditingDirectorSuggestionRead,
 } from "./api";
 
 type EditingWorkspaceProps = {
@@ -28,6 +30,18 @@ type EditableTimeline = {
   metadata: EditableMetadata;
 };
 type JsonValue = components["schemas"]["JsonValue"];
+type EditingSuggestionMutationInput = {
+  projectId: string;
+  sessionId: string;
+  expectedSessionVersion: number;
+  userInstruction: string;
+  sequence: number;
+};
+type EditingSuggestionPreviewContext = {
+  projectId: string;
+  sessionId: string;
+  sessionVersion: number;
+};
 
 function clipsByTrack(manifest: OpenCutManifestRead | undefined) {
   return (manifest?.tracks ?? []).flatMap((track) =>
@@ -75,6 +89,10 @@ function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function isSessionVersion(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
+
 function timelineForSave(
   timeline: EditableTimeline,
 ): Pick<EditTimelinePayload, "clips" | "metadata"> {
@@ -104,6 +122,16 @@ export function EditingWorkspace({
   const [baseline, setBaseline] = useState<EditableTimeline | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [exported, setExported] = useState<EditExportRead | null>(null);
+  const [suggestionInstruction, setSuggestionInstruction] = useState("");
+  const [suggestionPreview, setSuggestionPreview] = useState<EditingDirectorSuggestionRead | null>(
+    null,
+  );
+  const [suggestionPreviewContext, setSuggestionPreviewContext] =
+    useState<EditingSuggestionPreviewContext | null>(null);
+  const [suggestionStale, setSuggestionStale] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  const suggestionSequenceRef = useRef(0);
+  const suggestionIdentityRef = useRef<EditingSuggestionPreviewContext | null>(null);
 
   const hasSession = Boolean(sessionId);
   const manifest = useQuery({
@@ -117,6 +145,12 @@ export function EditingWorkspace({
     enabled: Boolean(projectId) && projectId !== "demo" && hasSession,
   });
 
+  const currentSessionVersion = persistedSession.data?.version;
+  suggestionIdentityRef.current =
+    sessionId && isSessionVersion(currentSessionVersion)
+      ? { projectId, sessionId, sessionVersion: currentSessionVersion }
+      : null;
+
   const dirty = useMemo(
     () => draft !== null && baseline !== null && !sameTimeline(draft, baseline),
     [baseline, draft],
@@ -129,6 +163,12 @@ export function EditingWorkspace({
     setBaseline(null);
     setFeedback(null);
     setExported(null);
+    setSuggestionInstruction("");
+    setSuggestionPreview(null);
+    setSuggestionPreviewContext(null);
+    setSuggestionStale(false);
+    setSuggestionError(null);
+    suggestionSequenceRef.current += 1;
   }, [projectId, sessionId]);
 
   useEffect(() => {
@@ -185,6 +225,114 @@ export function EditingWorkspace({
       setFeedback(`导出时间线失败：${errorMessage(error)}`);
     },
   });
+
+  const suggestionRequest = useMutation<
+    EditingDirectorSuggestionRead,
+    unknown,
+    EditingSuggestionMutationInput
+  >({
+    mutationFn: ({
+      projectId: requestProjectId,
+      sessionId: requestSessionId,
+      expectedSessionVersion,
+      userInstruction,
+    }) =>
+      requestEditingDirectorSuggestion(requestProjectId, requestSessionId, {
+        expected_session_version: expectedSessionVersion,
+        user_instruction: userInstruction,
+      }),
+    onSuccess: (result, variables) => {
+      const currentIdentity = suggestionIdentityRef.current;
+      if (
+        variables.sequence !== suggestionSequenceRef.current ||
+        !currentIdentity ||
+        currentIdentity.projectId !== variables.projectId ||
+        currentIdentity.sessionId !== variables.sessionId ||
+        currentIdentity.sessionVersion !== variables.expectedSessionVersion
+      ) {
+        // A late response is intentionally ignored. It cannot become the
+        // preview for a newer session/version/request.
+        return;
+      }
+      setSuggestionPreview(result);
+      setSuggestionPreviewContext(currentIdentity);
+      setSuggestionStale(false);
+      setSuggestionError(null);
+    },
+    onError: (error: unknown, variables) => {
+      const currentIdentity = suggestionIdentityRef.current;
+      if (
+        variables.sequence !== suggestionSequenceRef.current ||
+        !currentIdentity ||
+        currentIdentity.projectId !== variables.projectId ||
+        currentIdentity.sessionId !== variables.sessionId ||
+        currentIdentity.sessionVersion !== variables.expectedSessionVersion
+      ) {
+        // A late error is just as stale as a late success; it must not replace
+        // the error/preview belonging to the current route and version.
+        return;
+      }
+      setSuggestionPreview(null);
+      setSuggestionPreviewContext(null);
+      setSuggestionStale(false);
+      setSuggestionError(`建议请求失败：${errorMessage(error)}`);
+    },
+  });
+  const suggestionRequestResetRef = useRef(suggestionRequest.reset);
+  suggestionRequestResetRef.current = suggestionRequest.reset;
+
+  useEffect(() => {
+    // Route changes invalidate any in-flight mutation state as well as the
+    // local preview. The sequence guard above still ignores its eventual
+    // response if the transport cannot be cancelled.
+    suggestionRequestResetRef.current();
+  }, [projectId, sessionId]);
+
+  useEffect(() => {
+    if (!suggestionPreview || !suggestionPreviewContext) return;
+    const currentIdentity = suggestionIdentityRef.current;
+    if (
+      !currentIdentity ||
+      currentIdentity.projectId !== suggestionPreviewContext.projectId ||
+      currentIdentity.sessionId !== suggestionPreviewContext.sessionId ||
+      currentIdentity.sessionVersion !== suggestionPreviewContext.sessionVersion
+    ) {
+      setSuggestionStale(true);
+    }
+  }, [currentSessionVersion, projectId, sessionId, suggestionPreview, suggestionPreviewContext]);
+
+  const suggestionIsStale =
+    suggestionPreview !== null &&
+    suggestionPreviewContext !== null &&
+    (suggestionStale ||
+      suggestionPreviewContext.projectId !== projectId ||
+      suggestionPreviewContext.sessionId !== sessionId ||
+      suggestionPreviewContext.sessionVersion !== currentSessionVersion);
+
+  function submitSuggestion() {
+    const userInstruction = suggestionInstruction.trim();
+    if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
+      setSuggestionError("无法请求建议：当前 EditSession 版本尚未加载。");
+      return;
+    }
+    if (!userInstruction) {
+      setSuggestionError("请输入导演要求后再请求建议。");
+      return;
+    }
+    const sequence = suggestionSequenceRef.current + 1;
+    suggestionSequenceRef.current = sequence;
+    setSuggestionPreview(null);
+    setSuggestionPreviewContext(null);
+    setSuggestionStale(false);
+    setSuggestionError(null);
+    suggestionRequest.mutate({
+      projectId,
+      sessionId,
+      expectedSessionVersion: currentSessionVersion,
+      userInstruction,
+      sequence,
+    });
+  }
 
   function moveClip(index: number, offset: -1 | 1) {
     setDraft((current) => {
@@ -261,6 +409,12 @@ export function EditingWorkspace({
                 <dd>{persistedSession.data.id}</dd>
                 <dt>状态</dt>
                 <dd>{persistedSession.data.status}</dd>
+                <dt>版本</dt>
+                <dd data-testid="edit-session-version">
+                  {isSessionVersion(persistedSession.data.version)
+                    ? `v${persistedSession.data.version}`
+                    : "尚未加载"}
+                </dd>
                 <dt>镜头数量</dt>
                 <dd>{draft.clips.length}</dd>
               </dl>
@@ -268,6 +422,167 @@ export function EditingWorkspace({
               <pre data-testid="edit-session-lineage">
                 {formatJson(persistedSession.data.production_lineage)}
               </pre>
+            </section>
+
+            <section
+              className="editing-director-suggestion"
+              data-testid="editing-director-suggestion"
+              data-project-id={projectId}
+              data-session-id={sessionId}
+            >
+              <header>
+                <div>
+                  <p className="editing-director-suggestion-kicker">Director suggestion</p>
+                  <h2>剪辑建议预览</h2>
+                </div>
+                <span data-testid="editing-suggestion-current-version">
+                  当前 EditSession v
+                  {isSessionVersion(currentSessionVersion) ? currentSessionVersion : "—"}
+                </span>
+              </header>
+              <p className="editing-director-suggestion-note">
+                建议只形成待审核
+                Proposal，不会应用到时间线；应用后的时间线仍由下方手动编辑和显式保存控制。
+              </p>
+              <label htmlFor="editing-director-suggestion-instruction">
+                导演要求
+                <textarea
+                  id="editing-director-suggestion-instruction"
+                  data-testid="editing-director-suggestion-instruction"
+                  aria-label="剪辑导演要求"
+                  value={suggestionInstruction}
+                  onChange={(event) => setSuggestionInstruction(event.target.value)}
+                  placeholder="例如：让前两个镜头之间多留一点停顿"
+                  disabled={suggestionRequest.isPending}
+                />
+              </label>
+              <button
+                type="button"
+                data-testid="request-editing-director-suggestion"
+                onClick={submitSuggestion}
+                disabled={
+                  suggestionRequest.isPending ||
+                  !suggestionInstruction.trim() ||
+                  !isSessionVersion(currentSessionVersion)
+                }
+              >
+                {suggestionRequest.isPending ? "正在请求建议…" : "请求剪辑建议"}
+              </button>
+
+              {suggestionRequest.isPending && (
+                <p
+                  className="editing-director-suggestion-status"
+                  data-testid="editing-suggestion-pending"
+                  role="status"
+                >
+                  正在基于当前 EditSession v{currentSessionVersion} 生成建议…
+                </p>
+              )}
+              {suggestionError && (
+                <p
+                  className="editing-director-suggestion-error"
+                  data-testid="editing-suggestion-error"
+                  role="alert"
+                >
+                  {suggestionError}
+                </p>
+              )}
+
+              {suggestionPreview && (
+                <article
+                  className="editing-director-suggestion-preview"
+                  data-testid="editing-suggestion-preview"
+                  data-proposal-id={suggestionPreview.proposal_id}
+                  data-item-id={suggestionPreview.item_id}
+                  data-base-session-version={suggestionPreview.suggestion.base_session_version}
+                >
+                  <header>
+                    <div>
+                      <h3>Pending proposal（未应用）</h3>
+                      <p>这是待审核建议预览，不是已应用的时间线事件。</p>
+                    </div>
+                    <span data-testid="editing-suggestion-pending-status">pending</span>
+                  </header>
+                  <dl className="editing-director-suggestion-identities">
+                    <dt>proposal_id</dt>
+                    <dd data-testid="editing-suggestion-proposal-id">
+                      {suggestionPreview.proposal_id}
+                    </dd>
+                    <dt>item_id</dt>
+                    <dd data-testid="editing-suggestion-item-id">{suggestionPreview.item_id}</dd>
+                    <dt>基于版本</dt>
+                    <dd data-testid="editing-suggestion-base-version">
+                      v{suggestionPreview.suggestion.base_session_version}
+                    </dd>
+                  </dl>
+
+                  <section
+                    className="editing-director-suggestion-operations"
+                    data-testid="editing-suggestion-operations"
+                  >
+                    <h4>Typed operations</h4>
+                    {suggestionPreview.suggestion.plan.operations.length === 0 ? (
+                      <p className="muted">没有可展示的 typed operation。</p>
+                    ) : (
+                      <ol>
+                        {suggestionPreview.suggestion.plan.operations.map((operation, index) => (
+                          <li
+                            key={`${operation.operation}-${index}`}
+                            data-testid="editing-suggestion-operation"
+                            data-operation={operation.operation}
+                          >
+                            <strong>{operation.operation}</strong>
+                            {operation.operation === "reorder_clips" ? (
+                              <span>顺序：{operation.clip_ids.join(" → ")}</span>
+                            ) : (
+                              <span>
+                                片段 {operation.clip_id} · 时长 {operation.duration_seconds}s
+                              </span>
+                            )}
+                            <pre>{formatJson(operation)}</pre>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </section>
+
+                  <dl className="editing-director-suggestion-explanations">
+                    <dt>rationale / 原因</dt>
+                    <dd data-testid="editing-suggestion-rationale">
+                      {suggestionPreview.suggestion.rationale}
+                    </dd>
+                    <dt>benefit / 收益</dt>
+                    <dd data-testid="editing-suggestion-benefit">
+                      {suggestionPreview.suggestion.benefit}
+                    </dd>
+                    <dt>cost / 创作代价</dt>
+                    <dd data-testid="editing-suggestion-cost">
+                      {suggestionPreview.suggestion.cost}
+                    </dd>
+                    <dt>risk / 风险</dt>
+                    <dd data-testid="editing-suggestion-risk">
+                      {suggestionPreview.suggestion.risk}
+                    </dd>
+                    <dt>impact / 影响范围</dt>
+                    <dd data-testid="editing-suggestion-impact">
+                      {suggestionPreview.suggestion.impact}
+                    </dd>
+                  </dl>
+                  {suggestionIsStale && (
+                    <p
+                      className="editing-director-suggestion-stale"
+                      data-testid="editing-suggestion-stale"
+                      role="alert"
+                    >
+                      当前 EditSession
+                      版本已变化，这条建议已过期；请重新请求。它不会自动重试、保存或修改时间线。
+                    </p>
+                  )}
+                  <p className="editing-director-suggestion-footer">
+                    Proposal/item 仍为 pending；没有 Apply、accept、reject 或 timeline save 操作。
+                  </p>
+                </article>
+              )}
             </section>
 
             <section className="editing-session-editor" data-testid="edit-session-editor">
