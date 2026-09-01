@@ -140,8 +140,12 @@ successful Golden rerun. Root files and containers were not changed.
 ## Golden result and verdict
 
 The sanitized evidence file is
-`docs/reviews/GOLDEN-REAL-PROVIDER-RUN-2026-09-01.json` (14,400 bytes;
-SHA-256 `c1b844b7a8c70642fd7c7052f31948b3a8a4000eb44e20ab47329a435c751909`).
+`docs/reviews/GOLDEN-REAL-PROVIDER-RUN-2026-09-01.json` (14,011 bytes in the
+repository's normalized LF checkout; SHA-256
+`9404f968fef33fbc1c1ce6549a263d6d5f93eff18d6dfa44d2c3ae9bc1a9a5d5c4`). The
+candidate's pre-commit CRLF copy was 14,400 bytes with SHA-256
+`c1b844b7a8c70642fd7c7052f31948b3a8a4000eb44e20ab47329a435c751909`; the
+content is identical after line-ending normalization.
 It contains `source_commit=66eb4d28a352dc093e1f8a7c3d733601d13a9f7c`,
 `dirty=false`, `ok=true`, and `paid_provider_calls=2`; the secret-value scan
 found zero hits. It records two succeeded Agnes operations
@@ -165,6 +169,6 @@ satisfied by the two successful Agnes operations.
   allowed Golden JSON after evidence generation.
 
 **Overall current V1 Release Gate verdict: `PASS`.** No mandatory blocker
-remains. No commit or push was performed.
-
+remains. The evidence was committed and pushed through protected PR #31,
+squash-merged to `dev` as `6a20cdb1d2bd0abe1dacc0bc7128d07bd1ea1aa2`.
 
