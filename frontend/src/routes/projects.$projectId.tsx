@@ -140,7 +140,7 @@ function ProjectLayout() {
       projectId={projectId}
       projectName={projectRead?.name ?? (projectId === "demo" ? "演示项目" : "短剧项目")}
       activeView={view ?? "overview"}
-      inspector={<EvidenceInspector project={projectRead} />}
+      inspector={view === "scenes" ? undefined : <EvidenceInspector project={projectRead} />}
       modeLabel={view === "production" ? "专业模式" : (view ?? "项目总览")}
     >
       {project.isError && (

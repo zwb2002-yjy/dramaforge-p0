@@ -70,6 +70,15 @@ describe("Workstation shell", () => {
     expect(screen.queryByTestId("workstation-shell")).not.toBeInTheDocument();
   });
 
+  it("gives Scene Workbench one right operation panel without the outer evidence inspector", async () => {
+    renderApp("/projects/demo/scenes/scene-1");
+
+    const shell = await screen.findByTestId("project-workspace-shell");
+    expect(shell).toHaveClass("scene-view");
+    expect(shell.querySelector(".qc-content-grid")).toHaveClass("no-inspector");
+    expect(screen.queryByTestId("project-evidence-inspector")).not.toBeInTheDocument();
+  });
+
   it("toggles the Visual 2.0 project navigation", async () => {
     renderApp("/projects/demo/production");
     const shell = await screen.findByTestId("project-workspace-shell");
@@ -129,7 +138,12 @@ describe("Workstation shell", () => {
           adapter: "dramaforge-opencut-adapter-v1",
           project_id: "project-1",
           official_line: "formal",
-          timeline: { duration_seconds: "0", frame_rate: 24, timebase: "1/24", aspect_ratio: "16:9" },
+          timeline: {
+            duration_seconds: "0",
+            frame_rate: 24,
+            timebase: "1/24",
+            aspect_ratio: "16:9",
+          },
           tracks: [],
           shots: [],
         });
@@ -153,7 +167,8 @@ describe("Workstation shell", () => {
       if (url.includes("/shots")) return json([]);
       if (url.includes("/assets")) return json([]);
       if (url.includes("/experiments")) return json([]);
-      if (url.includes("/opencut-manifest")) return json({ schema_version: "opencut-manifest-v2", tracks: [], shots: [] });
+      if (url.includes("/opencut-manifest"))
+        return json({ schema_version: "opencut-manifest-v2", tracks: [], shots: [] });
       if (url.includes("/annotations")) return json([]);
       if (url.includes("/director-board")) return json(null);
       if (url.includes("/snapshot"))

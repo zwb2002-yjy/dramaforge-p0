@@ -1,20 +1,22 @@
+import { useEffect, useMemo, useState } from "react";
+
 import { artifactContentUrl } from "../../lib/api";
 import type { ShotLite } from "./api";
+import { parseShotCandidates, shotCandidateKey, type ShotCandidate } from "./shotCandidates";
 
 type CinematicCanvasProps = {
   projectId: string;
   shot: ShotLite | null;
   /** Server-derived candidate envelope for the selected Shot. */
   candidates?: unknown[];
+  /** A local-only CandidateTray selection to preview on the canvas. */
+  selectedCandidate?: ShotCandidate | null;
+  /** Alias useful to embedders that call the local selection a preview. */
+  previewCandidate?: ShotCandidate | null;
+  /** Optional uncontrolled setter for a host that renders its own tray. */
+  onCandidateSelect?: (candidate: ShotCandidate) => void;
   /** Server-derived NodeRun summary for the selected Shot. */
   trace?: unknown[];
-};
-
-type CanvasCandidate = {
-  artifactId: string;
-  artifactType: "image" | "video";
-  stage: "image_keyframe" | "video";
-  status: string;
 };
 
 type TraceState = {
@@ -25,30 +27,8 @@ type TraceState = {
 const ACTIVE_STATUSES = new Set(["queued", "pending", "running", "processing", "submitted"]);
 const FAILED_STATUSES = new Set(["failed", "error", "cancelled", "canceled"]);
 
-function candidateOf(value: unknown): CanvasCandidate | null {
-  if (typeof value !== "object" || value === null) return null;
-  const row = value as Record<string, unknown>;
-  const artifactId = row.artifact_id ?? row.result_artifact_id ?? row.id;
-  const rawType = row.artifact_type;
-  if (
-    typeof artifactId !== "string" ||
-    artifactId.length === 0 ||
-    (rawType !== "image" && rawType !== "video")
-  ) {
-    return null;
-  }
-  const rawStage = row.stage ?? row.node_key;
-  const stage = rawStage === "video" || rawType === "video" ? "video" : ("image_keyframe" as const);
-  return {
-    artifactId,
-    artifactType: rawType,
-    stage,
-    status: typeof row.status === "string" ? row.status : "completed",
-  };
-}
-
 function traceStateOf(value: unknown): TraceState | null {
-  if (typeof value !== "object" || value === null) return null;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   if (typeof row.status !== "string" || row.status.length === 0) return null;
   return {
@@ -82,44 +62,88 @@ function stateLabel(status: string): string {
   }
 }
 
-function renderCandidate(candidates: unknown[]): CanvasCandidate | null {
-  return (
-    candidates
-      .map(candidateOf)
-      .find((candidate): candidate is CanvasCandidate => candidate !== null) ?? null
-  );
-}
-
 function latestTraceState(trace: unknown[]): TraceState | null {
   return trace.map(traceStateOf).find((state): state is TraceState => state !== null) ?? null;
 }
 
 /**
- * Central canvas: formal output first, then a server candidate, then an
- * execution/empty state.  It deliberately contains no prompt, reference, or
- * production controls; those live in DirectorSidebar.
+ * Stage-first central canvas. The canvas renders the work itself and keeps
+ * all prompts, references, generation, and formal confirmation in sibling
+ * operation surfaces.
+ *
+ * Preview order is intentionally explicit:
+ * local CandidateTray selection → formal video → formal keyframe → an
+ * unconfirmed server candidate → execution state / placeholder.
  */
 export function CinematicCanvas({
   projectId,
   shot,
   candidates = [],
+  selectedCandidate,
+  previewCandidate,
+  onCandidateSelect,
   trace = [],
 }: CinematicCanvasProps) {
+  const [localCandidate, setLocalCandidate] = useState<ShotCandidate | null>(null);
+  useEffect(() => {
+    // Candidate previews are ephemeral UI state and never survive a Shot
+    // switch. The parent clears its controlled selection at the same boundary.
+    setLocalCandidate(null);
+  }, [shot?.id]);
+
+  const parsedCandidates = useMemo(() => parseShotCandidates(candidates), [candidates]);
+  const controlledCandidate = selectedCandidate ?? previewCandidate ?? null;
+  const candidate = controlledCandidate ?? localCandidate ?? parsedCandidates[0] ?? null;
   const keyframeId = shot?.formal_keyframe_artifact_id ?? null;
   const videoId = shot?.formal_video_artifact_id ?? null;
-  const candidate = renderCandidate(candidates);
   const latestTrace = latestTraceState(trace);
   const normalizedStatus = latestTrace?.status.toLowerCase() ?? "";
   const isActive = ACTIVE_STATUSES.has(normalizedStatus);
   const isFailed = FAILED_STATUSES.has(normalizedStatus);
+
+  const selectCandidate = (next: ShotCandidate) => {
+    if (selectedCandidate === undefined && previewCandidate === undefined) {
+      setLocalCandidate(next);
+    }
+    onCandidateSelect?.(next);
+  };
+
   return (
     <div
       className="qc-cinematic-canvas"
       data-testid="cinematic-canvas"
       data-shot-id={shot?.id ?? undefined}
+      data-preview-candidate={candidate ? shotCandidateKey(candidate) : undefined}
     >
       {!shot ? (
-        <p className="qc-canvas-empty">选择左侧镜头开始导演构图。</p>
+        <p className="qc-canvas-empty">选择镜头开始导演构图。</p>
+      ) : candidate ? (
+        <div
+          className="qc-canvas-media"
+          data-testid="shot-candidate"
+          onClick={() => selectCandidate(candidate)}
+        >
+          <span className="qc-canvas-state">
+            {candidate.stage === "video" ? "视频候选预览" : "关键帧候选预览"}
+          </span>
+          {candidate.artifactType === "video" ? (
+            <video
+              controls
+              preload="metadata"
+              src={artifactContentUrl(projectId, candidate.artifactId)}
+              data-testid={`shot-candidate-preview-${candidate.artifactId}`}
+            />
+          ) : (
+            <img
+              src={artifactContentUrl(projectId, candidate.artifactId)}
+              alt={`#${shot.shot_number} 候选 ${candidate.artifactId}`}
+              data-testid={`shot-candidate-preview-${candidate.artifactId}`}
+            />
+          )}
+          <small>
+            未确认候选 · {candidate.status} · {candidate.artifactId}
+          </small>
+        </div>
       ) : videoId ? (
         <div className="qc-canvas-media" data-testid="shot-formal-output">
           <span className="qc-canvas-state">正式视频</span>
@@ -138,29 +162,6 @@ export function CinematicCanvas({
             alt={`#${shot.shot_number} 关键帧`}
             data-testid="shot-keyframe"
           />
-        </div>
-      ) : candidate ? (
-        <div className="qc-canvas-media" data-testid="shot-candidate">
-          <span className="qc-canvas-state">
-            {candidate.stage === "video" ? "视频候选" : "关键帧候选"}
-          </span>
-          {candidate.artifactType === "video" ? (
-            <video
-              controls
-              preload="metadata"
-              src={artifactContentUrl(projectId, candidate.artifactId)}
-              data-testid={`shot-candidate-preview-${candidate.artifactId}`}
-            />
-          ) : (
-            <img
-              src={artifactContentUrl(projectId, candidate.artifactId)}
-              alt={`#${shot.shot_number} 候选 ${candidate.artifactId}`}
-              data-testid={`shot-candidate-preview-${candidate.artifactId}`}
-            />
-          )}
-          <small>
-            候选 · {candidate.status} · {candidate.artifactId}
-          </small>
         </div>
       ) : isActive || isFailed ? (
         <div className="qc-canvas-empty qc-canvas-status" data-testid="shot-execution-state">

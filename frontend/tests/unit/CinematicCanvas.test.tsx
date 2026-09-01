@@ -48,7 +48,7 @@ describe("CinematicCanvas", () => {
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
-  it("gives formal output precedence over candidates", () => {
+  it("gives a local/server candidate preview precedence over formal output", () => {
     render(
       <CinematicCanvas
         projectId="project-1"
@@ -64,8 +64,8 @@ describe("CinematicCanvas", () => {
       />,
     );
 
-    expect(screen.getByTestId("shot-keyframe")).toBeInTheDocument();
-    expect(screen.queryByTestId("shot-candidate")).not.toBeInTheDocument();
+    expect(screen.getByTestId("shot-candidate")).toBeInTheDocument();
+    expect(screen.queryByTestId("shot-keyframe")).not.toBeInTheDocument();
   });
 
   it("surfaces an active execution state when no media is available", () => {

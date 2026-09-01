@@ -65,12 +65,17 @@ type EditingMockState = {
 export type ProfessionalMockState = {
   assets: Array<Record<string, unknown>>;
   experiments: Array<Record<string, unknown>>;
+  candidates: Array<Record<string, unknown>>;
   annotations: Array<Record<string, unknown>>;
   revisions: Array<Record<string, unknown>>;
   proposals: Array<Record<string, unknown>>;
   board: Record<string, unknown> | null;
   shotVersion: number;
+  formalKeyframeArtifactId: string | null;
+  formalVideoArtifactId: string | null;
   visual: string;
+  imagePrompt: string;
+  videoPrompt: string;
   editing: EditingMockState;
 };
 
@@ -267,10 +272,10 @@ function workspaceShot(
     project_id: PROJECT_ID,
     duration_seconds: shotNumber === 1 ? "5" : "4",
     director_state: {},
-    image_prompt: shotNumber === 1 ? "close up" : "medium close up",
-    video_prompt: "locked",
-    formal_keyframe_artifact_id: null,
-    formal_video_artifact_id: shotNumber === 1 ? "artifact-video-1" : "artifact-video-2",
+    image_prompt: shotNumber === 1 ? state.imagePrompt : "medium close up",
+    video_prompt: shotNumber === 1 ? state.videoPrompt : "locked",
+    formal_keyframe_artifact_id: shotId === SHOT_ID ? state.formalKeyframeArtifactId : null,
+    formal_video_artifact_id: shotId === SHOT_ID ? state.formalVideoArtifactId : null,
     formal_composite_artifact_id: null,
   };
 }
@@ -405,12 +410,17 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
   const state: ProfessionalMockState = {
     assets: [],
     experiments: [],
+    candidates: [],
     annotations: [],
     revisions: [],
     proposals: [],
     board: null,
     shotVersion: 1,
+    formalKeyframeArtifactId: null,
+    formalVideoArtifactId: null,
     visual: "主角在雨夜街口转身看向镜头",
+    imagePrompt: "close up",
+    videoPrompt: "locked",
     editing: {
       session: initialEditingSession(),
       created: false,
@@ -476,7 +486,7 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           workspaceShot(state, state.shotVersion, SECOND_SHOT_ID, 2),
         ],
         references: { [SHOT_ID]: [], [SECOND_SHOT_ID]: [] },
-        candidates: { [SHOT_ID]: [], [SECOND_SHOT_ID]: [] },
+        candidates: { [SHOT_ID]: clone(state.candidates), [SECOND_SHOT_ID]: [] },
         trace: {
           [SHOT_ID]: [
             {
@@ -503,7 +513,61 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     }
     if (path.endsWith("/design") && method === "PATCH") {
       state.visual = String(body.visual_description ?? state.visual);
+      state.imagePrompt = String(body.image_prompt ?? state.imagePrompt);
+      state.videoPrompt = String(body.video_prompt ?? state.videoPrompt);
       return json(route, { ...shotRow(state, state.shotVersion), version: state.shotVersion + 1 });
+    }
+    if (path.endsWith("/execution-plan") && method === "POST") {
+      return json(route, {
+        plan: { accepted_approximations: [] },
+        plan_fingerprint: "a".repeat(64),
+      });
+    }
+    if (path.endsWith("/executions") && method === "POST") {
+      if (body.stage === "image_keyframe") {
+        state.candidates = [
+          {
+            artifact_id: "candidate-keyframe-1",
+            node_run_id: "run-keyframe-1",
+            node_key: "keyframe",
+            stage: "image_keyframe",
+            status: "completed",
+            artifact_type: "image",
+            mime_type: "image/png",
+          },
+        ];
+      }
+      return json(route, {
+        node_run_id: "run-keyframe-1",
+        graph_id: "graph-1",
+        graph_version_id: "version-graph-1",
+        status: "queued",
+        plan_fingerprint: "a".repeat(64),
+      });
+    }
+    if (path.endsWith("/formal-keyframe") && method === "POST") {
+      state.formalKeyframeArtifactId = String(body.artifact_id);
+      state.shotVersion += 1;
+      state.candidates = state.candidates.filter(
+        (candidate) => candidate.artifact_id !== state.formalKeyframeArtifactId,
+      );
+      return json(route, {
+        shot_id: SHOT_ID,
+        formal_keyframe_artifact_id: state.formalKeyframeArtifactId,
+        version: state.shotVersion,
+      });
+    }
+    if (path.endsWith("/formal-video") && method === "POST") {
+      state.formalVideoArtifactId = String(body.artifact_id);
+      state.shotVersion += 1;
+      state.candidates = state.candidates.filter(
+        (candidate) => candidate.artifact_id !== state.formalVideoArtifactId,
+      );
+      return json(route, {
+        shot_id: SHOT_ID,
+        formal_video_artifact_id: state.formalVideoArtifactId,
+        version: state.shotVersion,
+      });
     }
     if (path.endsWith("/snapshot")) {
       return json(route, {
