@@ -10,7 +10,57 @@ import type { Page, Route } from "@playwright/test";
 export const WORKSPACE_ID = "workspace-professional";
 export const PROJECT_ID = "project-professional";
 export const SHOT_ID = "11111111-1111-4111-8111-111111111111";
+export const SECOND_SHOT_ID = "44444444-4444-4444-8444-444444444444";
 export const SCENE_ID = "22222222-2222-4222-8222-222222222222";
+export const EDIT_SESSION_ID = "33333333-3333-4333-8333-333333333333";
+export const EDITING_PROPOSAL_ID = "55555555-5555-4555-8555-555555555555";
+export const EDITING_PROPOSAL_ITEM_ID = "66666666-6666-4666-8666-666666666666";
+
+type EditingClip = {
+  id: string;
+  episode_id: string;
+  episode_number: number;
+  scene_id: string;
+  scene_number: number;
+  shot_id: string;
+  shot_number: number;
+  artifact_id: string;
+  duration_seconds: number;
+  order: number;
+  subtitle: string;
+  audio_id: string | null;
+  transition: Record<string, unknown> | null;
+};
+
+type EditingTimeline = {
+  clips: EditingClip[];
+  metadata: Record<string, unknown>;
+};
+
+type EditingSession = {
+  id: string;
+  project_id: string;
+  name: string;
+  status: string;
+  version: number;
+  timeline: EditingTimeline;
+  production_lineage: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EditingRequestRecord = {
+  method: string;
+  path: string;
+  body: unknown;
+};
+
+type EditingMockState = {
+  session: EditingSession;
+  created: boolean;
+  requests: EditingRequestRecord[];
+  suggestionResponses: Array<Record<string, unknown>>;
+};
 
 export type ProfessionalMockState = {
   assets: Array<Record<string, unknown>>;
@@ -21,7 +71,142 @@ export type ProfessionalMockState = {
   board: Record<string, unknown> | null;
   shotVersion: number;
   visual: string;
+  editing: EditingMockState;
 };
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function recordKeys(value: unknown, label: string): string[] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be a JSON object`);
+  }
+  return Object.keys(value).sort();
+}
+
+function assertExactKeys(value: unknown, expected: string[], label: string) {
+  const actual = recordKeys(value, label);
+  const wanted = [...expected].sort();
+  if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
+    throw new Error(
+      `${label} keys mismatch: expected ${wanted.join(",")}, got ${actual.join(",")}`,
+    );
+  }
+}
+
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((nested) => canonicalJson(nested));
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, canonicalJson(nested)]),
+  );
+}
+
+function assertExactJson(actual: unknown, expected: unknown, label: string) {
+  if (JSON.stringify(canonicalJson(actual)) !== JSON.stringify(canonicalJson(expected))) {
+    throw new Error(
+      `${label} mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    );
+  }
+}
+
+function assertNoProductionLineage(value: unknown, path = "body") {
+  if (Array.isArray(value)) {
+    value.forEach((nested, index) => assertNoProductionLineage(nested, `${path}[${index}]`));
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === "production_lineage") {
+      throw new Error(`${path} must not contain production_lineage`);
+    }
+    assertNoProductionLineage(nested, `${path}.${key}`);
+  }
+}
+
+function initialEditingTimeline(): EditingTimeline {
+  return {
+    clips: [
+      {
+        id: "edit-clip-1",
+        episode_id: "episode-1",
+        episode_number: 1,
+        scene_id: SCENE_ID,
+        scene_number: 1,
+        shot_id: SHOT_ID,
+        shot_number: 1,
+        artifact_id: "artifact-video-1",
+        order: 1,
+        duration_seconds: 5,
+        subtitle: "我终于明白了。",
+        audio_id: null,
+        transition: null,
+      },
+      {
+        id: "edit-clip-2",
+        episode_id: "episode-1",
+        episode_number: 1,
+        scene_id: SCENE_ID,
+        scene_number: 1,
+        shot_id: SECOND_SHOT_ID,
+        shot_number: 2,
+        artifact_id: "artifact-video-2",
+        order: 2,
+        duration_seconds: 4,
+        subtitle: "雨声里，他没有回答。",
+        audio_id: null,
+        transition: null,
+      },
+    ],
+    metadata: { auto_built: true, assembly: "episode_scene_shot" },
+  };
+}
+
+function initialEditingSession(): EditingSession {
+  return {
+    id: EDIT_SESSION_ID,
+    project_id: PROJECT_ID,
+    name: "Long-form Edit",
+    status: "draft",
+    version: 1,
+    timeline: initialEditingTimeline(),
+    production_lineage: {
+      clips: [
+        {
+          episode_id: "episode-1",
+          scene_id: SCENE_ID,
+          shot_id: SHOT_ID,
+          artifact_id: "artifact-video-1",
+          order: 1,
+        },
+        {
+          episode_id: "episode-1",
+          scene_id: SCENE_ID,
+          shot_id: SECOND_SHOT_ID,
+          artifact_id: "artifact-video-2",
+          order: 2,
+        },
+      ],
+      lineage_readonly: true,
+    },
+    created_at: "2026-09-01T00:00:00.000Z",
+    updated_at: "2026-09-01T00:00:00.000Z",
+  };
+}
+
+function expectedSavedEditingTimeline(): EditingTimeline {
+  const initial = initialEditingTimeline();
+  return {
+    metadata: { ...initial.metadata },
+    clips: [
+      { ...initial.clips[1], order: 1 },
+      { ...initial.clips[0], duration_seconds: 2.5, order: 2 },
+    ],
+  };
+}
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -55,18 +240,164 @@ export function workspaceSnapshot() {
   };
 }
 
-function shotRow(state: ProfessionalMockState, version: number) {
+function shotRow(state: ProfessionalMockState, version: number, shotId = SHOT_ID, shotNumber = 1) {
+  const second = shotId === SECOND_SHOT_ID;
   return {
-    id: SHOT_ID,
+    id: shotId,
     scene_id: SCENE_ID,
-    shot_number: 1,
+    shot_number: shotNumber,
     shot_type: "中近景",
     camera_move: "static",
-    visual_description: state.visual,
-    dialogue: "我终于明白了。",
-    sort_order: 1,
+    visual_description: second ? "他在雨声里收紧手指" : state.visual,
+    dialogue: second ? "你还要继续吗？" : "我终于明白了。",
+    sort_order: shotNumber,
     status: "draft",
     version,
+  };
+}
+
+function workspaceShot(
+  state: ProfessionalMockState,
+  version: number,
+  shotId: string,
+  shotNumber: number,
+) {
+  return {
+    ...shotRow(state, version, shotId, shotNumber),
+    project_id: PROJECT_ID,
+    duration_seconds: shotNumber === 1 ? "5" : "4",
+    director_state: {},
+    image_prompt: shotNumber === 1 ? "close up" : "medium close up",
+    video_prompt: "locked",
+    formal_keyframe_artifact_id: null,
+    formal_video_artifact_id: shotNumber === 1 ? "artifact-video-1" : "artifact-video-2",
+    formal_composite_artifact_id: null,
+  };
+}
+
+function opencutTrace(artifactId: string | null, sourceKind = "formal_artifact") {
+  return {
+    artifact_id: artifactId,
+    source_kind: sourceKind,
+    reference_artifact_ids: [],
+    parameters: {},
+    effective_request: {},
+  };
+}
+
+function opencutClip(
+  shotId: string,
+  clipId: string,
+  start: string,
+  duration: string,
+  artifactId: string | null,
+  trackKind: "video" | "audio" | "subtitle",
+  text: string | null = null,
+) {
+  return {
+    id: clipId,
+    shot_id: shotId,
+    scene_id: SCENE_ID,
+    track_kind: trackKind,
+    timeline_start_seconds: start,
+    timeline_end_seconds: String(Number(start) + Number(duration)),
+    source_in_seconds: "0",
+    duration_seconds: duration,
+    artifact_id: artifactId,
+    source_url: artifactId
+      ? `/api/v1/projects/${PROJECT_ID}/artifacts/${artifactId}/content`
+      : null,
+    mime_type: artifactId
+      ? trackKind === "subtitle"
+        ? "text/vtt"
+        : trackKind === "audio"
+          ? "audio/mpeg"
+          : "video/mp4"
+      : null,
+    text,
+    trace: opencutTrace(artifactId, artifactId ? "formal_artifact" : "script"),
+  };
+}
+
+function opencutManifest() {
+  return {
+    schema_version: "opencut-manifest-v2",
+    adapter: "dramaforge-opencut-adapter-v1",
+    project_id: PROJECT_ID,
+    official_line: "formal",
+    timeline: {
+      duration_seconds: "9",
+      frame_rate: 24,
+      timebase: "1/24",
+      aspect_ratio: "16:9",
+    },
+    shots: [
+      {
+        shot_id: SHOT_ID,
+        shot_number: 1,
+        scene_id: SCENE_ID,
+        timeline_start_seconds: "0",
+        duration_seconds: "5",
+        dialogue: "我终于明白了。",
+        status: "draft",
+        artifact_ids: ["artifact-video-1"],
+        formal_artifacts: { video: "artifact-video-1" },
+      },
+      {
+        shot_id: SECOND_SHOT_ID,
+        shot_number: 2,
+        scene_id: SCENE_ID,
+        timeline_start_seconds: "5",
+        duration_seconds: "4",
+        dialogue: "你还要继续吗？",
+        status: "draft",
+        artifact_ids: ["artifact-video-2"],
+        formal_artifacts: { video: "artifact-video-2" },
+      },
+    ],
+    tracks: [
+      {
+        id: "video-main",
+        kind: "video",
+        name: "正式视频",
+        locked: false,
+        muted: false,
+        clips: [
+          opencutClip(SHOT_ID, "video-clip-1", "0", "5", "artifact-video-1", "video"),
+          opencutClip(SECOND_SHOT_ID, "video-clip-2", "5", "4", "artifact-video-2", "video"),
+        ],
+      },
+      {
+        id: "audio-dialogue",
+        kind: "audio",
+        name: "对白与声音",
+        locked: false,
+        muted: false,
+        clips: [
+          opencutClip(SHOT_ID, "audio-clip-1", "0", "5", "audio-formal-1", "audio"),
+          opencutClip(SECOND_SHOT_ID, "audio-clip-2", "5", "4", "audio-formal-2", "audio"),
+        ],
+      },
+      {
+        id: "subtitle-main",
+        kind: "subtitle",
+        name: "字幕",
+        locked: false,
+        muted: false,
+        clips: [
+          opencutClip(SHOT_ID, "subtitle-clip-1", "0", "5", null, "subtitle", "我终于明白了。"),
+          opencutClip(
+            SECOND_SHOT_ID,
+            "subtitle-clip-2",
+            "5",
+            "4",
+            null,
+            "subtitle",
+            "你还要继续吗？",
+          ),
+        ],
+      },
+    ],
   };
 }
 
@@ -80,6 +411,12 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     board: null,
     shotVersion: 1,
     visual: "主角在雨夜街口转身看向镜头",
+    editing: {
+      session: initialEditingSession(),
+      created: false,
+      requests: [],
+      suggestionResponses: [],
+    },
   };
   await page.addInitScript((workspaceId) => {
     sessionStorage.setItem("dramaforge.selected-workspace-id", workspaceId);
@@ -93,8 +430,13 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     const method = request.method();
     const path = url.pathname;
     const body = request.postDataJSON?.() ?? {};
+    state.editing.requests.push({ method, path, body: clone(body) });
     if (path === "/health") return json(route, { status: "ok", db: "up" });
-    if (path.endsWith("/auth/csrf")) return json(route, { csrf_token: "csrf-e2e" });
+    if (path === "/api/v1/auth/csrf") {
+      if (method !== "GET") throw new Error("CSRF token fetch must use GET");
+      assertExactJson(body, {}, "CSRF token request body");
+      return json(route, { csrf_token: "csrf-e2e" });
+    }
     if (path.endsWith("/director/workspace-snapshot")) return json(route, workspaceSnapshot());
     if (path.endsWith("/scenes")) {
       return json(route, [
@@ -108,9 +450,9 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           time_of_day: "night",
           synopsis: "",
           version: 1,
-          shot_count: 1,
-          formal_keyframe_count: 1,
-          formal_video_count: 1,
+          shot_count: 2,
+          formal_keyframe_count: 2,
+          formal_video_count: 2,
           risk_count: 0,
           representative_artifact: null,
         },
@@ -130,32 +472,31 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           design_state: { blocking_2d: [] },
         },
         shots: [
-          {
-            id: SHOT_ID,
-            project_id: PROJECT_ID,
-            scene_id: SCENE_ID,
-            shot_number: 1,
-            shot_type: "中近景",
-            camera_move: "static",
-            visual_description: state.visual,
-            dialogue: "我终于明白了。",
-            duration_seconds: "3",
-            status: "draft",
-            sort_order: 1,
-            version: state.shotVersion,
-            director_state: {},
-            image_prompt: "close up",
-            video_prompt: "locked",
-            formal_keyframe_artifact_id: null,
-            formal_video_artifact_id: null,
-            formal_composite_artifact_id: null,
-          },
+          workspaceShot(state, state.shotVersion, SHOT_ID, 1),
+          workspaceShot(state, state.shotVersion, SECOND_SHOT_ID, 2),
         ],
-        references: { [SHOT_ID]: [] },
-        candidates: { [SHOT_ID]: [] },
+        references: { [SHOT_ID]: [], [SECOND_SHOT_ID]: [] },
+        candidates: { [SHOT_ID]: [], [SECOND_SHOT_ID]: [] },
         trace: {
           [SHOT_ID]: [
-            { node_run_id: "run-1", node_key: "keyframe", status: "completed", error_code: null, finished_at: null, result_artifact_id: null },
+            {
+              node_run_id: "run-1",
+              node_key: "keyframe",
+              status: "completed",
+              error_code: null,
+              finished_at: null,
+              result_artifact_id: null,
+            },
+          ],
+          [SECOND_SHOT_ID]: [
+            {
+              node_run_id: "run-2",
+              node_key: "keyframe",
+              status: "completed",
+              error_code: null,
+              finished_at: null,
+              result_artifact_id: null,
+            },
           ],
         },
       });
@@ -165,10 +506,19 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       return json(route, { ...shotRow(state, state.shotVersion), version: state.shotVersion + 1 });
     }
     if (path.endsWith("/snapshot")) {
-      return json(route, { project_id: PROJECT_ID, name: "专业工作台验收", node_runs: [], artifacts: [], provider_operations: [] });
+      return json(route, {
+        project_id: PROJECT_ID,
+        name: "专业工作台验收",
+        node_runs: [],
+        artifacts: [],
+        provider_operations: [],
+      });
     }
     if (path.endsWith("/shots")) {
-      return json(route, [shotRow(state, state.shotVersion)]);
+      return json(route, [
+        shotRow(state, state.shotVersion),
+        shotRow(state, state.shotVersion, SECOND_SHOT_ID, 2),
+      ]);
     }
     if (path.endsWith("/models")) {
       return json(route, [
@@ -251,7 +601,8 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         201,
       );
     }
-    if (path.includes("/change-proposals/") && path.endsWith("/confirm")) return json(route, { status: "applied" });
+    if (path.includes("/change-proposals/") && path.endsWith("/confirm"))
+      return json(route, { status: "applied" });
     if (path.endsWith("/experiments") && method === "GET") return json(route, state.experiments);
     if (path.endsWith("/experiments") && method === "POST") {
       const experiment = {
@@ -325,55 +676,129 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       };
       return json(route, state.board);
     }
-    if (path.endsWith("/opencut-manifest")) {
+    if (path === "/api/v1/projects/" + PROJECT_ID + "/opencut-manifest") {
+      if (method !== "GET") throw new Error("formal OpenCut manifest must use GET");
+      assertExactJson(body, {}, "OpenCut manifest body");
+      return json(route, opencutManifest());
+    }
+
+    const editSessionsPath = "/api/v1/projects/" + PROJECT_ID + "/edit-sessions";
+    const editSessionPath = editSessionsPath + "/" + EDIT_SESSION_ID;
+
+    if (path === editSessionsPath && method === "POST") {
+      if (state.editing.created) throw new Error("EditSession creation must happen exactly once");
+      if ((await request.headerValue("x-csrf-token")) !== "csrf-e2e") {
+        throw new Error("EditSession creation must carry the fetched CSRF token");
+      }
+      assertExactJson(body, {}, "EditSession create body");
+      state.editing.created = true;
+      return json(route, clone(state.editing.session), 201);
+    }
+
+    if (path === editSessionPath && method === "GET") {
+      assertExactJson(body, {}, "EditSession GET body");
+      if (!state.editing.created)
+        throw new Error("EditSession must be created before it is loaded");
+      return json(route, clone(state.editing.session));
+    }
+
+    if (path === editSessionPath + "/timeline" && method === "PATCH") {
+      if ((await request.headerValue("x-csrf-token")) !== "csrf-e2e") {
+        throw new Error("EditSession timeline save must carry the fetched CSRF token");
+      }
+      assertExactKeys(body, ["timeline"], "EditSession timeline save body");
+      const timeline = (body as { timeline?: unknown }).timeline;
+      assertExactKeys(timeline, ["clips", "metadata"], "EditSession timeline payload");
+      assertNoProductionLineage(body);
+      assertExactJson(
+        timeline,
+        expectedSavedEditingTimeline(),
+        "EditSession timeline save payload",
+      );
+      if (state.editing.session.version !== 1) {
+        throw new Error("EditSession timeline save must increment the version exactly once");
+      }
+      state.editing.session.timeline = clone(timeline) as EditingTimeline;
+      state.editing.session.version += 1;
+      state.editing.session.updated_at = "2026-09-01T00:01:00.000Z";
+      return json(route, clone(state.editing.session));
+    }
+
+    if (path === editSessionPath + "/export" && method === "GET") {
+      assertExactJson(body, {}, "EditSession export body");
+      const clips = state.editing.session.timeline.clips;
       return json(route, {
-        schema_version: "opencut-manifest-v1",
-        adapter: "opencut",
-        project_id: PROJECT_ID,
-        official_line: "formal",
-        timeline: {
-          duration_seconds: "5",
-          frame_rate: 24,
-          timebase: "1/24",
-          aspect_ratio: "16:9",
-        },
-        shots: [{
-          shot_id: SHOT_ID,
-          shot_number: 1,
-          scene_id: SCENE_ID,
-          timeline_start_seconds: "0",
-          duration_seconds: "5",
-          dialogue: "我终于明白了。",
-          status: "draft",
-          artifact_ids: ["artifact-video-1"],
-          formal_artifacts: { video: "artifact-video-1" },
-        }],
-        tracks: [{
-          id: "video-track-1",
-          kind: "video",
-          name: "正式视频",
-          locked: false,
-          muted: false,
-          clips: [{
-            id: "video-clip-1",
-            shot_id: SHOT_ID,
-            scene_id: SCENE_ID,
-            track_kind: "video",
-            timeline_start_seconds: "0",
-            timeline_end_seconds: "5",
-            source_in_seconds: "0",
-            duration_seconds: "5",
-            artifact_id: "artifact-video-1",
-            source_url: null,
-            mime_type: "video/mp4",
-            text: null,
-            trace: {},
-          }],
-        }],
+        session_id: state.editing.session.id,
+        format: "dramaforge-edit-v1",
+        clip_count: clips.length,
+        duration_seconds: Number(
+          clips.reduce((total, clip) => total + clip.duration_seconds, 0).toFixed(3),
+        ),
+        clips: clone(clips),
+        production_lineage: clone(state.editing.session.production_lineage),
       });
     }
+
+    if (path === editSessionPath + "/director-suggestion" && method === "POST") {
+      if ((await request.headerValue("x-csrf-token")) !== "csrf-e2e") {
+        throw new Error("Director suggestion must carry the fetched CSRF token");
+      }
+      assertExactKeys(
+        body,
+        ["expected_session_version", "user_instruction"],
+        "Director suggestion body",
+      );
+      const expectedVersion = (body as { expected_session_version?: unknown })
+        .expected_session_version;
+      const instruction = (body as { user_instruction?: unknown }).user_instruction;
+      if (expectedVersion !== state.editing.session.version) {
+        throw new Error(
+          `Director suggestion must use current session version ${state.editing.session.version}`,
+        );
+      }
+      if (typeof instruction !== "string" || !instruction.trim()) {
+        throw new Error("Director suggestion instruction must be non-blank");
+      }
+      const currentClips = state.editing.session.timeline.clips;
+      const suggestion = {
+        proposal_id: EDITING_PROPOSAL_ID,
+        item_id: EDITING_PROPOSAL_ITEM_ID,
+        suggestion: {
+          base_session_version: state.editing.session.version,
+          plan: {
+            operations: [
+              {
+                operation: "reorder_clips",
+                clip_ids: currentClips.map((clip) => clip.id).reverse(),
+              },
+              {
+                operation: "set_clip_duration",
+                clip_id: currentClips[0]?.id ?? "",
+                duration_seconds: currentClips[0]?.duration_seconds ?? 0,
+              },
+            ],
+          },
+          rationale: `根据“${instruction.trim()}”审阅当前剪辑顺序与停顿。`,
+          benefit: "只形成待审核建议，不改变正式生产产物。",
+          cost: "需要人工确认并保存时间线版本。",
+          risk: "顺序或时长变化会影响剪辑节奏。",
+          impact: "仅影响当前 EditSession；production lineage 保持只读。",
+        },
+      };
+      state.editing.suggestionResponses.push(clone(suggestion));
+      return json(route, suggestion);
+    }
+
     if (path.includes("/professional/shots/") && method === "POST") {
-      return json(route, { shot_id: SHOT_ID, status: "queued", locked: false, message: "queued", run_ids: [], stale_nodes: [], job_ids: [] });
+      return json(route, {
+        shot_id: SHOT_ID,
+        status: "queued",
+        locked: false,
+        message: "queued",
+        run_ids: [],
+        stale_nodes: [],
+        job_ids: [],
+      });
     }
     return json(route, {});
   });
