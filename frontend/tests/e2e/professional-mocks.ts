@@ -548,9 +548,6 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     if (path.endsWith("/formal-keyframe") && method === "POST") {
       state.formalKeyframeArtifactId = String(body.artifact_id);
       state.shotVersion += 1;
-      state.candidates = state.candidates.filter(
-        (candidate) => candidate.artifact_id !== state.formalKeyframeArtifactId,
-      );
       return json(route, {
         shot_id: SHOT_ID,
         formal_keyframe_artifact_id: state.formalKeyframeArtifactId,
@@ -560,9 +557,6 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     if (path.endsWith("/formal-video") && method === "POST") {
       state.formalVideoArtifactId = String(body.artifact_id);
       state.shotVersion += 1;
-      state.candidates = state.candidates.filter(
-        (candidate) => candidate.artifact_id !== state.formalVideoArtifactId,
-      );
       return json(route, {
         shot_id: SHOT_ID,
         formal_video_artifact_id: state.formalVideoArtifactId,

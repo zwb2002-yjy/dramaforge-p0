@@ -45,8 +45,27 @@ test("manual professional production: Scene Workbench design → candidate previ
 
   await page.getByTestId("shot-candidate-confirm-candidate-keyframe-1").click();
   await expect(page.getByTestId("shot-candidate-success")).toContainText("candidate-keyframe-1");
-  await expect(page.getByTestId("shot-formal-output")).toBeVisible();
   await expect.poll(() => state.formalKeyframeArtifactId).toBe("candidate-keyframe-1");
+  // The real backend keeps the successful Artifact in the candidate
+  // projection after formal selection. The Scene refetch clears only the
+  // local preview, so Canvas must return to the newly formal keyframe.
+  await expect.poll(() => state.candidates.length).toBe(1);
+  await expect(page.getByTestId("shot-keyframe")).toBeVisible();
+  await expect(page.getByTestId("shot-formal-output")).toBeVisible();
+  await expect(page.getByTestId("shot-candidate")).toHaveCount(0);
+
+  // The same Artifact can still be selected for a temporary comparison while
+  // formal remains authoritative after the preview is cleared.
+  const writesBeforeTemporaryPreview = state.editing.requests.filter(
+    (request) => request.method === "POST",
+  ).length;
+  await page.getByTestId("shot-candidate-select-candidate-keyframe-1").click();
+  await expect(page.getByTestId("shot-candidate-preview-candidate-keyframe-1")).toBeVisible();
+  await expect(page.getByTestId("shot-formal-output")).toHaveCount(0);
+  expect(state.editing.requests.filter((request) => request.method === "POST").length).toBe(
+    writesBeforeTemporaryPreview,
+  );
+
   const formalRequest = state.editing.requests.find(
     (request) => request.path.endsWith("/formal-keyframe") && request.method === "POST",
   );
