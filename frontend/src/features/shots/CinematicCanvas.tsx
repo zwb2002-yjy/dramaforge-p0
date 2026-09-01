@@ -85,17 +85,22 @@ export function CinematicCanvas({
   trace = [],
 }: CinematicCanvasProps) {
   const [localCandidate, setLocalCandidate] = useState<ShotCandidate | null>(null);
+  const keyframeId = shot?.formal_keyframe_artifact_id ?? null;
+  const videoId = shot?.formal_video_artifact_id ?? null;
   useEffect(() => {
     // Candidate previews are ephemeral UI state and never survive a Shot
-    // switch. The parent clears its controlled selection at the same boundary.
+    // switch or a formal-line refetch. The parent clears its controlled
+    // selection at the same boundary.
     setLocalCandidate(null);
-  }, [shot?.id]);
+  }, [shot?.id, keyframeId, videoId]);
 
   const parsedCandidates = useMemo(() => parseShotCandidates(candidates), [candidates]);
   const controlledCandidate = selectedCandidate ?? previewCandidate ?? null;
-  const candidate = controlledCandidate ?? localCandidate ?? parsedCandidates[0] ?? null;
-  const keyframeId = shot?.formal_keyframe_artifact_id ?? null;
-  const videoId = shot?.formal_video_artifact_id ?? null;
+  const explicitCandidate = controlledCandidate ?? localCandidate;
+  // A server candidate is only a fallback before the Shot has a formal
+  // artifact. Once the formal line exists, list_formal_candidates may still
+  // return the same successful Artifact; it must not hide the formal preview.
+  const candidate = explicitCandidate ?? (!videoId && !keyframeId ? parsedCandidates[0] : null);
   const latestTrace = latestTraceState(trace);
   const normalizedStatus = latestTrace?.status.toLowerCase() ?? "";
   const isActive = ACTIVE_STATUSES.has(normalizedStatus);

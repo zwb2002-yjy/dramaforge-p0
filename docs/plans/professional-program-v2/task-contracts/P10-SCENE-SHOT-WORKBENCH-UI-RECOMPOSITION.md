@@ -19,7 +19,7 @@
 ## Current evidence / drift
 
 - `SceneWorkspace` currently renders a left vertical ShotStrip, a central canvas, and a right sidebar with design, references, production, formal confirmation, and trace all stacked together.
-- `CinematicCanvas` gives formal media precedence over server candidates and has no local candidate-selection state.
+- After the initial UI recomposition, `CinematicCanvas` treated the first parsed server candidate as a universal fallback. This was incorrect after formal selection because the backend intentionally keeps successful NodeRun → Artifact rows in the candidate projection.
 - `ShotFormalOutputActions` owns candidate parsing and confirmation in the right sidebar.
 - `ProjectWorkspaceShell` always receives the outer EvidenceInspector from the project route, so Scene Workbench has two right-side surfaces and an unnecessary outer width cap.
 - The backend already exposes concrete NodeRun → Artifact candidates and the existing formal selection endpoints; no backend or schema change is needed.
@@ -28,7 +28,7 @@
 
 1. Add a strict `shotCandidates.ts` parser that accepts only concrete image/video Artifact lineage rows with stage/media agreement and rejects opaque ExperimentBranch rows.
 2. Add `ShotCandidateTray` below the canvas. Candidate clicks are local preview selection only; formal confirmation calls only the existing `setShotFormalKeyframe` / `setShotFormalVideo` APIs with the exact current `shot.version` and fails closed on stale errors.
-3. Make `CinematicCanvas` candidate-preview aware with priority: local candidate, formal video, formal keyframe, unconfirmed candidate, execution state, placeholder. It must not render prompt controls and must clear preview on Shot changes/refetch after confirmation.
+3. Make `CinematicCanvas` candidate-preview aware with priority: explicit local/controlled candidate, formal video, formal keyframe, unconfirmed candidate fallback only when no formal exists, execution state, placeholder. It must not render prompt controls and must clear preview on Shot changes/formal refetch after confirmation.
 4. Make `ShotStrip` a bottom horizontal storyboard/timeline hybrid displaying formal keyframe, number, duration, type, formal status, and trace risk.
 5. Make `DirectorSidebar` a compact collapsible tabs surface: 镜头 (design + suggestion), 参考 (asset picker), 生成 (production actions + trace). Formal confirmation does not live in this sidebar.
 6. Compose Scene Workbench as compact header + stage (canvas / candidates / strip) + one right operation panel, and suppress the outer project EvidenceInspector for `view === "scenes"` only.
@@ -73,3 +73,25 @@
 - `npm run build` — passed.
 - `npm run test:e2e` — 16 Chromium tests passed.
 - `git diff --check` — passed.
+
+## Post-merge correction — 2026-09-02
+
+Sol High review found that the initial Canvas expression
+`controlledCandidate ?? localCandidate ?? parsedCandidates[0]` let an old
+successful candidate hide a newly confirmed formal Artifact, because
+`list_formal_candidates()` correctly retains successful rows after formal
+selection. The bounded fix keeps explicit preview selection above the formal
+line for temporary comparison, but permits the parsed-candidate fallback only
+when both formal ids are absent. Formal confirmation still clears the local
+preview and refetches `SceneWorkspaceRead`, while the E2E mock now retains the
+candidate row to mirror the backend projection.
+
+Correction evidence:
+
+- `CinematicCanvas.test.tsx` covers formal-over-server-candidate, explicit
+  candidate-over-formal, and clearing the preview back to formal.
+- `professional-manual.spec.ts` proves formal confirmation leaves the
+  candidate projection available, Canvas returns to formal after refetch, and
+  a later candidate click is a no-write temporary preview.
+- No backend, API, ORM, migration, runtime, Provider, Worker, or
+  `codex-with-chatgpt/` files changed.
