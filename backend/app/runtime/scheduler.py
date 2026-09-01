@@ -300,7 +300,12 @@ class AgentRunScheduler:
         )
 
         async def _arq() -> str:
-            redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+            redis_settings = RedisSettings.from_dsn(settings.redis_url)
+            # Fail fast in broken/missing Redis environments (unit tests, local misconfig).
+            redis_settings.conn_timeout = 1
+            redis_settings.conn_retries = 0
+            redis_settings.conn_retry_delay = 0
+            redis = await create_pool(redis_settings)
             try:
                 job = await redis.enqueue_job(
                     "execute_node_run",

@@ -58,6 +58,7 @@ ALLOWED_ROOT = {
 # Local-only root names (gitignored or tooling); not product code.
 LOCAL_ONLY_ROOT = {
     ".git",
+    "codex-with-chatgpt",
     ".agents",
     ".codex",
     ".idea",
