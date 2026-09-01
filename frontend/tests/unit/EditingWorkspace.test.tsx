@@ -145,12 +145,16 @@ function renderWorkspace() {
   return queryClient;
 }
 
-function persistedSession(timeline: Record<string, unknown> = DEFAULT_SESSION_TIMELINE) {
+function persistedSession(
+  timeline: Record<string, unknown> = DEFAULT_SESSION_TIMELINE,
+  version = 1,
+) {
   return {
     id: SESSION_ID,
     project_id: PROJECT_ID,
     name: "Director Cut",
     status: "draft",
+    version,
     timeline,
     production_lineage: {
       lineage_readonly: true,
@@ -158,6 +162,27 @@ function persistedSession(timeline: Record<string, unknown> = DEFAULT_SESSION_TI
     },
     created_at: "2026-08-31T00:00:00Z",
     updated_at: "2026-08-31T00:00:00Z",
+  };
+}
+
+function editingSuggestion(version = 1) {
+  return {
+    proposal_id: "proposal-1",
+    item_id: "proposal-item-1",
+    suggestion: {
+      base_session_version: version,
+      plan: {
+        operations: [
+          { operation: "reorder_clips", clip_ids: ["clip-2", "clip-1"] },
+          { operation: "set_clip_duration", clip_id: "clip-1", duration_seconds: 2.5 },
+        ],
+      },
+      rationale: "让开场更快进入冲突。",
+      benefit: "节奏更紧凑。",
+      cost: "需要重新确认停顿。",
+      risk: "对白衔接可能更紧。",
+      impact: "仅影响当前 EditSession 时间线。",
+    },
   };
 }
 
@@ -430,6 +455,170 @@ describe("EditingWorkspace", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("timeline save rejected by server");
     expect(screen.getByTestId("edit-session-dirty")).toBeInTheDocument();
     expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
+  });
+
+  it("requests a proposal with the current session version and keeps it separate from timeline save", async () => {
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined;
+      calls.push({ method: init?.method ?? "GET", url, body });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-suggestion" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "让开场更快进入冲突" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+
+    const preview = await screen.findByTestId("editing-suggestion-preview");
+    expect(preview).toHaveAttribute("data-proposal-id", "proposal-1");
+    expect(preview).toHaveAttribute("data-item-id", "proposal-item-1");
+    expect(screen.getByTestId("editing-suggestion-proposal-id")).toHaveTextContent("proposal-1");
+    expect(screen.getByTestId("editing-suggestion-item-id")).toHaveTextContent("proposal-item-1");
+    expect(screen.getByTestId("editing-suggestion-base-version")).toHaveTextContent("v1");
+    expect(screen.getAllByTestId("editing-suggestion-operation")).toHaveLength(2);
+    expect(screen.getByTestId("editing-suggestion-operations")).toHaveTextContent("reorder_clips");
+    expect(screen.getByTestId("editing-suggestion-operations")).toHaveTextContent(
+      "set_clip_duration",
+    );
+    expect(screen.getByTestId("editing-suggestion-rationale")).toHaveTextContent(
+      "让开场更快进入冲突",
+    );
+    expect(screen.getByTestId("editing-suggestion-benefit")).toHaveTextContent("节奏更紧凑");
+    expect(screen.getByTestId("editing-suggestion-cost")).toHaveTextContent("重新确认停顿");
+    expect(screen.getByTestId("editing-suggestion-risk")).toHaveTextContent("对白衔接");
+    expect(screen.getByTestId("editing-suggestion-impact")).toHaveTextContent("当前 EditSession");
+    expect(screen.getByTestId("editing-suggestion-pending-status")).toHaveTextContent("pending");
+    expect(screen.getAllByTestId("edit-session-clip")).toHaveLength(2);
+    expect(screen.getByTestId("save-edit-timeline")).toBeDisabled();
+
+    const request = calls.find((call) => call.url.endsWith("/director-suggestion"));
+    expect(request?.method).toBe("POST");
+    expect(request?.url).toBe(
+      `/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}/director-suggestion`,
+    );
+    expect(request?.body).toEqual({
+      expected_session_version: 1,
+      user_instruction: "让开场更快进入冲突",
+    });
+    expect(request?.body).not.toHaveProperty("project_id");
+    expect(request?.body).not.toHaveProperty("session_id");
+    expect(calls.some((call) => call.url.endsWith("/timeline"))).toBe(false);
+  });
+
+  it("marks a pending preview stale when the loaded session version changes", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-suggestion" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      return json({});
+    });
+    const queryClient = renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "调整节奏" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    await screen.findByTestId("editing-suggestion-preview");
+
+    queryClient.setQueryData(
+      ["edit-session", PROJECT_ID, SESSION_ID],
+      persistedSession(DEFAULT_SESSION_TIMELINE, 2),
+    );
+    expect(await screen.findByTestId("editing-suggestion-stale")).toHaveTextContent("请重新请求");
+    expect(screen.getByTestId("editing-suggestion-base-version")).toHaveTextContent("v1");
+    expect(screen.getByTestId("edit-session-version")).toHaveTextContent("v2");
+    expect(screen.getByTestId("request-editing-director-suggestion")).toBeEnabled();
+    expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
+  });
+
+  it.each([409, 403, 404, 422])(
+    "fails closed on a %s suggestion response without timeline save",
+    async (status) => {
+      const calls: string[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+        if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-suggestion" });
+        if (url.endsWith("/director-suggestion")) {
+          return json({ detail: `suggestion rejected (${status})` }, status);
+        }
+        return json({});
+      });
+      renderPersistedSession();
+      await screen.findByTestId("edit-session-editor");
+      fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+        target: { value: "请给建议" },
+      });
+      fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+
+      expect(await screen.findByTestId("editing-suggestion-error")).toHaveTextContent(
+        `suggestion rejected (${status})`,
+      );
+      expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument();
+      expect(calls.some((url) => url.endsWith("/timeline"))).toBe(false);
+    },
+  );
+
+  it("does not submit an empty or whitespace-only instruction", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    const button = screen.getByTestId("request-editing-director-suggestion");
+    expect(button).toBeDisabled();
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "   \n  " },
+    });
+    expect(button).toBeDisabled();
+    expect(calls.some((url) => url.endsWith("/director-suggestion"))).toBe(false);
+  });
+
+  it("ignores an in-flight response when the session version changes", async () => {
+    let resolveSuggestion!: (response: Response) => void;
+    const suggestionResponse = new Promise<Response>((resolve) => {
+      resolveSuggestion = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-suggestion" });
+      if (url.endsWith("/director-suggestion")) return suggestionResponse;
+      return json({});
+    });
+    const queryClient = renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "调整节奏" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    expect(await screen.findByTestId("editing-suggestion-pending")).toBeInTheDocument();
+
+    queryClient.setQueryData(
+      ["edit-session", PROJECT_ID, SESSION_ID],
+      persistedSession(DEFAULT_SESSION_TIMELINE, 2),
+    );
+    await waitFor(() => expect(screen.getByTestId("edit-session-version")).toHaveTextContent("v2"));
+    resolveSuggestion(await json(editingSuggestion(1)));
+    await waitFor(() =>
+      expect(screen.queryByTestId("editing-suggestion-pending")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("editing-suggestion-error")).not.toBeInTheDocument();
   });
 
   it("surfaces an empty project and partial formal-video hand-off", async () => {
