@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import "./project-shell.css";
+import "./project-shell-visual.css";
 
 export type ProjectWorkspaceView =
   "overview" | "script" | "assets" | "scenes" | "production" | "review" | "edit";
@@ -41,6 +42,16 @@ const NAV_ITEMS: Array<{
   { view: "edit", label: "剪辑", icon: Scissors },
 ];
 
+const VIEW_MODE_LABELS: Record<ProjectWorkspaceView, string> = {
+  overview: "项目总览",
+  script: "剧本工作区",
+  assets: "资产库",
+  scenes: "场景工作台",
+  production: "专业模式",
+  review: "审片工作区",
+  edit: "剪辑工作区",
+};
+
 export function ProjectWorkspaceShell({
   projectId,
   projectName,
@@ -53,6 +64,7 @@ export function ProjectWorkspaceShell({
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const projectBase = `/projects/${projectId}`;
   const showInspector = Boolean(inspector) && activeView !== "scenes";
+  const displayModeLabel = modeLabel === activeView ? VIEW_MODE_LABELS[activeView] : modeLabel;
 
   return (
     <div
@@ -111,7 +123,7 @@ export function ProjectWorkspaceShell({
         <header className="qc-project-bar">
           <span className="qc-project-name">{projectName}</span>
           <span className="qc-project-save">已连接项目事实</span>
-          <span className="qc-project-mode">{modeLabel}</span>
+          <span className="qc-project-mode">{displayModeLabel}</span>
           <span className="qc-avatar qc-owner-avatar" aria-label="单用户 Owner">
             创
           </span>

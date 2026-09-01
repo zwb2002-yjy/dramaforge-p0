@@ -135,7 +135,7 @@ export function ShotCandidateTray({
     >
       <header className="qc-shot-candidate-tray-header">
         <div>
-          <span className="director-stage-kicker">Candidate compare</span>
+          <span className="director-stage-kicker">候选比较</span>
           <strong>候选结果 · #{shot.shot_number}</strong>
         </div>
         <span className="qc-shot-candidate-count">

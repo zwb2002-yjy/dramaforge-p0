@@ -37,7 +37,7 @@ export function ShotStrip({
     <section className="qc-shot-strip-panel" data-testid="shot-strip-panel" aria-label="镜头时间条">
       <header className="qc-shot-strip-header">
         <div>
-          <span className="director-stage-kicker">Storyboard / timeline</span>
+          <span className="director-stage-kicker">分镜 / 时间线</span>
           <strong>场景镜头</strong>
         </div>
         <span>{shots.length} 镜</span>

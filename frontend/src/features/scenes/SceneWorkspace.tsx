@@ -138,7 +138,7 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
     <div className="qc-scene-workspace" data-testid="scene-workspace">
       <header className="qc-scene-header">
         <div className="qc-scene-context" data-testid="scene-context">
-          <span className="director-stage-kicker">Scene Workbench</span>
+          <span className="director-stage-kicker">场景工作台</span>
           <h1>{data?.scene.location_name ?? "场景"}</h1>
           <span>
             {data?.scene.episode_number}.{data?.scene.scene_number} ·{" "}
