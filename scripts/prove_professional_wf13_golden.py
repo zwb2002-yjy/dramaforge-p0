@@ -196,11 +196,6 @@ def resume_report(
         ]
 
     def ops_for(shot_id: str | None) -> list[dict[str, Any]]:
-        run_ids = {
-            (r.get("input_snapshot") or {}).get("shot_id")
-            for r in snapshot.get("node_runs", [])
-            if (r.get("input_snapshot") or {}).get("shot_id") == shot_id
-        }
         # Map by node_run_id -> input_snapshot of that run.
         run_by_id = {str(r.get("id")): r for r in snapshot.get("node_runs", [])}
         out = []
@@ -217,7 +212,6 @@ def resume_report(
 
     # Per-shot workflow-state for the frozen plan / capability assessment.
     two_char_state = {}
-    action_state = {}
     if two_char_shot:
         st = require_ok(
             client.get(f"/projects/{project_id}/shots/{two_char_shot['id']}/workflow-state", headers=headers),
@@ -225,11 +219,10 @@ def resume_report(
         )
         two_char_state = st.get("workflow_state", {})
     if action_shot:
-        st = require_ok(
+        require_ok(
             client.get(f"/projects/{project_id}/shots/{action_shot['id']}/workflow-state", headers=headers),
             "action workflow-state",
         )
-        action_state = st.get("workflow_state", {})
 
     overview = require_ok(
         client.get(f"/projects/{project_id}/workflow-overview", headers=headers),
@@ -592,7 +585,7 @@ Camera: whip pan
 
         # --- Real paid path on the ACTION shot --------------------------------
         # Set duration on the action shot (single character -> no multi-subject gate).
-        action_state = require_ok(
+        require_ok(
             client.get(
                 f"/projects/{project_id}/shots/{action_shot['id']}/workflow-state",
                 headers=headers,
