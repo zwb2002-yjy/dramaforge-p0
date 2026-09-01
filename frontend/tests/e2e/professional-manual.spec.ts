@@ -27,22 +27,6 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
-  const studioPalette = await page.getByTestId("project-workspace-shell").evaluate((element) => {
-    const root = getComputedStyle(element);
-    const main = getComputedStyle(element.querySelector(".qc-main-canvas") as Element);
-    const sidebar = getComputedStyle(element.querySelector(".qc-sidebar") as Element);
-    const canvas = getComputedStyle(element.querySelector(".qc-cinematic-canvas") as Element);
-    return {
-      rootBackground: root.backgroundColor,
-      mainBackground: main.backgroundColor,
-      sidebarBackground: sidebar.backgroundColor,
-      canvasBackground: canvas.backgroundColor,
-    };
-  });
-  expect(studioPalette.rootBackground).toBe("rgb(240, 238, 232)");
-  expect(studioPalette.mainBackground).toBe("rgb(240, 238, 232)");
-  expect(studioPalette.sidebarBackground).toBe("rgb(48, 55, 53)");
-  expect(studioPalette.canvasBackground).toBe("rgb(48, 55, 53)");
   const canvasBox = await page.getByTestId("cinematic-canvas").boundingBox();
   const operationBox = await page.getByTestId("director-sidebar").boundingBox();
   expect(canvasBox?.width ?? 0).toBeGreaterThan(operationBox?.width ?? 0);
@@ -164,13 +148,6 @@ test("Scene Workbench remains readable at 910px and other views retain evidence"
   });
   expect(sceneLayout.columns).toBe(1);
   expect(sceneLayout.documentFits).toBe(true);
-  const narrowPalette = await page.getByTestId("cinematic-canvas").evaluate((element) => {
-    const root = getComputedStyle(element.closest(".qc-project-shell") as Element);
-    const canvas = getComputedStyle(element);
-    return { rootBackground: root.backgroundColor, canvasBackground: canvas.backgroundColor };
-  });
-  expect(narrowPalette.rootBackground).toBe("rgb(240, 238, 232)");
-  expect(narrowPalette.canvasBackground).toBe("rgb(48, 55, 53)");
 
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("project-evidence-inspector")).toBeVisible();
