@@ -26,12 +26,13 @@ from app.access.projects import ProjectService
 from app.director.models import DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.adapter import EditingAdapter
+from app.editing.models import EditSession
 from app.editing.proposal_plan import (
     EditSessionTimelinePlan,
     ReorderClipsOperation,
     SetClipDurationOperation,
 )
-from app.shared.errors import ConflictError, ValidationAppError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 
 class EditingDirectorSuggestionRequest(BaseModel):
@@ -388,14 +389,26 @@ class EditingDirectorSuggestionService:
             )
         _validate_plan_targets(candidate.plan, clip_ids=[clip.clip_id for clip in context.clips])
 
-        latest = await adapter.load_timeline(project_id=project.id, session_id=edit_session.id)
-        if latest.version != context.session_version:
+        # Read the persisted scalar directly instead of selecting the ORM row.
+        # The latter can return the already-loaded identity-map instance and
+        # therefore miss a version committed by a concurrent editor while the
+        # transport was running.  Keep both identifiers in the predicate so a
+        # session from another project can never satisfy this stale gate.
+        latest_version = await self._session.scalar(
+            select(EditSession.version).where(
+                EditSession.project_id == project.id,
+                EditSession.id == edit_session.id,
+            )
+        )
+        if latest_version is None:
+            raise NotFoundError("edit session not found")
+        if latest_version != context.session_version:
             raise ConflictError(
                 "edit session changed while the suggestion was generated",
                 details={
                     "code": "EDITING_SUGGESTION_STALE",
                     "expected_version": context.session_version,
-                    "actual_version": latest.version,
+                    "actual_version": latest_version,
                 },
             )
 
@@ -420,7 +433,7 @@ class EditingDirectorSuggestionService:
             project_id=project.id,
             thread_id=thread.id,
             scope_type="edit_session",
-            scope_entity_id=latest.id,
+            scope_entity_id=edit_session.id,
             status="pending",
             created_by=actor.id,
         )
@@ -432,7 +445,7 @@ class EditingDirectorSuggestionService:
                 project_id=project.id,
                 command="edit_session.apply_timeline_plan",
                 payload={
-                    "edit_session_id": str(latest.id),
+                    "edit_session_id": str(edit_session.id),
                     "plan": candidate.plan.model_dump(mode="json"),
                 },
                 expected_target_version=context.session_version,

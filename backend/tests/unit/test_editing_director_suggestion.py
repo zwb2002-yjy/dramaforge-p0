@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -26,9 +27,9 @@ from app.production.models import ProductionGraph
 from app.production.service import GraphService
 from app.shared.base import Base
 from app.shared.enums import ProjectStage
-from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
+from app.shared.errors import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.shared.security import hash_password
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -351,20 +352,32 @@ async def test_stale_before_transport_has_no_rows_or_context(session: AsyncSessi
 
 
 @pytest.mark.asyncio
-async def test_stale_during_transport_has_no_proposal_or_item(session: AsyncSession) -> None:
+async def test_stale_during_transport_reads_persisted_version_not_identity_map(
+    session: AsyncSession,
+) -> None:
     project, edit_session, user, _shot, _asset, _graph, _run, _operation = await _seed(session)
 
-    class SavingTransport(RecordingTransport):
+    class ConcurrentSavingTransport(RecordingTransport):
         async def generate(self, context: EditingDirectorSuggestionContext) -> object:
             self.calls.append(context)
-            await EditingAdapter(session).save_timeline(
-                project_id=project.id,
-                session_id=edit_session.id,
-                timeline=dict(edit_session.timeline),
+            # Simulate another editor committing a version while the service's
+            # ORM instance remains loaded at version 1.  The UPDATE deliberately
+            # disables ORM synchronization so only a persisted-scalar query can
+            # observe the concurrent change.
+            await session.execute(
+                update(EditSession)
+                .where(
+                    EditSession.project_id == project.id,
+                    EditSession.id == edit_session.id,
+                )
+                .values(version=2)
+                .execution_options(synchronize_session=False)
             )
+            await session.commit()
+            assert edit_session.version == context.session_version
             return _candidate(context.session_version)
 
-    transport = SavingTransport(_candidate(1))
+    transport = ConcurrentSavingTransport(_candidate(1))
     with pytest.raises(ConflictError) as raised:
         await EditingDirectorSuggestionService(session, transport=transport).suggest(
             project_id=project.id,
@@ -375,8 +388,40 @@ async def test_stale_during_transport_has_no_proposal_or_item(session: AsyncSess
     assert raised.value.details["code"] == "EDITING_SUGGESTION_STALE"
     assert len(transport.calls) == 1
     assert await _proposal_counts(session, project.id) == (0, 0, 0)
+    assert edit_session.version == 1
+    persisted_version = await session.scalar(
+        select(EditSession.version).where(
+            EditSession.project_id == project.id,
+            EditSession.id == edit_session.id,
+        )
+    )
+    assert persisted_version == 2
+
+
+@pytest.mark.asyncio
+async def test_default_deterministic_transport_uses_existing_clips_and_preserves_facts(
+    session: AsyncSession,
+) -> None:
+    project, edit_session, user, _shot, _asset, _graph, _run, _operation = await _seed(session)
+    timeline_before = deepcopy(edit_session.timeline)
+    lineage_before = deepcopy(edit_session.production_lineage)
+
+    candidate = await EditingDirectorSuggestionService(session).suggest(
+        project_id=project.id,
+        session_id=edit_session.id,
+        actor=user,
+        request=_request(1),
+    )
+
+    assert candidate.plan.model_dump(mode="json") == {
+        "operations": [
+            {"operation": "reorder_clips", "clip_ids": ["clip-b", "clip-a"]},
+        ]
+    }
     await session.refresh(edit_session)
-    assert edit_session.version == 2
+    assert edit_session.timeline == timeline_before
+    assert edit_session.production_lineage == lineage_before
+    assert await _proposal_counts(session, project.id) == (1, 1, 1)
 
 
 @pytest.mark.asyncio
@@ -476,6 +521,32 @@ async def test_cross_project_session_is_rejected(session: AsyncSession) -> None:
             actor=user,
             request=_request(1),
         )
+    assert await _proposal_counts(session, project.id) == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_non_project_owner_is_rejected_before_transport_or_persistence(
+    session: AsyncSession,
+) -> None:
+    project, edit_session, _user, _shot, _asset, _graph, _run, _operation = await _seed(session)
+    non_owner = User(
+        email=f"editing-director-non-owner-{uuid4().hex}@example.com",
+        display_name="Not Project Owner",
+        password_hash=hash_password("x"),
+    )
+    session.add(non_owner)
+    await session.flush()
+    transport = RecordingTransport(_candidate(1))
+
+    with pytest.raises(ForbiddenError):
+        await EditingDirectorSuggestionService(session, transport=transport).suggest(
+            project_id=project.id,
+            session_id=edit_session.id,
+            actor=non_owner,
+            request=_request(1),
+        )
+
+    assert transport.calls == []
     assert await _proposal_counts(session, project.id) == (0, 0, 0)
 
 
