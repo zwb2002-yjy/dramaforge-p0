@@ -78,3 +78,7 @@ fixtures/images/character_canonical/*.png
 
 # Acceptance gate evidence with timestamps (generated artifacts)
 docs/acceptance/p0_section31_gate_*.json
+
+# Local Codex-with-ChatGPT checkout (tooling only; not product code)
+codex-with-chatgpt/
+

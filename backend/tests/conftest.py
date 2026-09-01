@@ -22,6 +22,7 @@ os.environ["PROVIDER_UNIFIED_PATH_ENABLED"] = "false"
 os.environ["LITELLM_GATEWAY_URL"] = ""
 os.environ["LITELLM_API_KEY"] = ""
 os.environ["WORKER_TOKEN"] = ""
+os.environ["REDIS_URL"] = "redis://127.0.0.1:6399/0"  # nothing listens; fail fast in unit tests
 os.environ.setdefault("DRAMAFORGE_SOURCE_COMMIT", "test-source-commit")
 # Most legacy isolation tests intentionally create multiple users in one
 # in-memory app. The dedicated bootstrap tests below exercise the release
