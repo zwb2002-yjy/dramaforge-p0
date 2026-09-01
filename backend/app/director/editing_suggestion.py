@@ -17,7 +17,15 @@ from dataclasses import dataclass
 from typing import Protocol, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -185,6 +193,33 @@ class EditingDirectorSuggestionCandidate(BaseModel):
         return value
 
 
+class EditingDirectorSuggestionResult(EditingDirectorSuggestionCandidate):
+    """Validated suggestion plus the rows persisted for this exact result.
+
+    The result intentionally subclasses the candidate so callers of the P9-04B
+    service can continue to inspect ``plan`` and the explanation fields while
+    the HTTP bridge can return the proposal and item identities.  The private
+    candidate reference is the validated object that was produced before row
+    persistence; it is never loaded through a latest-row query.
+    """
+
+    proposal_id: UUID
+    item_id: UUID
+    _candidate: EditingDirectorSuggestionCandidate = PrivateAttr()
+
+    @property
+    def candidate(self) -> EditingDirectorSuggestionCandidate:
+        """Return the validated candidate represented by this persisted result."""
+
+        return self._candidate
+
+    @property
+    def suggestion(self) -> EditingDirectorSuggestionCandidate:
+        """Compatibility alias for callers using the HTTP response vocabulary."""
+
+        return self._candidate
+
+
 class EditingDirectorSuggestionTransport(Protocol):
     async def generate(self, context: EditingDirectorSuggestionContext) -> object:
         """Return an untrusted candidate for structured validation."""
@@ -334,7 +369,7 @@ class EditingDirectorSuggestionService:
         session_id: UUID,
         actor: User,
         request: EditingDirectorSuggestionRequest,
-    ) -> EditingDirectorSuggestionCandidate:
+    ) -> EditingDirectorSuggestionResult:
         project = await ProjectService(self._session).get_project_for_owner(
             project_id=project_id, actor=actor
         )
@@ -439,26 +474,35 @@ class EditingDirectorSuggestionService:
         )
         self._session.add(proposal)
         await self._session.flush()
-        self._session.add(
-            DirectorProposalItem(
-                proposal_id=proposal.id,
-                project_id=project.id,
-                command="edit_session.apply_timeline_plan",
-                payload={
-                    "edit_session_id": str(edit_session.id),
-                    "plan": candidate.plan.model_dump(mode="json"),
-                },
-                expected_target_version=context.session_version,
-                rationale=candidate.rationale,
-                benefit=candidate.benefit,
-                cost=candidate.cost,
-                risk=candidate.risk,
-                impact=candidate.impact,
-                status="pending",
-            )
+        item = DirectorProposalItem(
+            proposal_id=proposal.id,
+            project_id=project.id,
+            command="edit_session.apply_timeline_plan",
+            payload={
+                "edit_session_id": str(edit_session.id),
+                "plan": candidate.plan.model_dump(mode="json"),
+            },
+            expected_target_version=context.session_version,
+            rationale=candidate.rationale,
+            benefit=candidate.benefit,
+            cost=candidate.cost,
+            risk=candidate.risk,
+            impact=candidate.impact,
+            status="pending",
         )
+        self._session.add(item)
+        # Both ids are read from the rows created in this invocation.  Do not
+        # re-query a proposal/item by timestamp or "latest" ordering: that
+        # would be ambiguous under concurrent suggestions.
+        await self._session.flush()
+        result = EditingDirectorSuggestionResult(
+            **candidate.model_dump(mode="python"),
+            proposal_id=proposal.id,
+            item_id=item.id,
+        )
+        result._candidate = candidate
         await self._session.commit()
-        return candidate
+        return result
 
 
 __all__ = [
@@ -466,6 +510,7 @@ __all__ = [
     "EditingDirectorClipContext",
     "EditingDirectorSuggestionCandidate",
     "EditingDirectorSuggestionContext",
+    "EditingDirectorSuggestionResult",
     "EditingDirectorSuggestionRequest",
     "EditingDirectorSuggestionService",
     "EditingDirectorSuggestionTransport",

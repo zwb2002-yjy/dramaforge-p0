@@ -13,6 +13,7 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import Asset, AssetVersion, Episode, Scene, Shot
 from app.config import clear_settings_cache, get_settings
+from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.execution.models import Artifact, NodeRun, ProviderOperation
 from app.main import create_app
 from app.production.models import GraphVersion, ProductionGraph
@@ -389,6 +390,149 @@ def test_editing_http_rejects_lineage_and_missing_csrf(
     assert nested_lineage.status_code == 422, nested_lineage.text
     loaded = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}")
     assert loaded.json()["timeline"]["clips"]
+
+
+def test_editing_director_suggestion_http_returns_exact_persisted_identity(
+    api: tuple[TestClient, async_sessionmaker[AsyncSession]],
+) -> None:
+    client, factory = api
+    _register(client)
+    project_id = _create_project(client, name="Editing Suggestion API Project")
+    _run(factory, _seed_formal_facts(factory, project_id))
+    formal_before = _run(factory, _formal_snapshot(factory, project_id))
+    created = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions",
+        json={},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert created.status_code == 201, created.text
+    session_id = created.json()["id"]
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
+        json={"expected_session_version": 1, "user_instruction": "放慢节奏"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    suggestion = body["suggestion"]
+    assert body["proposal_id"]
+    assert body["item_id"]
+    assert suggestion["base_session_version"] == 1
+    assert suggestion["plan"]["operations"]
+
+    async def persisted_identity() -> tuple[UUID, UUID, str, int | None, dict[str, object]]:
+        async with factory() as session:
+            proposal = await session.get(DirectorProposal, UUID(body["proposal_id"]))
+            item = await session.get(DirectorProposalItem, UUID(body["item_id"]))
+            assert proposal is not None
+            assert item is not None
+            return (
+                proposal.id,
+                item.id,
+                item.command,
+                item.expected_target_version,
+                dict(item.payload),
+            )
+
+    proposal_id, item_id, command, expected_version, payload = _run(factory, persisted_identity())
+    assert str(proposal_id) == body["proposal_id"]
+    assert str(item_id) == body["item_id"]
+    assert command == "edit_session.apply_timeline_plan"
+    assert expected_version == 1
+    assert payload == {
+        "edit_session_id": session_id,
+        "plan": suggestion["plan"],
+    }
+
+    reopened = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["version"] == 1
+    assert _run(factory, _formal_snapshot(factory, project_id)) == formal_before
+
+
+def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_and_csrf(
+    api: tuple[TestClient, async_sessionmaker[AsyncSession]],
+) -> None:
+    client, factory = api
+    _register(client)
+    project_id = _create_project(client, name="Editing Suggestion Validation Project")
+    other_project_id = _create_project(client, name="Other Suggestion Project")
+    _run(factory, _seed_formal_facts(factory, project_id))
+    created = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions",
+        json={},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert created.status_code == 201, created.text
+    session_id = created.json()["id"]
+
+    missing_csrf = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
+        json={"expected_session_version": 1, "user_instruction": "要求"},
+    )
+    assert missing_csrf.status_code == 403, missing_csrf.text
+
+    extra = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
+        json={
+            "expected_session_version": 1,
+            "user_instruction": "要求",
+            "timeline": {},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert extra.status_code == 422, extra.text
+
+    stale = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
+        json={"expected_session_version": 2, "user_instruction": "要求"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["details"]["code"] == "EDITING_SUGGESTION_STALE"
+
+    foreign = client.post(
+        f"/api/v1/projects/{other_project_id}/edit-sessions/{session_id}/director-suggestion",
+        json={"expected_session_version": 1, "user_instruction": "要求"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert foreign.status_code == 404, foreign.text
+
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    registered = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": f"editing-suggestion-non-owner-{uuid4().hex}@example.com",
+            "password": "password123",
+            "display_name": "Not Owner",
+        },
+    )
+    assert registered.status_code == 201, registered.text
+    other_workspace_id = client.get("/api/v1/workspaces").json()[0]["id"]
+    client.headers["X-Workspace-Id"] = other_workspace_id
+    non_owner = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
+        json={"expected_session_version": 1, "user_instruction": "要求"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    # The selected-workspace dependency may hide the foreign project as 404;
+    # either status is a fail-closed non-owner response.
+    assert non_owner.status_code in {403, 404}, non_owner.text
+
+    async def count_rows() -> tuple[int, int]:
+        async with factory() as session:
+            proposals = await session.execute(
+                select(DirectorProposal).where(DirectorProposal.project_id == UUID(project_id))
+            )
+            items = await session.execute(
+                select(DirectorProposalItem).where(
+                    DirectorProposalItem.project_id == UUID(project_id)
+                )
+            )
+            return len(proposals.scalars().all()), len(items.scalars().all())
+
+    assert _run(factory, count_rows()) == (0, 0)
 
 
 def test_editing_http_is_project_scoped(
