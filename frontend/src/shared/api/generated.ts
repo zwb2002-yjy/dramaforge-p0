@@ -1242,6 +1242,31 @@ export interface paths {
         patch: operations["save_edit_timeline_api_v1_projects__project_id__edit_sessions__session_id__timeline_patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Editing Director Suggestion
+         * @description Generate one deterministic proposal-only suggestion for an EditSession.
+         *
+         *     Route identifiers are the only target identity accepted here.  The service
+         *     performs ownership, project/session scoping, both stale gates and strict
+         *     candidate validation, then persists without applying the command or
+         *     dispatching any provider/execution work.
+         */
+        post: operations["create_editing_director_suggestion_api_v1_projects__project_id__edit_sessions__session_id__director_suggestion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/edit-sessions/{session_id}/export": {
         parameters: {
             query?: never;
@@ -4068,6 +4093,14 @@ export interface components {
             updated_at: string;
         };
         /**
+         * EditSessionTimelinePlan
+         * @description Allow-listed edit operations applied against one session version.
+         */
+        EditSessionTimelinePlan: {
+            /** Operations */
+            operations: (components["schemas"]["ReorderClipsOperation"] | components["schemas"]["SetClipDurationOperation"])[];
+        };
+        /**
          * EditTimelinePayload
          * @description The adapter's editable timeline body, restricted to JSON-safe values.
          */
@@ -4084,6 +4117,52 @@ export interface components {
         /** EditTimelineUpdateRequest */
         EditTimelineUpdateRequest: {
             timeline: components["schemas"]["EditTimelinePayload"];
+        };
+        /**
+         * EditingDirectorSuggestionCandidate
+         * @description Typed design proposal returned by the suggestion transport.
+         */
+        EditingDirectorSuggestionCandidate: {
+            /** Base Session Version */
+            base_session_version: number;
+            plan: components["schemas"]["EditSessionTimelinePlan"];
+            /** Rationale */
+            rationale: string;
+            /** Benefit */
+            benefit: string;
+            /** Cost */
+            cost: string;
+            /** Risk */
+            risk: string;
+            /** Impact */
+            impact: string;
+        };
+        /**
+         * EditingDirectorSuggestionRead
+         * @description One persisted Director suggestion and its exact proposal item identity.
+         */
+        EditingDirectorSuggestionRead: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /**
+             * Item Id
+             * Format: uuid
+             */
+            item_id: string;
+            suggestion: components["schemas"]["EditingDirectorSuggestionCandidate"];
+        };
+        /**
+         * EditingDirectorSuggestionRequest
+         * @description The only user-supplied values accepted by the suggestion service.
+         */
+        EditingDirectorSuggestionRequest: {
+            /** Expected Session Version */
+            expected_session_version: number;
+            /** User Instruction */
+            user_instruction: string;
         };
         /** EffectiveBindingRead */
         EffectiveBindingRead: {
@@ -5783,6 +5862,16 @@ export interface components {
             /** Display Name */
             display_name: string;
         };
+        /** ReorderClipsOperation */
+        ReorderClipsOperation: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            operation: "reorder_clips";
+            /** Clip Ids */
+            clip_ids: string[];
+        };
         /** RepairAuthorizeRequest */
         RepairAuthorizeRequest: {
             /** Repair Option Id */
@@ -6163,6 +6252,18 @@ export interface components {
             document: components["schemas"]["ScriptDocumentRead"] | null;
             /** Episodes */
             episodes: components["schemas"]["EpisodeRead"][];
+        };
+        /** SetClipDurationOperation */
+        SetClipDurationOperation: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            operation: "set_clip_duration";
+            /** Clip Id */
+            clip_id: string;
+            /** Duration Seconds */
+            duration_seconds: number;
         };
         /** ShootingPackageGenerateRequest */
         ShootingPackageGenerateRequest: {
@@ -10255,6 +10356,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_editing_director_suggestion_api_v1_projects__project_id__edit_sessions__session_id__director_suggestion_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditingDirectorSuggestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingDirectorSuggestionRead"];
                 };
             };
             /** @description Validation Error */

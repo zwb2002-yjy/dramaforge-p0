@@ -262,6 +262,12 @@ async def test_server_truth_context_and_one_pending_proposal(session: AsyncSessi
         request=_request(1),
     )
     assert isinstance(candidate, EditingDirectorSuggestionCandidate)
+    assert candidate.proposal_id is not None
+    assert candidate.item_id is not None
+    assert candidate.candidate is not candidate
+    assert candidate.candidate.model_dump(mode="json") == candidate.model_dump(
+        mode="json", exclude={"proposal_id", "item_id"}
+    )
     assert len(transport.calls) == 1
     context = transport.calls[0]
     assert context.project_id == project.id
@@ -287,6 +293,8 @@ async def test_server_truth_context_and_one_pending_proposal(session: AsyncSessi
             select(DirectorProposalItem).where(DirectorProposalItem.project_id == project.id)
         )
     ).scalar_one()
+    assert candidate.proposal_id == proposal.id
+    assert candidate.item_id == item.id
     assert proposal.scope_type == "edit_session"
     assert proposal.scope_entity_id == edit_session.id
     assert proposal.thread_id is not None

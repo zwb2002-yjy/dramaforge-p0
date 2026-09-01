@@ -18,6 +18,11 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.director.editing_suggestion import (
+    EditingDirectorSuggestionCandidate,
+    EditingDirectorSuggestionRequest,
+    EditingDirectorSuggestionService,
+)
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.editing.timeline_builder import build_edit_session_for_project
@@ -77,6 +82,16 @@ class EditExportRead(BaseModel):
     duration_seconds: float
     clips: list[dict[str, JsonValue]]
     production_lineage: dict[str, JsonValue]
+
+
+class EditingDirectorSuggestionRead(BaseModel):
+    """One persisted Director suggestion and its exact proposal item identity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_id: UUID
+    item_id: UUID
+    suggestion: EditingDirectorSuggestionCandidate
 
 
 def _normalize_key(key: object) -> str:
@@ -208,6 +223,39 @@ async def save_edit_timeline(
     return _edit_session_read(saved)
 
 
+@router.post(
+    "/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
+    response_model=EditingDirectorSuggestionRead,
+)
+async def create_editing_director_suggestion(
+    project_id: UUID,
+    session_id: UUID,
+    body: EditingDirectorSuggestionRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> EditingDirectorSuggestionRead:
+    """Generate one deterministic proposal-only suggestion for an EditSession.
+
+    Route identifiers are the only target identity accepted here.  The service
+    performs ownership, project/session scoping, both stale gates and strict
+    candidate validation, then persists without applying the command or
+    dispatching any provider/execution work.
+    """
+
+    result = await EditingDirectorSuggestionService(session).suggest(
+        project_id=project_id,
+        session_id=session_id,
+        actor=user,
+        request=body,
+    )
+    return EditingDirectorSuggestionRead(
+        proposal_id=result.proposal_id,
+        item_id=result.item_id,
+        suggestion=result.candidate,
+    )
+
+
 @router.get(
     "/projects/{project_id}/edit-sessions/{session_id}/export",
     response_model=EditExportRead,
@@ -239,5 +287,6 @@ __all__ = [
     "EditSessionRead",
     "EditTimelinePayload",
     "EditTimelineUpdateRequest",
+    "EditingDirectorSuggestionRead",
     "router",
 ]
