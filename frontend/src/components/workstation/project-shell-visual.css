@@ -1127,3 +1127,646 @@ button:disabled {
     padding-inline: var(--df-space-4);
   }
 }
+
+/* ========================================================================
+   Visual 2.2 studio theme
+   ------------------------------------------------------------------------
+   Real project pages use a warm paper/graphite studio shell. These are local
+   overrides on the project-shell scope, not a second global token system;
+   Quick Creation remains on the established Visual 2.0 preview palette.
+   ======================================================================== */
+@scope (.qc-project-shell) {
+  :scope {
+    --df-obsidian: #252b29;
+    --df-ink: #303735;
+    --df-ink-light: #454d4a;
+    --df-verdigris: #3d786e;
+    --df-verdigris-dim: #2f625b;
+    --df-verdigris-tint: rgb(61 120 110 / 10%);
+    --df-brass: #a36838;
+    --df-brass-dim: #87532d;
+    --df-brass-tint: rgb(163 104 56 / 11%);
+    --df-ivory: #f7f4ee;
+    --df-ivory-dim: #dedbd3;
+    --df-success: #3d786d;
+    --df-success-dim: rgb(61 120 109 / 11%);
+    --df-success-border: rgb(61 120 109 / 38%);
+    --df-success-text: #2d6259;
+    --df-warning: #9a672f;
+    --df-warning-dim: rgb(154 103 47 / 11%);
+    --df-warning-border: rgb(154 103 47 / 38%);
+    --df-warning-text: #7d531f;
+    --df-danger: #a75149;
+    --df-danger-dim: rgb(167 81 73 / 10%);
+    --df-danger-border: rgb(167 81 73 / 38%);
+    --df-danger-text: #8a403b;
+    --df-info: #547488;
+    --df-info-dim: rgb(84 116 136 / 10%);
+    --df-info-border: rgb(84 116 136 / 35%);
+    --df-focus-ring: rgb(61 120 109 / 24%);
+    --df-selection: rgb(61 120 109 / 20%);
+    --df-surface-0: #f0eee8;
+    --df-surface-1: #faf8f3;
+    --df-surface-2: #e6e3dc;
+    --df-surface-3: #dcd9d1;
+    --df-surface-raised: #fffdf9;
+    --df-surface-overlay: rgb(250 248 243 / 96%);
+    --df-border: #c8c6be;
+    --df-border-strong: #969a94;
+    --df-border-subtle: #ddd9d1;
+    --df-text-primary: #252b29;
+    --df-text-secondary: #59615d;
+    --df-text-muted: #7b817d;
+    --df-text-inverse: #f7f4ee;
+    --df-font-display: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+
+  :scope,
+  .qc-workspace,
+  .qc-content-grid,
+  .qc-main-canvas {
+    background: var(--df-surface-0);
+    color: var(--df-text-primary);
+  }
+
+  .qc-preview-shell {
+    grid-template-columns: 72px minmax(0, 1fr);
+    background: var(--df-surface-0);
+  }
+
+  .qc-sidebar {
+    width: 72px;
+    border-right-color: var(--df-ink-light);
+    background: var(--df-ink);
+    color: var(--df-ivory-dim);
+  }
+
+  .sidebar-expanded .qc-sidebar {
+    width: 216px;
+    box-shadow: 8px 0 24px rgb(29 35 33 / 18%);
+  }
+
+  .qc-brand svg,
+  .qc-sidebar a.active svg {
+    color: var(--df-brass);
+  }
+
+  .qc-sidebar a {
+    color: var(--df-ivory-dim);
+    border-radius: var(--df-radius-sm);
+  }
+
+  .qc-sidebar a:hover {
+    background: var(--df-ink-light);
+    color: var(--df-ivory);
+  }
+
+  .qc-sidebar a.active {
+    background: var(--df-ink-light);
+    box-shadow: inset 3px 0 0 var(--df-brass);
+    color: var(--df-ivory);
+  }
+
+  .qc-project-bar {
+    height: 56px;
+    border-bottom-color: var(--df-border);
+    background: var(--df-surface-overlay);
+    box-shadow: 0 1px 0 rgb(37 43 41 / 8%);
+  }
+
+  .qc-project-name {
+    color: var(--df-text-primary);
+  }
+
+  .qc-project-save {
+    color: var(--df-success-text);
+  }
+
+  .qc-project-mode {
+    color: var(--df-text-muted);
+  }
+
+  .qc-avatar {
+    border-color: var(--df-border);
+    background: var(--df-surface-2);
+    color: var(--df-text-primary);
+  }
+
+  .qc-content-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 320px);
+    background: var(--df-surface-0);
+  }
+
+  .director-collapsed .qc-content-grid {
+    grid-template-columns: minmax(0, 1fr) 48px;
+  }
+
+  .qc-project-shell .qc-main-canvas {
+    width: min(100%, 1440px);
+    max-width: 1440px;
+    padding: var(--df-space-6) clamp(var(--df-space-5), 3vw, var(--df-space-10)) var(--df-space-12);
+  }
+
+  .qc-project-shell.scene-view .qc-main-canvas,
+  .qc-project-shell.scene-view .qc-project-canvas {
+    width: 100%;
+    max-width: none;
+    padding: var(--df-space-5) clamp(var(--df-space-5), 2.4vw, var(--df-space-10)) var(--df-space-10);
+  }
+
+  .qc-page-heading {
+    padding: var(--df-space-3) 0 var(--df-space-5);
+  }
+
+  .qc-page-heading h1 {
+    margin: var(--df-space-1) 0 var(--df-space-2);
+    color: var(--df-text-primary);
+    font-family: var(--df-font-display);
+    font-size: clamp(1.6rem, 2vw, 2rem);
+    font-weight: var(--df-weight-semibold);
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+
+  .qc-page-heading > span {
+    color: var(--df-text-secondary);
+    font-size: var(--df-text-sm);
+  }
+
+  .qc-director-panel {
+    top: 56px;
+    height: calc(100vh - 56px);
+    padding: var(--df-space-5);
+    border-left-color: var(--df-border);
+    background: var(--df-surface-1);
+    color: var(--df-text-primary);
+  }
+
+  .qc-director-header {
+    border-bottom-color: var(--df-border-subtle);
+  }
+
+  .qc-director-mark {
+    border-color: var(--df-brass);
+    background: var(--df-brass-tint);
+    color: var(--df-brass);
+  }
+
+  .qc-icon-button {
+    color: var(--df-text-secondary);
+    border-radius: var(--df-radius-sm);
+  }
+
+  .qc-icon-button:hover {
+    background: var(--df-surface-2);
+    color: var(--df-text-primary);
+  }
+
+  /* Shared light-page primitives. */
+  .panel,
+  .qc-asset-filters,
+  .qc-asset-card,
+  .workflow-navigator,
+  .creative-capabilities-panel,
+  .professional-workbench,
+  .asset-card-workspace,
+  .review-annotation-workspace,
+  .director-board-workspace,
+  .editing-session-facts,
+  .editing-session-editor,
+  .editing-session-export,
+  .editing-director-suggestion,
+  .qc-script-document,
+  .qc-script-episode {
+    border-color: var(--df-border);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+    box-shadow: none;
+    color: var(--df-text-primary);
+  }
+
+  .panel {
+    padding: var(--df-space-5);
+  }
+
+  .panel-header,
+  .professional-workbench-header {
+    border-bottom-color: var(--df-border-subtle);
+    background: var(--df-surface-2);
+  }
+
+  .panel-header {
+    padding-bottom: var(--df-space-3);
+  }
+
+  .panel h2,
+  .panel h3,
+  .panel h4,
+  .professional-workbench h2,
+  .professional-workbench h3,
+  .professional-workbench h4 {
+    color: var(--df-text-primary);
+  }
+
+  label {
+    color: var(--df-text-secondary);
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    border-color: var(--df-border);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-raised);
+    color: var(--df-text-primary);
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):focus,
+  textarea:focus,
+  select:focus {
+    border-color: var(--df-verdigris);
+    box-shadow: 0 0 0 2px var(--df-focus-ring);
+  }
+
+  :where(button:not(.qc-icon-button)) {
+    border-color: var(--df-border-strong);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-3);
+    color: var(--df-text-primary);
+  }
+
+  :where(button:not(.qc-icon-button):not(:disabled)):hover {
+    border-color: var(--df-verdigris);
+    background: var(--df-surface-raised);
+  }
+
+  button.primary:not(:disabled),
+  button.df-btn.primary:not(:disabled) {
+    border-color: var(--df-verdigris);
+    background: var(--df-verdigris);
+    color: var(--df-ivory);
+  }
+
+  button.accent:not(:disabled),
+  button.df-btn.accent:not(:disabled) {
+    border-color: var(--df-brass);
+    background: var(--df-brass);
+    color: var(--df-ivory);
+  }
+
+  button.ghost,
+  button.df-btn.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--df-text-secondary);
+  }
+
+  .status-card {
+    border-color: var(--df-border);
+    background: var(--df-surface-1);
+  }
+
+  .status-card strong {
+    color: var(--df-text-primary);
+  }
+
+  .status-label,
+  .muted {
+    color: var(--df-text-muted);
+  }
+
+  .callout {
+    border-left-color: var(--df-verdigris);
+    background: var(--df-verdigris-tint);
+    color: var(--df-text-secondary);
+  }
+
+  .callout.warn {
+    border-left-color: var(--df-brass);
+    background: var(--df-warning-dim);
+  }
+
+  .flash.ok {
+    background: var(--df-success-dim);
+    border-color: var(--df-success-border);
+    color: var(--df-success-text);
+  }
+
+  .flash.err {
+    background: var(--df-danger-dim);
+    border-color: var(--df-danger-border);
+    color: var(--df-danger-text);
+  }
+
+  .monitor-table th,
+  .monitor-table td {
+    border-bottom-color: var(--df-border-subtle);
+  }
+
+  .monitor-table th {
+    color: var(--df-text-muted);
+  }
+
+  .monitor-table td {
+    color: var(--df-text-secondary);
+  }
+
+  .monitor-table tbody tr:hover {
+    background: var(--df-surface-2);
+  }
+
+  .qc-asset-card header {
+    border-bottom-color: var(--df-border-subtle);
+  }
+
+  .qc-asset-card header span,
+  .qc-asset-card footer,
+  .qc-asset-card .muted {
+    color: var(--df-text-muted);
+  }
+
+  .qc-asset-status.active {
+    border-color: var(--df-success-border);
+    background: var(--df-success-dim);
+    color: var(--df-success-text);
+  }
+
+  .qc-asset-status.recycled {
+    border-color: var(--df-border);
+    color: var(--df-text-muted);
+  }
+
+  .qc-script-raw {
+    border-color: var(--df-border-subtle);
+    background: var(--df-surface-0);
+    color: var(--df-text-secondary);
+  }
+
+  .qc-script-scene {
+    border-top-color: var(--df-border-subtle);
+  }
+
+  /* Scene Workbench: one quiet light stage around a dark media surface. */
+  .qc-scene-header {
+    border-bottom-color: var(--df-border);
+    background: var(--df-surface-0);
+  }
+
+  .qc-scene-header .qc-scene-context h1 {
+    color: var(--df-text-primary);
+    font-family: var(--df-font-display);
+    font-size: clamp(1.35rem, 1.8vw, 1.75rem);
+    font-weight: var(--df-weight-semibold);
+  }
+
+  .qc-scene-header .qc-scene-context > span:not(.director-stage-kicker),
+  .qc-scene-header .qc-scene-context p {
+    color: var(--df-text-secondary);
+  }
+
+  .qc-scene-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 360px);
+    gap: var(--df-space-5);
+  }
+
+  .qc-scene-stage {
+    gap: var(--df-space-3);
+    padding: var(--df-space-3);
+    border: 1px solid var(--df-border);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-2);
+  }
+
+  .qc-scene-stage .qc-cinematic-canvas {
+    border-color: var(--df-ink-light);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-ink);
+    box-shadow: inset 0 0 0 1px rgb(20 25 24 / 20%);
+  }
+
+  .qc-cinematic-canvas,
+  .qc-cinematic-canvas h3,
+  .qc-cinematic-canvas p {
+    color: var(--df-ivory);
+  }
+
+  .qc-cinematic-canvas .qc-canvas-hint,
+  .qc-cinematic-canvas small {
+    color: var(--df-ivory-dim);
+  }
+
+  .qc-canvas-status {
+    border-color: var(--df-ink-light);
+    background: var(--df-ink-light);
+  }
+
+  .qc-shot-candidate-tray,
+  .qc-shot-strip-panel {
+    border-color: var(--df-border);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+  }
+
+  .qc-shot-candidate-card {
+    border-color: var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-0);
+  }
+
+  .qc-shot-candidate-card.selected {
+    border-color: var(--df-brass);
+    box-shadow: inset 0 0 0 1px var(--df-brass-dim);
+  }
+
+  .qc-shot-candidate-preview {
+    border-color: var(--df-border-strong);
+    border-radius: 2px;
+    background: var(--df-ink);
+  }
+
+  .qc-shot-candidate-preview:hover,
+  .qc-shot-candidate-preview:focus-visible {
+    border-color: var(--df-brass);
+    background: var(--df-ink-light);
+  }
+
+  .qc-shot-candidate-confirm {
+    border-color: var(--df-brass);
+    background: var(--df-brass);
+    color: var(--df-ivory);
+  }
+
+  .qc-shot-candidate-confirm:hover:not(:disabled) {
+    border-color: var(--df-brass-dim);
+    background: var(--df-brass-dim);
+  }
+
+  .qc-shot-candidate-success {
+    color: var(--df-success-text);
+  }
+
+  .qc-shot-candidate-error {
+    color: var(--df-danger-text);
+  }
+
+  .qc-shot-strip-panel {
+    padding: var(--df-space-3) var(--df-space-4);
+  }
+
+  .qc-shot-strip button {
+    border-color: var(--df-border-subtle);
+    border-radius: 2px;
+    background: var(--df-surface-0);
+  }
+
+  .qc-shot-strip button:hover {
+    border-color: var(--df-border-strong);
+    background: var(--df-surface-raised);
+  }
+
+  .qc-shot-strip button.active {
+    border-color: var(--df-brass);
+    box-shadow: inset 3px 0 0 var(--df-brass);
+  }
+
+  .qc-shot-strip-thumb {
+    background: var(--df-surface-2);
+  }
+
+  .qc-shot-strip-status em {
+    color: var(--df-text-muted);
+  }
+
+  .qc-shot-strip-status em.ready {
+    color: var(--df-success-text);
+  }
+
+  .qc-shot-strip-status em.risk {
+    color: var(--df-danger-text);
+  }
+
+  .qc-director-sidebar {
+    max-height: calc(100vh - 8.5rem);
+    border-color: var(--df-border);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+    box-shadow: -4px 0 18px rgb(37 43 41 / 7%);
+  }
+
+  .qc-director-sidebar-header {
+    border-bottom-color: var(--df-border-subtle);
+    background: var(--df-surface-1);
+  }
+
+  .qc-director-tabs {
+    border-color: var(--df-border);
+    border-radius: 2px;
+    background: var(--df-surface-2);
+  }
+
+  .qc-director-tabs button {
+    border-radius: 2px;
+    color: var(--df-text-muted);
+  }
+
+  .qc-director-tabs button.active,
+  .qc-director-tabs button:hover,
+  .qc-director-tabs button:focus-visible {
+    background: var(--df-surface-raised);
+    color: var(--df-text-primary);
+  }
+
+  .qc-director-tabs button.active {
+    box-shadow: inset 0 -2px 0 var(--df-brass);
+  }
+
+  .qc-director-tab-panel .qc-shot-design-panel,
+  .qc-director-tab-panel .qc-shot-production-actions,
+  .qc-director-tab-panel .qc-reference-picker,
+  .qc-director-tab-panel .qc-production-trace {
+    border-color: transparent;
+    background: transparent;
+    color: var(--df-text-primary);
+  }
+
+  .qc-director-tab-panel .qc-shot-design-panel textarea,
+  .qc-director-tab-panel .qc-reference-picker select,
+  .qc-director-tab-panel .qc-reference-picker input {
+    border-color: var(--df-border);
+    background: var(--df-surface-raised);
+  }
+
+  .qc-production-trace {
+    border-top-color: var(--df-border-subtle);
+  }
+
+  .qc-production-trace header > span,
+  .qc-production-trace .muted {
+    color: var(--df-text-muted);
+  }
+}
+
+/* Explicit project-only responsive rules complement the scoped desktop
+   layout and keep 910×838 usable without affecting Quick Creation. */
+@media (max-width: 1100px) {
+  .qc-project-shell {
+    grid-template-columns: 60px minmax(0, 1fr);
+  }
+
+  .qc-project-shell .qc-sidebar {
+    width: 60px;
+  }
+
+  .qc-project-shell.sidebar-expanded .qc-sidebar {
+    width: 204px;
+  }
+
+  .qc-project-shell .qc-content-grid,
+  .qc-project-shell.director-collapsed .qc-content-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qc-project-shell .qc-director-panel {
+    position: relative;
+    top: auto;
+    height: auto;
+    max-height: none;
+    border-top: 1px solid var(--df-border);
+    border-left: 0;
+  }
+
+  .qc-project-shell.scene-view .qc-scene-layout,
+  .qc-project-shell.scene-view .qc-scene-layout:has(.qc-director-sidebar.is-collapsed) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qc-project-shell.scene-view .qc-director-sidebar,
+  .qc-project-shell.scene-view .qc-director-sidebar.is-collapsed {
+    max-height: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .qc-project-shell {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .qc-project-shell .qc-sidebar {
+    width: 56px;
+    padding-inline: var(--df-space-1);
+  }
+
+  .qc-project-shell.sidebar-expanded .qc-sidebar {
+    width: 188px;
+  }
+
+  .qc-project-shell .qc-main-canvas,
+  .qc-project-shell.scene-view .qc-main-canvas,
+  .qc-project-shell.scene-view .qc-project-canvas {
+    padding-inline: var(--df-space-4);
+  }
+
+  .qc-project-shell .qc-project-bar {
+    padding-inline: var(--df-space-4);
+  }
+}
