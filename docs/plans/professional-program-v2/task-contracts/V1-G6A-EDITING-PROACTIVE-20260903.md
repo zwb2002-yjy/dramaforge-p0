@@ -1,7 +1,7 @@
 # V1 G6A — OpenCut Director 主动剪辑建议
 
 **Task:** `v1-g6a-editing-proactive-20260903`
-**Status:** READY / NOT STARTED
+**Status:** COMPLETE
 **Goal:** DramaForge V1 统一创作主链 — G6 OpenCut Director Integration
 
 ## Outcome
@@ -24,3 +24,9 @@
 1. 主动建议端点无需 instruction；
 2. 无 Provider/NodeRun/lineage 写；
 3. full unit / OpenAPI 同步。
+
+## Evidence
+
+- focused：16 passed；
+- full backend unit：870 passed；
+- OpenAPI/generated client 同步。

@@ -22,6 +22,7 @@ from app.director.editing_suggestion import (
     EditingDirectorSuggestionCandidate,
     EditingDirectorSuggestionRequest,
     EditingDirectorSuggestionService,
+    EditingProactiveSuggestionRequest,
 )
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
@@ -244,6 +245,31 @@ async def create_editing_director_suggestion(
     """
 
     result = await EditingDirectorSuggestionService(session).suggest(
+        project_id=project_id,
+        session_id=session_id,
+        actor=user,
+        request=body,
+    )
+    return EditingDirectorSuggestionRead(
+        proposal_id=result.proposal_id,
+        item_id=result.item_id,
+        suggestion=result.candidate,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/edit-sessions/{session_id}/director-proactive-suggestion",
+    response_model=EditingDirectorSuggestionRead,
+)
+async def create_editing_proactive_suggestion(
+    project_id: UUID,
+    session_id: UUID,
+    body: EditingProactiveSuggestionRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> EditingDirectorSuggestionRead:
+    result = await EditingDirectorSuggestionService(session).suggest_proactive(
         project_id=project_id,
         session_id=session_id,
         actor=user,

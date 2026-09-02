@@ -18,6 +18,7 @@ from app.director.editing_suggestion import (
     EditingDirectorSuggestionContext,
     EditingDirectorSuggestionRequest,
     EditingDirectorSuggestionService,
+    EditingProactiveSuggestionRequest,
 )
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.adapter import EditingAdapter
@@ -603,3 +604,32 @@ async def test_same_project_reuses_project_thread_and_creates_two_proposals(
     assert {proposal.thread_id for proposal in proposals} == {threads[0].id}
     assert {proposal.scope_type for proposal in proposals} == {"edit_session"}
     assert {proposal.scope_entity_id for proposal in proposals} == {edit_session.id}
+
+
+def test_proactive_request_forbids_user_instruction() -> None:
+    with pytest.raises(ValueError):
+        EditingProactiveSuggestionRequest.model_validate(
+            {
+                "expected_session_version": 1,
+                "user_instruction": "客户端不能上传",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_proactive_suggestion_works_without_instruction(
+    session: AsyncSession,
+) -> None:
+    project, edit_session, user, _shot, _asset, _graph, _run, _operation = await _seed(session)
+    result = await EditingDirectorSuggestionService(session).suggest_proactive(
+        project_id=project.id,
+        session_id=edit_session.id,
+        actor=user,
+        request=EditingProactiveSuggestionRequest(
+            expected_session_version=edit_session.version,
+        ),
+    )
+    assert result.candidate.base_session_version == edit_session.version
+    assert result.proposal_id
+    assert result.item_id
+    assert await _proposal_counts(session, project.id) == (1, 1, 1)

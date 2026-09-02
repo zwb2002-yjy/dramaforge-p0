@@ -618,23 +618,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{project_id}/shots/{shot_id}/recommendation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Recommend Shot Design */
-        post: operations["recommend_shot_design_api_v1_projects__project_id__shots__shot_id__recommendation_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/director-board": {
         parameters: {
             query?: never;
@@ -747,6 +730,23 @@ export interface paths {
          *     dispatching any provider/execution work.
          */
         post: operations["create_editing_director_suggestion_api_v1_projects__project_id__edit_sessions__session_id__director_suggestion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-proactive-suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Editing Proactive Suggestion */
+        post: operations["create_editing_proactive_suggestion_api_v1_projects__project_id__edit_sessions__session_id__director_proactive_suggestion_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2713,53 +2713,6 @@ export interface components {
              */
             updated_at: string;
         };
-        /** DirectorRecommendation */
-        DirectorRecommendation: {
-            /** Base Shot Version */
-            base_shot_version: number;
-            /**
-             * Scope
-             * @default shot
-             * @constant
-             */
-            scope: "shot";
-            /**
-             * Category
-             * @enum {string}
-             */
-            category: "PERFORMANCE" | "BLOCKING" | "SHOT_SIZE" | "CAMERA_ANGLE" | "CAMERA_MOTION" | "PACING";
-            /** Current State */
-            current_state: string;
-            /** Suggested Change */
-            suggested_change: string;
-            /** Reason */
-            reason: string;
-            /** Expected Effect */
-            expected_effect: string;
-            /** Risk */
-            risk: string;
-            /** Affected Facts */
-            affected_facts?: string[];
-            /** Typed Operations */
-            typed_operations?: {
-                [key: string]: unknown;
-            }[];
-        };
-        /** DirectorRecommendationRequest */
-        DirectorRecommendationRequest: {
-            /**
-             * Scene Id
-             * Format: uuid
-             */
-            scene_id: string;
-            /**
-             * Shot Id
-             * Format: uuid
-             */
-            shot_id: string;
-            /** Expected Shot Version */
-            expected_shot_version: number;
-        };
         /** DispatchResponse */
         DispatchResponse: {
             /** Enqueued */
@@ -2905,6 +2858,14 @@ export interface components {
             expected_session_version: number;
             /** User Instruction */
             user_instruction: string;
+        };
+        /**
+         * EditingProactiveSuggestionRequest
+         * @description No user instruction; the server analyzes the current timeline.
+         */
+        EditingProactiveSuggestionRequest: {
+            /** Expected Session Version */
+            expected_session_version: number;
         };
         /** EffectiveBindingRead */
         EffectiveBindingRead: {
@@ -7033,50 +6994,6 @@ export interface operations {
             };
         };
     };
-    recommend_shot_design_api_v1_projects__project_id__shots__shot_id__recommendation_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                shot_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DirectorRecommendationRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DirectorRecommendation"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_director_board_api_v1_projects__project_id__shots__shot_id__director_board_get: {
         parameters: {
             query?: {
@@ -7350,6 +7267,50 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["EditingDirectorSuggestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingDirectorSuggestionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_editing_proactive_suggestion_api_v1_projects__project_id__edit_sessions__session_id__director_proactive_suggestion_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditingProactiveSuggestionRequest"];
             };
         };
         responses: {

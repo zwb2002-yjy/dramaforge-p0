@@ -60,6 +60,14 @@ class EditingDirectorSuggestionRequest(BaseModel):
         return normalized
 
 
+class EditingProactiveSuggestionRequest(BaseModel):
+    """No user instruction; the server analyzes the current timeline."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_session_version: int = Field(ge=1)
+
+
 class EditingDirectorClipContext(BaseModel):
     """The design-only portion of one server-owned timeline clip."""
 
@@ -504,8 +512,29 @@ class EditingDirectorSuggestionService:
         await self._session.commit()
         return result
 
+    async def suggest_proactive(
+        self,
+        *,
+        project_id: UUID,
+        session_id: UUID,
+        actor: User,
+        request: EditingProactiveSuggestionRequest,
+    ) -> EditingDirectorSuggestionResult:
+        """Generate one server-driven editing suggestion without user input."""
+
+        return await self.suggest(
+            project_id=project_id,
+            session_id=session_id,
+            actor=actor,
+            request=EditingDirectorSuggestionRequest(
+                expected_session_version=request.expected_session_version,
+                user_instruction="主动分析当前时间线节奏与转场，不要求用户输入",
+            ),
+        )
+
 
 __all__ = [
+    "EditingProactiveSuggestionRequest",
     "DeterministicEditingDirectorSuggestionTransport",
     "EditingDirectorClipContext",
     "EditingDirectorSuggestionCandidate",
