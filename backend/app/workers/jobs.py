@@ -49,7 +49,7 @@ async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
     from sqlalchemy import select
 
     from app.execution.models import NodeRun, ProviderOperation
-    from app.runtime.scheduler import AgentRunScheduler
+    from app.runtime.scheduler import NodeRunScheduler
     from app.shared.db import (
         list_resumable_provider_node_run_rls_scopes,
         set_rls_context,
@@ -102,7 +102,7 @@ async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
             run.error_code = None
             run.error_summary = None
             await session.commit()
-            await AgentRunScheduler(session).enqueue_node_run_only(node_run_id)
+            await NodeRunScheduler(session).enqueue_node_run_only(node_run_id)
 
 
 async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, Any]:
@@ -229,14 +229,14 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
 
 async def dispatch_outbox(ctx: dict[str, Any]) -> dict[str, Any]:
     """Periodic: claim outbox + enqueue Arq jobs (no Adapter)."""
-    from app.runtime.scheduler import AgentRunScheduler, RedisStreamPublisher
+    from app.runtime.scheduler import NodeRunScheduler, RedisStreamPublisher
 
     settings = get_settings()
     factory = get_session_factory()
     async with factory() as session:
         pub = RedisStreamPublisher(settings.redis_url)
         try:
-            n = await AgentRunScheduler(session, publisher=pub).dispatch_pending(
+            n = await NodeRunScheduler(session, publisher=pub).dispatch_pending(
                 worker_id=str(ctx.get("job_id", "worker"))
             )
             return {"enqueued": n}

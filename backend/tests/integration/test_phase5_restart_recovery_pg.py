@@ -18,7 +18,6 @@ No Provider is contacted; the worker is driven inline with a fake unified plugin
 from __future__ import annotations
 
 import os
-import socket
 from collections.abc import AsyncGenerator
 from datetime import date
 from decimal import Decimal
@@ -55,12 +54,13 @@ from app.providers.runtime import (
     SubmissionResult,
 )
 from app.providers.workspace_credentials import configured_byok_keyring
-from app.runtime.scheduler import AgentRunScheduler, WorkerRuntime
+from app.runtime.scheduler import NodeRunScheduler, WorkerRuntime
 from app.security.credentials import store_credential
 from app.shared.db import set_rls_context
 from app.shared.enums import OutboxStatus
 from app.shared.security import hash_password
 from app.storage.minio_store import reset_object_store_for_tests
+from pg_support import available
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -72,19 +72,7 @@ def _database_url() -> str:
 
 
 def _postgres_is_available() -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", 5432), timeout=1.0):
-            pass
-        sync_url = _database_url().replace("postgresql+asyncpg://", "postgresql+psycopg://")
-        from sqlalchemy import create_engine
-
-        engine = create_engine(sync_url, connect_args={"connect_timeout": 2})
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
-        engine.dispose()
-        return True
-    except Exception:
-        return False
+    return available(_database_url())
 
 
 pytestmark = pytest.mark.skipif(
@@ -508,7 +496,7 @@ async def test_worker_restart_requeues_resumable_unified_run_pg(
         lambda: factory,
     )
     enqueue = AsyncMock(return_value="p5-resume-job")
-    monkeypatch.setattr(AgentRunScheduler, "enqueue_node_run_only", enqueue)
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", enqueue)
 
     await recover_interrupted_provider_jobs({})
 
@@ -579,7 +567,7 @@ async def test_api_restart_outbox_reenqueues_pending_node_run_pg(
     )
     drain = AsyncMock(return_value="p5-drain-job")
     monkeypatch.setattr(
-        AgentRunScheduler,
+        NodeRunScheduler,
         "_enqueue_node_run",
         drain,
     )
@@ -679,7 +667,6 @@ async def test_old_task_never_reads_new_binding_pg(
         shot_id=shot.id,
         user_id=user.id,
         node_keys=["prompt", "keyframe"],
-        legacy_guard=False,
     )
     assert len(run_ids) == 2
     prompt_run = await pg_session.get(NodeRun, run_ids[0])
@@ -723,7 +710,6 @@ async def test_old_task_never_reads_new_binding_pg(
         pp,
         "get_settings",
         lambda: Settings(
-            provider_unified_path_enabled=True,
             app_env="test",
             database_url=_database_url(),
         ),

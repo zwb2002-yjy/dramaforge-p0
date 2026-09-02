@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
-from app.director.models import DirectorMessage, DirectorThread
+from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.shared.base import Base
 from app.shared.security import hash_password
 from sqlalchemy import select

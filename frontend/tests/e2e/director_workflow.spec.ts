@@ -124,7 +124,6 @@ async function installProfessionalMock(page: Page): Promise<MockState> {
       return json(route, state.board);
     }
     if (path.endsWith("/opencut-manifest")) return json(route, { schema_version: "opencut-manifest-v1", project_id: PROJECT_ID, official_line: "formal", shots: [{ shot_id: SHOT_ID, shot_number: 1, scene_id: SCENE_ID, duration_seconds: "5", dialogue: "我终于明白了。", status: "draft", artifact_ids: [] }] });
-    if (path.includes("/professional/shots/") && method === "POST") return json(route, { shot_id: SHOT_ID, status: "queued", locked: false, message: "queued", run_ids: [], stale_nodes: [], job_ids: [] });
     return json(route, {});
   });
   return state;
@@ -171,5 +170,4 @@ test("professional workspace persists canvas proposals, assets, review, board, a
   await expect(page.getByText("Model B 转头验证")).toBeVisible();
   await expect(page.getByText(/OpenCut/)).toBeVisible();
 });
-
 

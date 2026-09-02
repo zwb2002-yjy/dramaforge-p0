@@ -6,7 +6,7 @@ import { ScriptWorkspace } from "../../src/features/script/ScriptWorkspace";
 
 const DOC = {
   script_document_id: "doc-1",
-  filename: "p0_10_shots.md",
+  filename: "episode_script.md",
   content_hash: "a".repeat(64),
   format: "md",
   raw_text:

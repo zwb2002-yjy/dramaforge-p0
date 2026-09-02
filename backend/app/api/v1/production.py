@@ -1,4 +1,4 @@
-"""Production snapshot / Outbox-Arq enqueue / export routes (no Adapter in API)."""
+"""Production snapshot and Outbox-Arq enqueue routes (no Adapter in API)."""
 
 from __future__ import annotations
 
@@ -11,18 +11,9 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
-from app.delivery.download import (
-    authorize_export_download,
-    fetch_export_bytes,
-    verify_download_token,
-)
-from app.delivery.export_service import build_project_export
-from app.director.legacy_guard import require_legacy_execution_allowed
-from app.director.models import DirectorWorkflowRun
-from app.events.models import OutboxEvent
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
-from app.runtime.scheduler import AgentRunScheduler
-from app.shared.errors import ForbiddenError, NotFoundError, ValidationAppError
+from app.runtime.scheduler import NodeRunScheduler
+from app.shared.errors import NotFoundError, ValidationAppError
 
 router = APIRouter(
     tags=["production"], dependencies=[Depends(require_selected_workspace)]
@@ -106,19 +97,6 @@ class EnqueueResponse(BaseModel):
     node_run_id: UUID
     status: str
     job_id: str
-
-
-class ExportResponse(BaseModel):
-    export_id: UUID
-    timeline_hash: str
-    srt_hash: str
-    package_hash: str
-    mp4_object_key: str | None
-    mp4_hash: str | None
-    mp4_error: str | None
-    source_artifact_ids: list[UUID]
-    source_node_run_ids: list[UUID]
-    export_item_count: int
 
 
 def _public_provider_request_summary(operation: ProviderOperation) -> dict[str, object]:
@@ -380,31 +358,7 @@ async def dispatch_project_work(
 ) -> DispatchResponse:
     """Publish Outbox + enqueue Arq jobs only — does not run Adapters."""
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    director = await session.scalar(
-        select(DirectorWorkflowRun.id).where(
-            DirectorWorkflowRun.project_id == project_id
-        )
-    )
-    if director is not None:
-        unauthorized_run = await session.scalar(
-            select(NodeRun.id).where(
-                NodeRun.project_id == project_id,
-                NodeRun.status == "queued",
-                NodeRun.production_batch_id.is_(None),
-            )
-        )
-        unauthorized_outbox = await session.scalar(
-            select(OutboxEvent.id).where(
-                OutboxEvent.project_id == project_id,
-                OutboxEvent.status == "pending",
-                OutboxEvent.topic == "node_run.enqueue",
-            )
-        )
-        if unauthorized_run is not None or unauthorized_outbox is not None:
-            await require_legacy_execution_allowed(
-                session, project_id=project_id, action="legacy_project_dispatch"
-            )
-    sched = AgentRunScheduler(session)
+    sched = NodeRunScheduler(session)
     n = await sched.dispatch_pending(
         worker_id=f"api-enqueue:{user.id}",
         project_id=project_id,
@@ -430,13 +384,9 @@ async def enqueue_node_run(
         from app.shared.errors import NotFoundError
 
         raise NotFoundError("node_run not found")
-    if run.production_batch_id is None:
-        await require_legacy_execution_allowed(
-            session, project_id=project_id, action="legacy_node_run_enqueue"
-        )
     response_run_id = run.id
     response_status = run.status
-    job_id = await AgentRunScheduler(session).enqueue_node_run_only(node_run_id)
+    job_id = await NodeRunScheduler(session).enqueue_node_run_only(node_run_id)
     # enqueue_node_run_only commits before publishing to Arq. PostgreSQL RLS
     # settings are transaction-local, so refreshing here would query without
     # the request's project scope and can race a fast Worker to a terminal state.
@@ -444,169 +394,4 @@ async def enqueue_node_run(
         node_run_id=response_run_id,
         status=response_status,
         job_id=job_id,
-    )
-
-
-@router.post("/projects/{project_id}/exports", response_model=ExportResponse)
-async def export_project(
-    project_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-) -> ExportResponse:
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    await require_legacy_execution_allowed(
-        session, project_id=project_id, action="legacy_project_export"
-    )
-    result = await build_project_export(
-        session,
-        project_id=project_id,
-        requested_by=user.id,
-        shot_subtitles=[(str(i), f"Line {i}") for i in range(1, 11)],
-        try_ffmpeg=True,
-        require_approved=True,
-    )
-    return ExportResponse(
-        export_id=result.export_id,
-        timeline_hash=result.timeline_hash,
-        srt_hash=result.srt_hash,
-        package_hash=result.package_hash,
-        mp4_object_key=result.mp4_object_key,
-        mp4_hash=result.mp4_hash,
-        mp4_error=result.mp4_error,
-        source_artifact_ids=result.source_artifact_ids,
-        source_node_run_ids=result.source_node_run_ids,
-        export_item_count=result.export_item_count,
-    )  # export_status available on service result if API extended later
-
-
-class GoldenProduceResponse(BaseModel):
-    shot_count: int
-    character_id: UUID
-    canonical_object_key: str
-    export_id: UUID
-    timeline_hash: str
-    srt_hash: str
-    package_hash: str
-    identity_reviewed: int
-    continuity_checked: int
-    content_hash: str
-
-
-class DownloadGrantResponse(BaseModel):
-    export_id: UUID
-    object_key: str
-    token: str
-    expires_at: int
-
-
-@router.post(
-    "/projects/{project_id}/produce-golden",
-    response_model=GoldenProduceResponse,
-)
-async def produce_golden_path(
-    project_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-) -> GoldenProduceResponse:
-    """Import frozen golden script if needed path via fixture, produce 10 shots, export."""
-    from app.execution.golden_path import run_golden_p0_path
-
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    await require_legacy_execution_allowed(
-        session, project_id=project_id, action="legacy_produce_golden"
-    )
-    result = await run_golden_p0_path(
-        session,
-        project_id=project_id,
-        user_id=user.id,
-        try_ffmpeg=True,
-    )
-    await session.commit()
-    return GoldenProduceResponse(
-        shot_count=result.shot_count,
-        character_id=result.character_id,
-        canonical_object_key=result.canonical_object_key,
-        export_id=result.export.export_id,
-        timeline_hash=result.export.timeline_hash,
-        srt_hash=result.export.srt_hash,
-        package_hash=result.export.package_hash,
-        identity_reviewed=sum(1 for s in result.shots if s.identity_reviewed),
-        continuity_checked=sum(1 for s in result.shots if s.continuity_checked),
-        content_hash=result.content_hash,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/exports/{export_id}/download-grant",
-    response_model=DownloadGrantResponse,
-)
-async def grant_export_download(
-    project_id: UUID,
-    export_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-    object_role: str = "timeline_json",
-) -> DownloadGrantResponse:
-    await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    grant = await authorize_export_download(
-        session, export_id=export_id, actor=user, object_role=object_role
-    )
-    if grant.project_id != project_id:
-        raise ForbiddenError("export not in project")
-    return DownloadGrantResponse(
-        export_id=grant.export_id,
-        object_key=grant.object_key,
-        token=grant.token,
-        expires_at=grant.expires_at,
-    )
-
-
-@router.get("/projects/{project_id}/exports/{export_id}/download")
-async def download_export_object(
-    project_id: UUID,
-    export_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-    token: str,
-    object_role: str = "timeline_json",
-) -> Response:
-    """Authorized download: return raw file bytes (not JSON metadata)."""
-    await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    grant = await authorize_export_download(
-        session, export_id=export_id, actor=user, object_role=object_role
-    )
-    verify_download_token(
-        token=token,
-        export_id=export_id,
-        project_id=project_id,
-        object_key=grant.object_key,
-        user_id=user.id,
-    )
-    data = await fetch_export_bytes(grant=grant)
-    media = "application/octet-stream"
-    name = grant.object_key.rsplit("/", 1)[-1]
-    if object_role in {"timeline_json", "package_json"} or name.endswith(".json"):
-        media = "application/json"
-    elif object_role == "srt" or name.endswith(".srt"):
-        media = "application/x-subrip"
-    elif object_role in {"package", "package_zip"} or name.endswith(".zip"):
-        media = "application/zip"
-    elif object_role == "mp4" or name.endswith(".mp4"):
-        media = "video/mp4"
-    return Response(
-        content=data,
-        media_type=media,
-        headers={
-            "Content-Disposition": f'attachment; filename="{name}"',
-            "X-Content-SHA256": __import__("hashlib").sha256(data).hexdigest(),
-            "X-Export-Id": str(export_id),
-            "X-Object-Key": grant.object_key,
-        },
     )

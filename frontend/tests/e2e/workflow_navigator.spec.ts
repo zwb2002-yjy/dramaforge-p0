@@ -46,8 +46,8 @@ function overviewBody() {
             supported_character_count: [2, 2],
             intent_tags: ["dialogue"],
             participations: [
-              { character_id: "306cde8f-b004-4468-9cf8-d29a0df6c575", asset_version_id: "dc4510ab-a29c-411e-8e03-bf3543716428", screen_role: "primary", importance: 80, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "speaking" },
-              { character_id: "f70efbf1-60d7-45f8-ac90-5e74b0411ca5", asset_version_id: "23b6f6e5-be46-49d1-9d55-94b7a0564c51", screen_role: "secondary", importance: 60, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "listening" },
+              { asset_id: "306cde8f-b004-4468-9cf8-d29a0df6c575", asset_version_id: "dc4510ab-a29c-411e-8e03-bf3543716428", screen_role: "primary", importance: 80, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "speaking" },
+              { asset_id: "f70efbf1-60d7-45f8-ac90-5e74b0411ca5", asset_version_id: "23b6f6e5-be46-49d1-9d55-94b7a0564c51", screen_role: "secondary", importance: 60, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "listening" },
             ],
             capability_assessment: { status: "UNSUPPORTED", required_subject_references: 2, max_subject_references: 1, reason: "model supports 1 subject reference(s) but the shot requires 2; multi-character identity cannot be preserved", approximate_strategy_id: null },
           },
@@ -111,8 +111,8 @@ function workflowStateBody() {
       supported_character_count: [2, 2],
       intent_tags: ["dialogue"],
       participations: [
-        { character_id: "c1", asset_version_id: "v1", screen_role: "primary", importance: 80, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "speaking" },
-        { character_id: "c2", asset_version_id: "v2", screen_role: "secondary", importance: 60, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "listening" },
+        { asset_id: "c1", asset_version_id: "v1", screen_role: "primary", importance: 80, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "speaking" },
+        { asset_id: "c2", asset_version_id: "v2", screen_role: "secondary", importance: 60, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "listening" },
       ],
       capability_assessment: { status: "UNSUPPORTED", required_subject_references: 2, max_subject_references: 1, reason: "model supports 1 subject reference(s) but the shot requires 2", approximate_strategy_id: null },
     },

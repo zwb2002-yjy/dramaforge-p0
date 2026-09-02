@@ -7,10 +7,8 @@ def load_all_models() -> None:
     """Import every ORM model module so cross-domain foreign keys can resolve."""
     from app.access import models as access_models
     from app.assets import models as assets_models
-    from app.creation import models as creation_models
-    from app.creation import schema_tables as creation_schema_tables
     from app.delivery import models as delivery_models
-    from app.director import models as director_models
+    from app.director import assistant_models as director_assistant_models
     from app.director import proposal_models as director_proposal_models
     from app.editing import models as editing_models
     from app.events import models as event_models
@@ -24,10 +22,8 @@ def load_all_models() -> None:
     _ = (
         access_models,
         assets_models,
-        creation_models,
-        creation_schema_tables,
         delivery_models,
-        director_models,
+        director_assistant_models,
         director_proposal_models,
         editing_models,
         event_models,

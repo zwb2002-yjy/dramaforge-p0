@@ -34,19 +34,7 @@ _FORBIDDEN_PROVIDER_MODULES = (
 # LEGACY_COMPAT: business files still reaching into concrete provider modules.
 # Each entry is (path, removal condition). These are the pre-V3 paths that are
 # being retired; the boundary test refuses any new file from doing the same.
-LEGACY_COMPAT: dict[str, str] = {
-    "creation/service.py": (
-        "text LLM via openai getter (Agent brief/plan); remove when the V3 text "
-        "model bridge is wired (P1)"
-    ),
-    "execution/product_path.py": (
-        "legacy adapter branch gated by PROVIDER_UNIFIED_PATH_ENABLED (B6) + "
-        "test Fake import; remove when the legacy branch is deleted"
-    ),
-    "execution/golden_path.py": "legacy P0 scaffolding using the Fake adapter",
-    "execution/pipeline.py": "legacy P0 scaffolding using the Fake adapter",
-    "execution/shot_p0.py": "legacy P0 scaffolding using the Fake adapter",
-}
+LEGACY_COMPAT: dict[str, str] = {}
 
 _IMPORT_RE = re.compile(
     r"^\s*(?:from (app\.providers\.[a-z_0-9]+) import|import (app\.providers\.[a-z_0-9]+))\b"
@@ -133,7 +121,7 @@ _PROVIDER_BRANCH_RE = re.compile(
 )
 _PROVIDER_BRANCH_ALLOWLIST = {
     "config.py",
-    "execution/product_path.py",  # LEGACY_COMPAT (B6)
+    # provider selection is delegated to the unified runtime/compiler.
 }
 
 

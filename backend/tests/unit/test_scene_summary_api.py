@@ -47,7 +47,6 @@ def _project_with_scenes(client: TestClient) -> tuple[str, list[str]]:
                 "## Scene 2 - Street / night\nBeat.\n\n"
                 "### Shot 3 - wide\nVisual: B walks\nDialogue: Let's go\nCamera: dolly\n"
             ),
-            "register_lead": False,
         },
         headers={CSRF_HEADER: _csrf(client)},
     )

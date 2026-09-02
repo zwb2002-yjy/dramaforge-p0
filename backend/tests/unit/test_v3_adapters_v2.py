@@ -1,4 +1,4 @@
-"""V3 ModelAdapter V2 + legacy bridge translation tests (Phase 3).
+"""V3 ModelAdapter V2 + provider adapter bridge translation tests (Phase 3).
 
 Translation is pure: a V3 capability request becomes a provider-native wire body
 with no I/O. The core V3 acceptance (§69.2) is exercised here: the SAME
@@ -16,7 +16,7 @@ from uuid import UUID
 import pytest
 from app.providers.adapters_v2 import (
     BridgeComponents,
-    LegacyAdapterBridge,
+    ProviderAdapterBridge,
     _compiler_translation_evidence,
     submission_status_to_v3,
 )
@@ -66,7 +66,7 @@ def _uuid_of(value: str) -> UUID:
         raise AssertionError(f"test fixture must contain a UUID: {value!r}") from exc
 
 
-def _bridge_for(provider_type: str, media: str) -> LegacyAdapterBridge:
+def _bridge_for(provider_type: str, media: str) -> ProviderAdapterBridge:
     seed = seed_manifests_for(provider_type=provider_type)
     manifest = ModelCapabilityManifest.model_validate(
         seed[0] if media == "image" else seed[1]
@@ -92,7 +92,7 @@ def _bridge_for(provider_type: str, media: str) -> LegacyAdapterBridge:
     else:
         image_compiler = ArkImageCompiler()
         video_compiler = ArkVideoCompiler()
-    return LegacyAdapterBridge(
+    return ProviderAdapterBridge(
         v3,
         BridgeComponents(
             a_b_manifest=manifest,
@@ -308,7 +308,7 @@ class _FakeRuntime:
 
 def _runtime_bridge(
     provider_type: str, media: str, *, resolver: object | None = None
-) -> tuple[LegacyAdapterBridge, _FakeRuntime]:
+) -> tuple[ProviderAdapterBridge, _FakeRuntime]:
     """Bridge with a wired fake runtime (so create/poll actually execute)."""
     seed = seed_manifests_for(provider_type=provider_type)
     manifest = ModelCapabilityManifest.model_validate(
@@ -330,7 +330,7 @@ def _runtime_bridge(
         image_compiler = ArkImageCompiler()
         video_compiler = ArkVideoCompiler()
     runtime = _FakeRuntime()
-    bridge = LegacyAdapterBridge(
+    bridge = ProviderAdapterBridge(
         v3,
         BridgeComponents(
             a_b_manifest=manifest,
@@ -378,12 +378,12 @@ class _RecordingVideoCompiler:
 
 def _ordered_bridge(
     *, runtime: _FakeRuntime | None = None, resolver: object | None = None
-) -> tuple[LegacyAdapterBridge, _RecordingVideoCompiler, _FakeRuntime | None]:
+) -> tuple[ProviderAdapterBridge, _RecordingVideoCompiler, _FakeRuntime | None]:
     seed = seed_manifests_for(provider_type="agnes")
     manifest = ModelCapabilityManifest.model_validate(seed[1])
     v3 = to_v3_model_manifest(manifest, transport_profile_id="agnes-video-v1")
     compiler = _RecordingVideoCompiler()
-    bridge = LegacyAdapterBridge(
+    bridge = ProviderAdapterBridge(
         v3,
         BridgeComponents(
             a_b_manifest=manifest,
@@ -522,7 +522,7 @@ class TestOrderedReferenceTransport:
             ("reference_video", "v" * 64),
         ]
 
-    async def test_legacy_image_bridge_rejects_multiple_references(self) -> None:
+    async def test_compatibility_image_bridge_rejects_multiple_references(self) -> None:
         bridge = _bridge_for("agnes", "image")
         request = ImageGenerateRequest(
             prompt="multi-reference image",

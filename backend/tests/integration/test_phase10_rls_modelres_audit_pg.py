@@ -17,7 +17,6 @@ HTTP). No secret material is written.
 from __future__ import annotations
 
 import os
-import socket
 from collections.abc import AsyncGenerator
 from datetime import date
 from decimal import Decimal
@@ -29,7 +28,7 @@ from app.access.models import Project, User, Workspace
 from app.assets.models import Asset, AssetVersion, Shot
 from app.assets.script_import import import_script
 from app.delivery.models import ReviewAnnotation
-from app.director.models import DirectorMessage, DirectorThread
+from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
@@ -54,6 +53,7 @@ from app.providers.models import (
 from app.security.models import EncryptedProviderCredential
 from app.shared.db import set_rls_context
 from app.shared.security import hash_password
+from pg_support import available
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -65,19 +65,7 @@ def _database_url() -> str:
 
 
 def _postgres_is_available() -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", 5432), timeout=1.0):
-            pass
-        sync_url = _database_url().replace("postgresql+asyncpg://", "postgresql+psycopg://")
-        from sqlalchemy import create_engine
-
-        engine = create_engine(sync_url, connect_args={"connect_timeout": 2})
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
-        engine.dispose()
-        return True
-    except Exception:
-        return False
+    return available(_database_url())
 
 
 pytestmark = pytest.mark.skipif(

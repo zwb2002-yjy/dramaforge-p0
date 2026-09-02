@@ -24,7 +24,7 @@ class IdentityResultStatus(StrEnum):
 class PerCharacterIdentityResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    character_id: UUID
+    asset_id: UUID
     status: IdentityResultStatus
     evidence: str = ""
     rule: str = ""

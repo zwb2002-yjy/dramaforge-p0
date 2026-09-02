@@ -32,7 +32,7 @@ def _agnes_operations() -> dict[str, object]:
 
 def _ent(screen_role: str) -> dict[str, object]:
     return {
-        "character_id": str(uuid4()),
+        "asset_id": str(uuid4()),
         "asset_version_id": str(uuid4()),
         "screen_role": screen_role,
     }

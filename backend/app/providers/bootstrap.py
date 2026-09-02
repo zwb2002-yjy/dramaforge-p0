@@ -6,7 +6,7 @@ manifests for the currently shipped providers (Agnes + Volcengine Ark), derived
 from the same immutable catalog seeds the A+B engine reads — so the V3 view can
 never disagree with the runtime engine about a model's capability contract.
 
-The adapter slots are filled by :class:`LegacyAdapterBridge` (Phase 3), which
+The adapter slots are filled by :class:`ProviderAdapterBridge` (Phase 3), which
 delegates I/O to the existing unified Compiler/Runtime. Until then the registry
 is usable for capability/manifest queries but ``create`` on a V2 adapter raises.
 """
@@ -43,7 +43,7 @@ from app.providers.transport_registry import TransportRegistry
 # manifest carries a ``ModelBackendBinding`` so the generic adapter knows which
 # gateway model to send. P0 exposes ``text.generate`` through the gateway.
 # The text-llm model is a *bootstrap bridge* (fix spec §34/§103): it maps to the
-# configurable ``legacy-text`` logical alias so the gateway can serve the legacy
+# configurable ``compatibility-text`` logical alias so the gateway can serve the compatibility
 # BYOK text path while logical aliases (script-quality / script-fast) are
 # registered separately by :func:`register_litellm_logical_models`.
 LITELLM_TEXT_MODEL_ID = "litellm/text-llm"
@@ -280,8 +280,8 @@ def build_v3_registry(
 def litellm_text_manifest() -> ModelManifest:
     """V3 manifest for the generic LiteLLM text model (spec §113/§114).
 
-    LEGACY_COMPAT bootstrap bridge (fix spec §34/§103): the ``gateway_model``
-    is the configurable ``legacy-text`` logical alias, NOT an upstream provider
+    Bootstrap bridge (fix spec §34/§103): the ``gateway_model`` is the configurable
+    logical alias, NOT an upstream provider
     model (fix spec §32/§33 — DramaForge requests a logical group; LiteLLM's
     Router picks the deployment). Prefer ``litellm/<logical-alias>`` models
     registered by :func:`register_litellm_logical_models` in new profiles.
@@ -303,7 +303,7 @@ def litellm_text_manifest() -> ModelManifest:
         id=LITELLM_TEXT_MODEL_ID,
         provider_id="litellm",
         model_name="text-llm",
-        display_name="LiteLLM 文本模型（legacy bridge）",
+        display_name="LiteLLM 文本模型（provider adapter bridge）",
         model_family="litellm",
         capability_specs={
             Capability.TEXT_GENERATE: CapabilitySpec(
@@ -352,7 +352,7 @@ def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
     submits only when the underlying provider is configured (settings key);
     otherwise it fails closed exactly like the runtime does."""
     from app.config import get_settings
-    from app.providers.adapters_v2 import BridgeComponents, LegacyAdapterBridge
+    from app.providers.adapters_v2 import BridgeComponents, ProviderAdapterBridge
     from app.providers.catalog_seed_data import seed_manifests_for
     from app.providers.registry import get_plugin
 
@@ -371,7 +371,7 @@ def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
         )
 
         def factory(v3_manifest: ModelManifest) -> ModelAdapter:
-            return LegacyAdapterBridge(
+            return ProviderAdapterBridge(
                 v3_manifest,
                 BridgeComponents(
                     a_b_manifest=a_b,

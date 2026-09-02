@@ -262,23 +262,6 @@ class NodeRun(Base):
     graph_node_id: Mapped[UUID] = mapped_column(
         ForeignKey("graph_nodes.id", ondelete="RESTRICT"), nullable=False
     )
-    production_batch_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey(
-            "production_batches.id",
-            name="fk_node_runs_production_batch",
-            ondelete="RESTRICT",
-        ),
-        nullable=True,
-    )
-    budget_reservation_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey(
-            "budget_reservations.id",
-            name="fk_node_runs_budget_reservation",
-            ondelete="RESTRICT",
-            use_alter=True,
-        ),
-        nullable=True,
-    )
     parent_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("node_runs.id", ondelete="SET NULL"), nullable=True
     )
@@ -338,7 +321,7 @@ class NodeRun(Base):
 
 
 class ShotHumanLock(Base):
-    """Durable human lock for a shot — blocks Agent/quick overwrite rework."""
+    """Durable human lock for a Shot — blocks unattended overwrite rework."""
 
     __tablename__ = "shot_human_locks"
     __table_args__ = (UniqueConstraint("project_id", "shot_id", name="uq_shot_lock"),)
@@ -363,9 +346,6 @@ class ProviderOperation(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     node_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("node_runs.id", ondelete="CASCADE"), nullable=True
-    )
-    agent_run_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=True
     )
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     purpose: Mapped[str] = mapped_column(
@@ -476,8 +456,6 @@ Index(
     NodeRun.__table__.c.reused_from_run_id,
     postgresql_where=text("reused_from_run_id IS NOT NULL"),
 )
-Index("ix_node_runs_production_batch_id", NodeRun.__table__.c.production_batch_id)
-Index("ix_node_runs_budget_reservation_id", NodeRun.__table__.c.budget_reservation_id)
 Index("ix_provider_operations_connection_id", ProviderOperation.__table__.c.connection_id)
 Index(
     "ix_provider_operations_connection_revision_id",
@@ -496,13 +474,6 @@ Index(
     ProviderOperation.__table__.c.node_run_id,
     unique=True,
     postgresql_where=text("node_run_id IS NOT NULL"),
-)
-Index(
-    "uq_provider_operations_agent_attempt",
-    ProviderOperation.__table__.c.agent_run_id,
-    ProviderOperation.__table__.c.attempt_no,
-    unique=True,
-    postgresql_where=text("agent_run_id IS NOT NULL"),
 )
 Index(
     "uq_provider_operations_remote",

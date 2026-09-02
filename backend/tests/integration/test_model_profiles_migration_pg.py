@@ -15,6 +15,7 @@ from pathlib import Path
 
 import asyncpg
 import pytest
+from pg_support import env_target
 from sqlalchemy import create_engine, text
 
 BACKEND = Path(__file__).resolve().parents[2]
@@ -23,11 +24,11 @@ DB_PASSWORD = os.environ.get("TEST_PG_PASSWORD", "dramaforge")
 
 
 def _pg_host() -> str:
-    return os.environ.get("TEST_PG_HOST", "127.0.0.1")
+    return env_target()[0]
 
 
 def _pg_port() -> str:
-    return os.environ.get("TEST_PG_PORT", "5432")
+    return env_target()[1]
 
 
 def _pg_admin_url() -> str:

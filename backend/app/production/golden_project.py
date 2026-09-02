@@ -1,7 +1,7 @@
 """P10-06 stable golden professional acceptance project (plan 03 §93).
 
 Seeds one deterministic project covering the full professional surface:
-script, 2+ scenes, one lead character with 2+ canonical reference angles,
+script, 2+ scenes, one character Asset with 2+ explicit reference angles,
 scene assets, multiple shots, formal keyframe + video, experiments, review
 repair plan, director proposal, 2D director board, edit session, export.
 
@@ -12,6 +12,7 @@ metadata and no secret material.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from decimal import Decimal
 from uuid import UUID
@@ -20,10 +21,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User, Workspace
-from app.assets.models import Asset, Character, CharacterReference, Scene, Shot
+from app.assets.models import Asset, AssetVersion, AssetVersionReference, Scene, Shot
 from app.assets.script_import import import_script
 from app.delivery.models import Export, ExportItem, ReviewAnnotation
-from app.director.models import DirectorMessage, DirectorThread
+from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.timeline_builder import build_edit_session_from_shots
 from app.execution.models import Artifact, GraphNode, NodeRun
@@ -81,8 +82,8 @@ class GoldenProject:
     project: Project
     scenes: list[Scene] = field(default_factory=list)
     shots: list[Shot] = field(default_factory=list)
-    lead: Character | None = None
-    references: list[CharacterReference] = field(default_factory=list)
+    lead: Asset | None = None
+    references: list[AssetVersionReference] = field(default_factory=list)
     scene_assets: list[Asset] = field(default_factory=list)
     keyframe: Artifact | None = None
     video: Artifact | None = None
@@ -254,7 +255,7 @@ async def seed_golden_project(session: AsyncSession, *, suffix: str) -> GoldenPr
         .all()
     )
 
-    # Lead character + 2 canonical reference angles.
+    # Character Asset + 2 explicit AssetVersion reference angles.
     lead_asset = Asset(
         project_id=project.id,
         kind="character",
@@ -265,26 +266,58 @@ async def seed_golden_project(session: AsyncSession, *, suffix: str) -> GoldenPr
     )
     session.add(lead_asset)
     await session.flush()
-    lead = Character(
-        id=lead_asset.id,
-        locked_prompt="Lin Xia, short black hair, rain coat",
-        negative_prompt="",
-        calibration_state="calibrated",
+    lead_version = AssetVersion(
+        project_id=project.id,
+        asset_id=lead_asset.id,
+        version_number=1,
+        kind="character",
+        name="Lin Xia v1",
+        description="Lin Xia, short black hair, rain coat",
+        metadata_json={"locked_prompt": "Lin Xia, short black hair, rain coat"},
+        status="formal",
+        created_by=user.id,
     )
-    session.add(lead)
+    session.add(lead_version)
+    await session.flush()
+    lead_asset.current_version_id = lead_version.id
+    reference_artifacts = [
+        Artifact(
+            project_id=project.id,
+            artifact_type="image",
+            storage_state="available",
+            object_key=f"golden/{suffix}/ref-front.png",
+            content_hash=hashlib.sha256(f"front:{suffix}".encode()).hexdigest(),
+            mime_type="image/png",
+            byte_size=0,
+        ),
+        Artifact(
+            project_id=project.id,
+            artifact_type="image",
+            storage_state="available",
+            object_key=f"golden/{suffix}/ref-profile.png",
+            content_hash=hashlib.sha256(f"profile:{suffix}".encode()).hexdigest(),
+            mime_type="image/png",
+            byte_size=0,
+        ),
+    ]
+    session.add_all(reference_artifacts)
     await session.flush()
     refs = [
-        CharacterReference(
-            character_id=lead.id,
-            object_key=f"golden/{suffix}/ref-front.png",
-            reference_kind="canonical",
-            is_canonical=True,
+        AssetVersionReference(
+            project_id=project.id,
+            asset_version_id=lead_version.id,
+            artifact_id=reference_artifacts[0].id,
+            reference_role="front_face",
+            label="front",
+            sort_order=0,
         ),
-        CharacterReference(
-            character_id=lead.id,
-            object_key=f"golden/{suffix}/ref-side.png",
-            reference_kind="canonical",
-            is_canonical=True,
+        AssetVersionReference(
+            project_id=project.id,
+            asset_version_id=lead_version.id,
+            artifact_id=reference_artifacts[1].id,
+            reference_role="profile",
+            label="profile",
+            sort_order=1,
         ),
     ]
     session.add_all(refs)
@@ -469,7 +502,7 @@ async def seed_golden_project(session: AsyncSession, *, suffix: str) -> GoldenPr
         project=project,
         scenes=scene_rows,
         shots=shot_rows,
-        lead=lead,
+        lead=lead_asset,
         references=refs,
         scene_assets=scene_assets,
         keyframe=keyframe,

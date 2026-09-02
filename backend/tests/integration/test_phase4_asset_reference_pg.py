@@ -10,7 +10,6 @@ snapshot at execution; a later upgrade does not drift that frozen run.
 from __future__ import annotations
 
 import os
-import socket
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -31,11 +30,12 @@ from app.assets.version_service import AssetVersionService
 from app.execution.models import Artifact
 from app.shared.db import set_rls_context
 from app.shared.security import hash_password
-from sqlalchemy import select, text
+from pg_support import available
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 REPO = Path(__file__).resolve().parents[3]
-GOLDEN = REPO / "fixtures" / "scripts" / "p0_10_shots.md"
+SCRIPT_FIXTURE = REPO / "fixtures" / "scripts" / "episode_script.md"
 
 _DEFAULT_URL = "postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
 
@@ -45,19 +45,7 @@ def _database_url() -> str:
 
 
 def _postgres_is_available() -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", 5432), timeout=1.0):
-            pass
-        from sqlalchemy import create_engine
-
-        sync_url = _database_url().replace("postgresql+asyncpg://", "postgresql+psycopg://")
-        engine = create_engine(sync_url, connect_args={"connect_timeout": 2})
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
-        engine.dispose()
-        return True
-    except Exception:
-        return False
+    return available(_database_url())
 
 
 pytestmark = pytest.mark.skipif(
@@ -173,8 +161,8 @@ async def test_phase4_asset_reference_verification_pg(pg_session: AsyncSession) 
         pg_session,
         project_id=project,
         actor_id=user.id,
-        filename="p0_10_shots.md",
-        text=GOLDEN.read_text(encoding="utf-8"),
+        filename="episode_script.md",
+        text=SCRIPT_FIXTURE.read_text(encoding="utf-8"),
         actor=user,
     )
     await pg_session.commit()

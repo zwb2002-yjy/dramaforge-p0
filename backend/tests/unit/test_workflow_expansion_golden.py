@@ -210,12 +210,12 @@ async def test_golden_workflow_expansion_end_to_end(session: AsyncSession) -> No
     participation = ShotParticipationPlan(
         participations=[
             ShotCharacterParticipation(
-                character_id=uuid4(),
+                asset_id=uuid4(),
                 asset_version_id=uuid4(),
                 screen_role=ScreenRole.PRIMARY,
             ),
             ShotCharacterParticipation(
-                character_id=uuid4(),
+                asset_id=uuid4(),
                 asset_version_id=uuid4(),
                 screen_role=ScreenRole.SECONDARY,
             ),
@@ -260,7 +260,7 @@ async def test_golden_workflow_expansion_end_to_end(session: AsyncSession) -> No
         participation_plan=ShotParticipationPlan(
             participations=[
                 ShotCharacterParticipation(
-                    character_id=uuid4(),
+                    asset_id=uuid4(),
                     asset_version_id=uuid4(),
                     screen_role=ScreenRole.PRIMARY,
                 ),

@@ -8,7 +8,6 @@ reads the JSON value back from PostgreSQL; it never invokes a Provider.
 from __future__ import annotations
 
 import os
-import socket
 from collections.abc import AsyncGenerator
 from datetime import date
 from decimal import Decimal
@@ -27,7 +26,8 @@ from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderModelBinding
 from app.security.models import EncryptedProviderCredential
 from app.shared.db import set_rls_context
-from sqlalchemy import select, text
+from pg_support import available
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 _DEFAULT_URL = "postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
@@ -38,21 +38,7 @@ def _database_url() -> str:
 
 
 def _postgres_is_available() -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", 5432), timeout=1.0):
-            pass
-        sync_url = _database_url().replace(
-            "postgresql+asyncpg://", "postgresql+psycopg://"
-        )
-        from sqlalchemy import create_engine
-
-        engine = create_engine(sync_url, connect_args={"connect_timeout": 2})
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
-        engine.dispose()
-        return True
-    except Exception:
-        return False
+    return available(_database_url())
 
 
 pytestmark = pytest.mark.skipif(
@@ -248,5 +234,4 @@ async def test_execution_model_resolution_round_trips_in_node_run_snapshot_pg(
     )
     assert stored_snapshot is not None
     assert stored_snapshot["execution_model_resolution"] == snapshot
-
 

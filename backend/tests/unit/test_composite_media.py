@@ -12,7 +12,6 @@ import pytest
 from app.access.models import User, Workspace
 from app.access.projects import ProjectService
 from app.config import clear_settings_cache
-from app.creation import models as _cm  # noqa: F401
 from app.execution import models as _xm  # noqa: F401
 from app.execution.composite_media import (
     CompositeInputs,

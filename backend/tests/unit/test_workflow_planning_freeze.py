@@ -257,10 +257,10 @@ async def test_project_overview_counts_and_unsupported(session) -> None:
     plan = ShotParticipationPlan(
         participations=[
             ShotCharacterParticipation(
-                character_id=uuid4(), asset_version_id=uuid4(), screen_role=ScreenRole.PRIMARY
+                asset_id=uuid4(), asset_version_id=uuid4(), screen_role=ScreenRole.PRIMARY
             ),
             ShotCharacterParticipation(
-                character_id=uuid4(), asset_version_id=uuid4(), screen_role=ScreenRole.SECONDARY
+                asset_id=uuid4(), asset_version_id=uuid4(), screen_role=ScreenRole.SECONDARY
             ),
         ]
     )

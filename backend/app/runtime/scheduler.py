@@ -99,7 +99,7 @@ class RedisStreamPublisher(StreamPublisher):
             self._redis = None
 
 
-class AgentRunScheduler:
+class NodeRunScheduler:
     """API-safe scheduler: Outbox claim/publish + Arq enqueue. Never calls Adapters."""
 
     def __init__(

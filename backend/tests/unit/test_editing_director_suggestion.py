@@ -12,13 +12,13 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.assets.models import Asset, Episode, Scene, Shot
+from app.director.assistant_models import DirectorThread
 from app.director.editing_suggestion import (
     EditingDirectorSuggestionCandidate,
     EditingDirectorSuggestionContext,
     EditingDirectorSuggestionRequest,
     EditingDirectorSuggestionService,
 )
-from app.director.models import DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession

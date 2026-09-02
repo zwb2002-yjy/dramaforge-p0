@@ -11,11 +11,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from app.director.production_templates import (
-    DIALOGUE_POST_DUB_SHOT_V1,
-    QUALITY_POLICY_V1,
-    dialogue_post_dub_definition,
-)
 from app.director.workflows.contracts import (
     WorkflowScope,
     WorkflowTemplateInputContract,
@@ -29,6 +24,11 @@ from app.director.workflows.template_nodes import (
     montage_sequence_definition,
     single_character_monologue_definition,
     two_character_dialogue_definition,
+)
+from app.production.templates import (
+    DIALOGUE_POST_DUB_SHOT_V1,
+    QUALITY_POLICY_V1,
+    dialogue_post_dub_definition,
 )
 from app.providers.capabilities import Capability
 

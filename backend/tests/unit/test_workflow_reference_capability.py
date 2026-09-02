@@ -55,7 +55,7 @@ def _plan(n: int) -> ShotParticipationPlan:
     return ShotParticipationPlan(
         participations=[
             ShotCharacterParticipation(
-                character_id=char,
+                asset_id=char,
                 asset_version_id=uuid4(),
                 screen_role=ScreenRole.PRIMARY if i == 0 else ScreenRole.SECONDARY,
             )
@@ -141,13 +141,13 @@ def test_quality_report_one_char_fail_cannot_silently_pass() -> None:
     report = MultiCharacterIdentityReport(
         results=[
             PerCharacterIdentityResult(
-                character_id=uuid4(),
+                asset_id=uuid4(),
                 status=IdentityResultStatus.PASSED,
                 evidence="A matches",
                 rule="two-source",
             ),
             PerCharacterIdentityResult(
-                character_id=uuid4(),
+                asset_id=uuid4(),
                 status=IdentityResultStatus.FAILED,
                 evidence="B drifted",
                 rule="two-source",
@@ -171,7 +171,7 @@ def test_quality_report_forces_blocked_when_fail_and_asked_pass() -> None:
         MultiCharacterIdentityReport(
             results=[
                 PerCharacterIdentityResult(
-                    character_id=uuid4(),
+                    asset_id=uuid4(),
                     status=IdentityResultStatus.FAILED,
                     evidence="B drifted",
                 ),

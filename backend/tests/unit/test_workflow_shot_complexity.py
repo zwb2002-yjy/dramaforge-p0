@@ -22,7 +22,7 @@ def _plan(n: int, *, visible: bool = True) -> ShotParticipationPlan:
     return ShotParticipationPlan(
         participations=[
             ShotCharacterParticipation(
-                character_id=uuid4(),
+                asset_id=uuid4(),
                 asset_version_id=uuid4() if visible else None,
                 screen_role=(
                     ScreenRole.PRIMARY

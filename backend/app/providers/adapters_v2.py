@@ -1,6 +1,6 @@
-"""V3 ModelAdapter V2 implementations and the legacy bridge (spec §26–§27).
+"""V3 ModelAdapter V2 implementations and the provider adapter bridge (spec §26–§27).
 
-A :class:`LegacyAdapterBridge` presents the existing A+B Compiler/Runtime pair
+A :class:`ProviderAdapterBridge` presents the existing A+B Compiler/Runtime pair
 behind the V3 :class:`ModelAdapter` surface. ``translate()`` is pure and
 unit-testable without a provider; ``create()``/``poll()``/``cancel()``/
 ``fetch_cost()`` delegate to the wrapped runtime when it is wired.
@@ -263,7 +263,7 @@ def _request_reference_roles(request: Any) -> list[tuple[str, ResolvedArtifact]]
     return roles
 
 
-class LegacyAdapterBridge:
+class ProviderAdapterBridge:
     """V3 ModelAdapter facade over one A+B model's compiler+runtime.
 
     ``invoke_model_value`` is the wire ``model`` field (from the catalog
@@ -370,7 +370,7 @@ class LegacyAdapterBridge:
 
     @staticmethod
     def _coerce_reference_input(resolved_artifacts: ReferenceInput) -> list[ResolvedReference]:
-        """Convert the legacy mapping surface without reintroducing role dedupe.
+        """Convert the mapping surface without reintroducing role dedupe.
 
         A mapping is retained only for old callers and therefore cannot recover
         duplicates that were already collapsed by that caller. New callers use

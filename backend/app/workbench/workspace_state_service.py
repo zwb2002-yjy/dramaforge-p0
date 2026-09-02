@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User, UserProjectPreference
 from app.access.projects import ProjectService
-from app.shared.enums import ExperienceMode
 from app.shared.errors import ValidationAppError
 
 
@@ -41,7 +40,6 @@ class WorkspaceStateService:
             pref = UserProjectPreference(
                 user_id=actor.id,
                 project_id=project_id,
-                experience_mode=ExperienceMode.WORKBENCH.value,
             )
             self._session.add(pref)
             await self._session.flush()

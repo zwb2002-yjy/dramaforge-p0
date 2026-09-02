@@ -43,7 +43,7 @@ def _python() -> str:
     for venv in venv_candidates:
         if venv.exists():
             return str(venv)
-    return "python"
+    return "py" if sys.platform == "win32" else "python"
 
 
 def main() -> int:
@@ -53,6 +53,28 @@ def main() -> int:
     os.environ.setdefault("PYTHONPATH", str(BACKEND))
 
     MODULE.mkdir(parents=True, exist_ok=True)
+
+    supplied_schema = os.environ.get("DRAMAFORGE_OPENAPI_JSON")
+    if supplied_schema:
+        tmp_json = Path(supplied_schema).resolve()
+        if not tmp_json.is_file():
+            raise FileNotFoundError(f"DRAMAFORGE_OPENAPI_JSON does not exist: {tmp_json}")
+        print(f"[api:generate] using exported OpenAPI → {tmp_json}")
+        subprocess.run(
+            [
+                "npm.cmd" if sys.platform == "win32" else "npm",
+                "exec",
+                "--",
+                "openapi-typescript",
+                str(tmp_json),
+                "-o",
+                str(OUT_SCHEMA),
+            ],
+            cwd=str(FRONTEND),
+            check=True,
+        )
+        print(f"[api:generate] wrote {OUT_SCHEMA}")
+        return 0
 
     with tempfile.TemporaryDirectory(prefix="dramaforge-openapi-") as tmp:
         tmp_json = Path(tmp) / "openapi.json"

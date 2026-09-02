@@ -191,7 +191,7 @@ class TestGenerationCreate:
             return f"fake-{node_run_id}"
 
         monkeypatch.setattr(
-            "app.providers.generation_service.AgentRunScheduler.enqueue_node_run_only",
+            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
             fake_enqueue,
         )
         response = client.post(
@@ -223,7 +223,7 @@ class TestGenerationCreate:
             return f"fake-{node_run_id}"
 
         monkeypatch.setattr(
-            "app.providers.generation_service.AgentRunScheduler.enqueue_node_run_only",
+            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
             fake_enqueue,
         )
         headers = {CSRF_HEADER: _csrf(client), "Idempotency-Key": key}
@@ -255,7 +255,7 @@ class TestGenerationCreate:
             return f"fake-{node_run_id}"
 
         monkeypatch.setattr(
-            "app.providers.generation_service.AgentRunScheduler.enqueue_node_run_only",
+            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
             fake_enqueue,
         )
         headers = {CSRF_HEADER: _csrf(client), "Idempotency-Key": key}

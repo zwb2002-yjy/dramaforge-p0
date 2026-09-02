@@ -1,4 +1,4 @@
-"""P2-02 AssetCardReadService: version references + legacy CharacterReference merge."""
+"""Asset card reads from the canonical AssetVersion reference graph."""
 
 from __future__ import annotations
 
@@ -13,8 +13,6 @@ from app.assets.models import (
     Asset,
     AssetVersion,
     AssetVersionReference,
-    Character,
-    CharacterReference,
 )
 from app.shared.errors import NotFoundError
 
@@ -48,13 +46,7 @@ def _missing_roles(kind: str, present: set[str]) -> list[str]:
 
 
 class AssetCardReadService:
-    """Reads the merged asset card fact.
-
-    Migration window: version references are authoritative; legacy
-    ``CharacterReference`` rows are only merged for artifacts that the new
-    references do not already cover, so the same Artifact is never returned
-    twice. ``CharacterReference`` is never deleted.
-    """
+    """Read the current AssetVersion and its explicit references."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -95,7 +87,6 @@ class AssetCardReadService:
             ).scalar_one_or_none()
 
         references: list[dict[str, object]] = []
-        seen_artifacts: set[UUID] = set()
         if current is not None:
             version_rows = (
                 await self._session.execute(
@@ -121,34 +112,6 @@ class AssetCardReadService:
                         "source": "version",
                     }
                 )
-                seen_artifacts.add(version_ref.artifact_id)
-
-        legacy_rows = (
-            await self._session.execute(
-                select(CharacterReference)
-                .join(Character, Character.id == CharacterReference.character_id)
-                .where(
-                    Character.id == asset.id,
-                    CharacterReference.artifact_id.is_not(None),
-                )
-            )
-        ).scalars().all()
-        for legacy_ref in legacy_rows:
-            if legacy_ref.artifact_id is None or legacy_ref.artifact_id in seen_artifacts:
-                continue
-            references.append(
-                {
-                    "artifact_id": legacy_ref.artifact_id,
-                    "reference_role": (
-                        "primary" if legacy_ref.is_canonical else "legacy"
-                    ),
-                    "label": "",
-                    "sort_order": 0,
-                    "metadata": {},
-                    "source": "legacy",
-                }
-            )
-            seen_artifacts.add(legacy_ref.artifact_id)
 
         present_roles: set[str] = set()
         for reference in references:

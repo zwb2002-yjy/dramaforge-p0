@@ -15,7 +15,6 @@ require_formal_keyframe fails closed with NO_FORMAL_KEYFRAME.
 from __future__ import annotations
 
 import os
-import socket
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 from typing import Any
@@ -25,8 +24,8 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import (
     Asset,
-    Character,
-    CharacterReference,
+    AssetVersion,
+    AssetVersionReference,
     Episode,
     Scene,
     ScriptDocument,
@@ -43,7 +42,8 @@ from app.shared.db import set_rls_context
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from app.workbench.scene_service import SceneWorkspaceService, ShotWorkbenchService
-from sqlalchemy import select, text
+from pg_support import available
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 _DEFAULT_URL = "postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
@@ -54,21 +54,7 @@ def _database_url() -> str:
 
 
 def _postgres_is_available() -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", 5432), timeout=1.0):
-            pass
-        sync_url = _database_url().replace(
-            "postgresql+asyncpg://", "postgresql+psycopg://"
-        )
-        from sqlalchemy import create_engine
-
-        engine = create_engine(sync_url, connect_args={"connect_timeout": 2})
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
-        engine.dispose()
-        return True
-    except Exception:
-        return False
+    return available(_database_url())
 
 
 pytestmark = pytest.mark.skipif(
@@ -159,19 +145,38 @@ async def _seed_historical_project(session: AsyncSession, suffix: str) -> dict[s
     )
     session.add(lead_asset)
     await session.flush()
-    lead = Character(
-        id=lead_asset.id,
-        locked_prompt="Lin Xia locked prompt",
-        negative_prompt="",
-        calibration_state="awaiting_visual_review",
+    lead_version = AssetVersion(
+        project_id=project.id,
+        asset_id=lead_asset.id,
+        version_number=1,
+        kind="character",
+        name="Lin Xia v1",
+        description="Lin Xia locked prompt",
+        metadata_json={"locked_prompt": "Lin Xia locked prompt"},
+        status="formal",
+        created_by=user.id,
     )
-    session.add(lead)
+    session.add(lead_version)
     await session.flush()
-    canonical = CharacterReference(
-        character_id=lead.id,
+    lead_asset.current_version_id = lead_version.id
+    ref_artifact = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
         object_key=f"p10/{suffix}/canonical.png",
-        reference_kind="canonical",
-        is_canonical=True,
+        content_hash="d" * 64,
+        mime_type="image/png",
+        byte_size=1,
+    )
+    session.add(ref_artifact)
+    await session.flush()
+    canonical = AssetVersionReference(
+        project_id=project.id,
+        asset_version_id=lead_version.id,
+        artifact_id=ref_artifact.id,
+        reference_role="front_face",
+        label="front",
+        sort_order=0,
     )
     session.add(canonical)
     await session.flush()
@@ -292,7 +297,8 @@ async def _seed_historical_project(session: AsyncSession, suffix: str) -> dict[s
         "run_id": run.id,
         "artifact_id": artifact.id,
         "export_id": export.id,
-        "lead_id": lead.id,
+        "lead_id": lead_asset.id,
+        "lead_version_id": lead_version.id,
         "canonical_id": canonical.id,
     }
 
@@ -346,10 +352,10 @@ async def test_historical_project_readable_by_new_workbench_pg(pg_session: Async
     assert shot_workbench["shot"]["id"] == seed["shot_id"]
 
     # character + canonical reference
-    lead = await pg_session.get(Character, seed["lead_id"])
-    canonical = await pg_session.get(CharacterReference, seed["canonical_id"])
+    lead = await pg_session.get(Asset, seed["lead_id"])
+    canonical = await pg_session.get(AssetVersionReference, seed["canonical_id"])
     assert lead is not None and canonical is not None
-    assert canonical.character_id == lead.id
+    assert canonical.asset_version_id == seed["lead_version_id"]
 
     # node run + provider operation + artifact via build_execution_trace
     trace = await build_execution_trace(

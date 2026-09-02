@@ -87,26 +87,6 @@ def test_workspace_with_project_cannot_be_deleted(client: TestClient) -> None:
     assert deleted.json()["code"] == "VALIDATION_ERROR"
 
 
-def test_experience_mode_switch_same_project(client: TestClient) -> None:
-    _register(client, "mode@example.com")
-    workspace_id = _default_workspace_id(client)
-    _select_workspace(client, workspace_id)
-    project = client.post(
-        "/api/v1/projects",
-        json={"workspace_id": workspace_id, "name": "Project", "aspect_ratio": "9:16"},
-        headers={CSRF_HEADER: _csrf(client)},
-    )
-    project_id = project.json()["id"]
-    for mode in ("quick", "workbench"):
-        response = client.put(
-            f"/api/v1/projects/{project_id}/preferences/experience-mode",
-            json={"experience_mode": mode},
-            headers={CSRF_HEADER: _csrf(client)},
-        )
-        assert response.status_code == 200
-        assert response.json()["experience_mode"] == mode
-
-
 def test_selected_workspace_blocks_same_owner_cross_workspace_project_access(
     client: TestClient,
 ) -> None:

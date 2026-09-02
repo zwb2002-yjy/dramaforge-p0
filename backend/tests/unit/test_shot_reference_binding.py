@@ -40,7 +40,6 @@ def _project_with_shot_and_asset(client: TestClient) -> tuple[str, str, str]:
                 "### Shot 1 - medium\nVisual: actor turns toward camera\n"
                 "Dialogue: Hello\nCamera: static\n"
             ),
-            "register_lead": False,
         },
         headers={CSRF_HEADER: _csrf(client)},
     )

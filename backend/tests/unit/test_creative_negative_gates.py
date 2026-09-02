@@ -144,7 +144,7 @@ def test_cc11_golden_composition_resolves_to_execution_reference() -> None:
 
 # --- Evidence no-secret guard -------------------------------------------------
 # The golden scripts emit only a field-allowlisted report (see
-# public_operation in scripts/prove_professional_wf13_golden.py).  This test
+# public_operation in the retained professional Agnes proof. This test
 # makes the no-secret guarantee automated (not construction-only) so a future
 # un-redacted field fails CI (review finding B).
 

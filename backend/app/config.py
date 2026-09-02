@@ -168,11 +168,6 @@ class Settings(BaseSettings):
         ),
     )
     litellm_api_key: str = Field(default="", description="LiteLLM Gateway API key")
-    # text.generate V3 router migration flag (spec §100–§101). When enabled,
-    # Agent Brief/Plan resolve through ModelBindingResolver + CapabilityRouter.
-    # Default OFF so the legacy OpenAI adapter path stays the production path
-    # until the router path is stable.
-    text_v3_router_enabled: bool = False
     # Logical alias the ``litellm/text-llm`` bootstrap bridge sends to the
     # gateway (fix spec §32/§33). Decoupled from TEXT_LLM_MODEL — DramaForge
     # requests the logical group, the LiteLLM Router picks the deployment.
@@ -197,12 +192,6 @@ class Settings(BaseSettings):
     tts_engine: str = "espeak-ng"
     tts_voice: str = "zh"
 
-    # Stage A+B provider unification. Director image/video runs are always unified;
-    # this flag only migrates non-Director historical projects. Resume never reads
-    # these flags because persisted execution state wins.
-    provider_catalog_enabled: bool = False
-    provider_unified_shadow: bool = False
-    provider_unified_path_enabled: bool = False
 
     @field_validator("cors_origins", "litellm_logical_models", mode="before")
     @classmethod

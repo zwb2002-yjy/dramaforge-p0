@@ -11,7 +11,7 @@ from app.access.projects import ProjectService
 from app.assets.models import Scene, Shot
 from app.delivery.models import ReviewAnnotation
 from app.director.assistant_context import AssistantContextBuilder
-from app.director.models import DirectorMessage, DirectorThread
+from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.production.models import ShotReferenceBinding
 from app.shared.base import Base
 from app.shared.security import hash_password

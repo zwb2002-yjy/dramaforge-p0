@@ -26,20 +26,12 @@ from sqlalchemy.types import JSON
 
 from app.shared.base import Base
 from app.shared.db_types import CURRENCY_CODE, JSON_DOCUMENT
-from app.shared.enums import ExperienceMode, ProjectStage
+from app.shared.enums import ProjectStage
 
 # PG native enums (create_type=False — Alembic owns types); SQLite uses string values.
 _project_stage = Enum(
     ProjectStage,
     name="project_stage",
-    native_enum=True,
-    create_constraint=False,
-    values_callable=lambda e: [m.value for m in e],
-    validate_strings=True,
-)
-_experience_mode = Enum(
-    ExperienceMode,
-    name="experience_mode",
     native_enum=True,
     create_constraint=False,
     values_callable=lambda e: [m.value for m in e],
@@ -153,12 +145,6 @@ class UserProjectPreference(Base):
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    experience_mode: Mapped[ExperienceMode | str] = mapped_column(
-        _experience_mode.with_variant(String(32), "sqlite"),
-        nullable=False,
-        default=ExperienceMode.WORKBENCH,
-    )
-    last_guided_step: Mapped[str | None] = mapped_column(String(80), nullable=True)
     workspace_state: Mapped[dict[str, object]] = mapped_column(
         JSON, nullable=False, default=dict
     )

@@ -50,7 +50,6 @@ def test_compose_defines_required_boot0_services() -> None:
         "TEXT_LLM_BASE_URL",
         "TEXT_LLM_MODEL",
         "TEXT_LLM_API_STYLE",
-        "PROVIDER_UNIFIED_PATH_ENABLED",
         "TTS_ENABLED",
         "TTS_ENGINE",
         "TTS_VOICE",
@@ -152,14 +151,14 @@ def test_gpu_profile_is_optional_and_not_default() -> None:
     assert "gpu" in comfy.get("profiles", [])
 
 
-def test_development_override_exposes_debug_ports_and_disables_production_ui() -> None:
+def test_development_override_exposes_infrastructure_debug_ports_only() -> None:
     services = yaml.safe_load(DEV_COMPOSE.read_text(encoding="utf-8"))["services"]
-    assert services["api"]["ports"] == ["8080:8000"]
+    assert "api" not in services or not services["api"].get("ports")
     assert services["postgres"]["ports"] == ["5432:5432"]
     assert services["redis"]["ports"] == ["6379:6379"]
     assert services["minio"]["ports"] == ["9000:9000", "9001:9001"]
     assert services["litellm"]["ports"] == ["4000:4000"]
-    assert services["frontend"]["profiles"] == ["production-ui"]
+    assert "frontend" not in services
 
 
 def test_backend_image_declares_formal_media_runtime_without_biometrics() -> None:

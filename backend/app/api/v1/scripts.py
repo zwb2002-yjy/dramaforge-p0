@@ -29,7 +29,6 @@ router = APIRouter(tags=["scripts"], dependencies=[Depends(require_selected_work
 class ScriptImportBody(BaseModel):
     filename: str = Field(min_length=1, max_length=260)
     text: str = Field(min_length=1)
-    register_lead: bool = True
 
 
 class ScriptImportResponse(BaseModel):
@@ -40,8 +39,6 @@ class ScriptImportResponse(BaseModel):
     shot_ids: list[UUID]
     lead_character: str | None
     content_hash: str
-    character_id: UUID | None = None
-    canonical_object_key: str | None = None
 
 
 class ShotRead(BaseModel):
@@ -310,8 +307,6 @@ async def import_project_script(
         shot_ids=result.shot_ids,
         lead_character=result.lead_character,
         content_hash=result.content_hash,
-        character_id=None,
-        canonical_object_key=None,
     )
 
 

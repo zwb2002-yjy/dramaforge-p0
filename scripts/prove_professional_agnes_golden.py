@@ -138,6 +138,50 @@ def wait_for_nodes(
     )
 
 
+def dispatch_stage(
+    client: httpx.Client,
+    *,
+    project_id: str,
+    shot_id: str,
+    stage: str,
+    prompt: str,
+    expected_shot_version: int,
+    headers: Mapping[str, str],
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Preview and dispatch one frozen canonical Workbench execution."""
+    payload = {
+        "stage": stage,
+        "prompt": prompt,
+        "semantic_intent": {"intent": stage, "shot_id": shot_id},
+        "mode_id": "text_to_image" if stage == "image_keyframe" else "first_frame",
+        "references": [],
+        "expected_shot_version": expected_shot_version,
+    }
+    preview = require_ok(
+        client.post(
+            f"/projects/{project_id}/shots/{shot_id}/execution-plan",
+            headers=headers,
+            json=payload,
+        ),
+        f"preview {stage}",
+    )
+    return require_ok(
+        client.post(
+            f"/projects/{project_id}/shots/{shot_id}/executions",
+            headers={**headers, "Idempotency-Key": idempotency_key},
+            json={
+                **payload,
+                "plan_fingerprint": preview["plan_fingerprint"],
+                "accepted_approximations": preview["plan"].get(
+                    "accepted_approximations", []
+                ),
+            },
+        ),
+        f"dispatch {stage}",
+    )
+
+
 def main() -> int:
     load_env()
     parser = argparse.ArgumentParser()
@@ -217,7 +261,7 @@ Camera: static
             client.post(
                 f"/projects/{project_id}/scripts/import",
                 headers=headers,
-                json={"filename": "agnes-golden.md", "text": script, "register_lead": False},
+                json={"filename": "agnes-golden.md", "text": script},
             ),
             "import script",
         )
@@ -304,23 +348,24 @@ Camera: static
             },
         }
 
-        keyframe_start = require_ok(
-            client.post(
-                f"/projects/{project_id}/professional/shots/{shot_id}/start",
-                headers=headers,
-                json={"node_keys": ["prompt", "keyframe", "identity_review"]},
-            ),
-            "start professional keyframe",
+        keyframe_start = dispatch_stage(
+            client,
+            project_id=project_id,
+            shot_id=shot_id,
+            stage="image_keyframe",
+            prompt=shot["visual_description"],
+            expected_shot_version=canvas["shot"]["version"],
+            headers=headers,
+            idempotency_key=f"agnes-golden-keyframe-{shot_id}",
         )
         report["steps"]["keyframe_start"] = {
-            "run_ids": keyframe_start.get("run_ids", []),
-            "job_ids": keyframe_start.get("job_ids", []),
+            "node_run_id": keyframe_start.get("node_run_id"),
         }
         keyframe_snapshot = wait_for_nodes(
             client,
             project_id=project_id,
             shot_id=shot_id,
-            node_keys={"prompt", "keyframe", "identity_review"},
+            node_keys={"keyframe"},
             timeout_seconds=args.timeout,
             headers=headers,
         )
@@ -334,17 +379,18 @@ Camera: static
         if any(run["status"] not in {"completed", "cached", "completed_after_cancel"} for run in keyframe_runs):
             raise RuntimeError(f"keyframe stage failed: {keyframe_runs}")
 
-        video_start = require_ok(
-            client.post(
-                f"/projects/{project_id}/professional/shots/{shot_id}/start",
-                headers=headers,
-                json={"node_keys": ["video"]},
-            ),
-            "start professional video",
+        video_start = dispatch_stage(
+            client,
+            project_id=project_id,
+            shot_id=shot_id,
+            stage="video",
+            prompt=shot["visual_description"],
+            expected_shot_version=canvas["shot"]["version"],
+            headers=headers,
+            idempotency_key=f"agnes-golden-video-{shot_id}",
         )
         report["steps"]["video_start"] = {
-            "run_ids": video_start.get("run_ids", []),
-            "job_ids": video_start.get("job_ids", []),
+            "node_run_id": video_start.get("node_run_id"),
         }
         final_snapshot = wait_for_nodes(
             client,

@@ -7,7 +7,7 @@ import logging
 import os
 import socket
 
-from app.runtime.scheduler import AgentRunScheduler, RedisStreamPublisher
+from app.runtime.scheduler import NodeRunScheduler, RedisStreamPublisher
 from app.shared.db import get_session_factory
 from app.shared.model_registry import load_all_models
 
@@ -27,7 +27,7 @@ async def dispatch_once(*, worker_id: str) -> int:
     async with factory() as session:
         publisher = RedisStreamPublisher(get_settings().redis_url)
         try:
-            return await AgentRunScheduler(session, publisher=publisher).dispatch_pending(
+            return await NodeRunScheduler(session, publisher=publisher).dispatch_pending(
                 worker_id=worker_id
             )
         finally:

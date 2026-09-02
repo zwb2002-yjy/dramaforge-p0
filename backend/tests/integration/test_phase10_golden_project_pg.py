@@ -10,23 +10,23 @@ editing, and export — all present and readable.
 from __future__ import annotations
 
 import os
-import socket
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 from app.api.v1.opencut import opencut_manifest
-from app.assets.models import Character, CharacterReference
+from app.assets.models import Asset, AssetVersionReference
 from app.delivery.models import Export
-from app.director.models import DirectorMessage, DirectorThread
+from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposalItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
 from app.production.golden_project import seed_golden_project
 from app.production.models import ProductionExperiment, ShotExperiment
 from app.shared.db import set_rls_context
-from sqlalchemy import select, text
+from pg_support import available
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 _DEFAULT_URL = "postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
@@ -37,19 +37,7 @@ def _database_url() -> str:
 
 
 def _postgres_is_available() -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", 5432), timeout=1.0):
-            pass
-        sync_url = _database_url().replace("postgresql+asyncpg://", "postgresql+psycopg://")
-        from sqlalchemy import create_engine
-
-        engine = create_engine(sync_url, connect_args={"connect_timeout": 2})
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
-        engine.dispose()
-        return True
-    except Exception:
-        return False
+    return available(_database_url())
 
 
 pytestmark = pytest.mark.skipif(
@@ -84,19 +72,22 @@ async def test_golden_professional_project_covers_p10_06_pg(pg_session: AsyncSes
     assert len(golden.scenes) >= 2
     assert len(golden.shots) >= 2
 
-    # One lead character with 2+ canonical reference angles.
-    lead = await pg_session.get(Character, golden.lead.id)
+    # One character Asset with 2+ explicit AssetVersion reference angles.
+    lead = await pg_session.get(Asset, golden.lead.id)
     assert lead is not None
     refs = (
         (
             await pg_session.execute(
-                select(CharacterReference).where(CharacterReference.character_id == lead.id)
+                select(AssetVersionReference).where(
+                    AssetVersionReference.asset_version_id == golden.references[0].asset_version_id
+                )
             )
         )
         .scalars()
         .all()
     )
-    assert len(refs) >= 2 and all(ref.is_canonical for ref in refs)
+    assert len(refs) >= 2
+    assert {ref.reference_role for ref in refs} >= {"front_face", "profile"}
 
     # Scene assets.
     assert len(golden.scene_assets) >= 2

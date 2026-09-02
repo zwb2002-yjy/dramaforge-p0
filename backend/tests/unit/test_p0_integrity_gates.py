@@ -344,7 +344,7 @@ async def test_enqueue_commits_before_arq(monkeypatch: pytest.MonkeyPatch) -> No
     """Outbox/NodeRun must be committed before Redis enqueue is called."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from app.runtime.scheduler import AgentRunScheduler
+    from app.runtime.scheduler import NodeRunScheduler
 
     session = MagicMock()
     session.get = AsyncMock(
@@ -370,7 +370,7 @@ async def test_enqueue_commits_before_arq(monkeypatch: pytest.MonkeyPatch) -> No
         return "job-1"
 
     session.commit = track_commit
-    sched = AgentRunScheduler(session)
+    sched = NodeRunScheduler(session)
     monkeypatch.setattr(sched, "_enqueue_node_run", track_enqueue)
 
     jid = await sched.enqueue_node_run_only(uuid4())

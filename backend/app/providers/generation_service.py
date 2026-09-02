@@ -30,13 +30,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.config import get_settings
-from app.director.legacy_guard import require_legacy_execution_allowed
 from app.execution.models import GraphNode, NodeRun
 from app.providers.capabilities import Capability
 from app.providers.contracts import ArtifactRef, ImageGenerateRequest
 from app.providers.idempotency import v3_request_fingerprint
 from app.providers.router import CapabilityRouter
-from app.runtime.scheduler import AgentRunScheduler
+from app.runtime.scheduler import NodeRunScheduler
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 # Capabilities the standalone Generation API can execute in P0. Each maps to a
@@ -73,11 +72,6 @@ class GenerationService:
         native_options: dict[str, Any],
         idempotency_key: str | None,
     ) -> NodeRun:
-        await require_legacy_execution_allowed(
-            self._session,
-            project_id=project.id,
-            action="direct_media_generation_service",
-        )
         node_type = _STANDALONE_NODE_TYPE.get(capability)
         if node_type is None:
             raise ValidationAppError(
@@ -270,7 +264,7 @@ class GenerationService:
         )
 
     async def enqueue(self, run: NodeRun) -> str:
-        scheduler = AgentRunScheduler(self._session)
+        scheduler = NodeRunScheduler(self._session)
         return await scheduler.enqueue_node_run_only(run.id)
 
     async def get_generation(self, *, project: Project, operation_id: UUID) -> NodeRun:

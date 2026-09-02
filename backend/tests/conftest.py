@@ -17,8 +17,6 @@ os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
 # Keep live keys out of accidental adapter selection, including ones in root .env.
 os.environ["AGNES_ENABLED"] = "false"
 os.environ["TEXT_LLM_ENABLED"] = "false"
-os.environ["TEXT_V3_ROUTER_ENABLED"] = "false"
-os.environ["PROVIDER_UNIFIED_PATH_ENABLED"] = "false"
 os.environ["LITELLM_GATEWAY_URL"] = ""
 os.environ["LITELLM_API_KEY"] = ""
 os.environ["WORKER_TOKEN"] = ""
@@ -31,9 +29,8 @@ os.environ.setdefault("PUBLIC_REGISTRATION_ENABLED", "true")
 
 from app.access import models as _access_models  # noqa: E402,F401
 from app.config import clear_settings_cache, get_settings  # noqa: E402
-from app.creation import models as _creation_models  # noqa: E402,F401
 from app.delivery import models as _delivery_models  # noqa: E402,F401
-from app.director import models as _director_models  # noqa: E402,F401
+from app.director import assistant_models as _director_assistant_models  # noqa: E402,F401
 from app.events import models as _event_models  # noqa: E402,F401
 from app.execution import models as _execution_models  # noqa: E402,F401
 from app.main import create_app  # noqa: E402

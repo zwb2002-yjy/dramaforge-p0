@@ -47,7 +47,6 @@ def _shot(client: TestClient, project_id: str) -> str:
                 "### Shot 1 - medium\nVisual: actor turns toward camera\n"
                 "Dialogue: Hello\nCamera: static\n"
             ),
-            "register_lead": False,
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
@@ -157,7 +156,7 @@ def test_review_rejects_ambiguous_image_coordinates(client: TestClient) -> None:
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert response.status_code == 409, response.text
-def test_professional_board_and_no_budget_shot_start_route(client: TestClient) -> None:
+def test_professional_board_and_retired_shot_start_route_is_gone(client: TestClient) -> None:
     _, project_id = _project(client)
     shot_id = _shot(client, project_id)
     board = client.put(
@@ -185,11 +184,9 @@ def test_professional_board_and_no_budget_shot_start_route(client: TestClient) -
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert board_conflict.status_code == 409, board_conflict.text
-    start = client.post(
+    retired_start = client.post(
         f"/api/v1/projects/{project_id}/professional/shots/{shot_id}/start",
         json={"node_keys": []},
         headers={CSRF_HEADER: _csrf(client)},
     )
-    # Queue availability is external in this unit fixture; importantly the route
-    # must not reject the request for a missing DramaForge budget authorization.
-    assert start.status_code not in {400, 401, 403}
+    assert retired_start.status_code == 404

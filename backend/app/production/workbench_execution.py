@@ -9,8 +9,8 @@ Orchestrates one Professional shot execution without any legacy gate:
 - Persist snapshot (plan + identity, never secrets)
 - Dispatch worker (queued NodeRun -> Worker)
 
-Forbidden here: direct Provider HTTP, ``require_legacy_execution_allowed``,
-BudgetAuthorization, automatic model fallback, Agent approval.
+Forbidden here: direct Provider HTTP, automatic model fallback, or Agent
+approval. The resolved model identity is frozen into the Workbench plan.
 """
 
 from __future__ import annotations
@@ -500,9 +500,8 @@ class WorkbenchExecutionService:
             "node_key": node_key,
             "source_commit": get_settings().source_commit,
             # Professional Workbench media NodeRuns always enter the unified
-            # Provider path.  These compatibility keys make the frozen
-            # resolution explicit at the worker boundary; legacy NodeRuns do
-            # not carry this marker and retain their old adapter path.
+            # Provider path. These keys make the frozen resolution explicit at
+            # the worker boundary.
             "professional_unified": True,
             "execution_path": "unified-v1",
             "model_binding_id": str(plan.resolved_model.provider_model_binding_id),

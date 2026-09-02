@@ -157,6 +157,24 @@ jobs:
         working-directory: frontend
         run: npm run api:check
 
+  container-gates:
+    name: container-gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the authoritative Docker quality gate
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.quality.yml build \
+            backend-quality frontend-quality
+          docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from backend-quality \
+            postgres-quality backend-quality
+          docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
+      - name: Remove quality containers
+        if: always()
+        run: docker compose -f docker-compose.quality.yml down --remove-orphans
+
   postgres-integration:
     name: postgres-integration
     runs-on: ubuntu-latest

@@ -48,7 +48,7 @@ class OrderedReferenceAdapter(Protocol):
 
 class ModelAdapter(Protocol):
     """Uniform adapter surface. ``request`` is one of the typed capability
-    contracts (or a validated dict at the legacy bridge); the concrete Adapter
+    contracts (or a validated dict at the provider adapter bridge); the concrete Adapter
     narrows it to the type its manifest declares."""
 
     provider_id: str

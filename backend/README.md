@@ -24,14 +24,16 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-## Run API
+## Run the application
 
 ```powershell
-$env:APP_ENV = "development"
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+cd ..
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
-`GET /health` should return HTTP 200.
+Open `http://127.0.0.1:8080`. The API listens on container-only port 8000 and
+is not published as a separate host application entry. For backend-only
+diagnostics, run Uvicorn inside the API container on its existing port 8000.
 
 ## Run workers (requires Redis)
 

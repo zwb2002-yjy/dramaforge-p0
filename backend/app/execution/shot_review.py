@@ -14,13 +14,12 @@ from app.access.models import Project
 from app.assets.models import Shot
 from app.config import get_settings
 from app.consistency.identity_policy import identity_evidence_policy_snapshot
-from app.director.legacy_guard import require_legacy_execution_allowed
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.branches import branch_priority
 from app.execution.models import Artifact, NodeRun
 from app.execution.product_path import identity_priority_keyframe_prompt
 from app.execution.runtime_invariants import mark_stale_downstream
-from app.execution.shot_p0 import is_shot_locked, set_shot_lock
+from app.execution.shot_locks import is_shot_locked, set_shot_lock
 from app.execution.shot_pipeline import (
     SHOT_EDGES,
     SHOT_NODES,
@@ -394,15 +393,10 @@ async def start_shot_nodes(
     node_keys: list[str] | None = None,
     force: bool = False,
     include_missing_dependencies: bool = False,
-    legacy_guard: bool = True,
     experiment_id: UUID | None = None,
     model_binding_id: UUID | None = None,
     model_binding_node_key: str | None = None,
 ) -> list[UUID]:
-    if legacy_guard:
-        await require_legacy_execution_allowed(
-            session, project_id=project_id, action="legacy_shot_media_service"
-        )
     """Queue missing shot-pipeline nodes with persisted Plan and Shot context.
 
     A normal start is idempotent: already queued or successful nodes are left
@@ -522,32 +516,6 @@ async def start_shot_nodes(
         candidate_prompt = keyframe_snapshot.get("canonical_locked_prompt")
         if isinstance(candidate_prompt, str):
             canonical_locked_prompt = candidate_prompt
-    if not canonical_binding:
-        from app.assets.models import Asset, Character, CharacterReference
-
-        canonical = (
-            await session.execute(
-                select(CharacterReference, Character.locked_prompt, Artifact)
-                .join(Character, Character.id == CharacterReference.character_id)
-                .join(Asset, Asset.id == Character.id)
-                .outerjoin(Artifact, Artifact.id == CharacterReference.artifact_id)
-                .where(Asset.project_id == project_id)
-                .where(CharacterReference.is_canonical.is_(True))
-                .order_by(CharacterReference.created_at.desc(), CharacterReference.id.desc())
-                .limit(1)
-            )
-        ).one_or_none()
-        if canonical is not None:
-            reference, locked_prompt, artifact = canonical
-            if artifact is not None and reference.artifact_id is not None:
-                canonical_binding = {
-                    "canonical_artifact_id": str(artifact.id),
-                    "canonical_object_key": artifact.object_key,
-                    "canonical_content_hash": artifact.content_hash,
-                    "canonical_mime_type": artifact.mime_type,
-                }
-            if isinstance(locked_prompt, str):
-                canonical_locked_prompt = locked_prompt
     probe_binding: dict[str, object] = {}
     if prior_keyframe is not None and prior_keyframe.result_artifact_id is not None:
         artifact = await session.get(Artifact, prior_keyframe.result_artifact_id)
@@ -642,8 +610,6 @@ async def start_shot_nodes(
             "model_profile": model_profile,
             **execution_freeze,
         }
-        if not legacy_guard:
-            snapshot["professional_trial_bootstrap_allowed"] = True
         if experiment_id is not None:
             snapshot["experiment_id"] = str(experiment_id)
         if model_binding_id is not None and key == model_binding_node_key:
@@ -687,12 +653,7 @@ async def local_rerun_from_node(
     shot_id: UUID,
     user_id: UUID,
     changed_node_key: str,
-    legacy_guard: bool = True,
 ) -> tuple[list[str], list[UUID]]:
-    if legacy_guard:
-        await require_legacy_execution_allowed(
-            session, project_id=project_id, action="legacy_shot_rerun_service"
-        )
     """Mark correct downstream stale and return (keys, run_ids) that must re-run."""
     if await is_shot_locked(session, project_id=project_id, shot_id=shot_id):
         raise ValidationAppError("shot is human-locked")
@@ -713,7 +674,6 @@ async def local_rerun_from_node(
         node_keys=to_run,
         force=True,
         include_missing_dependencies=True,
-        legacy_guard=legacy_guard,
     )
     return to_run, run_ids
 

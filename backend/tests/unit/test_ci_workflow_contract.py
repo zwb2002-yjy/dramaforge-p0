@@ -102,6 +102,33 @@ def test_postgres_integration_job_checks_schema_before_integration_tests() -> No
     assert upgrade < schema_check < integration
 
 
+def test_container_gate_owns_dependency_install_and_quality_commands() -> None:
+    workflow = _WORKFLOW.read_text(encoding="utf-8")
+    container_job = _job(workflow, "container-gates")
+    assert "docker-compose.quality.yml" in container_job
+    assert "docker compose -f docker-compose.quality.yml build" in container_job
+    assert "--exit-code-from backend-quality" in container_job
+    assert "postgres-quality backend-quality" in container_job
+    assert "run --rm --no-deps frontend-quality" in container_job
+    assert "if: always()" in container_job
+
+
+def test_container_gate_runs_canonical_surface_scan() -> None:
+    dockerfile = (
+        Path(__file__).resolve().parents[3] / "backend" / "Dockerfile.quality"
+    ).read_text(encoding="utf-8")
+    assert "scripts/check_canonical_surface.py" in dockerfile
+    assert "uv run --directory backend mypy app" in dockerfile
+
+
+def test_frontend_quality_image_owns_browser_e2e_gate() -> None:
+    dockerfile = (
+        Path(__file__).resolve().parents[3] / "frontend" / "Dockerfile.quality"
+    ).read_text(encoding="utf-8")
+    assert "chromium" in dockerfile
+    assert "npm run --prefix frontend test:e2e" in dockerfile
+
+
 def test_security_workflow_gates_optional_dependency_review_on_repository_capability() -> None:
     workflow = _SECURITY_WORKFLOW.read_text(encoding="utf-8")
     dependency_review = _job(workflow, "dependency-review")

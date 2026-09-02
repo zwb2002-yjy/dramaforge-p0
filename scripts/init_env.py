@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import os
 import secrets
 import subprocess
 from pathlib import Path
@@ -27,16 +28,19 @@ def render_env(template: str) -> str:
         f"{generated['POSTGRES_APP_PASSWORD']}@localhost:5432/dramaforge"
     )
     generated["MINIO_SECRET_KEY"] = generated["MINIO_ROOT_PASSWORD"]
-    source_commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=Path(__file__).resolve().parents[1],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if source_commit.returncode != 0 or not source_commit.stdout.strip():
+    source_commit_value = os.environ.get("DRAMAFORGE_SOURCE_COMMIT", "").strip()
+    if not source_commit_value:
+        source_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        source_commit_value = source_commit.stdout.strip()
+    if not source_commit_value:
         raise RuntimeError("cannot resolve DRAMAFORGE_SOURCE_COMMIT from git HEAD")
-    generated["DRAMAFORGE_SOURCE_COMMIT"] = source_commit.stdout.strip()
+    generated["DRAMAFORGE_SOURCE_COMMIT"] = source_commit_value
     seen: set[str] = set()
     output: list[str] = []
     for line in template.splitlines():

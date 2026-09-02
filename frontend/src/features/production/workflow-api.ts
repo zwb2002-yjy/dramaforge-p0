@@ -11,7 +11,7 @@ export type CapabilityAssessmentRead = {
 };
 
 export type ParticipationRead = {
-  character_id: string;
+  asset_id: string;
   asset_version_id: string | null;
   screen_role: string;
   importance: number;

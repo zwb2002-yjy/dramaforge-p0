@@ -3,7 +3,7 @@
 The V3 router normally resolves a model from the static registry. For business
 paths that hold a workspace but no shot binding (e.g. canonical lead portrait),
 the adapter must use the workspace's BYOK credential. This module builds a
-:class:`LegacyAdapterBridge` for one provider/profile/media from the workspace's
+:class:`ProviderAdapterBridge` for one provider/profile/media from the workspace's
 enabled connection, so business code goes through the same
 ``CapabilityRouter → Adapter → Runtime`` surface instead of a provider getter.
 """
@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.providers.adapters_v2 import BridgeComponents, LegacyAdapterBridge
+from app.providers.adapters_v2 import BridgeComponents, ProviderAdapterBridge
 from app.providers.bootstrap import transport_profile_id_for
 from app.providers.catalog_seed_data import seed_manifests_for
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
@@ -52,7 +52,7 @@ async def resolve_workspace_bridge(
     provider_type: str,
     media_kind: str,
     settings: Settings | None = None,
-) -> LegacyAdapterBridge:
+) -> ProviderAdapterBridge:
     """Build a V2 bridge for the workspace's enabled connection of
     ``provider_type``, wired to the BYOK credential and connection host."""
     connection = await session.scalar(
@@ -101,7 +101,7 @@ async def resolve_workspace_bridge(
     v3 = to_v3_model_manifest(a_b, transport_profile_id=transport_profile_id)
     image_compiler = resolved.image_compiler if media_kind == "image" else None
     video_compiler = resolved.video_compiler if media_kind == "video" else None
-    return LegacyAdapterBridge(
+    return ProviderAdapterBridge(
         v3,
         BridgeComponents(
             a_b_manifest=a_b,

@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
-from app.director.models import DirectorThread
+from app.director.assistant_models import DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession

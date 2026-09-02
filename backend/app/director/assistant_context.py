@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import Project
 from app.assets.models import Episode, Scene, Shot
 from app.delivery.models import ReviewAnnotation
-from app.director.models import DirectorMessage, DirectorThread
+from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.execution.models import Artifact
 from app.production.models import ShotExperiment, ShotReferenceBinding
 from app.providers.model_profiles.service import ProductionModelProfileService

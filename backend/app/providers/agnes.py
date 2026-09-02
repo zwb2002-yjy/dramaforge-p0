@@ -57,7 +57,7 @@ def _submission_gate(host: str, limit: int) -> asyncio.Semaphore:
 
 
 def normalize_agnes_host(value: str) -> str:
-    """Normalize a legacy ``.../v1`` setting into a profile-independent host."""
+    """Normalize a compatibility ``.../v1`` setting into a profile-independent host."""
     raw = value.strip().rstrip("/")
     if raw.endswith("/v1"):
         raw = raw[:-3]
@@ -185,7 +185,7 @@ def _video_result_url(data: dict[str, Any]) -> str | None:
 
 # ---------------------------------------------------------------------------
 # Low-level transport and wire-body builders (single source of truth).
-# Both the legacy HubClient methods and the unified Compiler/Runtime go through
+# Both the compatibility HubClient methods and the unified Compiler/Runtime go through
 # these, so there is exactly one wire contract and one HTTP send path.
 # ---------------------------------------------------------------------------
 
@@ -896,7 +896,7 @@ class AgnesImageCompiler:
         )
         summary.update({"size": size, "aspect_ratio": ratio})
         # Publish the effective-options envelope alongside the transformation list.
-        # The legacy bridge adapter's fail-closed compiler-evidence check
+        # The provider adapter bridge adapter's fail-closed compiler-evidence check
         # (``adapters_v2._compiler_translation_evidence``) requires that
         # ``effective_common_options`` and ``translation_transformations`` appear
         # together; publishing only the latter made the canonical-generation

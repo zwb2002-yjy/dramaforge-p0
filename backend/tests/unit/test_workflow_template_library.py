@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from app.director.production_templates import (
-    DIALOGUE_POST_DUB_SHOT_V1,
-    QUALITY_POLICY_V1,
-    dialogue_post_dub_definition,
-)
 from app.director.workflows.library import (
     dialogue_graph_factory,
     dialogue_post_dub_spec,
     get_default_registry,
+)
+from app.production.templates import (
+    DIALOGUE_POST_DUB_SHOT_V1,
+    QUALITY_POLICY_V1,
+    dialogue_post_dub_definition,
 )
 
 

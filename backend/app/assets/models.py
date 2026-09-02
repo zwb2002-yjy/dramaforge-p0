@@ -1,4 +1,4 @@
-"""Script / Episode / Scene / Shot / Character models (field-faithful subset of `04`)."""
+"""Canonical Script / Episode / Scene / Shot and versioned Asset models."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -287,39 +286,11 @@ class AssetVersion(Base):
     )
 
 
-class Character(Base):
-    __tablename__ = "characters"
-
-    id: Mapped[UUID] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), primary_key=True)
-    locked_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    negative_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    calibration_state: Mapped[str] = mapped_column(String(32), nullable=False, default="unreviewed")
-
-
-class CharacterReference(Base):
-    __tablename__ = "character_references"
-
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    character_id: Mapped[UUID] = mapped_column(
-        ForeignKey("characters.id", ondelete="CASCADE"), nullable=False
-    )
-    artifact_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
-    )
-    object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    reference_kind: Mapped[str] = mapped_column(String(40), nullable=False, default="canonical")
-    is_canonical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-
-
 class AssetVersionReference(Base):
     """Immutable artifact reference pinned to a specific asset version.
 
-    Phase 2: the canonical reference source for execution. Old
-    ``CharacterReference`` rows remain readable during the migration window and
-    are merged by ``AssetCardReadService`` without duplication.
+    The canonical reference source for execution. References are always pinned
+    to an explicit AssetVersion; no name-based or compatibility lookup exists.
     """
 
     __tablename__ = "asset_version_references"

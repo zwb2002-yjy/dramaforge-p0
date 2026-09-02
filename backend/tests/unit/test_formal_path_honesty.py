@@ -110,13 +110,13 @@ async def test_enqueue_does_not_return_local_on_redis_failure(
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
-    from app.runtime.scheduler import AgentRunScheduler
+    from app.runtime.scheduler import NodeRunScheduler
     from app.shared.errors import ValidationAppError
 
     session = MagicMock()
     session.get = AsyncMock(return_value=None)
     session.commit = AsyncMock()
-    sched = AgentRunScheduler(session)
+    sched = NodeRunScheduler(session)
 
     async def boom(*_a, **_k):
         raise OSError("redis down")
@@ -134,7 +134,7 @@ async def test_media_node_enqueues_on_heavy_queue(monkeypatch: pytest.MonkeyPatc
     from unittest.mock import AsyncMock, MagicMock
 
     from app.config import get_settings
-    from app.runtime.scheduler import AgentRunScheduler
+    from app.runtime.scheduler import NodeRunScheduler
 
     session = MagicMock()
     session.get = AsyncMock(
@@ -152,7 +152,7 @@ async def test_media_node_enqueues_on_heavy_queue(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr("arq.create_pool", create_pool)
 
-    job_id = await AgentRunScheduler(session)._enqueue_node_run(uuid4())
+    job_id = await NodeRunScheduler(session)._enqueue_node_run(uuid4())
 
     assert job_id == "heavy-job"
     assert redis.enqueue_job.await_args.kwargs["_queue_name"] == get_settings().arq_heavy_queue_name
@@ -231,15 +231,3 @@ async def test_resolve_media_bytes_no_stub_outside_test(monkeypatch: pytest.Monk
     finally:
         monkeypatch.setenv("APP_ENV", "test")
         clear_settings_cache()
-
-
-def test_full_product_script_refuses_force_memory() -> None:
-    from pathlib import Path
-
-    repo = Path(__file__).resolve().parents[3]
-    text = (repo / "scripts" / "run_p0_full_product.py").read_text(encoding="utf-8")
-    assert 'setdefault("DRAMA_FORCE_MEMORY_STORE"' not in text
-    assert "DRAMA_FORCE_MEMORY_STORE\", \"1\")" not in text
-    assert "WorkerRuntime" not in text or "do NOT call WorkerRuntime" in text
-    # must not silent FakeFlux for canonical
-    assert "canon fallback" not in text

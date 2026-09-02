@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1 import workbench as _workbench
-from app.shared.enums import ExperienceMode, ProjectStage
+from app.shared.enums import ProjectStage
 
 router = APIRouter(
     tags=["projects"], dependencies=[Depends(require_selected_workspace)]
@@ -37,19 +37,6 @@ class ProjectRead(BaseModel):
     target_platform: str
     provider_dispatch_frozen: bool
     version: int
-
-
-class ExperienceModeUpdate(BaseModel):
-    experience_mode: ExperienceMode
-
-
-class PreferenceRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    user_id: UUID
-    project_id: UUID
-    experience_mode: ExperienceMode
-    last_guided_step: str | None
 
 
 def _project_read(project: object) -> ProjectRead:
@@ -94,26 +81,3 @@ async def get_project(
         project_id=project_id, actor=user
     )
     return _project_read(project)
-
-
-@router.put(
-    "/projects/{project_id}/preferences/experience-mode",
-    response_model=PreferenceRead,
-)
-async def set_experience_mode(
-    project_id: UUID,
-    body: ExperienceModeUpdate,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-) -> PreferenceRead:
-    pref = await ProjectService(session).set_experience_mode(
-        project_id=project_id, actor=user, mode=body.experience_mode
-    )
-    await session.commit()
-    return PreferenceRead(
-        user_id=pref.user_id,
-        project_id=pref.project_id,
-        experience_mode=ExperienceMode(pref.experience_mode),
-        last_guided_step=pref.last_guided_step,
-    )

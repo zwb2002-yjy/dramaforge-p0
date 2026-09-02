@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from pg_support import available
 from sqlalchemy import create_engine, text
 
 REPO = Path(__file__).resolve().parents[3]
@@ -26,16 +27,7 @@ def _sync_url() -> str:
 
 
 def _pg_available() -> bool:
-    try:
-        engine = create_engine(
-            _sync_url(), pool_pre_ping=True, connect_args={"connect_timeout": 2}
-        )
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        engine.dispose()
-        return True
-    except Exception:
-        return False
+    return available(_sync_url())
 
 
 pytestmark = pytest.mark.skipif(
@@ -52,12 +44,11 @@ REQUIRED_TABLES = (
     "node_runs",
     "artifacts",
     "provider_operations",
-    "creative_briefs",
-    "creative_brief_revisions",
-    "creation_plans",
-    "planning_authorizations",
-    "agent_runs",
-    "materialization_operations",
+    "director_threads",
+    "director_messages",
+    "director_proposals",
+    "director_proposal_items",
+    "asset_version_references",
     "provider_connections",
     "provider_capability_evidence",
     "provider_model_bindings",
@@ -68,7 +59,7 @@ REQUIRED_TABLES = (
 )
 
 
-def test_migration_head_creates_execution_creation_tables() -> None:
+def test_migration_head_creates_canonical_schema_and_removes_retired_tables() -> None:
     engine = create_engine(_sync_url(), pool_pre_ping=True)
     with engine.connect() as conn:
         rows = conn.execute(
@@ -84,6 +75,20 @@ def test_migration_head_creates_execution_creation_tables() -> None:
     engine.dispose()
     missing = set(REQUIRED_TABLES) - present
     assert not missing, f"missing tables after upgrade: {sorted(missing)}"
+    retired = {
+        "creative_briefs",
+        "creative_brief_revisions",
+        "creation_plans",
+        "planning_authorizations",
+        "agent_runs",
+        "materialization_operations",
+        "director_workflow_runs",
+        "production_batches",
+        "budget_authorizations",
+        "characters",
+        "character_references",
+    }
+    assert not retired & present, f"retired tables still present: {sorted(retired & present)}"
 
 
 def test_can_insert_graph_node_and_artifact_shell() -> None:

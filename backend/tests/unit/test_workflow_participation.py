@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from app.access.models import User, Workspace
-from app.assets.models import Asset, AssetVersion, Character
+from app.assets.models import Asset, AssetVersion
 from app.director.workflows.character_participation import (
     DialogueRole,
     ScreenRole,
@@ -71,9 +71,6 @@ async def _seed_character(
     )
     session.add(asset)
     await session.flush()
-    character = Character(id=asset.id, locked_prompt="lead", negative_prompt="")
-    session.add(character)
-    await session.flush()
     version = AssetVersion(
         project_id=project_id,
         asset_id=asset.id,
@@ -89,10 +86,10 @@ async def _seed_character(
 
 
 def _participation(
-    character_id: UUID, asset_version_id: UUID, role: ScreenRole
+    asset_id: UUID, asset_version_id: UUID, role: ScreenRole
 ) -> ShotCharacterParticipation:
     return ShotCharacterParticipation(
-        character_id=character_id,
+        asset_id=asset_id,
         asset_version_id=asset_version_id,
         screen_role=role,
         importance=80,
@@ -111,7 +108,7 @@ async def test_participation_plan_round_trip(session: AsyncSession) -> None:
     )
     assert plan.visible_controlled_count == 1
     state = participation_director_state(plan)
-    assert state["workflow_participations"][0]["character_id"] == str(char_a)
+    assert state["workflow_participations"][0]["asset_id"] == str(char_a)
     assert state["max_visible_controlled_characters"] == 4
 
 
@@ -147,7 +144,7 @@ async def test_participation_plan_requires_identity_binding(session: AsyncSessio
         ShotParticipationPlan(
             participations=[
                 ShotCharacterParticipation(
-                    character_id=uuid4(),
+                    asset_id=uuid4(),
                     asset_version_id=None,
                     screen_role=ScreenRole.PRIMARY,
                 )
@@ -178,16 +175,16 @@ async def test_validate_participation_bindings_cross_workspace(session: AsyncSes
         await validate_participation_bindings(
             session, project_id=other_project, plan=plan
         )
-    assert excinfo.value.details.get("code") == "PARTICIPATION_ASSET_VERSION_CROSS_WORKSPACE"
+    assert excinfo.value.details.get("code") == "PARTICIPATION_ASSET_CROSS_WORKSPACE"
 
 
 @pytest.mark.asyncio
 async def test_validate_participation_bindings_unknown_character(session: AsyncSession) -> None:
-    project_id = await _seed_project(session)
+    project_id, _ = await _seed_project(session)
     plan = ShotParticipationPlan(
         participations=[
             ShotCharacterParticipation(
-                character_id=uuid4(),
+                asset_id=uuid4(),
                 asset_version_id=None,
                 screen_role=ScreenRole.OFFSCREEN,
             )
@@ -195,4 +192,4 @@ async def test_validate_participation_bindings_unknown_character(session: AsyncS
     )
     with pytest.raises(ValidationAppError) as excinfo:
         await validate_participation_bindings(session, project_id=project_id, plan=plan)
-    assert excinfo.value.details.get("code") == "PARTICIPATION_CHARACTER_NOT_FOUND"
+    assert excinfo.value.details.get("code") == "PARTICIPATION_ASSET_NOT_FOUND"

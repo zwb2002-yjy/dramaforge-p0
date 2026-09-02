@@ -131,7 +131,7 @@ class FreezeWorkflowBody(BaseModel):
 
 
 class ParticipationItemBody(BaseModel):
-    character_id: UUID
+    asset_id: UUID
     asset_version_id: UUID | None = None
     screen_role: str = "secondary"
     importance: int = Field(default=50, ge=0, le=100)
@@ -283,7 +283,7 @@ async def freeze_participation_plan(
             raise ValidationAppError(f"invalid role value: {exc}") from exc
         roles.append(
             ShotCharacterParticipation(
-                character_id=item.character_id,
+                asset_id=item.asset_id,
                 asset_version_id=item.asset_version_id,
                 screen_role=screen_role,
                 importance=item.importance,

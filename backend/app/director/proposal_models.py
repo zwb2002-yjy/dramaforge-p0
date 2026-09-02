@@ -24,7 +24,6 @@ class DirectorProposal(Base):
     thread_id: Mapped[UUID] = mapped_column(
         ForeignKey("director_threads.id", ondelete="CASCADE"), nullable=False
     )
-    agent_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
     scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
     scope_entity_id: Mapped[UUID] = mapped_column(nullable=False)
     status: Mapped[str] = mapped_column(

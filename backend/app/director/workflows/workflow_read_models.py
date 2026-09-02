@@ -40,7 +40,7 @@ class ParticipationEntry(BaseModel):
     # view intentionally omits; allow (and ignore) it here.
     model_config = ConfigDict(frozen=True, extra="ignore")
 
-    character_id: str
+    asset_id: str
     asset_version_id: str | None = None
     screen_role: str
     importance: int = 50
@@ -184,7 +184,7 @@ def build_shot_workflow_state(
         plan = ShotParticipationPlan(
             participations=[
                 ShotCharacterParticipation(
-                    character_id=UUID(entry.character_id),
+                    asset_id=UUID(entry.asset_id),
                     asset_version_id=(
                         UUID(entry.asset_version_id) if entry.asset_version_id else None
                     ),

@@ -1,5 +1,4 @@
-"""Phase 8 Gate tests (03 §79): multi-person scene, 2D plan, 3D-consistent data,
-DirectorControlPackage, unsupported warning, skip-direct-route."""
+"""Canonical deterministic Scene layout and direct Workbench path tests."""
 
 from __future__ import annotations
 
@@ -10,18 +9,11 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.assets.models import Scene, Shot
-from app.director.control_package import CameraControl, DirectorControlPackage
 from app.director.scene_assembler import (
     CharacterSpec,
     SceneAssembler,
     SceneLayoutSpec,
     SceneObjectSpec,
-)
-from app.providers.capabilities import Capability
-from app.providers.manifest import (
-    CapabilitySpec,
-    ModelManifest,
-    SubmissionSemantics,
 )
 from app.shared.base import Base
 from app.shared.security import hash_password
@@ -37,25 +29,6 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
     async with factory() as db_session:
         yield db_session
     await engine.dispose()
-
-
-def _manifest() -> ModelManifest:
-    return ModelManifest(
-        manifest_version="1",
-        id="agnes/video",
-        provider_id="agnes",
-        model_name="video",
-        display_name="Video",
-        capability_specs={
-            Capability.VIDEO_IMAGE_TO_VIDEO: CapabilitySpec(
-                capability=Capability.VIDEO_IMAGE_TO_VIDEO,
-                transport_profile_id="t1",
-                common_options={"camera_shot_size": {"type": "string", "ui_component": "select"}},
-            )
-        },
-        execution_mode="async_poll",
-        submission_semantics=SubmissionSemantics(),
-    )
 
 
 def test_gate_1_scene_assembler_deterministic_coordinates() -> None:
@@ -74,26 +47,6 @@ def test_gate_1_scene_assembler_deterministic_coordinates() -> None:
     assert "character" in kinds and "table" in kinds and "door" in kinds
     door = next(item for item in elements if item["kind"] == "door")
     assert door["x"] == 0.5 and door["y"] == 0.15  # north
-
-
-def test_gate_4_control_package_to_plan_controls_exact_and_warning() -> None:
-    """§79-4/5: converts to DirectorControlPackage; unsupported controls warn."""
-    package = DirectorControlPackage(
-        composition={"rule_of_thirds": True},
-        camera=CameraControl(shot_size="close", angle="low", movement="dolly"),
-        blocking={"elements": [], "composition_bounds": {}},
-    )
-    translations, gaps = package.to_plan_controls(
-        manifest=_manifest(), capability=Capability.VIDEO_IMAGE_TO_VIDEO
-    )
-    shot_size = [t for t in translations if t.control == "camera_shot_size"]
-    assert shot_size and shot_size[0].status == "exact"
-    # camera_angle / camera_movement not declared -> warning gaps
-    warnings = [g for g in gaps if g.severity == "warning"]
-    assert any("camera_angle" in g.controls for g in warnings)
-    assert any("camera_movement" in g.controls for g in warnings)
-    # blocking approximated
-    assert any(t.control == "blocking" and t.status == "approximate" for t in translations)
 
 
 async def _seed_scene_shot(session: AsyncSession) -> tuple[Project, Shot, User]:

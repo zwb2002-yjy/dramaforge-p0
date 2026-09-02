@@ -9,7 +9,7 @@ surface and fails if a Kling/Flux label leaks into the model identity.
 
 from __future__ import annotations
 
-from app.providers.adapters_v2 import BridgeComponents, LegacyAdapterBridge
+from app.providers.adapters_v2 import BridgeComponents, ProviderAdapterBridge
 from app.providers.bootstrap import build_v3_registry
 from app.providers.capabilities import Capability
 from app.providers.catalog_seed_data import seed_manifests_for
@@ -50,7 +50,7 @@ class TestAgnesIdentity:
         v3 = to_v3_model_manifest(manifest, transport_profile_id="agnes-video-v1")
         from app.providers.agnes import AgnesVideoCompiler
 
-        bridge = LegacyAdapterBridge(
+        bridge = ProviderAdapterBridge(
             v3,
             BridgeComponents(
                 a_b_manifest=manifest,

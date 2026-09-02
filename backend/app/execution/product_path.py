@@ -15,7 +15,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import httpcore
 import httpx
@@ -35,21 +35,13 @@ from app.consistency.identity_policy import (
     validate_identity_evidence_policy,
 )
 from app.consistency.identity_review import identity_review_images
-from app.creation.models import CreationPlan
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
-from app.execution.shot_pipeline import (
-    SHOT_PIPELINE_TEMPLATE_KEY,
-    shot_pipeline_definition,
-)
-from app.production.service import GraphService
 from app.providers.base import ProviderAdapter
-from app.providers.fake import FakeFluxAdapter
 from app.providers.request_summary import normalize_request_summary
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
-    AppError,
     NodeRunAlreadyClaimedError,
     ProviderTaskPendingError,
     ValidationAppError,
@@ -57,7 +49,6 @@ from app.shared.errors import (
 from app.storage.minio_store import ObjectStore, get_object_store
 
 if TYPE_CHECKING:
-    from app.director.execution_guard import DirectorMediaExecutionContext
     from app.providers.runtime import ResolvedReference
 
 _MAX_PROVIDER_MEDIA_BYTES = 512 * 1024 * 1024
@@ -365,14 +356,6 @@ def _binding_pricing_currency(binding: object, *, required: bool) -> str | None:
 
 
 @dataclass(frozen=True)
-class EnqueueKeyframeResult:
-    graph_id: UUID
-    graph_version_id: UUID
-    node_run_id: UUID
-    graph_node_id: UUID
-
-
-@dataclass(frozen=True)
 class ExecuteNodeResult:
     node_run_id: UUID
     artifact_id: UUID
@@ -567,74 +550,6 @@ async def _read_bound_artifact(
     return artifact, data
 
 
-async def _bind_director_canonical_source(
-    session: AsyncSession,
-    *,
-    run: NodeRun,
-    snapshot: dict[str, object],
-) -> dict[str, object]:
-    """Resolve the Director's frozen canonical source without a silent fallback."""
-
-    raw_source_id = snapshot.get("canonical_source_run_id")
-    if raw_source_id is None or snapshot.get("canonical_artifact_id") is not None:
-        return snapshot
-    try:
-        source_id = UUID(str(raw_source_id))
-    except (TypeError, ValueError, AttributeError) as exc:
-        raise ValidationAppError(
-            "canonical source NodeRun binding is invalid",
-            details={"code": "CANONICAL_SOURCE_RUN_INVALID"},
-        ) from exc
-    source = await session.get(NodeRun, source_id)
-    if (
-        source is None
-        or source.project_id != run.project_id
-        or run.production_batch_id is None
-        or source.production_batch_id != run.production_batch_id
-    ):
-        raise ValidationAppError(
-            "canonical source NodeRun is outside this Director production batch",
-            details={"code": "CANONICAL_SOURCE_RUN_INVALID"},
-        )
-    if (
-        source.status not in {"completed", "cached", "completed_after_cancel"}
-        or source.result_artifact_id is None
-    ):
-        raise ValidationAppError(
-            "canonical source NodeRun has not completed with an image",
-            details={"code": "CANONICAL_SOURCE_NOT_READY"},
-        )
-    artifact = await session.get(Artifact, source.result_artifact_id)
-    origin: NodeRun | None = source
-    visited_run_ids: set[UUID] = set()
-    while origin is not None and origin.reused_from_run_id is not None:
-        if origin.id in visited_run_ids:
-            origin = None
-            break
-        visited_run_ids.add(origin.id)
-        origin = await session.get(NodeRun, origin.reused_from_run_id)
-        if origin is None or origin.project_id != run.project_id:
-            break
-    if (
-        artifact is None
-        or artifact.project_id != run.project_id
-        or artifact.artifact_type != "image"
-        or artifact.storage_state != "available"
-        or artifact.deleted_at is not None
-        or origin is None
-        or artifact.produced_by_run_id != origin.id
-    ):
-        raise ValidationAppError(
-            "canonical source NodeRun image Artifact is missing",
-            details={"code": "CANONICAL_SOURCE_ARTIFACT_MISSING"},
-        )
-    resolved = {
-        **snapshot,
-        **_artifact_snapshot(artifact, prefix="canonical"),
-        "canonical_source_run_id": str(source.id),
-    }
-    return resolved
-
 
 def identity_priority_keyframe_prompt(
     prompt: str,
@@ -676,48 +591,6 @@ async def _commit_terminal_failure(
     await session.flush()
     await session.commit()
     await set_node_run_rls_context(session, node_run_id=run.id)
-
-
-async def _validate_director_submission_or_block(
-    session: AsyncSession,
-    *,
-    run: NodeRun,
-    node: GraphNode,
-    provider_operation: ProviderOperation | None = None,
-) -> DirectorMediaExecutionContext | None:
-    from datetime import UTC, datetime
-
-    from app.director.execution_guard import (
-        DirectorExecutionGuardError,
-        validate_director_media_submission,
-    )
-
-    try:
-        return await validate_director_media_submission(
-            session,
-            run=run,
-            node=node,
-        )
-    except DirectorExecutionGuardError as exc:
-        if provider_operation is not None:
-            provider_operation.status = "rejected"
-            provider_operation.error_code = exc.code
-            provider_operation.error_summary = exc.message[:500]
-            provider_operation.completed_at = datetime.now(UTC)
-        blocked_budget = exc.code in {
-            "DIRECTOR_PRODUCTION_CONTEXT_REQUIRED",
-            "DIRECTOR_BUDGET_RESERVATION_INVALID",
-            "DIRECTOR_BUDGET_AUTHORIZATION_INACTIVE",
-            "DIRECTOR_BUDGET_AUTHORIZATION_EXCEEDED",
-        }
-        await _commit_terminal_failure(
-            session,
-            run=run,
-            error_code=exc.code,
-            error_summary=exc.message,
-            status="blocked_budget" if blocked_budget else "failed",
-        )
-        raise
 
 
 async def claim_media_node_run(
@@ -763,192 +636,6 @@ async def claim_media_node_run(
     return run
 
 
-async def enqueue_keyframe_after_plan(
-    session: AsyncSession,
-    *,
-    project_id: UUID,
-    user_id: UUID,
-    plan: CreationPlan,
-    materialization_ops: list[str],
-    shot_id: UUID | None = None,
-    shot_plan: dict[str, object] | None = None,
-) -> EnqueueKeyframeResult:
-    """Publish the full Shot graph and queue its first keyframe NodeRun.
-
-    The remaining nodes are intentionally started through the per-shot API once
-    the operator is ready to advance that shot. This keeps provider work
-    explicit while giving every run the same persisted Plan context.
-    """
-    graphs = GraphService(session)
-    shot_id = shot_id or uuid4()
-    shot_body = dict(shot_plan or {})
-    prompt = str(
-        shot_body.get("keyframe_prompt")
-        or shot_body.get("prompt")
-        or plan.plan.get("prompt")
-        or "Cinematic keyframe, 9:16"
-    )
-    from app.access.models import Project
-
-    project = await session.get(Project, project_id)
-    assert project is not None
-    from app.providers.model_profiles.node_snapshot import planned_node_model_profile
-
-    model_profile = await planned_node_model_profile(session, project=project, node_key="keyframe")
-    graph = await graphs.create_graph(
-        project_id=project_id,
-        scope_type="shot",
-        scope_entity_id=shot_id,
-        template_key=SHOT_PIPELINE_TEMPLATE_KEY,
-        created_by=user_id,
-        definition=shot_pipeline_definition(
-            materialization=materialization_ops,
-            plan_id=str(plan.id),
-            shot_id=str(shot_id),
-            shot=shot_body,
-            model_profile=model_profile,
-        ),
-    )
-    assert graph.current_version_id is not None
-    materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
-    version = await graphs.publish(version_id=materialized.version.id, published_by=user_id)
-    nodes = materialized.nodes
-    node = nodes["keyframe"]
-    # Attach the registered project Canonical for request lineage and creator review.
-    from sqlalchemy import select
-
-    from app.assets.models import Asset, Character, CharacterReference
-
-    canonical_artifact: Artifact | None = None
-    canonical_locked_prompt = ""
-    ref = (
-        await session.execute(
-            select(CharacterReference, Character.locked_prompt, Artifact)
-            .join(Character, Character.id == CharacterReference.character_id)
-            .join(Asset, Asset.id == Character.id)
-            .outerjoin(Artifact, Artifact.id == CharacterReference.artifact_id)
-            .where(Asset.project_id == project_id)
-            .where(CharacterReference.is_canonical.is_(True))
-            .limit(1)
-        )
-    ).one_or_none()
-    if ref is not None:
-        canonical_artifact = ref[2]
-        canonical_locked_prompt = ref[1]
-    lead_identity_required = shot_body.get("lead_identity_required") is True
-    if lead_identity_required and canonical_locked_prompt:
-        prompt = identity_priority_keyframe_prompt(
-            prompt,
-            canonical_locked_prompt=canonical_locked_prompt,
-        )
-
-    snapshot: dict[str, object] = {
-        "plan_id": str(plan.id),
-        "shot_id": str(shot_id),
-        "node_key": "keyframe",
-        "source_commit": get_settings().source_commit,
-        "plan": {
-            "prompt": prompt,
-            "shot": shot_body,
-            "visual_bible": plan.plan.get("visual_bible", {}),
-        },
-        "prompt": prompt,
-        "materialization": materialization_ops,
-        "lead_identity_required": lead_identity_required,
-        "identity_evidence_policy": identity_evidence_policy_snapshot(),
-        "model_profile": model_profile,
-    }
-    if canonical_artifact is not None:
-        snapshot.update(_artifact_snapshot(canonical_artifact, prefix="canonical"))
-    if canonical_locked_prompt:
-        snapshot["canonical_locked_prompt"] = canonical_locked_prompt
-
-    # The graph declares prompt -> keyframe. Materialization of the accepted Plan
-    # is a deterministic, zero-cost upstream result, so persist its document and
-    # lineage before queueing any paid image work.
-    import json
-    from datetime import UTC, datetime
-
-    prompt_node = nodes["prompt"]
-    prompt_snapshot: dict[str, object] = {
-        **snapshot,
-        "node_key": "prompt",
-        # prompt_compose has no model slot; drop the keyframe slot's profile.
-        "model_profile": {},
-    }
-    prompt_hash = _input_hash(prompt_snapshot)
-    now = datetime.now(UTC)
-    prompt_run = NodeRun(
-        id=uuid4(),
-        project_id=project_id,
-        graph_version_id=version.id,
-        graph_node_id=prompt_node.id,
-        attempt_no=1,
-        idempotency_key=f"prompt:{shot_id}:{prompt_hash}",
-        input_hash=prompt_hash,
-        status="running",
-        input_snapshot=prompt_snapshot,
-        output_summary={},
-        started_at=now,
-        created_by=user_id,
-    )
-    session.add(prompt_run)
-    await session.flush()
-    prompt_bytes = json.dumps(
-        {"prompt": prompt, "status": "passed"},
-        ensure_ascii=True,
-        sort_keys=True,
-    ).encode("utf-8")
-    prompt_store = get_object_store()
-    stored_prompt = await prompt_store.put_bytes(
-        object_key=f"projects/{project_id}/nodes/prompt/{prompt_run.id}.json",
-        data=prompt_bytes,
-        mime_type="application/json",
-    )
-    prompt_artifact = await get_or_create_artifact(
-        session,
-        project_id=project_id,
-        artifact_type="document",
-        object_key=stored_prompt.object_key,
-        content_hash=stored_prompt.content_hash,
-        mime_type=stored_prompt.mime_type,
-        byte_size=stored_prompt.byte_size,
-        produced_by_run_id=prompt_run.id,
-    )
-    prompt_run.result_artifact_id = prompt_artifact.id
-    prompt_run.status = "completed"
-    prompt_run.finished_at = now
-    prompt_run.output_summary = {
-        "status": "passed",
-        "zero_provider_cost": True,
-        "artifact_id": str(prompt_artifact.id),
-        "content_hash": prompt_artifact.content_hash,
-        "byte_size": prompt_artifact.byte_size,
-        "source_commit": get_settings().source_commit,
-    }
-    prompt_node.latest_successful_run_id = prompt_run.id
-
-    ih = _input_hash(snapshot)
-    node_run = NodeRun(
-        project_id=project_id,
-        graph_version_id=version.id,
-        graph_node_id=node.id,
-        attempt_no=1,
-        idempotency_key=f"keyframe:{shot_id}:{ih}",
-        input_hash=ih,
-        status="queued",
-        input_snapshot=snapshot,
-        created_by=user_id,
-    )
-    session.add(node_run)
-    await session.flush()
-    return EnqueueKeyframeResult(
-        graph_id=graph.id,
-        graph_version_id=version.id,
-        node_run_id=node_run.id,
-        graph_node_id=node.id,
-    )
-
 
 async def execute_keyframe_node_run(
     session: AsyncSession,
@@ -970,74 +657,6 @@ async def execute_keyframe_node_run(
     )
 
 
-async def _run_shadow_selection(
-    session: AsyncSession,
-    *,
-    project: Project,
-    node_type: str,
-    prompt: str,
-    first_frame: Artifact | None,
-    op: ProviderOperation,
-    legacy_provider: str,
-    legacy_model: str,
-) -> None:
-    """Stage B1: resolve the intent through the unified path and compare with the
-    legacy resolution. Pure observation — never submits to a Provider."""
-    try:
-        from app.providers.intents import (
-            ArtifactReferenceIntent,
-            ImageGenerationIntent,
-            ModelSelectionIntent,
-            VideoGenerationIntentV1,
-        )
-        from app.providers.selection import ModelSelectionService
-
-        service = ModelSelectionService(session)
-        selection = ModelSelectionIntent(mode="explicit_binding")
-        if node_type == "keyframe":
-            image_intent = ImageGenerationIntent(prompt=prompt, selection=selection)
-            plan = await service.select_image(project=project, intent=image_intent)
-        else:
-            references = []
-            if first_frame is not None:
-                references.append(
-                    ArtifactReferenceIntent(
-                        artifact_id=first_frame.id,
-                        role="first_frame",
-                        required=True,
-                    )
-                )
-            video_intent = VideoGenerationIntentV1(
-                prompt=prompt,
-                references=references,
-                selection=selection,
-            )
-            plan = await service.select_video(project=project, intent=video_intent)
-        summary = dict(op.request_summary or {})
-        summary["shadow_selection"] = {
-            "resolved": True,
-            "provider_type": plan.provider_type,
-            "protocol_profile": plan.protocol_profile,
-            "model_id": plan.model_id,
-            "invoke_model_value": plan.invoke_model_value,
-            "model_binding_id": str(plan.model_binding_id) if plan.model_binding_id else None,
-            "manifest_hash": plan.manifest_hash,
-            "legacy_provider": legacy_provider,
-            "legacy_model": legacy_model,
-            "matches_legacy": (
-                plan.provider_type == legacy_provider and plan.invoke_model_value == legacy_model
-            ),
-        }
-        op.request_summary = summary
-        await session.flush()
-    except Exception as exc:  # noqa: BLE001 - shadow is observational, never blocks
-        summary = dict(op.request_summary or {})
-        summary["shadow_selection"] = {
-            "resolved": False,
-            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
-        }
-        op.request_summary = summary
-        await session.flush()
 
 
 UNIFIED_PATH_VERSION = "unified-v1"
@@ -1055,43 +674,19 @@ async def _unified_resolved_reference(
     fingerprint: str | None,
     provider_type: str,
 ) -> ResolvedReference:
-    """Resolve one artifact reference to the transport the selected Provider
-    requires: Ark references are short-lived public HTTPS URLs (issued through
-    the platform grant), Agnes references travel as bytes (data URI / raw
-    base64). A missing reference fails closed."""
-    from app.providers.reference_delivery import issue_artifact_reference
-    from app.providers.runtime import ResolvedReference
+    """Resolve one artifact reference through the provider delivery layer."""
+    from app.providers.reference_delivery import resolve_reference_for_runtime
 
-    if provider_type == "volcengine":
-        if artifact is None:
-            raise ValidationAppError(
-                "Ark reference requires a bound image artifact",
-                details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
-            )
-        grant = await issue_artifact_reference(
-            session,
-            artifact=artifact,
-            workspace_id=project.workspace_id,
-            created_by_run_id=run.id,
-        )
-        return ResolvedReference(
-            role=role,
-            artifact_id=artifact.id,
-            content_url=grant.url,
-            mime_type=artifact.mime_type or mime_type,
-            fingerprint=artifact.content_hash,
-        )
-    if content_bytes is None:
-        raise ValidationAppError(
-            "reference bytes are required",
-            details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
-        )
-    return ResolvedReference(
+    return await resolve_reference_for_runtime(
+        session,
+        project=project,
+        run=run,
         role=role,
-        artifact_id=artifact.id if artifact is not None else UUID(int=0),
+        artifact=artifact,
         content_bytes=content_bytes,
         mime_type=mime_type,
         fingerprint=fingerprint,
+        provider_type=provider_type,
     )
 
 
@@ -1159,7 +754,7 @@ async def _execute_unified_media_node_run(
     from app.providers.selection import ModelSelectionService, SelectionPlan
     from app.providers.translation import RequestTransformation
     from app.providers.workspace_credentials import runtime_connection_settings
-    from app.shared.errors import ProviderRateLimitedError, ProviderTaskPendingError
+    from app.shared.errors import ProviderRateLimitedError
 
     now = datetime.now(UTC)
     project = await session.scalar(select(Project).where(Project.id == run.project_id))
@@ -1253,8 +848,6 @@ async def _execute_unified_media_node_run(
     initial_status = "queued"
     synchronous_image = False
     result: SubmissionResult | None = None
-    director_context: DirectorMediaExecutionContext | None = None
-
     workbench_planned_references = (
         list(workbench_plan.planned_references) if workbench_plan is not None else []
     )
@@ -1279,9 +872,8 @@ async def _execute_unified_media_node_run(
                 error_summary=op.error_summary,
             )
             raise ValidationAppError("PROVIDER_SUBMISSION_UNKNOWN")
-        # Resume only. Never create a second remote task. New Professional
-        # operations rebuild exclusively from the frozen identity; legacy rows
-        # without that evidence retain the pre-C compatibility path.
+        # Resume only. Never create a second remote task. Rebuild the runtime
+        # exclusively from the persisted execution identity.
         if frozen_identity is not None:
             runtime = await ProviderRuntimeResolver(
                 session
@@ -1311,15 +903,10 @@ async def _execute_unified_media_node_run(
 
     if op is None or resubmit:
         # New submission. Resolve via the shared selection engine.
-        director_context = await _validate_director_submission_or_block(
-            session,
-            run=run,
-            node=node,
-        )
         frozen_binding_id = (
             frozen_identity.provider_model_binding_id
             if frozen_identity is not None
-            else director_context.model_binding_id if director_context is not None else None
+            else None
         )
         if frozen_binding_id is None and snap.get("model_binding_id") is not None:
             try:
@@ -1485,21 +1072,7 @@ async def _execute_unified_media_node_run(
             if op is not None and isinstance(op.selection_plan, dict)
             else snap.get("selection_plan")
         )
-        frozen_evidence = (
-            raw_frozen_selection.get("evidence")
-            if isinstance(raw_frozen_selection, dict)
-            else None
-        )
-        professional_trial_bootstrap_allowed = bool(
-            director_context is None
-            and snap.get("professional_trial_bootstrap_allowed") is True
-        )
-        allow_trial_without_quality_gate = professional_trial_bootstrap_allowed or bool(
-            director_context is not None
-            and director_context.trial_quality_gate_bootstrap_allowed
-            and isinstance(frozen_evidence, dict)
-            and frozen_evidence.get("trial_only_until_quality_gated") is True
-        )
+        allow_trial_without_quality_gate = False
 
         if frozen_identity is not None:
             if not isinstance(raw_frozen_selection, dict):
@@ -1905,26 +1478,25 @@ async def _execute_unified_media_node_run(
                     details={"code": "REFERENCE_METADATA_MISMATCH"},
                 )
             content_bytes: bytes | None = None
-            if provider_type != "volcengine":
-                content_bytes = existing_bytes if artifact.id == artifact_id else None
-                if content_bytes is None:
-                    try:
-                        content_bytes = await obj_store.get_bytes(
-                            object_key=artifact.object_key
-                        )
-                    except Exception as exc:
-                        raise ValidationAppError(
-                            "frozen Workbench reference bytes are unavailable",
-                            details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
-                        ) from exc
-                if (
-                    not content_bytes
-                    or hashlib.sha256(content_bytes).hexdigest() != artifact.content_hash
-                ):
-                    raise ValidationAppError(
-                        "frozen Workbench reference hash mismatch",
-                        details={"code": "ARTIFACT_HASH_MISMATCH"},
+            content_bytes = existing_bytes if artifact.id == artifact_id else None
+            if content_bytes is None:
+                try:
+                    content_bytes = await obj_store.get_bytes(
+                        object_key=artifact.object_key
                     )
+                except Exception as exc:
+                    raise ValidationAppError(
+                        "frozen Workbench reference bytes are unavailable",
+                        details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
+                    ) from exc
+            if (
+                not content_bytes
+                or hashlib.sha256(content_bytes).hexdigest() != artifact.content_hash
+            ):
+                raise ValidationAppError(
+                    "frozen Workbench reference hash mismatch",
+                    details={"code": "ARTIFACT_HASH_MISMATCH"},
+                )
             return await _unified_resolved_reference(
                 session,
                 project=project,
@@ -2191,12 +1763,6 @@ async def _execute_unified_media_node_run(
         run.input_snapshot = snap
         # Revalidate after request compilation, immediately before persisting
         # the submission marker and making the paid call.
-        if director_context is not None:
-            await _validate_director_submission_or_block(
-                session,
-                run=run,
-                node=node,
-            )
         if op is None:
             op = ProviderOperation(
                 node_run_id=run.id,
@@ -2260,14 +1826,6 @@ async def _execute_unified_media_node_run(
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
-
-        if director_context is not None:
-            await _validate_director_submission_or_block(
-                session,
-                run=run,
-                node=node,
-                provider_operation=op,
-            )
 
         if isinstance(compiled, CompiledImageRequest):
             result = await resolved.runtime.submit_image(compiled)
@@ -2447,10 +2005,6 @@ async def _execute_unified_media_node_run(
         ),
         "cost_status": cost_status,
     }
-    if run.production_batch_id is not None and run.budget_reservation_id is not None:
-        from app.director.execution_guard import settle_director_media_cost
-
-        await settle_director_media_cost(session, run=run, operation=op)
     if status not in {"succeeded", "completed", "success"}:
         error_summary = str(getattr(poll, "error_code", None) or status)[:500]
         op.status = "failed"
@@ -2573,22 +2127,6 @@ async def execute_media_node_run(
     snap = dict(run.input_snapshot or {})
     if node.node_key in {"identity_review", "video_drift_review"}:
         snap = await _bind_review_input_artifacts(session, run=run, node=node)
-    if snap.get("canonical_source_run_id") is not None:
-        try:
-            snap = await _bind_director_canonical_source(
-                session,
-                run=run,
-                snapshot=snap,
-            )
-        except ValidationAppError as exc:
-            error_code = str(exc.details.get("code") or "CANONICAL_REFERENCE_REQUIRED")
-            await _commit_terminal_failure(
-                session,
-                run=run,
-                error_code=error_code,
-                error_summary=exc.message,
-            )
-            raise
     canonical_artifact: Artifact | None = None
     # Formal Worker path resolves canonical only from a complete Artifact binding.
     if canonical_image_bytes is None:
@@ -2674,15 +2212,6 @@ async def execute_media_node_run(
     if await set_node_run_rls_context(session, node_run_id=run.id) is None:
         raise ValidationAppError("node_run ownership context unavailable")
 
-    # Director image/video work is always unified. The feature flag only keeps
-    # the migration path open for non-Director historical projects.
-    from app.director.models import DirectorWorkflowRun
-
-    director_workflow_id = await session.scalar(
-        select(DirectorWorkflowRun.id)
-        .where(DirectorWorkflowRun.project_id == run.project_id)
-        .limit(1)
-    )
     _unified_op = await session.scalar(
         select(ProviderOperation)
         .where(
@@ -2692,31 +2221,19 @@ async def execute_media_node_run(
         .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
         .limit(1)
     )
-    force_director_unified = director_workflow_id is not None and node_type in {
-        "keyframe",
-        "video",
-    }
-    # P4 Workbench NodeRuns carry a frozen plan and are always Professional
-    # unified executions.  They must not fall through to the legacy
-    # media-based Flux/Kling compatibility adapters, even when the migration
-    # feature flag is disabled.
-    raw_professional_plan = snap.get("workbench_plan")
-    professional_workbench_unified = (
-        node_type in {"keyframe", "video"}
-        and isinstance(raw_professional_plan, dict)
-        and (
-            snap.get("professional_unified") is True
-            or "resolved_model" in raw_professional_plan
+    if node_type == "voice":
+        from app.execution.voice_path import execute_voice_node_run
+
+        return await execute_voice_node_run(
+            session,
+            run=run,
+            node=node,
+            snapshot=snap,
+            store=obj_store,
+            prompt=prompt,
         )
-    )
-    if _unified_op is not None or (
-        node_type in {"keyframe", "video"}
-        and (
-            force_director_unified
-            or professional_workbench_unified
-            or get_settings().provider_unified_path_enabled
-        )
-    ):
+    # Keyframe and video are always executed by the unified compiler/runtime.
+    if _unified_op is not None or node_type in {"keyframe", "video"}:
         return await _execute_unified_media_node_run(
             session,
             run=run,
@@ -2730,524 +2247,7 @@ async def execute_media_node_run(
             has_canonical_binding=has_canonical_binding,
             canonical_artifact=canonical_artifact,
         )
-
-    # Select Adapter: real Agnes when configured. No silent Fake outside test.
-    adapter = flux
-    if adapter is None:
-        from app.config import get_settings as _gs
-        from app.providers.flux import (
-            ProviderNotConfiguredError,
-            get_flux_adapter_for_workspace,
-        )
-        from app.providers.kling import get_kling_adapter_for_workspace
-
-        _env = _gs().app_env
-        allow_fake = _env == "test"
-        try:
-            if node_type == "voice" and not allow_fake:
-                from app.providers.local_tts import get_local_tts_adapter
-
-                adapter = get_local_tts_adapter()
-            elif node_type in {"video", "video_review"}:
-                adapter = await get_kling_adapter_for_workspace(
-                    session,
-                    workspace_id=project.workspace_id,
-                    allow_fake=allow_fake,
-                )
-            elif node_type == "voice":
-                # TTS off for P0 — only allow deterministic stub under test
-                if not allow_fake:
-                    raise ProviderNotConfiguredError(
-                        "provider_not_configured: TTS disabled (TTS_ENABLED=false). "
-                        "Use audited manual media for voice or enable a voice Provider."
-                    )
-                adapter = FakeFluxAdapter()
-            else:
-                adapter = await get_flux_adapter_for_workspace(
-                    session,
-                    workspace_id=project.workspace_id,
-                    allow_fake=allow_fake,
-                )
-        except AppError as exc:
-            await _commit_terminal_failure(
-                session,
-                run=run,
-                error_code=exc.code,
-                error_summary=exc.message,
-            )
-            raise
-
-    # Persist the paid attempt before POST. A restart may then resume an existing
-    # remote task, but can never mistake it for a new submission.
-    kind = node_type
-    _settings = get_settings()
-    provider_name = str(getattr(adapter, "provider", "flux") or "flux")
-    if type(adapter).__name__.startswith("Agnes") or provider_name in {"agnes", "flux"}:
-        if node_type in {"video", "video_review"}:
-            model_name = _settings.agnes_video_model
-        else:
-            model_name = _settings.agnes_image_model
-    elif type(adapter).__name__.startswith("Fake"):
-        model_name = f"fake-{node_type}"
-    else:
-        model_name = str(getattr(adapter, "model", None) or provider_name)
-    op = await session.scalar(
-        select(ProviderOperation)
-        .where(
-            ProviderOperation.node_run_id == run.id,
-            ProviderOperation.provider_operation_id.is_not(None),
-            ProviderOperation.status.in_({"submitted", "running", "timed_out"}),
-        )
-        .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
-        .limit(1)
-    )
-    create: dict[str, object]
-    if op is None:
-        director_context = await _validate_director_submission_or_block(
-            session,
-            run=run,
-            node=node,
-        )
-        create_request: dict[str, object] = {"prompt": prompt, "kind": kind}
-        safe_request_summary: dict[str, object] = {"kind": kind}
-        first_frame = None
-        if node_type == "keyframe" and lead_identity_required and has_canonical_binding:
-            create_request["canonical_image_bytes"] = canonical_image_bytes
-            create_request["canonical_image_mime"] = str(
-                snap.get("canonical_mime_type") or "image/png"
-            )
-            if snap.get("canonical_artifact_id"):
-                create_request["canonical_artifact_id"] = str(snap["canonical_artifact_id"])
-                safe_request_summary["reference_artifact_ids"] = [
-                    str(snap["canonical_artifact_id"])
-                ]
-            if canonical_image_bytes:
-                safe_request_summary["reference_fingerprints"] = [
-                    hashlib.sha256(canonical_image_bytes).hexdigest()
-                ]
-                safe_request_summary["reference_transport"] = "data_uri"
-        if node_type == "video" and provider_name == "agnes":
-            from app.providers.reference_delivery import approved_first_frame_for_video
-
-            first_frame = await approved_first_frame_for_video(session, video_run=run)
-            # Agnes China accepts a base64 Data URI for the I2V first-frame
-            # (verified 2026-08-04: data URI -> video task completed). This
-            # removes the public HTTPS origin dependency for the P0 video chain.
-            try:
-                first_frame_bytes = await obj_store.get_bytes(object_key=first_frame.object_key)
-            except Exception:
-                first_frame_bytes = None
-            if not first_frame_bytes:
-                raise ValidationAppError(
-                    "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes unavailable "
-                    "for video I2V"
-                )
-            create_request.update(
-                {
-                    "image_bytes": first_frame_bytes,
-                    "image_mime": first_frame.mime_type or "image/png",
-                    "num_frames": _snapshot_int(snap.get("num_frames"), default=121),
-                    "frame_rate": _snapshot_int(snap.get("frame_rate"), default=24),
-                    "reference_artifact_ids": [str(first_frame.id)],
-                    "reference_fingerprints": [first_frame.content_hash],
-                }
-            )
-            safe_request_summary.update(
-                {
-                    "reference_artifact_ids": [str(first_frame.id)],
-                    "reference_fingerprints": [first_frame.content_hash],
-                    "reference_transport": "data_uri",
-                    "num_frames": create_request["num_frames"],
-                    "frame_rate": create_request["frame_rate"],
-                }
-            )
-        initial_fingerprint = hashlib.sha256(
-            f"{kind}:{prompt}:{safe_request_summary}".encode()
-        ).hexdigest()
-        raw_selection_plan = snap.get("selection_plan")
-        frozen_selection_plan = (
-            {str(key): value for key, value in raw_selection_plan.items()}
-            if isinstance(raw_selection_plan, dict)
-            else {}
-        )
-        if director_context is not None:
-            await _validate_director_submission_or_block(
-                session,
-                run=run,
-                node=node,
-            )
-        # Idempotent: a 429 requeue re-executes this node_run; reuse the single
-        # ProviderOperation row (uq_provider_operations_node_run) instead of
-        # inserting a duplicate.
-        op = (
-            (
-                await session.execute(
-                    select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
-                )
-            )
-            .scalars()
-            .first()
-        )
-        if op is None:
-            op = ProviderOperation(
-                node_run_id=run.id,
-                attempt_no=run.attempt_no,
-                purpose="primary",
-                operation_kind=f"{node_type}.generate",
-                actual_provider=provider_name,
-                actual_model=model_name,
-                provider_operation_id=None,
-                protocol_profile=str(getattr(adapter, "protocol_profile", "") or "") or None,
-                request_fingerprint=initial_fingerprint,
-                status="created",
-                request_summary=safe_request_summary,
-                response_summary={},
-                submitted_at=datetime.now(UTC),
-                model_binding_id=(
-                    director_context.model_binding_id if director_context is not None else None
-                ),
-                capability_manifest_hash=(str(snap.get("capability_manifest_hash") or "") or None),
-                selection_plan=frozen_selection_plan,
-            )
-            session.add(op)
-        else:
-            op.status = "created"
-            op.error_code = None
-            op.error_summary = None
-            op.provider_operation_id = None
-            op.request_fingerprint = initial_fingerprint
-            op.request_summary = safe_request_summary
-            op.response_summary = {}
-            op.submitted_at = datetime.now(UTC)
-            op.completed_at = None
-            if director_context is not None:
-                op.model_binding_id = director_context.model_binding_id
-                op.capability_manifest_hash = (
-                    str(snap.get("capability_manifest_hash") or "") or None
-                )
-                op.selection_plan = frozen_selection_plan
-        await session.flush()
-        await session.commit()
-        await set_node_run_rls_context(session, node_run_id=run.id)
-        if director_context is not None:
-            await _validate_director_submission_or_block(
-                session,
-                run=run,
-                node=node,
-                provider_operation=op,
-            )
-        if (
-            get_settings().provider_unified_shadow
-            and provider_name in {"agnes", "volcengine"}
-            and node_type in {"keyframe", "video"}
-        ):
-            # Stage B1: observe whether the unified path resolves to the same
-            # model before the legacy path pays for a submission.
-            await _run_shadow_selection(
-                session,
-                project=project,
-                node_type=node_type,
-                prompt=prompt,
-                first_frame=first_frame,
-                op=op,
-                legacy_provider=provider_name,
-                legacy_model=model_name,
-            )
-        try:
-            create = await adapter.create(create_request)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - provider boundary is sanitized
-            create = {
-                "status": "failed",
-                "error": f"provider create raised {type(exc).__name__}",
-            }
-        create_status = str(create.get("status", "unknown"))
-        create_rejected = create_status in {"failed", "error", "cancelled"}
-        remote_value = create.get("remote_task_id")
-        remote = str(remote_value) if remote_value else ""
-        op.actual_provider = str(create.get("actual_provider") or provider_name)
-        op.actual_model = str(create.get("actual_model") or model_name)
-        op.protocol_profile = (
-            str(create.get("protocol_profile"))
-            if create.get("protocol_profile")
-            else op.protocol_profile
-        )
-        op.provider_operation_id = remote if remote and not create_rejected else None
-        secondary = create.get("remote_secondary_id")
-        op.remote_secondary_id = str(secondary) if secondary else None
-        op.request_fingerprint = str(
-            create.get("request_fingerprint")
-            or create.get("effective_prompt_fingerprint")
-            or initial_fingerprint
-        )
-        adapter_summary = create.get("request_summary")
-        if isinstance(adapter_summary, dict):
-            op.request_summary = {**safe_request_summary, **adapter_summary}
-        op.response_summary = {
-            "create_status": create_status,
-            "query_kind": create.get("query_kind"),
-        }
-    else:
-        remote = str(op.provider_operation_id)
-        create_status = "resumed"
-        query_kind = (op.response_summary or {}).get("query_kind")
-        create = {
-            "status": "running",
-            "remote_task_id": remote,
-            "remote_secondary_id": op.remote_secondary_id,
-            "query_kind": query_kind,
-        }
-        op.status = "running"
-        op.error_code = None
-        op.error_summary = None
-
-    create_unknown = create_status == "unknown_submission"
-    create_failed = create_status in {"failed", "error", "cancelled"}
-    if create_unknown:
-        op.status = "unknown_submission"
-        op.error_code = str(create.get("error_code") or "PROVIDER_SUBMISSION_UNKNOWN")
-        op.error_summary = _unknown_submission_error_summary(create.get("transport_error"))
-        op.completed_at = datetime.now(UTC)
-        await _commit_terminal_failure(
-            session,
-            run=run,
-            error_code="PROVIDER_SUBMISSION_UNKNOWN",
-            error_summary=op.error_summary,
-        )
-        raise ValidationAppError("PROVIDER_SUBMISSION_UNKNOWN")
-
-    if create_failed:
-        create_error = str(create.get("error") or "provider rejected task creation")[:500]
-        # 429 rate limit: defer and retry after Retry-After (plan §11.2), never
-        # mark the node terminally failed on a transient provider throttle.
-        if str(create.get("error_code")) == "PROVIDER_RATE_LIMITED":
-            raw_retry_after = create.get("retry_after_seconds")
-            try:
-                retry_after = float(str(raw_retry_after)) if raw_retry_after else 5.0
-            except (TypeError, ValueError):
-                retry_after = 5.0
-            op.status = "failed"
-            op.error_code = "PROVIDER_RATE_LIMITED"
-            op.error_summary = create_error
-            op.completed_at = datetime.now(UTC)
-            await session.flush()
-            from app.shared.errors import ProviderRateLimitedError
-
-            raise ProviderRateLimitedError(retry_after_seconds=retry_after)
-        op.status = "failed"
-        op.error_code = "PROVIDER_CREATE_FAILED"
-        op.error_summary = create_error
-        op.response_summary = {
-            "create_status": create_status,
-            "create_error": create_error[:300],
-        }
-        provider_error_code = create.get("error_code")
-        if provider_error_code:
-            op.response_summary["provider_error_code"] = str(provider_error_code)
-        create_http_status = create.get("http_status")
-        if isinstance(create_http_status, int):
-            op.response_summary["create_http_status"] = create_http_status
-        retry_after_seconds = create.get("retry_after_seconds")
-        if isinstance(retry_after_seconds, int | float):
-            op.response_summary["retry_after_seconds"] = retry_after_seconds
-        op.completed_at = datetime.now(UTC)
-        await _commit_terminal_failure(
-            session,
-            run=run,
-            error_code="PROVIDER_CREATE_FAILED",
-            error_summary=create_error,
-        )
-        raise ValidationAppError(f"PROVIDER_CREATE_FAILED: {create_error}")
-
-    if not remote:
-        op.status = "failed"
-        op.error_code = "PROVIDER_RESPONSE_INVALID"
-        op.error_summary = "provider create response has no remote task id"
-        op.completed_at = datetime.now(UTC)
-        await _commit_terminal_failure(
-            session,
-            run=run,
-            error_code="PROVIDER_RESPONSE_INVALID",
-            error_summary=op.error_summary,
-        )
-        raise ValidationAppError("PROVIDER_RESPONSE_INVALID")
-
-    op.status = "submitted"
-    await session.flush()
-    await session.commit()
-    await set_node_run_rls_context(session, node_run_id=run.id)
-
-    # Provider video tasks can stay running for several minutes. Keep polling
-    # inside the heavy worker's 30-minute job budget; never submit a second task.
-    poll_timeout_s = 1_620.0 if node_type in {"video", "video_review"} else 120.0
-    poll_interval_s = 5.0 if node_type in {"video", "video_review"} else 3.0
-    deadline = asyncio.get_running_loop().time() + poll_timeout_s
-    poll: dict[str, object] = {"status": str(create.get("status", "queued"))}
-    poll_count = 0
-    while True:
-        persisted_poll = getattr(adapter, "poll_persisted", None)
-        if node_type == "video" and op.actual_provider == "agnes" and callable(persisted_poll):
-            poll = await persisted_poll(
-                remote,
-                query_kind=(op.response_summary or {}).get("query_kind"),
-            )
-        else:
-            poll = await adapter.poll(remote)
-        poll_count += 1
-        status = str(poll.get("status", "failed"))
-        op.last_polled_at = datetime.now(UTC)
-        op.status = "running"
-        poll_error = poll.get("poll_error")
-        if poll_error:
-            # Plan §11.2: transient poll errors are recorded, never terminal.
-            summary = dict(op.response_summary or {})
-            summary["last_poll_error"] = str(poll_error)[:200]
-            prior_count = summary.get("poll_error_count")
-            summary["poll_error_count"] = (
-                int(prior_count) if isinstance(prior_count, int) else 0
-            ) + 1
-            http_status = poll.get("http_status")
-            if isinstance(http_status, int):
-                summary["last_poll_http_status"] = http_status
-            op.response_summary = summary
-            # Persist transient poll-error evidence immediately. Without this a
-            # worker crash mid-poll rolls back the in-loop mutation and the 429/5xx
-            # bookkeeping is silently lost even though the remote task survives.
-            await session.commit()
-            await set_node_run_rls_context(session, node_run_id=run.id)
-        if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
-            break
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            op.status = "timed_out"
-            op.error_code = "PROVIDER_POLL_TIMEOUT"
-            op.error_summary = (
-                f"remote task still pending after {poll_timeout_s:.0f}s; resume polling"
-            )
-            poll_trail = dict(op.response_summary or {})
-            op.response_summary = {
-                "create_status": str(create.get("status", "unknown")),
-                "final_status": "running",
-                "poll_count": poll_count,
-                "query_kind": poll_trail.get("query_kind"),
-            }
-            if poll_trail.get("poll_error_count"):
-                # Keep transient poll-error bookkeeping visible on a pending task.
-                op.response_summary["last_poll_error"] = poll_trail.get("last_poll_error")
-                op.response_summary["poll_error_count"] = poll_trail["poll_error_count"]
-                if poll_trail.get("last_poll_http_status"):
-                    op.response_summary["last_poll_http_status"] = poll_trail[
-                        "last_poll_http_status"
-                    ]
-            run.status = "queued"
-            run.error_code = "PROVIDER_TASK_PENDING"
-            run.error_summary = "Remote Provider task is still running"
-            run.output_summary = {
-                "status": "provider_pending",
-                "provider_operation_id": str(op.id),
-            }
-            await session.commit()
-            raise ProviderTaskPendingError()
-        poll_retry_after = poll.get("retry_after_seconds")
-        sleep_s = poll_interval_s
-        if isinstance(poll_retry_after, int | float) and poll_retry_after > 0:
-            sleep_s = max(sleep_s, float(poll_retry_after))
-        await asyncio.sleep(min(sleep_s, remaining))
-
-    cost = await adapter.fetch_cost(remote)
-    status = str(poll.get("status", "failed"))
-    op.provider_cost = Decimal(str(cost.get("amount", 0.0)))
-    op.currency = str(cost.get("currency", "USD"))
-    poll_trail = dict(op.response_summary or {})
-    op.response_summary = {
-        "create_status": str(create.get("status", "unknown")),
-        "final_status": status,
-        "poll_count": poll_count,
-        "query_kind": poll_trail.get("query_kind"),
-    }
-    if poll_trail.get("poll_error_count"):
-        op.response_summary["last_poll_error"] = poll_trail.get("last_poll_error")
-        op.response_summary["poll_error_count"] = poll_trail["poll_error_count"]
-        if poll_trail.get("last_poll_http_status"):
-            op.response_summary["last_poll_http_status"] = poll_trail["last_poll_http_status"]
-    if run.production_batch_id is not None and run.budget_reservation_id is not None:
-        from app.director.execution_guard import settle_director_media_cost
-
-        await settle_director_media_cost(session, run=run, operation=op)
-    if status not in {"succeeded", "completed", "success"}:
-        error_summary = str(poll.get("error") or status)[:500]
-        op.status = "failed"
-        op.error_code = "PROVIDER_FAILED"
-        op.error_summary = error_summary
-        op.completed_at = datetime.now(UTC)
-        await _commit_terminal_failure(
-            session,
-            run=run,
-            error_code="PROVIDER_FAILED",
-            error_summary=error_summary,
-        )
-        raise ValidationAppError(f"PROVIDER_FAILED: {error_summary}")
-
-    op.status = "succeeded"
-    op.completed_at = datetime.now(UTC)
-    adapter_blobs = getattr(adapter, "blobs", {})
-    if remote in adapter_blobs:
-        data = adapter_blobs[remote]
-    else:
-        uri = poll.get("artifact_uri") or create.get("artifact_uri")
-        data = await _resolve_media_bytes(kind=kind, remote=remote, prompt=prompt, artifact_uri=uri)
-
-    # Node-specific mime / key
-    mime, ext, art_type = _mime_for_node(node_type)
-    object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
-    stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
-
-    art = await get_or_create_artifact(
-        session,
-        project_id=run.project_id,
-        artifact_type=art_type,
-        object_key=stored.object_key,
-        content_hash=stored.content_hash,
-        mime_type=stored.mime_type,
-        byte_size=stored.byte_size,
-        produced_by_run_id=run.id,
-        allow_cross_run_reuse=provider_name == "local_tts",
-    )
-
-    reused_from_run_id = (
-        art.produced_by_run_id
-        if art.produced_by_run_id is not None and art.produced_by_run_id != run.id
-        else None
-    )
-    run.status = "cached" if reused_from_run_id is not None else "completed"
-    run.result_artifact_id = art.id
-    run.reused_from_run_id = reused_from_run_id
-    run.provider_cost = op.provider_cost or Decimal("0")
-    run.finished_at = datetime.now(UTC)
-    run.output_summary = {
-        "artifact_id": str(art.id),
-        "node_type": node_type,
-        "byte_size": art.byte_size,
-        "content_hash": art.content_hash,
-        "source_commit": _settings.source_commit,
-        "identity_evidence_policy": identity_evidence_policy_snapshot(),
-        "reused_from_run_id": (
-            str(reused_from_run_id) if reused_from_run_id is not None else None
-        ),
-    }
-    node.latest_successful_run_id = run.id
-    await session.flush()
-    return ExecuteNodeResult(
-        node_run_id=run.id,
-        artifact_id=art.id,
-        object_key=art.object_key,
-        content_hash=art.content_hash,
-        byte_size=art.byte_size,
-        identity_status=None,
-        provider_operation_id=op.id,
-        node_type=node_type,
-    )
+    raise ValidationAppError(f"unsupported executable node type: {node_type}")
 
 
 async def _completed_result(

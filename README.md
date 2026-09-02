@@ -126,18 +126,19 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gpu up 
 
 ---
 
-### 原生 Python 调试
+### 原生 Python 调试（可选）
 
-当你需要在宿主机打断点调试 Python 代码时。
+仅当需要在宿主机 IDE 中打断点时使用；日常运行、依赖安装、质量检查和
+E2E 都走 Docker 质量/运行容器。本节不改变 8080 唯一用户入口。
 
-先用开发 override 启动 Docker 基础设施：
+先用开发 override 启动完整应用：
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis minio
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
 `docker-compose.dev.yml` 会显式开放调试端口，不得用于不受信网络。原生调试不提供另一套部署
-模式；数据库、队列和对象存储仍由 Compose 管理。
+模式；数据库、队列、对象存储和 API 仍由 Compose 管理，API 的 8000 端口不发布到宿主机。
 
 需要从源码构建完整容器栈时，必须显式叠加构建 override：
 
@@ -148,15 +149,18 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 发布拓扑本身没有 `build` 字段；改动源码后由开发者或 CI 重新构建镜像，普通用户不在安装机
 上编译。
 
-**后端**（Python 3.12 + venv）：
+**后端**（仅宿主机 IDE 快速反馈，Python 3.12 + venv）：
 
 ```powershell
 cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-uvicorn app.main:app --reload --port 8080
+uvicorn app.main:app --reload --port 8000
 ```
+
+直接运行的 API 仅用于本地断点调试；对外访问仍使用 Compose 前端网关
+`http://127.0.0.1:8080`。
 
 **Worker**（需 Redis 已启动）：
 
@@ -168,7 +172,7 @@ python -m app.workers.main heavy
 arq app.workers.heavy.WorkerSettings
 ```
 
-**前端**（同上）：
+**前端**（仅宿主机 IDE 快速反馈）：
 
 ```powershell
 cd frontend
@@ -180,7 +184,19 @@ npm.cmd run dev
 
 ## 测试与质量门禁
 
-一键（需已安装后端 venv 依赖与前端 `node_modules`）：
+提交前的权威质量门禁在 Docker 中执行。它会在一次性质量容器内安装锁定的
+Python/Node 依赖，运行后端静态检查、单测、PostgreSQL 迁移/API 合同，以及前端
+lint/typecheck/unit/build/E2E；宿主机不需要安装 Python、uv、Node 或浏览器：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_docker.ps1
+```
+
+原生命令仅用于快速编辑反馈，不能替代上述容器 Gate。
+其中 Canonical surface scan 会阻止已删除的 Quick、Creation、受控 Director、
+CharacterReference、旧运行时开关和旧 NodeRun 字段重新出现。
+
+以下原生命令仅用于快速编辑反馈（需要宿主机自行准备对应依赖），不能替代 Docker Gate：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality.ps1
@@ -254,4 +270,3 @@ DramaForge 以 [Apache License 2.0](LICENSE) 开源。提交代码前请阅读
 仓库提供 AIOS/AISphere 的 Compose 交接描述，但尚未在真实 AIOS 环境验证，也没有冒充平台
 官方 manifest；边界与集成验收见
 [`docs/runbooks/docker-deployment.md`](docs/runbooks/docker-deployment.md)。
-

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
@@ -7,6 +7,7 @@ import { ProfessionalWorkbench } from "../features/production/ProfessionalWorkbe
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
 import { fetchScenes } from "../features/scenes/api";
+import { createShotExecution } from "../features/shots/api";
 import {
   confirmShotChangeProposal,
   createExperiment,
@@ -14,8 +15,6 @@ import {
   createReviewAnnotation,
   createShotChangeProposal,
   decideExperiment,
-  exportDownloadUrl,
-  exportProject,
   fetchDirectorBoard,
   fetchExperiments,
   fetchOpenCutManifest,
@@ -24,12 +23,9 @@ import {
   fetchReviewAnnotations,
   fetchShotCanvasRevisions,
   fetchSnapshot,
-  grantExportDownload,
   listModels,
-  rerunProfessionalShot,
   saveDirectorBoard,
   startExperiment,
-  startProfessionalShot,
   updateProjectAsset,
   updateShotCanvas,
 } from "../lib/api";
@@ -42,7 +38,8 @@ import { projectRoute } from "./projects.$projectId";
  * Monitor. Legacy Script Import / budget main panel / old big storyboard
  * workspace migrated to the Scene Workbench and are no longer here; the
  * ProfessionalWorkbench (assets / experiments / review / director board /
- * OpenCut) and export remain.
+ * OpenCut) and the dedicated EditSession export remain in their canonical
+ * workspaces.
  */
 export const projectProductionRoute = createRoute({
   getParentRoute: () => projectRoute,
@@ -110,10 +107,7 @@ function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, str
 function ProductionPage() {
   const { projectId } = projectProductionRoute.useParams();
   const qc = useQueryClient();
-  const directorControlled = false;
   const [msg, setMsg] = useState<string | null>(null);
-  const [lastExportId, setLastExportId] = useState<string | null>(null);
-  const [downloadHint, setDownloadHint] = useState<string | null>(null);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
 
   const snapshot = useQuery({
@@ -169,36 +163,6 @@ function ProductionPage() {
     queryKey: ["canvas-revisions", projectId, revisionShotId],
     queryFn: () => fetchShotCanvasRevisions(projectId, revisionShotId!),
     enabled: projectId !== "demo" && Boolean(revisionShotId),
-  });
-
-  const exportMut = useMutation({
-    mutationFn: async () => {
-      if (projectId === "demo") throw new Error("请从大厅创建真实项目");
-      return exportProject(projectId);
-    },
-    onSuccess: (r) => {
-      setLastExportId(r.export_id);
-      setMsg(
-        `导出完成 timeline=${r.timeline_hash.slice(0, 12)}… items=${r.export_item_count} mp4=${r.mp4_error ? "失败" : "有"}`,
-      );
-      setDownloadHint(
-        r.mp4_error ? `MP4：${r.mp4_error}（仍可下载 timeline/SRT）` : "可申请 timeline 下载授权",
-      );
-    },
-    onError: (e: Error) => setMsg(e.message),
-  });
-
-  const downloadMut = useMutation({
-    mutationFn: async () => {
-      if (!lastExportId) throw new Error("请先导出");
-      return grantExportDownload(projectId, lastExportId, "timeline_json");
-    },
-    onSuccess: (g) => {
-      const url = exportDownloadUrl(projectId, g.export_id, g.token, "timeline_json");
-      setDownloadHint(`授权下载：${g.object_key}`);
-      window.open(url, "_blank", "noopener,noreferrer");
-    },
-    onError: (e: Error) => setMsg(e.message),
   });
 
   const runs = useMemo(() => snapshot.data?.node_runs ?? [], [snapshot.data?.node_runs]);
@@ -327,12 +291,56 @@ function ProductionPage() {
           await qc.invalidateQueries({ queryKey: ["director-board", projectId, revisionShotId] });
         }}
         onStart={(shotId) =>
-          void runShotOp("启动专业镜头", () => startProfessionalShot(projectId, shotId), shotId)
+          void runShotOp(
+            "生成关键帧",
+            async () => {
+              const shot = (shots.data ?? []).find((item) => item.id === shotId);
+              if (!shot) throw new Error("镜头不存在");
+              const result = await createShotExecution(
+                projectId,
+                shotId,
+                {
+                  stage: "image_keyframe",
+                  prompt: shot.visual_description,
+                  semantic_intent: { intent: "shot_keyframe", shot_id: shotId },
+                  mode_id: "text_to_image",
+                  requested_model_id: null,
+                  requested_binding_id: null,
+                  accept_approximations: false,
+                  references: [],
+                  expected_shot_version: shot.version,
+                },
+                `production-start-${shotId}-${shot.version}`,
+              );
+              return { status: result.status, message: `NodeRun ${result.node_run_id}` };
+            },
+            shotId,
+          )
         }
         onRerun={(shotId) =>
           void runShotOp(
             "局部重跑视频",
-            () => rerunProfessionalShot(projectId, shotId, "video"),
+            async () => {
+              const shot = (shots.data ?? []).find((item) => item.id === shotId);
+              if (!shot) throw new Error("镜头不存在");
+              const result = await createShotExecution(
+                projectId,
+                shotId,
+                {
+                  stage: "video",
+                  prompt: shot.visual_description,
+                  semantic_intent: { intent: "shot_video", shot_id: shotId },
+                  mode_id: "first_frame",
+                  requested_model_id: null,
+                  requested_binding_id: null,
+                  accept_approximations: false,
+                  references: [],
+                  expected_shot_version: shot.version,
+                },
+                `production-rerun-${shotId}-${shot.version}`,
+              );
+              return { status: result.status, message: `NodeRun ${result.node_run_id}` };
+            },
             shotId,
           )
         }
@@ -374,38 +382,10 @@ function ProductionPage() {
         ))}
       </div>
 
-      {!directorControlled && (
-        <div className="toolbar">
-          <button
-            type="button"
-            className="accent"
-            data-testid="export-project"
-            onClick={() => exportMut.mutate()}
-            disabled={exportMut.isPending || directorControlled}
-            title={directorControlled ? "请通过 AI 导演导出已验收的正式生产批次" : undefined}
-          >
-            {exportMut.isPending ? "导出中…" : "② 导出 timeline / SRT / 包"}
-          </button>
-          <button
-            type="button"
-            data-testid="download-export"
-            onClick={() => downloadMut.mutate()}
-            disabled={!lastExportId || downloadMut.isPending}
-          >
-            ③ 授权下载 timeline
-          </button>
-        </div>
-      )}
-
       {msg && (
         <div className="flash ok" data-testid="production-msg">
           {msg}
         </div>
-      )}
-      {downloadHint && (
-        <p className="muted" data-testid="download-hint">
-          {downloadHint}
-        </p>
       )}
     </div>
   );

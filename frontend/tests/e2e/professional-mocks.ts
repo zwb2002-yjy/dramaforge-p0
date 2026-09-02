@@ -903,17 +903,6 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       return json(route, suggestion);
     }
 
-    if (path.includes("/professional/shots/") && method === "POST") {
-      return json(route, {
-        shot_id: SHOT_ID,
-        status: "queued",
-        locked: false,
-        message: "queued",
-        run_ids: [],
-        stale_nodes: [],
-        job_ids: [],
-      });
-    }
     return json(route, {});
   });
   return state;

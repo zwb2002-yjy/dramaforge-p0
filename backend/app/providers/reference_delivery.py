@@ -7,6 +7,7 @@ import ipaddress
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -20,6 +21,9 @@ from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
 from app.providers.models import ArtifactReferenceToken
 from app.shared.errors import NotFoundError, ValidationAppError
 from app.storage.minio_store import ObjectStore, get_object_store
+
+if TYPE_CHECKING:
+    from app.providers.runtime import ResolvedReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +208,58 @@ async def issue_artifact_reference(
         artifact_id=artifact.id,
         content_hash=artifact.content_hash,
         expires_at=expires_at,
+    )
+
+
+async def resolve_reference_for_runtime(
+    session: AsyncSession,
+    *,
+    project: Project,
+    run: NodeRun,
+    role: str,
+    artifact: Artifact | None,
+    content_bytes: bytes | None,
+    mime_type: str,
+    fingerprint: str | None,
+    provider_type: str,
+) -> ResolvedReference:
+    """Build the runtime reference using the selected provider's transport.
+
+    Transport-specific URL versus bytes policy belongs in the provider
+    delivery layer, not in the shared execution orchestration module.
+    """
+    from app.providers.runtime import ResolvedReference
+
+    if provider_type == "volcengine":
+        if artifact is None:
+            raise ValidationAppError(
+                "Ark reference requires a bound image artifact",
+                details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
+            )
+        grant = await issue_artifact_reference(
+            session,
+            artifact=artifact,
+            workspace_id=project.workspace_id,
+            created_by_run_id=run.id,
+        )
+        return ResolvedReference(
+            role=role,
+            artifact_id=artifact.id,
+            content_url=grant.url,
+            mime_type=artifact.mime_type or mime_type,
+            fingerprint=artifact.content_hash,
+        )
+    if content_bytes is None:
+        raise ValidationAppError(
+            "reference bytes are required",
+            details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
+        )
+    return ResolvedReference(
+        role=role,
+        artifact_id=artifact.id if artifact is not None else UUID(int=0),
+        content_bytes=content_bytes,
+        mime_type=mime_type,
+        fingerprint=fingerprint,
     )
 
 

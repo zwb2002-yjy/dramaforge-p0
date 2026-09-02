@@ -16,12 +16,5 @@ services:
     ports:
       - "4000:4000"
 
-  api:
-    environment:
-      CORS_ORIGINS: http://localhost:5173
-    ports:
-      - "8080:8000"
-
-  frontend:
-    profiles:
-      - production-ui
+  # The frontend gateway remains the only application entry on host port 8080.
+  # The API keeps its container-only port 8000 and is reached by the gateway.

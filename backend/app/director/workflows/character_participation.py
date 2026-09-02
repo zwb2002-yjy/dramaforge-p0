@@ -1,8 +1,8 @@
 """Multi-character shot participation contract (WF5).
 
-A typed value object that records each visible character's explicit identity /
+A typed value object that records each visible character Asset's explicit identity /
 reference / control binding for a shot.  It is stored in
-``Shot.director_state`` (JSON) and is NOT a new Character ORM.
+``Shot.director_state`` (JSON); identity is always an AssetVersion binding.
 
 Rules enforced here:
 - At most ``MAX_VISIBLE_CONTROLLED_CHARACTERS`` visible controlled characters
@@ -41,7 +41,7 @@ class ShotCharacterParticipation(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    character_id: UUID
+    asset_id: UUID
     asset_version_id: UUID | None = None
     screen_role: ScreenRole = ScreenRole.SECONDARY
     importance: int = Field(default=50, ge=0, le=100)
@@ -76,8 +76,8 @@ class ShotParticipationPlan(BaseModel):
         return [item for item in self.participations if item.is_visible_controlled]
 
     @property
-    def character_ids(self) -> list[UUID]:
-        return [item.character_id for item in self.participations]
+    def asset_ids(self) -> list[UUID]:
+        return [item.asset_id for item in self.participations]
 
     @property
     def primary(self) -> ShotCharacterParticipation | None:
@@ -92,7 +92,7 @@ class ShotParticipationPlan(BaseModel):
 
     @model_validator(mode="after")
     def validate_participation_plan(self) -> ShotParticipationPlan:
-        ids = self.character_ids
+        ids = self.asset_ids
         if len(ids) != len(set(ids)):
             raise ValueError("a character may participate at most once per shot")
         if self.visible_controlled_count > MAX_VISIBLE_CONTROLLED_CHARACTERS:
@@ -103,7 +103,7 @@ class ShotParticipationPlan(BaseModel):
         for item in self.visible_controlled:
             if item.asset_version_id is None:
                 raise ValueError(
-                    f"visible character {item.character_id} is missing an "
+                    f"visible asset {item.asset_id} is missing an "
                     "identity AssetVersion binding"
                 )
         return self

@@ -59,7 +59,7 @@ Record the timestamp and outcome for each item:
 1. Finds a start entry and chooses an idea path without instruction.
 2. Understands and confirms the story core.
 3. Understands and confirms the shooting plan, including risk and model/cost
-   summary at the level shown in quick mode.
+   summary at the level shown in the compact workspace view.
 4. Notices that trial and formal production require different budget decisions.
 5. Reviews the representative trial and makes an independent continue, repair,
    or stop decision.

@@ -24,4 +24,10 @@ docs
 *.safetensors
 *.pth
 *.pt
+
+# Quality images run repository-level contract tests inside the image.
+!.github
+!.github/**
+!docs
+!docs/**
 models

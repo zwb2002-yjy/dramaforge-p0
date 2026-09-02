@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import {
   ApiError,
+  createProject,
   createWorkspace,
   deleteWorkspace,
   fetchBootstrapStatus,
@@ -16,7 +17,6 @@ import {
   registerUser,
   renameWorkspace,
   setSelectedWorkspaceId as persistSelectedWorkspaceId,
-  startProject,
   type WorkspaceRead,
 } from "../lib/api";
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
@@ -61,7 +61,6 @@ function HomePage() {
   );
   const [workspaceName, setWorkspaceName] = useState("");
   const [projectName, setProjectName] = useState("新短剧");
-  const [idea, setIdea] = useState("");
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9">("9:16");
   const [error, setError] = useState<string | null>(null);
 
@@ -170,18 +169,17 @@ function HomePage() {
   const createProjectMutation = useMutation({
     mutationFn: async () => {
       if (!selectedWorkspaceId) throw new Error("请先选择一个空间");
-      return startProject({
+      return createProject({
         workspace_id: selectedWorkspaceId,
         name: projectName,
         aspect_ratio: aspectRatio,
-        idea,
       });
     },
     onSuccess: async (project) => {
       await invalidateWorkspaceData();
       void navigate({
         to: "/projects/$projectId/production",
-        params: { projectId: project.project_id },
+        params: { projectId: project.id },
       });
     },
     onError: (cause: Error) => setError(cause.message),
@@ -397,13 +395,6 @@ function HomePage() {
                   aria-label="项目名"
                   value={projectName}
                   onChange={(event) => setProjectName(event.target.value)}
-                  disabled={!selectedWorkspaceId}
-                />
-                <input
-                  aria-label="创意想法"
-                  value={idea}
-                  onChange={(event) => setIdea(event.target.value)}
-                  placeholder="创意想法（可选）"
                   disabled={!selectedWorkspaceId}
                 />
                 <select

@@ -159,7 +159,7 @@ class TestDefaultRegistryRealAdapters:
         """Phase 8/9: the default registry's media adapters are real V2 bridges
         over the unified runtime (translate works), not query-only placeholders.
         The LiteLLM text model is a generic gateway adapter (M7), not a bridge."""
-        from app.providers.adapters_v2 import LegacyAdapterBridge
+        from app.providers.adapters_v2 import ProviderAdapterBridge
         from app.providers.bootstrap import default_v3_registry
         from app.providers.litellm_adapter import LiteLLMModelAdapter
 
@@ -175,6 +175,6 @@ class TestDefaultRegistryRealAdapters:
             if model.manifest.provider_id == "litellm":
                 assert isinstance(model.adapter, LiteLLMModelAdapter)
                 continue
-            assert isinstance(model.adapter, LegacyAdapterBridge)
+            assert isinstance(model.adapter, ProviderAdapterBridge)
             assert model.adapter.provider_id == model.manifest.provider_id
             assert model.adapter.model_id == model.manifest.id

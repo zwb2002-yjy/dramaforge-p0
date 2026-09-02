@@ -1,7 +1,7 @@
 """LiteLLM text bridge tests (spec §113/§114, M7/M8).
 
 Covers the Generic LiteLLM adapter wire contract, the router path, and the
-``TEXT_V3_ROUTER_ENABLED`` creation-service migration path (spec §100–§101).
+the canonical LiteLLM capability and resolver path.
 """
 
 from __future__ import annotations
@@ -13,15 +13,12 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from app.access.models import User, Workspace
-from app.config import Settings, clear_settings_cache
-from app.creation.service import CreationService
+from app.config import Settings
 from app.providers.bootstrap import litellm_text_manifest
 from app.providers.capabilities import Capability
 from app.providers.contracts.common import (
     ExecutionContext,
     GenerationStatus,
-    ProviderCreateResult,
 )
 from app.providers.contracts.text import TextGenerateRequest, TextMessage
 from app.providers.litellm_adapter import LiteLLMModelAdapter
@@ -30,7 +27,6 @@ from app.providers.model_profiles.slots import ModelSlot
 from app.providers.registry import ModelRegistry
 from app.providers.router import CapabilityRouter
 from app.shared.base import Base
-from app.shared.security import hash_password
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 _GATEWAY = Settings(
@@ -303,91 +299,3 @@ async def test_resolver_returns_system_text_model(
     )
     assert resolved.source == "system_default"
     assert resolved.model_id == "litellm/text-llm"
-
-
-async def test_text_v3_bridge_generates_brief_through_router(
-    session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """TEXT_V3_ROUTER_ENABLED routes Agent Brief through the CapabilityRouter
-    instead of the legacy OpenAI adapter (spec §38/§101)."""
-    monkeypatch.setenv("TEXT_V3_ROUTER_ENABLED", "1")
-    monkeypatch.setenv("LITELLM_GATEWAY_URL", "https://gateway.example")
-    monkeypatch.setenv("LITELLM_API_KEY", "gateway-key")
-    clear_settings_cache()
-
-    brief_json = json.dumps(
-        {
-            "title": "桥测短剧",
-            "logline": "霓虹雨夜，女主追踪真相。",
-            "synopsis": "一次偶然发现的线索将女主卷入事件。",
-            "protagonist": {"name": "林", "profile": "调查员", "goal": "追查真相"},
-            "conflict": "对手阻挠",
-            "stakes": "真相",
-            "world": "雨夜都市",
-            "tone": "悬疑",
-            "audience": "年轻人",
-            "visual_style": "冷色调，高对比",
-            "episode_hook": "反转",
-        },
-        ensure_ascii=False,
-    )
-
-    async def fake_create(self: Any, capability: Capability, request: Any, context: Any):
-        return ProviderCreateResult(
-            status=GenerationStatus.SUCCEEDED,
-            provider_metadata={"text": brief_json, "usage": {"prompt_tokens": 1}},
-        )
-
-    monkeypatch.setattr(LiteLLMModelAdapter, "create", fake_create)
-
-    suffix = uuid4().hex[:8]
-    user = User(
-        email=f"bridge-{suffix}@example.com",
-        display_name="B",
-        password_hash=hash_password("password123"),
-    )
-    session.add(user)
-    await session.flush()
-    workspace = Workspace(owner_user_id=user.id, name=f"W-{suffix}")
-    session.add(workspace)
-    await session.flush()
-    await session.commit()
-
-    svc = CreationService(session)
-    started = await svc.start_project(
-        workspace_id=workspace.id,
-        name=f"P-{suffix}",
-        aspect_ratio="9:16",
-        actor=user,
-        idea="霓虹雨夜",
-    )
-    rev = await svc.generate_brief_agent(
-        project_id=started.project_id,
-        actor=user,
-        idea="霓虹雨夜女主被跟踪",
-        authorize=True,
-    )
-    assert rev.source_kind == "agent"
-    assert rev.brief.get("logline")
-    assert rev.brief.get("protagonist")
-
-    from app.creation.models import AgentRun
-    from app.execution.models import ProviderOperation as _OP
-    from sqlalchemy import select
-
-    agent = (
-        await session.execute(
-            select(AgentRun).where(AgentRun.project_id == started.project_id)
-        )
-    ).scalar_one()
-    assert agent.status == "succeeded"
-    ops = (
-        await session.execute(select(_OP).where(_OP.agent_run_id == agent.id))
-    ).scalars().all()
-    assert len(ops) == 1
-    op = ops[0]
-    assert op.actual_provider == "litellm"
-    assert op.actual_model == "litellm/text-llm"
-    assert op.request_summary.get("path") == "v3_router"
-    assert op.status == "succeeded"

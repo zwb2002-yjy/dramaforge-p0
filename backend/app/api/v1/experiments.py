@@ -25,7 +25,7 @@ from app.production.experiment_service import (
 from app.production.models import ExperimentBranch
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.models import ProviderConnection, ProviderModelBinding
-from app.runtime.scheduler import AgentRunScheduler
+from app.runtime.scheduler import NodeRunScheduler
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["experiments"], dependencies=[Depends(require_selected_workspace)])
@@ -299,7 +299,7 @@ async def _resolve_model_binding(
 
 
 async def _enqueue(session: SessionDep, run_ids: list[UUID]) -> list[str]:
-    scheduler = AgentRunScheduler(session)
+    scheduler = NodeRunScheduler(session)
     jobs: list[str] = []
     failures: list[str] = []
     for run_id in run_ids:
@@ -548,7 +548,6 @@ async def start_experiment(
         node_keys=[body.target_node_key],
         force=True,
         include_missing_dependencies=True,
-        legacy_guard=False,
         experiment_id=row.id,
         model_binding_id=binding.id,
         model_binding_node_key=body.target_node_key,
@@ -662,7 +661,6 @@ async def decide_experiment(
             node_keys=list(_DOWNSTREAM_AFTER_KEYFRAME),
             force=True,
             include_missing_dependencies=True,
-            legacy_guard=False,
         )
     elif body.adoption_scope == "current_node":
         stale_nodes = {

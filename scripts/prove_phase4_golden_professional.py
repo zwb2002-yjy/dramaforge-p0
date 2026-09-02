@@ -214,7 +214,6 @@ def main() -> int:
                         "Dialogue:\n"
                         "Camera: static\n"
                     ),
-                    "register_lead": False,
                 },
             ),
             "import script",

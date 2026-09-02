@@ -71,7 +71,7 @@ class ImportResult:
 def parse_script_markdown(text: str) -> ParsedScript:
     """Parse a simple markdown script fixture into episodes/scenes/shots.
 
-    Expected shape (fixtures/scripts/p0_10_shots.md):
+    Expected shape (fixtures/scripts/episode_script.md):
       # Episode 1 — Title
       Lead: Hero Name
       ## Scene 1 — Location / night

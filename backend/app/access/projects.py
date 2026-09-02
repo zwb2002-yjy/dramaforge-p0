@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User, UserProjectPreference, Workspace
 from app.shared.db import set_rls_context
-from app.shared.enums import ExperienceMode, ProjectStage
+from app.shared.enums import ProjectStage
 from app.shared.errors import ForbiddenError, NotFoundError, ValidationAppError
 
 
@@ -80,7 +80,6 @@ class ProjectService:
             UserProjectPreference(
                 user_id=actor.id,
                 project_id=project.id,
-                experience_mode=ExperienceMode.WORKBENCH.value,
             )
         )
         await self._session.flush()
@@ -112,27 +111,3 @@ class ProjectService:
             .order_by(Project.created_at.desc(), Project.id)
         )
         return list(result.scalars().all())
-
-    async def set_experience_mode(
-        self, *, project_id: UUID, actor: User, mode: ExperienceMode
-    ) -> UserProjectPreference:
-        await self.get_project_for_owner(project_id=project_id, actor=actor)
-        result = await self._session.execute(
-            select(UserProjectPreference).where(
-                UserProjectPreference.user_id == actor.id,
-                UserProjectPreference.project_id == project_id,
-            )
-        )
-        pref = result.scalar_one_or_none()
-        if pref is None:
-            pref = UserProjectPreference(
-                user_id=actor.id,
-                project_id=project_id,
-                experience_mode=mode.value,
-            )
-            self._session.add(pref)
-        else:
-            pref.experience_mode = mode.value
-        await self._session.flush()
-        await self._session.refresh(pref)
-        return pref

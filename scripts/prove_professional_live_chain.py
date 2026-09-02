@@ -88,7 +88,6 @@ def main() -> int:
                     "### Shot 1 - medium\nVisual: lead turns toward camera in the rain\n"
                     "Dialogue: 我终于明白了。\nCamera: slow push in\n"
                 ),
-                "register_lead": False,
             },
         )
         imported.raise_for_status()
@@ -233,5 +232,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
