@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import { createRoute, Link } from "@tanstack/react-router";
 
 import { Badge, Button, Card, Input, PageHeader, Tab, Tabs } from "../components/ui";
-import { QuickCreationPreview } from "../features/creation-preview/QuickCreationPreview";
 import { rootRoute } from "./__root";
 
 export const designPreviewRoute = createRoute({
@@ -11,11 +10,6 @@ export const designPreviewRoute = createRoute({
   component: DesignPreviewPage,
 });
 
-export const designPreviewProductRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/design-preview/product",
-  component: QuickCreationPreview,
-});
 
 const PALETTE = [
   { name: "Obsidian", hex: "#071013", value: "var(--df-obsidian)" },
@@ -37,7 +31,7 @@ function PreviewSection({ title, children }: { title: string; children: ReactNod
 }
 
 export function DesignPreviewPage() {
-  const [activeTab, setActiveTab] = useState<"quick" | "professional">("quick");
+  const [activeTab, setActiveTab] = useState<"story" | "production">("story");
 
   return (
     <div className="df-design-preview" data-testid="design-preview">
@@ -115,11 +109,11 @@ export function DesignPreviewPage() {
 
       <PreviewSection title="Tabs">
         <Tabs label="工作模式">
-          <Tab active={activeTab === "quick"} onClick={() => setActiveTab("quick")}>
-            快速
+          <Tab active={activeTab === "story"} onClick={() => setActiveTab("story")}>
+            创作
           </Tab>
-          <Tab active={activeTab === "professional"} onClick={() => setActiveTab("professional")}>
-            专业
+          <Tab active={activeTab === "production"} onClick={() => setActiveTab("production")}>
+            制作
           </Tab>
         </Tabs>
       </PreviewSection>

@@ -99,9 +99,8 @@ function ProjectLayout() {
   const { projectId } = projectRoute.useParams();
   const location = useRouterState({ select: (state) => state.location });
   const pathname = location.pathname;
-  const onQuick = pathname.includes("/quick");
   const view = workspaceViewFromPath(pathname);
-  const atRoot = view === null && !onQuick;
+  const atRoot = view === null;
   const ws = useProjectWorkspaceState(projectId);
   const project = useQuery({
     queryKey: ["project", projectId],
@@ -113,7 +112,7 @@ function ProjectLayout() {
         throw error;
       }
     },
-    enabled: projectId !== "demo" && !onQuick && atRoot,
+    enabled: projectId !== "demo" && atRoot,
   });
 
   // Remember the current professional view so the next visit restores it.
@@ -124,8 +123,6 @@ function ProjectLayout() {
       ws.rememberLastView(view);
     }
   }, [view, ws]);
-
-  if (onQuick) return <Outlet />;
 
   const projectRead = project.data ?? undefined;
 
