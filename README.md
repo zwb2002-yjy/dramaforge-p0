@@ -126,19 +126,20 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gpu up 
 
 ---
 
-### 原生 Python 调试（可选）
+### 容器内开发与调试
 
-仅当需要在宿主机 IDE 中打断点时使用；日常运行、依赖安装、质量检查和
-E2E 都走 Docker 质量/运行容器。本节不改变 8080 唯一用户入口。
+项目的运行时、依赖安装、静态检查、测试和 E2E 统一在 Docker 容器中执行。
+宿主机不创建 Python venv、不安装 Node 依赖，也不直接启动 API 或 Vite。
+需要断点时，让 IDE 附加到对应容器进程；这不会改变 8080 唯一用户入口。
 
-先用开发 override 启动完整应用：
+从源码构建并启动完整应用：
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
-`docker-compose.dev.yml` 会显式开放调试端口，不得用于不受信网络。原生调试不提供另一套部署
-模式；数据库、队列、对象存储和 API 仍由 Compose 管理，API 的 8000 端口不发布到宿主机。
+`docker-compose.dev.yml` 只显式开放基础设施调试端口，不得用于不受信网络。数据库、队列、
+对象存储和 API 仍由 Compose 管理，API 的 8000 端口不发布到宿主机。
 
 需要从源码构建完整容器栈时，必须显式叠加构建 override：
 
@@ -149,38 +150,8 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 发布拓扑本身没有 `build` 字段；改动源码后由开发者或 CI 重新构建镜像，普通用户不在安装机
 上编译。
 
-**后端**（仅宿主机 IDE 快速反馈，Python 3.12 + venv）：
-
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-uvicorn app.main:app --reload --port 8000
-```
-
-直接运行的 API 仅用于本地断点调试；对外访问仍使用 Compose 前端网关
-`http://127.0.0.1:8080`。
-
-**Worker**（需 Redis 已启动）：
-
-```powershell
-python -m app.workers.main default
-arq app.workers.default.WorkerSettings
-
-python -m app.workers.main heavy
-arq app.workers.heavy.WorkerSettings
-```
-
-**前端**（仅宿主机 IDE 快速反馈）：
-
-```powershell
-cd frontend
-npm.cmd install
-npm.cmd run dev
-```
-
-> 工作台壳使用 TanStack Router + QueryClient；服务端状态只放 TanStack Query，Zustand 仅保存布局/选择等 UI 状态。
+Worker、API 和前端网关均由 Compose 管理。工作台壳使用 TanStack Router + QueryClient；
+服务端状态只放 TanStack Query，Zustand 仅保存布局/选择等 UI 状态。
 
 ## 测试与质量门禁
 
@@ -192,38 +163,11 @@ lint/typecheck/unit/build/E2E；宿主机不需要安装 Python、uv、Node 或�
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_docker.ps1
 ```
 
-原生命令仅用于快速编辑反馈，不能替代上述容器 Gate。
 其中 Canonical surface scan 会阻止已删除的 Quick、Creation、受控 Director、
 CharacterReference、旧运行时开关和旧 NodeRun 字段重新出现。
 
-以下原生命令仅用于快速编辑反馈（需要宿主机自行准备对应依赖），不能替代 Docker Gate：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality.ps1
-```
-
-分项：
-
-```powershell
-# 目录合规（拒绝未登记根目录与敏感/构建产物）
-python .\scripts\check_directory_compliance.py
-
-# 后端
-cd backend
-python -m ruff check app tests
-python -m mypy app
-python -m pytest -q
-
-# 前端
-cd frontend
-npm.cmd run lint
-npm.cmd run typecheck
-npm.cmd run test
-npm.cmd run build
-
-# OpenAPI → TypeScript（可重复生成，二次运行应无有意义 diff）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\generate_openapi_types.ps1
-```
+`scripts/run_quality.ps1` 仅作为兼容入口，内部转发到同一个 Docker Gate；不要在宿主机
+另行安装或运行项目工具链。
 
 演示目录检查的拒绝路径：
 

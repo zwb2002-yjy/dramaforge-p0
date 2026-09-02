@@ -16,44 +16,13 @@ jobs:
   verify-release-source:
     name: Verify release source
     runs-on: ubuntu-latest
+    env:
+      QUALITY_CONTRACT_DIR: ./tmp/quality-contract
     outputs:
       version: ${{ steps.identity.outputs.version }}
       migration_head: ${{ steps.migration-head.outputs.migration_head }}
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_DB: dramaforge
-          POSTGRES_USER: dramaforge
-          POSTGRES_PASSWORD: dramaforge
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U dramaforge -d dramaforge"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      APP_ENV: test
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge
-      SESSION_SECRET: release-verification-session-secret-32-characters
-      WORKER_TOKEN: release-verification-worker-token-32-characters
-      BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-      AGNES_ENABLED: "false"
-      MINIMAX_ENABLED: "false"
-      TEXT_LLM_ENABLED: "false"
-      LITELLM_INTEGRATION_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
       - name: Bind tag to repository version
         id: identity
         shell: bash
@@ -65,107 +34,57 @@ jobs:
               exit 1
             fi
             expected="${GITHUB_REF_NAME#v}"
-            version="$(python scripts/release_contract.py check --repo-root . --expected-version "$expected" --output version)"
+            version="$(docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace python:3.12-slim python scripts/release_contract.py check --repo-root /workspace --expected-version "$expected" --output version)"
           else
-            version="$(python scripts/release_contract.py check --repo-root . --output version)"
+            version="$(docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace python:3.12-slim python scripts/release_contract.py check --repo-root /workspace --output version)"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Enforce repository policy
+      - name: Enforce repository policy in a container
         run: |
-          python scripts/check_directory_compliance.py
-          python scripts/repo_guardrails.py policy --repo-root .
-      - name: Sync backend dependencies
-        working-directory: backend
-        run: uv sync --locked --extra dev
-      - name: Backend static analysis
-        working-directory: backend
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            python:3.12-slim \
+            python scripts/check_directory_compliance.py
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            python:3.12-slim \
+            python scripts/repo_guardrails.py policy --repo-root /workspace
+      - name: Run the exact source quality gate in containers
         run: |
-          uv run ruff check app tests alembic
-          uv run mypy app
-      - name: Backend unit tests
-        working-directory: backend
-        run: uv run pytest tests/unit -q
+          set -euo pipefail
+          mkdir -p tmp/quality-contract
+          docker compose -f docker-compose.quality.yml build backend-quality frontend-quality
+          docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from backend-quality \
+            postgres-quality backend-quality
+          docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
+          docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from litellm-integration-quality \
+            litellm-quality litellm-integration-quality
       - name: Resolve single migration head
         id: migration-head
-        working-directory: backend
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t heads < <(uv run alembic heads | awk 'NF {print $1}')
+          mapfile -t heads < <(
+            docker run --rm dramaforge-backend-quality:local \
+              sh -ec 'uv run --directory backend alembic heads' | awk 'NF {print $1}'
+          )
           if [[ "${#heads[@]}" -ne 1 ]]; then
             echo "Release requires exactly one Alembic head; found ${#heads[@]}." >&2
             exit 1
           fi
           echo "migration_head=${heads[0]}" >> "$GITHUB_OUTPUT"
-      - name: Apply migrations
-        working-directory: backend
-        run: uv run alembic upgrade head
-      - name: PostgreSQL and real LiteLLM integration tests
-        working-directory: backend
-        run: uv run pytest tests/integration -q -rs --fail-on-skip
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-      - name: Frontend quality suite
-        working-directory: frontend
-        run: |
-          npm run lint
-          npm run typecheck
-          npm run test
-          npm run build
-      - name: Install Chromium
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-      - name: Browser smoke test
-        working-directory: frontend
-        run: npm run test:e2e -- tests/e2e/smoke.spec.ts
-
-  release-platform-baseline:
-    name: Release baseline (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Validate version identity
-        run: python scripts/release_contract.py check --repo-root .
-      - name: Sync backend dependencies
-        working-directory: backend
-        run: uv sync --locked --extra dev
-      - name: Cross-platform backend contracts
-        working-directory: backend
-        run: >-
-          uv run pytest
-          tests/unit/test_config.py
-          tests/unit/test_init_env.py
-          tests/unit/test_dockerfile_context.py
-          tests/unit/test_compose_contract.py
-          tests/unit/test_release_contract.py
-          -q
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-      - name: Typecheck frontend
-        working-directory: frontend
-        run: npm run typecheck
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
+      - name: Remove verification resources
+        if: always()
+        run: docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
 
   containers-and-sbom:
     name: Build, smoke, and publish containers
-    needs: [verify-release-source, release-platform-baseline]
+    needs: verify-release-source
     runs-on: ubuntu-latest
     env:
       POSTGRES_PASSWORD: release-compose-postgres-password
@@ -322,18 +241,22 @@ jobs:
           if [[ "${{ steps.image.outputs.published }}" == "true" ]]; then
             published=(--published)
           fi
-          python scripts/release_contract.py manifest \
-            --version "${{ needs.verify-release-source.outputs.version }}" \
-            --source-commit "${{ github.sha }}" \
-            --migration-head "${{ needs.verify-release-source.outputs.migration_head }}" \
-            --backend-image "${{ steps.image.outputs.backend }}" \
-            --backend-tag "${{ steps.image.outputs.tag }}" \
-            --backend-digest "${{ steps.manifest-digests.outputs.backend }}" \
-            --frontend-image "${{ steps.image.outputs.frontend }}" \
-            --frontend-tag "${{ steps.image.outputs.tag }}" \
-            --frontend-digest "${{ steps.manifest-digests.outputs.frontend }}" \
-            "${published[@]}" \
-            --output-file release-manifest.json
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            python:3.12-slim \
+            python scripts/release_contract.py manifest \
+              --version "${{ needs.verify-release-source.outputs.version }}" \
+              --source-commit "${{ github.sha }}" \
+              --migration-head "${{ needs.verify-release-source.outputs.migration_head }}" \
+              --backend-image "${{ steps.image.outputs.backend }}" \
+              --backend-tag "${{ steps.image.outputs.tag }}" \
+              --backend-digest "${{ steps.manifest-digests.outputs.backend }}" \
+              --frontend-image "${{ steps.image.outputs.frontend }}" \
+              --frontend-tag "${{ steps.image.outputs.tag }}" \
+              --frontend-digest "${{ steps.manifest-digests.outputs.frontend }}" \
+              "${published[@]}" \
+              --output-file /workspace/release-manifest.json
       - name: Create online and offline release bundles
         shell: bash
         env:

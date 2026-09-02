@@ -10,8 +10,8 @@ network. A user host needs Docker Compose v2; it does not need Python, Node.js,
 or a compiler.
 
 This topology is intended to behave the same with Docker Compose v2 on Linux,
-Windows Docker Desktop and macOS Docker Desktop. CI validates source
-configuration and application builds on all three operating systems; a release
+Windows Docker Desktop and macOS Docker Desktop. The authoritative CI quality
+gate builds and tests the same containers used for the release path; a release
 claim still requires the release candidate's Docker smoke test and evidence on
 each claimed host.
 
@@ -95,17 +95,21 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 This path is for maintainers and contributors. Ordinary installations consume
 the release images and never compile source.
 
-The following intentionally exposes infrastructure and API ports for local
-debugging and excludes the production frontend unless its profile is selected:
+The following intentionally exposes infrastructure ports for local debugging.
+The frontend gateway remains the only application entry; the API port 8000 is
+not published:
 
 ```text
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-cd frontend
-npm ci
-npm run dev
 ```
 
-Never use `docker-compose.dev.yml` on an untrusted network.
+For source changes, rebuild the explicit build override and run the Docker
+quality gate. Never use `docker-compose.dev.yml` on an untrusted network.
+
+```text
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_docker.ps1
+```
 
 ## Health and lifecycle
 

@@ -10,7 +10,6 @@ export const designPreviewRoute = createRoute({
   component: DesignPreviewPage,
 });
 
-
 const PALETTE = [
   { name: "Obsidian", hex: "#071013", value: "var(--df-obsidian)" },
   { name: "Ink Blue", hex: "#142129", value: "var(--df-ink)" },

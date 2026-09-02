@@ -38,9 +38,10 @@ services afterward.
 
 ## Runtime smoke
 
-For a no-cost smoke use the canonical proof script:
+For a no-cost smoke use the canonical proof script from the backend runtime
+container (the host does not need Python):
 
-    python scripts/prove_formal_live_chain.py --scratch tmp/proof --idea "..." --script-file fixtures/scripts/episode_script.md
+    docker compose --profile maintenance run --rm --entrypoint python maintenance /workspace/scripts/prove_formal_live_chain.py --scratch /workspace/tmp/proof --idea "..." --script-file /workspace/fixtures/scripts/episode_script.md
 
 Paid Provider proofs require separate Owner authorization and must record the
 exact source commit and redacted ProviderOperation evidence.

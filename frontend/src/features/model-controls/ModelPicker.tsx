@@ -41,9 +41,7 @@ export function ModelPicker({ models, value, onChange, loading = false }: ModelP
             ].join(" ")}
           >
             <span className="font-medium">{model.display_name}</span>
-            <span className="ml-2 text-xs text-gray-500">
-              {model.capabilities.join(" · ")}
-            </span>
+            <span className="ml-2 text-xs text-gray-500">{model.capabilities.join(" · ")}</span>
           </button>
         );
       })}

@@ -1,6 +1,6 @@
 # P10-C5 — Identity asset convergence
 
-**Status:** USER-AUTHORIZED / IN PROGRESS
+**Status:** COMPLETE
 **Parent:** P10 legacy hard removal
 
 ## Outcome

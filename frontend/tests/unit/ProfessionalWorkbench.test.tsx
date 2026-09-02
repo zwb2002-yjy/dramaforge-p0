@@ -38,7 +38,8 @@ describe("ProfessionalWorkbench", () => {
         selectedShotId="shot-1"
         onSelectShot={onSelectShot}
 
-        onSave={async (shot) => ({ ...shot, version: shot.version + 1 })}      />,
+        onSave={async (shot) => ({ ...shot, version: shot.version + 1 })}
+      />,
     );
 
     expect(screen.getByTestId("professional-workbench")).toBeInTheDocument();
@@ -53,7 +54,9 @@ describe("ProfessionalWorkbench", () => {
     fireEvent.change(editor, { target: { value: "用户手动改写的正式镜头语义" } });
     expect(screen.getByText("有未保存变更")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "保存画布版本" }));
-    await waitFor(() => expect(screen.getByText(/后续执行将以这份正式镜头语义为事实源/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText(/后续执行将以这份正式镜头语义为事实源/)).toBeInTheDocument(),
+    );
   });
 
   it("lets the user reject a suggestion without changing the canvas", () => {

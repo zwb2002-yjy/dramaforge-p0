@@ -96,9 +96,7 @@ describe("AssetMentionInput", () => {
     await waitFor(() =>
       expect(onCreateBinding).toHaveBeenCalledWith("@林墨", "asset-linmo", "identity"),
     );
-    await waitFor(() =>
-      expect(screen.queryByTestId("mention-unresolved")).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByTestId("mention-unresolved")).not.toBeInTheDocument());
   });
 
   it("marks unbound @text as unresolved without creating a binding", async () => {

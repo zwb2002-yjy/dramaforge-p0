@@ -1,0 +1,20 @@
+model_list:
+  - model_name: script-quality
+    litellm_params:
+      model: openai/script-quality-deployment-a
+      mock_response: "integration deployment A"
+  - model_name: script-quality
+    litellm_params:
+      model: openai/script-quality-deployment-b
+      mock_response: "integration deployment B"
+  - model_name: script-fast
+    litellm_params:
+      model: openai/script-fast-deployment
+      mock_response: "integration fast"
+
+router_settings:
+  routing_strategy: simple-shuffle
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  enable_response_cost_headers: true

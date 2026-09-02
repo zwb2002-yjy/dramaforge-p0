@@ -113,7 +113,8 @@ export function zhErrorCode(code: string | null | undefined): string {
 const SUMMARY_PATTERNS: Array<[RegExp, (...m: string[]) => string]> = [
   [
     /required review (\w+) is (blocked|needs_human|failed)/,
-    (_all, node: string, state: string) => `必需审核「${zhNode(node)}」${ZH_REVIEW_STATE[state] ?? state}`,
+    (_all, node: string, state: string) =>
+      `必需审核「${zhNode(node)}」${ZH_REVIEW_STATE[state] ?? state}`,
   ],
   [
     /required upstream (\w+) ended with (failed|blocked|cancelled)/,
@@ -132,10 +133,7 @@ const SUMMARY_PATTERNS: Array<[RegExp, (...m: string[]) => string]> = [
     /required upstream (\w+) Artifact is unavailable/,
     (_all, node: string) => `必需上游「${zhNode(node)}」产物不可用`,
   ],
-  [
-    /completed after cancel without explicit adoption/,
-    () => "取消后完成但未获显式采用",
-  ],
+  [/completed after cancel without explicit adoption/, () => "取消后完成但未获显式采用"],
   [
     /current graph node is missing or belongs to another version/,
     () => "当前图节点缺失或属于另一版本",

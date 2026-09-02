@@ -50,10 +50,11 @@ Artifact delivery, and EditSession export.
 ## Required checks
 
 npm run api:check
+frontend: npm run format:check
 backend: alembic check
 backend: pytest tests/unit
 backend: pytest tests/integration/test_s1_db_migration_pg.py
 
 The authoritative dependency installation and command execution are defined by
-docker-compose.quality.yml. Host-only commands in README are fast feedback,
-not release evidence.
+docker-compose.quality.yml. The repository does not require a host Python or
+Node installation for development or release evidence.

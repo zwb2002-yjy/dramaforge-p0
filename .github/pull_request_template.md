@@ -7,12 +7,7 @@
 ## Verification
 
 - [ ] `policy`
-- [ ] `backend-static`
-- [ ] `backend-unit`
-- [ ] `postgres-integration`
-- [ ] `frontend`
-- [ ] `frontend-smoke`
-- [ ] `frontend-smoke-windows`
+- [ ] `container-gates` (backend + PostgreSQL + OpenAPI + frontend + E2E + LiteLLM)
 - [ ] No generated formal evidence was committed from a dirty worktree.
 - [ ] This is either the release PR `dev -> main`, an isolation PR `agent/<task-id> -> dev`, or an urgent `agent/hotfix-* -> main` PR that will be synchronized back to `dev`.
 

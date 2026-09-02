@@ -81,14 +81,17 @@ def test_release_workflow_cannot_publish_before_verification() -> None:
         encoding="utf-8"
     )
     assert "verify-release-source:" in workflow
-    assert "release-platform-baseline:" in workflow
-    assert "needs: [verify-release-source, release-platform-baseline]" in workflow
+    assert "release-platform-baseline:" not in workflow
+    assert "docker-compose.quality.yml" in workflow
+    assert "docker run --rm" in workflow
     assert "release_contract.py check" in workflow
-    assert "uv run pytest tests/integration -q -rs --fail-on-skip" in workflow
-    assert "npm run test:e2e -- tests/e2e/smoke.spec.ts" in workflow
+    assert "litellm-integration-quality" in workflow
+    assert "frontend-quality" in workflow
     assert "DRAMAFORGE_VERSION=${{ needs.verify-release-source.outputs.version }}" in workflow
     assert "DRAMAFORGE_SOURCE_COMMIT=${{ github.sha }}" in workflow
     assert "release-manifest.json" in workflow
+    assert "actions/setup-python" not in workflow
+    assert "actions/setup-node" not in workflow
 
 
 def test_release_workflow_packages_installable_online_and_offline_bundles() -> None:

@@ -64,9 +64,7 @@ export function AssetMentionInput({
 
   const unresolved = useMemo(() => {
     const tokens = value.match(/@([\p{L}\p{N}_\-\u4e00-\u9fff]+)/gu) ?? [];
-    return tokens
-      .map((token) => token.slice(1))
-      .filter((name) => !boundLabels.includes(name));
+    return tokens.map((token) => token.slice(1)).filter((name) => !boundLabels.includes(name));
   }, [value, boundLabels]);
 
   const pick = (asset: AssetRead) => {
@@ -103,9 +101,7 @@ export function AssetMentionInput({
               aria-selected="false"
               onMouseDown={(event) => {
                 event.preventDefault();
-                const asset = (assets.data ?? []).find(
-                  (item) => item.id === suggestion.asset_id,
-                );
+                const asset = (assets.data ?? []).find((item) => item.id === suggestion.asset_id);
                 if (asset) pick(asset);
               }}
             >

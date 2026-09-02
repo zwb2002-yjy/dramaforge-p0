@@ -18,4 +18,4 @@ COPY . .
 
 RUN npm ci --prefix /workspace/frontend
 
-CMD ["sh", "-c", "set -eu; npm run --prefix frontend api:check; npm run --prefix frontend lint; npm run --prefix frontend typecheck; npm run --prefix frontend test -- --run; npm run --prefix frontend build; npm run --prefix frontend test:e2e"]
+CMD ["sh", "-c", "set -eu; npm run --prefix frontend api:check; npm run --prefix frontend format:check; npm run --prefix frontend lint; npm run --prefix frontend typecheck; npm run --prefix frontend test -- --run --maxWorkers=1 --minWorkers=1; npm run --prefix frontend build; npm run --prefix frontend test:e2e"]

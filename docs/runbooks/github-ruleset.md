@@ -15,12 +15,7 @@ Create a branch ruleset targeting `main` with these rules:
 6. Block force pushes and branch deletion.
 7. Require these exact status checks:
    - `policy`
-   - `backend-static`
-   - `backend-unit`
-   - `postgres-integration`
-   - `frontend`
-   - `frontend-smoke`
-   - `frontend-smoke-windows`
+   - `container-gates`
 8. Do not allow repository administrators or automation agents to bypass the ruleset.
 
 Only `@zwb2002-yjy` may provide the required approval and merge. An agent may create or

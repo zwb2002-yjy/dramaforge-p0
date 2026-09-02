@@ -1,6 +1,6 @@
 # PHASE_GATE
 
-Status: P10 hard-removal candidate
+Status: P10 hard-removal complete
 Date: 2026-09-02
 Base: dev e8da0da
 
@@ -15,6 +15,7 @@ Base: dev e8da0da
 | C4 runtime convergence | keyframe/video always use unified-v1; local voice has a named neutral path; switch flags removed |
 | C5 identity convergence | AssetVersionReference is the only identity reference source |
 | C6 schema hard removal | migration 20260902_0051 upgrades an empty PostgreSQL database and drops retired tables/columns |
+| C7 contract/test/documentation closeout | generated OpenAPI, source scans, Docker quality gate, frontend format and Canonical inventories are aligned |
 
 ## Required release evidence
 
@@ -22,7 +23,7 @@ Base: dev e8da0da
 - backend unit tests;
 - PostgreSQL upgrade and alembic check;
 - canonical Golden and RLS integration tests;
-- frontend lint, typecheck, Vitest, build and Playwright;
+- frontend format, lint, typecheck, Vitest, build and Playwright;
 - generated OpenAPI no-diff;
 - security, repository policy and directory compliance;
 - same-SHA runtime image health and source identity.

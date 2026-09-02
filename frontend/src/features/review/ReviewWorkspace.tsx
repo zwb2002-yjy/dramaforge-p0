@@ -64,9 +64,7 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
     enabled: projectId !== "demo" && Boolean(shotId),
   });
   const addAnnotation = useMutation({
-    mutationFn: (
-      input: Omit<Parameters<typeof createReviewAnnotation>[2], "note">,
-    ) =>
+    mutationFn: (input: Omit<Parameters<typeof createReviewAnnotation>[2], "note">) =>
       createReviewAnnotation(projectId, shotId!, { ...input, note }),
     onSuccess: () => {
       setNote("");

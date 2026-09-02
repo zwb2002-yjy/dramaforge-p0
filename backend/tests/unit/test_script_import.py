@@ -76,7 +76,6 @@ def test_parse_script_fixture() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     parsed = parse_script_markdown(text)
     assert parsed.episode_number == 1
-    assert parsed.lead_character == "Lin Xia"
     assert len(parsed.scenes) == 2
     assert sum(len(s.shots) for s in parsed.scenes) == 3
     assert parsed.scenes[0].shots[0].visual
@@ -96,7 +95,6 @@ async def test_import_script_creates_variable_shot_count(session: AsyncSession) 
     )
     assert result.shot_count == 3
     assert result.scene_count == 2
-    assert result.lead_character == "Lin Xia"
     assert len(result.content_hash) == 64
     rows = list(
         (

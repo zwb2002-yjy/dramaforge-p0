@@ -26,7 +26,11 @@ def main() -> int:
     ap.add_argument("--base", default=BASE)
     ap.add_argument("--out", type=Path, default=Path("tmp/provider-probe/probe.json"))
     ap.add_argument("--capability", default="auth_models")
-    ap.add_argument("--budget", default="100", help="budget_authorized for paid probes")
+    ap.add_argument(
+        "--confirm-paid-request",
+        action="store_true",
+        help="explicitly confirm a paid capability probe",
+    )
     args = ap.parse_args()
     base = args.base.rstrip("/")
     key = os.environ.get("AGNES_PROBE_KEY", "").strip()
@@ -128,7 +132,10 @@ def main() -> int:
         # Run the requested capability probe
         r = post(
             f"/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/probes",
-            {"capability": args.capability, "budget_authorized": args.budget},
+            {
+                "capability": args.capability,
+                "paid_request_confirmed": args.confirm_paid_request,
+            },
         )
         if r.status_code not in (200, 201):
             report["steps"]["probe"] = {

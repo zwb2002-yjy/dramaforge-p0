@@ -57,10 +57,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
     retry: false,
   });
 
-  const slotById = useMemo(
-    () => new Map((slots.data ?? []).map((s) => [s.id, s])),
-    [slots.data],
-  );
+  const slotById = useMemo(() => new Map((slots.data ?? []).map((s) => [s.id, s])), [slots.data]);
 
   const effectiveById = useMemo(
     () => new Map((effective.data ?? []).map((b) => [b.slot, b])),
@@ -91,7 +88,9 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
     onSuccess: (profile: ModelProfileRead) => {
       queryClient.setQueryData(["project-model-profile", projectId], profile);
       queryClient.invalidateQueries({ queryKey: ["model-bindings-effective", projectId] });
-      setMessage(`已保存（版本 ${profile.version}）。修改只影响后续生成，运行中的镜头不会自动换模型。`);
+      setMessage(
+        `已保存（版本 ${profile.version}）。修改只影响后续生成，运行中的镜头不会自动换模型。`,
+      );
       setError(null);
     },
     onError: (err: Error) => {
@@ -147,11 +146,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
       slot.capabilities.some((cap) => m.capabilities.includes(cap)),
     );
 
-  const renderModelSelect = (
-    slotId: string,
-    value: string,
-    onChange: (v: string) => void,
-  ) => {
+  const renderModelSelect = (slotId: string, value: string, onChange: (v: string) => void) => {
     const slot = slotById.get(slotId);
     if (!slot) return null;
     const candidates = modelsForCapability(slot);
@@ -185,12 +180,13 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
           <div className="status-grid">
             {(["llm", "image", "video", "voice"] as const).map((group) => {
               const slotsInGroup = SIMPLE_MODE_SLOT_GROUPS[group];
-              const current =
-                slotsInGroup
-                  .map((s) => effectiveSlotModel(s))
-                  .find((m) => m) ?? "";
+              const current = slotsInGroup.map((s) => effectiveSlotModel(s)).find((m) => m) ?? "";
               return (
-                <label key={group} className="status-card" style={{ display: "grid", gap: "0.4rem" }}>
+                <label
+                  key={group}
+                  className="status-card"
+                  style={{ display: "grid", gap: "0.4rem" }}
+                >
                   <span className="status-label">
                     {group === "llm"
                       ? "默认语言模型"
@@ -230,7 +226,11 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
             {(slots.data ?? []).map((slot) => {
               const value = advancedChoices[slot.id] ?? effectiveSlotModel(slot.id);
               return (
-                <label key={slot.id} className="status-card" style={{ display: "grid", gap: "0.4rem" }}>
+                <label
+                  key={slot.id}
+                  className="status-card"
+                  style={{ display: "grid", gap: "0.4rem" }}
+                >
                   <span className="status-label">
                     {slot.display_name}
                     {slot.p0_scope ? "" : " · 扩展"}
@@ -246,7 +246,12 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
             })}
           </div>
           <div className="toolbar">
-            <button type="button" className="primary" onClick={saveAdvanced} disabled={save.isPending}>
+            <button
+              type="button"
+              className="primary"
+              onClick={saveAdvanced}
+              disabled={save.isPending}
+            >
               保存高级模式
             </button>
             <button type="button" className="ghost" onClick={() => setAdvanced(false)}>

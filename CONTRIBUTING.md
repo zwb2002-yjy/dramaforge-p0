@@ -14,28 +14,17 @@ Thank you for helping make AI-assisted short-drama creation more reliable.
 
 ## Development checks
 
-```powershell
-cd backend
-uv sync --locked --extra dev
-uv run ruff check app tests
-uv run mypy app
-uv run pytest tests/unit -q
-
-cd ..\frontend
-npm ci
-npm run lint
-npm run typecheck
-npm test
-npm run build
-```
-
-Container changes must also pass:
+The repository toolchains are container-owned. Do not create a host Python
+environment or install Node dependencies for routine development. Run the
+single authoritative gate:
 
 ```powershell
-python scripts/init_env.py
-docker compose config --quiet
-docker compose build
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_docker.ps1
 ```
+
+It installs locked Python/Node dependencies inside disposable quality images,
+starts disposable PostgreSQL and LiteLLM services, and runs the complete
+backend/frontend/API/E2E gate.
 
 Use a throwaway `.env` and isolated databases in tests. Pull requests should be
 small, explain user-visible behavior, list exact verification commands, and keep

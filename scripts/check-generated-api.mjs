@@ -1,6 +1,6 @@
 // Verify that the committed frontend API types are reproducible without
-// requiring Git metadata.  This is used by both host CI and source-less
-// quality images, where `git diff` cannot inspect the checkout.
+// requiring Git metadata. The authoritative caller is the source-less
+// frontend quality image, which receives the backend-exported contract.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -22,6 +22,9 @@ const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const result = spawnSync(npm, ["run", "api:generate"], {
   cwd: path.join(repoRoot, "frontend"),
   stdio: "inherit",
+  // Windows cannot spawn a .cmd shim without a shell; Linux/macOS keep the
+  // direct process path so the check remains deterministic there.
+  shell: process.platform === "win32",
 });
 
 try {

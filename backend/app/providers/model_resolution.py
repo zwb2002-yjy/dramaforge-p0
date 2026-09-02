@@ -69,10 +69,9 @@ class ExecutionModelResolver:
     """Resolve a Professional execution to one concrete ProviderModelBinding.
 
     The priority is intentionally evaluated at *slot* level: explicit request,
-    project profile slot, workspace profile slot, then the existing legacy
-    project binding as the bounded compatibility system default.  Once a higher
-    priority source names X, an unavailable X is terminal and never falls
-    through to legacy Y.
+    project profile slot, workspace profile slot, then an explicitly saved
+    project binding as the system default. Once a higher-priority source names
+    X, an unavailable X is terminal and never falls through to another model.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -165,10 +164,10 @@ class ExecutionModelResolver:
                 native_options=binding.native_options,
             )
 
-        # The legacy ProjectProviderBinding remains a compatibility source only
-        # when neither profile declares this slot. It is deliberately labelled
-        # system_default in the reviewed priority vocabulary.
-        legacy = await self._session.scalar(
+        # An explicitly saved project binding is used only when neither profile
+        # declares this slot. It is labelled system_default and never acts as a
+        # fallback after a higher-priority model was selected.
+        project_binding = await self._session.scalar(
             select(ProjectProviderBinding).where(
                 ProjectProviderBinding.project_id == project.id,
                 ProjectProviderBinding.purpose == purpose,
@@ -177,10 +176,10 @@ class ExecutionModelResolver:
         concrete = (
             await self._binding_by_id(
                 workspace_id=project.workspace_id,
-                binding_id=legacy.model_binding_id,
+                binding_id=project_binding.model_binding_id,
                 purpose=purpose,
             )
-            if legacy is not None
+            if project_binding is not None
             else None
         )
         return self._resolution_for(

@@ -1,11 +1,10 @@
-"""Scene-level production orchestration (WF9).
+"""Scene-level production status aggregation (WF9).
 
-The Scene is the default production batch boundary: each scene runs its own
-planning, graph, budget authorization, review and completion.  Project/Episode
-only aggregate state.  This module builds the scene read model and the
-prepare/execute status transition; it never builds one giant project graph and
-never invents a second queue (it reuses NodeRun single-flight / provider
-operations / budget).
+The Scene is the default production status boundary: each scene aggregates its
+shots, graph state, review state and completion. Project/Episode only aggregate
+state. This module builds a read model; it never builds one giant project graph
+or invents a second queue (it reuses NodeRun single-flight and Provider
+operations).
 """
 
 from __future__ import annotations

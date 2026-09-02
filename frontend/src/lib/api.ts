@@ -418,12 +418,7 @@ export function getEffectiveBindings(projectId: string): Promise<EffectiveBindin
   return apiGet(`/api/v1/projects/${projectId}/model-bindings/effective`);
 }
 
-export type ProjectRead = components["schemas"]["ProjectRead"] & {
-  /** @deprecated historical fixture compatibility; server no longer returns this field. */
-  budget_limit?: string;
-  /** @deprecated historical fixture compatibility; server no longer returns this field. */
-  budget_currency?: string;
-};
+export type ProjectRead = components["schemas"]["ProjectRead"];
 
 export async function fetchCsrf(): Promise<string> {
   const r = await apiGet<CsrfResponse>("/api/v1/auth/csrf");
@@ -575,7 +570,6 @@ export type ScriptImportResponse = {
   scene_count: number;
   shot_count: number;
   shot_ids: string[];
-  lead_character: string | null;
   content_hash: string;
 };
 
@@ -585,12 +579,7 @@ export async function importScript(
   text: string,
 ): Promise<ScriptImportResponse> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/scripts/import`,
-    { filename, text },
-    csrf,
-  );
+  return apiSend("POST", `/api/v1/projects/${projectId}/scripts/import`, { filename, text }, csrf);
 }
 
 export type AssetRead = {

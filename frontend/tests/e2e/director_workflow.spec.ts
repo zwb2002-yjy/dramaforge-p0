@@ -75,20 +75,78 @@ async function installProfessionalMock(page: Page): Promise<MockState> {
     if (path.endsWith("/auth/csrf")) return json(route, { csrf_token: "csrf-e2e" });
     if (path.endsWith("/director/workspace-snapshot")) return json(route, workspaceSnapshot());
     if (path.endsWith("/snapshot")) {
-      return json(route, { project_id: PROJECT_ID, name: "专业工作台验收", node_runs: [], artifacts: [], provider_operations: [] });
+      return json(route, {
+        project_id: PROJECT_ID,
+        name: "专业工作台验收",
+        node_runs: [],
+        artifacts: [],
+        provider_operations: [],
+      });
     }
     if (path.endsWith("/scenes")) {
-      return json(route, [{ id: SCENE_ID, project_id: PROJECT_ID, episode_id: "episode-1", episode_number: 1, scene_number: 1, location_name: "雨夜街口", time_of_day: "night", synopsis: "", version: 1, shot_count: 1, formal_keyframe_count: 0, formal_video_count: 0, risk_count: 0, representative_artifact: null }]);
+      return json(route, [
+        {
+          id: SCENE_ID,
+          project_id: PROJECT_ID,
+          episode_id: "episode-1",
+          episode_number: 1,
+          scene_number: 1,
+          location_name: "雨夜街口",
+          time_of_day: "night",
+          synopsis: "",
+          version: 1,
+          shot_count: 1,
+          formal_keyframe_count: 0,
+          formal_video_count: 0,
+          risk_count: 0,
+          representative_artifact: null,
+        },
+      ]);
     }
     if (path.endsWith("/shots")) {
-      return json(route, [{ id: SHOT_ID, scene_id: SCENE_ID, shot_number: 1, shot_type: "中近景", camera_move: "static", visual_description: state.visual, dialogue: "我终于明白了。", sort_order: 1, status: "draft", version: state.shotVersion }]);
+      return json(route, [
+        {
+          id: SHOT_ID,
+          scene_id: SCENE_ID,
+          shot_number: 1,
+          shot_type: "中近景",
+          camera_move: "static",
+          visual_description: state.visual,
+          dialogue: "我终于明白了。",
+          sort_order: 1,
+          status: "draft",
+          version: state.shotVersion,
+        },
+      ]);
     }
     if (path.endsWith("/models")) {
-      return json(route, [{ id: "provider/model-b", provider_id: "provider", display_name: "Model B", capabilities: ["image.generate", "video.image_to_video"], provider_protocol: "native", media_type: "video", option_schema: {}, capability_specs: {} }]);
+      return json(route, [
+        {
+          id: "provider/model-b",
+          provider_id: "provider",
+          display_name: "Model B",
+          capabilities: ["image.generate", "video.image_to_video"],
+          provider_protocol: "native",
+          media_type: "video",
+          option_schema: {},
+          capability_specs: {},
+        },
+      ]);
     }
     if (path.endsWith("/assets") && method === "GET") return json(route, state.assets);
     if (path.endsWith("/assets") && method === "POST") {
-      const asset = { id: `asset-${state.assets.length + 1}`, project_id: PROJECT_ID, kind: body.kind, name: body.name, description: body.description, metadata: body.metadata, status: body.status, version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      const asset = {
+        id: `asset-${state.assets.length + 1}`,
+        project_id: PROJECT_ID,
+        kind: body.kind,
+        name: body.name,
+        description: body.description,
+        metadata: body.metadata,
+        status: body.status,
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
       state.assets.push(asset);
       return json(route, asset, 201);
     }
@@ -96,40 +154,140 @@ async function installProfessionalMock(page: Page): Promise<MockState> {
     if (path.endsWith("/canvas") && method === "PATCH") {
       state.shotVersion += 1;
       state.visual = String(body.visual_description);
-      const revision = { id: `revision-${state.shotVersion}`, revision_number: state.shotVersion - 1, base_shot_version: state.shotVersion - 1, visual_description: state.visual, shot_type: body.shot_type, camera_move: body.camera_move, dialogue: body.dialogue, source: body.source, created_at: new Date().toISOString() };
+      const revision = {
+        id: `revision-${state.shotVersion}`,
+        revision_number: state.shotVersion - 1,
+        base_shot_version: state.shotVersion - 1,
+        visual_description: state.visual,
+        shot_type: body.shot_type,
+        camera_move: body.camera_move,
+        dialogue: body.dialogue,
+        source: body.source,
+        created_at: new Date().toISOString(),
+      };
       state.revisions.unshift(revision);
-      return json(route, { shot: { id: SHOT_ID, scene_id: SCENE_ID, shot_number: 1, shot_type: body.shot_type, camera_move: body.camera_move, visual_description: state.visual, dialogue: body.dialogue, sort_order: 1, status: "draft", version: state.shotVersion }, revision_id: revision.id, revision_number: revision.revision_number });
+      return json(route, {
+        shot: {
+          id: SHOT_ID,
+          scene_id: SCENE_ID,
+          shot_number: 1,
+          shot_type: body.shot_type,
+          camera_move: body.camera_move,
+          visual_description: state.visual,
+          dialogue: body.dialogue,
+          sort_order: 1,
+          status: "draft",
+          version: state.shotVersion,
+        },
+        revision_id: revision.id,
+        revision_number: revision.revision_number,
+      });
     }
     if (path.endsWith("/change-proposals") && method === "POST") {
-      const proposal = { id: `proposal-${state.proposals.length + 1}`, shot_id: SHOT_ID, summary: body.summary, base_shot_version: body.expected_version, replacement_payload: body.replacement_payload, affected_node_keys: body.affected_node_keys, reusable_artifact_ids: body.reusable_artifact_ids, status: "awaiting_confirmation", confirmed_revision_id: null, created_at: new Date().toISOString(), confirmed_at: null };
+      const proposal = {
+        id: `proposal-${state.proposals.length + 1}`,
+        shot_id: SHOT_ID,
+        summary: body.summary,
+        base_shot_version: body.expected_version,
+        replacement_payload: body.replacement_payload,
+        affected_node_keys: body.affected_node_keys,
+        reusable_artifact_ids: body.reusable_artifact_ids,
+        status: "awaiting_confirmation",
+        confirmed_revision_id: null,
+        created_at: new Date().toISOString(),
+        confirmed_at: null,
+      };
       state.proposals.push(proposal);
-      return json(route, { proposal, impact: { affected_shot_ids: [SHOT_ID], invalidated_node_keys: body.affected_node_keys, reusable_artifact_ids: body.reusable_artifact_ids } }, 201);
+      return json(
+        route,
+        {
+          proposal,
+          impact: {
+            affected_shot_ids: [SHOT_ID],
+            invalidated_node_keys: body.affected_node_keys,
+            reusable_artifact_ids: body.reusable_artifact_ids,
+          },
+        },
+        201,
+      );
     }
-    if (path.includes("/change-proposals/") && path.endsWith("/confirm")) return json(route, { status: "applied" });
+    if (path.includes("/change-proposals/") && path.endsWith("/confirm"))
+      return json(route, { status: "applied" });
     if (path.endsWith("/experiments") && method === "GET") return json(route, state.experiments);
     if (path.endsWith("/experiments") && method === "POST") {
-      const experiment = { id: `experiment-${state.experiments.length + 1}`, project_id: PROJECT_ID, source_shot_id: body.source_shot_id, name: body.name, branch_type: "model_experiment", status: "draft", source_artifact_ids: [], parameters: {}, selected_model: body.selected_model, created_at: new Date().toISOString(), decided_at: null };
+      const experiment = {
+        id: `experiment-${state.experiments.length + 1}`,
+        project_id: PROJECT_ID,
+        source_shot_id: body.source_shot_id,
+        name: body.name,
+        branch_type: "model_experiment",
+        status: "draft",
+        source_artifact_ids: [],
+        parameters: {},
+        selected_model: body.selected_model,
+        created_at: new Date().toISOString(),
+        decided_at: null,
+      };
       state.experiments.push(experiment);
       return json(route, experiment, 201);
     }
     if (path.endsWith("/annotations") && method === "GET") return json(route, state.annotations);
     if (path.endsWith("/annotations") && method === "POST") {
-      const annotation = { id: `annotation-${state.annotations.length + 1}`, shot_id: SHOT_ID, artifact_id: null, time_start: body.time_start, time_end: body.time_end, note: body.note, severity: "note", status: "open", created_by: "owner", created_at: new Date().toISOString(), resolved_at: null };
+      const annotation = {
+        id: `annotation-${state.annotations.length + 1}`,
+        shot_id: SHOT_ID,
+        artifact_id: null,
+        time_start: body.time_start,
+        time_end: body.time_end,
+        note: body.note,
+        severity: "note",
+        status: "open",
+        created_by: "owner",
+        created_at: new Date().toISOString(),
+        resolved_at: null,
+      };
       state.annotations.push(annotation);
       return json(route, annotation, 201);
     }
     if (path.endsWith("/director-board") && method === "GET") return json(route, state.board);
     if (path.endsWith("/director-board") && method === "PUT") {
-      state.board = { id: "board-1", shot_id: SHOT_ID, mode: body.mode, camera: body.camera, characters: body.characters, scene: body.scene, version: 1, updated_at: new Date().toISOString() };
+      state.board = {
+        id: "board-1",
+        shot_id: SHOT_ID,
+        mode: body.mode,
+        camera: body.camera,
+        characters: body.characters,
+        scene: body.scene,
+        version: 1,
+        updated_at: new Date().toISOString(),
+      };
       return json(route, state.board);
     }
-    if (path.endsWith("/opencut-manifest")) return json(route, { schema_version: "opencut-manifest-v1", project_id: PROJECT_ID, official_line: "formal", shots: [{ shot_id: SHOT_ID, shot_number: 1, scene_id: SCENE_ID, duration_seconds: "5", dialogue: "我终于明白了。", status: "draft", artifact_ids: [] }] });
+    if (path.endsWith("/opencut-manifest"))
+      return json(route, {
+        schema_version: "opencut-manifest-v1",
+        project_id: PROJECT_ID,
+        official_line: "formal",
+        shots: [
+          {
+            shot_id: SHOT_ID,
+            shot_number: 1,
+            scene_id: SCENE_ID,
+            duration_seconds: "5",
+            dialogue: "我终于明白了。",
+            status: "draft",
+            artifact_ids: [],
+          },
+        ],
+      });
     return json(route, {});
   });
   return state;
 }
 
-test("professional workspace persists canvas proposals, assets, review, board, and experiments", async ({ page }) => {
+test("professional workspace persists canvas proposals, assets, review, board, and experiments", async ({
+  page,
+}) => {
   const state = await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
@@ -170,4 +328,3 @@ test("professional workspace persists canvas proposals, assets, review, board, a
   await expect(page.getByText("Model B 转头验证")).toBeVisible();
   await expect(page.getByText(/OpenCut/)).toBeVisible();
 });
-

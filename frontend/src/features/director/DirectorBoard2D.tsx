@@ -44,10 +44,7 @@ export function DirectorBoard2D({ elements, compositionBounds, onChange }: Direc
         const rect = event.currentTarget.getBoundingClientRect();
         const x = (event.clientX - rect.left) / rect.width;
         const y = (event.clientY - rect.top) / rect.height;
-        onChange([
-          ...elements,
-          { kind: "camera", name: `camera-${elements.length + 1}`, x, y },
-        ]);
+        onChange([...elements, { kind: "camera", name: `camera-${elements.length + 1}`, x, y }]);
       }}
     >
       {compositionBounds ? (
@@ -90,7 +87,12 @@ export function DirectorBoard2D({ elements, compositionBounds, onChange }: Direc
                 strokeDasharray="4 3"
               />
             ) : null}
-            <text x={cx} y={cy + (element.kind === "camera" ? 26 : -18)} textAnchor="middle" fontSize={11}>
+            <text
+              x={cx}
+              y={cy + (element.kind === "camera" ? 26 : -18)}
+              textAnchor="middle"
+              fontSize={11}
+            >
               {element.name}
             </text>
           </g>

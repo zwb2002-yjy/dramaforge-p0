@@ -1335,9 +1335,9 @@ class ProviderConnectionService:
             connection=model_connection,
         )
         # A fresh installation cannot have project-level quality evidence before
-        # its first representative trial. Allow an account-verified binding to
-        # enter the project, then require an accepted trial before formal
-        # production. The production boundary is enforced by the Director.
+        # its first representative proof. Allow an account-verified binding to
+        # enter the project, then require accepted evidence before formal
+        # Workbench execution.
         if not (
             model.enabled
             and model.documented
@@ -1345,7 +1345,7 @@ class ProviderConnectionService:
             and model.account_verified
         ):
             raise ValidationAppError(
-                "model binding is not eligible for a controlled trial",
+            "model binding is not eligible for Workbench execution",
                 details={"code": "MODEL_BINDING_NOT_VERIFIED"},
             )
         binding = await self._session.scalar(

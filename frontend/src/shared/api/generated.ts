@@ -4380,8 +4380,6 @@ export interface components {
             shot_count: number;
             /** Shot Ids */
             shot_ids: string[];
-            /** Lead Character */
-            lead_character: string | null;
             /** Content Hash */
             content_hash: string;
         };

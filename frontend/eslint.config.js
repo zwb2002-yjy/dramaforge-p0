@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist", "coverage", "playwright-report", "test-results", "tmp", "src/types/api.ts"],
+    ignores: ["dist", "coverage", "playwright-report", "test-results", "tmp"],
   },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

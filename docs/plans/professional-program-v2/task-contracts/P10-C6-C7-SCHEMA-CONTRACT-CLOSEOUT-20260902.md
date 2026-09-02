@@ -1,6 +1,6 @@
 # P10-C6/C7 — Schema, API, tests, and documentation closeout
 
-**Status:** USER-AUTHORIZED / IN PROGRESS
+**Status:** COMPLETE
 **Parent:** P10 legacy hard removal
 **Alembic revision:** 20260902_0051
 

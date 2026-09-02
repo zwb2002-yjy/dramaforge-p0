@@ -58,10 +58,20 @@ describe("uiComponentFor", () => {
 describe("allowedValuesFor", () => {
   it("applies the duration-resolution matrix", () => {
     expect(
-      allowedValuesFor(DURATION_RESOLUTION_SPEC, "resolution", { type: "string", enum: ["720p", "1080p"] }, { duration_seconds: 10 }),
+      allowedValuesFor(
+        DURATION_RESOLUTION_SPEC,
+        "resolution",
+        { type: "string", enum: ["720p", "1080p"] },
+        { duration_seconds: 10 },
+      ),
     ).toEqual(["720p"]);
     expect(
-      allowedValuesFor(DURATION_RESOLUTION_SPEC, "resolution", { type: "string", enum: ["720p", "1080p"] }, { duration_seconds: 5 }),
+      allowedValuesFor(
+        DURATION_RESOLUTION_SPEC,
+        "resolution",
+        { type: "string", enum: ["720p", "1080p"] },
+        { duration_seconds: 5 },
+      ),
     ).toEqual(["720p", "1080p"]);
   });
 });

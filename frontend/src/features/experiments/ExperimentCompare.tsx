@@ -32,7 +32,10 @@ function ReferenceList({ references }: { references: ExperimentReferenceRow[] })
     <ul className="list-disc pl-4 text-xs">
       {references.map((reference, index) => (
         <li key={`${reference.purpose}-${index}`}>
-          {reference.purpose} · <span className={reference.delivery === "exact" ? "text-green-600" : "text-amber-600"}>{reference.delivery}</span>
+          {reference.purpose} ·{" "}
+          <span className={reference.delivery === "exact" ? "text-green-600" : "text-amber-600"}>
+            {reference.delivery}
+          </span>
         </li>
       ))}
     </ul>
@@ -41,9 +44,7 @@ function ReferenceList({ references }: { references: ExperimentReferenceRow[] })
 
 function MediaCell({ url, label }: { url?: string | null; label: string }) {
   if (!url) return <span className="text-gray-400">—</span>;
-  return (
-    <img src={url} alt={label} className="h-24 w-full rounded border object-cover" />
-  );
+  return <img src={url} alt={label} className="h-24 w-full rounded border object-cover" />;
 }
 
 export function ExperimentCompare({ formal, experiments }: ExperimentCompareProps) {

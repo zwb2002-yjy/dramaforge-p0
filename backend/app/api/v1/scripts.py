@@ -37,7 +37,6 @@ class ScriptImportResponse(BaseModel):
     scene_count: int
     shot_count: int
     shot_ids: list[UUID]
-    lead_character: str | None
     content_hash: str
 
 
@@ -305,7 +304,6 @@ async def import_project_script(
         scene_count=result.scene_count,
         shot_count=result.shot_count,
         shot_ids=result.shot_ids,
-        lead_character=result.lead_character,
         content_hash=result.content_hash,
     )
 

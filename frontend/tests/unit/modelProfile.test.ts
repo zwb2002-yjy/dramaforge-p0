@@ -37,7 +37,11 @@ describe("simpleModeToBindings", () => {
 
   it("skips groups the user left unset", () => {
     const bindings = simpleModeToBindings({ llm: "test/text-a" });
-    expect(Object.keys(bindings)).toEqual(["planning.brief", "planning.script", "planning.storyboard"]);
+    expect(Object.keys(bindings)).toEqual([
+      "planning.brief",
+      "planning.script",
+      "planning.storyboard",
+    ]);
     expect(bindings["video.shot"]).toBeUndefined();
   });
 

@@ -1,6 +1,6 @@
 # P10-C4 — Runtime and Provider single path
 
-**Status:** USER-AUTHORIZED / IN PROGRESS
+**Status:** COMPLETE
 **Parent:** P10 legacy hard removal
 
 ## Outcome

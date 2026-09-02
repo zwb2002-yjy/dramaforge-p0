@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ProposalPreview, type ProposalItemData } from "../../src/features/director/ProposalPreview";
+import {
+  ProposalPreview,
+  type ProposalItemData,
+} from "../../src/features/director/ProposalPreview";
 
 const items: ProposalItemData[] = [
   {

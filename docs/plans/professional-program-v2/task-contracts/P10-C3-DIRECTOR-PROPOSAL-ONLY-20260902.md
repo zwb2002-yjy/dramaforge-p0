@@ -1,6 +1,6 @@
 # P10-C3 — Director proposal-only convergence
 
-**Status:** USER-AUTHORIZED / IN PROGRESS
+**Status:** COMPLETE
 **Parent:** P10 legacy hard removal
 **Canonical boundary:** Director Assistant → suggestion/proposal → explicit user apply
 

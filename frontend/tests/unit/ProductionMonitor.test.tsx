@@ -39,8 +39,22 @@ const scenes = [
 ];
 
 const shots = [
-  { id: "shot-1", scene_id: "scene-1", shot_number: 1, sort_order: 1, shot_type: "中近景", status: "draft" },
-  { id: "shot-2", scene_id: "scene-1", shot_number: 2, sort_order: 2, shot_type: "特写", status: "completed" },
+  {
+    id: "shot-1",
+    scene_id: "scene-1",
+    shot_number: 1,
+    sort_order: 1,
+    shot_type: "中近景",
+    status: "draft",
+  },
+  {
+    id: "shot-2",
+    scene_id: "scene-1",
+    shot_number: 2,
+    sort_order: 2,
+    shot_type: "特写",
+    status: "completed",
+  },
 ];
 
 const snapshot = {
@@ -89,7 +103,13 @@ describe("ProductionMonitor", () => {
 
   it("renders empty state when no scenes exist", () => {
     render(
-      <ProductionMonitor projectId="project-1" scenes={[]} shots={[]} snapshot={undefined} experimentCount={0} />,
+      <ProductionMonitor
+        projectId="project-1"
+        scenes={[]}
+        shots={[]}
+        snapshot={undefined}
+        experimentCount={0}
+      />,
     );
     expect(screen.getByText("尚无场景。请在场景工作区创建场景与镜头。")).toBeInTheDocument();
   });

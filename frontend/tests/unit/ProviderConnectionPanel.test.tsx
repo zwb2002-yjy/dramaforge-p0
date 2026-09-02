@@ -142,8 +142,6 @@ describe("Provider connection contract revisions", () => {
               target_platform: "other",
               provider_dispatch_frozen: false,
               version: 1,
-              budget_limit: "10",
-              budget_currency: "USD",
             },
           ]}
         />

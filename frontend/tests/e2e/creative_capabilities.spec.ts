@@ -41,14 +41,32 @@ async function installMock(page: Page) {
       });
     }
     if (path.endsWith("/shots") && method === "GET") {
-      return json(route, [{ id: SHOT_ID, scene_id: SCENE_ID, shot_number: 1, shot_type: "中景", visual_description: "人", dialogue: "", status: "draft", version: 1 }]);
+      return json(route, [
+        {
+          id: SHOT_ID,
+          scene_id: SCENE_ID,
+          shot_number: 1,
+          shot_type: "中景",
+          visual_description: "人",
+          dialogue: "",
+          status: "draft",
+          version: 1,
+        },
+      ]);
     }
-    if (path.endsWith("/snapshot")) return json(route, { project_id: PROJECT_ID, node_runs: [], artifacts: [], provider_operations: [] });
+    if (path.endsWith("/snapshot"))
+      return json(route, {
+        project_id: PROJECT_ID,
+        node_runs: [],
+        artifacts: [],
+        provider_operations: [],
+      });
     if (path.endsWith("/scenes")) return json(route, []);
     if (path.endsWith("/assets") && method === "GET") return json(route, []);
     if (path.endsWith("/experiments") && method === "GET") return json(route, []);
     if (path.endsWith("/models")) return json(route, []);
-    if (path.endsWith("/opencut-manifest")) return json(route, { schema_version: "v1", tracks: [], shots: [] });
+    if (path.endsWith("/opencut-manifest"))
+      return json(route, { schema_version: "v1", tracks: [], shots: [] });
     if (path.endsWith("/director-board") && method === "GET") return json(route, null);
     if (path.endsWith("/annotations") && method === "GET") return json(route, []);
     return json(route, {});

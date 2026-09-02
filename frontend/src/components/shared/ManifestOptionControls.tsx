@@ -7,11 +7,7 @@
 
 import { useMemo, useState } from "react";
 import type { CapabilitySpecRead, ParameterSpecRead } from "../../lib/api";
-import {
-  allowedValuesFor,
-  constraintViolations,
-  uiComponentFor,
-} from "../../lib/manifestOptions";
+import { allowedValuesFor, constraintViolations, uiComponentFor } from "../../lib/manifestOptions";
 
 export interface ManifestOptionControlsProps {
   spec: CapabilitySpecRead;
@@ -83,7 +79,10 @@ function OptionControl({
     return (
       <label className="option-control">
         <span>{parameter.title ?? keyName}</span>
-        <textarea value={value === undefined ? "" : String(value)} onChange={(event) => onChange(keyName, event.target.value)} />
+        <textarea
+          value={value === undefined ? "" : String(value)}
+          onChange={(event) => onChange(keyName, event.target.value)}
+        />
       </label>
     );
   }
@@ -122,11 +121,7 @@ function OptionControl({
   );
 }
 
-export function ManifestOptionControls({
-  spec,
-  values,
-  onChange,
-}: ManifestOptionControlsProps) {
+export function ManifestOptionControls({ spec, values, onChange }: ManifestOptionControlsProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const violations = useMemo(() => constraintViolations(spec, values), [spec, values]);
 

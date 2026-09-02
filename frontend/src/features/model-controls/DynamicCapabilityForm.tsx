@@ -91,7 +91,7 @@ export function OptionField({
           type="range"
           min={min}
           max={max}
-          value={typeof value === "number" ? value : (parameter.default as number) ?? min}
+          value={typeof value === "number" ? value : ((parameter.default as number) ?? min)}
           disabled={effectiveDisabled}
           onChange={(event) => onChange(keyName, Number(event.target.value))}
           className="w-full"

@@ -27,12 +27,7 @@ ALLOWED_TRANSITIONS: dict[str | None, set[str]] = {
 MERGE_APPROVER = "@zwb2002-yjy"
 REQUIRED_CHECKS = (
     "policy",
-    "backend-static",
-    "backend-unit",
-    "postgres-integration",
-    "frontend",
-    "frontend-smoke",
-    "frontend-smoke-windows",
+    "container-gates",
 )
 TASK_ID_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 

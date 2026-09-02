@@ -5,7 +5,12 @@
    ============================================================ */
 
 /* ---- Heading Hierarchy ---- */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: var(--df-font-sans);
   font-weight: var(--df-weight-semibold);
   line-height: var(--df-leading-tight);

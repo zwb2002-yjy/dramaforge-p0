@@ -22,7 +22,9 @@ export interface RenderableOption {
   constraints: string[];
 }
 
-export function uiComponentFor(parameter: ParameterSpecRead): NonNullable<ParameterSpecRead["ui_component"]> {
+export function uiComponentFor(
+  parameter: ParameterSpecRead,
+): NonNullable<ParameterSpecRead["ui_component"]> {
   if (parameter.ui_component) return parameter.ui_component;
   if (parameter.type === "boolean") return "switch";
   if (parameter.type === "integer" || parameter.type === "number") return "number";
@@ -56,9 +58,7 @@ export function allowedValuesFor(
 ): unknown[] {
   if (!parameter.enum) return [];
   for (const condition of spec.constraints.conditional) {
-    const matches = Object.entries(condition.when).every(
-      ([key, value]) => values[key] === value,
-    );
+    const matches = Object.entries(condition.when).every(([key, value]) => values[key] === value);
     if (!matches) continue;
     const allowed = condition.allowed[optionKey];
     if (allowed !== undefined) return allowed;
@@ -76,9 +76,7 @@ export function constraintViolations(
 ): string[] {
   const violations: string[] = [];
   for (const condition of spec.constraints.conditional) {
-    const matches = Object.entries(condition.when).every(
-      ([key, value]) => values[key] === value,
-    );
+    const matches = Object.entries(condition.when).every(([key, value]) => values[key] === value);
     if (!matches) continue;
     for (const key of Object.keys(condition.forbid)) {
       if (values[key] !== undefined) {
@@ -106,9 +104,10 @@ export function constraintViolations(
  * spec order), then native options. Native options declare which conditions
  * they participate in so the UI can show/hide constraints.
  */
-export function renderableOptions(
-  spec: CapabilitySpecRead,
-): { common: RenderableOption[]; native: RenderableOption[] } {
+export function renderableOptions(spec: CapabilitySpecRead): {
+  common: RenderableOption[];
+  native: RenderableOption[];
+} {
   const dependentKeys = new Set(whenKeys(spec.constraints.conditional));
   const common = Object.entries(spec.common_options).map(([key, parameter]) => ({
     key,

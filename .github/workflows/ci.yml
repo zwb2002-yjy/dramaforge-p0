@@ -15,73 +15,18 @@ permissions:
   contents: read
 
 jobs:
-  platform-baseline:
-    name: platform-baseline-${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Sync backend dependencies
-        working-directory: backend
-        run: uv sync --locked --extra dev
-      - name: Cross-platform configuration contracts
-        working-directory: backend
-        run: >-
-          uv run pytest
-          tests/unit/test_config.py
-          tests/unit/test_init_env.py
-          tests/unit/test_dockerfile_context.py
-          tests/unit/test_compose_contract.py
-          -q
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-      - name: Typecheck frontend
-        working-directory: frontend
-        run: npm run typecheck
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-      - name: Validate release Compose model
-        if: runner.os == 'Linux'
-        env:
-          POSTGRES_PASSWORD: ci-postgres-password-not-for-deployment
-          POSTGRES_APP_PASSWORD: ci-postgres-app-password-not-for-deployment
-          MINIO_ROOT_PASSWORD: ci-minio-password-not-for-deployment
-          LITELLM_DB_PASSWORD: ci-litellm-db-password-not-for-deployment
-          LITELLM_MASTER_KEY: ci-litellm-master-key-not-for-deployment
-          SESSION_SECRET: ci-session-secret-not-for-deployment-1234567890
-          WORKER_TOKEN: ci-worker-token-not-for-deployment-1234567890
-          BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-          DRAMAFORGE_SOURCE_COMMIT: ${{ github.sha }}
-        run: docker compose config --quiet
-
   policy:
     name: policy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - name: Enforce integration branch flow
         if: github.event_name == 'pull_request'
         env:
           HEAD_REF: ${{ github.head_ref }}
           BASE_REF: ${{ github.base_ref }}
         run: |
+          set -euo pipefail
           if [ "$BASE_REF" = "main" ]; then
             case "$HEAD_REF" in
               dev|agent/hotfix-*) ;;
@@ -100,190 +45,49 @@ jobs:
                 ;;
             esac
           fi
-      - run: python scripts/check_directory_compliance.py
-      - run: python scripts/repo_guardrails.py policy --repo-root .
-
-  backend-static:
-    name: backend-static
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync --locked --extra dev
-      - run: uv run ruff check app tests
-      - run: uv run mypy app
-
-  backend-unit:
-    name: backend-unit
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync --locked --extra dev
-      - run: uv run pytest tests/unit -q
-
-  api-contract:
-    name: api-contract
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - name: Sync backend dependencies
-        working-directory: backend
-        run: uv sync --locked --extra dev
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-        working-directory: frontend
-      - name: Check generated API contract
-        working-directory: frontend
-        run: npm run api:check
+      - name: Check repository policy in a container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            python:3.12-slim \
+            python scripts/check_directory_compliance.py
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            python:3.12-slim \
+            python scripts/repo_guardrails.py policy --repo-root /workspace
 
   container-gates:
     name: container-gates
     runs-on: ubuntu-latest
+    env:
+      QUALITY_CONTRACT_DIR: ./tmp/quality-contract
     steps:
       - uses: actions/checkout@v4
-      - name: Run the authoritative Docker quality gate
+      - name: Build the exact quality images
         run: |
           set -euo pipefail
+          mkdir -p tmp/quality-contract
           docker compose -f docker-compose.quality.yml build \
             backend-quality frontend-quality
+      - name: Run backend, PostgreSQL, migration and API contract gates
+        run: |
+          set -euo pipefail
           docker compose -f docker-compose.quality.yml up \
             --no-build --abort-on-container-exit --exit-code-from backend-quality \
             postgres-quality backend-quality
+      - name: Run frontend, generated API, build and browser gates
+        run: |
+          set -euo pipefail
           docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
-      - name: Remove quality containers
+      - name: Run the real pinned LiteLLM integration in containers
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from litellm-integration-quality \
+            litellm-quality litellm-integration-quality
+      - name: Remove quality containers and volumes
         if: always()
-        run: docker compose -f docker-compose.quality.yml down --remove-orphans
-
-  postgres-integration:
-    name: postgres-integration
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_DB: dramaforge
-          POSTGRES_USER: dramaforge
-          POSTGRES_PASSWORD: dramaforge
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U dramaforge -d dramaforge"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      APP_ENV: test
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge
-      SESSION_SECRET: ci-session-secret-32-characters-minimum
-      BYOK_FERNET_KEY: test-byok-fernet-key-replace==
-      AGNES_ENABLED: "false"
-      TEXT_LLM_ENABLED: "false"
-      TEST_PG_ENABLED: "1"
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync --locked --extra dev
-      - run: uv run alembic upgrade head
-      - run: uv run alembic check
-      - run: uv run pytest tests/integration -q -rs --fail-on-skip
-
-  litellm-integration:
-    name: litellm-integration
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync --locked --extra dev
-      - name: Pull pinned official LiteLLM image
-        run: docker pull ghcr.io/berriai/litellm:v1.96.0
-      - name: Real LiteLLM Proxy integration test
-        env:
-          LITELLM_INTEGRATION_REQUIRED: "1"
-          LITELLM_INTEGRATION_PORT: "4066"
-        run: uv run pytest tests/integration/test_litellm_real_proxy.py -q -rs
-
-  frontend:
-    name: frontend
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test
-      - run: npm run build
-
-  frontend-smoke:
-    name: frontend-smoke
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e -- tests/e2e/smoke.spec.ts
-
-  frontend-smoke-windows:
-    name: frontend-smoke-windows
-    runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npx playwright install chromium
-      - run: npm run test:e2e -- tests/e2e/smoke.spec.ts
+        run: docker compose -f docker-compose.quality.yml down --volumes --remove-orphans

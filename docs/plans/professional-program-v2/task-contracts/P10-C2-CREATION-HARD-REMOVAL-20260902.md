@@ -2,7 +2,7 @@
 
 **Task:** `p10-c2-creation-hard-removal-20260902`
 **Base:** `codex/cleanup-legacy-quick-media-20260902@a0ed4b9`
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 
 ## Boundary
 
@@ -19,9 +19,9 @@ does not get invented here.
   API helpers/tests have been deleted.
 - The generated frontend contract has been regenerated after removing the
   Creation router; remaining legacy paths belong to C3/C4/C5 cleanup slices.
-- The old backend Creation service/models and P0 media helpers still have
-  internal consumers and are removed only after those consumers are migrated or
-  deleted in the following bounded slices.
+- The old backend Creation service/models and P0 media helpers have been
+  removed after their consumers were migrated to Canonical Workbench paths or
+  deleted with the retired surface.
 
 ## Required gate
 

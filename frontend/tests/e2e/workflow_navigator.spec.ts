@@ -17,7 +17,14 @@ function overviewBody() {
   return {
     project_id: PROJECT_ID,
     episodes: [
-      { episode_id: EPISODE_ID, episode_number: 1, title: "WF13 Golden", synopsis: "", scene_count: 2, total_shots: 2 },
+      {
+        episode_id: EPISODE_ID,
+        episode_number: 1,
+        title: "WF13 Golden",
+        synopsis: "",
+        scene_count: 2,
+        total_shots: 2,
+      },
     ],
     scenes: [
       {
@@ -28,7 +35,17 @@ function overviewBody() {
         location_name: "Rain street",
         time_of_day: "night",
         synopsis: "A decision in the rain",
-        production_status: { scene_id: SCENE_1, episode_id: EPISODE_ID, state: "blocked", total_shots: 1, formal_shots: 0, failed_shots: 0, review_required: 0, blocked_shots: 1, reasons: ["multi-subject unsupported"] },
+        production_status: {
+          scene_id: SCENE_1,
+          episode_id: EPISODE_ID,
+          state: "blocked",
+          total_shots: 1,
+          formal_shots: 0,
+          failed_shots: 0,
+          review_required: 0,
+          blocked_shots: 1,
+          reasons: ["multi-subject unsupported"],
+        },
         shots: [
           {
             shot_id: SHOT_TWO,
@@ -38,7 +55,8 @@ function overviewBody() {
             status: "in_production",
             workflow_template_key: "two-character-dialogue-v1",
             template_version: "1.0.0",
-            template_contract_hash: "a42277423ffb20f7dbff736967e35c6f4f393e800367366ab5412f6377972b2b",
+            template_contract_hash:
+              "a42277423ffb20f7dbff736967e35c6f4f393e800367366ab5412f6377972b2b",
             template_resolution_status: "RESOLVED",
             quality_policy_id: "two-character-dialogue-quality-v1",
             repair_policy_id: "two-character-repair-v1",
@@ -46,10 +64,41 @@ function overviewBody() {
             supported_character_count: [2, 2],
             intent_tags: ["dialogue"],
             participations: [
-              { asset_id: "306cde8f-b004-4468-9cf8-d29a0df6c575", asset_version_id: "dc4510ab-a29c-411e-8e03-bf3543716428", screen_role: "primary", importance: 80, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "speaking" },
-              { asset_id: "f70efbf1-60d7-45f8-ac90-5e74b0411ca5", asset_version_id: "23b6f6e5-be46-49d1-9d55-94b7a0564c51", screen_role: "secondary", importance: 60, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "listening" },
+              {
+                asset_id: "306cde8f-b004-4468-9cf8-d29a0df6c575",
+                asset_version_id: "dc4510ab-a29c-411e-8e03-bf3543716428",
+                screen_role: "primary",
+                importance: 80,
+                wardrobe_asset_version_id: null,
+                position: "",
+                pose: "",
+                gaze_target: "",
+                action: "",
+                expression: "",
+                dialogue_role: "speaking",
+              },
+              {
+                asset_id: "f70efbf1-60d7-45f8-ac90-5e74b0411ca5",
+                asset_version_id: "23b6f6e5-be46-49d1-9d55-94b7a0564c51",
+                screen_role: "secondary",
+                importance: 60,
+                wardrobe_asset_version_id: null,
+                position: "",
+                pose: "",
+                gaze_target: "",
+                action: "",
+                expression: "",
+                dialogue_role: "listening",
+              },
             ],
-            capability_assessment: { status: "UNSUPPORTED", required_subject_references: 2, max_subject_references: 1, reason: "model supports 1 subject reference(s) but the shot requires 2; multi-character identity cannot be preserved", approximate_strategy_id: null },
+            capability_assessment: {
+              status: "UNSUPPORTED",
+              required_subject_references: 2,
+              max_subject_references: 1,
+              reason:
+                "model supports 1 subject reference(s) but the shot requires 2; multi-character identity cannot be preserved",
+              approximate_strategy_id: null,
+            },
           },
         ],
       },
@@ -61,7 +110,17 @@ function overviewBody() {
         location_name: "Neon bar",
         time_of_day: "night",
         synopsis: "An action break",
-        production_status: { scene_id: SCENE_2, episode_id: EPISODE_ID, state: "producing", total_shots: 1, formal_shots: 1, failed_shots: 0, review_required: 0, blocked_shots: 0, reasons: ["producing"] },
+        production_status: {
+          scene_id: SCENE_2,
+          episode_id: EPISODE_ID,
+          state: "producing",
+          total_shots: 1,
+          formal_shots: 1,
+          failed_shots: 0,
+          review_required: 0,
+          blocked_shots: 0,
+          reasons: ["producing"],
+        },
         shots: [
           {
             shot_id: SHOT_ACTION,
@@ -71,7 +130,8 @@ function overviewBody() {
             status: "in_production",
             workflow_template_key: "action-motion-shot-v1",
             template_version: "1.0.0",
-            template_contract_hash: "b52277423ffb20f7dbff736967e35c6f4f393e800367366ab5412f6377972b2c",
+            template_contract_hash:
+              "b52277423ffb20f7dbff736967e35c6f4f393e800367366ab5412f6377972b2c",
             template_resolution_status: "RESOLVED",
             quality_policy_id: "action-motion-quality-v1",
             repair_policy_id: "action-motion-repair-v1",
@@ -79,7 +139,13 @@ function overviewBody() {
             supported_character_count: [1, 4],
             intent_tags: ["action"],
             participations: [],
-            capability_assessment: { status: "EXACT", required_subject_references: 1, max_subject_references: 1, reason: "model natively supports all required subject references", approximate_strategy_id: null },
+            capability_assessment: {
+              status: "EXACT",
+              required_subject_references: 1,
+              max_subject_references: 1,
+              reason: "model natively supports all required subject references",
+              approximate_strategy_id: null,
+            },
           },
         ],
       },
@@ -111,10 +177,40 @@ function workflowStateBody() {
       supported_character_count: [2, 2],
       intent_tags: ["dialogue"],
       participations: [
-        { asset_id: "c1", asset_version_id: "v1", screen_role: "primary", importance: 80, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "speaking" },
-        { asset_id: "c2", asset_version_id: "v2", screen_role: "secondary", importance: 60, wardrobe_asset_version_id: null, position: "", pose: "", gaze_target: "", action: "", expression: "", dialogue_role: "listening" },
+        {
+          asset_id: "c1",
+          asset_version_id: "v1",
+          screen_role: "primary",
+          importance: 80,
+          wardrobe_asset_version_id: null,
+          position: "",
+          pose: "",
+          gaze_target: "",
+          action: "",
+          expression: "",
+          dialogue_role: "speaking",
+        },
+        {
+          asset_id: "c2",
+          asset_version_id: "v2",
+          screen_role: "secondary",
+          importance: 60,
+          wardrobe_asset_version_id: null,
+          position: "",
+          pose: "",
+          gaze_target: "",
+          action: "",
+          expression: "",
+          dialogue_role: "listening",
+        },
       ],
-      capability_assessment: { status: "UNSUPPORTED", required_subject_references: 2, max_subject_references: 1, reason: "model supports 1 subject reference(s) but the shot requires 2", approximate_strategy_id: null },
+      capability_assessment: {
+        status: "UNSUPPORTED",
+        required_subject_references: 2,
+        max_subject_references: 1,
+        reason: "model supports 1 subject reference(s) but the shot requires 2",
+        approximate_strategy_id: null,
+      },
     },
   };
 }
@@ -138,13 +234,19 @@ async function installMock(page: Page) {
       return json(route, []);
     }
     if (path.endsWith("/snapshot")) {
-      return json(route, { project_id: PROJECT_ID, node_runs: [], artifacts: [], provider_operations: [] });
+      return json(route, {
+        project_id: PROJECT_ID,
+        node_runs: [],
+        artifacts: [],
+        provider_operations: [],
+      });
     }
     if (path.endsWith("/scenes")) return json(route, []);
     if (path.endsWith("/assets") && request.method() === "GET") return json(route, []);
     if (path.endsWith("/experiments") && request.method() === "GET") return json(route, []);
     if (path.endsWith("/models")) return json(route, []);
-    if (path.endsWith("/opencut-manifest")) return json(route, { schema_version: "opencut-manifest-v1", tracks: [], shots: [] });
+    if (path.endsWith("/opencut-manifest"))
+      return json(route, { schema_version: "opencut-manifest-v1", tracks: [], shots: [] });
     return json(route, {});
   });
 }

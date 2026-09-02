@@ -1,6 +1,6 @@
 # P10 Legacy Hard Removal — Owner Revision 2026-09-02
 
-**Status:** USER-AUTHORIZED / IN PROGRESS  
+**Status:** COMPLETE
 **Base:** `dev@e8da0da167624aed944a7b5c4a42e4f56a65fb02`  
 **Branch:** `codex/cleanup-legacy-quick-media-20260902`  
 **Canonical chain protected:** Project → ScriptDocument → Episode → Scene → Shot → ProductionGraph → NodeRun → ProviderOperation → Artifact
@@ -88,3 +88,13 @@ Regenerate OpenAPI, remove obsolete tests/fixtures/scripts, refresh Legacy/API/C
 - Alembic upgrade from current head succeeds on PostgreSQL;
 - backend unit/integration, frontend unit/type/build/E2E and security gates pass;
 - professional one-Shot real-provider script remains structurally intact; paid execution requires separate Owner authorization.
+
+## Completion evidence
+
+The continuation branch now satisfies the required outcome on the current
+candidate: the canonical surface scan and directory compliance scan pass;
+backend static checks, 872 unit tests, PostgreSQL migration/integration checks,
+and OpenAPI export pass; frontend format, lint, typecheck, 101 unit tests,
+production build, and 13 Playwright tests pass. The Docker quality images run
+these checks from the repository source context and preserve the generated
+OpenAPI contract for the frontend gate.
