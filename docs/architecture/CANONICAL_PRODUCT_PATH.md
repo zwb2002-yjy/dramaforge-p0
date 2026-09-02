@@ -2,8 +2,8 @@
 
 Status: current candidate
 Date: 2026-09-03
-Base: dev 8ac3546
-Alembic head: 20260902_0051
+Base: dev d46ad15
+Alembic head: 20260903_0052
 Owner goal: DramaForge V1 统一创作主链
 
 ## Product chain

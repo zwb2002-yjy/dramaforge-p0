@@ -1,13 +1,14 @@
 # DATA_MODEL_INVENTORY
 
 Status: current candidate
-Date: 2026-09-02
-Alembic head: 20260902_0051
+Date: 2026-09-03
+Alembic head: 20260903_0052
 
 ## Canonical relational graph
 
 users → workspaces → projects
 projects → script_documents → episodes → scenes → shots
+projects → project_creative_profiles
 projects → assets → asset_versions → asset_version_references
 shots → shot_reference_bindings
 shots → production_graphs → graph_versions → graph_nodes/graph_edges
@@ -22,6 +23,7 @@ projects → edit_sessions → exports
 | Domain | Canonical tables | ORM location |
 |---|---|---|
 | Access | users, workspaces, projects, user_project_preferences.workspace_state | app/access/models.py |
+| V1 creative profile | project_creative_profiles | app/access/models.py |
 | Story | script_documents, episodes, scenes, shots, canvas_revisions, shot_change_proposals | app/assets/models.py |
 | Identity assets | assets, asset_versions, asset_version_references, asset_tags | app/assets/models.py |
 | Shot references | shot_reference_bindings, shot_experiments | app/production/models.py |
@@ -47,13 +49,18 @@ Migration 20260902_0051 removes:
 - user_project_preferences experience_mode and last_guided_step;
 - their retired PostgreSQL enum types and constraints.
 
+Migration 20260903_0052 adds `project_creative_profiles`
+(start_type / template identity / director_autonomy / selected creative
+defaults / asset slot requirements / frozen strategy snapshot / optimistic
+version).  It only initializes project facts and never owns Runtime.
+
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
 deleted by this migration. Historical data migration and rollback are not
 required by the Owner revision.
 
 ## Schema invariants
 
-- Alembic has one head: 20260902_0051.
+- Alembic has one head: 20260903_0052.
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - identity reference resolution is explicit and version-pinned.

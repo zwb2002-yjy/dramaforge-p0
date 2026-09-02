@@ -2,8 +2,8 @@
 
 Status: current candidate
 Source: backend/app/api/v1 and generated OpenAPI
-Date: 2026-09-02
-Migration head: 20260902_0051
+Date: 2026-09-03
+Migration head: 20260903_0052
 
 ## Contract rules
 

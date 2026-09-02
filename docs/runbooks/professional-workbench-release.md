@@ -3,7 +3,7 @@
 1. Check out the exact candidate SHA.
 2. Run scripts/run_quality_in_docker.ps1 (or the equivalent Docker Compose
    command on Linux).
-3. Confirm the single Alembic head is 20260902_0051 and alembic check is clean.
+3. Confirm the single Alembic head is 20260903_0052 and alembic check is clean.
 4. Build release images from that same SHA with docker-compose.build.yml.
 5. Start the release topology with docker-compose.yml.
 6. Verify /health, /gateway-health and the source commit identity.
