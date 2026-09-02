@@ -205,13 +205,14 @@ The JSON truthfully records both paid operations as Agnes. This particular `prov
 
 ---
 
-## Current DramaForge V1 Goal release candidate — 2026-09-03 (`0d3fff8`)
+## Current DramaForge V1 Goal release candidate — 2026-09-03 (`c8bd597`)
 
 ### Candidate and image identity
 
-- **Final candidate source:** `b7b7864754a7c9cb9c55a1ea8554a306116b1c0d`
-  (final report commit on `dev`); Golden runtime commit `d46ad15`;
-  prior evidence commit `0d3fff8`.
+- **Final candidate source:** `c8bd59724d3500ca36ea5c550d64c97c926b904e`
+  (final release-evidence commit on `dev`); Golden runtime commit `d46ad15`;
+  image OCI revision `b7b7864…`（backend/frontend 内容与 `c8bd597` 相同，
+  差异仅为本报告绑定说明）。
 - **Migration head:** `20260903_0052`（`project_creative_profiles`）。
 - **Real Provider Golden:** `docs/reviews/GOLDEN-V1-CURRENT-HEAD-20260903.json`
   (`ok=true`, `paid_provider_calls=6`, 3 Formal Shots, OpenCut 15.000s,
@@ -227,7 +228,7 @@ The JSON truthfully records both paid operations as Agnes. This particular `prov
 - Smoke: release backend uvicorn started with current code and app import ok；
   release frontend `/gateway-health` returned `ok`.
 
-### GitHub Actions evidence (`0d3fff8`, push + pull_request)
+### GitHub Actions evidence (`c8bd597`, push)
 
 | Gate | Result |
 |---|---|
