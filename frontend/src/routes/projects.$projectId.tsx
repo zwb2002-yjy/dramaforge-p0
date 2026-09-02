@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProjectWorkspaceShell } from "../components/workstation/ProjectWorkspaceShell";
+import { CreativeAutonomySwitcher } from "../features/project/CreativeAutonomySwitcher";
 import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
 import { ApiError, fetchProject, getSelectedWorkspaceId, type ProjectRead } from "../lib/api";
 import { rootRoute } from "./__root";
@@ -89,6 +90,7 @@ function ProjectOverview({ project }: { project: ProjectRead | undefined }) {
         </article>
       </section>
       <section id="model-settings" className="qc-settings-band">
+        {project && <CreativeAutonomySwitcher project={project} />}
         <ModelProfileSettings projectId={projectId} workspaceId={getSelectedWorkspaceId()} />
       </section>
     </div>

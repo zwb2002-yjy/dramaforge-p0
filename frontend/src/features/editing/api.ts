@@ -11,6 +11,8 @@ export type EditingDirectorSuggestionRequest =
 export type EditingDirectorSuggestionCandidate =
   components["schemas"]["EditingDirectorSuggestionCandidate"];
 export type EditingDirectorSuggestionRead = components["schemas"]["EditingDirectorSuggestionRead"];
+export type EditingRepairRoutingRead = components["schemas"]["EditingRepairRoutingRead"];
+export type EditingRepairRoutingRequest = components["schemas"]["EditingRepairRoutingRequest"];
 
 const editSessionPath = (projectId: string, suffix = "") =>
   `/api/v1/projects/${projectId}/edit-sessions${suffix}`;
@@ -90,11 +92,31 @@ export async function requestProactiveEditingDirectorSuggestion(
   const csrf = await fetchCsrf();
   return apiSend<EditingDirectorSuggestionRead>(
     "POST",
-    editSessionPath(
-      projectId,
-      `/${encodeURIComponent(sessionId)}/director-proactive-suggestion`,
-    ),
+    editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/director-proactive-suggestion`),
     { expected_session_version },
+    csrf,
+  );
+}
+
+/**
+ * Ask the server-side Director whether the current editing issue must go to
+ * production Repair.  A can_fix_in_timeline=True response means the caller
+ * should keep using the normal editing suggestion path; False returns the
+ * exact persisted Repair Proposal identity without executing any repair.
+ */
+export async function routeEditingDirectorRepair(
+  projectId: string,
+  sessionId: string,
+  input: Pick<EditingRepairRoutingRequest, "expected_session_version" | "user_instruction">,
+): Promise<EditingRepairRoutingRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<EditingRepairRoutingRead>(
+    "POST",
+    editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/director-repair-routing`),
+    {
+      expected_session_version: input.expected_session_version,
+      user_instruction: input.user_instruction,
+    },
     csrf,
   );
 }

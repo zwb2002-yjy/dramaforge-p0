@@ -9,8 +9,10 @@ import {
   fetchEditSession,
   requestEditingDirectorSuggestion,
   requestProactiveEditingDirectorSuggestion,
+  routeEditingDirectorRepair,
   saveEditTimeline,
   type EditExportRead,
+  type EditingRepairRoutingRead,
   type EditSessionRead,
   type EditTimelinePayload,
   type EditingDirectorSuggestionRead,
@@ -132,6 +134,8 @@ export function EditingWorkspace({
     useState<EditingSuggestionPreviewContext | null>(null);
   const [suggestionStale, setSuggestionStale] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  const [repairRouting, setRepairRouting] = useState<EditingRepairRoutingRead | null>(null);
+  const [repairError, setRepairError] = useState<string | null>(null);
   const suggestionSequenceRef = useRef(0);
   const suggestionIdentityRef = useRef<EditingSuggestionPreviewContext | null>(null);
 
@@ -170,6 +174,8 @@ export function EditingWorkspace({
     setSuggestionPreviewContext(null);
     setSuggestionStale(false);
     setSuggestionError(null);
+    setRepairRouting(null);
+    setRepairError(null);
     suggestionSequenceRef.current += 1;
   }, [projectId, sessionId]);
 
@@ -287,14 +293,51 @@ export function EditingWorkspace({
       setSuggestionError(`建议请求失败：${errorMessage(error)}`);
     },
   });
+  const repairRoutingMutation = useMutation<
+    EditingRepairRoutingRead,
+    unknown,
+    { sequence: number }
+  >({
+    mutationFn: () => {
+      if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
+        throw new Error("无法判定修复路由：当前 EditSession 版本尚未加载。");
+      }
+      return routeEditingDirectorRepair(projectId, sessionId, {
+        expected_session_version: currentSessionVersion,
+        user_instruction: suggestionInstruction.trim(),
+      });
+    },
+    onSuccess: (result, variables) => {
+      const currentIdentity = suggestionIdentityRef.current;
+      if (
+        variables.sequence !== suggestionSequenceRef.current ||
+        !currentIdentity ||
+        currentIdentity.projectId !== projectId ||
+        currentIdentity.sessionId !== sessionId ||
+        currentIdentity.sessionVersion !== result.session_version
+      ) {
+        return;
+      }
+      setRepairRouting(result);
+      setRepairError(null);
+    },
+    onError: (error: unknown, variables) => {
+      if (variables.sequence !== suggestionSequenceRef.current) return;
+      setRepairRouting(null);
+      setRepairError(`修复路由判定失败：${errorMessage(error)}`);
+    },
+  });
   const suggestionRequestResetRef = useRef(suggestionRequest.reset);
   suggestionRequestResetRef.current = suggestionRequest.reset;
+  const repairRoutingMutationResetRef = useRef(repairRoutingMutation.reset);
+  repairRoutingMutationResetRef.current = repairRoutingMutation.reset;
 
   useEffect(() => {
     // Route changes invalidate any in-flight mutation state as well as the
     // local preview. The sequence guard above still ignores its eventual
     // response if the transport cannot be cancelled.
     suggestionRequestResetRef.current();
+    repairRoutingMutationResetRef.current();
   }, [projectId, sessionId]);
 
   useEffect(() => {
@@ -362,6 +405,18 @@ export function EditingWorkspace({
       proactive: true,
       sequence,
     });
+  }
+
+  function submitRepairRouting() {
+    if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
+      setRepairError("无法判定修复路由：当前 EditSession 版本尚未加载。");
+      return;
+    }
+    const sequence = suggestionSequenceRef.current + 1;
+    suggestionSequenceRef.current = sequence;
+    setRepairRouting(null);
+    setRepairError(null);
+    repairRoutingMutation.mutate({ sequence });
   }
 
   function moveClip(index: number, offset: -1 | 1) {
@@ -478,9 +533,7 @@ export function EditingWorkspace({
                 type="button"
                 data-testid="request-proactive-editing-suggestion"
                 onClick={submitProactiveSuggestion}
-                disabled={
-                  suggestionRequest.isPending || !isSessionVersion(currentSessionVersion)
-                }
+                disabled={suggestionRequest.isPending || !isSessionVersion(currentSessionVersion)}
               >
                 {suggestionRequest.isPending ? "正在分析…" : "主动分析剪辑节奏"}
               </button>
@@ -526,6 +579,58 @@ export function EditingWorkspace({
                 >
                   {suggestionError}
                 </p>
+              )}
+
+              <button
+                type="button"
+                data-testid="request-repair-routing"
+                onClick={submitRepairRouting}
+                disabled={
+                  repairRoutingMutation.isPending || !isSessionVersion(currentSessionVersion)
+                }
+              >
+                {repairRoutingMutation.isPending ? "正在判定…" : "判断是否需要生产 Repair"}
+              </button>
+              {repairError && (
+                <p
+                  className="editing-repair-routing-error"
+                  data-testid="editing-repair-routing-error"
+                  role="alert"
+                >
+                  {repairError}
+                </p>
+              )}
+              {repairRouting && (
+                <article
+                  className="editing-repair-routing-result"
+                  data-testid="editing-repair-routing-result"
+                  data-can-fix={repairRouting.can_fix_in_timeline}
+                  data-proposal-id={repairRouting.proposal_id ?? ""}
+                  data-session-version={repairRouting.session_version}
+                >
+                  <h3>
+                    {repairRouting.can_fix_in_timeline
+                      ? "可以在时间线内修复"
+                      : "需要 Production Repair"}
+                  </h3>
+                  <p data-testid="editing-repair-routing-reason">{repairRouting.reason}</p>
+                  {!repairRouting.can_fix_in_timeline && (
+                    <>
+                      <p className="callout" data-testid="editing-repair-routing-notice">
+                        Repair Proposal 已创建但不会自动执行；请到审片/镜头生产层打开 Repair Plan
+                        人工确认后执行。
+                      </p>
+                      <dl>
+                        <dt>proposal_id</dt>
+                        <dd>{repairRouting.proposal_id}</dd>
+                        <dt>item_id</dt>
+                        <dd>{repairRouting.item_id}</dd>
+                        <dt>需要修复的镜头</dt>
+                        <dd>{repairRouting.shot_ids?.join(", ") || "—"}</dd>
+                      </dl>
+                    </>
+                  )}
+                </article>
               )}
 
               {suggestionPreview && (

@@ -186,6 +186,21 @@ function editingSuggestion(version = 1) {
   };
 }
 
+function repairRouting(canFix = false) {
+  return {
+    project_id: PROJECT_ID,
+    session_id: SESSION_ID,
+    session_version: 1,
+    can_fix_in_timeline: canFix,
+    proposal_id: canFix ? null : "repair-proposal-1",
+    item_id: canFix ? null : "repair-item-1",
+    shot_ids: canFix ? [] : [SHOT_ID],
+    reason: canFix
+      ? "该问题可以在当前 EditSession 时间线内处理，无需生产 Repair。"
+      : "这段表演需要补拍，时间线无法解决。",
+  };
+}
+
 function renderPersistedSession(onSessionCreated?: (sessionId: string) => void) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -532,9 +547,7 @@ describe("EditingWorkspace", () => {
 
     const preview = await screen.findByTestId("editing-suggestion-preview");
     expect(preview).toHaveAttribute("data-proposal-id", "proposal-1");
-    const request = calls.find((call) =>
-      call.url.endsWith("/director-proactive-suggestion"),
-    );
+    const request = calls.find((call) => call.url.endsWith("/director-proactive-suggestion"));
     expect(request?.method).toBe("POST");
     expect(request?.url).toBe(
       `/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}/director-proactive-suggestion`,
@@ -569,6 +582,63 @@ describe("EditingWorkspace", () => {
     expect(screen.getByTestId("edit-session-version")).toHaveTextContent("v2");
     expect(screen.getByTestId("request-editing-director-suggestion")).toBeEnabled();
     expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
+  });
+
+  it("routes a production-repair issue to a Repair Proposal without saving the timeline", async () => {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ method, url, body });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-repair" });
+      if (url.endsWith("/director-repair-routing")) return json(repairRouting(false));
+      return json({});
+    });
+
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "这段表演不到位，需要补拍，时间线无法解决。" },
+    });
+    fireEvent.click(screen.getByTestId("request-repair-routing"));
+
+    const result = await screen.findByTestId("editing-repair-routing-result");
+    expect(result).toHaveAttribute("data-can-fix", "false");
+    expect(result).toHaveAttribute("data-proposal-id", "repair-proposal-1");
+    expect(screen.getByTestId("editing-repair-routing-notice")).toHaveTextContent("不会自动执行");
+    const request = calls.find((call) => call.url.endsWith("/director-repair-routing"));
+    expect(request?.method).toBe("POST");
+    expect(request?.body).toEqual({
+      expected_session_version: 1,
+      user_instruction: "这段表演不到位，需要补拍，时间线无法解决。",
+    });
+    expect(calls.some((call) => call.url.endsWith("/timeline"))).toBe(false);
+  });
+
+  it("keeps the timeline path when the Director says the timeline can fix the issue", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-repair-yes" });
+      if (url.endsWith("/director-repair-routing")) return json(repairRouting(true));
+      return json({});
+    });
+
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "把停顿放长一点" },
+    });
+    fireEvent.click(screen.getByTestId("request-repair-routing"));
+
+    const result = await screen.findByTestId("editing-repair-routing-result");
+    expect(result).toHaveAttribute("data-can-fix", "true");
+    expect(screen.getByTestId("editing-repair-routing-reason")).toHaveTextContent(
+      "无需生产 Repair",
+    );
+    expect(screen.queryByTestId("editing-repair-routing-notice")).not.toBeInTheDocument();
   });
 
   it.each([409, 403, 404, 422])(

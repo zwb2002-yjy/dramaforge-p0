@@ -18,6 +18,11 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.director.editing_repair import (
+    EditingRepairRoutingRead,
+    EditingRepairRoutingRequest,
+    EditingRepairRoutingService,
+)
 from app.director.editing_suggestion import (
     EditingDirectorSuggestionCandidate,
     EditingDirectorSuggestionRequest,
@@ -282,6 +287,33 @@ async def create_editing_proactive_suggestion(
     )
 
 
+@router.post(
+    "/projects/{project_id}/edit-sessions/{session_id}/director-repair-routing",
+    response_model=EditingRepairRoutingRead,
+)
+async def route_editing_director_repair(
+    project_id: UUID,
+    session_id: UUID,
+    body: EditingRepairRoutingRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> EditingRepairRoutingRead:
+    """Ask the Director whether the issue needs a production Repair Proposal.
+
+    can_fix_in_timeline=True returns no proposal: the caller should use the
+    normal editing suggestion path.  can_fix_in_timeline=False persists one
+    pending Repair Proposal and never dispatches/executes Repair.
+    """
+
+    return await EditingRepairRoutingService(session).route(
+        project_id=project_id,
+        session_id=session_id,
+        actor=user,
+        request=body,
+    )
+
+
 @router.get(
     "/projects/{project_id}/edit-sessions/{session_id}/export",
     response_model=EditExportRead,
@@ -314,5 +346,7 @@ __all__ = [
     "EditTimelinePayload",
     "EditTimelineUpdateRequest",
     "EditingDirectorSuggestionRead",
+    "EditingRepairRoutingRead",
+    "EditingRepairRoutingRequest",
     "router",
 ]

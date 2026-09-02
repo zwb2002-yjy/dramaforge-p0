@@ -1,10 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import {
-  PROJECT_ID,
-  SCENE_ID,
-  installProfessionalMock,
-} from "./professional-mocks";
+import { PROJECT_ID, SCENE_ID, installProfessionalMock } from "./professional-mocks";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -90,18 +86,15 @@ async function installStoryOnProfessionalProject(page: Page) {
       ],
     });
   });
-  await page.route(
-    "**/api/v1/projects/" + PROJECT_ID + "/story/proposals",
-    async (route) => {
-      const request = route.request();
-      if (request.method() !== "POST") return route.continue();
-      const body = request.postDataJSON();
-      if (typeof body?.draft_text !== "string") {
-        return json(route, { code: "VALIDATION_ERROR", detail: "draft missing" }, 422);
-      }
-      return json(route, PROPOSAL, 201);
-    },
-  );
+  await page.route("**/api/v1/projects/" + PROJECT_ID + "/story/proposals", async (route) => {
+    const request = route.request();
+    if (request.method() !== "POST") return route.continue();
+    const body = request.postDataJSON();
+    if (typeof body?.draft_text !== "string") {
+      return json(route, { code: "VALIDATION_ERROR", detail: "draft missing" }, 422);
+    }
+    return json(route, PROPOSAL, 201);
+  });
   await page.route(
     "**/api/v1/projects/" + PROJECT_ID + "/story/proposals/proposal-main/apply",
     async (route) => {
@@ -112,9 +105,7 @@ async function installStoryOnProfessionalProject(page: Page) {
         .filter((d: { decision: string }) => d.decision === "accepted")
         .some((d: { item_id: string }) => d.item_id === "op-main-ep");
       return json(route, {
-        accepted: body?.decisions?.map(
-          (d: { item_id: string; decision: string }) => d.item_id,
-        ),
+        accepted: body?.decisions?.map((d: { item_id: string; decision: string }) => d.item_id),
         rejected: [],
         failed: [],
       });

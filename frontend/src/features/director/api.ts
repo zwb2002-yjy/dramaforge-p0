@@ -1,8 +1,5 @@
 import { apiSend, fetchCsrf } from "../../lib/api";
-import type {
-  DirectorRecommendation,
-  ShotDirectorSuggestion,
-} from "./suggestion-types";
+import type { DirectorRecommendation, ShotDirectorSuggestion } from "./suggestion-types";
 
 const directorPath = (projectId: string, suffix: string) =>
   `/api/v1/projects/${projectId}/director${suffix}`;

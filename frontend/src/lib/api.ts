@@ -419,6 +419,8 @@ export function getEffectiveBindings(projectId: string): Promise<EffectiveBindin
 }
 
 export type ProjectRead = components["schemas"]["ProjectRead"];
+export type ProjectCreativeProfileRead = components["schemas"]["ProjectCreativeProfileRead"];
+export type CreativeAutonomy = "AUTO" | "ASSIST" | "MANUAL";
 
 export async function fetchCsrf(): Promise<string> {
   const r = await apiGet<CsrfResponse>("/api/v1/auth/csrf");
@@ -473,6 +475,20 @@ export function listWorkspaceProjects(workspaceId: string): Promise<ProjectRead[
 
 export function fetchProject(projectId: string): Promise<ProjectRead> {
   return apiGet<ProjectRead>(`/api/v1/projects/${projectId}`);
+}
+
+export async function updateProjectCreativeProfile(
+  projectId: string,
+  expected_version: number,
+  director_autonomy: CreativeAutonomy,
+): Promise<ProjectCreativeProfileRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<ProjectCreativeProfileRead>(
+    "PATCH",
+    `/api/v1/projects/${projectId}/creative-profile`,
+    { expected_version, director_autonomy },
+    csrf,
+  );
 }
 
 export async function createProject(input: {

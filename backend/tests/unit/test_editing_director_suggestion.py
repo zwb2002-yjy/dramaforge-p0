@@ -13,6 +13,10 @@ from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.assets.models import Asset, Episode, Scene, Shot
 from app.director.assistant_models import DirectorThread
+from app.director.editing_repair import (
+    EditingRepairRoutingRequest,
+    EditingRepairRoutingService,
+)
 from app.director.editing_suggestion import (
     EditingDirectorSuggestionCandidate,
     EditingDirectorSuggestionContext,
@@ -633,3 +637,125 @@ async def test_proactive_suggestion_works_without_instruction(
     assert result.proposal_id
     assert result.item_id
     assert await _proposal_counts(session, project.id) == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_timeline_fixable_route_creates_no_repair_proposal(
+    session: AsyncSession,
+) -> None:
+    project, edit_session, user, _shot, _asset, _graph, _run, _operation = await _seed(session)
+    before = await _proposal_counts(session, project.id)
+    result = await EditingRepairRoutingService(session).route(
+        project_id=project.id,
+        session_id=edit_session.id,
+        actor=user,
+        request=EditingRepairRoutingRequest(
+            expected_session_version=edit_session.version,
+            user_instruction="把开场停顿放长，剪辑里就能解决。",
+        ),
+    )
+    assert result.can_fix_in_timeline is True
+    assert result.proposal_id is None
+    assert result.item_id is None
+    assert result.shot_ids == []
+    assert await _proposal_counts(session, project.id) == before
+
+
+@pytest.mark.asyncio
+async def test_repair_signal_creates_repair_proposal_without_repair_execution(
+    session: AsyncSession,
+) -> None:
+    project, edit_session, user, shot, _asset, graph, run, operation = await _seed(session)
+    before_shot = (shot.version, shot.formal_video_artifact_id)
+    before_run = (run.status, run.result_artifact_id)
+    before_op = operation.status
+    before = await _proposal_counts(session, project.id)
+
+    result = await EditingRepairRoutingService(session).route(
+        project_id=project.id,
+        session_id=edit_session.id,
+        actor=user,
+        request=EditingRepairRoutingRequest(
+            expected_session_version=edit_session.version,
+            user_instruction="这段表演不到位，需要补拍，时间线无法解决。",
+        ),
+    )
+    assert result.can_fix_in_timeline is False
+    assert result.proposal_id is not None
+    assert result.item_id is not None
+    assert result.shot_ids == [str(shot.id)]
+    assert result.reason is not None
+    assert await _proposal_counts(session, project.id) == (
+        before[0] + 1,
+        before[1] + 1,
+        before[2] + 1,
+    )
+
+    item = (
+        await session.execute(
+            select(DirectorProposalItem).where(
+                DirectorProposalItem.project_id == project.id,
+                DirectorProposalItem.status == "pending",
+            )
+        )
+    ).scalar_one()
+    assert item.command == "editing.repair_proposal"
+    assert item.payload["no_auto_execute"] is True
+    assert "plan" not in item.payload
+    assert item.payload["shot_ids"] == [str(shot.id)]
+
+    await session.refresh(shot)
+    await session.refresh(run)
+    await session.refresh(operation)
+    await session.refresh(edit_session)
+    assert (shot.version, shot.formal_video_artifact_id) == before_shot
+    assert (run.status, run.result_artifact_id) == before_run
+    assert operation.status == before_op
+    assert edit_session.version == 1
+    assert edit_session.timeline["clips"][0]["duration_seconds"] == 2.0
+
+
+@pytest.mark.asyncio
+async def test_missing_formal_video_server_fact_creates_repair_proposal(
+    session: AsyncSession,
+) -> None:
+    project, edit_session, user, shot, _asset, _graph, _run, _operation = await _seed(session)
+    shot.formal_video_artifact_id = None
+    await session.flush()
+    await session.commit()
+    before = await _proposal_counts(session, project.id)
+
+    result = await EditingRepairRoutingService(session).route(
+        project_id=project.id,
+        session_id=edit_session.id,
+        actor=user,
+        request=EditingRepairRoutingRequest(
+            expected_session_version=edit_session.version,
+            user_instruction="",
+        ),
+    )
+    assert result.can_fix_in_timeline is False
+    assert result.proposal_id is not None
+    assert result.shot_ids == [str(shot.id)]
+    assert await _proposal_counts(session, project.id) == (
+        before[0] + 1,
+        before[1] + 1,
+        before[2] + 1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_repair_routing_stale_version_fails_closed(session: AsyncSession) -> None:
+    project, edit_session, user, _shot, _asset, _graph, _run, _operation = await _seed(session)
+    before = await _proposal_counts(session, project.id)
+    with pytest.raises(ConflictError):
+        await EditingRepairRoutingService(session).route(
+            project_id=project.id,
+            session_id=edit_session.id,
+            actor=user,
+            request=EditingRepairRoutingRequest(
+                expected_session_version=edit_session.version + 1,
+                user_instruction="需要补拍",
+            ),
+        )
+    assert await _proposal_counts(session, project.id) == before

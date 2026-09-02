@@ -69,9 +69,7 @@ function HomePage() {
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9">("9:16");
   const [startType, setStartType] = useState<"TEMPLATE" | "FREE">("FREE");
   const [templateKey, setTemplateKey] = useState<string>(V1_TEMPLATES[0].key);
-  const [directorAutonomy, setDirectorAutonomy] = useState<
-    "AUTO" | "ASSIST" | "MANUAL"
-  >("ASSIST");
+  const [directorAutonomy, setDirectorAutonomy] = useState<"AUTO" | "ASSIST" | "MANUAL">("ASSIST");
   const [error, setError] = useState<string | null>(null);
 
   const selectWorkspace = useCallback((workspaceId: string | null) => {
@@ -422,9 +420,7 @@ function HomePage() {
                 <select
                   aria-label="创作起点"
                   value={startType}
-                  onChange={(event) =>
-                    setStartType(event.target.value as "TEMPLATE" | "FREE")
-                  }
+                  onChange={(event) => setStartType(event.target.value as "TEMPLATE" | "FREE")}
                   disabled={!selectedWorkspaceId}
                 >
                   <option value="FREE">自由创建</option>
@@ -448,9 +444,7 @@ function HomePage() {
                   aria-label="导演参与度"
                   value={directorAutonomy}
                   onChange={(event) =>
-                    setDirectorAutonomy(
-                      event.target.value as "AUTO" | "ASSIST" | "MANUAL",
-                    )
+                    setDirectorAutonomy(event.target.value as "AUTO" | "ASSIST" | "MANUAL")
                   }
                   disabled={!selectedWorkspaceId}
                 >
@@ -481,9 +475,9 @@ function HomePage() {
                   >
                     <span>{project.name}</span>
                     <span className="muted">
-                  {project.creative_profile?.start_type ?? project.stage} ·{" "}
-                  {project.creative_profile?.director_autonomy ?? project.aspect_ratio}
-                </span>
+                      {project.creative_profile?.start_type ?? project.stage} ·{" "}
+                      {project.creative_profile?.director_autonomy ?? project.aspect_ratio}
+                    </span>
                   </button>
                 ))}
                 {selectedWorkspaceId && !projects.isLoading && !projects.data?.length && (

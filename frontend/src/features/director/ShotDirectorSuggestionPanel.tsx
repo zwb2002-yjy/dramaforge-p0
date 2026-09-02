@@ -2,10 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { recommendShotDesign, suggestShotDesign } from "./api";
-import type {
-  DirectorRecommendation,
-  ShotDirectorSuggestion,
-} from "./suggestion-types";
+import type { DirectorRecommendation, ShotDirectorSuggestion } from "./suggestion-types";
 import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
 import type { ShotLite } from "../shots/api";
 
@@ -93,9 +90,7 @@ export function ShotDirectorSuggestionPanel({
     },
     onSuccess: (result) => {
       setRecommendation(result);
-      setSelectedOps(
-        Object.fromEntries(result.typed_operations.map((_, index) => [index, true])),
-      );
+      setSelectedOps(Object.fromEntries(result.typed_operations.map((_, index) => [index, true])));
       setMessage(null);
     },
     onError: (error: unknown) => {

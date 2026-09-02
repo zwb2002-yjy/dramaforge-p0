@@ -770,6 +770,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-repair-routing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Route Editing Director Repair
+         * @description Ask the Director whether the issue needs a production Repair Proposal.
+         *
+         *     can_fix_in_timeline=True returns no proposal: the caller should use the
+         *     normal editing suggestion path.  can_fix_in_timeline=False persists one
+         *     pending Repair Proposal and never dispatches/executes Repair.
+         */
+        post: operations["route_editing_director_repair_api_v1_projects__project_id__edit_sessions__session_id__director_repair_routing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/edit-sessions/{session_id}/export": {
         parameters: {
             query?: never;
@@ -2930,6 +2954,44 @@ export interface components {
         EditingProactiveSuggestionRequest: {
             /** Expected Session Version */
             expected_session_version: number;
+        };
+        /** EditingRepairRoutingRead */
+        EditingRepairRoutingRead: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Session Version */
+            session_version: number;
+            /** Can Fix In Timeline */
+            can_fix_in_timeline: boolean;
+            /** Proposal Id */
+            proposal_id?: string | null;
+            /** Item Id */
+            item_id?: string | null;
+            /** Shot Ids */
+            shot_ids?: string[];
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * EditingRepairRoutingRequest
+         * @description No timeline/lineage/provider fields are accepted from the client.
+         */
+        EditingRepairRoutingRequest: {
+            /** Expected Session Version */
+            expected_session_version: number;
+            /**
+             * User Instruction
+             * @default
+             */
+            user_instruction: string;
         };
         /** EffectiveBindingRead */
         EffectiveBindingRead: {
@@ -7429,6 +7491,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditingDirectorSuggestionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    route_editing_director_repair_api_v1_projects__project_id__edit_sessions__session_id__director_repair_routing_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditingRepairRoutingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingRepairRoutingRead"];
                 };
             };
             /** @description Validation Error */
