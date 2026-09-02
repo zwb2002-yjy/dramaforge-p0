@@ -1,7 +1,7 @@
 # V1 G4A — Proactive Director Recommendation（Backend）
 
 **Task:** `v1-g4a-proactive-recommendation-20260903`
-**Status:** READY / NOT STARTED
+**Status:** COMPLETE
 **Goal:** DramaForge V1 统一创作主链 — G4 Proactive Director Recommendation
 
 ## Outcome
@@ -29,3 +29,9 @@
 3. stale fail closed；
 4. 非法字段 fail closed；
 5. full backend unit / ruff / mypy / OpenAPI 同步。
+
+## Evidence
+
+- focused：`test_director_recommendation.py` 5 passed；
+- full backend unit：868 passed；
+- ruff/mypy/OpenAPI 同步通过。

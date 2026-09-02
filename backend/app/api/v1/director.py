@@ -13,6 +13,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.director.recommendation import (
+    DirectorRecommendation,
+    DirectorRecommendationRequest,
+    DirectorRecommendationService,
+)
 from app.director.suggestion import (
     ShotDirectorSuggestion,
     ShotDirectorSuggestionRequest,
@@ -43,6 +48,30 @@ async def suggest_shot_design(
             details={"code": "SHOT_SUGGESTION_SCOPE_MISMATCH"},
         )
     return await ShotDirectorSuggestionService(session).suggest(
+        project_id=project_id,
+        actor=user,
+        request=body,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/recommendation",
+    response_model=DirectorRecommendation,
+)
+async def recommend_shot_design(
+    project_id: UUID,
+    shot_id: UUID,
+    body: DirectorRecommendationRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> DirectorRecommendation:
+    if body.shot_id != shot_id:
+        raise ValidationAppError(
+            "shot id in the request body does not match the route",
+            details={"code": "RECOMMENDATION_SCOPE_MISMATCH"},
+        )
+    return await DirectorRecommendationService(session).recommend(
         project_id=project_id,
         actor=user,
         request=body,
