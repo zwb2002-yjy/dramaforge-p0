@@ -29,6 +29,11 @@ export const indexRoute = createRoute({
   component: HomePage,
 });
 
+const V1_TEMPLATES = [
+  { key: "dual_character_conflict_v1", name: "双人对白反转" },
+  { key: "single_monologue_v1", name: "单人情绪独白" },
+] as const;
+
 function HomePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -62,6 +67,11 @@ function HomePage() {
   const [workspaceName, setWorkspaceName] = useState("");
   const [projectName, setProjectName] = useState("新短剧");
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9">("9:16");
+  const [startType, setStartType] = useState<"TEMPLATE" | "FREE">("FREE");
+  const [templateKey, setTemplateKey] = useState<string>(V1_TEMPLATES[0].key);
+  const [directorAutonomy, setDirectorAutonomy] = useState<
+    "AUTO" | "ASSIST" | "MANUAL"
+  >("ASSIST");
   const [error, setError] = useState<string | null>(null);
 
   const selectWorkspace = useCallback((workspaceId: string | null) => {
@@ -173,12 +183,15 @@ function HomePage() {
         workspace_id: selectedWorkspaceId,
         name: projectName,
         aspect_ratio: aspectRatio,
+        start_type: startType,
+        template_key: startType === "TEMPLATE" ? templateKey : null,
+        director_autonomy: directorAutonomy,
       });
     },
     onSuccess: async (project) => {
       await invalidateWorkspaceData();
       void navigate({
-        to: "/projects/$projectId/production",
+        to: "/projects/$projectId/script",
         params: { projectId: project.id },
       });
     },
@@ -406,6 +419,45 @@ function HomePage() {
                   <option value="9:16">9:16 竖屏</option>
                   <option value="16:9">16:9 横屏</option>
                 </select>
+                <select
+                  aria-label="创作起点"
+                  value={startType}
+                  onChange={(event) =>
+                    setStartType(event.target.value as "TEMPLATE" | "FREE")
+                  }
+                  disabled={!selectedWorkspaceId}
+                >
+                  <option value="FREE">自由创建</option>
+                  <option value="TEMPLATE">从模板开始</option>
+                </select>
+                {startType === "TEMPLATE" && (
+                  <select
+                    aria-label="创作模板"
+                    value={templateKey}
+                    onChange={(event) => setTemplateKey(event.target.value)}
+                    disabled={!selectedWorkspaceId}
+                  >
+                    {V1_TEMPLATES.map((template) => (
+                      <option key={template.key} value={template.key}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <select
+                  aria-label="导演参与度"
+                  value={directorAutonomy}
+                  onChange={(event) =>
+                    setDirectorAutonomy(
+                      event.target.value as "AUTO" | "ASSIST" | "MANUAL",
+                    )
+                  }
+                  disabled={!selectedWorkspaceId}
+                >
+                  <option value="AUTO">导演自动 AUTO</option>
+                  <option value="ASSIST">导演辅助 ASSIST</option>
+                  <option value="MANUAL">手动控制 MANUAL</option>
+                </select>
                 <button
                   className="primary"
                   type="submit"
@@ -429,8 +481,9 @@ function HomePage() {
                   >
                     <span>{project.name}</span>
                     <span className="muted">
-                      {project.stage} · {project.aspect_ratio}
-                    </span>
+                  {project.creative_profile?.start_type ?? project.stage} ·{" "}
+                  {project.creative_profile?.director_autonomy ?? project.aspect_ratio}
+                </span>
                   </button>
                 ))}
                 {selectedWorkspaceId && !projects.isLoading && !projects.data?.length && (

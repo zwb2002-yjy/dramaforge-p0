@@ -479,6 +479,9 @@ export async function createProject(input: {
   workspace_id: string;
   name: string;
   aspect_ratio: string;
+  start_type?: "TEMPLATE" | "FREE";
+  template_key?: string | null;
+  director_autonomy?: "AUTO" | "ASSIST" | "MANUAL";
 }): Promise<components["schemas"]["ProjectRead"]> {
   const csrf = await fetchCsrf();
   return apiSend(
@@ -488,6 +491,9 @@ export async function createProject(input: {
       workspace_id: input.workspace_id,
       name: input.name,
       aspect_ratio: input.aspect_ratio,
+      start_type: input.start_type ?? "FREE",
+      template_key: input.template_key ?? null,
+      director_autonomy: input.director_autonomy ?? "ASSIST",
     },
     csrf,
   );
