@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ScriptWorkspace } from "../../src/features/script/ScriptWorkspace";
 
@@ -9,8 +9,7 @@ const DOC = {
   filename: "episode_script.md",
   content_hash: "a".repeat(64),
   format: "md",
-  raw_text:
-    "# Episode 1 — Neon Rain Lead\nLead: Lin Xia\n## Scene 1 — Neon alley / night\nOpening.\n### Shot 1 — wide\nVisual: neon rain street at night\nDialogue: (none)\nCamera: static",
+  raw_text: "# Episode 1 — Neon Rain\n## Scene 1 — Street / night\nOpening.\n",
   version: 1,
 };
 
@@ -18,16 +17,16 @@ const EPISODES = [
   {
     id: "ep-1",
     episode_number: 1,
-    title: "Neon Rain Lead",
+    title: "Neon Rain",
     synopsis: "A lead",
     version: 1,
     scenes: [
       {
         id: "sc-1",
         scene_number: 1,
-        location_name: "Neon alley",
+        location_name: "Street",
         time_of_day: "night",
-        synopsis: "Opening rain.",
+        synopsis: "Opening.",
         shot_count: 3,
         version: 1,
       },
@@ -35,12 +34,52 @@ const EPISODES = [
   },
 ];
 
+const PROPOSAL = {
+  id: "proposal-1",
+  project_id: "project-1",
+  status: "pending",
+  summary: "Story authoring proposal",
+  created_at: "2026-09-03T00:00:00Z",
+  operations: [
+    {
+      id: "op-1",
+      command: "story.upsert_episode",
+      action: "create",
+      key: "episode:1",
+      expected_target_version: null,
+      rationale: "Episode 结构",
+      impact: "episode:1",
+      payload: { episode_number: 1, action: "create" },
+    },
+    {
+      id: "op-2",
+      command: "story.upsert_scene",
+      action: "create",
+      key: "scene:1.1",
+      expected_target_version: null,
+      rationale: "Scene 结构",
+      impact: "scene:1.1",
+      payload: { episode_number: 1, scene_number: 1, action: "create" },
+    },
+    {
+      id: "op-3",
+      command: "story.upsert_shot",
+      action: "create",
+      key: "shot:1.1.1",
+      expected_target_version: null,
+      rationale: "Shot 结构",
+      impact: "shot:1.1.1",
+      payload: { episode_number: 1, scene_number: 1, shot_number: 1, action: "create" },
+    },
+  ],
+};
+
 const EMPTY = { document: null, episodes: [] };
 
-function json(body: unknown): Promise<Response> {
+function json(body: unknown, status = 200): Promise<Response> {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
-      status: 200,
+      status,
       headers: { "Content-Type": "application/json" },
     }),
   );
@@ -56,10 +95,9 @@ function renderWorkspace(projectId = "project-1") {
 }
 
 afterEach(() => vi.restoreAllMocks());
-beforeEach(() => {});
 
-describe("ScriptWorkspace", () => {
-  it("shows raw text + episodes when a document exists, and no import form", async () => {
+describe("ScriptWorkspace proposal-first UI", () => {
+  it("shows the current document and episodes when Canonical Story exists", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/script")) return json({ document: DOC, episodes: EPISODES });
@@ -68,14 +106,11 @@ describe("ScriptWorkspace", () => {
     renderWorkspace();
     expect(await screen.findByTestId("script-document")).toBeInTheDocument();
     const episodes = screen.getByTestId("script-episodes");
-    expect(episodes).toBeInTheDocument();
-    expect(within(episodes).getByText(/Neon Rain Lead/)).toBeInTheDocument();
-    expect(within(episodes).getByText(/3 镜头/)).toBeInTheDocument();
-    // No active import control once a document exists.
-    expect(screen.queryByTestId("script-import")).not.toBeInTheDocument();
+    expect(within(episodes).getByText(/Neon Rain/)).toBeInTheDocument();
+    expect(screen.getByTestId("story-proposal-composer")).toBeInTheDocument();
   });
 
-  it("shows the empty state + import form when no document is imported", async () => {
+  it("shows the empty state and always offers a Story proposal composer", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/script")) return json(EMPTY);
@@ -83,57 +118,73 @@ describe("ScriptWorkspace", () => {
     });
     renderWorkspace();
     expect(await screen.findByTestId("script-empty")).toBeInTheDocument();
-    expect(screen.getByTestId("script-import")).toBeInTheDocument();
-    expect(screen.getByText("尚未导入剧本")).toBeInTheDocument();
+    expect(screen.getByTestId("story-proposal-composer")).toBeInTheDocument();
+    expect(screen.getByText("Story 导演提案")).toBeInTheDocument();
   });
 
-  it("submits a first import then refetches the workspace", async () => {
-    const calls: string[] = [];
+  it("creates a proposal and renders the typed diff", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
-      calls.push(`${init?.method ?? "GET"} ${url}`);
-      if (url.endsWith("/script") && !(init?.method === "POST")) return json(EMPTY);
-      if (url.endsWith("/scripts/import") && init?.method === "POST") {
-        return json({ ...DOC, script_document_id: "doc-2" });
+      if (url.endsWith("/script")) return json(EMPTY);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf" });
+      if (url.endsWith("/story/proposals") && init?.method === "POST") {
+        return json(PROPOSAL, 201);
       }
       return json({});
     });
     renderWorkspace();
-    await screen.findByTestId("script-import");
-    // Simulate a refetch after import by returning a non-empty document.
+    await screen.findByTestId("story-proposal-composer");
+    fireEvent.change(screen.getByLabelText("故事方向"), {
+      target: { value: "双人冲突" },
+    });
     fireEvent.change(screen.getByLabelText("剧本文本"), {
       target: {
         value:
-          "# Episode 1 — X\nLead: A\n## Scene 1 — Loc / day\nbody\n### Shot 1 — medium\nVisual: v\nDialogue: d",
+          "# Episode 1 — X\n## Scene 1 — Studio / day\nbody\n### Shot 1 — medium\nVisual: v\nDialogue: d",
       },
     });
-    fireEvent.click(screen.getByRole("button", { name: "导入剧本" }));
-    await waitFor(() => {
-      expect(calls.some((c) => c.startsWith("POST") && c.endsWith("/scripts/import"))).toBe(true);
-    });
+    fireEvent.click(screen.getByTestId("story-proposal-create"));
+    expect(await screen.findByTestId("story-proposal-preview")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/story-operation-/)).toHaveLength(3);
+    expect(screen.getByText(/Episode 1/)).toBeInTheDocument();
+    expect(screen.getByText(/pending/)).toBeInTheDocument();
   });
 
-  it("surfaces a parse error on a failed first import", async () => {
-    const body = JSON.stringify({
-      code: "VALIDATION_ERROR",
-      detail: "script has no scenes",
-    });
-    const errorResponse = new Response(body, {
-      status: 422,
-      headers: { "Content-Type": "application/json" },
-    });
+  it("applies only the selected operations", async () => {
+    let applyBody: unknown;
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
-      if (url.endsWith("/script") && !(init?.method === "POST")) return json(EMPTY);
-      if (url.endsWith("/scripts/import") && init?.method === "POST") {
-        return Promise.resolve(errorResponse);
+      if (url.endsWith("/script")) return json(EMPTY);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf" });
+      if (url.endsWith("/story/proposals") && init?.method === "POST") {
+        return json(PROPOSAL, 201);
+      }
+      if (url.endsWith("/story/proposals/proposal-1/apply") && init?.method === "POST") {
+        applyBody = init.body ? JSON.parse(String(init.body)) : null;
+        return json({ accepted: ["op-1"], rejected: [], failed: [] });
       }
       return json({});
     });
     renderWorkspace();
-    await screen.findByTestId("script-import");
-    fireEvent.change(screen.getByLabelText("剧本文本"), { target: { value: "no scenes here" } });
-    fireEvent.click(screen.getByRole("button", { name: "导入剧本" }));
-    expect(await screen.findByTestId("script-import-error")).toBeInTheDocument();
+    await screen.findByTestId("story-proposal-composer");
+    fireEvent.change(screen.getByLabelText("剧本文本"), {
+      target: {
+        value:
+          "# Episode 1 — X\n## Scene 1 — Studio / day\nbody\n### Shot 1 — medium\nVisual: v\nDialogue: d",
+      },
+    });
+    fireEvent.click(screen.getByTestId("story-proposal-create"));
+    await screen.findByTestId("story-proposal-preview");
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[1]);
+    fireEvent.click(checkboxes[2]);
+    fireEvent.click(screen.getByTestId("story-proposal-apply-selected"));
+
+    await waitFor(() => {
+      expect(applyBody).toEqual({
+        decisions: [{ item_id: "op-1", decision: "accepted" }],
+      });
+    });
   });
 });

@@ -6,7 +6,7 @@
  * reused from `lib/api.ts` unchanged.
  */
 
-import { apiGet } from "../../lib/api";
+import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
 
 export type SceneRead = {
   id: string;
@@ -43,4 +43,61 @@ export type ScriptWorkspaceRead = {
 
 export async function fetchScriptWorkspace(projectId: string): Promise<ScriptWorkspaceRead> {
   return apiGet<ScriptWorkspaceRead>(`/api/v1/projects/${projectId}/script`);
+}
+
+export type StoryProposalOperation = {
+  id: string;
+  command: string;
+  action: string;
+  key: string;
+  expected_target_version: number | null;
+  rationale: string;
+  impact: string;
+  payload: Record<string, unknown>;
+};
+
+export type StoryProposalRead = {
+  id: string;
+  project_id: string;
+  status: string;
+  summary: string;
+  created_at: string;
+  operations: StoryProposalOperation[];
+};
+
+export type PartialApplyResult = {
+  accepted: string[];
+  rejected: string[];
+  failed: Array<{ item_id?: string; error?: string }>;
+};
+
+export async function createStoryProposal(
+  projectId: string,
+  input: { idempotency_key: string; brief: string; filename: string; draft_text: string },
+): Promise<StoryProposalRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<StoryProposalRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/story/proposals`,
+    input,
+    csrf,
+  );
+}
+
+export async function listStoryProposals(projectId: string): Promise<StoryProposalRead[]> {
+  return apiGet<StoryProposalRead[]>(`/api/v1/projects/${projectId}/story/proposals`);
+}
+
+export async function applyStoryProposal(
+  projectId: string,
+  proposalId: string,
+  decisions: Array<{ item_id: string; decision: "accepted" | "rejected" }>,
+): Promise<PartialApplyResult> {
+  const csrf = await fetchCsrf();
+  return apiSend<PartialApplyResult>(
+    "POST",
+    `/api/v1/projects/${projectId}/story/proposals/${proposalId}/apply`,
+    { decisions },
+    csrf,
+  );
 }

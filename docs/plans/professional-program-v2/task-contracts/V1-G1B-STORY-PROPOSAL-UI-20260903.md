@@ -1,7 +1,7 @@
 # V1 G1B — Story Authoring Proposal UI
 
 **Task:** `v1-g1b-story-proposal-ui-20260903`
-**Status:** READY / NOT STARTED
+**Status:** COMPLETE
 **Goal:** DramaForge V1 统一创作主链 — G1 Story Authoring Proposal Chain
 **Depends on:** V1-G1A backend（dev `5a544e4`）
 
@@ -40,7 +40,7 @@ Script 工作区提供 Story proposal-first 体验：
 
 ## Evidence
 
-- commit SHA；
-- vitest focused；
-- Playwright focused；
-- frontend gate 结果。
+- commit SHA：提交后回填；
+- vitest focused：`ScriptWorkspace.test.tsx` 4 passed；
+- Playwright focused：`story-proposal.spec.ts` 1 passed；
+- frontend typecheck/lint/build：通过；full vitest 97 passed。
