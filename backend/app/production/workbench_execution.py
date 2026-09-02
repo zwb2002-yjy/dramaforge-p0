@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import Project
 from app.assets.models import Asset, AssetVersion, AssetVersionReference, Shot
 from app.config import get_settings
-from app.execution.models import Artifact, NodeRun
+from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
 from app.execution.shot_pipeline import (
     SHOT_PIPELINE_TEMPLATE_KEY,
     shot_pipeline_definition,
@@ -67,6 +67,104 @@ _STAGE_CONTRACT: Final[dict[PlanStage, tuple[ModelSlot, Capability, str, str]]] 
         "video",
     ),
 }
+
+_PURE_UPSTREAM_NODE_TYPES = frozenset({"prompt", "prompt_compose"})
+
+
+def _chain_input_hash(payload: dict[str, object]) -> str:
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+async def _ensure_pure_chain_upstreams(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    graph_version_id: UUID,
+    target_node_id: UUID,
+    shot_id: UUID,
+    prompt: str,
+    stage: PlanStage,
+    created_by: UUID,
+) -> None:
+    """Create missing queued pure upstream runs for the shot pipeline.
+
+    The Workbench API dispatches one concrete media NodeRun (keyframe/video).
+    The frozen shot graph still requires its pure ``prompt`` upstream to have
+    a durable run before a media run may execute.  These zero-provider runs
+    are created here as queued facts and then picked up by the same
+    dispatcher/worker path; the media run waits/retries until they complete.
+    """
+    edges = (
+        await session.execute(
+            select(GraphEdge, GraphNode)
+            .join(GraphNode, GraphNode.id == GraphEdge.upstream_node_id)
+            .where(GraphEdge.graph_version_id == graph_version_id)
+            .where(GraphEdge.downstream_node_id == target_node_id)
+            .where(GraphEdge.required.is_(True))
+            .order_by(GraphEdge.input_port, GraphEdge.position)
+        )
+    ).tuples().all()
+    source_commit = get_settings().source_commit.strip() or "development"
+    for _edge, node in edges:
+        if node.node_type not in _PURE_UPSTREAM_NODE_TYPES:
+            continue
+        existing = list(
+            (
+                await session.execute(
+                    select(NodeRun)
+                    .where(NodeRun.project_id == project_id)
+                    .where(NodeRun.graph_version_id == graph_version_id)
+                    .where(NodeRun.graph_node_id == node.id)
+                    .order_by(NodeRun.attempt_no.desc(), NodeRun.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        latest = existing[0] if existing else None
+        if latest is not None and latest.status in {
+            "queued",
+            "running",
+            "completed",
+            "cached",
+            "completed_after_cancel",
+        }:
+            continue
+        attempt_no = (max((row.attempt_no or 0) for row in existing) + 1) if existing else 1
+        payload: dict[str, object] = {
+            "plan": {"prompt": prompt},
+            "prompt": prompt,
+            "project_id": str(project_id),
+            "shot_id": str(shot_id),
+            "node_key": node.node_key,
+            "stage": stage,
+            "source_commit": source_commit,
+            "professional_unified": True,
+            "execution_path": "unified-v1",
+        }
+        session.add(
+            NodeRun(
+                project_id=project_id,
+                graph_version_id=graph_version_id,
+                graph_node_id=node.id,
+                attempt_no=attempt_no,
+                idempotency_key=(
+                    f"workbench:chain:{stage}:{node.node_key}:{shot_id}:{attempt_no}"
+                ),
+                input_hash=_chain_input_hash(payload),
+                status="queued",
+                input_snapshot=payload,
+                created_by=created_by,
+            )
+        )
+        await session.flush()
 
 
 class WorkbenchExecutionError(ValidationAppError):
@@ -469,6 +567,16 @@ class WorkbenchExecutionService:
                 published_by=self._user_id,
             )
         node = materialized.nodes[node_key]
+        await _ensure_pure_chain_upstreams(
+            self._session,
+            project_id=project.id,
+            graph_version_id=version.id,
+            target_node_id=node.id,
+            shot_id=execution_input.shot_id,
+            prompt=plan.prompt,
+            stage=plan.stage,
+            created_by=self._user_id,
+        )
         provider_connection_id = plan.resolved_model.provider_connection_id
         if provider_connection_id is None:
             raise WorkbenchExecutionError(

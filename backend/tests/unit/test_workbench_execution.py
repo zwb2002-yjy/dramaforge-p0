@@ -355,6 +355,22 @@ async def test_reference_identity_is_hydrated_and_frozen_in_node_run_snapshot(
     assert snapshot["references"] == snapshot["workbench_plan"]["planned_references"]
     assert snapshot["references"][0]["artifact_id"] == str(artifact.id)
 
+    # The single keyframe dispatch materializes the required pure prompt
+    # upstream so the real Worker never sees an UPSTREAM_RUN_MISSING failure.
+    runs = (await session.execute(select(NodeRun))).scalars().all()
+    node_keys = {str((item.input_snapshot or {}).get("node_key")) for item in runs}
+    assert {"prompt", "keyframe"} <= node_keys
+    prompt_run = next(
+        item
+        for item in runs
+        if str((item.input_snapshot or {}).get("node_key")) == "prompt"
+    )
+    assert prompt_run.status == "queued"
+    assert prompt_run.input_snapshot is not None
+    assert prompt_run.input_snapshot["source_commit"]
+    ops = (await session.execute(select(ProviderOperation))).scalars().all()
+    assert ops == []
+
 
 @pytest.mark.asyncio
 async def test_cross_project_reference_fails_before_plan_or_graph_write(
