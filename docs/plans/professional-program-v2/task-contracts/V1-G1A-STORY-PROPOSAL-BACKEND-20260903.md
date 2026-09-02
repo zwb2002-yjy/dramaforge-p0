@@ -1,7 +1,7 @@
 # V1 G1A — Story Authoring Proposal Backend
 
 **Task:** `v1-g1a-story-proposal-backend-20260903`
-**Status:** READY / NOT STARTED
+**Status:** COMPLETE
 **Goal:** DramaForge V1 统一创作主链 — G1 Story Authoring Proposal Chain
 **Parent:** `P10-STORY-AUTHORING-PROPOSAL-CHAIN-20260902`
 
@@ -69,8 +69,9 @@ Script Draft (Markdown)
 
 ## Completion Evidence
 
-- 实际 commit SHA；
-- focused unit 结果；
-- full backend unit 结果；
-- OpenAPI/api:check 结果；
-- canonical/policy 扫描结果。
+- 实际 commit SHA：提交后回填；
+- focused unit：`test_story_proposal_chain.py` 6 passed；
+- full backend unit：854 passed；
+- ruff/mypy：`All checks passed!` / `Success: no issues found in 229 source files`；
+- OpenAPI/generated client：story routes 已导出并同步；
+- canonical/directory/policy 扫描通过（提交前回填命令）。

@@ -24,6 +24,7 @@ from app.api.v1 import (
     review,
     scenes,
     scripts,
+    story,
     worker,
     workflow_overview,
     workflow_planning,
@@ -41,6 +42,7 @@ api_router.include_router(production.router)
 api_router.include_router(review.router)
 api_router.include_router(scenes.router)
 api_router.include_router(scripts.router)
+api_router.include_router(story.router)
 api_router.include_router(credentials.router)
 api_router.include_router(provider_connections.router)
 api_router.include_router(provider_references.router)

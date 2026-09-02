@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
-from app.assets.models import Scene, Shot
+from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.assets.version_service import AssetVersionService
 from app.editing.models import EditSession
 from app.editing.proposal_plan import (
@@ -35,6 +35,13 @@ from app.shared.errors import ValidationAppError
 
 COMMAND_WHITELIST = frozenset(
     {
+        "story.set_script_document",
+        "story.upsert_episode",
+        "story.upsert_scene",
+        "story.upsert_shot",
+        "story.delete_shot",
+        "story.delete_scene",
+        "story.delete_episode",
         "shot.update_director_state",
         "shot.update_image_prompt",
         "shot.update_video_prompt",
@@ -62,6 +69,470 @@ _EDIT_SESSION_VERSIONED = frozenset({"edit_session.apply_timeline_plan"})
 
 class ProposalCommandError(ValidationAppError):
     """Raised when a proposal command is unknown, stale or cannot apply."""
+
+
+def _require_uuid_field(payload: dict[str, Any], field: str, command: str) -> UUID:
+    raw = payload.get(field)
+    if raw is None:
+        raise ProposalCommandError(f"{command} payload requires {field}")
+    try:
+        return UUID(str(raw))
+    except (TypeError, ValueError, AttributeError):
+        raise ProposalCommandError(f"{command} payload has an invalid {field}") from None
+
+
+def _story_stale(
+    *,
+    entity: str,
+    expected_version: int | None,
+    actual_version: int,
+) -> ProposalCommandError:
+    return ProposalCommandError(
+        f"{entity} version mismatch: proposal is stale",
+        details={
+            "code": "PROPOSAL_STALE",
+            "entity": entity,
+            "expected_version": expected_version,
+            "actual_version": actual_version,
+        },
+    )
+
+
+async def _episode_number_row(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    payload: dict[str, Any],
+    command: str,
+    expected_version: int | None,
+    required: bool,
+) -> tuple[Episode | None, int]:
+    raw_number = payload.get("episode_number")
+    if not isinstance(raw_number, int):
+        raise ProposalCommandError(f"{command} payload requires integer episode_number")
+    episode = await session.scalar(
+        select(Episode).where(
+            Episode.project_id == project_id,
+            Episode.episode_number == raw_number,
+        )
+    )
+    if episode is None:
+        if required:
+            raise ProposalCommandError(f"{command}: episode {raw_number} not found")
+        return None, raw_number
+    if expected_version is not None and episode.version != expected_version:
+        raise _story_stale(
+            entity=f"episode {raw_number}",
+            expected_version=expected_version,
+            actual_version=episode.version,
+        )
+    return episode, raw_number
+
+
+async def _scene_number_row(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    episode: Episode,
+    payload: dict[str, Any],
+    command: str,
+    expected_version: int | None,
+    required: bool,
+) -> tuple[Scene | None, int]:
+    raw_number = payload.get("scene_number")
+    if not isinstance(raw_number, int):
+        raise ProposalCommandError(f"{command} payload requires integer scene_number")
+    scene = await session.scalar(
+        select(Scene).where(
+            Scene.episode_id == episode.id,
+            Scene.scene_number == raw_number,
+        )
+    )
+    if scene is None:
+        if required:
+            raise ProposalCommandError(
+                f"{command}: scene {raw_number} not found in episode {episode.episode_number}"
+            )
+        return None, raw_number
+    if expected_version is not None and scene.version != expected_version:
+        raise _story_stale(
+            entity=f"scene {raw_number}",
+            expected_version=expected_version,
+            actual_version=scene.version,
+        )
+    return scene, raw_number
+
+
+async def _shot_row(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    scene: Scene,
+    payload: dict[str, Any],
+    command: str,
+    expected_version: int | None,
+    required: bool,
+) -> tuple[Shot | None, int]:
+    raw_number = payload.get("shot_number")
+    if not isinstance(raw_number, int):
+        raise ProposalCommandError(f"{command} payload requires integer shot_number")
+    shot = await session.scalar(
+        select(Shot).where(
+            Shot.project_id == project_id,
+            Shot.scene_id == scene.id,
+            Shot.shot_number == raw_number,
+        )
+    )
+    if shot is None:
+        if required:
+            raise ProposalCommandError(
+                f"{command}: shot {raw_number} not found in scene {scene.scene_number}"
+            )
+        return None, raw_number
+    if expected_version is not None and shot.version != expected_version:
+        raise _story_stale(
+            entity=f"shot {raw_number}",
+            expected_version=expected_version,
+            actual_version=shot.version,
+        )
+    return shot, raw_number
+
+
+async def _apply_story_set_script_document(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    payload: dict[str, Any],
+    actor_id: UUID,
+) -> None:
+    filename = str(payload.get("filename") or "story-draft.md")[:260]
+    content_hash = str(payload.get("content_hash") or "")
+    raw_text = str(payload.get("raw_text") or "")
+    if not content_hash or not raw_text.strip():
+        raise ProposalCommandError(
+            "story.set_script_document requires content_hash and raw_text"
+        )
+    existing = await session.scalar(
+        select(ScriptDocument)
+        .where(
+            ScriptDocument.project_id == project_id,
+            ScriptDocument.content_hash == content_hash,
+        )
+        .order_by(ScriptDocument.created_at, ScriptDocument.id)
+        .limit(1)
+    )
+    if existing is not None:
+        return
+    document = ScriptDocument(
+        project_id=project_id,
+        filename=filename,
+        content_hash=content_hash,
+        raw_text=raw_text,
+        format=str(payload.get("format") or "md")[:16],
+        imported_by=actor_id,
+    )
+    session.add(document)
+    await session.flush()
+
+
+async def _apply_story_upsert_episode(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    payload: dict[str, Any],
+    expected_version: int | None,
+) -> None:
+    episode, episode_number = await _episode_number_row(
+        session,
+        project_id=project_id,
+        payload=payload,
+        command="story.upsert_episode",
+        expected_version=expected_version,
+        required=False,
+    )
+    title = str(payload.get("title") or "")[:160]
+    synopsis = str(payload.get("synopsis") or "")
+    if episode is None:
+        episode = Episode(
+            project_id=project_id,
+            episode_number=episode_number,
+            title=title or None,
+            synopsis=synopsis,
+        )
+        session.add(episode)
+        await session.flush()
+        return
+    episode.title = title or None
+    episode.synopsis = synopsis
+    episode.version = (episode.version or 1) + 1
+    await session.flush()
+
+
+async def _apply_story_upsert_scene(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    payload: dict[str, Any],
+    expected_version: int | None,
+) -> None:
+    episode, _ = await _episode_number_row(
+        session,
+        project_id=project_id,
+        payload=payload,
+        command="story.upsert_scene",
+        expected_version=None,
+        required=True,
+    )
+    assert episode is not None
+    scene, scene_number = await _scene_number_row(
+        session,
+        project_id=project_id,
+        episode=episode,
+        payload=payload,
+        command="story.upsert_scene",
+        expected_version=expected_version,
+        required=False,
+    )
+    location = str(payload.get("location_name") or "")[:160]
+    time_of_day = str(payload.get("time_of_day") or "day")[:40]
+    synopsis = str(payload.get("synopsis") or "")
+    if scene is None:
+        scene = Scene(
+            episode_id=episode.id,
+            scene_number=scene_number,
+            location_name=location,
+            time_of_day=time_of_day,
+            synopsis=synopsis,
+        )
+        session.add(scene)
+        await session.flush()
+        return
+    scene.location_name = location
+    scene.time_of_day = time_of_day
+    scene.synopsis = synopsis
+    scene.version = (scene.version or 1) + 1
+    await session.flush()
+
+
+async def _apply_story_upsert_shot(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    payload: dict[str, Any],
+    expected_version: int | None,
+) -> None:
+    episode, _ = await _episode_number_row(
+        session,
+        project_id=project_id,
+        payload=payload,
+        command="story.upsert_shot",
+        expected_version=None,
+        required=True,
+    )
+    assert episode is not None
+    scene, _ = await _scene_number_row(
+        session,
+        project_id=project_id,
+        episode=episode,
+        payload=payload,
+        command="story.upsert_shot",
+        expected_version=None,
+        required=True,
+    )
+    assert scene is not None
+    shot, shot_number = await _shot_row(
+        session,
+        project_id=project_id,
+        scene=scene,
+        payload=payload,
+        command="story.upsert_shot",
+        expected_version=expected_version,
+        required=False,
+    )
+    from decimal import Decimal
+
+    if shot is None:
+        shot = Shot(
+            project_id=project_id,
+            scene_id=scene.id,
+            shot_number=shot_number,
+            shot_type=str(payload.get("shot_type") or "medium")[:40],
+            camera_move=str(payload.get("camera_move") or "static")[:80],
+            visual_description=str(payload.get("visual_description") or ""),
+            dialogue=str(payload.get("dialogue") or ""),
+            duration_seconds=Decimal(str(payload.get("duration_seconds") or 3)),
+            status="draft",
+            sort_order=int(payload.get("sort_order") or shot_number),
+        )
+        session.add(shot)
+        await session.flush()
+        return
+    shot.shot_type = str(payload.get("shot_type") or shot.shot_type)[:40]
+    shot.camera_move = str(payload.get("camera_move") or shot.camera_move)[:80]
+    shot.visual_description = str(payload.get("visual_description") or shot.visual_description)
+    shot.dialogue = str(
+        payload.get("dialogue")
+        if payload.get("dialogue") is not None
+        else shot.dialogue
+    )
+    shot.duration_seconds = Decimal(str(payload.get("duration_seconds") or shot.duration_seconds))
+    shot.sort_order = int(payload.get("sort_order") or shot.sort_order)
+    shot.version = (shot.version or 1) + 1
+    await session.flush()
+
+
+async def _ensure_shot_has_no_execution(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    shot: Shot,
+    command: str,
+) -> None:
+    if (
+        shot.formal_keyframe_artifact_id is not None
+        or shot.formal_video_artifact_id is not None
+        or shot.formal_composite_artifact_id is not None
+    ):
+        raise ProposalCommandError(
+            f"{command} refuses to delete a Shot with formal media",
+            details={"code": "STORY_DELETE_FORMAL_SHOT"},
+        )
+    from app.execution.models import GraphNode, NodeRun
+    from app.production.models import GraphVersion, ProductionGraph
+
+    execution_id = await session.scalar(
+        select(NodeRun.id)
+        .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+        .join(GraphVersion, GraphVersion.id == NodeRun.graph_version_id)
+        .join(ProductionGraph, ProductionGraph.id == GraphVersion.graph_id)
+        .where(
+            ProductionGraph.project_id == project_id,
+            ProductionGraph.scope_type == "shot",
+            ProductionGraph.scope_entity_id == shot.id,
+        )
+        .limit(1)
+    )
+    if execution_id is not None:
+        raise ProposalCommandError(
+            f"{command} refuses to delete a Shot with NodeRun lineage",
+            details={"code": "STORY_DELETE_EXECUTED_SHOT"},
+        )
+
+
+async def _apply_story_delete_shot(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    payload: dict[str, Any],
+    expected_version: int | None,
+) -> None:
+    episode, _ = await _episode_number_row(
+        session,
+        project_id=project_id,
+        payload=payload,
+        command="story.delete_shot",
+        expected_version=None,
+        required=True,
+    )
+    assert episode is not None
+    scene, _ = await _scene_number_row(
+        session,
+        project_id=project_id,
+        episode=episode,
+        payload=payload,
+        command="story.delete_shot",
+        expected_version=None,
+        required=True,
+    )
+    assert scene is not None
+    shot, _ = await _shot_row(
+        session,
+        project_id=project_id,
+        scene=scene,
+        payload=payload,
+        command="story.delete_shot",
+        expected_version=expected_version,
+        required=True,
+    )
+    assert shot is not None
+    await _ensure_shot_has_no_execution(
+        session,
+        project_id=project_id,
+        shot=shot,
+        command="story.delete_shot",
+    )
+    await session.delete(shot)
+    await session.flush()
+
+
+async def _apply_story_delete_scene(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    payload: dict[str, Any],
+    expected_version: int | None,
+) -> None:
+    episode, _ = await _episode_number_row(
+        session,
+        project_id=project_id,
+        payload=payload,
+        command="story.delete_scene",
+        expected_version=None,
+        required=True,
+    )
+    assert episode is not None
+    scene, _ = await _scene_number_row(
+        session,
+        project_id=project_id,
+        episode=episode,
+        payload=payload,
+        command="story.delete_scene",
+        expected_version=expected_version,
+        required=True,
+    )
+    assert scene is not None
+    shot_count = await session.scalar(
+        select(Shot.id)
+        .where(Shot.project_id == project_id, Shot.scene_id == scene.id)
+        .limit(1)
+    )
+    if shot_count is not None:
+        raise ProposalCommandError(
+            "story.delete_scene requires every Shot to be deleted first",
+            details={"code": "STORY_DELETE_SCENE_NOT_EMPTY"},
+        )
+    await session.delete(scene)
+    await session.flush()
+
+
+async def _apply_story_delete_episode(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    payload: dict[str, Any],
+    expected_version: int | None,
+) -> None:
+    episode, _ = await _episode_number_row(
+        session,
+        project_id=project_id,
+        payload=payload,
+        command="story.delete_episode",
+        expected_version=expected_version,
+        required=True,
+    )
+    assert episode is not None
+    scene_count = await session.scalar(
+        select(Scene.id)
+        .where(Scene.episode_id == episode.id)
+        .limit(1)
+    )
+    if scene_count is not None:
+        raise ProposalCommandError(
+            "story.delete_episode requires every Scene to be deleted first",
+            details={"code": "STORY_DELETE_EPISODE_NOT_EMPTY"},
+        )
+    await session.delete(episode)
+    await session.flush()
 
 
 async def _require_shot(
@@ -340,7 +811,56 @@ class ProposalCommandRegistry:
                 f"unknown proposal command: {command}",
                 details={"code": "UNKNOWN_COMMAND"},
             )
-        if command in _SHOT_VERSIONED:
+        if command == "story.set_script_document":
+            await _apply_story_set_script_document(
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                actor_id=self._actor_id,
+            )
+        elif command == "story.upsert_episode":
+            await _apply_story_upsert_episode(
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                expected_version=expected_target_version,
+            )
+        elif command == "story.upsert_scene":
+            await _apply_story_upsert_scene(
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                expected_version=expected_target_version,
+            )
+        elif command == "story.upsert_shot":
+            await _apply_story_upsert_shot(
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                expected_version=expected_target_version,
+            )
+        elif command == "story.delete_shot":
+            await _apply_story_delete_shot(
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                expected_version=expected_target_version,
+            )
+        elif command == "story.delete_scene":
+            await _apply_story_delete_scene(
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                expected_version=expected_target_version,
+            )
+        elif command == "story.delete_episode":
+            await _apply_story_delete_episode(
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                expected_version=expected_target_version,
+            )
+        elif command in _SHOT_VERSIONED:
             await _apply_shot_update(
                 self._session,
                 project_id=project_id,
