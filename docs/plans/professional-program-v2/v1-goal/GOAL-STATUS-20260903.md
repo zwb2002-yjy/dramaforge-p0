@@ -8,7 +8,7 @@
 
 ## State
 
-- Status: IN_PROGRESS（G0/G1/G2A/G3A/G4A/G4B/G5A/G6A/G6B COMPLETE）
+- Status: IN_PROGRESS（G0/G1/G2A/G3A/G4A/G4B/G5A/G6A/G6B/G7A COMPLETE）
 - Baseline: dev@8ac3546
 - Gate condition: only the execution plan's GOAL_DONE/GOAL_READY_FOR_OWNER_MERGE states count.
 
@@ -23,5 +23,5 @@
 | G4 Proactive Director Recommendation（G4A/G4B COMPLETE；Golden 采用证据并入 G7） | task-contracts/V1-G4A-PROACTIVE-RECOMMENDATION-20260903.md + task-contracts/V1-G4B-RECOMMENDATION-UI-20260903.md | COMPLETE* |
 | G5 Creation UX 与统一 Canvas（G5A 创建入口 COMPLETE；Canvas 分层并入后续） | task-contracts/V1-G5A-CREATION-UX-20260903.md | IN PROGRESS |
 | G6 OpenCut Director 主动剪辑建议（G6A/G6B COMPLETE；Repair 分流并入 G7/G8 证据） | task-contracts/V1-G6A-EDITING-PROACTIVE-20260903.md + task-contracts/V1-G6B-EDITING-PROACTIVE-UI-20260903.md | COMPLETE* |
-| G7 统一主链 E2E 与 Golden Project | pending | READY / NOT STARTED |
+| G7 统一主链 E2E 与 Golden Project（G7A Story→Scene COMPLETE；真实 Provider Golden 待 G8） | task-contracts/V1-G7A-MAINCHAIN-E2E-20260903.md | IN PROGRESS |
 | G8 Current-HEAD Release Gate | pending | READY / NOT STARTED |
