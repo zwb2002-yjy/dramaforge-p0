@@ -85,5 +85,8 @@ jobs:
           exit-code: "1"
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
+        # The Trivy scan remains the blocking security gate. Uploading its
+        # report is best-effort while repository Code Scanning is disabled.
+        continue-on-error: true
         with:
           sarif_file: trivy-results.sarif
