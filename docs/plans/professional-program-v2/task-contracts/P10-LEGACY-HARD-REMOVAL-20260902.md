@@ -30,6 +30,11 @@ At the base SHA:
 - the professional Scene/Shot path does not require Quick, old Budget authorization or old Director workflow.
 - the canonical real-provider proof script uses professional APIs and one Shot; it does not require the ten-shot P0 endpoint.
 
+The C0 consumer/deletion matrix is recorded in
+[`P10-C0-LEGACY-CONSUMER-MATRIX-20260902.md`](P10-C0-LEGACY-CONSUMER-MATRIX-20260902.md).
+It names the current consumers, canonical replacements, and removal stage for
+each retired surface before implementation proceeds.
+
 ## Required outcome
 
 After this task:

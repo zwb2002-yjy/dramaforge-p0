@@ -1,5 +1,4 @@
 /* DramaForge — canonical product workstation shell styles.
-   Split from features/creation-preview/quick-creation-preview.css during Phase 1 §17.3.
    Owns the qc-* classes consumed by the real shells and formal business files. */
 
 .qc-preview-shell {

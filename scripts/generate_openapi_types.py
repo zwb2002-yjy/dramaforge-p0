@@ -27,6 +27,10 @@ MODULE = FRONTEND / "src" / "shared" / "api"
 
 
 def _python() -> str:
+    configured = os.environ.get("DRAMAFORGE_PYTHON")
+    if configured:
+        return configured
+
     # ``uv sync`` creates a project-local environment on every CI runner, but
     # the layout is platform-specific.  Prefer that interpreter so the
     # exporter can import FastAPI when this script is launched from the

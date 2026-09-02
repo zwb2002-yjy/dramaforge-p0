@@ -172,14 +172,4 @@ test("professional workspace persists canvas proposals, assets, review, board, a
   await expect(page.getByText(/OpenCut/)).toBeVisible();
 });
 
-test("retired quick route shows legacy notice without redirect", async ({ page }) => {
-  await installProfessionalMock(page);
-  await page.goto(`/projects/${PROJECT_ID}/quick`);
-  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/quick`);
-  await expect(page.getByTestId("quick-legacy")).toBeVisible();
-  await expect(page.getByText("Quick 模式已退役")).toBeVisible();
-  await expect(page.getByTestId("professional-workbench")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "进入场景工作区" })).toBeVisible();
-});
-
 

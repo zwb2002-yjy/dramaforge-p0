@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { suggestShotDesign } from "./api";
-import type { ShotDirectorSuggestion } from "./types";
+import type { ShotDirectorSuggestion } from "./suggestion-types";
 import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
 import type { ShotLite } from "../shots/api";
 

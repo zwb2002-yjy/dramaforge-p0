@@ -793,7 +793,7 @@ button:not(:disabled):hover {
   border-color: var(--df-verdigris);
 }
 
-/* ----- Studio layout (quick + production) ----- */
+/* ----- Studio layout ----- */
 .studio {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--stage-w);
