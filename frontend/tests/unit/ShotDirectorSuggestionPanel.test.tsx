@@ -43,6 +43,27 @@ function suggestion(baseShotVersion = 5) {
   };
 }
 
+function recommendation() {
+  return {
+    base_shot_version: 5,
+    scope: "shot",
+    category: "PERFORMANCE",
+    current_state: "medium static：A turns",
+    suggested_change: "先停顿再抬眼看",
+    reason: "当前没有可被情绪消化的内部反应节拍。",
+    expected_effect: "表演更可信。",
+    risk: "需要稍长的镜头时长。",
+    affected_facts: ["shot.director_state.performance"],
+    typed_operations: [
+      {
+        op: "update_director_state",
+        field: "performance",
+        value: { beat: "breath_hold", gaze: "down_then_up" },
+      },
+    ],
+  };
+}
+
 function renderPanel(onApplyDraft = vi.fn(), dirty = false): ReturnType<typeof render> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -62,6 +83,42 @@ function renderPanel(onApplyDraft = vi.fn(), dirty = false): ReturnType<typeof r
 afterEach(() => vi.restoreAllMocks());
 
 describe("ShotDirectorSuggestionPanel", () => {
+  it("generates a proactive recommendation without instruction and partially applies selected operations", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.endsWith("/auth/csrf")) return Promise.resolve(json({ csrf_token: "csrf" }));
+      if (url.endsWith("/recommendation")) return Promise.resolve(json(recommendation()));
+      return Promise.resolve(json({}));
+    });
+    const onApplyDraft = vi.fn();
+    renderPanel(onApplyDraft);
+
+    fireEvent.click(screen.getByTestId("request-proactive-director-recommendation"));
+    expect(await screen.findByTestId("director-recommendation-preview")).toBeInTheDocument();
+    expect(screen.getByText(/medium static/)).toBeInTheDocument();
+    const request = calls.find((call) => call.endsWith("/recommendation"));
+    expect(request).toBe("POST /api/v1/projects/project-1/director/shots/shot-1/recommendation");
+
+    fireEvent.click(screen.getByTestId("recommendation-operation-0"));
+    expect(screen.getByTestId("apply-director-recommendation")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("recommendation-operation-0"));
+    fireEvent.click(screen.getByTestId("apply-director-recommendation"));
+    await waitFor(() =>
+      expect(onApplyDraft).toHaveBeenCalledWith({
+        image_prompt: "old image prompt",
+        video_prompt: "old video prompt",
+        director_state: {
+          action: { description: "turns" },
+          performance: { beat: "breath_hold", gaze: "down_then_up" },
+        },
+      }),
+    );
+    expect(calls.some((call) => call.endsWith("/design"))).toBe(false);
+    expect(calls.some((call) => call.endsWith("/execution-plan"))).toBe(false);
+  });
+
   it("requests the selected shot, renders old/new diff, and applies only to draft", async () => {
     const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {

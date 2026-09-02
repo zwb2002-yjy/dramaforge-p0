@@ -1,8 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { suggestShotDesign } from "./api";
-import type { ShotDirectorSuggestion } from "./suggestion-types";
+import { recommendShotDesign, suggestShotDesign } from "./api";
+import type {
+  DirectorRecommendation,
+  ShotDirectorSuggestion,
+} from "./suggestion-types";
 import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
 import type { ShotLite } from "../shots/api";
 
@@ -38,12 +41,16 @@ export function ShotDirectorSuggestionPanel({
   const [proposal, setProposal] = useState<ShotDirectorSuggestion | null>(null);
   const [applied, setApplied] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [recommendation, setRecommendation] = useState<DirectorRecommendation | null>(null);
+  const [selectedOps, setSelectedOps] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     setInstruction("");
     setProposal(null);
     setApplied(false);
     setMessage(null);
+    setRecommendation(null);
+    setSelectedOps({});
   }, [shot.id]);
 
   const request = useMutation({
@@ -71,6 +78,53 @@ export function ShotDirectorSuggestionPanel({
 
   const stale = proposal !== null && proposal.base_shot_version !== shot.version;
   const canApply = proposal !== null && !dirty && !stale && !applied && !request.isPending;
+  const recStale = recommendation !== null && recommendation.base_shot_version !== shot.version;
+
+  const proactive = useMutation({
+    mutationFn: () => {
+      if (dirty) {
+        throw new Error("请先保存或撤销未保存的镜头设计，再请求导演建议。");
+      }
+      return recommendShotDesign(projectId, shot.id, {
+        scene_id: shot.scene_id,
+        shot_id: shot.id,
+        expected_shot_version: shot.version,
+      });
+    },
+    onSuccess: (result) => {
+      setRecommendation(result);
+      setSelectedOps(
+        Object.fromEntries(result.typed_operations.map((_, index) => [index, true])),
+      );
+      setMessage(null);
+    },
+    onError: (error: unknown) => {
+      setRecommendation(null);
+      setMessage(`主动分析失败：${errorMessage(error)}`);
+    },
+  });
+
+  function applySelectedRecommendation() {
+    if (!recommendation || dirty || recStale) return;
+    const directorState = { ...(shot.director_state ?? {}) };
+    recommendation.typed_operations.forEach((operation, index) => {
+      if (!selectedOps[index]) return;
+      if (operation.op === "update_director_state") {
+        const field = typeof operation.field === "string" ? operation.field : "performance";
+        if (typeof operation.value === "object" && operation.value !== null) {
+          directorState[field] = operation.value;
+        }
+      }
+    });
+    onApplyDraft({
+      image_prompt: shot.image_prompt,
+      video_prompt: shot.video_prompt,
+      director_state: directorState,
+    });
+    setRecommendation(null);
+    setSelectedOps({});
+    setMessage("主动推荐已应用到镜头草稿；请点击“保存设计”写入服务器事实。");
+  }
 
   function applyProposal() {
     if (!proposal || !canApply) return;
@@ -98,10 +152,19 @@ export function ShotDirectorSuggestionPanel({
       <header>
         <div>
           <span className="director-stage-kicker">Director suggestion</span>
-          <strong>针对当前镜头提出一句要求</strong>
+          <strong>导演分析与建议</strong>
         </div>
         <span className="qc-shot-production-version">v{shot.version}</span>
       </header>
+
+      <button
+        type="button"
+        data-testid="request-proactive-director-recommendation"
+        onClick={() => proactive.mutate()}
+        disabled={proactive.isPending || dirty}
+      >
+        {proactive.isPending ? "正在主动分析…" : "主动分析当前镜头"}
+      </button>
 
       <label>
         导演要求
@@ -241,6 +304,81 @@ export function ShotDirectorSuggestionPanel({
       <p className="qc-shot-director-suggestion-footer">
         建议只生成预览，不会自动保存、采纳或生产。
       </p>
+
+      {recommendation && (
+        <article
+          className="qc-shot-director-suggestion-proposal"
+          data-testid="director-recommendation-preview"
+          data-base-shot-version={recommendation.base_shot_version}
+        >
+          <header>
+            <strong>
+              {recommendation.category} · 基于 Shot v{recommendation.base_shot_version}
+            </strong>
+            {recStale && <span className="qc-shot-director-suggestion-stale">已过期</span>}
+          </header>
+          <p>{recommendation.current_state}</p>
+          <p>
+            <strong>建议：</strong>
+            {recommendation.suggested_change}
+          </p>
+          <p className="muted">{recommendation.reason}</p>
+          <p className="muted">预期：{recommendation.expected_effect}</p>
+          <p className="muted">风险：{recommendation.risk}</p>
+          <div data-testid="recommendation-affected-facts">
+            {recommendation.affected_facts.map((fact) => (
+              <code key={fact}>{fact}</code>
+            ))}
+          </div>
+          {recommendation.typed_operations.map((operation, index) => (
+            <label key={`${operation.op}-${index}`} className="qc-recommendation-operation-row">
+              <input
+                type="checkbox"
+                data-testid={`recommendation-operation-${index}`}
+                checked={Boolean(selectedOps[index])}
+                onChange={(event) =>
+                  setSelectedOps((current) => ({
+                    ...current,
+                    [index]: event.target.checked,
+                  }))
+                }
+              />
+              <code>{operation.op}</code>
+              {typeof operation.field === "string" ? <span>{operation.field}</span> : null}
+            </label>
+          ))}
+          {recStale && (
+            <p className="qc-shot-director-suggestion-hint" role="alert">
+              当前镜头版本已变化，不能应用这条旧推荐；请重新主动分析。
+            </p>
+          )}
+          <div className="qc-shot-director-suggestion-actions">
+            <button
+              type="button"
+              data-testid="apply-director-recommendation"
+              disabled={
+                dirty ||
+                recStale ||
+                proactive.isPending ||
+                !Object.values(selectedOps).some(Boolean)
+              }
+              onClick={applySelectedRecommendation}
+            >
+              采用已选推荐
+            </button>
+            <button
+              type="button"
+              data-testid="discard-director-recommendation"
+              onClick={() => {
+                setRecommendation(null);
+                setSelectedOps({});
+              }}
+            >
+              拒绝推荐
+            </button>
+          </div>
+        </article>
+      )}
     </section>
   );
 }
