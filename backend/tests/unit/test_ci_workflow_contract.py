@@ -8,6 +8,9 @@ from pathlib import Path
 _WORKFLOW = (
     Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml"
 )
+_SECURITY_WORKFLOW = (
+    Path(__file__).resolve().parents[3] / ".github" / "workflows" / "security.yml"
+)
 
 
 def _job(workflow: str, name: str) -> str:
@@ -97,3 +100,19 @@ def test_postgres_integration_job_checks_schema_before_integration_tests() -> No
         "uv run pytest tests/integration -q -rs --fail-on-skip"
     )
     assert upgrade < schema_check < integration
+
+
+def test_security_workflow_gates_optional_dependency_review_on_repository_capability() -> None:
+    workflow = _SECURITY_WORKFLOW.read_text(encoding="utf-8")
+    dependency_review = _job(workflow, "dependency-review")
+
+    assert (
+        "if: github.event_name == 'pull_request' && "
+        "vars.DEPENDENCY_REVIEW_ENABLED == 'true'"
+    ) in dependency_review
+    assert "fail-on-severity: high" in dependency_review
+    assert "continue-on-error:" not in dependency_review
+
+    filesystem_scan = _job(workflow, "filesystem-scan")
+    assert "security-events: write" in filesystem_scan
+    assert "continue-on-error: true" in filesystem_scan

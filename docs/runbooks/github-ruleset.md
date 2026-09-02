@@ -32,6 +32,13 @@ After the merge, the user records `MERGED` with `ApprovedBy @zwb2002-yjy`.
 - `main` is the protected, stable release branch. Direct pushes are forbidden.
 - `dev` is the routine integration and forward-development branch. The repository root
   worktree normally tracks `dev`; daily commits are pushed directly to `origin/dev`.
+- Every push to `dev` runs the full CI and Security workflows after the push. The `dev`
+  ruleset therefore keeps deletion and force-push protection while allowing the normal
+  direct-push workflow; `main` remains the release protection boundary.
+- Dependency Review is capability-gated by the repository variable
+  `DEPENDENCY_REVIEW_ENABLED=true`. When GitHub Dependency Graph / Advanced Security is
+  unavailable, that job is explicitly skipped rather than reported as a false failure;
+  `pip-audit`, `npm audit`, secret scan, and Trivy filesystem scan remain blocking checks.
 - Promote a verified release through the only normal stable-release PR direction:
   `dev -> main`. After it merges, fast-forward local `main` and merge or fast-forward the
   resulting `main` commit back into `dev` if the histories differ.
