@@ -1,18 +1,27 @@
 # CANONICAL_PRODUCT_PATH
 
 Status: current candidate
-Date: 2026-09-02
-Base: dev e8da0da
+Date: 2026-09-03
+Base: dev 8ac3546
 Alembic head: 20260902_0051
+Owner goal: DramaForge V1 统一创作主链
 
 ## Product chain
 
-Project → ScriptDocument → Episode → Scene → Shot → AssetVersionReference →
-WorkbenchExecutionPlan → ProductionGraph → NodeRun → ProviderOperation →
-Artifact → Review/Repair → EditSession → Delivery.
+Project (Template Start / Free Start)
+→ Story Proposal / Script Draft
+→ ScriptDocument / Episode / Scene / Shot
+→ AssetVersionReference / ProjectCreativeProfile
+→ WorkbenchExecutionPlan
+→ ProductionGraph → NodeRun → ProviderOperation → Artifact
+→ Candidate / Formal → Review / Experiment / Repair
+→ EditSession / Timeline → OpenCut Director Editing → Export → Final Film.
 
 There is one product path. Story proposals are intentionally out of scope for
-this cleanup and will be introduced by a separate Story Task Contract.
+this cleanup and are introduced by the V1 Story proposal Task Contract.
+Template / Free Start and AUTO / ASSIST / MANUAL only affect initialization
+and Director behavior; they never change the Project, Scene/Shot,
+Candidate/Formal, Production Runtime, Artifact lineage, or EditingAdapter.
 
 ## Frontend routes
 

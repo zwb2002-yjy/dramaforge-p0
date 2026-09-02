@@ -49,6 +49,25 @@
 
 ## Owner amendments
 
+### 2026-09-03 — DramaForge V1 统一创作主链（Owner Goal）
+
+The Owner replaced the repository-root agent navigation documents with the
+V1 continuous-execution versions and supplied the final V1 architecture and
+Goal execution plans. The authoritative Owner documents are:
+
+- [`v1-goal/DramaForge_V1_最终创作与导演架构设计方案.md`](v1-goal/DramaForge_V1_最终创作与导演架构设计方案.md)
+- [`v1-goal/DramaForge_V1_统一创作主链_Goal执行方案.md`](v1-goal/DramaForge_V1_统一创作主链_Goal执行方案.md)
+
+This amendment registers the V1 Director-first product convergence: Template
+Start / Free Start and AUTO / ASSIST / MANUAL are orthogonal product
+dimensions that never create a second runtime; the current Goal and task
+sequence are tracked in
+[`v1-goal/GOAL-STATUS-20260903.md`](v1-goal/GOAL-STATUS-20260903.md) and
+bounded contracts in
+[`task-contracts/`](task-contracts/). It supersedes only the retired
+Quick/Professional dual-product reading and does not modify the seven original
+source files or their integrity hashes.
+
 ### 2026-09-02 — Legacy compatibility hard removal
 
 The Owner withdrew the historical-project compatibility and rollback requirement. Retired Quick, controlled Director, Budget/ProductionBatch, fixed-ten-shot and legacy media materialization surfaces must be removed before new Story work. The bounded implementation authority and protected canonical scope are recorded in [P10-LEGACY-HARD-REMOVAL-20260902.md](task-contracts/P10-LEGACY-HARD-REMOVAL-20260902.md).
