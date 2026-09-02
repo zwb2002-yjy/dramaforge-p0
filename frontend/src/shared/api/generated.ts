@@ -581,6 +581,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/creative-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Project Creative Profile */
+        patch: operations["update_project_creative_profile_api_v1_projects__project_id__creative_profile_patch"];
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/director/shots/{shot_id}/suggestion": {
         parameters: {
             query?: never;
@@ -2593,6 +2610,16 @@ export interface components {
             verification_status: string;
             /** Verified At */
             verified_at: string | null;
+        };
+        /** CreativeProfileUpdateBody */
+        CreativeProfileUpdateBody: {
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Director Autonomy
+             * @enum {string}
+             */
+            director_autonomy: "AUTO" | "ASSIST" | "MANUAL";
         };
         /** CreativeStateResponse */
         CreativeStateResponse: {
@@ -6842,6 +6869,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_project_creative_profile_api_v1_projects__project_id__creative_profile_patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreativeProfileUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCreativeProfileRead"];
                 };
             };
             /** @description Validation Error */

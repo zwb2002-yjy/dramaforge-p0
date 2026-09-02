@@ -1,7 +1,7 @@
 # V1 G3A — DirectorAutonomy 后端策略与切换
 
 **Task:** `v1-g3a-director-autonomy-backend-20260903`
-**Status:** READY / NOT STARTED
+**Status:** COMPLETE
 **Goal:** DramaForge V1 统一创作主链 — G3 DirectorAutonomy
 
 ## Outcome
@@ -29,3 +29,10 @@
 3. runtime/model code 不引用 autonomy；
 4. focused + full backend unit 通过；
 5. OpenAPI 同步。
+
+## Evidence
+
+- commit SHA：提交后回填；
+- focused：`test_director_autonomy.py` 4 passed；
+- full backend unit：863 passed；
+- ruff/mypy/OpenAPI 同步通过。

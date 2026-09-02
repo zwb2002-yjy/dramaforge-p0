@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -14,7 +15,7 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1 import workbench as _workbench
 from app.shared.enums import ProjectStage
-from app.shared.errors import NotFoundError
+from app.shared.errors import ConflictError, NotFoundError
 
 router = APIRouter(
     tags=["projects"], dependencies=[Depends(require_selected_workspace)]
@@ -65,6 +66,11 @@ class ProjectRead(BaseModel):
     creative_profile: ProjectCreativeProfileRead
 
 
+class CreativeProfileUpdateBody(BaseModel):
+    expected_version: int = Field(ge=1)
+    director_autonomy: Literal["AUTO", "ASSIST", "MANUAL"]
+
+
 def _profile_read(profile: ProjectCreativeProfile) -> ProjectCreativeProfileRead:
     return ProjectCreativeProfileRead(
         id=profile.id,
@@ -92,7 +98,11 @@ def _project_read(
         id=project.id,
         workspace_id=project.workspace_id,
         name=project.name,
-        stage=project.stage,
+        stage=(
+            project.stage
+            if isinstance(project.stage, ProjectStage)
+            else ProjectStage(project.stage)
+        ),
         aspect_ratio=project.aspect_ratio,
         target_platform=project.target_platform,
         provider_dispatch_frozen=project.provider_dispatch_frozen,
@@ -179,3 +189,39 @@ async def get_project(
     )
     profile = await _profile_for_project(session, project.id)
     return _project_read(project, profile)
+
+
+@router.patch(
+    "/projects/{project_id}/creative-profile",
+    response_model=ProjectCreativeProfileRead,
+)
+async def update_project_creative_profile(
+    project_id: UUID,
+    body: CreativeProfileUpdateBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> ProjectCreativeProfileRead:
+    await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    profile = await session.scalar(
+        select(ProjectCreativeProfile)
+        .where(ProjectCreativeProfile.project_id == project_id)
+        .with_for_update()
+    )
+    if profile is None:
+        raise NotFoundError("project creative profile not found")
+    if profile.version != body.expected_version:
+        raise ConflictError(
+            "creative profile version conflict",
+            details={
+                "expected_version": body.expected_version,
+                "actual_version": profile.version,
+            },
+        )
+    profile.director_autonomy = body.director_autonomy
+    profile.version = (profile.version or 1) + 1
+    profile.updated_at = datetime.now(UTC)
+    await session.commit()
+    return _profile_read(profile)
