@@ -136,6 +136,7 @@ export function EditingWorkspace({
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [repairRouting, setRepairRouting] = useState<EditingRepairRoutingRead | null>(null);
   const [repairError, setRepairError] = useState<string | null>(null);
+  const [selectedSuggestionOps, setSelectedSuggestionOps] = useState<Record<number, boolean>>({});
   const suggestionSequenceRef = useRef(0);
   const suggestionIdentityRef = useRef<EditingSuggestionPreviewContext | null>(null);
 
@@ -176,6 +177,7 @@ export function EditingWorkspace({
     setSuggestionError(null);
     setRepairRouting(null);
     setRepairError(null);
+    setSelectedSuggestionOps({});
     suggestionSequenceRef.current += 1;
   }, [projectId, sessionId]);
 
@@ -212,6 +214,11 @@ export function EditingWorkspace({
       setBaseline(next);
       setFeedback("时间线已保存（服务器响应已成为新的 clean baseline）");
       setExported(null);
+      setSuggestionPreview(null);
+      setSuggestionPreviewContext(null);
+      setSuggestionStale(false);
+      setSuggestionError(null);
+      setSelectedSuggestionOps({});
       queryClient.setQueryData(["edit-session", projectId, sessionId], saved);
     },
     onError: (error: unknown) => {
@@ -273,6 +280,7 @@ export function EditingWorkspace({
       setSuggestionPreviewContext(currentIdentity);
       setSuggestionStale(false);
       setSuggestionError(null);
+      setSelectedSuggestionOps({});
     },
     onError: (error: unknown, variables) => {
       const currentIdentity = suggestionIdentityRef.current;
@@ -291,6 +299,7 @@ export function EditingWorkspace({
       setSuggestionPreviewContext(null);
       setSuggestionStale(false);
       setSuggestionError(`建议请求失败：${errorMessage(error)}`);
+      setSelectedSuggestionOps({});
     },
   });
   const repairRoutingMutation = useMutation<
@@ -384,6 +393,7 @@ export function EditingWorkspace({
       userInstruction,
       sequence,
     });
+    setSelectedSuggestionOps({});
   }
 
   function submitProactiveSuggestion() {
@@ -405,6 +415,7 @@ export function EditingWorkspace({
       proactive: true,
       sequence,
     });
+    setSelectedSuggestionOps({});
   }
 
   function submitRepairRouting() {
@@ -435,6 +446,64 @@ export function EditingWorkspace({
     });
     setFeedback(null);
     setExported(null);
+  }
+
+  function applySuggestionToDraft(operationIndices: number[] | null) {
+    if (!suggestionPreview || !draft) return;
+    const operations = suggestionPreview.suggestion.plan.operations;
+    const indices = operationIndices ?? operations.map((_operation, index) => index);
+    if (indices.length === 0) {
+      setFeedback("请先选择至少一条剪辑操作。");
+      return;
+    }
+
+    let nextClips = draft.clips.map((clip) => ({ ...clip }));
+    for (const index of indices) {
+      const operation = operations[index];
+      if (!operation) continue;
+      if (operation.operation === "reorder_clips") {
+        const byId = new Map(
+          nextClips
+            .filter((clip) => typeof clip.id === "string")
+            .map((clip) => [clip.id as string, clip]),
+        );
+        const reordered = operation.clip_ids
+          .map((clipId) => byId.get(clipId))
+          .filter((clip): clip is EditableClip => clip !== undefined);
+        if (reordered.length !== nextClips.length) {
+          setFeedback("无法应用建议：重排片段不在当前草稿中，请重新请求。");
+          return;
+        }
+        nextClips = reordered.map((clip, order) => ({
+          ...clip,
+          order: order + 1,
+        }));
+      } else if (operation.operation === "set_clip_duration") {
+        nextClips = nextClips.map((clip) =>
+          clip.id === operation.clip_id || clipValue(clip, "shot_id") === operation.clip_id
+            ? { ...clip, duration_seconds: operation.duration_seconds }
+            : clip,
+        );
+      }
+    }
+    setDraft({
+      ...draft,
+      clips: nextClips,
+      metadata: {
+        ...draft.metadata,
+        director_suggestion_applied: suggestionPreview.suggestion.base_session_version,
+      },
+    });
+    setFeedback("建议已应用到时间线草稿；请检查后显式保存。");
+    setExported(null);
+  }
+
+  function rejectSuggestion() {
+    setSuggestionPreview(null);
+    setSuggestionPreviewContext(null);
+    setSuggestionStale(false);
+    setSelectedSuggestionOps({});
+    setFeedback("已拒绝当前剪辑建议预览。");
   }
 
   function updateClipDuration(index: number, value: string) {
@@ -676,6 +745,22 @@ export function EditingWorkspace({
                             data-testid="editing-suggestion-operation"
                             data-operation={operation.operation}
                           >
+                            <label>
+                              <input
+                                type="checkbox"
+                                data-testid={`editing-suggestion-op-select-${index}`}
+                                aria-label={`采用第 ${index + 1} 条剪辑操作`}
+                                checked={selectedSuggestionOps[index] === true}
+                                disabled={suggestionIsStale}
+                                onChange={(event) =>
+                                  setSelectedSuggestionOps((current) => ({
+                                    ...current,
+                                    [index]: event.target.checked,
+                                  }))
+                                }
+                              />
+                              采用
+                            </label>
                             <strong>{operation.operation}</strong>
                             {operation.operation === "reorder_clips" ? (
                               <span>顺序：{operation.clip_ids.join(" → ")}</span>
@@ -689,6 +774,43 @@ export function EditingWorkspace({
                         ))}
                       </ol>
                     )}
+                    <div className="editing-suggestion-apply-actions">
+                      <button
+                        type="button"
+                        data-testid="editing-suggestion-apply-all"
+                        onClick={() => applySuggestionToDraft(null)}
+                        disabled={
+                          suggestionIsStale ||
+                          suggestionPreview.suggestion.plan.operations.length === 0
+                        }
+                      >
+                        全部采用到草稿
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="editing-suggestion-apply-selected"
+                        onClick={() =>
+                          applySuggestionToDraft(
+                            Object.entries(selectedSuggestionOps)
+                              .filter(([, selected]) => selected)
+                              .map(([index]) => Number(index)),
+                          )
+                        }
+                        disabled={
+                          suggestionIsStale || !Object.values(selectedSuggestionOps).some(Boolean)
+                        }
+                      >
+                        采用所选到草稿
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="editing-suggestion-reject"
+                        onClick={rejectSuggestion}
+                        disabled={suggestionIsStale}
+                      >
+                        拒绝建议
+                      </button>
+                    </div>
                   </section>
 
                   <dl className="editing-director-suggestion-explanations">
@@ -724,7 +846,7 @@ export function EditingWorkspace({
                     </p>
                   )}
                   <p className="editing-director-suggestion-footer">
-                    Proposal/item 仍为 pending；没有 Apply、accept、reject 或 timeline save 操作。
+                    采用操作会写入时间线草稿；必须显式保存后才会成为新时间线版本。
                   </p>
                 </article>
               )}

@@ -528,6 +528,116 @@ describe("EditingWorkspace", () => {
     expect(calls.some((call) => call.url.endsWith("/timeline"))).toBe(false);
   });
 
+  it("applies the whole editing suggestion to the local draft and saves it explicitly", async () => {
+    let patchBody: Record<string, unknown> | undefined;
+    const appliedTimeline = {
+      clips: [
+        { ...DEFAULT_SESSION_TIMELINE.clips[1], order: 1 },
+        { ...DEFAULT_SESSION_TIMELINE.clips[0], order: 2, duration_seconds: 2.5 },
+      ],
+      metadata: { auto_built: true, director_suggestion_applied: 1 },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`) && method === "GET") {
+        return json(persistedSession());
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-apply" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}/timeline`) && method === "PATCH") {
+        patchBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return json(persistedSession(appliedTimeline, 2));
+      }
+      return json({});
+    });
+
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "让开场更快进入冲突" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    await screen.findByTestId("editing-suggestion-preview");
+    fireEvent.click(screen.getByTestId("editing-suggestion-apply-all"));
+
+    expect(await screen.findByTestId("edit-session-dirty")).toBeInTheDocument();
+    expect(screen.getByTestId("save-edit-timeline")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("save-edit-timeline"));
+    expect(
+      await screen.findByText(/已保存（服务器响应已成为新的 clean baseline）/),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument();
+
+    const clips = (patchBody?.timeline as { clips: Array<Record<string, unknown>> })?.clips;
+    expect(clips?.map((clip) => clip.id)).toEqual(["clip-2", "clip-1"]);
+    expect(clips?.[1]).toMatchObject({ id: "clip-1", duration_seconds: 2.5 });
+    expect(patchBody).not.toHaveProperty("production_lineage");
+  });
+
+  it("partially applies only selected operations and rejects the rest", async () => {
+    let patchBody: Record<string, unknown> | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`) && method === "GET") {
+        return json(persistedSession());
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-partial" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}/timeline`) && method === "PATCH") {
+        patchBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return json(persistedSession({ clips: DEFAULT_SESSION_TIMELINE.clips, metadata: {} }, 2));
+      }
+      return json({});
+    });
+
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "只调整第一段停顿" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    await screen.findByTestId("editing-suggestion-preview");
+
+    fireEvent.click(screen.getByTestId("editing-suggestion-op-select-1"));
+    fireEvent.click(screen.getByTestId("editing-suggestion-apply-selected"));
+    expect(await screen.findByTestId("edit-session-dirty")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("save-edit-timeline"));
+    await screen.findByText(/已保存（服务器响应已成为新的 clean baseline）/);
+
+    const clips = (patchBody?.timeline as { clips: Array<Record<string, unknown>> })?.clips;
+    expect(clips?.map((clip) => clip.id)).toEqual(["clip-1", "clip-2"]);
+    expect(clips?.[0]).toMatchObject({ id: "clip-1", duration_seconds: 2.5 });
+    expect(clips?.[1]).toMatchObject({ id: "clip-2", duration_seconds: 4 });
+  });
+
+  it("rejects the editing suggestion preview without a timeline mutation", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-reject" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      return json({});
+    });
+
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "调整节奏" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    await screen.findByTestId("editing-suggestion-preview");
+    fireEvent.click(screen.getByTestId("editing-suggestion-reject"));
+
+    expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
+    expect(screen.getByText("已拒绝当前剪辑建议预览。")).toBeInTheDocument();
+    expect(calls.some((url) => url.endsWith("/timeline"))).toBe(false);
+  });
+
   it("requests a proactive editing suggestion without a user instruction", async () => {
     const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
