@@ -8,6 +8,7 @@ import {
   exportEditSession,
   fetchEditSession,
   requestEditingDirectorSuggestion,
+  requestProactiveEditingDirectorSuggestion,
   saveEditTimeline,
   type EditExportRead,
   type EditSessionRead,
@@ -35,6 +36,7 @@ type EditingSuggestionMutationInput = {
   sessionId: string;
   expectedSessionVersion: number;
   userInstruction: string;
+  proactive?: boolean;
   sequence: number;
 };
 type EditingSuggestionPreviewContext = {
@@ -236,11 +238,18 @@ export function EditingWorkspace({
       sessionId: requestSessionId,
       expectedSessionVersion,
       userInstruction,
+      proactive = false,
     }) =>
-      requestEditingDirectorSuggestion(requestProjectId, requestSessionId, {
-        expected_session_version: expectedSessionVersion,
-        user_instruction: userInstruction,
-      }),
+      proactive
+        ? requestProactiveEditingDirectorSuggestion(
+            requestProjectId,
+            requestSessionId,
+            expectedSessionVersion,
+          )
+        : requestEditingDirectorSuggestion(requestProjectId, requestSessionId, {
+            expected_session_version: expectedSessionVersion,
+            user_instruction: userInstruction,
+          }),
     onSuccess: (result, variables) => {
       const currentIdentity = suggestionIdentityRef.current;
       if (
@@ -330,6 +339,27 @@ export function EditingWorkspace({
       sessionId,
       expectedSessionVersion: currentSessionVersion,
       userInstruction,
+      sequence,
+    });
+  }
+
+  function submitProactiveSuggestion() {
+    if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
+      setSuggestionError("无法主动分析：当前 EditSession 版本尚未加载。");
+      return;
+    }
+    const sequence = suggestionSequenceRef.current + 1;
+    suggestionSequenceRef.current = sequence;
+    setSuggestionPreview(null);
+    setSuggestionPreviewContext(null);
+    setSuggestionStale(false);
+    setSuggestionError(null);
+    suggestionRequest.mutate({
+      projectId,
+      sessionId,
+      expectedSessionVersion: currentSessionVersion,
+      userInstruction: "",
+      proactive: true,
       sequence,
     });
   }
@@ -444,6 +474,16 @@ export function EditingWorkspace({
                 建议只形成待审核
                 Proposal，不会应用到时间线；应用后的时间线仍由下方手动编辑和显式保存控制。
               </p>
+              <button
+                type="button"
+                data-testid="request-proactive-editing-suggestion"
+                onClick={submitProactiveSuggestion}
+                disabled={
+                  suggestionRequest.isPending || !isSessionVersion(currentSessionVersion)
+                }
+              >
+                {suggestionRequest.isPending ? "正在分析…" : "主动分析剪辑节奏"}
+              </button>
               <label htmlFor="editing-director-suggestion-instruction">
                 导演要求
                 <textarea

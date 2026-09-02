@@ -81,3 +81,20 @@ export async function requestEditingDirectorSuggestion(
 
 /** Explicit alias for callers that prefer the verb used by the Director API. */
 export const suggestEditingDirector = requestEditingDirectorSuggestion;
+
+export async function requestProactiveEditingDirectorSuggestion(
+  projectId: string,
+  sessionId: string,
+  expected_session_version: number,
+): Promise<EditingDirectorSuggestionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<EditingDirectorSuggestionRead>(
+    "POST",
+    editSessionPath(
+      projectId,
+      `/${encodeURIComponent(sessionId)}/director-proactive-suggestion`,
+    ),
+    { expected_session_version },
+    csrf,
+  );
+}

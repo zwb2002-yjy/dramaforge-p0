@@ -513,6 +513,37 @@ describe("EditingWorkspace", () => {
     expect(calls.some((call) => call.url.endsWith("/timeline"))).toBe(false);
   });
 
+  it("requests a proactive editing suggestion without a user instruction", async () => {
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined;
+      calls.push({ method: init?.method ?? "GET", url, body });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-proactive" });
+      if (url.endsWith("/director-proactive-suggestion")) return json(editingSuggestion());
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.click(screen.getByTestId("request-proactive-editing-suggestion"));
+
+    const preview = await screen.findByTestId("editing-suggestion-preview");
+    expect(preview).toHaveAttribute("data-proposal-id", "proposal-1");
+    const request = calls.find((call) =>
+      call.url.endsWith("/director-proactive-suggestion"),
+    );
+    expect(request?.method).toBe("POST");
+    expect(request?.url).toBe(
+      `/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}/director-proactive-suggestion`,
+    );
+    expect(request?.body).toEqual({ expected_session_version: 1 });
+    expect(request?.body).not.toHaveProperty("user_instruction");
+    expect(calls.some((call) => call.url.endsWith("/director-suggestion"))).toBe(false);
+  });
+
   it("marks a pending preview stale when the loaded session version changes", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
