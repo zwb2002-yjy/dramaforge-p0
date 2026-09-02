@@ -202,3 +202,51 @@ The JSON truthfully records both paid operations as Agnes. This particular `prov
 - **Non-blocking environment note:** the root `codex-with-chatgpt/` remains untouched and excluded from the candidate; the candidate worktree contains only the allowed Golden JSON after evidence generation.
 
 **Overall current V1 Release Gate verdict: `PASS`.** No mandatory current-candidate blocker remains.
+
+---
+
+## Current DramaForge V1 Goal release candidate — 2026-09-03 (`0d3fff8`)
+
+### Candidate and image identity
+
+- **Final candidate source:** `0d3fff878b424edd922e2a7517712092f8be9bbf`
+  (docs+evidence commit on `dev`); Golden runtime commit `d46ad15`.
+- **Migration head:** `20260903_0052`（`project_creative_profiles`）。
+- **Real Provider Golden:** `docs/reviews/GOLDEN-V1-CURRENT-HEAD-20260903.json`
+  (`ok=true`, `paid_provider_calls=6`, 3 Formal Shots, OpenCut 15.000s,
+  EditSession v1 export 15.126s).
+- **Local exact-source images** built by committing the current backend app
+  tree / frontend `dist` onto the already-built pinned runtime base with OCI
+  revision `0d3fff8…`（Docker Desktop PyPI TLS prevented a from-scratch
+  rebuild locally；full Docker quality gate ran on GitHub Actions）。
+  - backend: `dramaforge-backend:release-0d3fff878b424edd922e2a7517712092f8be9bbf`
+    digest `sha256:604b5b66e0f3abd49907948f60a5685080623bf94ff5fe72339de0072df78564`
+  - frontend: `dramaforge-frontend:release-0d3fff878b424edd922e2a7517712092f8be9bbf`
+    digest `sha256:806d0ea368a329813f10cf61ebf7dc4a9fd9b0df39d7ce5f9380778784c739af`
+- Smoke: release backend uvicorn started with current code and app import ok；
+  release frontend `/gateway-health` returned `ok`.
+
+### GitHub Actions evidence (`0d3fff8`, push + pull_request)
+
+| Gate | Result |
+|---|---|
+| CI policy | PASS |
+| CI container-gates | PASS — backend unit **874 passed**; PostgreSQL migration/integration **17 passed**; frontend Vitest **24 files / 106 tests**; Playwright **15 passed**; LiteLLM real-proxy **5 passed** |
+| Security | PASS |
+
+### V1 audit / bounded fixes recorded in this candidate
+
+- **G3B** project-level DirectorAutonomy switch UI.
+- **G6C** Editing→Production Repair routing (proposal-only, no auto-execute).
+- **G6D** Editing suggestion whole/partial/reject apply to timeline draft.
+- **G7C** Workbench media dispatch pure-upstream fix (`UPSTREAM_RUN_MISSING`
+  eliminated) — proven by the real current-HEAD Golden.
+- Task contracts under
+  `docs/plans/professional-program-v2/task-contracts/V1-G3B-…`,
+  `V1-G6C-…`, `V1-G6D-…`, `V1-G7B-…`, `V1-G7C-…`, `V1-G8-…`.
+
+### Current verdict
+
+All mandatory current-candidate checks are green except the Owner-only
+`dev → main` merge (PR #12).  Agent status: `GOAL_READY_FOR_OWNER_MERGE` —
+do **not** merge or approve on behalf of @zwb2002-yjy.

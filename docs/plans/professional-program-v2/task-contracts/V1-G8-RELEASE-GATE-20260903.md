@@ -1,7 +1,7 @@
 # V1 G8 — Current-HEAD Release Gate 与 source/image/evidence 绑定
 
 **Task:** `v1-g8-release-gate-20260903`
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 **Goal:** DramaForge V1 统一创作主链 — G8 Release
 
 ## Required
