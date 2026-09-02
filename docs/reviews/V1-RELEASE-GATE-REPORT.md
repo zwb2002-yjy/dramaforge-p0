@@ -209,20 +209,21 @@ The JSON truthfully records both paid operations as Agnes. This particular `prov
 
 ### Candidate and image identity
 
-- **Final candidate source:** `0d3fff878b424edd922e2a7517712092f8be9bbf`
-  (docs+evidence commit on `dev`); Golden runtime commit `d46ad15`.
+- **Final candidate source:** `b7b7864754a7c9cb9c55a1ea8554a306116b1c0d`
+  (final report commit on `dev`); Golden runtime commit `d46ad15`;
+  prior evidence commit `0d3fff8`.
 - **Migration head:** `20260903_0052`（`project_creative_profiles`）。
 - **Real Provider Golden:** `docs/reviews/GOLDEN-V1-CURRENT-HEAD-20260903.json`
   (`ok=true`, `paid_provider_calls=6`, 3 Formal Shots, OpenCut 15.000s,
   EditSession v1 export 15.126s).
 - **Local exact-source images** built by committing the current backend app
   tree / frontend `dist` onto the already-built pinned runtime base with OCI
-  revision `0d3fff8…`（Docker Desktop PyPI TLS prevented a from-scratch
+  revision `b7b7864…`（Docker Desktop PyPI TLS prevented a from-scratch
   rebuild locally；full Docker quality gate ran on GitHub Actions）。
-  - backend: `dramaforge-backend:release-0d3fff878b424edd922e2a7517712092f8be9bbf`
-    digest `sha256:604b5b66e0f3abd49907948f60a5685080623bf94ff5fe72339de0072df78564`
-  - frontend: `dramaforge-frontend:release-0d3fff878b424edd922e2a7517712092f8be9bbf`
-    digest `sha256:806d0ea368a329813f10cf61ebf7dc4a9fd9b0df39d7ce5f9380778784c739af`
+  - backend: `dramaforge-backend:release-b7b7864754a7c9cb9c55a1ea8554a306116b1c0d`
+    digest `sha256:b86355c5328aa9be96dac0aba3dd566857b01de096660a5f136a513f974dce09`
+  - frontend: `dramaforge-frontend:release-b7b7864754a7c9cb9c55a1ea8554a306116b1c0d`
+    digest `sha256:defa45fdd8aed7702be442239b39853c43e02034818f11363876db904ec367ef`
 - Smoke: release backend uvicorn started with current code and app import ok；
   release frontend `/gateway-health` returned `ok`.
 
