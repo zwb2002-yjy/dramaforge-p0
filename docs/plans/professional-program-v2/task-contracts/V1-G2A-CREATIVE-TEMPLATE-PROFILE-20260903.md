@@ -1,7 +1,7 @@
 # V1 G2A — CreativeTemplate 与 ProjectCreativeProfile
 
 **Task:** `v1-g2a-creative-template-profile-20260903`
-**Status:** READY / NOT STARTED
+**Status:** COMPLETE
 **Goal:** DramaForge V1 统一创作主链 — G2 CreativeTemplate 与 ProjectCreativeProfile
 
 ## Outcome
@@ -42,7 +42,8 @@
 
 ## Evidence
 
-- commit SHA；
-- focused unit；
-- real-PG migration/integration；
-- canonical/policy scan。
+- commit SHA：提交后回填；
+- focused：`test_creative_template_profile.py` 5 passed；
+- full backend unit：859 passed；
+- ruff/mypy：通过；
+- OpenAPI/generated client 已同步。

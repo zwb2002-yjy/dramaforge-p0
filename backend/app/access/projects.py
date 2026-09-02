@@ -8,7 +8,14 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import Project, User, UserProjectPreference, Workspace
+from app.access.models import (
+    Project,
+    ProjectCreativeProfile,
+    User,
+    UserProjectPreference,
+    Workspace,
+)
+from app.director.creative_capabilities.creative_templates import get_creative_template
 from app.shared.db import set_rls_context
 from app.shared.enums import ProjectStage
 from app.shared.errors import ForbiddenError, NotFoundError, ValidationAppError
@@ -51,7 +58,20 @@ class ProjectService:
         budget_limit: Decimal = Decimal("0"),
         budget_currency: str = "USD",
         target_platform: str = "general",
+        start_type: str = "FREE",
+        template_key: str | None = None,
+        template_version: str | None = None,
+        director_autonomy: str = "ASSIST",
     ) -> Project:
+        if start_type not in {"TEMPLATE", "FREE"}:
+            raise ValidationAppError("start_type must be TEMPLATE or FREE")
+        if director_autonomy not in {"AUTO", "ASSIST", "MANUAL"}:
+            raise ValidationAppError("director_autonomy must be AUTO, ASSIST, or MANUAL")
+        if start_type == "TEMPLATE" and not template_key:
+            raise ValidationAppError(
+                "template start requires template_key",
+                details={"code": "TEMPLATE_KEY_REQUIRED"},
+            )
         if aspect_ratio not in {"9:16", "16:9"}:
             raise ValidationAppError("aspect_ratio must be 9:16 or 16:9")
         if budget_limit < 0:
@@ -82,6 +102,49 @@ class ProjectService:
                 project_id=project.id,
             )
         )
+        await self._session.flush()
+        template = None
+        if start_type == "TEMPLATE" and template_key:
+            template = get_creative_template(template_key, template_version)
+        profile = ProjectCreativeProfile(
+            project_id=project.id,
+            start_type=start_type,
+            created_from_template_key=template.key if template else None,
+            template_version=template.version if template else None,
+            template_contract_hash=template.contract_hash if template else None,
+            director_autonomy=director_autonomy,
+            selected_genre=template.recommended_genre if template else None,
+            selected_style_ids=(
+                list(template.recommended_style_ids) if template else []
+            ),
+            selected_skill_ids=(
+                list(template.recommended_skill_ids) if template else []
+            ),
+            selected_shot_language=(
+                template.recommended_shot_language if template else None
+            ),
+            asset_slot_requirements=(
+                {
+                    "required": list(template.required_asset_slots),
+                    "optional": list(template.optional_asset_slots),
+                }
+                if template
+                else {"required": [], "optional": []}
+            ),
+            strategy_snapshot=(
+                dict(template.model_dump(mode="json"))
+                if template
+                else {
+                    "source": "free",
+                    "shot_planning": "user_directed",
+                    "generation": "keyframe_then_video",
+                    "review": "user_review",
+                    "editing": "user_timeline",
+                }
+            ),
+            version=1,
+        )
+        self._session.add(profile)
         await self._session.flush()
         await self._session.refresh(project)
         return project

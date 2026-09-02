@@ -3994,6 +3994,63 @@ export interface components {
              * @default general
              */
             target_platform: string;
+            /**
+             * Start Type
+             * @default FREE
+             * @enum {string}
+             */
+            start_type: "TEMPLATE" | "FREE";
+            /** Template Key */
+            template_key?: string | null;
+            /** Template Version */
+            template_version?: string | null;
+            /**
+             * Director Autonomy
+             * @default ASSIST
+             * @enum {string}
+             */
+            director_autonomy: "AUTO" | "ASSIST" | "MANUAL";
+        };
+        /** ProjectCreativeProfileRead */
+        ProjectCreativeProfileRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Start Type */
+            start_type: string;
+            /** Created From Template Key */
+            created_from_template_key: string | null;
+            /** Template Version */
+            template_version: string | null;
+            /** Template Contract Hash */
+            template_contract_hash: string | null;
+            /** Director Autonomy */
+            director_autonomy: string;
+            /** Selected Genre */
+            selected_genre: string | null;
+            /** Selected Style Ids */
+            selected_style_ids: string[];
+            /** Selected Skill Ids */
+            selected_skill_ids: string[];
+            /** Selected Shot Language */
+            selected_shot_language: string | null;
+            /** Asset Slot Requirements */
+            asset_slot_requirements: {
+                [key: string]: unknown;
+            };
+            /** Strategy Snapshot */
+            strategy_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Version */
+            version: number;
         };
         /** ProjectRead */
         ProjectRead: {
@@ -4018,6 +4075,7 @@ export interface components {
             provider_dispatch_frozen: boolean;
             /** Version */
             version: number;
+            creative_profile: components["schemas"]["ProjectCreativeProfileRead"];
         };
         /** ProjectSnapshot */
         ProjectSnapshot: {

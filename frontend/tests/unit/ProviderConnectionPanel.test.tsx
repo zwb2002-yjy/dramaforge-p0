@@ -142,6 +142,22 @@ describe("Provider connection contract revisions", () => {
               target_platform: "other",
               provider_dispatch_frozen: false,
               version: 1,
+              creative_profile: {
+                id: "profile-1",
+                project_id: "project-1",
+                start_type: "FREE",
+                created_from_template_key: null,
+                template_version: null,
+                template_contract_hash: null,
+                director_autonomy: "ASSIST",
+                selected_genre: null,
+                selected_style_ids: [],
+                selected_skill_ids: [],
+                selected_shot_language: null,
+                asset_slot_requirements: {},
+                strategy_snapshot: {},
+                version: 1,
+              },
             },
           ]}
         />

@@ -156,6 +156,49 @@ class UserProjectPreference(Base):
     )
 
 
+class ProjectCreativeProfile(Base):
+    """One canonical Creative Profile per Project (V1 Template/Free start)."""
+
+    __tablename__ = "project_creative_profiles"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    start_type: Mapped[str] = mapped_column(String(16), nullable=False, default="FREE")
+    created_from_template_key: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )
+    template_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    template_contract_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    director_autonomy: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ASSIST"
+    )
+    selected_genre: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    selected_style_ids: Mapped[list[str]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    selected_skill_ids: Mapped[list[str]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    selected_shot_language: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )
+    asset_slot_requirements: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    strategy_snapshot: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 Index(
     "idx_projects_workspace_stage",
     Project.__table__.c.workspace_id,
