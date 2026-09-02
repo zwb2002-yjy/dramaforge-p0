@@ -2,10 +2,14 @@
 
 ## Status
 
-- **State:** BLOCKED — schema authority follow-up required
+- **State:** COMPLETE — resolved by subsequent schema-authority reconciliation
 - **Program order:** Phase 4 Merge Gate CI contract evidence; no Phase 6+ work
 - **Scope:** Add a strict `alembic check` gate after `alembic upgrade head` in the
   existing PostgreSQL 15 integration job and record the first real drift result.
+
+> The drift list below is a historical finding from the contract-creation run at
+> `39f68ac` against migration `20260827_0049`. It is retained as evidence and is
+> not the current runtime status.
 
 ## Current implementation evidence
 
@@ -15,7 +19,8 @@
 - `backend/tests/unit/test_ci_workflow_contract.py` statically verifies the
   PostgreSQL 15 service, all three commands, their order, and the absence of
   skip/advisory semantics.
-- Local `dramaforge-ci-pg` is PostgreSQL 15, reachable on `127.0.0.1:5432`,
+- At contract creation, local `dramaforge-ci-pg` was PostgreSQL 15, reachable on
+  `127.0.0.1:5432`,
   database `dramaforge`. Before the check, `alembic current` reported
   `20260827_0049 (head)` and the database contained 71 public tables.
 - `python -m alembic upgrade head` exited 0. The database was already at head;
@@ -191,13 +196,22 @@ shot_experiments.comparison
 shot_reference_bindings.metadata
 ```
 
-## Blocker and next bounded task
+## Resolution evidence
 
-The new strict CI gate correctly blocks on pre-existing ORM/schema authority
-drift. The next task must handle **schema authority only**: reconcile the
-canonical ORM metadata with the migration-defined PostgreSQL schema (or record
-intentional exclusions in the comparison contract), while preserving
-`materialization_operations`, existing migrations, execution-identity fixes,
-and all other runtime/product boundaries. It must not guess a destructive
-normalization migration, run `create_all`, use SQLite, globally ignore drift,
-or expand Provider/runtime/UI scope.
+The blocker was resolved after this contract was written:
+
+- `e3e117e` (`fix: reconcile ORM schema authority`) reconciled the canonical ORM
+  metadata and model registry with the migration-defined PostgreSQL schema. It
+  did not delete `materialization_operations`, rewrite migration history, run
+  `create_all`, or apply a guessed normalization migration.
+- The current `dev` runtime is at migration `20260901_0050 (head)`.
+- Against the current PostgreSQL instance, `alembic current` and
+  `alembic check` both exit successfully; `alembic check` reports
+  `No new upgrade operations detected.`
+- Current verification also passes the backend unit, PostgreSQL integration,
+  frontend contract, and end-to-end gates recorded by the current runtime
+  revalidation. No schema-authority blocker remains for this contract.
+
+The historical drift list remains useful for explaining why the strict gate was
+added, but it must not be read as evidence that the current `dev` database is
+still drifting.

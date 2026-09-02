@@ -22,7 +22,7 @@ import httpx
 import os
 
 REPO = Path(__file__).resolve().parents[1]
-BASE = "http://127.0.0.1:8000"
+BASE = "http://127.0.0.1:8080"
 EMAIL = "dramaforge.owner@example.com"
 PASSWORD = os.environ.get("DF_OWNER_PASSWORD", "")  # from env, never committed
 WORKSPACE_ID = "c8cdbc7d-cad4-4f8b-83f4-931cf71dd853"  # 黄金样本工作区

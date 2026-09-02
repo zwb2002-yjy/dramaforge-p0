@@ -36,7 +36,7 @@ D:\dramaforge
 | PostgreSQL 15 | 主数据库 |
 | Redis 7 | 任务队列（Arq） |
 | MinIO | S3 兼容对象存储 |
-| API (FastAPI) | Compose 内网 `:8000`，后端服务 |
+| Web/API gateway | `http://localhost:8080` |
 | Dispatcher / Worker (default + heavy) | Outbox 派发与 Arq 异步任务消费 |
 | 前端网关 (React + Nginx) | 默认唯一入口 `127.0.0.1:8080` |
 
@@ -155,7 +155,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8080
 ```
 
 **Worker**（需 Redis 已启动）：

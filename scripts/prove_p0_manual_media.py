@@ -96,7 +96,7 @@ def _upload_payload(node_key: str, seed: str) -> tuple[str, bytes, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default="http://127.0.0.1:8000")
+    parser.add_argument("--base", default="http://127.0.0.1:8080")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--script-file", type=Path, required=True)
     parser.add_argument("--idea", required=True)

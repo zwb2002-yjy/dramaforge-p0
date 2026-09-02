@@ -154,7 +154,7 @@ def test_gpu_profile_is_optional_and_not_default() -> None:
 
 def test_development_override_exposes_debug_ports_and_disables_production_ui() -> None:
     services = yaml.safe_load(DEV_COMPOSE.read_text(encoding="utf-8"))["services"]
-    assert services["api"]["ports"] == ["8000:8000"]
+    assert services["api"]["ports"] == ["8080:8000"]
     assert services["postgres"]["ports"] == ["5432:5432"]
     assert services["redis"]["ports"] == ["6379:6379"]
     assert services["minio"]["ports"] == ["9000:9000", "9001:9001"]
@@ -195,6 +195,11 @@ def test_frontend_image_is_static_unprivileged_gateway() -> None:
     assert "resolver 127.0.0.11" in nginx
     assert "set $api_upstream http://api:8000" in nginx
     assert "proxy_pass $api_upstream" in nginx
+    assert "location = /openapi.json" in nginx
+    assert "proxy_pass $api_upstream/openapi.json" in nginx
+    assert "location = /docs" in nginx
+    assert "proxy_pass $api_upstream/docs" in nginx
+    assert "location = /docs/oauth2-redirect" in nginx
     assert "try_files $uri $uri/ /index.html" in nginx
 
 

@@ -95,7 +95,7 @@ jobs:
             case "$HEAD_REF" in
               agent/*) ;;
               *)
-                echo "Only short-lived agent/<task-id> branches may target dev by PR; direct pushes are not part of the routine branch flow."
+                echo "Only short-lived agent/<task-id> branches may target dev through a pull request."
                 exit 1
                 ;;
             esac

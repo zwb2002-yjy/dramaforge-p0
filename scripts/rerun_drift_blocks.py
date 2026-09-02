@@ -59,7 +59,7 @@ def _latest_target_runs(
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:8000")
+    ap.add_argument("--base", default="http://127.0.0.1:8080")
     ap.add_argument("--email", required=True)
     ap.add_argument("--password", default="password123")
     ap.add_argument("--project-id", required=True)

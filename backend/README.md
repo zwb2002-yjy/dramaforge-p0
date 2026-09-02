@@ -28,7 +28,7 @@ pip install -e ".[dev]"
 
 ```powershell
 $env:APP_ENV = "development"
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 ```
 
 `GET /health` should return HTTP 200.
