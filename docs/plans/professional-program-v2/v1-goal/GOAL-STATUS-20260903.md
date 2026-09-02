@@ -8,7 +8,7 @@
 
 ## State
 
-- Status: IN_PROGRESS
+- Status: IN_PROGRESS（G0 COMPLETE）
 - Baseline: dev@8ac3546
 - Gate condition: only the execution plan's GOAL_DONE/GOAL_READY_FOR_OWNER_MERGE states count.
 
@@ -16,7 +16,7 @@
 
 | Task | Contract | Status |
 |---|---|---|
-| G0 权威基线与架构登记 | task-contracts/V1-G0-AUTHORITY-BASELINE-20260903.md | STARTED |
+| G0 权威基线与架构登记 | task-contracts/V1-G0-AUTHORITY-BASELINE-20260903.md | COMPLETE |
 | G1 Story Authoring Proposal Chain | P10-STORY-AUTHORING-PROPOSAL-CHAIN-20260902.md | READY / NOT STARTED |
 | G2 CreativeTemplate 与 ProjectCreativeProfile | pending | READY / NOT STARTED |
 | G3 DirectorAutonomy | pending | READY / NOT STARTED |

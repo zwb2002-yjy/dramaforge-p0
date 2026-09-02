@@ -1,7 +1,7 @@
 # V1 G0 — 权威基线与架构登记
 
 **Task:** `v1-g0-authority-baseline-20260903`
-**Status:** STARTED
+**Status:** COMPLETE
 **Goal:** DramaForge V1 统一创作主链
 **Base:** dev@8ac35463097bc0a769f969df1a457a51802ccda1
 
@@ -53,4 +53,9 @@ Owner amendment，并把仓库根目录的 Agent 导航文件替换为同一份 
 
 ## Completion Evidence
 
-- 提交后记录实际 SHA、替换文件哈希、扫描输出与 README 入口。
+- 登记提交：`2a44c12`；
+- 根目录 `agent.md`、`AGENT_EXECUTION_PROTOCOL.md` 与 Owner 文件 SHA 一致；
+- V1 设计/Goal 文档与 Owner 文件 SHA 一致；
+- seven-plan source integrity、canonical surface、directory compliance、
+  active-plan reference 与 repository policy 扫描全部通过；
+- README Owner amendments 与 `v1-goal/GOAL-STATUS-20260903.md` 已登记入口。
