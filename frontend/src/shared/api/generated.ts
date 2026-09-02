@@ -618,6 +618,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/recommendation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recommend Shot Design */
+        post: operations["recommend_shot_design_api_v1_projects__project_id__shots__shot_id__recommendation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/director-board": {
         parameters: {
             query?: never;
@@ -2712,6 +2729,53 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** DirectorRecommendation */
+        DirectorRecommendation: {
+            /** Base Shot Version */
+            base_shot_version: number;
+            /**
+             * Scope
+             * @default shot
+             * @constant
+             */
+            scope: "shot";
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "PERFORMANCE" | "BLOCKING" | "SHOT_SIZE" | "CAMERA_ANGLE" | "CAMERA_MOTION" | "PACING";
+            /** Current State */
+            current_state: string;
+            /** Suggested Change */
+            suggested_change: string;
+            /** Reason */
+            reason: string;
+            /** Expected Effect */
+            expected_effect: string;
+            /** Risk */
+            risk: string;
+            /** Affected Facts */
+            affected_facts?: string[];
+            /** Typed Operations */
+            typed_operations?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** DirectorRecommendationRequest */
+        DirectorRecommendationRequest: {
+            /**
+             * Scene Id
+             * Format: uuid
+             */
+            scene_id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Expected Shot Version */
+            expected_shot_version: number;
         };
         /** DispatchResponse */
         DispatchResponse: {
@@ -6981,6 +7045,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ShotDirectorSuggestion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recommend_shot_design_api_v1_projects__project_id__shots__shot_id__recommendation_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectorRecommendationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorRecommendation"];
                 };
             };
             /** @description Validation Error */
