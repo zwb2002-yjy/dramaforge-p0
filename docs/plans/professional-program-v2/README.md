@@ -46,3 +46,11 @@
 - 旧文档、旧 Release Board、旧 checkpoint 和旧 ADR 可以作为**历史实现/证据材料**阅读；
 - 它们不能决定产品范围、阶段顺序、架构 Gate 或完成声明；
 - 任何仍链接旧 `docs/current/` 的 Runbook 在被逐项迁移前均视为历史操作材料，不具备计划权威。
+
+## Owner amendments
+
+### 2026-09-02 — Legacy compatibility hard removal
+
+The Owner withdrew the historical-project compatibility and rollback requirement. Retired Quick, controlled Director, Budget/ProductionBatch, fixed-ten-shot and legacy media materialization surfaces must be removed before new Story work. The bounded implementation authority and protected canonical scope are recorded in [P10-LEGACY-HARD-REMOVAL-20260902.md](task-contracts/P10-LEGACY-HARD-REMOVAL-20260902.md).
+
+This amendment supersedes only the earlier compatibility-retention instructions for those retired surfaces. The seven supplied source files remain verbatim and their integrity hashes are unchanged.
