@@ -25,9 +25,6 @@ type ShotCandidateTrayProps = {
   selectedCandidate?: ShotCandidate | null;
   /** Local-only selection; the callback must not persist a candidate. */
   onPreviewCandidate?: (candidate: ShotCandidate) => void;
-  /** Backwards-compatible names for embedders that call this selection. */
-  onCandidateSelect?: (candidate: ShotCandidate) => void;
-  onSelectCandidate?: (candidate: ShotCandidate) => void;
   /** Clear the canvas preview and refetch the SceneWorkspace after success. */
   onConfirmed?: (result: FormalKeyframeRead | FormalVideoRead) => void | Promise<void>;
 };
@@ -51,8 +48,6 @@ export function ShotCandidateTray({
   candidates = [],
   selectedCandidate = null,
   onPreviewCandidate,
-  onCandidateSelect,
-  onSelectCandidate,
   onConfirmed,
 }: ShotCandidateTrayProps) {
   const queryClient = useQueryClient();
@@ -124,8 +119,6 @@ export function ShotCandidateTray({
   }
 
   const activeArtifactId = confirm.isPending ? confirm.variables?.artifactId : null;
-  const notifyPreview = onPreviewCandidate ?? onCandidateSelect ?? onSelectCandidate ?? (() => {});
-
   return (
     <section
       className="qc-shot-candidate-tray"
@@ -167,7 +160,7 @@ export function ShotCandidateTray({
                   data-testid={`shot-candidate-select-${candidate.artifactId}`}
                   aria-label={`预览${label}候选 ${candidate.artifactId}`}
                   aria-pressed={selected}
-                  onClick={() => notifyPreview(candidate)}
+                  onClick={() => onPreviewCandidate?.(candidate)}
                 >
                   {candidate.artifactType === "video" ? (
                     <video

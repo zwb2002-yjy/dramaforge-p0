@@ -93,8 +93,12 @@ Regenerate OpenAPI, remove obsolete tests/fixtures/scripts, refresh Legacy/API/C
 
 The continuation branch now satisfies the required outcome on the current
 candidate: the canonical surface scan and directory compliance scan pass;
-backend static checks, 872 unit tests, PostgreSQL migration/integration checks,
-and OpenAPI export pass; frontend format, lint, typecheck, 101 unit tests,
-production build, and 13 Playwright tests pass. The Docker quality images run
-these checks from the repository source context and preserve the generated
-OpenAPI contract for the frontend gate.
+backend Ruff/Mypy checks, 848 unit tests, a clean PostgreSQL upgrade through
+`20260902_0051` with no Alembic drift, 17 PostgreSQL integration tests, and
+OpenAPI export pass; frontend API-contract check, format, lint, typecheck,
+97 unit tests, production build, and 13 Playwright tests pass; the pinned
+LiteLLM integration passes its 5 tests. Python and frontend production
+dependency audits report no known vulnerabilities, and repository policy
+guardrails pass. The Docker quality images run these checks from the repository
+source context and preserve the generated OpenAPI contract for the frontend
+gate.

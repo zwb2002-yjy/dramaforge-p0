@@ -8,7 +8,6 @@ through the registry without a provider-name branch.
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -293,7 +292,7 @@ async def test_plugin_extension_needs_no_service_branch(
             actor=user,
             capability="image_t2i",
             model_binding_id=binding.id,
-            budget_authorized=Decimal("1"),
+            paid_request_confirmed=True,
         )
     assert pricing_error.value.details["code"] == "PROBE_PRICING_CURRENCY_REQUIRED"
     binding.pricing_snapshot_json = {
@@ -308,7 +307,7 @@ async def test_plugin_extension_needs_no_service_branch(
         actor=user,
         capability="image_t2i",
         model_binding_id=binding.id,
-        budget_authorized=Decimal("1"),
+        paid_request_confirmed=True,
     )
     assert evidence.status == "passed"
     assert evidence.provider_request_id == "fake-img-1"
@@ -518,7 +517,7 @@ async def test_binding_scoped_probe_only_advances_probed_binding(
         capability="image_i2i",
         model_binding_id=binding_a.id,
         reference_artifact_id=artifact.id,
-        budget_authorized=Decimal("1"),
+        paid_request_confirmed=True,
     )
     assert evidence.status == "passed"
     assert evidence.model_binding_id == binding_a.id

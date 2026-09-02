@@ -106,14 +106,14 @@ function statusLabel(status: string): string {
   if (["completed", "cached", "completed_after_cancel", "approved"].includes(status))
     return "已完成";
   if (["queued", "running", "leased"].includes(status)) return "运行中";
-  if (["failed", "blocked_budget"].includes(status)) return "需处理";
+  if (status === "failed") return "需处理";
   return "未开始";
 }
 
 function statusTone(status: string): string {
   if (["completed", "cached", "completed_after_cancel", "approved"].includes(status)) return "done";
   if (["queued", "running", "leased"].includes(status)) return "running";
-  if (["failed", "blocked_budget"].includes(status)) return "attention";
+  if (status === "failed") return "attention";
   return "idle";
 }
 

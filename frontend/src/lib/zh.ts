@@ -14,7 +14,6 @@ export const ZH_STATUS: Record<string, string> = {
   completed_after_cancel: "取消后完成",
   failed: "失败",
   cancelled: "已取消",
-  blocked_budget: "预算阻断",
 };
 
 export function zhStatus(status: string | null | undefined): string {
@@ -86,7 +85,6 @@ export const ZH_ERROR_CODE: Record<string, string> = {
   IDENTITY_REVIEW_REQUIRED: "需要人工确认人物一致性",
   VIDEO_DRIFT_BLOCKED: "视频漂移阻断",
   VIDEO_DRIFT_POLICY_UNAPPROVED: "视频漂移策略未批准",
-  blocked_budget: "预算阻断",
   QUEUE_UNAVAILABLE: "队列不可用",
   APPROVE_GATE: "审核门禁未通过",
   EXPORT_GATE: "导出门禁未通过",

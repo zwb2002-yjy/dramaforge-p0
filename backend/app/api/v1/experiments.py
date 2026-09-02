@@ -8,7 +8,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 
 from app.access.models import Project
@@ -16,8 +16,8 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Shot
 from app.execution.branches import experiment_id as run_experiment_id
+from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import Artifact, GraphNode, NodeRun
-from app.execution.shot_review import start_shot_nodes
 from app.production.experiment_service import (
     ExperimentCreateInput,
     ExperimentService,
@@ -42,6 +42,8 @@ _DOWNSTREAM_AFTER_KEYFRAME = [
 
 
 class ExperimentCreateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     idempotency_key: str = Field(min_length=1, max_length=160)
     name: str = Field(min_length=1, max_length=160)
     branch_type: str = Field(default="model_experiment", max_length=32)
@@ -49,6 +51,13 @@ class ExperimentCreateBody(BaseModel):
     source_artifact_ids: list[str] = Field(default_factory=list)
     parameters: dict[str, object] = Field(default_factory=dict)
     selected_model: str | None = None
+
+
+class ExperimentCreateRead(BaseModel):
+    id: UUID
+    name: str
+    experiment_type: str
+    status: str
 
 
 class ExperimentRead(BaseModel):
@@ -437,14 +446,35 @@ async def list_experiments(
     return result
 
 
-@router.post("/projects/{project_id}/experiments", response_model=ExperimentRead, status_code=201)
+@router.post(
+    "/projects/{project_id}/experiments",
+    response_model=ExperimentRead | ExperimentCreateRead,
+    status_code=201,
+)
 async def create_experiment(
     project_id: UUID,
-    body: ExperimentCreateBody,
+    body: ExperimentCreateInput | ExperimentCreateBody,
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
-) -> ExperimentRead:
+) -> ExperimentRead | ExperimentCreateRead:
+    if isinstance(body, ExperimentCreateInput):
+        project = await ProjectService(session).get_project_for_owner(
+            project_id=project_id, actor=user
+        )
+        experiment = await ExperimentService(session).create_experiment(
+            project=project,
+            actor=user,
+            experiment_input=body,
+        )
+        await session.commit()
+        return ExperimentCreateRead(
+            id=experiment.id,
+            name=experiment.name,
+            experiment_type=experiment.experiment_type,
+            status=experiment.status,
+        )
+
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     existing = (
         await session.execute(
@@ -540,7 +570,7 @@ async def start_experiment(
             shot_id=row.source_shot_id,
             node_key=body.target_node_key,
         )
-    run_ids = await start_shot_nodes(
+    run_ids = await queue_branch_nodes(
         session,
         project_id=project_id,
         shot_id=row.source_shot_id,
@@ -653,7 +683,7 @@ async def decide_experiment(
         stale_nodes = list(_DOWNSTREAM_AFTER_KEYFRAME)
     elif body.adoption_scope == "keyframe_rerun_downstream":
         assert row.source_shot_id is not None
-        downstream_run_ids = await start_shot_nodes(
+        downstream_run_ids = await queue_branch_nodes(
             session,
             project_id=project_id,
             shot_id=row.source_shot_id,
@@ -687,39 +717,6 @@ async def decide_experiment(
     if downstream_run_ids:
         await _enqueue(session, downstream_run_ids)
     return _read(row, candidate_artifact_ids=candidate_ids, comparison=row.comparison)
-
-
-class ExperimentCreateRead(BaseModel):
-    id: UUID
-    name: str
-    experiment_type: str
-    status: str
-
-
-@router.post("/projects/{project_id}/experiments", response_model=ExperimentCreateRead)
-async def create_production_experiment(
-    project_id: UUID,
-    body: ExperimentCreateInput,
-    user: CurrentUser,
-    session: SessionDep,
-    _csrf: CsrfDep,
-) -> ExperimentCreateRead:
-    """Create a Phase 5 experiment with per-shot snapshots (03 §47)."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    experiment = await ExperimentService(session).create_experiment(
-        project=project,
-        actor=user,
-        experiment_input=body,
-    )
-    await session.commit()
-    return ExperimentCreateRead(
-        id=experiment.id,
-        name=experiment.name,
-        experiment_type=experiment.experiment_type,
-        status=experiment.status,
-    )
 
 
 class ExperimentAdoptBody(BaseModel):

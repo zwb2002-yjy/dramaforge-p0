@@ -1713,11 +1713,8 @@ export interface paths {
         /** List Experiments */
         get: operations["list_experiments_api_v1_projects__project_id__experiments_get"];
         put?: never;
-        /**
-         * Create Production Experiment
-         * @description Create a Phase 5 experiment with per-shot snapshots (03 §47).
-         */
-        post: operations["create_production_experiment_api_v1_projects__project_id__experiments_post"];
+        /** Create Experiment */
+        post: operations["create_experiment_api_v1_projects__project_id__experiments_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9674,7 +9671,7 @@ export interface operations {
             };
         };
     };
-    create_production_experiment_api_v1_projects__project_id__experiments_post: {
+    create_experiment_api_v1_projects__project_id__experiments_post: {
         parameters: {
             query?: {
                 workspace_id?: string | null;
@@ -9693,17 +9690,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ExperimentCreateInput"];
+                "application/json": components["schemas"]["ExperimentCreateInput"] | components["schemas"]["ExperimentCreateBody"];
             };
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExperimentCreateRead"];
+                    "application/json": components["schemas"]["ExperimentRead"] | components["schemas"]["ExperimentCreateRead"];
                 };
             };
             /** @description Validation Error */

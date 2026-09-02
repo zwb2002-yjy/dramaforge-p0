@@ -72,7 +72,7 @@ function ProjectOverview({ project }: { project: ProjectRead | undefined }) {
       </section>
       <section className="qc-overview-grid">
         <article>
-          <span className="director-stage-kicker">导演助手（兼容事实）</span>
+          <span className="director-stage-kicker">导演助手</span>
           <h2>受控导演建议</h2>
           <p>历史导演流程事实继续保留，但新的创作入口统一在专业工作台。</p>
           <Link to="/projects/$projectId/production" params={{ projectId }}>

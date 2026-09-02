@@ -91,6 +91,18 @@ def test_professional_assets_are_versioned(client: TestClient) -> None:
 def test_experiment_annotation_and_opencut_manifest(client: TestClient) -> None:
     _, project_id = _project(client)
     shot_id = _shot(client, project_id)
+    canonical_experiment = client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={
+            "idempotency_key": "production-model-b-1",
+            "name": "Canonical model B experiment",
+            "shot_ids": [shot_id],
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert canonical_experiment.status_code == 201, canonical_experiment.text
+    assert canonical_experiment.json()["experiment_type"] == "model_swap"
+
     experiment = client.post(
         f"/api/v1/projects/{project_id}/experiments",
         json={

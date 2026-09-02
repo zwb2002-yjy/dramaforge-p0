@@ -164,7 +164,6 @@ async def test_credential_rotation_clears_capability_and_quality_flags(
         status="passed",
         evidence_level="account_verified",
         request_fingerprint="a" * 64,
-        budget_authorized=0,
         currency="USD",
         cost_status="not_reported",
         created_by=user.id,
@@ -297,7 +296,6 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from datetime import date
-    from decimal import Decimal
 
     from app.access.models import Project
     from app.providers.catalog_models import ModelCatalogEntry
@@ -389,7 +387,7 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
             actor=user,
             capability="image_t2i",
             model_binding_id=legacy_binding.id,
-            budget_authorized=Decimal("1"),
+            paid_request_confirmed=True,
         )
 
     assert probe_caught.value.details["code"] == "MODEL_BINDING_CONTRACT_INACTIVE"

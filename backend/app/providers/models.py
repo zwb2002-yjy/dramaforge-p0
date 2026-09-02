@@ -142,9 +142,6 @@ class ProviderCapabilityEvidence(Base):
     )
     capability_manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     credential_revision: Mapped[int | None] = mapped_column(nullable=True)
-    budget_authorized: Mapped[Decimal] = mapped_column(
-        Numeric(20, 6), nullable=False, default=Decimal("0")
-    )
     provider_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     cost_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_reported")

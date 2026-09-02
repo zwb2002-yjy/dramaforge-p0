@@ -72,6 +72,19 @@ def test_migration_head_creates_canonical_schema_and_removes_retired_tables() ->
             {"names": list(REQUIRED_TABLES)},
         ).fetchall()
         present = {r[0] for r in rows}
+        node_run_status = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    """
+                    SELECT e.enumlabel
+                    FROM pg_type t
+                    JOIN pg_enum e ON e.enumtypid = t.oid
+                    WHERE t.typname = 'node_run_status'
+                    """
+                )
+            ).fetchall()
+        }
     engine.dispose()
     missing = set(REQUIRED_TABLES) - present
     assert not missing, f"missing tables after upgrade: {sorted(missing)}"
@@ -89,6 +102,7 @@ def test_migration_head_creates_canonical_schema_and_removes_retired_tables() ->
         "character_references",
     }
     assert not retired & present, f"retired tables still present: {sorted(retired & present)}"
+    assert "blocked_budget" not in node_run_status
 
 
 def test_can_insert_graph_node_and_artifact_shell() -> None:

@@ -50,7 +50,6 @@ _node_run_status = Enum(
     "running",
     "cancel_requested",
     "cached",
-    "blocked_budget",
     "completed",
     "completed_after_cancel",
     "failed",

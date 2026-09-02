@@ -7,7 +7,7 @@ Covers the Phase 5 Gate items that need persistence proof:
   ``app.resumable_provider_node_run_contexts`` and the RLS scope path.
 - API restart no task loss: ``dispatch_outbox`` re-enqueues a pending NodeRun
   from a durable Outbox row.
-- 旧任务不会读取新的 Binding: a NodeRun created by ``start_shot_nodes`` freezes
+- 旧任务不会读取新的 Binding: a NodeRun created by ``queue_branch_nodes`` freezes
   ``model_binding_id`` at dispatch; when the project later re-points at a second
   binding, execution still submits against the frozen binding (explicit_binding),
   never the newer one.
@@ -30,12 +30,12 @@ from app.access.models import User, Workspace
 from app.access.projects import ProjectService
 from app.config import Settings, clear_settings_cache
 from app.events.models import OutboxEvent
+from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import (
     GraphNode,
     NodeRun,
     ProviderOperation,
 )
-from app.execution.shot_review import start_shot_nodes
 from app.production.service import GraphService
 from app.providers import registry as registry_module
 from app.providers.catalog_models import ModelCatalogEntry
@@ -621,7 +621,7 @@ async def test_old_task_never_reads_new_binding_pg(
     _byok(monkeypatch)
     user, project_id, workspace_id = await _project(pg_session)
 
-    # A concrete shot (start_shot_nodes requires a Shot).
+    # A concrete shot (the branch queue requires a Shot).
     episode = Episode(project_id=project_id, episode_number=1, title="E")
     pg_session.add(episode)
     await pg_session.flush()
@@ -661,7 +661,7 @@ async def test_old_task_never_reads_new_binding_pg(
     await pg_session.commit()
 
     # Dispatch while B1 is current. Order follows keys: prompt first, then keyframe.
-    run_ids = await start_shot_nodes(
+    run_ids = await queue_branch_nodes(
         pg_session,
         project_id=project_id,
         shot_id=shot.id,

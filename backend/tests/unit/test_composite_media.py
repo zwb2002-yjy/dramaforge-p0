@@ -70,23 +70,6 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
     reset_object_store_for_tests()
 
 
-class ExplodingAdapter:
-    provider = "kling"
-
-    def __init__(self) -> None:
-        self.called = False
-
-    async def create(self, request: dict[str, object]) -> dict[str, object]:
-        self.called = True
-        raise AssertionError(f"composite must not call Provider: {request}")
-
-    async def poll(self, remote_task_id: str) -> dict[str, object]:
-        raise AssertionError(f"composite must not poll Provider: {remote_task_id}")
-
-    async def fetch_cost(self, remote_task_id: str) -> dict[str, object]:
-        raise AssertionError(f"composite must not fetch Provider cost: {remote_task_id}")
-
-
 async def _make_composite_fixture(
     session: AsyncSession,
     *,
@@ -259,13 +242,11 @@ async def test_composite_runs_locally_with_complete_media_lineage(
     session: AsyncSession,
 ) -> None:
     fixture = await _make_composite_fixture(session, add_older_video=True)
-    adapter = ExplodingAdapter()
 
     result = await execute_media_node_run(
         session,
         node_run_id=fixture.composite_run.id,
         store=fixture.store,
-        flux=adapter,  # type: ignore[arg-type]
     )
 
     expected_inputs = _media_lineage(fixture.sources)
@@ -288,7 +269,6 @@ async def test_composite_runs_locally_with_complete_media_lineage(
         )
     ).scalars().all()
 
-    assert adapter.called is False
     assert operations == []
     assert run is not None
     assert run.status == "completed"
@@ -406,14 +386,12 @@ async def test_composite_missing_required_input_fails_without_provider_operation
         session,
         source_keys=set(_SOURCE_BYTES) - {missing_key},
     )
-    adapter = ExplodingAdapter()
 
     with pytest.raises(ValidationAppError, match="COMPOSITE_INPUT_MISSING"):
         await execute_media_node_run(
             session,
             node_run_id=fixture.composite_run.id,
             store=fixture.store,
-            flux=adapter,  # type: ignore[arg-type]
         )
 
     run = await session.get(NodeRun, fixture.composite_run.id)
@@ -424,7 +402,6 @@ async def test_composite_missing_required_input_fails_without_provider_operation
             )
         )
     ).scalars().all()
-    assert adapter.called is False
     assert operations == []
     assert run is not None
     assert run.status == "failed"
@@ -448,14 +425,12 @@ async def test_composite_unavailable_or_unreadable_input_fails_closed(
         unreadable_key=unreadable_key,
         invalid_hash_key=invalid_hash_key,
     )
-    adapter = ExplodingAdapter()
 
     with pytest.raises(ValidationAppError, match="COMPOSITE_INPUT_MISSING"):
         await execute_media_node_run(
             session,
             node_run_id=fixture.composite_run.id,
             store=fixture.store,
-            flux=adapter,  # type: ignore[arg-type]
         )
 
     run = await session.get(NodeRun, fixture.composite_run.id)
@@ -466,7 +441,6 @@ async def test_composite_unavailable_or_unreadable_input_fails_closed(
             )
         )
     ).scalars().all()
-    assert adapter.called is False
     assert operations == []
     assert run is not None
     assert run.status == "failed"
@@ -481,7 +455,6 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
     app_env: str,
 ) -> None:
     fixture = await _make_composite_fixture(session)
-    adapter = ExplodingAdapter()
     called = False
 
     async def failing_ffmpeg(_: CompositeInputs) -> bytes:
@@ -508,7 +481,6 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
                 session,
                 node_run_id=fixture.composite_run.id,
                 store=fixture.store,
-                flux=adapter,  # type: ignore[arg-type]
             )
     finally:
         clear_settings_cache()
@@ -522,7 +494,6 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
         )
     ).scalars().all()
     assert called is True
-    assert adapter.called is False
     assert operations == []
     assert run is not None
     assert run.status == "failed"

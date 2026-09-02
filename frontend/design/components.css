@@ -977,70 +977,9 @@ code {
   background: var(--df-warning-dim);
 }
 
-/* Legacy director styles */
-.director-status-chip {
-  border-color: var(--df-success-border);
-  color: var(--df-verdigris);
-  background: var(--df-verdigris-tint);
-}
+/* Shared Director Assistant label */
 .director-stage-kicker {
   color: var(--df-verdigris);
-}
-.director-concept-card {
-  background: var(--df-surface-0);
-}
-.director-concept-card.selected,
-.director-choice-grid button.selected,
-.director-goal-list label.selected {
-  border-color: var(--df-verdigris);
-  background: var(--df-verdigris-tint);
-  box-shadow: 0 0 0 1px var(--df-focus-ring);
-}
-.director-preference-card {
-  border-color: var(--df-success-border);
-  background: var(--df-verdigris-tint);
-}
-.director-hard-confirm {
-  border-color: var(--df-success-border);
-}
-.director-hard-confirm > div > span {
-  color: var(--df-verdigris);
-}
-
-.director-shot-list > article {
-  background: var(--df-surface-0);
-}
-.director-character-list article {
-  background: var(--df-surface-0);
-}
-.director-trial-run-list article,
-.director-production-batches article {
-  background: var(--df-surface-0);
-}
-.director-repair-options article {
-  background: var(--df-surface-0);
-}
-.director-repair-options article.selected {
-  border-color: var(--df-verdigris);
-  box-shadow: 0 0 0 1px var(--df-focus-ring);
-}
-.director-shot-decisions button.selected {
-  border-color: var(--df-verdigris);
-  color: var(--df-verdigris);
-  background: var(--df-verdigris-tint);
-}
-.director-quality-grid article {
-  background: var(--df-surface-0);
-}
-.director-quality-grid article.passed {
-  border-left-color: var(--df-success);
-}
-.director-quality-grid article.warning,
-.director-quality-grid article.needs_human {
-  border-left-color: var(--df-warning);
-}
-.director-quality-grid article.blocked {
-  border-left-color: var(--df-danger);
 }
 
 .mode-banner {
@@ -1152,21 +1091,6 @@ code {
 }
 .node-runtime-state.run {
   color: var(--df-warning);
-}
-
-/* Legacy director change preview */
-.director-change-preview {
-  border-color: rgba(184, 134, 11, 0.4);
-  background: var(--df-warning-dim);
-}
-
-/* Legacy director contract gap */
-.director-contract-gap {
-  border-color: rgba(192, 57, 43, 0.4);
-}
-.director-contract-gap code {
-  background: var(--df-surface-0);
-  color: var(--df-text-primary);
 }
 
 /* ============================================================

@@ -38,7 +38,6 @@ from app.consistency.identity_review import identity_review_images
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
-from app.providers.base import ProviderAdapter
 from app.providers.request_summary import normalize_request_summary
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
@@ -635,30 +634,6 @@ async def claim_media_node_run(
     await session.refresh(run)
     return run
 
-
-
-async def execute_keyframe_node_run(
-    session: AsyncSession,
-    *,
-    node_run_id: UUID,
-    store: ObjectStore | None = None,
-    flux: ProviderAdapter | None = None,
-    require_canonical: bool = False,
-    canonical_image_bytes: bytes | None = None,
-) -> ExecuteNodeResult:
-    """Worker: Adapter → ObjectStore → Artifact with optional Canonical binding."""
-    return await execute_media_node_run(
-        session,
-        node_run_id=node_run_id,
-        store=store,
-        flux=flux,
-        require_canonical=require_canonical,
-        canonical_image_bytes=canonical_image_bytes,
-    )
-
-
-
-
 UNIFIED_PATH_VERSION = "unified-v1"
 
 
@@ -948,7 +923,7 @@ async def _execute_unified_media_node_run(
             )
             if image_ratio is None:
                 raise ValidationAppError(
-                    "Director image request has an unsupported aspect ratio",
+                    "unified image request has an unsupported aspect ratio",
                     details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
                 )
             image_intent = ImageGenerationIntent(
@@ -992,7 +967,7 @@ async def _execute_unified_media_node_run(
                 duration_seconds = 0
             if duration_seconds <= 0:
                 raise ValidationAppError(
-                    "Director video request has no valid duration",
+                    "unified video request has no valid duration",
                     details={"code": "DURATION_REQUIRED"},
                 )
             raw_ratio = str(snap.get("aspect_ratio") or project.aspect_ratio or "")
@@ -1001,7 +976,7 @@ async def _execute_unified_media_node_run(
             )
             if video_ratio is None:
                 raise ValidationAppError(
-                    "Director video request has an unsupported aspect ratio",
+                    "unified video request has an unsupported aspect ratio",
                     details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
                 )
             planned_video_references = [
@@ -1072,8 +1047,6 @@ async def _execute_unified_media_node_run(
             if op is not None and isinstance(op.selection_plan, dict)
             else snap.get("selection_plan")
         )
-        allow_trial_without_quality_gate = False
-
         if frozen_identity is not None:
             if not isinstance(raw_frozen_selection, dict):
                 raise ValidationAppError(
@@ -1305,14 +1278,12 @@ async def _execute_unified_media_node_run(
                     plan = await service.select_image(
                         project=project,
                         intent=image_intent,
-                        allow_trial_without_quality_gate=allow_trial_without_quality_gate,
                     )
                 else:
                     assert video_intent is not None
                     plan = await service.select_video(
                         project=project,
                         intent=video_intent,
-                        allow_trial_without_quality_gate=allow_trial_without_quality_gate,
                     )
                 if frozen_binding_id is not None and plan.model_binding_id != frozen_binding_id:
                     raise ValidationAppError(
@@ -2077,7 +2048,6 @@ async def execute_media_node_run(
     *,
     node_run_id: UUID,
     store: ObjectStore | None = None,
-    flux: ProviderAdapter | None = None,
     require_canonical: bool = False,
     canonical_image_bytes: bytes | None = None,
     already_claimed: bool = False,

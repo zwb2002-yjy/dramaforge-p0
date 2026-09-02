@@ -1,5 +1,4 @@
-"""Controlled AI Director workflow domain."""
+"""Director Assistant and provider-neutral creative capability domain.
 
-from app.director.registry import BUILTIN_SKILLS, LIVE_ACTION_DIALOGUE_SHORT_V1
-
-__all__ = ["BUILTIN_SKILLS", "LIVE_ACTION_DIALOGUE_SHORT_V1"]
+Controlled workflow execution is intentionally not owned by this package.
+"""

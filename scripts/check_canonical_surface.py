@@ -32,6 +32,13 @@ FORBIDDEN_TEXT = (
     "experience_" + "mode",
     "PROVIDER_" + "UNIFIED_PATH_ENABLED",
     "TEXT_" + "V3_ROUTER_ENABLED",
+    "start_" + "shot_nodes",
+    "upload_" + "manual_media",
+    "allow_" + "trial_without_quality_gate",
+    "professional_" + "trial_bootstrap_allowed",
+    "trial_" + "quality_gate_exception",
+    "audited_" + "manual_upload",
+    "manual_" + "media",
 )
 FORBIDDEN_FILES = (
     ROOT / "backend" / "app" / "creation",
@@ -39,6 +46,14 @@ FORBIDDEN_FILES = (
     ROOT / "backend" / "app" / "api" / "v1" / "shot_ops.py",
     ROOT / "backend" / "app" / "director" / "legacy_guard.py",
     ROOT / "backend" / "app" / "director" / "execution_guard.py",
+    ROOT / "backend" / "app" / "director" / "registry.py",
+    ROOT / "backend" / "app" / "director" / "enums.py",
+    ROOT / "backend" / "app" / "providers" / "flux.py",
+    ROOT / "backend" / "app" / "providers" / "kling.py",
+    ROOT / "backend" / "app" / "execution" / "shot_review.py",
+    ROOT / "backend" / "app" / "delivery" / "export_service.py",
+    ROOT / "backend" / "app" / "delivery" / "export_local.py",
+    ROOT / "scripts" / "rerun_drift_blocks.py",
     ROOT / "frontend" / "src" / "routes" / "projects.$projectId.quick.tsx",
 )
 IGNORED_PARTS = {".git", ".venv", "node_modules", "__pycache__", "dist", "tmp"}

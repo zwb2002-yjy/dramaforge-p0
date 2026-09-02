@@ -30,9 +30,8 @@ ResolutionSource = Literal[
     "project_profile",
     "workspace_profile",
     "system_default",
-    "fallback",
 ]
-ResolutionStatus = Literal["RESOLVED", "UNAVAILABLE", "FALLBACK"]
+ResolutionStatus = Literal["RESOLVED", "UNAVAILABLE"]
 
 
 class ExecutionModelResolution(BaseModel):

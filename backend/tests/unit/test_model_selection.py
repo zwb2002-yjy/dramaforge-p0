@@ -262,65 +262,6 @@ async def test_unverified_binding_is_fail_closed(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_account_verified_trial_can_bootstrap_quality_gate(
-    session: AsyncSession,
-) -> None:
-    project, binding = await _seed(session, quality_gated=False)
-    session.add(
-        ProjectProviderBinding(
-            project_id=project.id,
-            workspace_id=project.workspace_id,
-            purpose="video",
-            model_binding_id=binding.id,
-            selection_strategy="explicit_binding",
-            fallback_policy="none",
-            updated_by=uuid4(),
-        )
-    )
-    await session.flush()
-
-    plan = await ModelSelectionService(session).select_video(
-        project=project,
-        intent=_intent(),
-        allow_trial_without_quality_gate=True,
-    )
-
-    assert plan.model_binding_id == binding.id
-    assert plan.evidence["quality_gated"] is False
-    assert plan.evidence["trial_quality_gate_exception"] is True
-
-
-@pytest.mark.asyncio
-async def test_trial_exception_still_requires_account_verification(
-    session: AsyncSession,
-) -> None:
-    project, binding = await _seed(
-        session, account_verified=False, quality_gated=False
-    )
-    session.add(
-        ProjectProviderBinding(
-            project_id=project.id,
-            workspace_id=project.workspace_id,
-            purpose="video",
-            model_binding_id=binding.id,
-            selection_strategy="explicit_binding",
-            fallback_policy="none",
-            updated_by=uuid4(),
-        )
-    )
-    await session.flush()
-
-    with pytest.raises(ValidationAppError) as exc_info:
-        await ModelSelectionService(session).select_video(
-            project=project,
-            intent=_intent(),
-            allow_trial_without_quality_gate=True,
-        )
-
-    assert exc_info.value.details["issues"] == ["MODEL_NOT_ACCOUNT_VERIFIED"]
-
-
-@pytest.mark.asyncio
 async def test_unsatisfiable_required_capability_is_fail_closed(
     session: AsyncSession,
 ) -> None:

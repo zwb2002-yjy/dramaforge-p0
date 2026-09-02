@@ -67,6 +67,70 @@ def _drop_retired_tables(tables: Sequence[str]) -> None:
         op.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
 
 
+def _remove_retired_node_run_status() -> None:
+    """Remove the old budget-blocked status from the canonical run enum."""
+    op.execute(
+        "UPDATE node_runs SET status = 'failed', "
+        "error_code = COALESCE(error_code, 'RETIRED_BUDGET_STATE'), "
+        "error_summary = COALESCE(error_summary, 'retired budget state') "
+        "WHERE status::text = 'blocked_budget'"
+    )
+    # PostgreSQL check constraints retain casts to the old enum type.  They
+    # must be removed before the column is converted, otherwise PostgreSQL
+    # tries to evaluate (node_run_status <> node_run_status_retired) while
+    # rewriting the column.  Recreate the canonical lineage checks below.
+    op.execute(
+        """
+        DO $$
+        DECLARE constraint_name text;
+        BEGIN
+          FOR constraint_name IN
+            SELECT c.conname
+            FROM pg_constraint c
+            WHERE c.conrelid = 'node_runs'::regclass
+              AND c.contype = 'c'
+              AND pg_get_constraintdef(c.oid) ILIKE '%status%'
+          LOOP
+            EXECUTE format(
+              'ALTER TABLE node_runs DROP CONSTRAINT %I',
+              constraint_name
+            );
+          END LOOP;
+        END $$;
+        """
+    )
+    op.execute("ALTER TABLE node_runs ALTER COLUMN status DROP DEFAULT")
+    op.execute("ALTER TYPE node_run_status RENAME TO node_run_status_retired")
+    op.execute(
+        "CREATE TYPE node_run_status AS ENUM ("
+        "'queued', 'running', 'cancel_requested', 'cached', 'completed', "
+        "'completed_after_cancel', 'failed', 'cancelled')"
+    )
+    op.execute(
+        "ALTER TABLE node_runs ALTER COLUMN status TYPE node_run_status "
+        "USING status::text::node_run_status"
+    )
+    op.execute("ALTER TABLE node_runs ALTER COLUMN status SET DEFAULT 'queued'")
+    op.execute("DROP TYPE node_run_status_retired")
+    op.execute(
+        """
+        ALTER TABLE node_runs
+        ADD CONSTRAINT ck_node_runs_cached_reused
+          CHECK ((status::text <> 'cached') OR reused_from_run_id IS NOT NULL),
+        ADD CONSTRAINT ck_node_runs_completed_artifact
+          CHECK (
+            (status::text NOT IN ('completed', 'cached', 'completed_after_cancel'))
+            OR result_artifact_id IS NOT NULL
+          ),
+        ADD CONSTRAINT ck_node_runs_cached_zero_cost
+          CHECK (
+            (status::text <> 'cached')
+            OR (provider_cost = 0 AND platform_cost = 0)
+          )
+        """
+    )
+
+
 def upgrade() -> None:
     # ProviderOperation is now NodeRun-owned only. Replace the RLS function and
     # policy first because the old definitions mention agent_runs.agent_run_id.
@@ -74,6 +138,10 @@ def upgrade() -> None:
     op.execute("DROP INDEX IF EXISTS uq_provider_operations_agent_attempt")
     op.execute(
         "ALTER TABLE provider_operations DROP COLUMN IF EXISTS agent_run_id CASCADE"
+    )
+    op.execute(
+        "ALTER TABLE provider_capability_evidence "
+        "DROP COLUMN IF EXISTS budget_authorized CASCADE"
     )
 
     # NodeRun no longer carries controlled Director budget/batch lineage.
@@ -131,6 +199,7 @@ def upgrade() -> None:
     op.execute(
         "ALTER TABLE user_project_preferences DROP COLUMN IF EXISTS experience_mode"
     )
+    _remove_retired_node_run_status()
 
     for enum_name in (
         "materialization_operation_status",

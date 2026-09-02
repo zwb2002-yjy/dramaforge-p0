@@ -91,9 +91,6 @@ def public_run(run: dict[str, Any]) -> dict[str, Any]:
         "input_hash": run.get("input_hash"),
         "duration_seconds": snapshot.get("duration_seconds"),
         "execution_branch": snapshot.get("execution_branch"),
-        "professional_trial_bootstrap_allowed": snapshot.get(
-            "professional_trial_bootstrap_allowed"
-        ),
         "model_binding_id": snapshot.get("model_binding_id"),
         "model_profile": snapshot.get("model_profile"),
         "canonical_artifact_id": snapshot.get("canonical_artifact_id"),

@@ -501,12 +501,12 @@ class ProviderConnectionService:
     def _probe_currency(
         binding: ProviderModelBinding | None,
         *,
-        strict_legacy: bool = False,
+        require_pricing: bool = False,
     ) -> str:
         if binding is None:
             return "USD"
         raw_currency = (binding.pricing_snapshot_json or {}).get("currency")
-        if not isinstance(raw_currency, str) and not strict_legacy:
+        if not isinstance(raw_currency, str) and not require_pricing:
             return "USD"
         if not isinstance(raw_currency, str):
             raise ValidationAppError(
@@ -516,7 +516,7 @@ class ProviderConnectionService:
         currency = raw_currency.strip().upper()
         if len(currency) == 3 and currency.isalpha():
             return currency
-        if not strict_legacy:
+        if not require_pricing:
             return "USD"
         raise ValidationAppError(
             "model capability Probe has an invalid Binding pricing currency",
@@ -535,7 +535,6 @@ class ProviderConnectionService:
         remote_task_id: str | None = None,
         remote_query_kind: str | None = None,
         paid_request_confirmed: bool = False,
-        budget_authorized: Decimal | None = None,
     ) -> ProviderCapabilityEvidence:
         if capability not in _CAPABILITIES:
             raise ValidationAppError("unsupported Provider capability")
@@ -556,23 +555,6 @@ class ProviderConnectionService:
                 "provider connection is disabled",
                 details={"code": "PROVIDER_CONNECTION_DISABLED"},
             )
-        legacy_probe = budget_authorized is not None
-        # ``budget_authorized`` is accepted only as a historical Python-call
-        # compatibility shim. It is never persisted, returned or interpreted as
-        # a DramaForge budget; new callers must use explicit confirmation.
-        if budget_authorized is not None and budget_authorized > 0:
-            paid_request_confirmed = True
-        if legacy_probe and budget_authorized is not None and budget_authorized < 0:
-            raise ValidationAppError("budget_authorized must be >= 0")
-        if (
-            legacy_probe
-            and capability in plugin.paid_capabilities
-            and (budget_authorized or Decimal("0")) <= 0
-        ):
-            raise ValidationAppError(
-                "paid Probe requires an explicit budget authorization",
-                details={"code": "PROBE_BUDGET_REQUIRED"},
-            )
         if capability in plugin.paid_capabilities and not paid_request_confirmed:
             raise ValidationAppError(
                 "paid Probe requires explicit request confirmation",
@@ -583,7 +565,10 @@ class ProviderConnectionService:
             connection=connection,
             model_binding_id=model_binding_id,
         )
-        probe_currency = self._probe_currency(binding, strict_legacy=legacy_probe)
+        probe_currency = self._probe_currency(
+            binding,
+            require_pricing=capability in plugin.paid_capabilities,
+        )
         recent = await self._session.scalar(
             select(ProviderCapabilityEvidence)
             .where(
@@ -811,7 +796,6 @@ class ProviderConnectionService:
             reference_artifact_id=reference_artifact_id,
             remote_query_kind=remote_query_kind,
             request_fingerprint=request_fingerprint,
-            budget_authorized=Decimal("0"),
             provider_cost=None,
             currency=probe_currency,
             cost_status="not_reported",

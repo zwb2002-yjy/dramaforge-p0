@@ -3,8 +3,8 @@
  *
  * The production page is a monitor: cross-scene summary + per-scene status,
  * while the actual work happens in the Scene Workbench (/scenes/$sceneId) and
- * the ProfessionalWorkbench. Legacy Script Import / budget main panel / old
- * big storyboard workspace were removed from this surface.
+ * the ProfessionalWorkbench. Script Import, budget controls and the former
+ * large storyboard workspace were removed from this surface.
  */
 import type { ProjectSnapshot } from "../../lib/api";
 import type { SceneSummary } from "../scenes/api";

@@ -22,8 +22,6 @@ APP_DIR = REPO_ROOT / "backend" / "app"
 _FORBIDDEN_PROVIDER_MODULES = (
     "app.providers.agnes",
     "app.providers.volcengine",
-    "app.providers.flux",
-    "app.providers.kling",
     "app.providers.openai",
     "app.providers.local_tts",
     "app.providers.comfyui",

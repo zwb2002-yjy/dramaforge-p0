@@ -35,8 +35,8 @@ import { projectRoute } from "./projects.$projectId";
 
 /**
  * Phase 10 (plan 03 §89): the production page is a cross-scene Production
- * Monitor. Legacy Script Import / budget main panel / old big storyboard
- * workspace migrated to the Scene Workbench and are no longer here; the
+ * Monitor. Script Import, budget main panel and the former large storyboard
+ * workspace belong to the Scene Workbench and are no longer here; the
  * ProfessionalWorkbench (assets / experiments / review / director board /
  * OpenCut) and the dedicated EditSession export remain in their canonical
  * workspaces.

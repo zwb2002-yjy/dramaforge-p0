@@ -33,7 +33,7 @@ try {
         throw "postgres-quality did not become healthy"
     }
 
-    # Backend publishes the OpenAPI contract into the named quality volume.
+    # Backend publishes the OpenAPI contract into the shared contract directory.
     docker compose -f docker-compose.quality.yml run --rm --no-deps backend-quality
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

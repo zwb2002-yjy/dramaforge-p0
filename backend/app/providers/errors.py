@@ -16,6 +16,17 @@ from typing import Any
 from app.shared.errors import AppError
 
 
+class ProviderNotConfiguredError(AppError):
+    """A configured model capability is required before a Provider call."""
+
+    def __init__(self, message: str = "provider_not_configured") -> None:
+        super().__init__(
+            code="PROVIDER_NOT_CONFIGURED",
+            message=message,
+            status_code=422,
+        )
+
+
 class ProviderErrorCode(StrEnum):
     """Normalized provider error vocabulary (spec §40)."""
 

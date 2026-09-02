@@ -20,7 +20,7 @@ class ShotDesignService:
     The update is an optimistic, user-initiated edit: it validates the shot
     belongs to the project, compares ``Shot.version``, writes the new design
     facts, and bumps ``Shot.version``. It never generates media and never
-    requires a Director Agent approval (Phase 1 boundary).
+    requires an explicit user save before execution (Phase 1 boundary).
     """
 
     def __init__(self, session: AsyncSession) -> None:
