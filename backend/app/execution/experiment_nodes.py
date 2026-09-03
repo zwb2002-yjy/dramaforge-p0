@@ -361,7 +361,7 @@ async def queue_branch_nodes(
             )
         model_profile: dict[str, object] = {}
         execution_freeze: dict[str, object] = {}
-        if key in {"keyframe", "video", "voice"}:
+        if key in {"keyframe", "video"}:
             from app.providers.model_profiles.node_snapshot import (
                 derive_video_capability,
                 planned_node_model_profile,

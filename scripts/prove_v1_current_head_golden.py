@@ -181,6 +181,8 @@ def wait_for_project_node_keys(
     timeout_seconds: int,
     headers: Mapping[str, str],
 ) -> dict[str, Any]:
+    terminal_success = {"completed", "cached", "completed_after_cancel"}
+    terminal_failure = {"failed", "blocked", "cancelled"}
     expected = {(shot_id, node_key) for shot_id in shot_ids for node_key in node_keys}
     deadline = time.monotonic() + timeout_seconds
     last_snapshot: dict[str, Any] = {}
@@ -212,18 +214,17 @@ def wait_for_project_node_keys(
                     str(current.get("id") or ""),
                 ):
                     latest[identity] = run
-        if len(latest) == len(expected):
-            failures = [
-                public_run(run)
-                for run in latest.values()
-                if run.get("status")
-                not in {"completed", "cached", "completed_after_cancel"}
-            ]
+        if len(latest) == len(expected) and all(
+            run.get("status") in {*terminal_success, *terminal_failure}
+            for run in latest.values()
+        ):
+            failures = [public_run(run) for run in latest.values() if run.get("status") in terminal_failure]
             if failures:
                 raise RuntimeError(
                     "tail node failed: " + json.dumps(failures, ensure_ascii=False, default=str)
                 )
-            return snapshot
+            if all(run.get("status") in terminal_success for run in latest.values()):
+                return snapshot
         time.sleep(3)
     raise TimeoutError(
         f"timed out waiting for {sorted(expected)}; last runs="

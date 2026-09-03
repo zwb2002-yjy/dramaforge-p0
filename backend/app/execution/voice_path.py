@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import GraphNode, NodeRun, ProviderOperation
 from app.providers.voice_runtime import get_voice_adapter
+from app.shared.db import set_node_run_rls_context
 from app.shared.errors import ValidationAppError
 from app.storage.minio_store import ObjectStore
 
@@ -68,6 +69,11 @@ async def execute_voice_node_run(
         session.add(operation)
     await session.flush()
     await session.commit()
+    # The worker establishes the node-run scope with SET LOCAL.  That scope is
+    # cleared by the operation commit, so restore it before inserting the WAV
+    # Artifact and updating the operation/run lineage.
+    if await set_node_run_rls_context(session, node_run_id=run.id) is None:
+        raise ValidationAppError("voice node ownership context unavailable")
 
     created = await adapter.create({"prompt": prompt, "kind": "voice"})
     remote = str(created.get("remote_task_id") or "")
