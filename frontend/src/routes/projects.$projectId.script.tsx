@@ -1,6 +1,6 @@
 import { createRoute } from "@tanstack/react-router";
 
-import { ScriptWorkspace } from "../features/script/ScriptWorkspace";
+import { LazyScriptWorkspace } from "./pages";
 import { projectRoute } from "./projects.$projectId";
 
 export const projectScriptRoute = createRoute({
@@ -11,5 +11,5 @@ export const projectScriptRoute = createRoute({
 
 function ScriptPage() {
   const { projectId } = projectScriptRoute.useParams();
-  return <ScriptWorkspace projectId={projectId} />;
+  return <LazyScriptWorkspace projectId={projectId} />;
 }

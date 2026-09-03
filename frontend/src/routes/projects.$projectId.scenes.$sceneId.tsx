@@ -1,6 +1,6 @@
 import { createRoute } from "@tanstack/react-router";
 
-import { SceneWorkspace } from "../features/scenes/SceneWorkspace";
+import { LazySceneWorkspace } from "./pages";
 import { projectRoute } from "./projects.$projectId";
 
 export const projectSceneWorkspaceRoute = createRoute({
@@ -11,5 +11,5 @@ export const projectSceneWorkspaceRoute = createRoute({
 
 function SceneWorkspacePage() {
   const { projectId, sceneId } = projectSceneWorkspaceRoute.useParams();
-  return <SceneWorkspace projectId={projectId} sceneId={sceneId} />;
+  return <LazySceneWorkspace projectId={projectId} sceneId={sceneId} />;
 }

@@ -1,6 +1,6 @@
 import { createRoute } from "@tanstack/react-router";
 
-import { EditingWorkspace } from "../features/editing/EditingWorkspace";
+import { LazyEditingWorkspace } from "./pages";
 import { projectRoute } from "./projects.$projectId";
 
 export const projectEditRoute = createRoute({
@@ -17,7 +17,7 @@ function EditPage() {
   const { sessionId } = projectEditRoute.useSearch();
   const navigate = projectEditRoute.useNavigate();
   return (
-    <EditingWorkspace
+    <LazyEditingWorkspace
       projectId={projectId}
       sessionId={sessionId}
       onSessionCreated={(createdSessionId) => navigate({ search: { sessionId: createdSessionId } })}
