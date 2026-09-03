@@ -13,6 +13,8 @@ export type EditingDirectorSuggestionCandidate =
 export type EditingDirectorSuggestionRead = components["schemas"]["EditingDirectorSuggestionRead"];
 export type EditingRepairRoutingRead = components["schemas"]["EditingRepairRoutingRead"];
 export type EditingRepairRoutingRequest = components["schemas"]["EditingRepairRoutingRequest"];
+export type FinalFilmPrepareRead = components["schemas"]["FinalFilmPrepareRead"];
+export type FinalFilmRead = components["schemas"]["FinalFilmRead"];
 
 const editSessionPath = (projectId: string, suffix = "") =>
   `/api/v1/projects/${projectId}/edit-sessions${suffix}`;
@@ -118,5 +120,43 @@ export async function routeEditingDirectorRepair(
       user_instruction: input.user_instruction,
     },
     csrf,
+  );
+}
+
+/** Prepare the Formal shot tail required by an EditSession Timeline version. */
+export async function prepareFinalFilm(
+  projectId: string,
+  sessionId: string,
+  expectedTimelineVersion: number,
+): Promise<FinalFilmPrepareRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<FinalFilmPrepareRead>(
+    "POST",
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/prepare`,
+    {
+      edit_session_id: sessionId,
+      expected_timeline_version: expectedTimelineVersion,
+    },
+    csrf,
+  );
+}
+
+export async function renderFinalFilm(
+  projectId: string,
+  sessionId: string,
+  expectedTimelineVersion: number,
+  idempotencyKey: string,
+): Promise<FinalFilmRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<FinalFilmRead>(
+    "POST",
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/render`,
+    {
+      edit_session_id: sessionId,
+      expected_timeline_version: expectedTimelineVersion,
+      name: "V1 Final Film",
+    },
+    csrf,
+    { "Idempotency-Key": idempotencyKey },
   );
 }

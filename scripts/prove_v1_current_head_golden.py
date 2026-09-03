@@ -148,10 +148,12 @@ def wait_for_project_node_keys(
     client: httpx.Client,
     *,
     project_id: str,
+    shot_ids: list[str],
     node_keys: set[str],
     timeout_seconds: int,
     headers: Mapping[str, str],
 ) -> dict[str, Any]:
+    expected = {(shot_id, node_key) for shot_id in shot_ids for node_key in node_keys}
     deadline = time.monotonic() + timeout_seconds
     last_snapshot: dict[str, Any] = {}
     while time.monotonic() < deadline:
@@ -160,20 +162,38 @@ def wait_for_project_node_keys(
             "snapshot",
         )
         last_snapshot = snapshot
-        latest: dict[str, dict[str, Any]] = {}
+        latest: dict[tuple[str, str], dict[str, Any]] = {}
         for run in snapshot.get("node_runs", []):
+            shot_id = str((run.get("input_snapshot") or {}).get("shot_id") or "")
             key = str((run.get("input_snapshot") or {}).get("node_key") or "")
-            if key in node_keys:
-                latest.setdefault(key, run)
-        if set(latest) >= node_keys and all(
-            run.get("status")
-            in {"completed", "cached", "completed_after_cancel", "failed", "blocked"}
-            for run in latest.values()
-        ):
+            identity = (shot_id, key)
+            if identity in expected:
+                current = latest.get(identity)
+                if current is None or (
+                    int(run.get("attempt_no") or 0),
+                    run.get("created_at") or "",
+                    str(run.get("id") or ""),
+                ) > (
+                    int(current.get("attempt_no") or 0),
+                    current.get("created_at") or "",
+                    str(current.get("id") or ""),
+                ):
+                    latest[identity] = run
+        if len(latest) == len(expected):
+            failures = [
+                public_run(run)
+                for run in latest.values()
+                if run.get("status")
+                not in {"completed", "cached", "completed_after_cancel"}
+            ]
+            if failures:
+                raise RuntimeError(
+                    "tail node failed: " + json.dumps(failures, ensure_ascii=False, default=str)
+                )
             return snapshot
         time.sleep(3)
     raise TimeoutError(
-        f"timed out waiting for {sorted(node_keys)}; last runs="
+        f"timed out waiting for {sorted(expected)}; last runs="
         f"{[public_run(run) for run in last_snapshot.get('node_runs', [])]}"
     )
 
@@ -823,7 +843,10 @@ def main() -> int:
             client.post(
                 f"/projects/{main_project_id}/final-film/prepare",
                 headers=headers,
-                json={"mode": "prepare", "shot_ids": shot_ids},
+                json={
+                    "edit_session_id": edit_session["id"],
+                    "expected_timeline_version": edit_session["version"],
+                },
             ),
             "prepare final film tail",
         )
@@ -835,6 +858,7 @@ def main() -> int:
         tail_snapshot = wait_for_project_node_keys(
             client,
             project_id=main_project_id,
+            shot_ids=shot_ids,
             node_keys={
                 "video_drift_review",
                 "voice",
@@ -845,29 +869,92 @@ def main() -> int:
             timeout_seconds=args.timeout,
             headers=headers,
         )
-        report["final_film_tail"] = {
-            "runs": [
-                public_run(run)
-                for run in tail_snapshot.get("node_runs", [])
-                if (run.get("input_snapshot") or {}).get("node_key")
-                in {
+        tail_latest: dict[tuple[str, str], dict[str, Any]] = {}
+        for run in tail_snapshot.get("node_runs", []):
+            run_shot = str((run.get("input_snapshot") or {}).get("shot_id") or "")
+            run_key = str((run.get("input_snapshot") or {}).get("node_key") or "")
+            if (
+                run_shot not in shot_ids
+                or run_key
+                not in {
                     "video_drift_review",
                     "voice",
                     "subtitle",
                     "composite",
                     "continuity_review",
                 }
-            ]
+                or run.get("status")
+                not in {"completed", "cached", "completed_after_cancel"}
+            ):
+                continue
+            identity = (run_shot, run_key)
+            current = tail_latest.get(identity)
+            if current is None or (
+                int(run.get("attempt_no") or 0),
+                run.get("created_at") or "",
+                str(run.get("id") or ""),
+            ) > (
+                int(current.get("attempt_no") or 0),
+                current.get("created_at") or "",
+                str(current.get("id") or ""),
+            ):
+                tail_latest[identity] = run
+        report["final_film_tail"] = {
+            "runs": [public_run(run) for run in tail_latest.values()],
+            "latest_identity_count": len(tail_latest),
         }
+        idempotency_key = f"frozen-final-film-{main_project_id}-{edit_session['version']}"
         final_film_artifact = require_ok(
             client.post(
                 f"/projects/{main_project_id}/final-film/render",
-                headers=headers,
-                json={"name": "V1 Current-Head Final Film"},
+                headers={**headers, "Idempotency-Key": idempotency_key},
+                json={
+                    "edit_session_id": edit_session["id"],
+                    "expected_timeline_version": edit_session["version"],
+                    "name": "V1 Current-Head Final Film",
+                },
             ),
             "render final film artifact",
         )
         report["final_film_artifact"] = final_film_artifact
+        dedup_render = require_ok(
+            client.post(
+                f"/projects/{main_project_id}/final-film/render",
+                headers={**headers, "Idempotency-Key": idempotency_key},
+                json={
+                    "edit_session_id": edit_session["id"],
+                    "expected_timeline_version": edit_session["version"],
+                    "name": "V1 Current-Head Final Film",
+                },
+            ),
+            "render final film artifact idempotency",
+        )
+        report["final_film_idempotency"] = {
+            "same_export_id": dedup_render.get("export_id")
+            == final_film_artifact.get("export_id"),
+            "same_artifact_id": dedup_render.get("artifact_id")
+            == final_film_artifact.get("artifact_id"),
+            "export_id": dedup_render.get("export_id"),
+            "artifact_id": dedup_render.get("artifact_id"),
+        }
+        report["media_identity_freeze"] = [
+            {
+                "shot_id": (run.get("input_snapshot") or {}).get("shot_id"),
+                "node_key": (run.get("input_snapshot") or {}).get("node_key"),
+                "source_commit": (run.get("input_snapshot") or {}).get("source_commit"),
+                "model_binding_id": (run.get("input_snapshot") or {}).get("model_binding_id"),
+                "connection_revision_id": (run.get("input_snapshot") or {}).get(
+                    "connection_revision_id"
+                ),
+                "credential_revision_id": (run.get("input_snapshot") or {}).get(
+                    "credential_revision_id"
+                ),
+                "input_hash": run.get("input_hash"),
+                "status": run.get("status"),
+            }
+            for run in tail_snapshot.get("node_runs", [])
+            if (run.get("input_snapshot") or {}).get("node_key") in {"keyframe", "video"}
+        ]
 
     report["finished_at_utc"] = datetime.now(UTC).isoformat()
     report["ok"] = True

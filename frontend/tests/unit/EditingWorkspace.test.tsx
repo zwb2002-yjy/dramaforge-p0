@@ -201,6 +201,30 @@ function repairRouting(canFix = false) {
   };
 }
 
+function finalFilmRead() {
+  return {
+    project_id: PROJECT_ID,
+    edit_session_id: SESSION_ID,
+    timeline_version: 1,
+    export_id: "export-final-1",
+    artifact_id: "artifact-final-1",
+    node_run_id: "node-run-final-1",
+    provider_operation_id: "op-final-1",
+    format: "dramaforge-final-film-v1",
+    status: "completed",
+    duration_seconds: "15.233",
+    shot_count: 3,
+    timeline_clip_count: 3,
+    composite_artifact_ids: ["composite-1", "composite-2", "composite-3"],
+    source_commit: "720bde4",
+    mime_type: "video/mp4",
+    byte_size: 1024,
+    storage_state: "available",
+    content_hash: "c".repeat(64),
+    idempotency_key: "final-project-1-edit-session-1-1",
+  };
+}
+
 function renderPersistedSession(onSessionCreated?: (sessionId: string) => void) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -636,6 +660,44 @@ describe("EditingWorkspace", () => {
     expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
     expect(screen.getByText("已拒绝当前剪辑建议预览。")).toBeInTheDocument();
     expect(calls.some((url) => url.endsWith("/timeline"))).toBe(false);
+  });
+
+  it("exports Final Film from the persisted EditSession timeline with idempotency", async () => {
+    const calls: Array<{ method: string; url: string; headers?: Record<string, string> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      calls.push({ method: init?.method ?? "GET", url, headers });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`) && (init?.method ?? "GET") === "GET") {
+        return json(persistedSession());
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-final" });
+      if (url.endsWith("/final-film/prepare")) {
+        return json({
+          project_id: PROJECT_ID,
+          edit_session_id: SESSION_ID,
+          timeline_version: 1,
+          shot_ids: ["shot-1", "shot-2"],
+          node_run_ids: [],
+          status: "queued",
+        });
+      }
+      if (url.endsWith("/final-film/render")) return json(finalFilmRead());
+      return json({});
+    });
+
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.click(screen.getByTestId("export-final-film"));
+
+    const result = await screen.findByTestId("final-film-result");
+    expect(result).toHaveTextContent("artifact-final-1");
+    expect(result).toHaveTextContent("15.233");
+    const renderCall = calls.find((call) => call.url.endsWith("/final-film/render"));
+    expect(renderCall?.method).toBe("POST");
+    expect(renderCall?.headers?.["Idempotency-Key"]).toBe(
+      `final-${PROJECT_ID}-${SESSION_ID}-1`,
+    );
   });
 
   it("requests a proactive editing suggestion without a user instruction", async () => {

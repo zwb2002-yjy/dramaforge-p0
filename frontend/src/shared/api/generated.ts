@@ -3370,8 +3370,13 @@ export interface components {
         };
         /** FinalFilmPrepareBody */
         FinalFilmPrepareBody: {
-            /** Shot Ids */
-            shot_ids?: string[] | null;
+            /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Expected Timeline Version */
+            expected_timeline_version?: number | null;
             /**
              * Mode
              * @default prepare
@@ -3386,6 +3391,13 @@ export interface components {
              * Format: uuid
              */
             project_id: string;
+            /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Timeline Version */
+            timeline_version: number;
             /** Shot Ids */
             shot_ids: string[];
             /** Node Run Ids */
@@ -3404,6 +3416,13 @@ export interface components {
              */
             project_id: string;
             /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Timeline Version */
+            timeline_version: number;
+            /**
              * Export Id
              * Format: uuid
              */
@@ -3413,6 +3432,16 @@ export interface components {
              * Format: uuid
              */
             artifact_id: string;
+            /**
+             * Node Run Id
+             * Format: uuid
+             */
+            node_run_id: string;
+            /**
+             * Provider Operation Id
+             * Format: uuid
+             */
+            provider_operation_id: string;
             /** Format */
             format: string;
             /** Status */
@@ -3421,13 +3450,36 @@ export interface components {
             duration_seconds: string;
             /** Shot Count */
             shot_count: number;
+            /** Timeline Clip Count */
+            timeline_clip_count: number;
             /** Composite Artifact Ids */
             composite_artifact_ids: string[];
             /** Source Commit */
             source_commit: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Byte Size */
+            byte_size: number;
+            /** Storage State */
+            storage_state: string;
+            /** Content Hash */
+            content_hash: string;
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+            /** Ffprobe */
+            ffprobe?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** FinalFilmRenderBody */
         FinalFilmRenderBody: {
+            /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Expected Timeline Version */
+            expected_timeline_version?: number | null;
             /**
              * Name
              * @default V1 Final Film
@@ -10711,6 +10763,7 @@ export interface operations {
                 workspace_id?: string | null;
             };
             header?: {
+                "Idempotency-Key"?: string | null;
                 "X-Workspace-Id"?: string | null;
                 "X-CSRF-Token"?: string | null;
             };

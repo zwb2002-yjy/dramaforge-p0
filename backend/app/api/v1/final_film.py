@@ -1,11 +1,11 @@
-"""Final Film HTTP routes for Formal Shot tails and playable Artifact export."""
+"""Final Film HTTP routes bound to an OpenCut EditSession Timeline version."""
 
 from __future__ import annotations
 
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.access.projects import ProjectService
@@ -23,13 +23,16 @@ router = APIRouter(tags=["final-film"], dependencies=[Depends(require_selected_w
 class FinalFilmPrepareBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    shot_ids: list[UUID] | None = Field(default=None, max_length=200)
+    edit_session_id: UUID
+    expected_timeline_version: int | None = Field(default=None, ge=1)
     mode: Literal["prepare"] = "prepare"
 
 
 class FinalFilmRenderBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    edit_session_id: UUID
+    expected_timeline_version: int | None = Field(default=None, ge=1)
     name: str = Field(default="V1 Final Film", min_length=1, max_length=200)
 
 
@@ -51,8 +54,9 @@ async def prepare_final_film(
     return await prepare_formal_tail(
         session,
         project_id=project.id,
-        actor=user,
-        shot_ids=body.shot_ids,
+        edit_session_id=body.edit_session_id,
+        expected_timeline_version=body.expected_timeline_version,
+        actor_id=user.id,
     )
 
 
@@ -66,6 +70,7 @@ async def render_final_film_route(
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> FinalFilmRead:
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=user
@@ -73,7 +78,10 @@ async def render_final_film_route(
     return await render_final_film(
         session,
         project_id=project.id,
-        actor=user,
+        edit_session_id=body.edit_session_id,
+        expected_timeline_version=body.expected_timeline_version,
+        actor_id=user.id,
+        idempotency_key=idempotency_key,
         name=body.name,
     )
 

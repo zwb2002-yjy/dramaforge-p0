@@ -7,11 +7,14 @@ import {
   createEditSession,
   exportEditSession,
   fetchEditSession,
+  prepareFinalFilm,
+  renderFinalFilm,
   requestEditingDirectorSuggestion,
   requestProactiveEditingDirectorSuggestion,
   routeEditingDirectorRepair,
   saveEditTimeline,
   type EditExportRead,
+  type FinalFilmRead,
   type EditingRepairRoutingRead,
   type EditSessionRead,
   type EditTimelinePayload,
@@ -126,6 +129,9 @@ export function EditingWorkspace({
   const [baseline, setBaseline] = useState<EditableTimeline | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [exported, setExported] = useState<EditExportRead | null>(null);
+  const [finalFilm, setFinalFilm] = useState<FinalFilmRead | null>(null);
+  const [finalFilmError, setFinalFilmError] = useState<string | null>(null);
+  const [finalFilmPending, setFinalFilmPending] = useState<"prepare" | "render" | null>(null);
   const [suggestionInstruction, setSuggestionInstruction] = useState("");
   const [suggestionPreview, setSuggestionPreview] = useState<EditingDirectorSuggestionRead | null>(
     null,
@@ -170,6 +176,9 @@ export function EditingWorkspace({
     setBaseline(null);
     setFeedback(null);
     setExported(null);
+    setFinalFilm(null);
+    setFinalFilmError(null);
+    setFinalFilmPending(null);
     setSuggestionInstruction("");
     setSuggestionPreview(null);
     setSuggestionPreviewContext(null);
@@ -240,6 +249,31 @@ export function EditingWorkspace({
       setFeedback(`导出时间线失败：${errorMessage(error)}`);
     },
   });
+
+  async function runFinalFilmExport() {
+    if (!sessionId || !isSessionVersion(currentSessionVersion)) {
+      setFinalFilmError("请先创建并加载 EditSession 后再导出 Final Film。");
+      return;
+    }
+    const idempotencyKey = `final-${projectId}-${sessionId}-${currentSessionVersion}`;
+    try {
+      setFinalFilmError(null);
+      setFinalFilmPending("prepare");
+      await prepareFinalFilm(projectId, sessionId, currentSessionVersion);
+      setFinalFilmPending("render");
+      const result = await renderFinalFilm(
+        projectId,
+        sessionId,
+        currentSessionVersion,
+        idempotencyKey,
+      );
+      setFinalFilm(result);
+      setFinalFilmPending(null);
+    } catch (error: unknown) {
+      setFinalFilmError(`Final Film 导出失败：${errorMessage(error)}`);
+      setFinalFilmPending(null);
+    }
+  }
 
   const suggestionRequest = useMutation<
     EditingDirectorSuggestionRead,
@@ -929,8 +963,47 @@ export function EditingWorkspace({
                 >
                   {exportMutation.isPending ? "读取导出…" : "导出时间线"}
                 </button>
+                <button
+                  type="button"
+                  data-testid="export-final-film"
+                  onClick={() => void runFinalFilmExport()}
+                  disabled={finalFilmPending !== null || save.isPending}
+                >
+                  {finalFilmPending === "prepare"
+                    ? "准备尾链…"
+                    : finalFilmPending === "render"
+                      ? "渲染 Final Film…"
+                      : "导出 Final Film Artifact"}
+                </button>
               </div>
             </section>
+
+            {finalFilm && (
+              <section className="final-film-result" data-testid="final-film-result">
+                <h2>Final Film Artifact</h2>
+                <dl>
+                  <dt>EditSession</dt>
+                  <dd>{finalFilm.edit_session_id}</dd>
+                  <dt>Timeline version</dt>
+                  <dd>{finalFilm.timeline_version}</dd>
+                  <dt>Artifact</dt>
+                  <dd>{finalFilm.artifact_id}</dd>
+                  <dt>duration_seconds</dt>
+                  <dd>{finalFilm.duration_seconds}</dd>
+                  <dt>mime_type</dt>
+                  <dd>{finalFilm.mime_type}</dd>
+                  <dt>byte_size</dt>
+                  <dd>{finalFilm.byte_size}</dd>
+                  <dt>content_hash</dt>
+                  <dd>{finalFilm.content_hash}</dd>
+                </dl>
+              </section>
+            )}
+            {finalFilmError && (
+              <p className="flash err" data-testid="final-film-error" role="alert">
+                {finalFilmError}
+              </p>
+            )}
 
             {exported && (
               <section className="editing-session-export" data-testid="edit-session-export">

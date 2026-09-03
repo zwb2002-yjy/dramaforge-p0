@@ -215,9 +215,9 @@ class GraphService:
         created_by: UUID,
         definition: dict[str, object] | None = None,
     ) -> ProductionGraph:
-        if scope_type not in {"shot", "episode", "shot_experiment"}:
+        if scope_type not in {"shot", "episode", "shot_experiment", "project"}:
             raise ValidationAppError(
-                "scope_type must be shot, episode or shot_experiment"
+                "scope_type must be shot, episode, shot_experiment or project"
             )
         body = definition or {"nodes": [], "edges": []}
         validate_graph_definition(body)
