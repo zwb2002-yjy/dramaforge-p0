@@ -12,6 +12,7 @@ from app.api.v1 import (
     editing,
     events,
     experiments,
+    final_film,
     generations,
     model_candidates,
     model_profiles,
@@ -54,6 +55,7 @@ api_router.include_router(opencut.router)
 api_router.include_router(worker.router)
 api_router.include_router(events.router)
 api_router.include_router(experiments.router)
+api_router.include_router(final_film.router)
 api_router.include_router(workflow_planning.router)
 api_router.include_router(workflow_overview.router)
 api_router.include_router(creative_capabilities.router)

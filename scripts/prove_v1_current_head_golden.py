@@ -140,6 +140,40 @@ def wait_for_nodes(
     )
 
 
+def wait_for_project_node_keys(
+    client: httpx.Client,
+    *,
+    project_id: str,
+    node_keys: set[str],
+    timeout_seconds: int,
+    headers: Mapping[str, str],
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_snapshot: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        snapshot = require_ok(
+            client.get(f"/projects/{project_id}/snapshot", headers=headers),
+            "snapshot",
+        )
+        last_snapshot = snapshot
+        latest: dict[str, dict[str, Any]] = {}
+        for run in snapshot.get("node_runs", []):
+            key = str((run.get("input_snapshot") or {}).get("node_key") or "")
+            if key in node_keys:
+                latest.setdefault(key, run)
+        if set(latest) >= node_keys and all(
+            run.get("status")
+            in {"completed", "cached", "completed_after_cancel", "failed", "blocked"}
+            for run in latest.values()
+        ):
+            return snapshot
+        time.sleep(3)
+    raise TimeoutError(
+        f"timed out waiting for {sorted(node_keys)}; last runs="
+        f"{[public_run(run) for run in last_snapshot.get('node_runs', [])]}"
+    )
+
+
 def dispatch_stage(
     client: httpx.Client,
     *,
@@ -270,6 +304,12 @@ def main() -> int:
         action="store_true",
         help="create Template+AUTO and Free+ASSIST projects and import the script, then stop before Provider work",
     )
+    parser.add_argument(
+        "--mode",
+        choices=("template-auto", "free-assist"),
+        default="template-auto",
+        help="which project path receives the full real Provider chain in this run",
+    )
     args = parser.parse_args()
 
     email = os.environ.get("DRAMAFORGE_PROOF_EMAIL", "professional-proof@example.com")
@@ -316,31 +356,53 @@ def main() -> int:
         workspace_id = str(workspaces[0]["id"])
         headers = {"X-CSRF-Token": csrf, "X-Workspace-Id": workspace_id}
 
-        template_project = create_project(
-            client,
-            workspace_id=workspace_id,
-            headers=headers,
-            name=f"Template AUTO Golden {uuid4().hex[:8]}",
-            start_type="TEMPLATE",
-            template_key="single_monologue_v1",
-            director_autonomy="AUTO",
-        )
-        free_project = create_project(
-            client,
-            workspace_id=workspace_id,
-            headers=headers,
-            name=f"Free ASSIST Golden {uuid4().hex[:8]}",
-            start_type="FREE",
-            template_key=None,
-            director_autonomy="ASSIST",
-        )
-        report["template_project"] = {
-            "project_id": str(template_project["id"]),
-            "profile": template_project["creative_profile"],
+        if args.mode == "template-auto":
+            primary_project = create_project(
+                client,
+                workspace_id=workspace_id,
+                headers=headers,
+                name=f"Template AUTO Golden {uuid4().hex[:8]}",
+                start_type="TEMPLATE",
+                template_key="single_monologue_v1",
+                director_autonomy="AUTO",
+            )
+            peer_project = create_project(
+                client,
+                workspace_id=workspace_id,
+                headers=headers,
+                name=f"Free ASSIST Golden {uuid4().hex[:8]}",
+                start_type="FREE",
+                template_key=None,
+                director_autonomy="ASSIST",
+            )
+        else:
+            primary_project = create_project(
+                client,
+                workspace_id=workspace_id,
+                headers=headers,
+                name=f"Free ASSIST Golden {uuid4().hex[:8]}",
+                start_type="FREE",
+                template_key=None,
+                director_autonomy="ASSIST",
+            )
+            peer_project = create_project(
+                client,
+                workspace_id=workspace_id,
+                headers=headers,
+                name=f"Template AUTO Golden {uuid4().hex[:8]}",
+                start_type="TEMPLATE",
+                template_key="single_monologue_v1",
+                director_autonomy="AUTO",
+            )
+        report["primary_project"] = {
+            "project_id": str(primary_project["id"]),
+            "profile": primary_project["creative_profile"],
+            "full_real_chain": True,
         }
-        report["free_project"] = {
-            "project_id": str(free_project["id"]),
-            "profile": free_project["creative_profile"],
+        report["peer_project"] = {
+            "project_id": str(peer_project["id"]),
+            "profile": peer_project["creative_profile"],
+            "full_real_chain": False,
         }
 
         connections = require_ok(
@@ -380,7 +442,7 @@ def main() -> int:
             if binding is None:
                 raise RuntimeError(f"no verified Agnes binding for {purpose}")
             selected[purpose] = binding
-            for project_id in (str(template_project["id"]), str(free_project["id"])):
+            for project_id in (str(primary_project["id"]), str(peer_project["id"])):
                 require_ok(
                     client.put(
                         f"/projects/{project_id}/provider-bindings/{purpose}",
@@ -406,7 +468,7 @@ def main() -> int:
             },
         }
 
-        main_project_id = str(template_project["id"])
+        main_project_id = str(primary_project["id"])
         if args.dry_run:
             report["dry_run"] = True
             report["finished_at_utc"] = datetime.now(UTC).isoformat()
@@ -429,17 +491,17 @@ def main() -> int:
         shot_ids = [str(shot_id) for shot_id in imported["shot_ids"]]
         if not shot_ids:
             raise RuntimeError("script import produced no shots")
-        report["template_shots"] = shot_ids
+        report["primary_shots"] = shot_ids
 
-        free_imported = require_ok(
+        peer_imported = require_ok(
             client.post(
-                f"/projects/{str(free_project['id'])}/scripts/import",
+                f"/projects/{str(peer_project['id'])}/scripts/import",
                 headers=headers,
-                json={"filename": "current-head-golden-free.md", "text": SCRIPT},
+                json={"filename": "current-head-golden-peer.md", "text": SCRIPT},
             ),
-            "import script into Free project",
+            "import script into peer project",
         )
-        report["free_shots"] = [str(shot_id) for shot_id in free_imported["shot_ids"]]
+        report["peer_shots"] = [str(shot_id) for shot_id in peer_imported["shot_ids"]]
 
         shots = require_ok(
             client.get(f"/projects/{main_project_id}/shots", headers=headers),
@@ -643,6 +705,57 @@ def main() -> int:
             "production_lineage": edit_session["production_lineage"],
             "export": export,
         }
+
+        # Formal shot tail: local voice/subtitle/review/composite runs.
+        prepare = require_ok(
+            client.post(
+                f"/projects/{main_project_id}/final-film/prepare",
+                headers=headers,
+                json={"mode": "prepare", "shot_ids": shot_ids},
+            ),
+            "prepare final film tail",
+        )
+        report["final_film_prepare"] = {
+            "node_run_ids": prepare.get("node_run_ids", []),
+            "shot_ids": prepare.get("shot_ids", []),
+            "status": prepare.get("status"),
+        }
+        tail_snapshot = wait_for_project_node_keys(
+            client,
+            project_id=main_project_id,
+            node_keys={
+                "video_drift_review",
+                "voice",
+                "subtitle",
+                "composite",
+                "continuity_review",
+            },
+            timeout_seconds=args.timeout,
+            headers=headers,
+        )
+        report["final_film_tail"] = {
+            "runs": [
+                public_run(run)
+                for run in tail_snapshot.get("node_runs", [])
+                if (run.get("input_snapshot") or {}).get("node_key")
+                in {
+                    "video_drift_review",
+                    "voice",
+                    "subtitle",
+                    "composite",
+                    "continuity_review",
+                }
+            ]
+        }
+        final_film_artifact = require_ok(
+            client.post(
+                f"/projects/{main_project_id}/final-film/render",
+                headers=headers,
+                json={"name": "V1 Current-Head Final Film"},
+            ),
+            "render final film artifact",
+        )
+        report["final_film_artifact"] = final_film_artifact
 
     report["finished_at_utc"] = datetime.now(UTC).isoformat()
     report["ok"] = True

@@ -1902,6 +1902,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/final-film/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Final Film */
+        post: operations["prepare_final_film_api_v1_projects__project_id__final_film_prepare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/final-film/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Render Final Film Route */
+        post: operations["render_final_film_route_api_v1_projects__project_id__final_film_render_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/workflow-state": {
         parameters: {
             query?: never;
@@ -3333,6 +3367,72 @@ export interface components {
             run_ids: string[];
             /** Job Ids */
             job_ids: string[];
+        };
+        /** FinalFilmPrepareBody */
+        FinalFilmPrepareBody: {
+            /** Shot Ids */
+            shot_ids?: string[] | null;
+            /**
+             * Mode
+             * @default prepare
+             * @constant
+             */
+            mode: "prepare";
+        };
+        /** FinalFilmPrepareRead */
+        FinalFilmPrepareRead: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Shot Ids */
+            shot_ids: string[];
+            /** Node Run Ids */
+            node_run_ids: string[];
+            /**
+             * Status
+             * @default queued
+             */
+            status: string;
+        };
+        /** FinalFilmRead */
+        FinalFilmRead: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Export Id
+             * Format: uuid
+             */
+            export_id: string;
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /** Format */
+            format: string;
+            /** Status */
+            status: string;
+            /** Duration Seconds */
+            duration_seconds: string;
+            /** Shot Count */
+            shot_count: number;
+            /** Composite Artifact Ids */
+            composite_artifact_ids: string[];
+            /** Source Commit */
+            source_commit: string;
+        };
+        /** FinalFilmRenderBody */
+        FinalFilmRenderBody: {
+            /**
+             * Name
+             * @default V1 Final Film
+             */
+            name: string;
         };
         /** FormalArtifactsRead */
         FormalArtifactsRead: {
@@ -10549,6 +10649,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExperimentAdoptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepare_final_film_api_v1_projects__project_id__final_film_prepare_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalFilmPrepareBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinalFilmPrepareRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_final_film_route_api_v1_projects__project_id__final_film_render_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalFilmRenderBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinalFilmRead"];
                 };
             };
             /** @description Validation Error */
