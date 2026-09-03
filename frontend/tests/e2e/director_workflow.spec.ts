@@ -291,7 +291,7 @@ test("professional workspace persists canvas proposals, assets, review, board, a
   const state = await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
-  await expect(page.getByText("场景与镜头")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "场景与镜头" })).toBeVisible();
   await expect(page.getByText(/预算|计费|费用/)).toHaveCount(0);
 
   await page.getByRole("button", { name: "采纳" }).first().click();
