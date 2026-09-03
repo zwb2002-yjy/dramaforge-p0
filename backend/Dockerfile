@@ -25,6 +25,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         build-essential \
         curl \
         espeak-ng \
+        fonts-noto-cjk \
         ffmpeg \
         git \
         postgresql-client; do \

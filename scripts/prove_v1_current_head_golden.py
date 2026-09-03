@@ -98,6 +98,10 @@ def public_run(run: dict[str, Any]) -> dict[str, Any]:
         "model_binding_id": snapshot.get("model_binding_id"),
         "model_profile": snapshot.get("model_profile"),
         "canonical_artifact_id": snapshot.get("canonical_artifact_id"),
+        "connection_revision_id": snapshot.get("connection_revision_id"),
+        "credential_revision_id": snapshot.get("credential_revision_id"),
+        "execution_model_resolution": snapshot.get("execution_model_resolution"),
+        "request_fingerprint": run.get("input_hash"),
     }
 
 
@@ -270,6 +274,103 @@ def create_project(
     )
 
 
+def collect_negative_checks(
+    client: httpx.Client,
+    *,
+    project_id: str,
+    headers: Mapping[str, str],
+) -> dict[str, Any]:
+    """Fail-closed probes with controlled inputs; never submit a paid request."""
+    shots = require_ok(client.get(f"/projects/{project_id}/shots", headers=headers), "list shots")
+    shot = next(iter(shots), None)
+    if shot is None:
+        raise RuntimeError("negative checks require at least one shot")
+    shot_id = str(shot["id"])
+    scene_id = str(shot.get("scene_id") or "")
+    snapshot_before = require_ok(
+        client.get(f"/projects/{project_id}/snapshot", headers=headers), "snapshot before"
+    )
+    before_runs = len(snapshot_before.get("node_runs", []))
+
+    stale = client.post(
+        f"/projects/{project_id}/shots/{shot_id}/recommendation",
+        headers=headers,
+        json={
+            "scene_id": scene_id,
+            "shot_id": shot_id,
+            "expected_shot_version": int(shot["version"]) + 1000,
+        },
+    )
+    stale_body: dict[str, Any] = {}
+    try:
+        stale_body = stale.json()
+    except Exception:  # noqa: BLE001
+        stale_body = {"raw": stale.text[:300]}
+
+    preview_payload = {
+        "stage": "image_keyframe",
+        "prompt": "controlled fail-closed preview probe",
+        "semantic_intent": {"intent": "shot_keyframe", "probe": True},
+        "mode_id": "text_to_image",
+        "references": [],
+        "expected_shot_version": int(shot["version"]),
+    }
+    preview_one = require_ok(
+        client.post(
+            f"/projects/{project_id}/shots/{shot_id}/execution-plan",
+            headers=headers,
+            json=preview_payload,
+        ),
+        "preview one",
+    )
+    preview_two = require_ok(
+        client.post(
+            f"/projects/{project_id}/shots/{shot_id}/execution-plan",
+            headers=headers,
+            json=preview_payload,
+        ),
+        "preview two",
+    )
+    mismatch = client.post(
+        f"/projects/{project_id}/shots/{shot_id}/executions",
+        headers=headers,
+        json={
+            **preview_payload,
+            "plan_fingerprint": "0" * 64,
+            "accepted_approximations": [],
+        },
+    )
+    mismatch_body: dict[str, Any] = {}
+    try:
+        mismatch_body = mismatch.json()
+    except Exception:  # noqa: BLE001
+        mismatch_body = {"raw": mismatch.text[:300]}
+    snapshot_after = require_ok(
+        client.get(f"/projects/{project_id}/snapshot", headers=headers), "snapshot after"
+    )
+    after_runs = len(snapshot_after.get("node_runs", []))
+    if after_runs != before_runs:
+        raise RuntimeError("fail-closed probes unexpectedly created a NodeRun")
+    return {
+        "stale_recommendation": {
+            "http_status": stale.status_code,
+            "code": stale_body.get("code"),
+            "detail": stale_body.get("detail"),
+        },
+        "plan_preview_deterministic": {
+            "same_fingerprint": preview_one.get("plan_fingerprint")
+            == preview_two.get("plan_fingerprint"),
+            "fingerprint_length": len(preview_one.get("plan_fingerprint") or ""),
+        },
+        "fingerprint_mismatch_execution": {
+            "http_status": mismatch.status_code,
+            "code": mismatch_body.get("code"),
+            "detail": mismatch_body.get("detail"),
+        },
+        "no_node_run_created_by_negative_probes": after_runs == before_runs,
+    }
+
+
 SCRIPT = """# Episode 1 - Current Head Golden
 
 ## Scene 1 - Rooftop / night
@@ -278,17 +379,17 @@ emotional monologue to the camera.
 
 ### Shot 1 - closeup
 Visual: a fictional woman looks away, takes a quiet breath, then lifts her gaze toward the camera, subtle micro-expression, stable composition
-Dialogue: 我早就知道，答案从来不在别人那里。
+Dialogue: 够了。
 Camera: static
 
 ### Shot 2 - medium
 Visual: she turns toward the city lights, one hand tightening, wind moving her hair, real cinematic skin texture
-Dialogue: 这些年我一直在等一句对不起。
+Dialogue: 我明白。
 Camera: slow_push
 
 ### Shot 3 - closeup
 Visual: she faces the camera again, tears in her eyes, chin steady, voice becoming calm, studio-realistic portrait
-Dialogue: 但从今天起，我要自己给自己答案。
+Dialogue: 我自己来。
 Camera: static
 """
 
@@ -309,6 +410,11 @@ def main() -> int:
         choices=("template-auto", "free-assist"),
         default="template-auto",
         help="which project path receives the full real Provider chain in this run",
+    )
+    parser.add_argument(
+        "--negative-checks",
+        action="store_true",
+        help="run controlled fail-closed probes against the peer project (no paid submit)",
     )
     args = parser.parse_args()
 
@@ -502,6 +608,12 @@ def main() -> int:
             "import script into peer project",
         )
         report["peer_shots"] = [str(shot_id) for shot_id in peer_imported["shot_ids"]]
+        if args.negative_checks:
+            report["negative_checks"] = collect_negative_checks(
+                client,
+                project_id=str(peer_project["id"]),
+                headers=headers,
+            )
 
         shots = require_ok(
             client.get(f"/projects/{main_project_id}/shots", headers=headers),

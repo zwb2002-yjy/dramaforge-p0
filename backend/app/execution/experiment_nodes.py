@@ -344,6 +344,8 @@ async def queue_branch_nodes(
             if key == "keyframe"
             else f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}"
         )
+        if key == "voice":
+            prompt = dialogue or "（静默段落）"
         lead_identity_value = shot_plan.get("lead_identity_required")
         lead_identity_required = lead_identity_value is True
         # A project with a registered lead canonical is single-lead in P0. Script
@@ -388,6 +390,7 @@ async def queue_branch_nodes(
                 project=project,
                 node_key=key,
             )
+        voice_prompt = (dialogue or "（静默段落）") if key == "voice" else prompt
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),
             "node_key": key,
@@ -396,7 +399,7 @@ async def queue_branch_nodes(
             "plan_id": definition.get("plan_id"),
             "prompt": prompt,
             "plan": {
-                "prompt": keyframe_prompt,
+                "prompt": voice_prompt,
                 "shot": shot_plan,
             },
             "visual_description": visual,

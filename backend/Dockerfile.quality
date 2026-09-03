@@ -11,7 +11,7 @@ RUN set -eux; \
     apt_options="-o Acquire::Retries=10 -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0 -o Acquire::http::Timeout=60"; \
     apt-get ${apt_options} update; \
     attempt=1; \
-    while ! apt-get ${apt_options} install -y --no-install-recommends ffmpeg espeak-ng git; do \
+    while ! apt-get ${apt_options} install -y --no-install-recommends ffmpeg espeak-ng fonts-noto-cjk git; do \
         if [ "${attempt}" -ge 3 ]; then exit 1; fi; \
         attempt=$((attempt + 1)); \
         apt-get ${apt_options} update; \
