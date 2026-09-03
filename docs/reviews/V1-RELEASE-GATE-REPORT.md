@@ -270,3 +270,49 @@ reverted status to **GOAL_BLOCKED**.  Follow-up work in progress:
 
 The next report section will be replaced with frozen-SHA dual-path Golden +
 Release Candidate Gate evidence.
+
+---
+
+## Frozen SHA `720bde4` — Final release evidence (independent review branch)
+
+### Frozen source
+
+- `dev` frozen at `720bde475369c13111db643524126c13e9cd4557`
+- Migration head `20260903_0052`; repo clean at evidence generation
+
+### GitHub Actions
+
+- CI push `33709050631`: PASS (backend unit 874, PG 17, Vitest 106,
+  Playwright 15, LiteLLM 5)
+- Security push `33709050691`: PASS
+- Release Candidate Gate `33709050687`: PASS
+  - exact source quality gate, single migration head
+  - exact SHA images built and smoke-tested
+  - three SBOMs + `release-manifest.json` + online/offline bundles
+  - non-tag publish steps skipped
+  - Artifact:
+    `release-candidate-sha-720bde475369` id `9876566850`
+    ZIP SHA-256 `e4547031e121a125c2f4ff0a254567c336530de1afca3d0ef2de486203f51839`
+
+### Frozen dual-path real Provider Golden
+
+- Template+AUTO: `docs/reviews/GOLDEN-TEMPLATE-AUTO-FROZEN-720bde4.json`
+  `ok=true`, `paid_provider_calls=6`, Final Film Artifact 15.233s
+- Free+ASSIST: `docs/reviews/GOLDEN-FREE-ASSIST-FROZEN-720bde4.json`
+  `ok=true`, `paid_provider_calls=6`, Final Film Artifact 15.233s
+- Both final MP4 artifacts: `video/mp4`, streams `h264 + aac`,
+  duration 15.233s; subtitles burned into the video frames
+- Final Film Export lineage:
+  `Export(format=dramaforge-final-film-v1)` + 3 `ExportItem(role=shot_composite)`
+  + Formal Shot / voice / subtitle / composite NodeRun→Artifact rows
+- Controlled fail-closed negative probes (Template run):
+  stale recommendation 409; deterministic plan fingerprint 64; fingerprint
+  mismatch execution 422; zero NodeRun created by probes
+- Execution identity freeze: every ProviderOperation records
+  `frozen_model_binding_id`, model/capability manifest hash,
+  `request_fingerprint`; runs record shot/graph/version lineage
+
+### Review status
+
+Agent status: `GOAL_READY_FOR_OWNER_MERGE` — await independent owner review.
+No merge performed.
