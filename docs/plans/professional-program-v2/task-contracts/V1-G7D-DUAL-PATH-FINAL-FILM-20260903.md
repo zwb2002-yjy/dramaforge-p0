@@ -1,7 +1,7 @@
 # V1 G7D — Dual-path real Golden + Final Film Artifact
 
 **Task:** `v1-g7d-dual-path-final-film-20260903`
-**Status:** COMPLETE
+**Status:** IN PROGRESS（验收复核重新打开；由 G7E 收口）
 
 ## Required by Owner review
 

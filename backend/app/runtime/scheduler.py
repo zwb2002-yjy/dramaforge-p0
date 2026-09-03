@@ -280,7 +280,11 @@ class NodeRunScheduler:
         # a burst from the general I/O queue.
         queue_name = (
             settings.arq_heavy_queue_name
-            if node and node.node_type in {"keyframe", "video", "voice", "composite"}
+            if node
+            and (
+                node.node_type in {"keyframe", "video", "voice", "composite"}
+                or node.node_key == "final_film_assembly"
+            )
             else settings.arq_default_queue_name
         )
         stable_job_id = queue_scoped_job_id(

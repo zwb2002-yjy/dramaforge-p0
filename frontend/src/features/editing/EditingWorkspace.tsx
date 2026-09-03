@@ -1,11 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchOpenCutManifest, type OpenCutManifestRead } from "../../lib/api";
+import {
+  artifactContentUrl,
+  fetchOpenCutManifest,
+  fetchSnapshot,
+  type OpenCutManifestRead,
+} from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 import {
   createEditSession,
   exportEditSession,
+  fetchFinalFilmStatus,
   fetchEditSession,
   prepareFinalFilm,
   renderFinalFilm,
@@ -15,6 +21,7 @@ import {
   saveEditTimeline,
   type EditExportRead,
   type FinalFilmRead,
+  type FinalFilmJobRead,
   type EditingRepairRoutingRead,
   type EditSessionRead,
   type EditTimelinePayload,
@@ -84,6 +91,25 @@ function clipValue(clip: EditableClip, key: string): string {
   return value === undefined || value === null ? "—" : String(value);
 }
 
+function editableValue(clip: EditableClip, key: string, fallback = ""): string {
+  const value = clip[key];
+  return value === undefined || value === null ? fallback : String(value);
+}
+
+function metadataValue(metadata: EditableMetadata, key: string, fallback = ""): string {
+  const value = metadata[key];
+  return value === undefined || value === null ? fallback : String(value);
+}
+
+function transitionKind(clip: EditableClip): "cut" | "crossfade" {
+  const value = clip.transition;
+  if (typeof value === "string" && value.toLowerCase() === "crossfade") return "crossfade";
+  if (isJsonObject(value) && String(value.kind ?? value.type ?? "").toLowerCase() === "crossfade") {
+    return "crossfade";
+  }
+  return "cut";
+}
+
 function sameTimeline(left: EditableTimeline | null, right: EditableTimeline | null): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -98,6 +124,47 @@ function formatJson(value: unknown): string {
 
 function isSessionVersion(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
+
+const FINAL_FILM_TERMINAL_SUCCESS = new Set(["completed", "cached", "completed_after_cancel"]);
+const FINAL_FILM_TERMINAL_FAILURE = new Set(["failed", "blocked", "cancelled"]);
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function waitForPreparedTail(projectId: string, nodeRunIds: string[]): Promise<void> {
+  if (nodeRunIds.length === 0) return;
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const snapshot = await fetchSnapshot(projectId);
+    const runs = new Map(snapshot.node_runs.map((run) => [run.id, run]));
+    const selected = nodeRunIds.map((id) => runs.get(id));
+    if (selected.some((run) => run?.status && FINAL_FILM_TERMINAL_FAILURE.has(run.status))) {
+      throw new Error("Final Film 尾链有任务失败，请先处理生产错误。");
+    }
+    if (selected.every((run) => run && FINAL_FILM_TERMINAL_SUCCESS.has(run.status))) return;
+    await wait(1200);
+  }
+  throw new Error("Final Film 尾链等待超时，请到生产监控查看任务状态。");
+}
+
+async function waitForFinalFilmJob(
+  projectId: string,
+  initial: FinalFilmJobRead,
+): Promise<FinalFilmRead> {
+  if (initial.result && FINAL_FILM_TERMINAL_SUCCESS.has(initial.status)) return initial.result;
+  const deadline = Date.now() + 15 * 60 * 1000;
+  let current = initial;
+  while (Date.now() < deadline) {
+    if (FINAL_FILM_TERMINAL_FAILURE.has(current.status)) {
+      throw new Error(current.error_summary || "Final Film Worker 执行失败。");
+    }
+    if (current.result && FINAL_FILM_TERMINAL_SUCCESS.has(current.status)) return current.result;
+    await wait(1200);
+    current = await fetchFinalFilmStatus(projectId, initial.node_run_id);
+  }
+  throw new Error("Final Film 渲染等待超时，请到生产监控查看任务状态。");
 }
 
 function timelineForSave(
@@ -131,7 +198,9 @@ export function EditingWorkspace({
   const [exported, setExported] = useState<EditExportRead | null>(null);
   const [finalFilm, setFinalFilm] = useState<FinalFilmRead | null>(null);
   const [finalFilmError, setFinalFilmError] = useState<string | null>(null);
-  const [finalFilmPending, setFinalFilmPending] = useState<"prepare" | "render" | null>(null);
+  const [finalFilmPending, setFinalFilmPending] = useState<"prepare" | "tail" | "render" | null>(
+    null,
+  );
   const [suggestionInstruction, setSuggestionInstruction] = useState("");
   const [suggestionPreview, setSuggestionPreview] = useState<EditingDirectorSuggestionRead | null>(
     null,
@@ -168,6 +237,24 @@ export function EditingWorkspace({
     () => draft !== null && baseline !== null && !sameTimeline(draft, baseline),
     [baseline, draft],
   );
+
+  function updateClipField(index: number, key: string, value: JsonValue) {
+    setDraft((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        clips: current.clips.map((clip, clipIndex) =>
+          clipIndex === index ? ({ ...clip, [key]: value } as EditableClip) : clip,
+        ),
+      };
+    });
+  }
+
+  function updateTimelineMetadata(key: string, value: JsonValue) {
+    setDraft((current) =>
+      current ? { ...current, metadata: { ...current.metadata, [key]: value } } : current,
+    );
+  }
 
   useEffect(() => {
     // Route identity is the isolation boundary: never carry a local timeline
@@ -251,6 +338,10 @@ export function EditingWorkspace({
   });
 
   async function runFinalFilmExport() {
+    if (dirty) {
+      setFinalFilmError("时间线有未保存修改，请先保存后再导出 Final Film。");
+      return;
+    }
     if (!sessionId || !isSessionVersion(currentSessionVersion)) {
       setFinalFilmError("请先创建并加载 EditSession 后再导出 Final Film。");
       return;
@@ -259,15 +350,17 @@ export function EditingWorkspace({
     try {
       setFinalFilmError(null);
       setFinalFilmPending("prepare");
-      await prepareFinalFilm(projectId, sessionId, currentSessionVersion);
+      const prepared = await prepareFinalFilm(projectId, sessionId, currentSessionVersion);
+      setFinalFilmPending("tail");
+      await waitForPreparedTail(projectId, prepared.node_run_ids);
       setFinalFilmPending("render");
-      const result = await renderFinalFilm(
+      const queued = await renderFinalFilm(
         projectId,
         sessionId,
         currentSessionVersion,
         idempotencyKey,
       );
-      setFinalFilm(result);
+      setFinalFilm(await waitForFinalFilmJob(projectId, queued));
       setFinalFilmPending(null);
     } catch (error: unknown) {
       setFinalFilmError(`Final Film 导出失败：${errorMessage(error)}`);
@@ -924,6 +1017,64 @@ export function EditingWorkspace({
                           onChange={(event) => updateClipDuration(index, event.target.value)}
                         />
                       </label>
+                      <label>
+                        入点（秒）
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          data-testid={`clip-source-in-${index}`}
+                          aria-label={`镜头 ${index + 1} 入点`}
+                          value={editableValue(clip, "source_in_seconds", "0")}
+                          onChange={(event) =>
+                            updateClipField(index, "source_in_seconds", event.target.value)
+                          }
+                        />
+                      </label>
+                      <label>
+                        字幕文本
+                        <input
+                          type="text"
+                          data-testid={`clip-subtitle-${index}`}
+                          aria-label={`镜头 ${index + 1} 字幕`}
+                          value={editableValue(clip, "subtitle")}
+                          onChange={(event) =>
+                            updateClipField(index, "subtitle", event.target.value)
+                          }
+                        />
+                      </label>
+                      <label>
+                        音频 Artifact ID（可选）
+                        <input
+                          type="text"
+                          data-testid={`clip-audio-${index}`}
+                          aria-label={`镜头 ${index + 1} 音频 Artifact ID`}
+                          value={editableValue(clip, "audio_id")}
+                          onChange={(event) =>
+                            updateClipField(index, "audio_id", event.target.value)
+                          }
+                        />
+                      </label>
+                      <label>
+                        转场
+                        <select
+                          data-testid={`clip-transition-${index}`}
+                          aria-label={`镜头 ${index + 1} 转场`}
+                          value={transitionKind(clip)}
+                          onChange={(event) =>
+                            updateClipField(
+                              index,
+                              "transition",
+                              event.target.value === "crossfade"
+                                ? { kind: "crossfade", duration_seconds: 0.25 }
+                                : { kind: "cut" },
+                            )
+                          }
+                        >
+                          <option value="cut">直接切换</option>
+                          <option value="crossfade">交叉淡化</option>
+                        </select>
+                      </label>
                       <div className="editing-session-clip-actions">
                         <button
                           type="button"
@@ -946,6 +1097,35 @@ export function EditingWorkspace({
                   ))}
                 </ol>
               )}
+              <div className="editing-session-music" data-testid="timeline-music-controls">
+                <label>
+                  音乐 Artifact ID（可选）
+                  <input
+                    type="text"
+                    data-testid="timeline-music-artifact"
+                    value={metadataValue(draft.metadata, "music_artifact_id")}
+                    onChange={(event) =>
+                      updateTimelineMetadata("music_artifact_id", event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  音乐音量
+                  <input
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    data-testid="timeline-music-volume"
+                    value={
+                      draft.metadata.music_volume === undefined
+                        ? "0.12"
+                        : String(draft.metadata.music_volume)
+                    }
+                    onChange={(event) => updateTimelineMetadata("music_volume", event.target.value)}
+                  />
+                </label>
+              </div>
               <div className="editing-session-actions">
                 <button
                   type="button"
@@ -967,15 +1147,22 @@ export function EditingWorkspace({
                   type="button"
                   data-testid="export-final-film"
                   onClick={() => void runFinalFilmExport()}
-                  disabled={finalFilmPending !== null || save.isPending}
+                  disabled={dirty || finalFilmPending !== null || save.isPending}
                 >
                   {finalFilmPending === "prepare"
                     ? "准备尾链…"
-                    : finalFilmPending === "render"
-                      ? "渲染 Final Film…"
-                      : "导出 Final Film Artifact"}
+                    : finalFilmPending === "tail"
+                      ? "等待尾链完成…"
+                      : finalFilmPending === "render"
+                        ? "渲染 Final Film…"
+                        : "导出 Final Film Artifact"}
                 </button>
               </div>
+              {dirty && (
+                <p className="editing-final-film-dirty-gate" data-testid="final-film-dirty-gate">
+                  时间线有未保存修改；保存后才能导出 Final Film，避免导出旧的服务器版本。
+                </p>
+              )}
             </section>
 
             {finalFilm && (
@@ -1009,6 +1196,22 @@ export function EditingWorkspace({
                       : "未提供"}
                   </dd>
                 </dl>
+                <video
+                  controls
+                  playsInline
+                  preload="metadata"
+                  data-testid="final-film-player"
+                  src={artifactContentUrl(projectId, finalFilm.artifact_id)}
+                >
+                  当前浏览器不支持视频播放。
+                </video>
+                <a
+                  data-testid="final-film-download"
+                  href={artifactContentUrl(projectId, finalFilm.artifact_id)}
+                  download={`dramaforge-final-film-${finalFilm.content_hash.slice(0, 12)}.mp4`}
+                >
+                  下载 Final Film MP4
+                </a>
               </section>
             )}
             {finalFilmError && (

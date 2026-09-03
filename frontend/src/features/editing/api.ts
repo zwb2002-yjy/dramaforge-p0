@@ -15,6 +15,7 @@ export type EditingRepairRoutingRead = components["schemas"]["EditingRepairRouti
 export type EditingRepairRoutingRequest = components["schemas"]["EditingRepairRoutingRequest"];
 export type FinalFilmPrepareRead = components["schemas"]["FinalFilmPrepareRead"];
 export type FinalFilmRead = components["schemas"]["FinalFilmRead"];
+export type FinalFilmJobRead = components["schemas"]["FinalFilmJobRead"];
 
 const editSessionPath = (projectId: string, suffix = "") =>
   `/api/v1/projects/${projectId}/edit-sessions${suffix}`;
@@ -146,9 +147,9 @@ export async function renderFinalFilm(
   sessionId: string,
   expectedTimelineVersion: number,
   idempotencyKey: string,
-): Promise<FinalFilmRead> {
+): Promise<FinalFilmJobRead> {
   const csrf = await fetchCsrf();
-  return apiSend<FinalFilmRead>(
+  return apiSend<FinalFilmJobRead>(
     "POST",
     `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/render`,
     {
@@ -158,5 +159,14 @@ export async function renderFinalFilm(
     },
     csrf,
     { "Idempotency-Key": idempotencyKey },
+  );
+}
+
+export function fetchFinalFilmStatus(
+  projectId: string,
+  nodeRunId: string,
+): Promise<FinalFilmJobRead> {
+  return apiGet<FinalFilmJobRead>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/runs/${encodeURIComponent(nodeRunId)}`,
   );
 }

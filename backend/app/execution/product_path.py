@@ -2087,6 +2087,15 @@ async def execute_media_node_run(
             raise ValidationAppError(f"node_run cannot execute from status={run.status}")
 
     obj_store = store or get_object_store()
+    if node.node_key == "final_film_assembly":
+        from app.production.final_film import execute_final_film_node_run
+
+        return await execute_final_film_node_run(
+            session,
+            run=run,
+            node=node,
+            obj_store=obj_store,
+        )
     if node_type == "composite":
         return await _complete_composite_node(
             session,

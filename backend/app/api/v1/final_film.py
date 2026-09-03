@@ -11,10 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.production.final_film import (
+    FinalFilmJobRead,
     FinalFilmPrepareRead,
-    FinalFilmRead,
+    get_final_film_status,
     prepare_formal_tail,
-    render_final_film,
+    queue_final_film_render,
 )
 
 router = APIRouter(tags=["final-film"], dependencies=[Depends(require_selected_workspace)])
@@ -48,9 +49,7 @@ async def prepare_final_film(
     session: SessionDep,
     _: CsrfDep,
 ) -> FinalFilmPrepareRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     return await prepare_formal_tail(
         session,
         project_id=project.id,
@@ -62,7 +61,8 @@ async def prepare_final_film(
 
 @router.post(
     "/projects/{project_id}/final-film/render",
-    response_model=FinalFilmRead,
+    response_model=FinalFilmJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def render_final_film_route(
     project_id: UUID,
@@ -71,11 +71,9 @@ async def render_final_film_route(
     session: SessionDep,
     _: CsrfDep,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-) -> FinalFilmRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    return await render_final_film(
+) -> FinalFilmJobRead:
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await queue_final_film_render(
         session,
         project_id=project.id,
         edit_session_id=body.edit_session_id,
@@ -83,6 +81,24 @@ async def render_final_film_route(
         actor_id=user.id,
         idempotency_key=idempotency_key,
         name=body.name,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/final-film/runs/{node_run_id}",
+    response_model=FinalFilmJobRead,
+)
+async def get_final_film_run_status(
+    project_id: UUID,
+    node_run_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> FinalFilmJobRead:
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await get_final_film_status(
+        session,
+        project_id=project.id,
+        node_run_id=node_run_id,
     )
 
 

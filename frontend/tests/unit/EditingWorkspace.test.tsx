@@ -682,7 +682,17 @@ describe("EditingWorkspace", () => {
           status: "queued",
         });
       }
-      if (url.endsWith("/final-film/render")) return json(finalFilmRead());
+      if (url.endsWith("/final-film/render")) {
+        return json({
+          project_id: PROJECT_ID,
+          edit_session_id: SESSION_ID,
+          timeline_version: 1,
+          node_run_id: "node-run-final-1",
+          attempt_no: 1,
+          status: "completed",
+          result: finalFilmRead(),
+        });
+      }
       return json({});
     });
 
@@ -696,6 +706,28 @@ describe("EditingWorkspace", () => {
     const renderCall = calls.find((call) => call.url.endsWith("/final-film/render"));
     expect(renderCall?.method).toBe("POST");
     expect(renderCall?.headers?.["Idempotency-Key"]).toBe(`final-${PROJECT_ID}-${SESSION_ID}-1`);
+    expect(screen.getByTestId("final-film-player")).toHaveAttribute(
+      "src",
+      `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-final-1/content`,
+    );
+    expect(screen.getByTestId("final-film-download")).toHaveAttribute("download");
+  });
+
+  it("blocks Final Film export while the timeline draft is dirty", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      return json({});
+    });
+
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByLabelText("镜头 1 时长"), { target: { value: "2" } });
+    expect(screen.getByTestId("final-film-dirty-gate")).toBeInTheDocument();
+    expect(screen.getByTestId("export-final-film")).toBeDisabled();
+    expect(calls.some((url) => url.endsWith("/final-film/prepare"))).toBe(false);
   });
 
   it("requests a proactive editing suggestion without a user instruction", async () => {

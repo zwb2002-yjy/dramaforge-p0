@@ -8,9 +8,9 @@
 
 ## State
 
-- Status: GOAL_READY_FOR_OWNER_MERGE（G0–G8 完成；仅剩 Owner 独立复核与
-  `dev → main` 合并，Agent 不代批/不代合并）
-- Baseline: dev@06dd369ea7b1e0f0fa2fd362ee68dc6df16d7357
+- Status: GOAL_BLOCKED（验收复核发现 Final Film Timeline 真渲染、Worker
+  异步链、重试语义、前端等待/dirty gate 与 current-HEAD 证据仍未闭环）
+- Baseline: dev@71ed8147f3e4c4cb89a0b328a87029058f5d0cc8
 - Gate condition: only the execution plan's GOAL_DONE/GOAL_READY_FOR_OWNER_MERGE states count.
 
 ## Task Index
@@ -24,5 +24,5 @@
 | G4 Proactive Director Recommendation（Golden 采用证据并入 G7 报告） | task-contracts/V1-G4A-PROACTIVE-RECOMMENDATION-20260903.md + task-contracts/V1-G4B-RECOMMENDATION-UI-20260903.md | COMPLETE* |
 | G5 Creation UX 与统一 Canvas | task-contracts/V1-G5A-CREATION-UX-20260903.md | COMPLETE |
 | G6 OpenCut Director 主动剪辑建议与 Editing→Repair 分流 | task-contracts/V1-G6A-EDITING-PROACTIVE-20260903.md + task-contracts/V1-G6B-EDITING-PROACTIVE-UI-20260903.md + task-contracts/V1-G6C-EDITING-REPAIR-ROUTING-20260903.md + task-contracts/V1-G6D-EDITING-SUGGESTION-APPLY-20260903.md | COMPLETE |
-| G7 统一主链 E2E 与 current-HEAD 双路径真实 Provider Golden | task-contracts/V1-G7A-MAINCHAIN-E2E-20260903.md + task-contracts/V1-G7B-CURRENT-HEAD-GOLDEN-20260903.md + task-contracts/V1-G7D-DUAL-PATH-FINAL-FILM-20260903.md | COMPLETE |
-| G8 Current-HEAD Release Candidate Gate 与 source/image/evidence 绑定 | task-contracts/V1-G8-RELEASE-GATE-20260903.md | COMPLETE |
+| G7 统一主链 E2E 与 current-HEAD 双路径真实 Provider Golden | task-contracts/V1-G7A-MAINCHAIN-E2E-20260903.md + task-contracts/V1-G7B-CURRENT-HEAD-GOLDEN-20260903.md + task-contracts/V1-G7D-DUAL-PATH-FINAL-FILM-20260903.md + task-contracts/V1-G7E-FINAL-FILM-ASYNC-TIMELINE-20260903.md | IN PROGRESS |
+| G8 Current-HEAD Release Candidate Gate 与 source/image/evidence 绑定 | task-contracts/V1-G8-RELEASE-GATE-20260903.md | IN PROGRESS |

@@ -1936,6 +1936,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/final-film/runs/{node_run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Final Film Run Status */
+        get: operations["get_final_film_run_status_api_v1_projects__project_id__final_film_runs__node_run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/workflow-state": {
         parameters: {
             query?: never;
@@ -3368,6 +3385,41 @@ export interface components {
             /** Job Ids */
             job_ids: string[];
         };
+        /** FinalFilmJobRead */
+        FinalFilmJobRead: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Timeline Version */
+            timeline_version: number;
+            /**
+             * Node Run Id
+             * Format: uuid
+             */
+            node_run_id: string;
+            /** Attempt No */
+            attempt_no: number;
+            /** Status */
+            status: string;
+            /** Job Id */
+            job_id?: string | null;
+            /** Export Id */
+            export_id?: string | null;
+            /** Artifact Id */
+            artifact_id?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Summary */
+            error_summary?: string | null;
+            result?: components["schemas"]["FinalFilmRead"] | null;
+        };
         /** FinalFilmPrepareBody */
         FinalFilmPrepareBody: {
             /**
@@ -3472,6 +3524,10 @@ export interface components {
             idempotency_key?: string | null;
             /** Ffprobe */
             ffprobe?: {
+                [key: string]: unknown;
+            } | null;
+            /** Render Summary */
+            render_summary?: {
                 [key: string]: unknown;
             } | null;
         };
@@ -10792,12 +10848,50 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinalFilmJobRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_final_film_run_status_api_v1_projects__project_id__final_film_runs__node_run_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                node_run_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FinalFilmRead"];
+                    "application/json": components["schemas"]["FinalFilmJobRead"];
                 };
             };
             /** @description Validation Error */

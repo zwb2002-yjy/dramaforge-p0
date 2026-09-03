@@ -599,6 +599,42 @@ def _render_final_film_concurrently(
         return list(executor.map(submit, (1, 2)))
 
 
+def _wait_for_final_film_job(
+    client: httpx.Client,
+    *,
+    project_id: str,
+    node_run_id: str,
+    timeout_seconds: int,
+    headers: Mapping[str, str],
+) -> dict[str, Any]:
+    terminal_success = {"completed", "cached", "completed_after_cancel"}
+    terminal_failure = {"failed", "blocked", "cancelled"}
+    deadline = time.monotonic() + timeout_seconds
+    last: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        last = require_ok(
+            client.get(
+                f"/projects/{project_id}/final-film/runs/{node_run_id}",
+                headers=headers,
+            ),
+            "Final Film status",
+        )
+        status = str(last.get("status") or "")
+        if status in terminal_failure:
+            raise RuntimeError(
+                "Final Film Worker failed: "
+                + json.dumps(last, ensure_ascii=False, default=str)
+            )
+        result = last.get("result")
+        if status in terminal_success and isinstance(result, dict):
+            return result
+        time.sleep(3)
+    raise TimeoutError(
+        f"timed out waiting for Final Film NodeRun {node_run_id}; "
+        f"last={json.dumps(last, ensure_ascii=False, default=str)}"
+    )
+
+
 def run_full_project_chain(
     client: httpx.Client,
     *,
@@ -607,6 +643,7 @@ def run_full_project_chain(
     timeout: int,
     label: str,
     imported: dict[str, Any] | None = None,
+    evidence_dir: Path | None = None,
 ) -> dict[str, Any]:
     project_id = str(project["id"])
     if imported is None:
@@ -726,6 +763,29 @@ def run_full_project_chain(
         ),
         f"create {label} edit session",
     )
+    timeline = dict(edit_session.get("timeline") or {})
+    timeline_clips = timeline.get("clips")
+    if not isinstance(timeline_clips, list) or len(timeline_clips) != len(shot_ids):
+        raise RuntimeError(f"{label} EditSession timeline is not aligned with its shots")
+    for index, raw_clip in enumerate(timeline_clips):
+        if not isinstance(raw_clip, dict):
+            raise RuntimeError(f"{label} EditSession timeline clip is invalid")
+        raw_clip["source_in_seconds"] = 0.02
+        raw_clip["duration_seconds"] = 5.02
+        raw_clip["subtitle"] = f"{label} Timeline subtitle {index + 1}"
+        raw_clip["transition"] = (
+            {"kind": "crossfade", "duration_seconds": 0.02}
+            if index > 0
+            else {"kind": "cut"}
+        )
+    edit_session = require_ok(
+        client.patch(
+            f"/projects/{project_id}/edit-sessions/{edit_session['id']}/timeline",
+            headers=headers,
+            json={"timeline": timeline},
+        ),
+        f"save {label} edited Timeline",
+    )
     edit_export = require_ok(
         client.get(
             f"/projects/{project_id}/edit-sessions/{edit_session['id']}/export",
@@ -768,10 +828,28 @@ def run_full_project_chain(
         headers=headers,
         idempotency_key=idempotency_key,
     )
-    first_render = render_results[0]
+    node_run_ids = {str(item.get("node_run_id") or "") for item in render_results}
+    if len(node_run_ids) != 1 or "" in node_run_ids:
+        raise RuntimeError(
+            f"{label} concurrent render requests did not share one NodeRun: {render_results}"
+        )
+    first_render = _wait_for_final_film_job(
+        client,
+        project_id=project_id,
+        node_run_id=next(iter(node_run_ids)),
+        timeout_seconds=timeout,
+        headers=headers,
+    )
     idempotency = {
-        "same_export_id": all(item.get("export_id") == first_render.get("export_id") for item in render_results),
-        "same_artifact_id": all(item.get("artifact_id") == first_render.get("artifact_id") for item in render_results),
+        "same_node_run_id": True,
+        "same_export_id": all(
+            item.get("export_id") in {None, first_render.get("export_id")}
+            for item in render_results
+        ),
+        "same_artifact_id": all(
+            item.get("artifact_id") in {None, first_render.get("artifact_id")}
+            for item in render_results
+        ),
         "request_count": len(render_results),
         "concurrent": True,
         "export_id": first_render.get("export_id"),
@@ -793,6 +871,11 @@ def run_full_project_chain(
     assertions = probe.get("assertions") if isinstance(probe, dict) else None
     if not isinstance(assertions, dict) or not all(assertions.values()):
         raise RuntimeError(f"{label} Final Film media assertions failed: {assertions}")
+    render_summary = first_render.get("render_summary")
+    if not isinstance(render_summary, dict) or render_summary.get("timeline_renderer") != "ffmpeg-v2":
+        raise RuntimeError(f"{label} Final Film did not report Timeline rendering: {render_summary}")
+    if render_summary.get("clip_count") != len(shot_ids):
+        raise RuntimeError(f"{label} Final Film rendered clip count mismatch: {render_summary}")
     duration = float(first_render.get("duration_seconds") or 0)
     if not 15 <= duration <= 30:
         raise RuntimeError(f"{label} Final Film duration is outside 15-30 seconds: {duration}")
@@ -801,6 +884,27 @@ def run_full_project_chain(
     formal_references = first_render.get("formal_references")
     if not isinstance(formal_references, list) or len(formal_references) != len(shot_ids):
         raise RuntimeError(f"{label} Final Film Formal reference lineage is incomplete")
+    if evidence_dir is not None:
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        content_response = client.get(
+            f"/projects/{project_id}/artifacts/{first_render['artifact_id']}/content",
+            headers=headers,
+        )
+        if content_response.is_error:
+            raise RuntimeError(
+                f"download {label} Final Film failed: {request_error(content_response)}"
+            )
+        content = content_response.content
+        if not content:
+            raise RuntimeError(f"{label} Final Film download returned no bytes")
+        evidence_path = evidence_dir / f"{label}-final-film.mp4"
+        evidence_path.write_bytes(content)
+        first_render["evidence_file"] = evidence_path.name
+        first_render["evidence_mime_type"] = content_response.headers.get(
+            "content-type", "video/mp4"
+        ).split(";", 1)[0]
+        first_render["evidence_byte_size"] = len(content)
+        first_render["evidence_sha256"] = hashlib.sha256(content).hexdigest()
     media_freeze = [
         {
             "shot_id": (run.get("input_snapshot") or {}).get("shot_id"),
@@ -1049,6 +1153,7 @@ def main() -> int:
                         timeout=args.timeout,
                         label=label,
                         imported=imported_by_label[label],
+                        evidence_dir=args.out.parent / f"{args.out.stem}-media",
                     )
                     result["full_real_chain"] = True
                     report["projects"][label] = result
