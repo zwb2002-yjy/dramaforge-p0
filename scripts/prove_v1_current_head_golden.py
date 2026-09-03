@@ -10,10 +10,12 @@ request/result metadata; credentials, signed URLs and raw Provider payloads
 are never written.
 """
 
+# Long lines inside the embedded acceptance screenplay are intentional.
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -22,6 +24,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any

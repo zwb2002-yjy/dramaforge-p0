@@ -295,3 +295,53 @@ real Golden ran, and no runtime commit followed the Release Candidate Gate.
 
 `GOAL_READY_FOR_OWNER_MERGE`.  Only final independent Owner review and
 `dev → main` merge of PR #12 remain; the Agent does not approve or merge it.
+
+---
+
+## Review follow-up — Final Film async Timeline candidate (`94b5c2d`)
+
+This section supersedes the earlier `06dd369` Final Film evidence for the
+review findings listed in the Owner decision. The runtime was rebuilt from a
+clean `94b5c2db37baaa57caa3ccdb5f5a86283a9ede67` checkout; API health,
+Dispatcher, default Worker, and heavy Worker all reported that exact source
+commit.
+
+### Review-driven implementation
+
+- Final Film now snapshots the full EditSession Timeline and renders each
+  clip's source in/duration, subtitle override, selected/default dialogue
+  audio, optional music, and cut/crossfade transition in
+  `timeline_renderer.py`; it no longer concatenates whole Composite files.
+- The HTTP route creates a queued project-level NodeRun and uses the existing
+  `NodeRunScheduler` Outbox → commit → Arq boundary. FFmpeg, object storage,
+  ProviderOperation, Export, and ExportItem work is Worker-only.
+- Attempts are computed per Final Film graph node. A failed run can be retried
+  with the same external idempotency key; a queued/running run is singleflight,
+  and a different request under the same key is rejected.
+- Editing waits for the prepared tail and Final Film status endpoint, blocks
+  export while the Timeline draft is dirty, and exposes the completed Artifact
+  as a player plus MP4 download link.
+
+### Verification
+
+| Gate | Result |
+|---|---|
+| Backend quality image | PASS — Ruff, Mypy, 883 unit tests, Postgres migration/check, 17 integration tests, OpenAPI export |
+| Frontend quality image | PASS — API check, Prettier, ESLint, typecheck, 108 unit tests, build, 15 Playwright tests |
+| Real dual-path Golden | PASS — `ok=true`, `dirty=false`, 12 paid Agnes calls; both paths have 3 shots and 15.146s Final Film |
+| Final Film media | PASS — two downloadable MP4s, 704×1280, H.264/AAC; ffprobe and persisted assertions include burned subtitles, dialogue audio, and applied Timeline edits |
+| Final Film idempotency | PASS — concurrent requests share one NodeRun, Export, and Artifact |
+
+### Downloadable evidence
+
+- [Golden JSON](evidence/v1-current-head/golden-current-94b5c2d.json) —
+  SHA-256 `6b17c344f4967da3de63b04c0137cef4fc4660ca42e3a10694d794c2aedad23c`.
+- [Template + AUTO Final Film MP4](evidence/v1-current-head/template_auto-final-film.mp4) —
+  SHA-256 `bde01df1a9f84caa7534b3595062dd673833439af7c28b2667ba591faee49050`.
+- [Free + ASSIST Final Film MP4](evidence/v1-current-head/free_assist-final-film.mp4) —
+  SHA-256 `766527a32607ecf5fc5a291fcde7216997deafc234ecf3e4b37b859cb3a1d0ce`.
+
+The Release Candidate workflow uploads this evidence directory as a separate
+downloadable artifact for `[release-candidate]` pushes. The final verdict
+remains blocked until that workflow, CI, Security, and Release Candidate Gate
+are green on the final pushed HEAD.

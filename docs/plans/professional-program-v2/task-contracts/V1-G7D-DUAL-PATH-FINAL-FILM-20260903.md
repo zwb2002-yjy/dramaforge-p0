@@ -23,11 +23,21 @@
 
 ## Evidence after freeze
 
-- real run JSON：`backend/tmp/golden-current-06dd369.json`，SHA-256
-  `bffafbae6976b34dc9fff02d2ec00cdc40e4002ab60923d750ae73e7e9ed01e2`；
-  `source_commit=06dd369`、`dirty=false`、`ok=true`；
-- Template+AUTO 与 Free+ASSIST 各 3 shots，真实 Agnes keyframe/video 共 12 次；
-- 两条 Final Film 均为 15.233s、`video/mp4`、H.264/AAC、dialogue audio、
-  burned subtitles；两条并发 render 均证明相同 Export/Artifact；
-- negative probes fail closed（409/422、无新增 NodeRun）；resilience 49 tests
-  passed；执行 identity 的 connection/credential revision 全部冻结。
+The prior `06dd369` evidence is superseded by the review-follow-up run. The
+new clean runtime execution commit is
+`94b5c2db37baaa57caa3ccdb5f5a86283a9ede67`; its evidence is kept under
+`docs/reviews/evidence/v1-current-head/` and uploaded by the Release Candidate
+workflow for `[release-candidate]` pushes.
+
+- Golden JSON: `golden-current-94b5c2d.json`, SHA-256
+  `6b17c344f4967da3de63b04c0137cef4fc4660ca42e3a10694d794c2aedad23c`；
+  `source_commit=94b5c2d…`、`dirty=false`、`ok=true`；
+- Template+AUTO and Free+ASSIST each completed 3 shots and the same full
+  Formal → Tail → Final Film chain, with 12 paid Agnes calls total；
+- both Final Films are 15.146s `video/mp4` H.264/AAC with dialogue audio,
+  burned Timeline subtitles, trim, subtitle override, and crossfade evidence；
+- concurrent Final Film requests share one queued Worker NodeRun, Export, and
+  Artifact; failed retries use the next `attempt_no` and same external key.
+
+The final gate remains blocked until CI, Security, and Release Candidate all
+report this evidence on the final pushed HEAD.

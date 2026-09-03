@@ -221,12 +221,8 @@ async def _assemble_segments(
             )
             current_duration += clips[index].duration_seconds - duration
         else:
-            filters.append(
-                f"[{current_video}][v{index}]concat=n=2:v=1:a=0[{next_video}]"
-            )
-            filters.append(
-                f"[{current_audio}][a{index}]concat=n=2:v=0:a=1[{next_audio}]"
-            )
+            filters.append(f"[{current_video}][v{index}]concat=n=2:v=1:a=0[{next_video}]")
+            filters.append(f"[{current_audio}][a{index}]concat=n=2:v=0:a=1[{next_audio}]")
             current_duration += clips[index].duration_seconds
         current_video = next_video
         current_audio = next_audio

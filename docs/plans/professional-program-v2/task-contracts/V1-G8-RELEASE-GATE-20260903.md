@@ -37,3 +37,13 @@
   `sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea`。
 - Non-tag publish/attestation/release steps were skipped by the gate as required;
   no production release was created.
+
+## Review follow-up candidate
+
+The old `06dd369` gate is superseded. The review-follow-up runtime was verified
+from clean commit `94b5c2db37baaa57caa3ccdb5f5a86283a9ede67`; its sanitized
+Golden JSON and two playable Final Film MP4s are now stored under
+`docs/reviews/evidence/v1-current-head/`. The Release workflow now uploads that
+directory as a dedicated `v1-current-head-golden-<commit>` artifact on the
+candidate push. This contract remains `IN PROGRESS` until CI, Security, and
+Release Candidate checks are green on the final pushed HEAD.
