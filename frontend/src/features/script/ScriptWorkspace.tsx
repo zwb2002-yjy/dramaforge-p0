@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { queryKeys } from "../../lib/queryKeys";
 import {
   applyStoryProposal,
   createStoryProposal,
@@ -42,14 +43,14 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
   const [applyMessage, setApplyMessage] = useState<string | null>(null);
 
   const workspace = useQuery({
-    queryKey: ["script-workspace", projectId],
+    queryKey: queryKeys.script.workspace(projectId),
     queryFn: () => fetchScriptWorkspace(projectId),
     enabled: Boolean(projectId) && projectId !== "demo",
   });
   const data = workspace.data as ScriptWorkspaceRead | undefined;
 
   const invalidateScript = () => {
-    void queryClient.invalidateQueries({ queryKey: ["script-workspace", projectId] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.script.workspace(projectId) });
   };
 
   const createMut = useMutation({

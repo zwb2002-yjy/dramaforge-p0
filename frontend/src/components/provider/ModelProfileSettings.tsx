@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
+import { queryKeys } from "../../lib/queryKeys";
+
 import {
   getEffectiveBindings,
   getProjectModelProfile,
@@ -33,25 +35,25 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
   const [error, setError] = useState<string | null>(null);
 
   const slots = useQuery({
-    queryKey: ["model-slots"],
+    queryKey: queryKeys.model.slots(),
     queryFn: listModelSlots,
     enabled: Boolean(workspaceId),
   });
 
   const models = useQuery({
-    queryKey: ["models"],
+    queryKey: queryKeys.model.catalog(),
     queryFn: () => listModels(),
     enabled: Boolean(workspaceId),
   });
 
   const effective = useQuery({
-    queryKey: ["model-bindings-effective", projectId],
+    queryKey: queryKeys.model.effectiveBindings(projectId),
     queryFn: () => getEffectiveBindings(projectId),
     enabled: Boolean(workspaceId),
   });
 
   const projectProfile = useQuery({
-    queryKey: ["project-model-profile", projectId],
+    queryKey: queryKeys.model.projectProfile(projectId),
     queryFn: () => getProjectModelProfile(projectId),
     enabled: Boolean(workspaceId),
     retry: false,
@@ -87,7 +89,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
       putProjectModelProfile(projectId, { bindings }),
     onSuccess: (profile: ModelProfileRead) => {
       queryClient.setQueryData(["project-model-profile", projectId], profile);
-      queryClient.invalidateQueries({ queryKey: ["model-bindings-effective", projectId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.model.effectiveBindings(projectId) });
       setMessage(
         `已保存（版本 ${profile.version}）。修改只影响后续生成，运行中的镜头不会自动换模型。`,
       );

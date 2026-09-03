@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { queryKeys } from "../../lib/queryKeys";
 import {
   artifactContentUrl,
   fetchOpenCutManifest,
@@ -217,12 +218,12 @@ export function EditingWorkspace({
 
   const hasSession = Boolean(sessionId);
   const manifest = useQuery({
-    queryKey: ["opencut-manifest", projectId],
+    queryKey: queryKeys.production.opencutManifest(projectId),
     queryFn: () => fetchOpenCutManifest(projectId),
     enabled: Boolean(projectId) && projectId !== "demo" && !hasSession,
   });
   const persistedSession = useQuery({
-    queryKey: ["edit-session", projectId, sessionId],
+    queryKey: queryKeys.editing.session(projectId, sessionId),
     queryFn: () => fetchEditSession(projectId, sessionId!),
     enabled: Boolean(projectId) && projectId !== "demo" && hasSession,
   });

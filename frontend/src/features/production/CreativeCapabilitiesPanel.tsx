@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { queryKeys } from "../../lib/queryKeys";
 import { fetchCreativeProvenance, freezeCreativeCapabilities } from "./workflow-api";
 
 const GENRES = [
@@ -82,7 +83,7 @@ export function CreativeCapabilitiesPanel({
 
   const targetId = shotId ?? sceneId ?? null;
   const provenance = useQuery({
-    queryKey: ["creative-provenance", projectId, targetId],
+    queryKey: queryKeys.production.provenance(projectId, targetId),
     queryFn: () =>
       fetchCreativeProvenance(projectId, {
         shot_id: shotId ?? undefined,
@@ -105,7 +106,7 @@ export function CreativeCapabilitiesPanel({
       }),
     onSuccess: () => {
       setMsg("已冻结创意能力与 provenance。");
-      void qc.invalidateQueries({ queryKey: ["creative-provenance", projectId, targetId] });
+      void qc.invalidateQueries({ queryKey: queryKeys.production.provenance(projectId, targetId) });
     },
     onError: (e: Error) => setMsg(`冻结失败：${e.message}`),
   });

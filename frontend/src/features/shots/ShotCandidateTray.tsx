@@ -2,8 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { artifactContentUrl } from "../../lib/api";
+import { queryKeys } from "../../lib/queryKeys";
 import {
-  SHOT_PRODUCTION_TRACE_QUERY_KEY,
   setShotFormalKeyframe,
   setShotFormalVideo,
   type FormalKeyframeRead,
@@ -89,16 +89,16 @@ export function ShotCandidateTray({
       // formal id is manufactured; the follow-up workspace read is the truth.
       await Promise.all([
         queryClient.invalidateQueries({
-          queryKey: ["scene-workspace", projectId, shot?.scene_id],
+          queryKey: queryKeys.scene.workspace(projectId, shot?.scene_id),
         }),
         queryClient.invalidateQueries({
-          queryKey: ["scene-summaries", projectId],
+          queryKey: queryKeys.scene.summaries(projectId),
         }),
         queryClient.invalidateQueries({
-          queryKey: [SHOT_PRODUCTION_TRACE_QUERY_KEY, projectId, shot?.id],
+          queryKey: queryKeys.shot.productionTrace(projectId, shot?.id),
         }),
         queryClient.invalidateQueries({
-          queryKey: ["shot-workbench", projectId, shot?.id],
+          queryKey: queryKeys.shot.workbench(projectId, shot?.id),
         }),
       ]);
       await onConfirmed?.(result);

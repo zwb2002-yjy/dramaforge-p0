@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { queryKeys } from "../../lib/queryKeys";
 import {
   fetchWorkflowOverview,
   type SceneWorkflowViewRead,
@@ -114,7 +115,7 @@ export type WorkflowNavigatorProps = {
  */
 export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
   const overview = useQuery({
-    queryKey: ["workflow-overview", projectId],
+    queryKey: queryKeys.production.workflowOverview(projectId),
     queryFn: () => fetchWorkflowOverview(projectId),
     enabled: Boolean(projectId) && projectId !== "demo",
   });

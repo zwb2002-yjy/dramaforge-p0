@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { artifactContentUrl } from "../../lib/api";
+import { queryKeys } from "../../lib/queryKeys";
 import { copyScene, fetchScenes, reorderScene, type SceneSummary } from "./api";
 
 type SceneStoryboardWallProps = {
@@ -16,13 +17,13 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   const queryClient = useQueryClient();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const scenes = useQuery({
-    queryKey: ["scene-summaries", projectId],
+    queryKey: queryKeys.scene.summaries(projectId),
     queryFn: () => fetchScenes(projectId),
     enabled: Boolean(projectId) && projectId !== "demo",
   });
 
   const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ["scene-summaries", projectId] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scene.summaries(projectId) });
   };
   const copy = useMutation({
     mutationFn: (sceneId: string) => copyScene(projectId, sceneId),

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { apiGet, type AssetRead } from "../../lib/api";
+import { queryKeys } from "../../lib/queryKeys";
 import {
   createAssetCandidate,
   fetchAssetCard,
@@ -69,7 +70,7 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
   const [tagFilter, setTagFilter] = useState("");
 
   const assets = useQuery({
-    queryKey: ["project-assets", projectId, kindFilter, statusFilter, nameFilter, tagFilter],
+    queryKey: queryKeys.asset.list(projectId, kindFilter, statusFilter, nameFilter, tagFilter),
     queryFn: () =>
       fetchAssetsFiltered(projectId, {
         kind: kindFilter,
@@ -79,13 +80,13 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
       }),
   });
   const tags = useQuery({
-    queryKey: ["asset-tags", projectId],
+    queryKey: queryKeys.asset.tags(projectId),
     queryFn: () => fetchAssetTags(projectId),
   });
 
   const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ["project-assets", projectId] });
-    void queryClient.invalidateQueries({ queryKey: ["asset-tags", projectId] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.asset.tags(projectId) });
   };
 
   const recycle = useMutation({
@@ -276,12 +277,12 @@ function VersionControls({
   const [showVersions, setShowVersions] = useState(false);
   const [candidateName, setCandidateName] = useState("");
   const versions = useQuery({
-    queryKey: ["asset-versions", projectId, asset.id],
+    queryKey: queryKeys.asset.versions(projectId, asset.id),
     queryFn: () => fetchAssetVersions(projectId, asset.id),
     enabled: showVersions,
   });
   const card = useQuery({
-    queryKey: ["asset-card", projectId, asset.id],
+    queryKey: queryKeys.asset.card(projectId, asset.id),
     queryFn: () => fetchAssetCard(projectId, asset.id),
     enabled: showVersions,
   });

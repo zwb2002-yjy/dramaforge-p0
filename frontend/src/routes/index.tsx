@@ -19,6 +19,7 @@ import {
   setSelectedWorkspaceId as persistSelectedWorkspaceId,
   type WorkspaceRead,
 } from "../lib/api";
+import { queryKeys } from "../lib/queryKeys";
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
 import { ProjectLobbyShell } from "../components/workstation/ProjectLobbyShell";
 import { rootRoute } from "./__root";
@@ -38,23 +39,23 @@ function HomePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const health = useQuery({
-    queryKey: ["health"],
+    queryKey: queryKeys.health(),
     queryFn: fetchHealth,
     refetchInterval: 8_000,
     retry: 1,
   });
   const bootstrapStatus = useQuery({
-    queryKey: ["bootstrap-status"],
+    queryKey: queryKeys.auth.bootstrap(),
     queryFn: fetchBootstrapStatus,
     retry: 1,
   });
   const currentUser = useQuery({
-    queryKey: ["current-user"],
+    queryKey: queryKeys.auth.currentUser(),
     queryFn: fetchCurrentUser,
     retry: false,
   });
   const workspaces = useQuery({
-    queryKey: ["workspaces"],
+    queryKey: queryKeys.workspace.list(),
     queryFn: listWorkspaces,
     enabled: Boolean(currentUser.data),
   });
@@ -93,7 +94,7 @@ function HomePage() {
   }, [selectedWorkspaceId]);
 
   const projects = useQuery({
-    queryKey: ["workspace-projects", selectedWorkspaceId],
+    queryKey: queryKeys.workspace.projects(selectedWorkspaceId),
     queryFn: () => listWorkspaceProjects(selectedWorkspaceId!),
     enabled: Boolean(
       currentUser.data &&
@@ -103,8 +104,8 @@ function HomePage() {
   });
 
   const invalidateWorkspaceData = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
-    await queryClient.invalidateQueries({ queryKey: ["workspace-projects"] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.workspace.list() });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.workspace.projectsRoot() });
   };
 
   const authenticate = useMutation({
@@ -114,13 +115,13 @@ function HomePage() {
       // new session is being established.
       selectWorkspace(null);
       await Promise.all([
-        queryClient.cancelQueries({ queryKey: ["current-user"] }),
-        queryClient.cancelQueries({ queryKey: ["workspaces"] }),
-        queryClient.cancelQueries({ queryKey: ["workspace-projects"] }),
+        queryClient.cancelQueries({ queryKey: queryKeys.auth.currentUser() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.workspace.list() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.workspace.projectsRoot() }),
       ]);
-      queryClient.removeQueries({ queryKey: ["current-user"] });
-      queryClient.removeQueries({ queryKey: ["workspaces"] });
-      queryClient.removeQueries({ queryKey: ["workspace-projects"] });
+      queryClient.removeQueries({ queryKey: queryKeys.auth.currentUser() });
+      queryClient.removeQueries({ queryKey: queryKeys.workspace.list() });
+      queryClient.removeQueries({ queryKey: queryKeys.workspace.projectsRoot() });
     },
     mutationFn: async (mode: "login" | "register") => {
       setError(null);
@@ -128,9 +129,9 @@ function HomePage() {
       return loginUser(email, password);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["current-user"] });
-      await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
-      await queryClient.invalidateQueries({ queryKey: ["bootstrap-status"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.auth.currentUser() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.workspace.list() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.auth.bootstrap() });
     },
     onError: (cause: Error) => {
       if (cause instanceof ApiError && cause.status === 401) {

@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { queryKeys } from "../../lib/queryKeys";
 import {
   createShotExecution,
-  SHOT_PRODUCTION_TRACE_QUERY_KEY,
   type ShotExecutionRead,
   type ShotExecutionStage,
   type ShotExecutionReference,
@@ -127,16 +127,16 @@ export function ShotProductionActions({
       // later navigation cannot display stale production state.
       await Promise.all([
         queryClient.invalidateQueries({
-          queryKey: ["scene-workspace", projectId, shot.scene_id],
+          queryKey: queryKeys.scene.workspace(projectId, shot.scene_id),
         }),
         queryClient.invalidateQueries({
-          queryKey: ["scene-summaries", projectId],
+          queryKey: queryKeys.scene.summaries(projectId),
         }),
         queryClient.invalidateQueries({
-          queryKey: [SHOT_PRODUCTION_TRACE_QUERY_KEY, projectId, shot.id],
+          queryKey: queryKeys.shot.productionTrace(projectId, shot.id),
         }),
         queryClient.invalidateQueries({
-          queryKey: ["shot-workbench", projectId, shot.id],
+          queryKey: queryKeys.shot.workbench(projectId, shot.id),
         }),
       ]);
       await onExecuted?.(result);

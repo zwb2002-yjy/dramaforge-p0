@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchProjectAssets } from "../../lib/api";
+import { queryKeys } from "../../lib/queryKeys";
 import {
   createShotReference,
   deleteShotReference,
@@ -57,12 +58,12 @@ export function AssetReferencePicker({
   const [resolvedReferences, setResolvedReferences] = useState<ResolvedReferenceRead[]>([]);
 
   const assets = useQuery({
-    queryKey: ["picker-assets", projectId],
+    queryKey: queryKeys.asset.picker(projectId),
     queryFn: () => fetchProjectAssets(projectId),
     enabled: Boolean(projectId) && projectId !== "demo",
   });
   const bindings = useQuery({
-    queryKey: ["shot-references", projectId, shotId],
+    queryKey: queryKeys.asset.shotReferences(projectId, shotId),
     queryFn: () => fetchShotReferences(projectId, shotId),
     enabled: Boolean(shotId) && shotId !== "demo",
   });
@@ -72,12 +73,12 @@ export function AssetReferencePicker({
   // Shot immediately receives its persisted references without requiring a
   // second manual click.
   const resolution = useQuery({
-    queryKey: ["shot-reference-resolution", projectId, shotId],
+    queryKey: queryKeys.asset.referenceResolution(projectId, shotId),
     queryFn: () => resolveShotReferences(projectId, shotId),
     enabled: Boolean(projectId) && Boolean(shotId) && shotId !== "demo",
   });
 
-  const resolutionQueryKey = ["shot-reference-resolution", projectId, shotId] as const;
+  const resolutionQueryKey = queryKeys.asset.referenceResolution(projectId, shotId);
 
   const clearResolvedReferences = () => {
     setResolvedReferences([]);
@@ -87,7 +88,7 @@ export function AssetReferencePicker({
 
   const invalidate = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["shot-references", projectId, shotId] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.asset.shotReferences(projectId, shotId) }),
       queryClient.invalidateQueries({ queryKey: resolutionQueryKey }),
     ]);
   };

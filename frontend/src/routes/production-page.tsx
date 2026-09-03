@@ -29,6 +29,7 @@ import {
   updateShotCanvas,
 } from "../lib/api";
 import type { ProjectSnapshot } from "../lib/api";
+import { queryKeys } from "../lib/queryKeys";
 import { zhNode } from "../lib/zh";
 
 const NODES = [
@@ -94,18 +95,18 @@ export function ProductionPage({ projectId }: { projectId: string }) {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
 
   const snapshot = useQuery({
-    queryKey: ["snapshot", projectId],
+    queryKey: queryKeys.production.snapshot(projectId),
     queryFn: () => fetchSnapshot(projectId),
     enabled: projectId !== "demo",
     refetchInterval: 4000,
   });
   const shots = useQuery({
-    queryKey: ["shots", projectId],
+    queryKey: queryKeys.shot.list(projectId),
     queryFn: () => fetchProjectShots(projectId),
     enabled: projectId !== "demo",
   });
   const scenes = useQuery({
-    queryKey: ["scenes", projectId],
+    queryKey: queryKeys.scene.list(projectId),
     queryFn: () => fetchScenes(projectId),
     enabled: projectId !== "demo",
   });
@@ -114,36 +115,36 @@ export function ProductionPage({ projectId }: { projectId: string }) {
   const selectedShot = (shots.data ?? []).find((s) => s.id === revisionShotId) ?? null;
   const selectedSceneId = selectedShot?.scene_id ?? null;
   const projectAssets = useQuery({
-    queryKey: ["project-assets", projectId],
+    queryKey: queryKeys.asset.root(projectId),
     queryFn: () => fetchProjectAssets(projectId),
     enabled: projectId !== "demo",
   });
   const experiments = useQuery({
-    queryKey: ["experiments", projectId],
+    queryKey: queryKeys.experiment.list(projectId),
     queryFn: () => fetchExperiments(projectId),
     enabled: projectId !== "demo",
   });
   const directorBoard = useQuery({
-    queryKey: ["director-board", projectId, revisionShotId],
+    queryKey: queryKeys.director.board(projectId, revisionShotId),
     queryFn: () => fetchDirectorBoard(projectId, revisionShotId!),
     enabled: projectId !== "demo" && Boolean(revisionShotId),
   });
   const reviewAnnotations = useQuery({
-    queryKey: ["review-annotations", projectId, revisionShotId],
+    queryKey: queryKeys.review.annotations(projectId, revisionShotId),
     queryFn: () => fetchReviewAnnotations(projectId, revisionShotId!),
     enabled: projectId !== "demo" && Boolean(revisionShotId),
   });
   const availableModels = useQuery({
-    queryKey: ["models"],
+    queryKey: queryKeys.model.catalog(),
     queryFn: () => listModels(),
   });
   const openCutManifest = useQuery({
-    queryKey: ["opencut-manifest", projectId],
+    queryKey: queryKeys.production.opencutManifest(projectId),
     queryFn: () => fetchOpenCutManifest(projectId),
     enabled: projectId !== "demo",
   });
   const canvasRevisions = useQuery({
-    queryKey: ["canvas-revisions", projectId, revisionShotId],
+    queryKey: queryKeys.production.canvasRevisions(projectId, revisionShotId),
     queryFn: () => fetchShotCanvasRevisions(projectId, revisionShotId!),
     enabled: projectId !== "demo" && Boolean(revisionShotId),
   });
@@ -161,8 +162,8 @@ export function ProductionPage({ projectId }: { projectId: string }) {
     try {
       const r = await fn();
       setMsg(`${label}: ${r.status} — ${r.message}`);
-      await qc.invalidateQueries({ queryKey: ["shots", projectId] });
-      await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
+      await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
+      await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
     }
@@ -224,7 +225,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             metadata: { tags: input.tags },
             status: "active",
           });
-          await qc.invalidateQueries({ queryKey: ["project-assets", projectId] });
+          await qc.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
         }}
         onUpdateAsset={async (asset, input) => {
           await updateProjectAsset(projectId, asset.id, {
@@ -235,7 +236,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             metadata: asset.metadata,
             status: input.status,
           });
-          await qc.invalidateQueries({ queryKey: ["project-assets", projectId] });
+          await qc.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
         }}
         onCreateExperiment={async (input) => {
           await createExperiment(projectId, {
@@ -245,24 +246,24 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             selected_model: input.selected_model,
             parameters: { target_node_key: "video" },
           });
-          await qc.invalidateQueries({ queryKey: ["experiments", projectId] });
+          await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
         }}
         onStartExperiment={async (experimentId, targetNodeKey) => {
           await startExperiment(projectId, experimentId, targetNodeKey);
-          await qc.invalidateQueries({ queryKey: ["experiments", projectId] });
-          await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
+          await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
+          await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
         }}
         onDecideExperiment={async (experimentId, input) => {
           await decideExperiment(projectId, experimentId, input);
-          await qc.invalidateQueries({ queryKey: ["experiments", projectId] });
-          await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
-          await qc.invalidateQueries({ queryKey: ["shots", projectId] });
+          await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
+          await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
+          await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
         }}
         onCreateAnnotation={async (input) => {
           if (!revisionShotId) return;
           await createReviewAnnotation(projectId, revisionShotId, input);
           await qc.invalidateQueries({
-            queryKey: ["review-annotations", projectId, revisionShotId],
+            queryKey: queryKeys.review.annotations(projectId, revisionShotId),
           });
         }}
         onSaveDirectorBoard={async (input) => {
@@ -271,7 +272,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             expected_version: directorBoard.data?.version ?? null,
             ...input,
           });
-          await qc.invalidateQueries({ queryKey: ["director-board", projectId, revisionShotId] });
+          await qc.invalidateQueries({ queryKey: queryKeys.director.board(projectId, revisionShotId) });
         }}
         onStart={(shotId) =>
           void runShotOp(
@@ -337,9 +338,9 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             duration_seconds: input.duration_seconds,
             source: "user",
           });
-          await qc.invalidateQueries({ queryKey: ["shots", projectId] });
-          await qc.invalidateQueries({ queryKey: ["snapshot", projectId] });
-          await qc.invalidateQueries({ queryKey: ["canvas-revisions", projectId, shot.id] });
+          await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
+          await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
+          await qc.invalidateQueries({ queryKey: queryKeys.production.canvasRevisions(projectId, shot.id) });
           return result;
         }}
         onPropose={async (shot, input) =>

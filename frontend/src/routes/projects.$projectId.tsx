@@ -8,6 +8,7 @@ import { CreativeAutonomySwitcher } from "../features/project/CreativeAutonomySw
 import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
 import { ApiError, fetchProject, getSelectedWorkspaceId, type ProjectRead } from "../lib/api";
 import { rootRoute } from "./__root";
+import { queryKeys } from "../lib/queryKeys";
 
 export const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -105,7 +106,7 @@ function ProjectLayout() {
   const atRoot = view === null;
   const ws = useProjectWorkspaceState(projectId);
   const project = useQuery({
-    queryKey: ["project", projectId],
+    queryKey: queryKeys.project.detail(projectId),
     queryFn: async () => {
       try {
         return await fetchProject(projectId);

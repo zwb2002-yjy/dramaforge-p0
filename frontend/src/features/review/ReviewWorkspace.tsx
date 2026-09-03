@@ -8,6 +8,7 @@ import {
   fetchReviewAnnotations,
   type ReviewAnnotationRead,
 } from "../../lib/api";
+import { queryKeys } from "../../lib/queryKeys";
 import { fetchShotWorkbench } from "../shots/api";
 import { MediaReviewCanvas, type NormalizedRegion } from "./MediaReviewCanvas";
 import { VideoReviewTimeline, type VideoAnnotation } from "./VideoReviewTimeline";
@@ -48,18 +49,18 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const shots = useQuery({
-    queryKey: ["review-shots", projectId],
+    queryKey: queryKeys.shot.review(projectId),
     queryFn: () => fetchProjectShots(projectId),
     enabled: projectId !== "demo",
   });
   const shotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
   const workbench = useQuery({
-    queryKey: ["review-shot-workbench", projectId, shotId],
+    queryKey: queryKeys.shot.reviewWorkbench(projectId, shotId),
     queryFn: () => fetchShotWorkbench(projectId, shotId!),
     enabled: projectId !== "demo" && Boolean(shotId),
   });
   const annotations = useQuery({
-    queryKey: ["review-annotations", projectId, shotId],
+    queryKey: queryKeys.review.annotations(projectId, shotId),
     queryFn: () => fetchReviewAnnotations(projectId, shotId!),
     enabled: projectId !== "demo" && Boolean(shotId),
   });
@@ -68,7 +69,7 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
       createReviewAnnotation(projectId, shotId!, { ...input, note }),
     onSuccess: () => {
       setNote("");
-      void queryClient.invalidateQueries({ queryKey: ["review-annotations", projectId, shotId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.review.annotations(projectId, shotId) });
     },
   });
 

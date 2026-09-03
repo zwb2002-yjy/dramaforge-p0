@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useMemo, useState } from "react";
 
+import { queryKeys } from "../../lib/queryKeys";
+
 import {
   bindProjectProvider,
   createProviderConnection,
@@ -49,7 +51,7 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
   const [error, setError] = useState<string | null>(null);
 
   const connections = useQuery({
-    queryKey: ["provider-connections", workspaceId],
+    queryKey: queryKeys.provider.connections(workspaceId),
     queryFn: () => listProviderConnections(workspaceId!),
     enabled: Boolean(workspaceId),
   });
@@ -60,7 +62,7 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
         ? "未知错误"
         : null;
   const plugins = useQuery({
-    queryKey: ["provider-plugins"],
+    queryKey: queryKeys.provider.plugins(),
     queryFn: listProviderPlugins,
     staleTime: 60_000,
   });
@@ -77,12 +79,12 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
         item.protocol_profile === selectedPlugin?.protocol_profile,
     ) ?? null;
   const probes = useQuery({
-    queryKey: ["provider-probes", workspaceId, connection?.id],
+    queryKey: queryKeys.provider.probes(workspaceId, connection?.id),
     queryFn: () => listProviderProbes(workspaceId!, connection!.id),
     enabled: Boolean(workspaceId && connection),
   });
   const bindings = useQuery({
-    queryKey: ["provider-bindings", workspaceId, connection?.id],
+    queryKey: queryKeys.provider.bindings(workspaceId, connection?.id),
     queryFn: () => listProviderModelBindings(workspaceId!, connection!.id),
     enabled: Boolean(workspaceId && connection),
   });
@@ -93,9 +95,9 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
   };
 
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["provider-connections", workspaceId] });
-    await queryClient.invalidateQueries({ queryKey: ["provider-probes", workspaceId] });
-    await queryClient.invalidateQueries({ queryKey: ["provider-bindings", workspaceId] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.provider.connections(workspaceId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.provider.probesRoot(workspaceId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.provider.bindingsRoot(workspaceId) });
   };
 
   const credentialMutation = useMutation({
@@ -162,10 +164,10 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
     onSuccess: async (result) => {
       setMessage(`探测 ${result.capability}：${result.status} · 证据=${result.evidence_level}`);
       await queryClient.invalidateQueries({
-        queryKey: ["provider-probes", workspaceId, connection?.id],
+        queryKey: queryKeys.provider.probes(workspaceId, connection?.id),
       });
       await queryClient.invalidateQueries({
-        queryKey: ["provider-bindings", workspaceId, connection?.id],
+        queryKey: queryKeys.provider.bindings(workspaceId, connection?.id),
       });
     },
     onError: (cause: Error) => setError(cause.message),
@@ -184,7 +186,7 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
     onSuccess: async (result) => {
       setMessage(`${result.purpose} 模型绑定已创建：${result.model_id}`);
       await queryClient.invalidateQueries({
-        queryKey: ["provider-bindings", workspaceId, connection?.id],
+        queryKey: queryKeys.provider.bindings(workspaceId, connection?.id),
       });
     },
     onError: (cause: Error) => setError(cause.message),
@@ -218,7 +220,7 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
     onMutate: resetFeedback,
     onSuccess: async () => {
       setMessage("质量证据已记录，绑定现可被项目使用。");
-      await queryClient.invalidateQueries({ queryKey: ["provider-bindings", workspaceId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.provider.bindingsRoot(workspaceId) });
     },
     onError: (cause: Error) => setError(cause.message),
   });

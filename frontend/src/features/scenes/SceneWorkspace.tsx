@@ -9,6 +9,7 @@ import { ShotStrip } from "../shots/ShotStrip";
 import type { ShotCandidate } from "../shots/shotCandidates";
 import type { ShotExecutionReference, ShotLite } from "../shots/api";
 import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
+import { queryKeys } from "../../lib/queryKeys";
 
 type SceneWorkspaceProps = {
   projectId: string;
@@ -39,7 +40,7 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   const [previewCandidate, setPreviewCandidate] = useState<ShotCandidate | null>(null);
   const [referenceDrafts, setReferenceDrafts] = useState<Record<string, ShotReferenceContext>>({});
   const workspace = useQuery({
-    queryKey: ["scene-workspace", projectId, sceneId],
+    queryKey: queryKeys.scene.workspace(projectId, sceneId),
     queryFn: () => fetchSceneWorkspace(projectId, sceneId),
     enabled: Boolean(projectId) && Boolean(sceneId) && projectId !== "demo",
   });
