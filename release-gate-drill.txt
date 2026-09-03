@@ -1,0 +1,2 @@
+This file intentionally violates repository directory policy for the required
+merge-protection drill. It must be removed with the drill branch.
