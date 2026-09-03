@@ -16,6 +16,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -433,7 +434,11 @@ def run_resilience_evidence() -> dict[str, Any]:
         "tests/unit/test_connection_revisions.py",
         "tests/unit/test_ark_compiler.py",
     ]
+    # The production image intentionally omits the dev test entry points, but
+    # the exact quality image provides them through its locked uv environment.
     command = [sys.executable, "-m", "pytest", *files, "-q"]
+    if shutil.which("pytest") is None and shutil.which("uv") is not None:
+        command = ["uv", "run", "--extra", "dev", "pytest", *files, "-q"]
     completed = subprocess.run(
         command,
         cwd=REPO / "backend",
