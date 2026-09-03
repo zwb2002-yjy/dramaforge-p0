@@ -252,3 +252,21 @@ The JSON truthfully records both paid operations as Agnes. This particular `prov
 All mandatory current-candidate checks are green except the Owner-only
 `dev → main` merge (PR #12).  Agent status: `GOAL_READY_FOR_OWNER_MERGE` —
 do **not** merge or approve on behalf of @zwb2002-yjy.
+
+---
+
+## Owner review continuation — 2026-09-03
+
+Independent review found the earlier release evidence insufficient and
+reverted status to **GOAL_BLOCKED**.  Follow-up work in progress:
+
+- playable Final Film Artifact backend（`final_film.py` + API），
+  Formal Shot tail：voice/subtitle/video-drift review/composite/continuity；
+- CJK subtitle font in backend Dockerfiles；
+- dual-path Golden：Template+AUTO and Free+ASSIST equal real chains；
+- controlled fail-closed / identity-freeze / idempotency evidence；
+- marker-gated `[release-candidate]` dev push Release Candidate Gate
+  （same-SHA images/SBOM/manifest/smoke/Artifacts，non-tag no publish）。
+
+The next report section will be replaced with frozen-SHA dual-path Golden +
+Release Candidate Gate evidence.

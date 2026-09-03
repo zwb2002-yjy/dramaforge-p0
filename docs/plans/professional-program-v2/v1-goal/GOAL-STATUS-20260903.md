@@ -8,7 +8,8 @@
 
 ## State
 
-- Status: GOAL_READY_FOR_OWNER_MERGE（G0–G8 COMPLETE；仅剩 Owner 批准/合并 dev→main）
+- Status: GOAL_BLOCKED（Owner/独立 review 复核后暂缓合并；正在补 dual-path 真实链、
+  Final Film Artifact、韧性证据与 Release Candidate Gate）
 - Baseline: dev@8ac3546
 - Gate condition: only the execution plan's GOAL_DONE/GOAL_READY_FOR_OWNER_MERGE states count.
 
@@ -23,5 +24,5 @@
 | G4 Proactive Director Recommendation（Golden 采用证据并入 G7 报告） | task-contracts/V1-G4A-PROACTIVE-RECOMMENDATION-20260903.md + task-contracts/V1-G4B-RECOMMENDATION-UI-20260903.md | COMPLETE* |
 | G5 Creation UX 与统一 Canvas | task-contracts/V1-G5A-CREATION-UX-20260903.md | COMPLETE |
 | G6 OpenCut Director 主动剪辑建议与 Editing→Repair 分流 | task-contracts/V1-G6A-EDITING-PROACTIVE-20260903.md + task-contracts/V1-G6B-EDITING-PROACTIVE-UI-20260903.md + task-contracts/V1-G6C-EDITING-REPAIR-ROUTING-20260903.md + task-contracts/V1-G6D-EDITING-SUGGESTION-APPLY-20260903.md | COMPLETE |
-| G7 统一主链 E2E 与 current-HEAD 真实 Provider Golden | task-contracts/V1-G7A-MAINCHAIN-E2E-20260903.md + task-contracts/V1-G7B-CURRENT-HEAD-GOLDEN-20260903.md | COMPLETE |
-| G8 Current-HEAD Release Gate 与 source/image/evidence 绑定 | task-contracts/V1-G8-RELEASE-GATE-20260903.md | COMPLETE |
+| G7 统一主链 E2E 与 current-HEAD 双路径真实 Provider Golden | task-contracts/V1-G7A-MAINCHAIN-E2E-20260903.md + task-contracts/V1-G7B-CURRENT-HEAD-GOLDEN-20260903.md + task-contracts/V1-G7D-DUAL-PATH-FINAL-FILM-20260903.md | IN PROGRESS |
+| G8 Current-HEAD Release Candidate Gate 与 source/image/evidence 绑定 | task-contracts/V1-G8-RELEASE-GATE-20260903.md | IN PROGRESS |
