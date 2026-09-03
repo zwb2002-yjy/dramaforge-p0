@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -391,6 +392,36 @@ def collect_negative_checks(
     }
 
 
+def run_resilience_evidence() -> dict[str, Any]:
+    """Run the controlled runtime resilience tests offline (no paid Provider)."""
+    files = [
+        "backend/tests/unit/test_runtime.py",
+        "backend/tests/unit/test_litellm_text_bridge.py",
+        "backend/tests/unit/test_v3_core_types.py",
+        "backend/tests/unit/test_execution_identity.py",
+        "backend/tests/unit/test_connection_revisions.py",
+        "backend/tests/unit/test_ark_compiler.py",
+    ]
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", *files, "-q"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+    tail = (completed.stdout or "").strip().splitlines()[-6:]
+    errors = (completed.stderr or "").strip().splitlines()[-6:]
+    return {
+        "returncode": completed.returncode,
+        "summary": tail,
+        "stderr_tail": errors,
+        "coverage": [
+            "timeout -> retry/resume",
+            "submit_unknown no blind retry",
+            "credential/connection revision identity freeze",
+        ],
+    }
+
+
 SCRIPT = """# Episode 1 - Current Head Golden
 
 ## Scene 1 - Rooftop / night
@@ -435,6 +466,11 @@ def main() -> int:
         "--negative-checks",
         action="store_true",
         help="run controlled fail-closed probes against the peer project (no paid submit)",
+    )
+    parser.add_argument(
+        "--resilience-checks",
+        action="store_true",
+        help="run offline runtime resilience tests and record summary in the report",
     )
     args = parser.parse_args()
 
@@ -634,6 +670,8 @@ def main() -> int:
                 project_id=str(peer_project["id"]),
                 headers=headers,
             )
+        if args.resilience_checks:
+            report["resilience_evidence"] = run_resilience_evidence()
 
         shots = require_ok(
             client.get(f"/projects/{main_project_id}/shots", headers=headers),

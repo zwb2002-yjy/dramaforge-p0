@@ -32,7 +32,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
@@ -477,6 +477,16 @@ async def render_final_film(
     name: str = "V1 Final Film",
 ) -> FinalFilmRead:
     await _project_or_404(session, project_id)
+    bind = session.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        lock_seed = hashlib.sha256(
+            f"final-film-idempotency:{project_id}:{idempotency_key or ''}".encode()
+        ).hexdigest()
+        lock_value = int(lock_seed[:15], 16)
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_value)"),
+            {"lock_value": lock_value},
+        )
     edit_session, refs = await _load_timeline_refs(
         session,
         project_id=project_id,
