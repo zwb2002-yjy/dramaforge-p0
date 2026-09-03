@@ -14,6 +14,7 @@ from app.access.models import Project, ProjectCreativeProfile
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1 import workbench as _workbench
+from app.shared.db import set_rls_context
 from app.shared.enums import ProjectStage
 from app.shared.errors import ConflictError, NotFoundError
 
@@ -144,6 +145,14 @@ async def create_project(
         director_autonomy=body.director_autonomy,
     )
     await session.commit()
+    # ``SET LOCAL`` RLS context is cleared by commit.  Re-apply the new
+    # project's scope before reading the profile for the response.
+    await set_rls_context(
+        session,
+        user_id=user.id,
+        workspace_id=project.workspace_id,
+        project_id=project.id,
+    )
     profile = await _profile_for_project(session, project.id)
     return _project_read(project, profile)
 
