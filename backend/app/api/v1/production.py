@@ -73,6 +73,9 @@ class ProviderOperationRead(BaseModel):
     model_binding_id: UUID | None
     catalog_entry_id: UUID | None
     capability_manifest_hash: str | None
+    connection_id: UUID | None
+    provider_connection_revision_id: UUID | None
+    credential_revision_id: UUID | None
     execution_path_version: str | None
     provider_cost: str | None
     currency: str
@@ -329,6 +332,9 @@ async def project_snapshot(
                 model_binding_id=operation.model_binding_id,
                 catalog_entry_id=operation.catalog_entry_id,
                 capability_manifest_hash=operation.capability_manifest_hash,
+                connection_id=operation.connection_id,
+                provider_connection_revision_id=operation.provider_connection_revision_id,
+                credential_revision_id=operation.credential_revision_id,
                 execution_path_version=operation.execution_path_version,
                 provider_cost=(
                     str(operation.provider_cost) if operation.provider_cost is not None else None

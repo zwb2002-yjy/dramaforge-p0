@@ -25,6 +25,8 @@ class ObjectStore(Protocol):
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
 
+    async def delete_bytes(self, *, object_key: str) -> None: ...
+
     def clear(self) -> None: ...
 
 
@@ -52,6 +54,8 @@ class _MinioClient(Protocol):
 
     def get_object(self, bucket_name: str, object_name: str) -> _MinioResponse: ...
 
+    def remove_object(self, bucket_name: str, object_name: str) -> None: ...
+
 
 class InMemoryObjectStore:
     """Process-wide test/dev store (shared singleton via get_object_store)."""
@@ -74,6 +78,9 @@ class InMemoryObjectStore:
         if object_key not in self._objects:
             raise KeyError(object_key)
         return self._objects[object_key]
+
+    async def delete_bytes(self, *, object_key: str) -> None:
+        self._objects.pop(object_key, None)
 
     def clear(self) -> None:
         self._objects.clear()
@@ -151,6 +158,10 @@ class MinioObjectStore:
         finally:
             response.close()
             response.release_conn()
+
+    async def delete_bytes(self, *, object_key: str) -> None:
+        client = self._ensure_client()
+        client.remove_object(self._settings.minio_bucket, object_key)
 
 
 # Process-wide singleton — Worker, export, and tests MUST share this when not using MinIO.

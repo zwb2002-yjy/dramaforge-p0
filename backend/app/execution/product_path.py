@@ -1774,6 +1774,7 @@ async def _execute_unified_media_node_run(
                 submitted_at=now,
                 connection_id=connection.id,
                 provider_connection_revision_id=connection_revision.id,
+                credential_revision_id=connection_revision.credential_revision_id,
                 model_binding_id=binding.id,
                 catalog_entry_id=entry.id,
                 capability_manifest_hash=plan.manifest_hash,
@@ -2347,6 +2348,18 @@ async def _complete_composite_node(
         "media_inputs": inputs.media_inputs,
         "source_commit": get_settings().source_commit,
     }
+    if (
+        (run.input_snapshot or {}).get("execution_branch") == "formal"
+        and (run.input_snapshot or {}).get("experiment_id") is None
+    ):
+        from app.assets.models import Shot
+
+        shot_id = (run.input_snapshot or {}).get("shot_id")
+        if shot_id:
+            shot = await session.get(Shot, UUID(str(shot_id)))
+            if shot is not None and shot.project_id == run.project_id:
+                shot.formal_composite_artifact_id = art.id
+                shot.version = (shot.version or 1) + 1
     node.latest_successful_run_id = run.id
     await session.flush()
     return ExecuteNodeResult(

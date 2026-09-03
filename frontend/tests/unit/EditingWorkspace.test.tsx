@@ -695,9 +695,7 @@ describe("EditingWorkspace", () => {
     expect(result).toHaveTextContent("15.233");
     const renderCall = calls.find((call) => call.url.endsWith("/final-film/render"));
     expect(renderCall?.method).toBe("POST");
-    expect(renderCall?.headers?.["Idempotency-Key"]).toBe(
-      `final-${PROJECT_ID}-${SESSION_ID}-1`,
-    );
+    expect(renderCall?.headers?.["Idempotency-Key"]).toBe(`final-${PROJECT_ID}-${SESSION_ID}-1`);
   });
 
   it("requests a proactive editing suggestion without a user instruction", async () => {

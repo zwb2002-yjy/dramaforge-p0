@@ -24,12 +24,13 @@ import hashlib
 import json
 import shutil
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
-from uuid import UUID, uuid4
+from typing import Any, cast
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
@@ -43,7 +44,7 @@ from app.editing.models import EditSession
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
-from app.production.models import ProductionGraph
+from app.production.models import GraphVersion, ProductionGraph
 from app.production.service import GraphService
 from app.shared.errors import NotFoundError, ValidationAppError
 from app.storage.minio_store import get_object_store
@@ -63,7 +64,7 @@ class FinalFilmPrepareBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     edit_session_id: UUID
-    expected_timeline_version: int | None = Field(default=None, ge=1)
+    expected_timeline_version: int = Field(ge=1)
 
 
 class FinalFilmPrepareRead(BaseModel):
@@ -98,6 +99,7 @@ class FinalFilmRead(BaseModel):
     byte_size: int
     storage_state: str
     content_hash: str
+    formal_references: list[dict[str, Any]]
     idempotency_key: str | None = None
     ffprobe: dict[str, Any] | None = None
 
@@ -176,6 +178,23 @@ async def _load_timeline_refs(
                 "timeline clip reference must be UUID",
                 details={"code": "TIMELINE_REFERENCE_INVALID", "clip_id": clip_id},
             ) from exc
+        artifact = await session.get(Artifact, artifact_id)
+        if (
+            artifact is None
+            or artifact.project_id != project_id
+            or artifact.artifact_type != "video"
+            or not artifact.mime_type.startswith("video/")
+            or artifact.storage_state != "available"
+            or artifact.deleted_at is not None
+        ):
+            raise ValidationAppError(
+                "timeline reference is not an available project video Artifact",
+                details={
+                    "code": "TIMELINE_ARTIFACT_SCOPE",
+                    "clip_id": clip_id,
+                    "artifact_id": str(artifact_id),
+                },
+            )
         seen_clips.add(clip_id)
         refs.append(
             _TimelineRef(
@@ -249,6 +268,28 @@ async def prepare_formal_tail(
     shot_ids = [shot.id for shot in shots]
     all_run_ids: list[UUID] = []
     for shot in shots:
+        refresh_tail = False
+        if shot.formal_composite_artifact_id is not None:
+            composite_artifact = await session.get(
+                Artifact, shot.formal_composite_artifact_id
+            )
+            composite_run = (
+                await session.get(NodeRun, composite_artifact.produced_by_run_id)
+                if composite_artifact is not None
+                and composite_artifact.produced_by_run_id is not None
+                else None
+            )
+            media_inputs = (
+                (composite_run.input_snapshot or {}).get("media_inputs")
+                if composite_run is not None
+                else None
+            )
+            video_input = media_inputs.get("video") if isinstance(media_inputs, dict) else None
+            refresh_tail = not (
+                isinstance(video_input, dict)
+                and str(video_input.get("artifact_id"))
+                == str(shot.formal_video_artifact_id)
+            )
         run_ids = await queue_branch_nodes(
             session,
             project_id=project_id,
@@ -256,6 +297,7 @@ async def prepare_formal_tail(
             user_id=actor_id,
             node_keys=list(_TAIL_NODE_KEYS),
             include_missing_dependencies=True,
+            force=refresh_tail,
         )
         all_run_ids.extend(run_ids)
     await session.commit()
@@ -272,6 +314,7 @@ async def prepare_formal_tail(
 def _deterministic_final_film_bytes(
     *,
     composites: list[tuple[str, bytes, dict[str, str]]],
+    final_run_id: UUID,
 ) -> bytes:
     digest = hashlib.sha256()
     for object_key, data, metadata in composites:
@@ -280,6 +323,8 @@ def _deterministic_final_film_bytes(
         digest.update(str(len(data)).encode("ascii"))
         digest.update(b"\0")
         digest.update(json.dumps(metadata, sort_keys=True).encode("utf-8"))
+    digest.update(b"final-run\0")
+    digest.update(str(final_run_id).encode("ascii"))
     return b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + digest.digest()
 
 
@@ -292,7 +337,7 @@ async def _ffprobe_json(path: Path) -> dict[str, Any]:
         "-v",
         "error",
         "-show_entries",
-        "format=duration:stream=codec_type,codec_name",
+        "format=duration,format_name:stream=index,codec_type,codec_name,width,height,channels,sample_rate",
         "-of",
         "json",
         str(path),
@@ -306,13 +351,42 @@ async def _ffprobe_json(path: Path) -> dict[str, Any]:
             detail or f"ffprobe failed for {path.name}",
             details={"code": "FFPROBE_FAILED"},
         )
-    return dict[str, Any](json.loads(stdout.decode("utf-8")))
+    return dict(json.loads(stdout.decode("utf-8")))
+
+
+def _final_film_probe_assertions(
+    probe: dict[str, Any],
+    *,
+    dialogue_audio_present: bool,
+    burned_subtitles: bool,
+) -> dict[str, Any]:
+    streams = probe.get("streams")
+    stream_rows = (
+        [item for item in streams if isinstance(item, dict)]
+        if isinstance(streams, list)
+        else []
+    )
+    video_codecs = {
+        str(item.get("codec_name")) for item in stream_rows if item.get("codec_type") == "video"
+    }
+    audio_codecs = {
+        str(item.get("codec_name")) for item in stream_rows if item.get("codec_type") == "audio"
+    }
+    format_name = str((probe.get("format") or {}).get("format_name") or "")
+    return {
+        "mp4_container": "mp4" in format_name or not format_name,
+        "h264_video": "h264" in video_codecs,
+        "aac_audio": "aac" in audio_codecs,
+        "dialogue_audio_present": dialogue_audio_present and bool(audio_codecs),
+        "burned_subtitles": burned_subtitles,
+    }
 
 
 async def _render_with_ffmpeg(
     *,
     composite_files: list[Path],
     output_path: Path,
+    lineage_fingerprint: str,
 ) -> dict[str, Any]:
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
@@ -333,6 +407,8 @@ async def _render_with_ffmpeg(
         str(list_path),
         "-c",
         "copy",
+        "-metadata",
+        f"comment=dramaforge-final-film-lineage:{lineage_fingerprint}",
         "-movflags",
         "+faststart",
         str(output_path),
@@ -367,17 +443,31 @@ async def _latest_formal_composite(
     *,
     project_id: UUID,
     ref: _TimelineRef,
+    shot: Shot,
 ) -> tuple[NodeRun, Artifact]:
-    """Latest formal Composite whose frozen media inputs match the Timeline ref."""
+    """Return the current Formal composite for one exact Timeline reference.
+
+    A project can contain many attempts and experiment branches in the same
+    graph.  The Timeline's Formal video artifact is the first boundary; the
+    explicit Formal composite pointer, when present, is the second.  The
+    graph-scope and snapshot checks keep historical or cross-branch rows out
+    even if a legacy row has a matching shot id.
+    """
     rows = list(
         (
             await session.execute(
                 select(NodeRun, Artifact, GraphNode)
                 .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                .join(GraphVersion, GraphVersion.id == GraphNode.graph_version_id)
+                .join(ProductionGraph, ProductionGraph.id == GraphVersion.graph_id)
                 .join(Artifact, Artifact.id == NodeRun.result_artifact_id)
                 .where(NodeRun.project_id == project_id)
                 .where(NodeRun.status.in_(_DONE))
                 .where(GraphNode.node_key == "composite")
+                .where(GraphNode.graph_version_id == NodeRun.graph_version_id)
+                .where(ProductionGraph.project_id == project_id)
+                .where(ProductionGraph.scope_type == "shot")
+                .where(ProductionGraph.scope_entity_id == ref.shot_id)
             )
         )
         .tuples()
@@ -385,15 +475,37 @@ async def _latest_formal_composite(
     )
     candidates: list[tuple[NodeRun, Artifact]] = []
     for run, artifact, _node in rows:
-        if str((run.input_snapshot or {}).get("shot_id")) != str(ref.shot_id):
+        snapshot = run.input_snapshot or {}
+        if str(snapshot.get("shot_id")) != str(ref.shot_id):
             continue
-        if (run.input_snapshot or {}).get("experiment_id") is not None:
+        if snapshot.get("execution_branch") != "formal":
             continue
-        media = (run.input_snapshot or {}).get("media_inputs")
+        if snapshot.get("experiment_id") is not None:
+            continue
+        if run.result_artifact_id != artifact.id:
+            continue
+        if shot.formal_composite_artifact_id is not None and (
+            shot.formal_composite_artifact_id != artifact.id
+        ):
+            continue
+        if (
+            artifact.project_id != project_id
+            or artifact.artifact_type != "video"
+            or not artifact.mime_type.startswith("video/")
+            or artifact.storage_state != "available"
+            or artifact.deleted_at is not None
+        ):
+            continue
+        media = snapshot.get("media_inputs")
         if not isinstance(media, dict):
             continue
         video = media.get("video")
         if not isinstance(video, dict) or str(video.get("artifact_id")) != str(ref.artifact_id):
+            continue
+        formal_video = await session.get(Artifact, ref.artifact_id)
+        if formal_video is None or video.get("content_hash") != formal_video.content_hash:
+            continue
+        if not all(isinstance(media.get(key), dict) for key in ("voice", "subtitle")):
             continue
         candidates.append((run, artifact))
     if not candidates:
@@ -414,6 +526,78 @@ async def _latest_formal_composite(
             str(pair[0].id),
         ),
     )
+
+
+async def _final_film_read(
+    session: AsyncSession,
+    *,
+    export: Export,
+    edit_session: EditSession,
+    refs: list[_TimelineRef],
+) -> FinalFilmRead:
+    artifact = await session.get(Artifact, export.result_artifact_id)
+    if artifact is None or artifact.storage_state != "available":
+        raise ValidationAppError(
+            "Final Film Artifact is not available",
+            details={"code": "FINAL_FILM_ARTIFACT_UNAVAILABLE"},
+        )
+    manifest = dict(export.manifest or {})
+    raw_run_id = manifest.get("node_run_id")
+    raw_operation_id = manifest.get("provider_operation_id")
+    if raw_run_id is None or raw_operation_id is None:
+        raise ValidationAppError(
+            "Final Film export is missing execution lineage",
+            details={"code": "FINAL_FILM_LINEAGE_MISSING"},
+        )
+    items = list(
+        (
+            await session.execute(
+                select(ExportItem)
+                .where(ExportItem.export_id == export.id)
+                .order_by(ExportItem.ordinal)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    composite_ids = [str(item.source_artifact_id) for item in items]
+    if not composite_ids:
+        raw_ids = manifest.get("composite_artifact_ids")
+        if isinstance(raw_ids, list):
+            composite_ids = [str(item) for item in raw_ids]
+    ffprobe = manifest.get("ffprobe")
+    formal_references = manifest.get("formal_references")
+    return FinalFilmRead(
+        project_id=export.project_id,
+        edit_session_id=edit_session.id,
+        timeline_version=edit_session.version,
+        export_id=export.id,
+        artifact_id=artifact.id,
+        node_run_id=UUID(str(raw_run_id)),
+        provider_operation_id=UUID(str(raw_operation_id)),
+        format=export.format,
+        status=export.status,
+        duration_seconds=artifact.duration_seconds or Decimal("0"),
+        shot_count=len({ref.shot_id for ref in refs}),
+        timeline_clip_count=len(refs),
+        composite_artifact_ids=composite_ids,
+        source_commit=str(manifest.get("source_commit") or ""),
+        mime_type=artifact.mime_type,
+        byte_size=int(artifact.byte_size),
+        storage_state=artifact.storage_state,
+        content_hash=artifact.content_hash,
+        formal_references=(
+            [item for item in formal_references if isinstance(item, dict)]
+            if isinstance(formal_references, list)
+            else []
+        ),
+        idempotency_key=export.idempotency_key,
+        ffprobe=ffprobe if isinstance(ffprobe, dict) else None,
+    )
+
+
+def _final_film_error_summary(exc: Exception) -> str:
+    return str(exc)[:500] or type(exc).__name__
 
 
 async def _ensure_final_graph(
@@ -477,10 +661,16 @@ async def render_final_film(
     name: str = "V1 Final Film",
 ) -> FinalFilmRead:
     await _project_or_404(session, project_id)
+    normalized_key = idempotency_key.strip() if idempotency_key else None
+    if normalized_key and len(normalized_key) > 200:
+        raise ValidationAppError(
+            "Idempotency-Key is too long",
+            details={"code": "IDEMPOTENCY_KEY_INVALID"},
+        )
     bind = session.get_bind()
     if bind is not None and bind.dialect.name == "postgresql":
         lock_seed = hashlib.sha256(
-            f"final-film-idempotency:{project_id}:{idempotency_key or ''}".encode()
+            f"final-film-idempotency:{project_id}:{normalized_key or edit_session_id}".encode()
         ).hexdigest()
         lock_value = int(lock_seed[:15], 16)
         await session.execute(
@@ -495,47 +685,66 @@ async def render_final_film(
     )
     if not refs:
         raise ValidationAppError("no timeline clips", details={"code": "EMPTY_TIMELINE"})
-    if idempotency_key:
-        existing = await session.scalar(
-            select(Export).where(
-                Export.project_id == project_id,
-                Export.format == "dramaforge-final-film-v1",
-                Export.manifest["idempotency_key"].as_string() == idempotency_key,
-            )
+    source_commit = get_settings().source_commit
+    request_payload = {
+        "project_id": str(project_id),
+        "edit_session_id": str(edit_session.id),
+        "timeline_version": edit_session.version,
+        "timeline_clips": [
+            {
+                "clip_id": ref.clip_id,
+                "shot_id": str(ref.shot_id),
+                "artifact_id": str(ref.artifact_id),
+                "order": ref.order,
+            }
+            for ref in refs
+        ],
+        "name": name,
+    }
+    request_fingerprint = hashlib.sha256(
+        json.dumps(request_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    existing_query = select(Export).where(
+        Export.project_id == project_id,
+        Export.format == "dramaforge-final-film-v1",
+    )
+    if normalized_key:
+        existing_query = existing_query.where(Export.idempotency_key == normalized_key)
+    else:
+        existing_query = existing_query.where(
+            Export.manifest["request_fingerprint"].as_string() == request_fingerprint
         )
-        if existing is not None and existing.result_artifact_id is not None:
-            artifact = await session.get(Artifact, existing.result_artifact_id)
-            if artifact is not None and artifact.storage_state == "available":
-                ffprobe_value = existing.manifest.get("ffprobe")
-                return FinalFilmRead(
-                    project_id=project_id,
-                    edit_session_id=edit_session.id,
-                    timeline_version=edit_session.version,
-                    export_id=existing.id,
-                    artifact_id=artifact.id,
-                    node_run_id=UUID(str(existing.manifest.get("node_run_id"))),
-                    provider_operation_id=UUID(
-                        str(existing.manifest.get("provider_operation_id"))
-                    ),
-                    format=existing.format,
-                    status=existing.status,
-                    duration_seconds=artifact.duration_seconds or Decimal("0"),
-                    shot_count=len({ref.shot_id for ref in refs}),
-                    timeline_clip_count=len(refs),
-                    composite_artifact_ids=[],
-                    source_commit=str(existing.manifest.get("source_commit") or ""),
-                    mime_type=artifact.mime_type or "video/mp4",
-                    byte_size=int(artifact.byte_size or 0),
-                    storage_state=artifact.storage_state,
-                    content_hash=artifact.content_hash,
-                    idempotency_key=idempotency_key,
-                    ffprobe=ffprobe_value if isinstance(ffprobe_value, dict) else None,
-                )
+    existing = await session.scalar(existing_query)
+    if existing is not None:
+        existing_fingerprint = str((existing.manifest or {}).get("request_fingerprint") or "")
+        if normalized_key and existing_fingerprint != request_fingerprint:
+            raise ValidationAppError(
+                "Idempotency-Key was already used for a different Final Film request",
+                details={"code": "IDEMPOTENCY_KEY_REUSED"},
+            )
+        if existing.result_artifact_id is None or existing.status != "completed":
+            raise ValidationAppError(
+                "Final Film render is already in progress",
+                details={"code": "FINAL_FILM_RENDER_IN_PROGRESS"},
+            )
+        return await _final_film_read(
+            session, export=existing, edit_session=edit_session, refs=refs
+        )
 
     composites: list[tuple[NodeRun, Artifact, bytes]] = []
+    composite_lineage: list[dict[str, object]] = []
     store = get_object_store()
+    formal_shots = {
+        shot.id: shot
+        for shot in await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
+    }
     for ref in refs:
-        run, artifact = await _latest_formal_composite(session, project_id=project_id, ref=ref)
+        run, artifact = await _latest_formal_composite(
+            session,
+            project_id=project_id,
+            ref=ref,
+            shot=formal_shots[ref.shot_id],
+        )
         if artifact.storage_state != "available":
             raise ValidationAppError(
                 "composite Artifact is not available",
@@ -548,83 +757,41 @@ async def render_final_film(
                 details={"code": "COMPOSITE_EMPTY"},
             )
         composites.append((run, artifact, data))
-
-    probe_result: dict[str, Any]
-    if get_settings().app_env == "test":
-        final_bytes = _deterministic_final_film_bytes(
-            composites=[
-                (artifact.object_key, data, {"artifact_id": str(artifact.id)})
-                for _run, artifact, data in composites
-            ]
+        raw_media_inputs = (run.input_snapshot or {}).get("media_inputs")
+        media_inputs = (
+            dict(cast(dict[str, object], raw_media_inputs))
+            if isinstance(raw_media_inputs, dict)
+            else {}
         )
-        duration_seconds = Decimal(
-            str(
-                sum(
-                    float(artifact.duration_seconds or 0)
-                    for _run, artifact, _data in composites
-                )
-            )
-        ).quantize(Decimal("0.001"))
-        probe_result = {
-            "streams": [{"codec_type": "video", "codec_name": "h264"}],
-            "format": {"duration": str(duration_seconds)},
-        }
-        object_key = f"projects/{project_id}/final-film/{uuid4()}.mp4"
-        stored = await store.put_bytes(
-            object_key=object_key,
-            data=final_bytes,
-            mime_type="video/mp4",
+        composite_lineage.append(
+            {
+                "clip_id": ref.clip_id,
+                "shot_id": str(ref.shot_id),
+                "formal_video_artifact_id": str(ref.artifact_id),
+                "composite_artifact_id": str(artifact.id),
+                "composite_run_id": str(run.id),
+                "media_inputs": media_inputs,
+            }
         )
-    else:
-        with tempfile.TemporaryDirectory(prefix="dramaforge-final-film-") as tmp:
-            tmp_path = Path(tmp)
-            files: list[Path] = []
-            for index, (_run, _artifact, data) in enumerate(composites, start=1):
-                path = tmp_path / f"clip-{index}.mp4"
-                path.write_bytes(data)
-                files.append(path)
-            output = tmp_path / "final-film.mp4"
-            probe_result = await _render_with_ffmpeg(
-                composite_files=files,
-                output_path=output,
-            )
-            final_bytes = output.read_bytes()
-            raw_duration = float(probe_result["format"]["duration"])
-            duration_seconds = Decimal(str(raw_duration)).quantize(Decimal("0.001"))
-            object_key = f"projects/{project_id}/final-film/{uuid4()}.mp4"
-            stored = await store.put_bytes(
-                object_key=object_key,
-                data=final_bytes,
-                mime_type="video/mp4",
-            )
 
     graph, node, _version_no = await _ensure_final_graph(
         session,
         project_id=project_id,
         actor_id=actor_id,
     )
-    source_commit = get_settings().source_commit
-    request_fingerprint = hashlib.sha256(
-        (
-            f"final-film:{project_id}:{edit_session.id}:"
-            f"{edit_session.version}:{idempotency_key}"
-        ).encode()
-    ).hexdigest()
     run = NodeRun(
         project_id=project_id,
         graph_version_id=node.graph_version_id,
         graph_node_id=node.id,
-        idempotency_key=(
-            f"final-film:{idempotency_key or edit_session.id}:{edit_session.version}"
-        ),
+        idempotency_key=f"final-film:{request_fingerprint}",
         input_hash=request_fingerprint,
         status="running",
         input_snapshot={
-            "project_id": str(project_id),
-            "edit_session_id": str(edit_session.id),
-            "timeline_version": edit_session.version,
+            **request_payload,
             "node_key": _FINAL_FILM_GRAPH_KEY,
             "source_commit": source_commit,
+            "execution_path": "local-final-film-v1",
+            "formal_references": composite_lineage,
         },
         created_by=actor_id,
     )
@@ -638,111 +805,211 @@ async def render_final_film(
         actual_provider="local_ffmpeg",
         actual_model="ffmpeg-concat",
         request_fingerprint=request_fingerprint,
-        status="succeeded",
+        status="submission_started",
         request_summary={
             "execution_path": "local-final-film-v1",
+            "edit_session_id": str(edit_session.id),
             "timeline_version": edit_session.version,
+            "formal_references": composite_lineage,
         },
-        response_summary={
-            "ffprobe": probe_result,
-            "duration_seconds": str(duration_seconds),
-        },
+        response_summary={},
         submitted_at=datetime.now(UTC),
-        completed_at=datetime.now(UTC),
+        currency="USD",
     )
     session.add(operation)
     await session.flush()
 
-    artifact = await get_or_create_artifact(
-        session,
-        project_id=project_id,
-        artifact_type="video",
-        object_key=stored.object_key,
-        content_hash=stored.content_hash,
-        mime_type=stored.mime_type,
-        byte_size=stored.byte_size,
-        produced_by_run_id=run.id,
-        allow_cross_run_reuse=True,
-    )
-    artifact.duration_seconds = duration_seconds
-    run.status = "completed"
-    run.result_artifact_id = artifact.id
-    run.finished_at = datetime.now(UTC)
-    run.output_summary = {
-        "status": "completed",
-        "artifact_id": str(artifact.id),
-        "ffprobe": probe_result,
-    }
-    node.latest_successful_run_id = run.id
-    await session.flush()
-
-    export = Export(
-        project_id=project_id,
-        format="dramaforge-final-film-v1",
-        status="completed",
-        requested_by=actor_id,
-        manifest={
-            "edit_session_id": str(edit_session.id),
-            "timeline_version": edit_session.version,
-            "timeline_clip_count": len(refs),
-            "clips": [
-                {
-                    "clip_id": ref.clip_id,
-                    "shot_id": str(ref.shot_id),
-                    "artifact_id": str(ref.artifact_id),
-                    "order": ref.order,
-                }
-                for ref in refs
-            ],
-            "artifact_id": str(artifact.id),
-            "node_run_id": str(run.id),
-            "provider_operation_id": str(operation.id),
-            "duration_seconds": str(duration_seconds),
-            "source_commit": source_commit,
-            "idempotency_key": idempotency_key,
-            "ffprobe": probe_result,
-        },
-        result_artifact_id=artifact.id,
-        completed_at=datetime.now(UTC),
-    )
-    session.add(export)
-    await session.flush()
-    for ordinal, (_run, source_artifact, _data) in enumerate(composites, start=1):
-        session.add(
-            ExportItem(
-                export_id=export.id,
-                ordinal=ordinal,
-                source_artifact_id=source_artifact.id,
-                role="shot_composite",
-                metadata_json={
-                    "composite_artifact_id": str(source_artifact.id),
-                    "timeline_clip_id": refs[ordinal - 1].clip_id,
-                },
+    probe_result: dict[str, Any]
+    stored = None
+    try:
+        if get_settings().app_env == "test":
+            final_bytes = _deterministic_final_film_bytes(
+                composites=[
+                    (
+                        artifact.object_key,
+                        data,
+                        {"artifact_id": str(artifact.id)},
+                    )
+                    for _run, artifact, data in composites
+                ],
+                final_run_id=run.id,
             )
+            duration_seconds = Decimal(
+                str(
+                    sum(
+                        float(artifact.duration_seconds or 0)
+                        for _run, artifact, _data in composites
+                    )
+                )
+            ).quantize(Decimal("0.001"))
+            probe_result = {
+                "streams": [
+                    {"codec_type": "video", "codec_name": "h264"},
+                    {"codec_type": "audio", "codec_name": "aac"},
+                ],
+                "format": {"duration": str(duration_seconds), "format_name": "mp4"},
+            }
+            object_key = f"projects/{project_id}/final-film/{run.id}.mp4"
+            stored = await store.put_bytes(
+                object_key=object_key,
+                data=final_bytes,
+                mime_type="video/mp4",
+            )
+        else:
+            with tempfile.TemporaryDirectory(prefix="dramaforge-final-film-") as tmp:
+                tmp_path = Path(tmp)
+                files: list[Path] = []
+                for index, (_run, _artifact, data) in enumerate(composites, start=1):
+                    path = tmp_path / f"clip-{index}.mp4"
+                    path.write_bytes(data)
+                    files.append(path)
+                output = tmp_path / "final-film.mp4"
+                lineage_fingerprint = hashlib.sha256(
+                    json.dumps(composite_lineage, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest()
+                probe_result = await _render_with_ffmpeg(
+                    composite_files=files,
+                    output_path=output,
+                    lineage_fingerprint=lineage_fingerprint,
+                )
+                final_bytes = output.read_bytes()
+                format_info = probe_result.get("format")
+                if not isinstance(format_info, dict) or format_info.get("duration") is None:
+                    raise ValidationAppError(
+                        "ffprobe did not report Final Film duration",
+                        details={"code": "FFPROBE_INVALID_DURATION"},
+                    )
+                raw_duration = float(format_info["duration"])
+                duration_seconds = Decimal(str(raw_duration)).quantize(Decimal("0.001"))
+                object_key = f"projects/{project_id}/final-film/{run.id}.mp4"
+                stored = await store.put_bytes(
+                    object_key=object_key,
+                    data=final_bytes,
+                    mime_type="video/mp4",
+                )
+        def has_media_input(item: dict[str, object], key: str) -> bool:
+            media = item.get("media_inputs")
+            return isinstance(media, dict) and isinstance(media.get(key), dict)
+
+        assertions = _final_film_probe_assertions(
+            probe_result,
+            dialogue_audio_present=all(
+                has_media_input(item, "voice")
+                for item in composite_lineage
+            ),
+            burned_subtitles=all(
+                has_media_input(item, "subtitle")
+                for item in composite_lineage
+            ),
         )
-    await session.commit()
-    return FinalFilmRead(
-        project_id=project_id,
-        edit_session_id=edit_session.id,
-        timeline_version=edit_session.version,
-        export_id=export.id,
-        artifact_id=artifact.id,
-        node_run_id=run.id,
-        provider_operation_id=operation.id,
-        format=export.format,
-        status=export.status,
-        duration_seconds=duration_seconds,
-        shot_count=len({ref.shot_id for ref in refs}),
-        timeline_clip_count=len(refs),
-        composite_artifact_ids=[str(source.id) for _run, source, _data in composites],
-        source_commit=source_commit,
-        mime_type=artifact.mime_type,
-        byte_size=int(artifact.byte_size),
-        storage_state=artifact.storage_state,
-        content_hash=artifact.content_hash,
-        idempotency_key=idempotency_key,
-        ffprobe=probe_result,
-    )
+        if not all(assertions.values()):
+            raise ValidationAppError(
+                "Final Film media proof is incomplete",
+                details={"code": "FINAL_FILM_MEDIA_ASSERTION_FAILED", "assertions": assertions},
+            )
+        probe_result["assertions"] = assertions
+        operation.status = "succeeded"
+        operation.response_summary = {
+            "ffprobe": probe_result,
+            "duration_seconds": str(duration_seconds),
+        }
+        operation.completed_at = datetime.now(UTC)
+        artifact = await get_or_create_artifact(
+            session,
+            project_id=project_id,
+            artifact_type="video",
+            object_key=stored.object_key,
+            content_hash=stored.content_hash,
+            mime_type=stored.mime_type,
+            byte_size=stored.byte_size,
+            produced_by_run_id=run.id,
+        )
+        artifact.duration_seconds = duration_seconds
+        raw_stream_rows = probe_result.get("streams")
+        stream_rows: list[dict[str, Any]] = (
+            [item for item in raw_stream_rows if isinstance(item, dict)]
+            if isinstance(raw_stream_rows, list)
+            else []
+        )
+        first_video = next(
+            (item for item in stream_rows if item.get("codec_type") == "video"), {}
+        )
+        artifact.width = int(first_video["width"]) if first_video.get("width") else None
+        artifact.height = int(first_video["height"]) if first_video.get("height") else None
+        run.status = "completed"
+        run.result_artifact_id = artifact.id
+        run.finished_at = datetime.now(UTC)
+        run.output_summary = {
+            "status": "completed",
+            "artifact_id": str(artifact.id),
+            "ffprobe": probe_result,
+            "formal_references": composite_lineage,
+        }
+        node.latest_successful_run_id = run.id
+        export = Export(
+            project_id=project_id,
+            format="dramaforge-final-film-v1",
+            status="completed",
+            requested_by=actor_id,
+            idempotency_key=normalized_key,
+            manifest={
+                **request_payload,
+                "request_fingerprint": request_fingerprint,
+                "timeline": {
+                    "edit_session_id": str(edit_session.id),
+                    "version": edit_session.version,
+                    "clips": request_payload["timeline_clips"],
+                },
+                "formal_references": composite_lineage,
+                "artifact_id": str(artifact.id),
+                "node_run_id": str(run.id),
+                "provider_operation_id": str(operation.id),
+                "duration_seconds": str(duration_seconds),
+                "source_commit": source_commit,
+                "idempotency_key": normalized_key,
+                "ffprobe": probe_result,
+            },
+            result_artifact_id=artifact.id,
+            completed_at=datetime.now(UTC),
+        )
+        session.add(export)
+        await session.flush()
+        for ordinal, (_run, source_artifact, _data) in enumerate(composites, start=1):
+            session.add(
+                ExportItem(
+                    export_id=export.id,
+                    ordinal=ordinal,
+                    source_artifact_id=source_artifact.id,
+                    role="shot_composite",
+                    metadata_json={
+                        "timeline_clip_id": refs[ordinal - 1].clip_id,
+                        "formal_video_artifact_id": str(refs[ordinal - 1].artifact_id),
+                        **composite_lineage[ordinal - 1],
+                    },
+                )
+            )
+        await session.commit()
+        return await _final_film_read(
+            session, export=export, edit_session=edit_session, refs=refs
+        )
+    except Exception as exc:
+        if stored is not None:
+            with suppress(Exception):
+                await store.delete_bytes(object_key=stored.object_key)
+        operation.status = "failed"
+        operation.error_code = (
+            str(exc.details.get("code"))
+            if isinstance(exc, ValidationAppError) and exc.details.get("code")
+            else "FINAL_FILM_RENDER_FAILED"
+        )
+        operation.error_summary = _final_film_error_summary(exc)
+        operation.completed_at = datetime.now(UTC)
+        run.status = "failed"
+        run.error_code = operation.error_code
+        run.error_summary = operation.error_summary
+        run.finished_at = datetime.now(UTC)
+        await session.commit()
+        raise
 
 
 __all__ = [

@@ -378,6 +378,14 @@ class ProviderOperation(Base):
         ),
         nullable=True,
     )
+    credential_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "encrypted_provider_credentials.id",
+            name="fk_provider_operations_credential_revision",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
     model_binding_id: Mapped[UUID | None] = mapped_column(
         ForeignKey(
             "provider_model_bindings.id",
@@ -459,6 +467,10 @@ Index("ix_provider_operations_connection_id", ProviderOperation.__table__.c.conn
 Index(
     "ix_provider_operations_connection_revision_id",
     ProviderOperation.__table__.c.provider_connection_revision_id,
+)
+Index(
+    "ix_provider_operations_credential_revision_id",
+    ProviderOperation.__table__.c.credential_revision_id,
 )
 Index(
     "ix_provider_operations_model_binding_id",

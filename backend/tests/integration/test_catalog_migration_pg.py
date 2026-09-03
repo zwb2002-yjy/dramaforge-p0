@@ -345,7 +345,7 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
         with engine.connect() as conn:
             assert (
                 conn.execute(text("select version_num from alembic_version")).scalar_one()
-                == "20260903_0053"
+                == "20260903_0055"
             )
             reupgraded = conn.execute(
                 text(

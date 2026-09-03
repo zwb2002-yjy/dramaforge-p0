@@ -24,7 +24,7 @@ class FinalFilmPrepareBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     edit_session_id: UUID
-    expected_timeline_version: int | None = Field(default=None, ge=1)
+    expected_timeline_version: int = Field(ge=1)
     mode: Literal["prepare"] = "prepare"
 
 
@@ -32,7 +32,7 @@ class FinalFilmRenderBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     edit_session_id: UUID
-    expected_timeline_version: int | None = Field(default=None, ge=1)
+    expected_timeline_version: int = Field(ge=1)
     name: str = Field(default="V1 Final Film", min_length=1, max_length=200)
 
 

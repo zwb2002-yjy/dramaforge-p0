@@ -996,6 +996,18 @@ export function EditingWorkspace({
                   <dd>{finalFilm.byte_size}</dd>
                   <dt>content_hash</dt>
                   <dd>{finalFilm.content_hash}</dd>
+                  <dt>storage_state</dt>
+                  <dd>{finalFilm.storage_state}</dd>
+                  <dt>可播放性断言</dt>
+                  <dd>
+                    {finalFilm.ffprobe?.assertions &&
+                    typeof finalFilm.ffprobe.assertions === "object" &&
+                    !Array.isArray(finalFilm.ffprobe.assertions)
+                      ? Object.entries(finalFilm.ffprobe.assertions as Record<string, unknown>)
+                          .map(([key, value]) => `${key}=${String(value)}`)
+                          .join(" · ")
+                      : "未提供"}
+                  </dd>
                 </dl>
               </section>
             )}

@@ -3376,7 +3376,7 @@ export interface components {
              */
             edit_session_id: string;
             /** Expected Timeline Version */
-            expected_timeline_version?: number | null;
+            expected_timeline_version: number;
             /**
              * Mode
              * @default prepare
@@ -3464,6 +3464,10 @@ export interface components {
             storage_state: string;
             /** Content Hash */
             content_hash: string;
+            /** Formal References */
+            formal_references: {
+                [key: string]: unknown;
+            }[];
             /** Idempotency Key */
             idempotency_key?: string | null;
             /** Ffprobe */
@@ -3479,7 +3483,7 @@ export interface components {
              */
             edit_session_id: string;
             /** Expected Timeline Version */
-            expected_timeline_version?: number | null;
+            expected_timeline_version: number;
             /**
              * Name
              * @default V1 Final Film
@@ -5585,6 +5589,12 @@ export interface components {
             catalog_entry_id: string | null;
             /** Capability Manifest Hash */
             capability_manifest_hash: string | null;
+            /** Connection Id */
+            connection_id: string | null;
+            /** Provider Connection Revision Id */
+            provider_connection_revision_id: string | null;
+            /** Credential Revision Id */
+            credential_revision_id: string | null;
             /** Execution Path Version */
             execution_path_version: string | null;
             /** Provider Cost */
