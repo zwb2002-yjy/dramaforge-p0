@@ -255,18 +255,43 @@ do **not** merge or approve on behalf of @zwb2002-yjy.
 
 ---
 
-## Owner review continuation — 2026-09-03
+## Final frozen runtime candidate — 2026-09-03 (`06dd369`)
 
-Independent review found the earlier release evidence insufficient and
-reverted status to **GOAL_BLOCKED**.  Follow-up work in progress:
+Independent review follow-up is complete.  The frozen runtime candidate is
+`06dd369ea7b1e0f0fa2fd362ee68dc6df16d7357`; the worktree was clean when the
+real Golden ran, and no runtime commit followed the Release Candidate Gate.
 
-- playable Final Film Artifact backend（`final_film.py` + API），
-  Formal Shot tail：voice/subtitle/video-drift review/composite/continuity；
-- CJK subtitle font in backend Dockerfiles；
-- dual-path Golden：Template+AUTO and Free+ASSIST equal real chains；
-- controlled fail-closed / identity-freeze / idempotency evidence；
-- marker-gated `[release-candidate]` dev push Release Candidate Gate
-  （same-SHA images/SBOM/manifest/smoke/Artifacts，non-tag no publish）。
+### Golden evidence
 
-The next report section will be replaced with frozen-SHA dual-path Golden +
-Release Candidate Gate evidence.
+- JSON: `backend/tmp/golden-current-06dd369.json`；SHA-256
+  `bffafbae6976b34dc9fff02d2ec00cdc40e4002ab60923d750ae73e7e9ed01e2`。
+- Template+AUTO and Free+ASSIST each completed the same three-shot formal
+  keyframe → video chain, with 6 paid Agnes operations per path.
+- Both Final Film artifacts are 15.233 seconds, playable MP4 with H.264 video,
+  AAC dialogue audio, burned subtitles, formal-shot lineage, and concurrent
+  Export/Artifact idempotency.
+- Negative probes returned the expected fail-closed 409/422 responses without
+  creating a NodeRun.  The controlled resilience suite passed 49 tests.
+
+### GitHub Release Candidate Gate
+
+- CI push/PR and Security push/PR: **PASS**；migration head
+  `20260903_0055`。
+- Release run `33733545387`: **PASS** — source verification, exact-SHA images,
+  Compose smoke, SBOMs, release-manifest, online/offline bundles, checksums,
+  and artifact upload.
+- Artifact: `release-candidate-sha-06dd369ea7b1`, ID `9885350784`, ZIP SHA-256
+  `59b7e3813f21f204e779e553a8262af20063139ef7b860116150e1c01037c308`。
+- Backend digest:
+  `sha256:75ed47988241921e58904fb5758b0b55ec8b0824c6d2882efea93cc4f0df9ff0`；
+  frontend digest:
+  `sha256:2273982152d0be0fe2a49a9c0bc0a8ee58916abde4fd79b79249ae09dd4197d9`；
+  manifest digest:
+  `sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea`。
+- This was a non-tag candidate push, so publish/attestation/release steps were
+  correctly skipped; no production release was created.
+
+### Current verdict
+
+`GOAL_READY_FOR_OWNER_MERGE`.  Only final independent Owner review and
+`dev → main` merge of PR #12 remain; the Agent does not approve or merge it.
