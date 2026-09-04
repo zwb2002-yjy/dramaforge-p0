@@ -1,51 +1,329 @@
-"""Agnes AI OpenAI-compatible hub client (image + video).
+"""Agnes China ``agnes_cn_v1`` image and video protocol profile.
 
-Real endpoints verified against apihub.agnes-ai.com:
-  GET  /v1/models
-  POST /v1/images/generations  -> { data: [{ url }] }
-  POST /v1/videos              -> { id/task_id, status: queued|... }
-  GET  /v1/videos/{task_id}    -> poll status / result
-
-Never logs the full API key.
+The profile owns every wire path. Provider Connection hosts therefore stay at
+``https://api.agnes-ai.cn`` and never include ``/v1``. Paid create requests are
+single-attempt: transport ambiguity is returned as ``unknown_submission`` so a
+caller cannot accidentally hide a duplicate POST inside the adapter.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
-import re
+import json
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Any
+from typing import Any, Literal, cast
+from urllib.parse import urlsplit
 from uuid import uuid4
+from weakref import WeakKeyDictionary
 
 import httpx
+from pydantic import JsonValue
 
 from app.config import Settings, get_settings
 
+AGNES_CN_PROFILE = "agnes_cn_v1"
+AGNES_CN_HOST = "https://api.agnes-ai.cn"
+AGNES_IMAGE_PATH = "/v1/images/generations"
+AGNES_VIDEO_CREATE_PATH = "/v1/videos"
+AGNES_VIDEO_BY_ID_PATH = "/agnesapi"
+_ALLOWED_REFERENCE_MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
+_MAX_REFERENCE_BYTES = 20 * 1024 * 1024
+_AGNES_IMAGE_SIZE = "1K"
+_AGNES_IMAGE_RATIO = "9:16"
+_AGNES_IMAGE_WIDTH = 736
+_AGNES_IMAGE_HEIGHT = 1312
+_AGNES_VIDEO_NUM_FRAMES = 121
+_AGNES_VIDEO_FRAME_RATE = 24
+_AGNES_VIDEO_DURATION_SECONDS = 5
+_SUBMISSION_GATES: WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[tuple[str, int], asyncio.Semaphore]
+] = WeakKeyDictionary()
+
+
+def _submission_gate(host: str, limit: int) -> asyncio.Semaphore:
+    """Limit paid Agnes creates per host while leaving task polling parallel."""
+
+    loop = asyncio.get_running_loop()
+    loop_gates = _SUBMISSION_GATES.setdefault(loop, {})
+    key = (host, limit)
+    gate = loop_gates.get(key)
+    if gate is None:
+        gate = asyncio.Semaphore(limit)
+        loop_gates[key] = gate
+    return gate
+
+
+def normalize_agnes_host(value: str) -> str:
+    """Normalize a compatibility ``.../v1`` setting into a profile-independent host."""
+    raw = value.strip().rstrip("/")
+    if raw.endswith("/v1"):
+        raw = raw[:-3]
+    parsed = urlsplit(raw)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.query or parsed.fragment:
+        raise ValueError("Agnes host must be an HTTPS origin")
+    if parsed.path not in {"", "/"}:
+        raise ValueError("Agnes host must not contain a path")
+    return f"https://{parsed.netloc}"
+
+
+def _require_prompt(prompt: str) -> str:
+    value = prompt.strip()
+    if not value:
+        raise ValueError("prompt must be non-empty")
+    return value
+
+
+def _reference_data_uri(*, data: bytes, mime_type: str) -> tuple[str, str]:
+    mime = mime_type.strip().lower()
+    if mime not in _ALLOWED_REFERENCE_MIMES:
+        raise ValueError("canonical image MIME is not allowed")
+    if not data or len(data) > _MAX_REFERENCE_BYTES:
+        raise ValueError("canonical image byte size is invalid")
+    fingerprint = hashlib.sha256(data).hexdigest()
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime};base64,{encoded}", fingerprint
+
+
+def _require_https_reference(value: str) -> str:
+    reference = value.strip()
+    parsed = urlsplit(reference)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("video reference must be a public HTTPS URL")
+    return reference
+
+
+def _validate_video_shape(*, num_frames: int, frame_rate: int) -> None:
+    if num_frames != _AGNES_VIDEO_NUM_FRAMES:
+        raise ValueError("Agnes Video V2.0 requires exactly 121 frames")
+    if frame_rate != _AGNES_VIDEO_FRAME_RATE:
+        raise ValueError("Agnes Video V2.0 requires exactly 24 fps")
+
+
+def _schema_fingerprint(body: dict[str, object]) -> str:
+    """Fingerprint field shape while replacing prompts, references, and tokens."""
+
+    def redacted(value: object, key: str = "") -> object:
+        if key == "prompt":
+            return "<prompt>"
+        if key in {"image", "url", "video_url"}:
+            if isinstance(value, list):
+                return ["<reference>" for _ in value]
+            return "<reference>"
+        if isinstance(value, dict):
+            return {str(k): redacted(v, str(k)) for k, v in sorted(value.items())}
+        if isinstance(value, list):
+            return [redacted(item) for item in value]
+        return value
+
+    raw = json.dumps(redacted(body), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _error_code(status_code: int) -> str:
+    if status_code == 400:
+        return "PROVIDER_BAD_REQUEST"
+    if status_code == 401:
+        return "PROVIDER_AUTH_FAILED"
+    if status_code == 403:
+        return "PROVIDER_FORBIDDEN"
+    if status_code == 429:
+        return "PROVIDER_RATE_LIMITED"
+    if status_code >= 500:
+        return "PROVIDER_UNAVAILABLE"
+    return "PROVIDER_REQUEST_FAILED"
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    retry_after = response.headers.get("Retry-After", "").strip()
+    if not retry_after:
+        return None
+    try:
+        return max(float(retry_after), 0.0)
+    except ValueError:
+        try:
+            return max(
+                (parsedate_to_datetime(retry_after) - datetime.now(UTC)).total_seconds(),
+                0.0,
+            )
+        except (TypeError, ValueError):
+            return None
+
+
+def _json_object(response: httpx.Response) -> dict[str, Any]:
+    try:
+        value = response.json()
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _image_result_url(data: dict[str, Any]) -> str | None:
+    items = data.get("data")
+    if not isinstance(items, list) or not items or not isinstance(items[0], dict):
+        return None
+    value = items[0].get("url")
+    return str(value) if isinstance(value, str) and value else None
+
+
+def _video_result_url(data: dict[str, Any]) -> str | None:
+    """Migration parser until an account-verified China response fixture is frozen."""
+    candidates: list[object] = [data.get("url"), data.get("video_url")]
+    for key in ("data", "output", "metadata"):
+        nested = data.get(key)
+        if isinstance(nested, dict):
+            candidates.extend((nested.get("url"), nested.get("video_url")))
+        elif key == "output":
+            candidates.append(nested)
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Low-level transport and wire-body builders (single source of truth).
+# Both the compatibility HubClient methods and the unified Compiler/Runtime go through
+# these, so there is exactly one wire contract and one HTTP send path.
+# ---------------------------------------------------------------------------
+
+
+async def _post_json(
+    host: str,
+    path: str,
+    *,
+    headers: dict[str, str],
+    body: dict[str, object],
+    timeout: float,
+    transport: httpx.AsyncBaseTransport | None,
+) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+        return await client.post(f"{host}{path}", headers=headers, json=body)
+
+
+async def _get_json(
+    host: str,
+    path: str,
+    *,
+    headers: dict[str, str],
+    params: dict[str, str] | None,
+    timeout: float,
+    transport: httpx.AsyncBaseTransport | None,
+) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+        return await client.get(f"{host}{path}", headers=headers, params=params)
+
+
+def _build_image_body(
+    model: str,
+    *,
+    prompt: str,
+    size: str,
+    ratio: str | None = None,
+    canonical_image_bytes: bytes | None = None,
+    canonical_image_mime: str = "image/png",
+) -> tuple[dict[str, object], str, list[str]]:
+    """Construct the Image 2.x request body and derive operation + fingerprints."""
+    prompt_value = _require_prompt(prompt)
+    size_value = size.strip()
+    if not size_value:
+        raise ValueError("size must be non-empty")
+    extra_body: dict[str, object] = {"response_format": "url"}
+    reference_fingerprints: list[str] = []
+    if canonical_image_bytes is not None:
+        data_uri, fingerprint = _reference_data_uri(
+            data=canonical_image_bytes,
+            mime_type=canonical_image_mime,
+        )
+        extra_body["image"] = [data_uri]
+        reference_fingerprints.append(fingerprint)
+    body: dict[str, object] = {
+        "model": model,
+        "prompt": prompt_value,
+        "size": size_value,
+        "extra_body": extra_body,
+    }
+    if ratio is not None:
+        body["ratio"] = ratio
+    operation = "image.i2i" if reference_fingerprints else "image.t2i"
+    return body, operation, reference_fingerprints
+
+
+def _build_video_body(
+    model: str,
+    *,
+    prompt: str,
+    image_url: str | None = None,
+    image_bytes: bytes | None = None,
+    image_mime: str = "image/png",
+    num_frames: int = 121,
+    frame_rate: int = 24,
+    keyframe_urls: list[str] | None = None,
+) -> tuple[dict[str, object], str, list[str], str]:
+    """Construct the Video V2.0 request body and derive operation/transport."""
+    prompt_value = _require_prompt(prompt)
+    _validate_video_shape(num_frames=num_frames, frame_rate=frame_rate)
+    if keyframe_urls is not None:
+        raise ValueError("Agnes Video V2.0 product contract only supports first-frame I2V")
+    if image_bytes is not None and image_url:
+        raise ValueError("image_bytes cannot be combined with image_url/keyframe_urls")
+    body: dict[str, object] = {
+        "model": model,
+        "prompt": prompt_value,
+        "num_frames": num_frames,
+        "frame_rate": frame_rate,
+        "height": 1280,
+        "width": 720,
+    }
+    operation = "video.i2v"
+    reference_transport = "short_lived_https"
+    references: list[str]
+    if image_url is not None:
+        references = [_require_https_reference(image_url)]
+        body["image"] = references[0]
+    elif image_bytes is not None:
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        body["image"] = encoded
+        references = [encoded]
+        reference_transport = "base64_raw"
+    else:
+        raise ValueError("video I2V requires one first-frame reference")
+    return body, operation, references, reference_transport
+
+
+def _request_fingerprint(body: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
 
 class AgnesHubClient:
-    _IMAGE_MAX_ATTEMPTS = 8
-    _IMAGE_REQUEST_TIMEOUT_S = 150.0
-    _IMAGE_RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
-    _IMAGE_BACKOFF_CAP_S = 20.0
-    _VIDEO_MAX_ATTEMPTS = 8
+    """Single-attempt Agnes China protocol client."""
+
     _VIDEO_REQUEST_TIMEOUT_S = 120.0
-    _VIDEO_BACKOFF_CAP_S = 90.0
 
     def __init__(
         self,
         settings: Settings | None = None,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        host: str | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._transport = transport
-        self._base = self._settings.agnes_base_url.rstrip("/")
+        self._host = normalize_agnes_host(host or self._settings.agnes_base_url)
         self._key = self._settings.agnes_api_key.strip()
         self._image_model = self._settings.agnes_image_model
         self._video_model = self._settings.agnes_video_model
+        self._image_request_timeout_s = self._settings.agnes_image_request_timeout_seconds
+        self._submission_limit = self._settings.agnes_max_concurrent_submissions
         self._tasks: dict[str, dict[str, Any]] = {}
+
+    @property
+    def host(self) -> str:
+        return self._host
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -56,301 +334,321 @@ class AgnesHubClient:
     def configured(self) -> bool:
         return bool(self._key and self._settings.agnes_enabled)
 
-    @staticmethod
-    def _policy_safe_image_prompt(prompt: str) -> str:
-        """Keep a storyboard beat while removing physical-confrontation wording.
-
-        This is only used after the provider explicitly rejects an image request.
-        The original plan remains on the NodeRun; callers receive fingerprints for
-        both requests so the adaptation is visible in ProviderOperation audit data.
-        """
-        rewritten = prompt
-        replacements = (
-            (r"\bstalker(?:'s)?\b", "unidentified figure"),
-            (r"\bgrabbing\b", "reaching toward"),
-            (r"\bgrabs\b", "reaches toward"),
-            (r"\bgrab\b", "reach toward"),
-            (r"\bslipping to reveal\b", "partially opened to reveal"),
-            (r"\bfreeze frame, then black screen\b", "a dramatic cinematic pause"),
-        )
-        for pattern, replacement in replacements:
-            rewritten = re.sub(pattern, replacement, rewritten, flags=re.IGNORECASE)
-        return rewritten + ", non-violent cinematic suspense, no physical confrontation"
-
-    @staticmethod
-    def _is_image_policy_refusal(data: object) -> bool:
-        message = str(data).lower()
-        return any(
-            marker in message
-            for marker in (
-                "unable to generate this content",
-                "content policy",
-                "safety policy",
-                "modify your prompt",
-            )
-        )
-
-    async def create_image(self, *, prompt: str, size: str = "1024x1024") -> dict[str, Any]:
+    async def create_image(
+        self,
+        *,
+        prompt: str,
+        size: str = _AGNES_IMAGE_SIZE,
+        ratio: str | None = _AGNES_IMAGE_RATIO,
+        canonical_image_bytes: bytes | None = None,
+        canonical_image_mime: str = "image/png",
+        reference_artifact_id: str | None = None,
+    ) -> dict[str, Any]:
         if not self.configured():
-            raise RuntimeError("Agnes hub not configured (AGNES_ENABLED + AGNES_API_KEY)")
-        remote_id = f"agnes-img-{uuid4()}"
-        url = f"{self._base}/images/generations"
-        body = {
+            raise RuntimeError("Agnes China connection is not configured")
+        body, operation, reference_fingerprints = _build_image_body(
+            self._image_model,
+            prompt=prompt,
+            size=size,
+            ratio=ratio,
+            canonical_image_bytes=canonical_image_bytes,
+            canonical_image_mime=canonical_image_mime,
+        )
+        request_fingerprint = _request_fingerprint(body)
+        summary: dict[str, object] = {
+            "protocol_profile": AGNES_CN_PROFILE,
+            "host": urlsplit(self._host).hostname or "",
+            "operation": operation,
             "model": self._image_model,
-            "prompt": prompt,
-            "n": 1,
-            "size": size,
+            "size": str(body.get("size", "")),
+            "aspect_ratio": str(body.get("ratio", "")) or None,
+            "reference_count": len(reference_fingerprints),
+            "reference_artifact_ids": ([reference_artifact_id] if reference_artifact_id else []),
+            "reference_fingerprints": reference_fingerprints,
+            "reference_transport": "data_uri" if reference_fingerprints else "none",
+            "request_schema_fingerprint": _schema_fingerprint(body),
         }
-        original_fingerprint = hashlib.sha256(prompt.encode()).hexdigest()
-        effective_prompt = prompt
-        policy_rewrite = False
-        last_err = "unknown"
-        # Eight 150-second requests plus capped backoff fit inside the heavy
-        # Worker's 30-minute execution budget.
-        async with httpx.AsyncClient(
-            timeout=self._IMAGE_REQUEST_TIMEOUT_S,
-            transport=self._transport,
-        ) as client:
-            for attempt in range(1, self._IMAGE_MAX_ATTEMPTS + 1):
-                try:
-                    resp = await client.post(url, headers=self._headers(), json=body)
-                    try:
-                        data = resp.json()
-                    except Exception:
-                        data = {"raw_status": resp.status_code}
-                    ok = resp.status_code < 400
-                    image_url = None
-                    if isinstance(data, dict):
-                        items = data.get("data")
-                        if isinstance(items, list) and items:
-                            first = items[0]
-                            if isinstance(first, dict):
-                                image_url = first.get("url") or first.get("b64_json")
-                    if ok and image_url:
-                        self._tasks[remote_id] = {
-                            "kind": "image",
-                            "status": "succeeded",
-                            "http_status": resp.status_code,
-                            "artifact_uri": image_url,
-                            "error": None,
-                        }
-                        return {
-                            "remote_task_id": remote_id,
-                            "status": "succeeded",
-                            "artifact_uri": image_url,
-                            "prompt_adaptation": (
-                                "provider_policy_safe_rewrite" if policy_rewrite else None
-                            ),
-                            "original_prompt_fingerprint": original_fingerprint,
-                            "effective_prompt_fingerprint": hashlib.sha256(
-                                effective_prompt.encode()
-                            ).hexdigest(),
-                        }
-                    last_err = f"agnes image http {resp.status_code}: {str(data)[:120]}"
-                    if (
-                        resp.status_code == 400
-                        and not policy_rewrite
-                        and self._is_image_policy_refusal(data)
-                    ):
-                        effective_prompt = self._policy_safe_image_prompt(prompt)
-                        body["prompt"] = effective_prompt
-                        policy_rewrite = True
-                        continue
-                    if resp.status_code in self._IMAGE_RETRYABLE_STATUSES:
-                        await asyncio.sleep(self._image_retry_delay(attempt))
-                        continue
-                except (
-                    httpx.TimeoutException,
-                    httpx.NetworkError,
-                    httpx.RemoteProtocolError,
-                ) as exc:
-                    last_err = f"{type(exc).__name__}: {exc}"
-                    await asyncio.sleep(self._image_retry_delay(attempt))
-                    continue
-                break
-            self._tasks[remote_id] = {
-                "kind": "image",
-                "status": "failed",
-                "artifact_uri": None,
-                "error": last_err[:300],
-            }
+        try:
+            async with _submission_gate(self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    AGNES_IMAGE_PATH,
+                    headers=self._headers(),
+                    body=body,
+                    timeout=self._image_request_timeout_s,
+                    transport=self._transport,
+                )
+        except httpx.TransportError as exc:
             return {
-                "remote_task_id": remote_id,
-                "status": "failed",
-                "error": last_err[:300],
-                "prompt_adaptation": (
-                    "provider_policy_safe_rewrite" if policy_rewrite else None
-                ),
-                "original_prompt_fingerprint": original_fingerprint,
-                "effective_prompt_fingerprint": hashlib.sha256(
-                    effective_prompt.encode()
-                ).hexdigest(),
+                "status": "unknown_submission",
+                "error_code": "PROVIDER_SUBMISSION_UNKNOWN",
+                "actual_provider": "agnes",
+                "actual_model": self._image_model,
+                "protocol_profile": AGNES_CN_PROFILE,
+                "request_fingerprint": request_fingerprint,
+                "request_summary": summary,
+                "reference_fingerprints": reference_fingerprints,
+                "transport_error": type(exc).__name__,
             }
-
-    @classmethod
-    def _image_retry_delay(cls, attempt: int) -> float:
-        return min(2.0**attempt, cls._IMAGE_BACKOFF_CAP_S)
-
-    @classmethod
-    def _video_retry_delay(cls, response: httpx.Response, attempt: int) -> float:
-        """Honor the hub cooldown when it supplies one for a rejected create."""
-        retry_after = response.headers.get("Retry-After", "").strip()
-        if retry_after:
-            try:
-                return min(max(float(retry_after), 0.0), cls._VIDEO_BACKOFF_CAP_S)
-            except ValueError:
-                try:
-                    delay = (
-                        parsedate_to_datetime(retry_after) - datetime.now(UTC)
-                    ).total_seconds()
-                    return min(max(delay, 0.0), cls._VIDEO_BACKOFF_CAP_S)
-                except (TypeError, ValueError):
-                    pass
-        return min(15.0 * 2.0 ** (attempt - 1), cls._VIDEO_BACKOFF_CAP_S)
-
-    async def create_video(self, *, prompt: str) -> dict[str, Any]:
-        """POST /videos — async task creation."""
-        if not self.configured():
-            raise RuntimeError("Agnes hub not configured (AGNES_ENABLED + AGNES_API_KEY)")
-        url = f"{self._base}/videos"
-        body = {"model": self._video_model, "prompt": prompt}
-        last_err = "unknown"
-        async with httpx.AsyncClient(
-            timeout=self._VIDEO_REQUEST_TIMEOUT_S,
-            transport=self._transport,
-        ) as client:
-            for attempt in range(1, self._VIDEO_MAX_ATTEMPTS + 1):
-                try:
-                    resp = await client.post(url, headers=self._headers(), json=body)
-                    try:
-                        data = resp.json()
-                    except Exception:
-                        data = {"raw_status": resp.status_code}
-                    task_id = None
-                    if isinstance(data, dict):
-                        task_id = (
-                            data.get("task_id")
-                            or data.get("video_id")
-                            or data.get("id")
-                        )
-                    if resp.status_code < 400 and task_id:
-                        remote_id = str(task_id)
-                        self._tasks[remote_id] = {
-                            "kind": "video",
-                            "status": str(data.get("status", "queued")),
-                            "http_status": resp.status_code,
-                            "artifact_uri": None,
-                            "error": None,
-                        }
-                        return {
-                            "remote_task_id": remote_id,
-                            "status": str(data.get("status", "queued")),
-                        }
-                    last_err = f"agnes video http {resp.status_code}: {str(data)[:200]}"
-                    if resp.status_code in self._IMAGE_RETRYABLE_STATUSES:
-                        await asyncio.sleep(self._video_retry_delay(resp, attempt))
-                        continue
-                except (
-                    httpx.TimeoutException,
-                    httpx.NetworkError,
-                    httpx.RemoteProtocolError,
-                ) as exc:
-                    last_err = f"{type(exc).__name__}: {exc}"
-                    await asyncio.sleep(self._image_retry_delay(attempt))
-                    continue
-                break
+        data = _json_object(response)
+        image_url = _image_result_url(data)
+        if response.status_code >= 400 or not image_url:
+            code = (
+                _error_code(response.status_code)
+                if response.status_code >= 400
+                else "PROVIDER_RESPONSE_INVALID"
+            )
+            return {
+                "status": "failed",
+                "http_status": response.status_code,
+                "error_code": code,
+                "error": f"Agnes image request failed ({response.status_code})",
+                "retry_after_seconds": _retry_after_seconds(response),
+                "actual_provider": "agnes",
+                "actual_model": self._image_model,
+                "protocol_profile": AGNES_CN_PROFILE,
+                "request_fingerprint": request_fingerprint,
+                "request_summary": summary,
+                "reference_fingerprints": reference_fingerprints,
+            }
+        remote_id = f"agnes-image-{uuid4()}"
+        self._tasks[remote_id] = {
+            "kind": "image",
+            "status": "succeeded",
+            "artifact_uri": image_url,
+        }
         return {
-            "remote_task_id": str(uuid4()),
-            "status": "failed",
-            "error": last_err[:300],
+            "remote_task_id": remote_id,
+            "status": "succeeded",
+            "artifact_uri": image_url,
+            "actual_provider": "agnes",
+            "actual_model": self._image_model,
+            "protocol_profile": AGNES_CN_PROFILE,
+            "request_fingerprint": request_fingerprint,
+            "request_summary": summary,
+            "reference_fingerprints": reference_fingerprints,
         }
 
-    async def poll_video(self, remote_task_id: str) -> dict[str, Any]:
-        """GET /videos/{id} for async video tasks."""
+    async def create_video(
+        self,
+        *,
+        prompt: str,
+        image_url: str | None = None,
+        image_bytes: bytes | None = None,
+        image_mime: str = "image/png",
+        num_frames: int = 121,
+        frame_rate: int = 24,
+        keyframe_urls: list[str] | None = None,
+        reference_artifact_ids: list[str] | None = None,
+        reference_fingerprints: list[str] | None = None,
+    ) -> dict[str, Any]:
         if not self.configured():
-            raise RuntimeError("Agnes hub not configured")
-        url = f"{self._base}/videos/{remote_task_id}"
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(url, headers=self._headers())
-            try:
-                raw_data = resp.json()
-            except Exception:
-                raw_data = {"raw_status": resp.status_code}
-            data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
-            if resp.status_code >= 400:
-                return {"status": "failed", "error": f"poll http {resp.status_code}"}
-            status = str(data.get("status", "unknown"))
-            # Normalize completed variants
-            if status in {"succeeded", "completed", "success", "done"}:
-                status = "succeeded"
-            elif status in {"failed", "error"}:
-                status = "failed"
-            elif status in {"queued", "pending", "processing", "running", "in_progress"}:
-                status = "running" if status != "queued" else "queued"
-            uri: object | None = None
-            meta = data.get("metadata")
-            if isinstance(meta, dict):
-                uri = meta.get("url") or meta.get("video_url")
-            output = data.get("output")
-            if isinstance(output, dict):
-                uri = uri or output.get("url")
-            elif isinstance(output, str):
-                uri = uri or output
-            uri = uri or data.get("url") or data.get("video_url")
-            nested_data = data.get("data")
-            if isinstance(nested_data, dict):
-                uri = uri or nested_data.get("url")
-            self._tasks[remote_task_id] = {
-                "kind": "video",
-                "status": status,
-                "artifact_uri": uri,
-                "error": data.get("error"),
+            raise RuntimeError("Agnes China connection is not configured")
+        body, operation, references, reference_transport = _build_video_body(
+            self._video_model,
+            prompt=prompt,
+            image_url=image_url,
+            image_bytes=image_bytes,
+            image_mime=image_mime,
+            num_frames=num_frames,
+            frame_rate=frame_rate,
+            keyframe_urls=keyframe_urls,
+        )
+        request_fingerprint = _request_fingerprint(body)
+        summary: dict[str, object] = {
+            "protocol_profile": AGNES_CN_PROFILE,
+            "host": urlsplit(self._host).hostname or "",
+            "operation": operation,
+            "model": self._video_model,
+            "num_frames": num_frames,
+            "frame_rate": frame_rate,
+            "reference_count": len(references),
+            "reference_artifact_ids": list(reference_artifact_ids or []),
+            "reference_fingerprints": list(reference_fingerprints or []),
+            "reference_transport": reference_transport,
+            "request_schema_fingerprint": _schema_fingerprint(body),
+        }
+        try:
+            async with _submission_gate(self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    AGNES_VIDEO_CREATE_PATH,
+                    headers=self._headers(),
+                    body=body,
+                    timeout=self._VIDEO_REQUEST_TIMEOUT_S,
+                    transport=self._transport,
+                )
+        except httpx.TransportError as exc:
+            return {
+                "status": "unknown_submission",
+                "error_code": "PROVIDER_SUBMISSION_UNKNOWN",
+                "actual_provider": "agnes",
+                "actual_model": self._video_model,
+                "protocol_profile": AGNES_CN_PROFILE,
+                "request_fingerprint": request_fingerprint,
+                "request_summary": summary,
+                "transport_error": type(exc).__name__,
             }
-            raw_progress = data.get("progress", 0)
-            progress = (
-                float(raw_progress) / 100.0
-                if isinstance(raw_progress, int | float) and raw_progress > 1
-                else float(raw_progress or 0)
+        data = _json_object(response)
+        video_id = data.get("video_id")
+        task_id = data.get("task_id")
+        video_id_value = str(video_id) if video_id is not None and str(video_id) else None
+        task_id_value = str(task_id) if task_id is not None and str(task_id) else None
+        if response.status_code >= 400 or (video_id_value is None and task_id_value is None):
+            code = (
+                _error_code(response.status_code)
+                if response.status_code >= 400
+                else "PROVIDER_RESPONSE_INVALID"
             )
-            result: dict[str, Any] = {
-                "status": status,
-                "progress": progress,
+            return {
+                "status": "failed",
+                "http_status": response.status_code,
+                "error_code": code,
+                "error": f"Agnes video request failed ({response.status_code})",
+                "retry_after_seconds": _retry_after_seconds(response),
+                "actual_provider": "agnes",
+                "actual_model": self._video_model,
+                "protocol_profile": AGNES_CN_PROFILE,
+                "request_fingerprint": request_fingerprint,
+                "request_summary": summary,
             }
-            if uri:
-                result["artifact_uri"] = uri
-            if status == "failed":
-                result["error"] = str(data.get("error", data))[:300]
-            return result
+        remote_id = video_id_value or task_id_value
+        assert remote_id is not None
+        remote_secondary_id = task_id_value if video_id_value else None
+        query_kind: Literal["video_id", "task_id"] = "video_id" if video_id_value else "task_id"
+        self._tasks[remote_id] = {
+            "kind": "video",
+            "query_kind": query_kind,
+            "remote_secondary_id": remote_secondary_id,
+            "status": str(data.get("status") or "queued"),
+        }
+        return {
+            "remote_task_id": remote_id,
+            "remote_secondary_id": remote_secondary_id,
+            "status": str(data.get("status") or "queued"),
+            "actual_provider": "agnes",
+            "actual_model": self._video_model,
+            "protocol_profile": AGNES_CN_PROFILE,
+            "request_fingerprint": request_fingerprint,
+            "request_summary": summary,
+            "query_kind": query_kind,
+        }
+
+    async def poll_video(
+        self,
+        remote_task_id: str,
+        *,
+        query_kind: Literal["video_id", "task_id"] | None = None,
+    ) -> dict[str, Any]:
+        if not self.configured():
+            raise RuntimeError("Agnes China connection is not configured")
+        task = self._tasks.get(remote_task_id, {})
+        selected_kind = query_kind or task.get("query_kind")
+        if selected_kind not in {"video_id", "task_id"}:
+            raise ValueError("video poll query kind is required")
+        if selected_kind == "video_id":
+            path = AGNES_VIDEO_BY_ID_PATH
+            params = {"video_id": remote_task_id}
+        else:
+            path = f"{AGNES_VIDEO_CREATE_PATH}/{remote_task_id}"
+            params = None
+        try:
+            response = await _get_json(
+                self._host,
+                path,
+                headers=self._headers(),
+                params=params,
+                timeout=60.0,
+                transport=self._transport,
+            )
+        except httpx.TransportError as exc:
+            return {
+                "status": "running",
+                "poll_error": type(exc).__name__,
+                "error_code": "PROVIDER_POLL_TRANSIENT",
+            }
+        data = _json_object(response)
+        if response.status_code >= 400:
+            # Transient provider throttle/unavailability during polling must not
+            # be terminal: the remote task already exists (plan §11.2). Keep the
+            # poll alive on the same task; only genuine 4xx (bad task id, revoked
+            # auth, permission) fail the node.
+            if response.status_code == 429 or response.status_code >= 500:
+                return {
+                    "status": "running",
+                    "http_status": response.status_code,
+                    "error_code": (
+                        "PROVIDER_RATE_LIMITED"
+                        if response.status_code == 429
+                        else "PROVIDER_POLL_TRANSIENT"
+                    ),
+                    "poll_error": f"http_{response.status_code}",
+                    "retry_after_seconds": _retry_after_seconds(response),
+                }
+            return {
+                "status": "failed",
+                "http_status": response.status_code,
+                "error_code": _error_code(response.status_code),
+                "error": f"Agnes video poll failed ({response.status_code})",
+            }
+        raw_status = str(data.get("status") or "unknown").lower()
+        if raw_status in {"succeeded", "completed", "success", "done"}:
+            status = "succeeded"
+        elif raw_status in {"failed", "error", "cancelled"}:
+            status = "failed" if raw_status != "cancelled" else "cancelled"
+        elif raw_status in {"queued", "pending"}:
+            status = "queued"
+        else:
+            status = "running"
+        uri = _video_result_url(data)
+        raw_progress = data.get("progress", 0)
+        try:
+            progress = float(raw_progress or 0)
+        except (TypeError, ValueError):
+            progress = 0.0
+        if progress > 1:
+            progress /= 100.0
+        result: dict[str, Any] = {"status": status, "progress": progress}
+        if uri:
+            result["artifact_uri"] = uri
+        if status == "failed":
+            result["error_code"] = "PROVIDER_TASK_FAILED"
+            result["error"] = "Agnes video task failed"
+        self._tasks[remote_task_id] = {**task, "kind": "video", "status": status}
+        return result
 
     async def poll(self, remote_task_id: str) -> dict[str, Any]:
         task = self._tasks.get(remote_task_id)
         if task and task.get("kind") == "video":
             return await self.poll_video(remote_task_id)
-        if task is None:
-            # try video poll anyway
-            if remote_task_id.startswith("task_") or remote_task_id.startswith("agnes-vid"):
-                return await self.poll_video(remote_task_id)
-            return {"status": "failed", "error": "unknown task"}
-        return {
-            "status": task["status"],
-            "progress": 1.0 if task["status"] == "succeeded" else 0.0,
-            "artifact_uri": task.get("artifact_uri"),
-            "error": task.get("error"),
-        }
+        if task and task.get("kind") == "image":
+            return {
+                "status": task["status"],
+                "progress": 1.0,
+                "artifact_uri": task.get("artifact_uri"),
+            }
+        return {"status": "failed", "error_code": "PROVIDER_TASK_UNKNOWN"}
 
     async def wait_video(
-        self, remote_task_id: str, *, timeout_s: float = 300.0, interval_s: float = 3.0
+        self,
+        remote_task_id: str,
+        *,
+        timeout_s: float = 1_620.0,
+        interval_s: float = 5.0,
     ) -> dict[str, Any]:
-        deadline = asyncio.get_event_loop().time() + timeout_s
+        deadline = asyncio.get_running_loop().time() + timeout_s
         last: dict[str, Any] = {"status": "queued"}
-        while asyncio.get_event_loop().time() < deadline:
+        while asyncio.get_running_loop().time() < deadline:
             last = await self.poll_video(remote_task_id)
             if last.get("status") in {"succeeded", "failed", "cancelled"}:
                 return last
             await asyncio.sleep(interval_s)
-        last["status"] = "failed"
-        last["error"] = "timeout waiting for video"
-        return last
+        return {
+            **last,
+            "status": "running",
+            "error_code": "PROVIDER_POLL_TRANSIENT",
+            "poll_timeout": True,
+        }
 
     async def cancel(self, remote_task_id: str) -> dict[str, Any]:
         if remote_task_id in self._tasks:
@@ -363,14 +661,35 @@ class AgnesHubClient:
 
 
 class AgnesImageAdapter:
-    provider = "flux"
+    provider = "agnes"
+    protocol_profile = AGNES_CN_PROFILE
 
-    def __init__(self, settings: Settings | None = None) -> None:
-        self._client = AgnesHubClient(settings)
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        host: str | None = None,
+    ) -> None:
+        self._client = AgnesHubClient(settings, transport=transport, host=host)
+        self.model = self._client._image_model
 
     async def create(self, request: dict[str, Any]) -> dict[str, Any]:
-        prompt = str(request.get("prompt", ""))
-        return await self._client.create_image(prompt=prompt)
+        image_bytes = request.get("canonical_image_bytes")
+        if image_bytes is not None and not isinstance(image_bytes, bytes):
+            raise TypeError("canonical_image_bytes must be bytes")
+        return await self._client.create_image(
+            prompt=str(request.get("prompt") or ""),
+            size=str(request.get("size") or _AGNES_IMAGE_SIZE),
+            ratio=str(request.get("ratio") or _AGNES_IMAGE_RATIO),
+            canonical_image_bytes=image_bytes,
+            canonical_image_mime=str(request.get("canonical_image_mime") or "image/png"),
+            reference_artifact_id=(
+                str(request["canonical_artifact_id"])
+                if request.get("canonical_artifact_id")
+                else None
+            ),
+        )
 
     async def poll(self, remote_task_id: str) -> dict[str, Any]:
         return await self._client.poll(remote_task_id)
@@ -383,20 +702,587 @@ class AgnesImageAdapter:
 
 
 class AgnesVideoAdapter:
-    provider = "kling"
+    provider = "agnes"
+    protocol_profile = AGNES_CN_PROFILE
 
-    def __init__(self, settings: Settings | None = None) -> None:
-        self._client = AgnesHubClient(settings)
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        host: str | None = None,
+    ) -> None:
+        self._client = AgnesHubClient(settings, transport=transport, host=host)
+        self.model = self._client._video_model
 
     async def create(self, request: dict[str, Any]) -> dict[str, Any]:
-        prompt = str(request.get("prompt", ""))
-        return await self._client.create_video(prompt=prompt)
+        keyframe_urls = request.get("keyframe_urls")
+        if keyframe_urls is not None and not isinstance(keyframe_urls, list):
+            raise TypeError("keyframe_urls must be a list")
+        return await self._client.create_video(
+            prompt=str(request.get("prompt") or ""),
+            image_url=(str(request["image_url"]) if request.get("image_url") else None),
+            image_bytes=request.get("image_bytes"),
+            image_mime=str(request.get("image_mime") or "image/png"),
+            num_frames=int(request.get("num_frames", 121)),
+            frame_rate=int(request.get("frame_rate", 24)),
+            keyframe_urls=[str(item) for item in keyframe_urls] if keyframe_urls else None,
+            reference_artifact_ids=[
+                str(item) for item in request.get("reference_artifact_ids", [])
+            ],
+            reference_fingerprints=[
+                str(item) for item in request.get("reference_fingerprints", [])
+            ],
+        )
 
     async def poll(self, remote_task_id: str) -> dict[str, Any]:
         return await self._client.poll(remote_task_id)
+
+    async def poll_persisted(
+        self,
+        remote_task_id: str,
+        *,
+        query_kind: str | None,
+    ) -> dict[str, Any]:
+        if query_kind not in {"video_id", "task_id"}:
+            raise ValueError("persisted Agnes video query kind is required")
+        selected_kind: Literal["video_id", "task_id"] = (
+            "video_id" if query_kind == "video_id" else "task_id"
+        )
+        return await self._client.poll_video(
+            remote_task_id,
+            query_kind=selected_kind,
+        )
 
     async def cancel(self, remote_task_id: str) -> dict[str, Any]:
         return await self._client.cancel(remote_task_id)
 
     async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
         return await self._client.fetch_cost(remote_task_id)
+
+
+# ---------------------------------------------------------------------------
+# Stage B2: unified Compiler + Runtime (single wire owner).
+# Compilers validate against the catalog manifest and reuse the same body
+# builders as the HubClient; the Runtime sends CompiledRequest.wire_request
+# verbatim through the low-level transport.
+# ---------------------------------------------------------------------------
+
+
+def _compiled_summary(
+    *,
+    operation: str,
+    invoke_model_value: str,
+    reference_artifact_ids: list[str],
+    reference_fingerprints: list[str],
+    schema_version: str,
+) -> dict[str, object]:
+    return {
+        "operation": operation,
+        "model": invoke_model_value,
+        "reference_artifact_ids": reference_artifact_ids,
+        "reference_fingerprints": reference_fingerprints,
+        "request_schema_version": schema_version,
+    }
+
+
+class AgnesImageCompiler:
+    """Validates an image intent against the catalog manifest and compiles the
+    wire request using the same body builder as :class:`AgnesHubClient`."""
+
+    def validate(self, intent: Any, model: Any) -> None:
+        op = model.operations.get("image.generate")
+        if op is None:
+            raise ValueError("model does not support image.generate")
+        constraints = op.output_constraints
+        if (
+            constraints.get("size") != _AGNES_IMAGE_SIZE
+            or constraints.get("aspect_ratio") != _AGNES_IMAGE_RATIO
+            or constraints.get("width") != _AGNES_IMAGE_WIDTH
+            or constraints.get("height") != _AGNES_IMAGE_HEIGHT
+        ):
+            raise ValueError(
+                "Agnes Image 2.1 Flash manifest is outside the verified product subset"
+            )
+        capabilities = set(op.capabilities)
+        required = "image.t2i"
+        if intent.reference_artifact_id is not None:
+            required = "image.i2i"
+        if required not in capabilities:
+            raise ValueError(f"model does not support {required}")
+        if intent.reference_artifact_id is not None:
+            constraint = op.reference_constraints.get("reference_image")
+            if constraint is None or constraint.max < 1:
+                raise ValueError("model does not accept a reference_image")
+        manifest_size = op.output_constraints.get("size")
+        manifest_ratio = op.output_constraints.get("aspect_ratio")
+        if (
+            isinstance(manifest_size, str)
+            and intent.size is not None
+            and intent.size != manifest_size
+        ):
+            raise ValueError(
+                f"image size {intent.size} does not match frozen manifest size {manifest_size}"
+            )
+        if (
+            isinstance(manifest_ratio, str)
+            and intent.aspect_ratio is not None
+            and intent.aspect_ratio != manifest_ratio
+        ):
+            raise ValueError(
+                f"image aspect ratio {intent.aspect_ratio} does not match frozen "
+                f"manifest ratio {manifest_ratio}"
+            )
+
+    async def compile(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+    ) -> Any:
+        self.validate(intent, model)
+        image_references = [
+            ref for ref in references if ref.role == "reference_image"
+        ]
+        if len(image_references) > 1:
+            raise ValueError(
+                "UNSUPPORTED_BY_LEGACY_BRIDGE: image compiler accepts at most one reference_image"
+            )
+        ref_image = image_references[0] if image_references else None
+        expected_reference_id = intent.reference_artifact_id
+        if expected_reference_id is None and ref_image is not None:
+            raise ValueError("image compiler received an unexpected reference_image")
+        if expected_reference_id is not None:
+            if ref_image is None:
+                raise ValueError("image intent reference_image was not resolved")
+            if ref_image.artifact_id != expected_reference_id:
+                raise ValueError("resolved reference_image does not match the image intent")
+            if (
+                intent.reference_fingerprint is not None
+                and ref_image.fingerprint != intent.reference_fingerprint
+            ):
+                raise ValueError("resolved reference_image fingerprint does not match the intent")
+            if intent.reference_mime is not None and ref_image.mime_type != intent.reference_mime:
+                raise ValueError("resolved reference_image MIME does not match the intent")
+        operation_manifest = model.operations["image.generate"]
+        manifest_size = operation_manifest.output_constraints.get("size")
+        manifest_ratio = operation_manifest.output_constraints.get("aspect_ratio")
+        size = intent.size or (
+            manifest_size if isinstance(manifest_size, str) else _AGNES_IMAGE_SIZE
+        )
+        ratio = intent.aspect_ratio or (
+            manifest_ratio if isinstance(manifest_ratio, str) else None
+        )
+        body, operation, fingerprints = _build_image_body(
+            invoke_model_value,
+            prompt=intent.prompt,
+            size=size,
+            ratio=ratio,
+            canonical_image_bytes=ref_image.content_bytes if ref_image is not None else None,
+            canonical_image_mime=ref_image.mime_type if ref_image is not None else "image/png",
+        )
+        from app.providers.runtime import CompiledImageRequest
+
+        artifact_ids = [str(ref_image.artifact_id)] if ref_image is not None else []
+        fps = [ref_image.fingerprint] if ref_image is not None and ref_image.fingerprint else []
+        summary = _compiled_summary(
+            operation=operation,
+            invoke_model_value=invoke_model_value,
+            reference_artifact_ids=artifact_ids,
+            reference_fingerprints=fps,
+            schema_version=model.manifest_version,
+        )
+        summary.update({"size": size, "aspect_ratio": ratio})
+        # Publish the effective-options envelope alongside the transformation list.
+        # The provider adapter bridge adapter's fail-closed compiler-evidence check
+        # (``adapters_v2._compiler_translation_evidence``) requires that
+        # ``effective_common_options`` and ``translation_transformations`` appear
+        # together; publishing only the latter made the canonical-generation
+        # bridge reject the compile with "compiler translation evidence is
+        # incomplete".  ``aspect_ratio``/``size`` are bounded audit strings.
+        summary["effective_common_options"] = {
+            "aspect_ratio": ratio if isinstance(ratio, str) else "9:16",
+            "size": size,
+        }
+        summary["translation_transformations"] = [
+            {
+                "field": "size",
+                "from_value": None,
+                "to_value": size,
+                "reason": "frozen_manifest_native_size_tier",
+            }
+        ] if intent.size is None else []
+        return CompiledImageRequest(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="image.generate",
+            wire_request=cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=cast(dict[str, JsonValue], summary),
+            reference_artifact_ids=[ref_image.artifact_id] if ref_image is not None else [],
+            reference_fingerprints=fps,
+        )
+
+
+class AgnesVideoCompiler:
+    """Validates a video intent against the catalog manifest and compiles the
+    wire request (first-frame I2V) using the same body builder as the HubClient."""
+
+    def validate(self, intent: Any, model: Any) -> None:
+        op = model.operations.get("video.generate")
+        if op is None:
+            raise ValueError("model does not support video.generate")
+        constraints = op.output_constraints
+        if (
+            constraints.get("aspect_ratio") != "9:16"
+            or constraints.get("num_frames") != {"allowed": [_AGNES_VIDEO_NUM_FRAMES]}
+            or constraints.get("frame_rate") != {"allowed": [_AGNES_VIDEO_FRAME_RATE]}
+            or constraints.get("height") != 1280
+            or constraints.get("width") != 720
+        ):
+            raise ValueError("Agnes Video V2.0 manifest is outside the verified product subset")
+        capabilities = set(op.capabilities)
+        if not ("video.i2v" in capabilities or "video.i2v.first_frame" in capabilities):
+            raise ValueError("model does not support video.i2v")
+        first_refs = [ref for ref in intent.references if ref.role == "first_frame"]
+        if not first_refs:
+            raise ValueError("video.generate requires a first_frame reference")
+        constraint = op.reference_constraints.get("first_frame")
+        if constraint is None or constraint.max < 1:
+            raise ValueError("model does not accept a first_frame reference")
+        if len(first_refs) > constraint.max:
+            raise ValueError("too many first_frame references")
+        if len(first_refs) != 1:
+            raise ValueError("Agnes Video V2.0 requires exactly one first_frame reference")
+        output = intent.output
+        if output.aspect_ratio not in {None, "9:16"}:
+            raise ValueError("Agnes Video V2.0 catalog revision only supports 9:16")
+        if output.generate_audio not in {None, False}:
+            raise ValueError("Agnes Video V2.0 compiler cannot request native audio")
+        if output.duration_seconds not in {None, _AGNES_VIDEO_DURATION_SECONDS}:
+            raise ValueError("Agnes Video V2.0 requires a 5 second product intent")
+
+    async def compile(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+    ) -> Any:
+        self.validate(intent, model)
+        intent_first = next(ref for ref in intent.references if ref.role == "first_frame")
+        resolved_first = [ref for ref in references if ref.role == "first_frame"]
+        if len(resolved_first) != 1:
+            raise ValueError("video intent first_frame was not resolved exactly once")
+        first = resolved_first[0]
+        if first.artifact_id != intent_first.artifact_id:
+            raise ValueError("resolved first_frame does not match the video intent")
+        duration_seconds = _AGNES_VIDEO_DURATION_SECONDS
+        num_frames = _AGNES_VIDEO_NUM_FRAMES
+        if first.content_bytes is not None:
+            body, operation, _refs, _transport = _build_video_body(
+                invoke_model_value,
+                prompt=intent.prompt,
+                image_bytes=first.content_bytes,
+                image_mime=first.mime_type,
+                num_frames=num_frames,
+                frame_rate=_AGNES_VIDEO_FRAME_RATE,
+            )
+        elif first.content_url is not None:
+            body, operation, _refs, _transport = _build_video_body(
+                invoke_model_value,
+                prompt=intent.prompt,
+                image_url=first.content_url,
+                num_frames=num_frames,
+                frame_rate=_AGNES_VIDEO_FRAME_RATE,
+            )
+        else:
+            raise ValueError("video first_frame reference has no bytes or URL")
+        from app.providers.runtime import CompiledVideoRequest
+
+        fps = [first.fingerprint] if first.fingerprint else []
+        summary = _compiled_summary(
+            operation=operation,
+            invoke_model_value=invoke_model_value,
+            reference_artifact_ids=[str(first.artifact_id)],
+            reference_fingerprints=fps,
+            schema_version=model.manifest_version,
+        )
+        summary.update(
+            {
+                "aspect_ratio": "9:16",
+                "duration_seconds": duration_seconds,
+                "num_frames": num_frames,
+                "frame_rate": _AGNES_VIDEO_FRAME_RATE,
+                "native_audio": False,
+            }
+        )
+        return CompiledVideoRequest(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="video.generate",
+            wire_request=cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=cast(dict[str, JsonValue], summary),
+            reference_artifact_ids=[first.artifact_id],
+            reference_fingerprints=fps,
+        )
+
+
+class AgnesRuntime:
+    """Unified runtime. ``submit_*`` sends the compiled wire request verbatim;
+    polling uses the sanitized resume token's query kind."""
+
+    provider = "agnes"
+    protocol_profile = AGNES_CN_PROFILE
+
+    _VIDEO_REQUEST_TIMEOUT_S = 120.0
+
+    def __init__(
+        self,
+        *,
+        connection: Any | None = None,
+        settings: Settings | None = None,
+        host: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._settings = settings or get_settings()
+        self._transport = transport
+        self._host = normalize_agnes_host(host or self._settings.agnes_base_url)
+        self._key = self._settings.agnes_api_key.strip()
+        self._enabled = self._settings.agnes_enabled
+        self._image_request_timeout_s = self._settings.agnes_image_request_timeout_seconds
+        self._submission_limit = self._settings.agnes_max_concurrent_submissions
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._key}",
+            "Content-Type": "application/json",
+        }
+
+    def _configured(self) -> bool:
+        return bool(self._key and self._enabled)
+
+    async def submit_image(self, request: Any) -> Any:
+        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+
+        if not self._configured():
+            raise RuntimeError("Agnes China connection is not configured")
+        try:
+            async with _submission_gate(self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    AGNES_IMAGE_PATH,
+                    headers=self._headers(),
+                    body=request.wire_request,
+                    timeout=self._image_request_timeout_s,
+                    transport=self._transport,
+                )
+        except httpx.TransportError as exc:
+            return SubmissionResult(
+                status="unknown_submission",
+                error_code="PROVIDER_SUBMISSION_UNKNOWN",
+                error=type(exc).__name__,
+                request_fingerprint=_request_fingerprint(request.wire_request),
+                request_summary=request.safe_request_summary,
+            )
+        data = _json_object(response)
+        image_url = _image_result_url(data)
+        if response.status_code >= 400 or not image_url:
+            return SubmissionResult(
+                status="failed",
+                error_code=(
+                    _error_code(response.status_code)
+                    if response.status_code >= 400
+                    else "PROVIDER_RESPONSE_INVALID"
+                ),
+                error=f"Agnes image request failed ({response.status_code})",
+                retry_after_seconds=_retry_after_seconds(response),
+                http_status=response.status_code,
+                request_fingerprint=_request_fingerprint(request.wire_request),
+                request_summary=request.safe_request_summary,
+            )
+        remote_id = f"agnes-image-{uuid4()}"
+        token = ProviderResumeToken(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            remote_task_id=remote_id,
+        )
+        return SubmissionResult(
+            remote_task_id=remote_id,
+            status="succeeded",
+            artifact_uri=image_url,
+            request_fingerprint=_request_fingerprint(request.wire_request),
+            request_summary=request.safe_request_summary,
+            resume_token=token,
+        )
+
+    async def submit_video(self, request: Any) -> Any:
+        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+
+        if not self._configured():
+            raise RuntimeError("Agnes China connection is not configured")
+        try:
+            async with _submission_gate(self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    AGNES_VIDEO_CREATE_PATH,
+                    headers=self._headers(),
+                    body=request.wire_request,
+                    timeout=self._VIDEO_REQUEST_TIMEOUT_S,
+                    transport=self._transport,
+                )
+        except httpx.TransportError as exc:
+            return SubmissionResult(
+                status="unknown_submission",
+                error_code="PROVIDER_SUBMISSION_UNKNOWN",
+                error=type(exc).__name__,
+                request_fingerprint=_request_fingerprint(request.wire_request),
+                request_summary=request.safe_request_summary,
+            )
+        data = _json_object(response)
+        video_id = data.get("video_id")
+        task_id = data.get("task_id")
+        video_id_value = str(video_id) if video_id is not None and str(video_id) else None
+        task_id_value = str(task_id) if task_id is not None and str(task_id) else None
+        if response.status_code >= 400 or (video_id_value is None and task_id_value is None):
+            return SubmissionResult(
+                status="failed",
+                error_code=(
+                    _error_code(response.status_code)
+                    if response.status_code >= 400
+                    else "PROVIDER_RESPONSE_INVALID"
+                ),
+                error=f"Agnes video request failed ({response.status_code})",
+                retry_after_seconds=_retry_after_seconds(response),
+                http_status=response.status_code,
+                request_fingerprint=_request_fingerprint(request.wire_request),
+                request_summary=request.safe_request_summary,
+            )
+        remote_id = video_id_value or task_id_value
+        assert remote_id is not None
+        remote_secondary_id = task_id_value if video_id_value else None
+        query_kind: str = "video_id" if video_id_value else "task_id"
+        token = ProviderResumeToken(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            remote_task_id=remote_id,
+            remote_secondary_id=remote_secondary_id,
+            query_kind=query_kind,
+        )
+        return SubmissionResult(
+            remote_task_id=remote_id,
+            remote_secondary_id=remote_secondary_id,
+            query_kind=query_kind,
+            status=str(data.get("status") or "queued"),
+            request_fingerprint=_request_fingerprint(request.wire_request),
+            request_summary=request.safe_request_summary,
+            resume_token=token,
+        )
+
+    async def poll_video(self, resume: Any) -> Any:
+        from app.providers.runtime import PollResult
+
+        if not self._configured():
+            raise RuntimeError("Agnes China connection is not configured")
+        query_kind = resume.query_kind
+        if query_kind not in {"video_id", "task_id"}:
+            raise ValueError("video poll query kind is required")
+        if query_kind == "video_id":
+            path = AGNES_VIDEO_BY_ID_PATH
+            params = {"video_id": resume.remote_task_id}
+        else:
+            path = f"{AGNES_VIDEO_CREATE_PATH}/{resume.remote_task_id}"
+            params = None
+        try:
+            response = await _get_json(
+                self._host,
+                path,
+                headers=self._headers(),
+                params=params,
+                timeout=60.0,
+                transport=self._transport,
+            )
+        except httpx.TransportError:
+            return PollResult(
+                status="running",
+                error_code="PROVIDER_POLL_TRANSIENT",
+            )
+        data = _json_object(response)
+        if response.status_code >= 400:
+            if response.status_code == 429 or response.status_code >= 500:
+                return PollResult(
+                    status="running",
+                    http_status=response.status_code,
+                    error_code=(
+                        "PROVIDER_RATE_LIMITED"
+                        if response.status_code == 429
+                        else "PROVIDER_POLL_TRANSIENT"
+                    ),
+                    retry_after_seconds=_retry_after_seconds(response),
+                )
+            return PollResult(
+                status="failed",
+                http_status=response.status_code,
+                error_code=_error_code(response.status_code),
+            )
+        raw_status = str(data.get("status") or "unknown").lower()
+        if raw_status in {"succeeded", "completed", "success", "done"}:
+            status = "succeeded"
+        elif raw_status in {"failed", "error", "cancelled"}:
+            status = "failed" if raw_status != "cancelled" else "cancelled"
+        elif raw_status in {"queued", "pending"}:
+            status = "queued"
+        else:
+            status = "running"
+        uri = _video_result_url(data)
+        progress_value = data.get("progress", 0)
+        try:
+            progress = float(progress_value or 0)
+        except (TypeError, ValueError):
+            progress = 0.0
+        if progress > 1:
+            progress /= 100.0
+        result = PollResult(status=status, progress=progress, artifact_uri=uri)
+        if status == "failed":
+            result = result.model_copy(update={"error_code": "PROVIDER_TASK_FAILED"})
+        return result
+
+    async def cancel_video(self, resume: Any) -> Any:
+        from app.providers.runtime import CancelResult
+
+        return CancelResult(status="cancelled")
+
+    async def fetch_cost(self, resume: Any) -> Any:
+        from app.providers.runtime import CostResult
+
+        return CostResult(
+            amount=None,
+            currency="USD",
+            units=1.0,
+            cost_status="not_reported",
+        )
+
+
+def _agnes_runtime_factory(
+    *,
+    connection: Any | None = None,
+    settings: Settings | None = None,
+    host: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> AgnesRuntime:
+    return AgnesRuntime(
+        connection=connection,
+        settings=settings,
+        host=host,
+        transport=transport,
+    )
+
+
+def _agnes_compiler_factory() -> tuple[AgnesImageCompiler, AgnesVideoCompiler]:
+    return AgnesImageCompiler(), AgnesVideoCompiler()

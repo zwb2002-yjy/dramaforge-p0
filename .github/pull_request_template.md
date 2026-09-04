@@ -7,14 +7,9 @@
 ## Verification
 
 - [ ] `policy`
-- [ ] `backend-static`
-- [ ] `backend-unit`
-- [ ] `postgres-integration`
-- [ ] `frontend`
-- [ ] `frontend-smoke`
-- [ ] `frontend-smoke-windows`
+- [ ] `container-gates` (backend + PostgreSQL + OpenAPI + frontend + E2E + LiteLLM)
 - [ ] No generated formal evidence was committed from a dirty worktree.
-- [ ] The branch is `agent/<task-id>` and the PR targets `main`.
+- [ ] This is either the release PR `dev -> main`, an isolation PR `agent/<task-id> -> dev`, or an urgent `agent/hotfix-* -> main` PR that will be synchronized back to `dev`.
 
 ## Approval
 
@@ -23,7 +18,7 @@
 
 ## Release Evidence
 
-The full non-Docker WSL P0 Gate is run manually before a release or P0 tag. Link the
+The Docker Compose P0 Gate is run manually before a release or P0 tag. Link the
 commit-bound evidence here when this PR is part of a release:
 
 - Source commit:

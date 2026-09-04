@@ -15,17 +15,31 @@ Create a branch ruleset targeting `main` with these rules:
 6. Block force pushes and branch deletion.
 7. Require these exact status checks:
    - `policy`
-   - `backend-static`
-   - `backend-unit`
-   - `postgres-integration`
-   - `frontend`
-   - `frontend-smoke`
-   - `frontend-smoke-windows`
+   - `container-gates`
 8. Do not allow repository administrators or automation agents to bypass the ruleset.
 
 Only `@zwb2002-yjy` may provide the required approval and merge. An agent may create or
 update a PR, but it must not approve, merge, or record `MERGED` in the local ledger.
 After the merge, the user records `MERGED` with `ApprovedBy @zwb2002-yjy`.
+
+## Branch Flow
+
+- `main` is the protected, stable release branch. Direct pushes are forbidden.
+- `dev` is the routine integration and forward-development branch. The repository root
+  worktree normally tracks `dev`; daily commits are pushed directly to `origin/dev`.
+- Every push to `dev` runs the full CI and Security workflows after the push. The `dev`
+  ruleset therefore keeps deletion and force-push protection while allowing the normal
+  direct-push workflow; `main` remains the release protection boundary.
+- Dependency Review is capability-gated by the repository variable
+  `DEPENDENCY_REVIEW_ENABLED=true`. When GitHub Dependency Graph / Advanced Security is
+  unavailable, that job is explicitly skipped rather than reported as a false failure;
+  `pip-audit`, `npm audit`, secret scan, and Trivy filesystem scan remain blocking checks.
+- Promote a verified release through the only normal stable-release PR direction:
+  `dev -> main`. After it merges, fast-forward local `main` and merge or fast-forward the
+  resulting `main` commit back into `dev` if the histories differ.
+- Use a short-lived `agent/<task-id>` branch and `.worktrees/<task-id>` only for parallel
+  isolated work. It starts from `dev` and its PR targets `dev`. A production hotfix may
+  start from `main`, target `main`, and must then be synchronized back to `dev`.
 
 ## Local Setup
 
@@ -35,7 +49,7 @@ Install the tracked hooks once per clone:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_git_hooks.ps1
 ```
 
-Create a writable task in an isolated worktree:
+Create a writable parallel task in an isolated worktree (routine work stays on `dev`):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\task_worktree.ps1 `
@@ -52,7 +66,7 @@ or the protected-branch merge record.
 
 ## Release Gate
 
-Before a release or P0 tag, run the full non-Docker WSL formal proof and section 3.1 Gate
+Before a release or P0 tag, run the Docker Compose formal proof and section 3.1 Gate
 from a clean checkout of the exact candidate commit. Any `FAIL`, `BLOCKED`, dirty source,
 or source mismatch prevents `p0_mvp_complete=true`. Generated reports default to
 `tmp/p0-evidence/<sha>/formal/` and `tmp/p0-evidence/<sha>/gate/`; do not refresh or

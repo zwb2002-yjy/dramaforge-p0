@@ -1,4 +1,4 @@
-"""Persist and rotate encrypted organization-scoped provider credentials."""
+"""Persist and rotate encrypted workspace-scoped provider credentials."""
 
 from __future__ import annotations
 
@@ -22,29 +22,34 @@ class RotationResult:
 async def store_credential(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     provider: str,
     plaintext: str,
     keyring: ByokKeyring,
 ) -> EncryptedProviderCredential:
     encrypted = keyring.encrypt(plaintext)
-    record = await session.scalar(
-        select(EncryptedProviderCredential).where(
-            EncryptedProviderCredential.organization_id == organization_id,
+    # Account credential changes are revisions, never updates.  Lock the
+    # current head when the backend supports row locks; the revision unique
+    # constraint remains the final guard for concurrent writers.
+    latest = await session.scalar(
+        select(EncryptedProviderCredential)
+        .where(
+            EncryptedProviderCredential.workspace_id == workspace_id,
             EncryptedProviderCredential.provider == provider,
         )
+        .order_by(EncryptedProviderCredential.revision_no.desc())
+        .limit(1)
+        .with_for_update()
     )
-    if record is None:
-        record = EncryptedProviderCredential(
-            organization_id=organization_id,
-            provider=provider,
-            ciphertext=encrypted.ciphertext,
-            key_version=encrypted.key_version,
-        )
-        session.add(record)
-    else:
-        record.ciphertext = encrypted.ciphertext
-        record.key_version = encrypted.key_version
+    record = EncryptedProviderCredential(
+        workspace_id=workspace_id,
+        provider=provider,
+        revision_no=(latest.revision_no + 1) if latest is not None else 1,
+        supersedes_id=latest.id if latest is not None else None,
+        ciphertext=encrypted.ciphertext,
+        key_version=encrypted.key_version,
+    )
+    session.add(record)
     await session.flush()
     return record
 
@@ -52,14 +57,43 @@ async def store_credential(
 async def read_credential(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     provider: str,
     keyring: ByokKeyring,
 ) -> str | None:
+    """Legacy provider-key lookup; Professional connections use ID lookup."""
+    record = await session.scalar(
+        select(EncryptedProviderCredential)
+        .where(
+            EncryptedProviderCredential.workspace_id == workspace_id,
+            EncryptedProviderCredential.provider == provider,
+        )
+        .order_by(EncryptedProviderCredential.revision_no.desc())
+        .limit(1)
+    )
+    if record is None:
+        return None
+    return keyring.decrypt(ciphertext=record.ciphertext, key_version=record.key_version)
+
+
+async def read_credential_by_id(
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    credential_id: UUID,
+    keyring: ByokKeyring,
+) -> str | None:
+    """Decrypt exactly the credential revision named by a connection.
+
+    The workspace predicate is deliberately repeated alongside the primary-key
+    lookup.  A UUID alone is not sufficient authorization for a credential
+    read, and a missing or cross-workspace row is treated as unavailable by
+    the concrete runtime callers.
+    """
     record = await session.scalar(
         select(EncryptedProviderCredential).where(
-            EncryptedProviderCredential.organization_id == organization_id,
-            EncryptedProviderCredential.provider == provider,
+            EncryptedProviderCredential.id == credential_id,
+            EncryptedProviderCredential.workspace_id == workspace_id,
         )
     )
     if record is None:
@@ -70,14 +104,14 @@ async def read_credential(
 async def has_credential(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     provider: str,
 ) -> bool:
-    """Return whether an organization has a stored credential without decrypting it."""
+    """Return whether an workspace has a stored credential without decrypting it."""
     return (
         await session.scalar(
             select(EncryptedProviderCredential.id).where(
-                EncryptedProviderCredential.organization_id == organization_id,
+                EncryptedProviderCredential.workspace_id == workspace_id,
                 EncryptedProviderCredential.provider == provider,
             )
         )

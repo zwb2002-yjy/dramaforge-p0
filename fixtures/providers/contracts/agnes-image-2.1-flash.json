@@ -1,0 +1,76 @@
+{
+  "contract": {
+    "documentation_source": {
+      "notes": "Image 2.1 Flash accepts Data URI I2I references and documents the native 1K + 9:16 portrait contract as 736x1312.",
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-image-21-flash.md",
+      "verified_at": "2026-08-19"
+    },
+    "wire_template": {
+      "host": "https://api.agnes-ai.cn",
+      "method": "POST",
+      "path": "/v1/images/generations",
+      "request_body": {
+        "extra_body": {
+          "image": [
+            "data:image/png;base64,..."
+          ],
+          "response_format": "url"
+        },
+        "model": "agnes-image-2.1-flash",
+        "prompt": "<prompt>",
+        "ratio": "9:16",
+        "size": "1K"
+      },
+      "status_machine": [
+        "synchronous"
+      ],
+      "success_response": {
+        "data": [
+          {
+            "url": "https://short-lived.example/i.png"
+          }
+        ]
+      }
+    }
+  },
+  "manifest": {
+    "catalog_source": "official_static",
+    "display_name": "Agnes Image Flash",
+    "documented_at": "2026-08-19",
+    "lifecycle": "active",
+    "manifest_version": "2026-08-19",
+    "media_kind": "image",
+    "model_id": "agnes-image-2.1-flash",
+    "model_revision": "v2",
+    "operations": {
+      "image.generate": {
+        "capabilities": [
+          "image.t2i",
+          "image.i2i"
+        ],
+        "exclusive_groups": [],
+        "operation": "image.generate",
+        "output_constraints": {
+          "aspect_ratio": "9:16",
+          "height": 1312,
+          "response_format": "url",
+          "size": "1K",
+          "width": 736
+        },
+        "reference_constraints": {
+          "reference_image": {
+            "max": 1,
+            "min": 0
+          }
+        }
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "protocol_profile": "agnes_cn_v1",
+    "provider_type": "agnes"
+  },
+  "manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c"
+}

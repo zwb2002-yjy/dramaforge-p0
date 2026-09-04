@@ -13,11 +13,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "api:generate": "node ../scripts/generate-openapi-types.mjs",
+    "api:check": "node ../scripts/check-generated-api.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.8",
     "@tanstack/react-router": "^1.91.0",
+    "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.2"
@@ -41,6 +44,7 @@
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.2",
     "vite": "^6.0.6",
+    "vite-plugin-compression2": "^2.5.3",
     "vitest": "^3.0.5"
   }
 }

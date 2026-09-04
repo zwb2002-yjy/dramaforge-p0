@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.storage.minio_store import ObjectStore
 
@@ -38,6 +39,7 @@ class CompositeRenderError(RuntimeError):
 class CompositeInputs:
     """Resolved media bytes and immutable lineage for one composite execution."""
 
+    composite_run_id: str
     media_inputs: dict[str, dict[str, str]]
     video: bytes
     voice: bytes
@@ -45,15 +47,18 @@ class CompositeInputs:
 
 
 def composite_lineage_fingerprint(inputs: CompositeInputs) -> str:
-    """Return a stable identity for the exact source Artifact lineage.
+    """Return a stable identity for one composite output and its source lineage.
 
-    FFmpeg can emit byte-identical containers when distinct Shot NodeRuns have
-    identical source media. The final composite is still a separate production
-    result, so include its immutable source lineage in the container metadata
-    and test fixture bytes rather than weakening Artifact ownership rules.
+    FFmpeg can emit byte-identical containers when a composite is re-run with
+    unchanged source media. The final output must remain independently
+    attributable to its NodeRun, so bind the output run ID and source lineage
+    into the container metadata and test fixture bytes.
     """
     raw = json.dumps(
-        inputs.media_inputs,
+        {
+            "composite_run_id": inputs.composite_run_id,
+            "media_inputs": inputs.media_inputs,
+        },
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
@@ -100,13 +105,18 @@ async def composite_inputs_pending(
     for source_run, source_node in rows:
         if str((source_run.input_snapshot or {}).get("shot_id") or "") != shot_id:
             continue
+        priority = branch_priority(source_run.input_snapshot, run.input_snapshot)
+        if priority is None:
+            continue
         key = source_node.node_key
         current = latest_by_key.get(key)
         if current is None or (
+            priority,
             source_run.attempt_no,
             source_run.created_at,
             str(source_run.id),
         ) > (
+            branch_priority(current.input_snapshot, run.input_snapshot) or 0,
             current.attempt_no,
             current.created_at,
             str(current.id),
@@ -149,12 +159,17 @@ async def resolve_composite_inputs(
         key = source_node.node_key
         if str((source_run.input_snapshot or {}).get("shot_id") or "") != shot_id:
             continue
+        priority = branch_priority(source_run.input_snapshot, run.input_snapshot)
+        if priority is None:
+            continue
         current = selected.get(key)
         if current is None or (
+            priority,
             source_run.attempt_no,
             source_run.created_at,
             str(source_run.id),
         ) > (
+            branch_priority(current[0].input_snapshot, run.input_snapshot) or 0,
             current[0].attempt_no,
             current[0].created_at,
             str(current[0].id),
@@ -195,6 +210,7 @@ async def resolve_composite_inputs(
         }
 
     return CompositeInputs(
+        composite_run_id=str(run.id),
         media_inputs=media_inputs,
         video=bytes_by_key["video"],
         voice=bytes_by_key["voice"],
@@ -231,6 +247,9 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise CompositeRenderError("ffmpeg executable not found")
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        raise CompositeRenderError("ffprobe executable not found")
     lineage_fingerprint = composite_lineage_fingerprint(inputs)
 
     with tempfile.TemporaryDirectory(prefix="dramaforge-composite-") as tmp:
@@ -242,6 +261,36 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
         video_path.write_bytes(inputs.video)
         voice_path.write_bytes(inputs.voice)
         subtitle_path.write_bytes(inputs.subtitle)
+
+        async def media_duration(path: Path) -> float:
+            probe = await asyncio.create_subprocess_exec(
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await probe.communicate()
+            if probe.returncode != 0:
+                detail = stderr.decode("utf-8", errors="replace").strip()[:300]
+                raise CompositeRenderError(detail or f"ffprobe failed for {path.name}")
+            try:
+                return float(stdout.decode("ascii").strip())
+            except ValueError as exc:
+                raise CompositeRenderError(f"invalid duration for {path.name}") from exc
+
+        video_duration = await media_duration(video_path)
+        voice_duration = await media_duration(voice_path)
+        if voice_duration > video_duration + 0.1:
+            raise CompositeRenderError(
+                "voice duration exceeds video duration "
+                f"({voice_duration:.2f}s > {video_duration:.2f}s)"
+            )
 
         subtitle_filter_path = (
             subtitle_path.as_posix().replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
@@ -259,6 +308,8 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
             "0:v:0",
             "-map",
             "1:a:0",
+            "-af",
+            "apad",
             "-c:v",
             "libx264",
             "-c:a",

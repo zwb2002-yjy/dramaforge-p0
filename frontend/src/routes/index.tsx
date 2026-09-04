@@ -1,14 +1,27 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import {
-  createOrganization,
+  ApiError,
+  createProject,
+  createWorkspace,
+  deleteWorkspace,
+  fetchBootstrapStatus,
+  fetchCurrentUser,
   fetchHealth,
+  getSelectedWorkspaceId,
+  listWorkspaceProjects,
+  listWorkspaces,
   loginUser,
   registerUser,
-  startProject,
+  renameWorkspace,
+  setSelectedWorkspaceId as persistSelectedWorkspaceId,
+  type WorkspaceRead,
 } from "../lib/api";
+import { queryKeys } from "../lib/queryKeys";
+import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
+import { ProjectLobbyShell } from "../components/workstation/ProjectLobbyShell";
 import { rootRoute } from "./__root";
 
 export const indexRoute = createRoute({
@@ -17,175 +30,466 @@ export const indexRoute = createRoute({
   component: HomePage,
 });
 
+const V1_TEMPLATES = [
+  { key: "dual_character_conflict_v1", name: "双人对白反转" },
+  { key: "single_monologue_v1", name: "单人情绪独白" },
+] as const;
+
 function HomePage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const health = useQuery({
-    queryKey: ["health"],
+    queryKey: queryKeys.health(),
     queryFn: fetchHealth,
     refetchInterval: 8_000,
     retry: 1,
   });
-  const [email, setEmail] = useState(`creator-${Date.now()}@example.com`);
-  const [password, setPassword] = useState("password123");
-  const [name, setName] = useState("霓虹雨夜 · 试产项目");
-  const [idea, setIdea] = useState("");
+  const bootstrapStatus = useQuery({
+    queryKey: queryKeys.auth.bootstrap(),
+    queryFn: fetchBootstrapStatus,
+    retry: 1,
+  });
+  const currentUser = useQuery({
+    queryKey: queryKeys.auth.currentUser(),
+    queryFn: fetchCurrentUser,
+    retry: false,
+  });
+  const workspaces = useQuery({
+    queryKey: queryKeys.workspace.list(),
+    queryFn: listWorkspaces,
+    enabled: Boolean(currentUser.data),
+  });
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("创作者");
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+    getSelectedWorkspaceId,
+  );
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [projectName, setProjectName] = useState("新短剧");
+  const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9">("9:16");
+  const [startType, setStartType] = useState<"TEMPLATE" | "FREE">("FREE");
+  const [templateKey, setTemplateKey] = useState<string>(V1_TEMPLATES[0].key);
+  const [directorAutonomy, setDirectorAutonomy] = useState<"AUTO" | "ASSIST" | "MANUAL">("ASSIST");
   const [error, setError] = useState<string | null>(null);
 
-  const bootstrap = useMutation({
-    mutationFn: async () => {
+  const selectWorkspace = useCallback((workspaceId: string | null) => {
+    persistSelectedWorkspaceId(workspaceId);
+    setSelectedWorkspaceId(workspaceId);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedWorkspaceId && workspaces.data?.[0]) selectWorkspace(workspaces.data[0].id);
+    if (
+      selectedWorkspaceId &&
+      workspaces.data &&
+      !workspaces.data.some((workspace) => workspace.id === selectedWorkspaceId)
+    ) {
+      selectWorkspace(workspaces.data[0]?.id ?? null);
+    }
+  }, [selectWorkspace, selectedWorkspaceId, workspaces.data]);
+
+  useEffect(() => {
+    persistSelectedWorkspaceId(selectedWorkspaceId);
+  }, [selectedWorkspaceId]);
+
+  const projects = useQuery({
+    queryKey: queryKeys.workspace.projects(selectedWorkspaceId),
+    queryFn: () => listWorkspaceProjects(selectedWorkspaceId!),
+    enabled: Boolean(
+      currentUser.data &&
+      selectedWorkspaceId &&
+      workspaces.data?.some((workspace) => workspace.id === selectedWorkspaceId),
+    ),
+  });
+
+  const invalidateWorkspaceData = async () => {
+    await queryClient.invalidateQueries({ queryKey: queryKeys.workspace.list() });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.workspace.projectsRoot() });
+  };
+
+  const authenticate = useMutation({
+    onMutate: async () => {
+      // A session can change accounts without a full page reload. Do not render
+      // the prior account's selected workspace or cached projects while the
+      // new session is being established.
+      selectWorkspace(null);
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.auth.currentUser() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.workspace.list() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.workspace.projectsRoot() }),
+      ]);
+      queryClient.removeQueries({ queryKey: queryKeys.auth.currentUser() });
+      queryClient.removeQueries({ queryKey: queryKeys.workspace.list() });
+      queryClient.removeQueries({ queryKey: queryKeys.workspace.projectsRoot() });
+    },
+    mutationFn: async (mode: "login" | "register") => {
       setError(null);
-      try {
-        await registerUser(email, password, "Creator");
-      } catch {
-        await loginUser(email, password);
+      if (mode === "register") return registerUser(email, password, displayName);
+      return loginUser(email, password);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.auth.currentUser() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.workspace.list() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.auth.bootstrap() });
+    },
+    onError: (cause: Error) => {
+      if (cause instanceof ApiError && cause.status === 401) {
+        setError("邮箱或密码不正确，请使用初始化此实例时创建的 Owner 账号。");
+        return;
       }
-      const org = await createOrganization(`Org-${Date.now()}`);
-      const project = await startProject({
-        organization_id: org.id,
-        name,
-        aspect_ratio: "9:16",
-        idea,
-      });
-      return project;
+      if (cause instanceof ApiError && cause.code === "REGISTRATION_CLOSED") {
+        setError("此单用户实例已有 Owner，请直接登录。");
+        return;
+      }
+      setError(cause.message);
     },
-    onSuccess: (project) => {
+  });
+
+  const createWorkspaceMutation = useMutation({
+    mutationFn: async () => createWorkspace(workspaceName.trim()),
+    onSuccess: async (workspace) => {
+      setWorkspaceName("");
+      selectWorkspace(workspace.id);
+      await invalidateWorkspaceData();
+    },
+    onError: (cause: Error) => setError(cause.message),
+  });
+
+  const renameWorkspaceMutation = useMutation({
+    mutationFn: async (workspace: WorkspaceRead) => {
+      const name = window.prompt("空间名", workspace.name)?.trim();
+      if (!name || name === workspace.name) return;
+      await renameWorkspace(workspace.id, name);
+    },
+    onSuccess: invalidateWorkspaceData,
+    onError: (cause: Error) => setError(cause.message),
+  });
+
+  const deleteWorkspaceMutation = useMutation({
+    mutationFn: async (workspace: WorkspaceRead) => {
+      if (!window.confirm(`删除空间「${workspace.name}」？`)) return;
+      await deleteWorkspace(workspace.id);
+    },
+    onSuccess: invalidateWorkspaceData,
+    onError: (cause: Error) => setError(cause.message),
+  });
+
+  const createProjectMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedWorkspaceId) throw new Error("请先选择一个空间");
+      return createProject({
+        workspace_id: selectedWorkspaceId,
+        name: projectName,
+        aspect_ratio: aspectRatio,
+        start_type: startType,
+        template_key: startType === "TEMPLATE" ? templateKey : null,
+        director_autonomy: directorAutonomy,
+      });
+    },
+    onSuccess: async (project) => {
+      await invalidateWorkspaceData();
       void navigate({
-        to: "/projects/$projectId/quick",
-        params: { projectId: project.project_id },
+        to: "/projects/$projectId/script",
+        params: { projectId: project.id },
       });
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (cause: Error) => setError(cause.message),
   });
 
   const dbUp = health.data?.db === "up" || (health.data?.status === "ok" && !health.data?.db);
-  const apiLive = !!health.data && !health.isError && health.data.status === "ok" && dbUp !== false;
+  const apiLive = Boolean(health.data && !health.isError && health.data.status === "ok" && dbUp);
+  const registrationAvailable = bootstrapStatus.data?.registration_available === true;
+  const ownerInitialized = bootstrapStatus.data?.owner_initialized === true;
+  const bootstrapReady = bootstrapStatus.data !== undefined;
+  const authFormReady = email.trim().length > 0 && password.length > 0;
+  const selectedWorkspace = workspaces.data?.find(
+    (workspace) => workspace.id === selectedWorkspaceId,
+  );
+  const workspacesError = workspaces.error instanceof ApiError ? workspaces.error.message : null;
+
+  function submitWorkspace(event: FormEvent) {
+    event.preventDefault();
+    if (workspaceName.trim()) createWorkspaceMutation.mutate();
+  }
 
   return (
-    <div className="hero-home" data-testid="home-panel">
-      <section className="panel">
-        <div className="page-title-row">
+    <ProjectLobbyShell apiLive={apiLive}>
+      <div className="workspace-home" data-testid="home-panel">
+        <section className="workspace-header">
           <div>
-            <h2>短剧生产工作台</h2>
-            <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-              创意 → Brief/Plan → 角色一致性 → 分镜流水线 → 审核交付。
-              信息密度对标行业生产台，产品合同以 DramaForge 冻结包为准。
-            </p>
+            <h1>个人创作空间</h1>
+            <p className="muted">每个短剧项目都放在仅由你账号拥有的独立空间内。</p>
           </div>
-        </div>
+          <span className={apiLive ? "status-ok" : "status-bad"}>
+            {apiLive ? "API 就绪" : "API 不可用"}
+          </span>
+        </section>
 
-        <div className="callout">
-          <strong>标准 P0 路径</strong>
-          <br />
-          ① 创建正式项目 → ② 快速创作竖切首帧（Agent 或手工）→ ③ 专业板 10 Shot → ④ 可追溯导出
-        </div>
-
-        <div className="status-grid" data-testid="api-status">
-          <div className="status-card">
-            <span className="status-label">API /health</span>
-            {health.isLoading && <strong className="status-pending">连接中…</strong>}
-            {health.isError && (
-              <strong className="status-bad">离线 — 启动 Postgres + API</strong>
+        {!currentUser.data ? (
+          <section className="panel auth-panel">
+            {!bootstrapReady ? (
+              <p className="muted auth-loading">正在确认实例账号状态…</p>
+            ) : (
+              <>
+                <div className="auth-heading">
+                  <div>
+                    <h2>{ownerInitialized ? "Owner 登录" : "初始化 Owner"}</h2>
+                    <p className="muted">
+                      {ownerInitialized
+                        ? "这是单用户实例，已关闭后续注册。"
+                        : "首次使用需要创建唯一的 Owner 账号。"}
+                    </p>
+                  </div>
+                  <span className="auth-mode-badge">
+                    {ownerInitialized ? "单用户" : "首次设置"}
+                  </span>
+                </div>
+                <form
+                  className="auth-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    authenticate.mutate(ownerInitialized ? "login" : "register");
+                  }}
+                >
+                  <label>
+                    邮箱
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      autoComplete="username"
+                      placeholder="owner@example.com"
+                      required
+                    />
+                  </label>
+                  <label>
+                    密码
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      autoComplete={ownerInitialized ? "current-password" : "new-password"}
+                      placeholder="输入密码"
+                      required
+                    />
+                  </label>
+                  {registrationAvailable && (
+                    <label>
+                      显示名
+                      <input
+                        value={displayName}
+                        onChange={(event) => setDisplayName(event.target.value)}
+                        autoComplete="name"
+                      />
+                    </label>
+                  )}
+                  <div className="toolbar">
+                    {ownerInitialized && (
+                      <button
+                        className="primary"
+                        type="submit"
+                        disabled={authenticate.isPending || !apiLive || !authFormReady}
+                      >
+                        登录
+                      </button>
+                    )}
+                    {registrationAvailable && (
+                      <button
+                        className="primary"
+                        type="submit"
+                        disabled={
+                          authenticate.isPending ||
+                          !apiLive ||
+                          !authFormReady ||
+                          !displayName.trim()
+                        }
+                      >
+                        初始化 Owner
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </>
             )}
-            {health.data && health.data.status === "ok" && (health.data.db === "up" || !health.data.db) && (
-              <strong className="status-ok">
-                在线 · db {health.data.db ?? "ok"} · {health.data.env}
-              </strong>
-            )}
-            {health.data && (health.data.status !== "ok" || health.data.db === "down") && (
-              <strong className="status-bad">
-                {health.data.status} · db {health.data.db ?? "?"}
-              </strong>
-            )}
-          </div>
-          <div className="status-card">
-            <span className="status-label">画幅</span>
-            <strong>9:16 竖屏</strong>
-          </div>
-          <div className="status-card">
-            <span className="status-label">双模式</span>
-            <strong>同 Project</strong>
-          </div>
-          <div className="status-card">
-            <span className="status-label">P0 验收</span>
-            <strong className="status-pending">§3.1 未盖章</strong>
-          </div>
-        </div>
+          </section>
+        ) : (
+          <>
+            <section className="panel workspace-manager">
+              <div className="panel-header">
+                <div>
+                  <h2>{currentUser.data.display_name}</h2>
+                  <p className="muted">{currentUser.data.email}</p>
+                </div>
+                <form className="inline-form" onSubmit={submitWorkspace}>
+                  <input
+                    aria-label="新空间名"
+                    value={workspaceName}
+                    onChange={(event) => setWorkspaceName(event.target.value)}
+                    placeholder="新空间名"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!workspaceName.trim() || createWorkspaceMutation.isPending}
+                  >
+                    创建空间
+                  </button>
+                </form>
+              </div>
+              <div className="workspace-list" role="list" aria-label="我的空间">
+                {workspaces.data?.map((workspace) => (
+                  <div
+                    className={
+                      workspace.id === selectedWorkspaceId
+                        ? "workspace-row selected"
+                        : "workspace-row"
+                    }
+                    key={workspace.id}
+                    role="listitem"
+                  >
+                    <button
+                      className="workspace-select"
+                      type="button"
+                      onClick={() => selectWorkspace(workspace.id)}
+                    >
+                      {workspace.name}
+                    </button>
+                    <div className="workspace-actions">
+                      <button
+                        className="ghost"
+                        type="button"
+                        onClick={() => renameWorkspaceMutation.mutate(workspace)}
+                      >
+                        重命名
+                      </button>
+                      <button
+                        className="ghost danger"
+                        type="button"
+                        onClick={() => deleteWorkspaceMutation.mutate(workspace)}
+                        disabled={projects.data?.some(
+                          (project) => project.workspace_id === workspace.id,
+                        )}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {!workspaces.isLoading && !workspaces.data?.length && (
+                  <p className="muted">先创建一个空间开始。</p>
+                )}
+              </div>
+            </section>
 
-        <form
-          className="auth-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            bootstrap.mutate();
-          }}
-        >
-          <label>
-            工作账号 Email
-            <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
-          </label>
-          <label>
-            密码
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-            />
-          </label>
-          <label>
-            项目名称
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label>
-            创意
-            <textarea
-              value={idea}
-              onChange={(e) => setIdea(e.target.value)}
-              rows={3}
-              placeholder="输入本次短剧的创意"
-            />
-          </label>
-          <div className="toolbar">
-            <button className="primary" type="submit" disabled={bootstrap.isPending || !apiLive}>
-              {bootstrap.isPending ? "创建中…" : "进入工作台 · 注册/登录并创建项目"}
-            </button>
-          </div>
-          {!apiLive && (
-            <p className="status-bad">
-              后端未就绪时无法创建项目。请运行{" "}
-              <code>scripts/start_p0_stack.ps1</code> 保证 PostgreSQL + API(:8010)。
-            </p>
-          )}
-          {error && <p className="flash err">{error}</p>}
-        </form>
-      </section>
+            <div id="provider-settings">
+              <ProviderConnectionPanel
+                key={selectedWorkspaceId ?? "no-workspace"}
+                workspaceId={selectedWorkspaceId}
+                projects={projects.data ?? []}
+              />
+            </div>
 
-      <section className="panel">
-        <h3>工作台地图</h3>
-        <ul className="clean">
-          <li>
-            <strong>快速创作</strong>：创意 → Agent/手工 Brief·Plan → 主角 canonical → 竖屏首帧预览
-          </li>
-          <li>
-            <strong>专业生产板</strong>：10 Shot 分镜板、节点轨、导出回链（非假黄金冒充验收）
-          </li>
-          <li>
-            <strong>检查器</strong>：Run 统计、失败、产物哈希（右侧栏实时）
-          </li>
-        </ul>
-        <div className="pipeline-rail" aria-hidden>
-          {["prompt", "keyframe", "face", "video", "voice", "subtitle", "composite", "continuity"].map(
-            (n) => (
-              <span key={n} className="pipeline-node">
-                {n}
-              </span>
-            ),
-          )}
-        </div>
-        <div className="callout warn" style={{ marginTop: "0.75rem" }}>
-          对照行业台看信息密度与流水线感；DramaForge 不复刻 LibTV / Jellyfish / Toonflow / ArcReel
-          的产品面，核心是私有化 Graph、一致性与审计。
-        </div>
-      </section>
-    </div>
+            <section className="panel project-manager" id="projects">
+              <div className="panel-header">
+                <div>
+                  <h2>{selectedWorkspace?.name ?? "选择一个空间"}</h2>
+                  <p className="muted">项目隔离在所选空间内。</p>
+                </div>
+              </div>
+              <form
+                className="inline-form project-create"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  createProjectMutation.mutate();
+                }}
+              >
+                <input
+                  aria-label="项目名"
+                  value={projectName}
+                  onChange={(event) => setProjectName(event.target.value)}
+                  disabled={!selectedWorkspaceId}
+                />
+                <select
+                  aria-label="画幅"
+                  value={aspectRatio}
+                  onChange={(event) => setAspectRatio(event.target.value as "9:16" | "16:9")}
+                  disabled={!selectedWorkspaceId}
+                >
+                  <option value="9:16">9:16 竖屏</option>
+                  <option value="16:9">16:9 横屏</option>
+                </select>
+                <select
+                  aria-label="创作起点"
+                  value={startType}
+                  onChange={(event) => setStartType(event.target.value as "TEMPLATE" | "FREE")}
+                  disabled={!selectedWorkspaceId}
+                >
+                  <option value="FREE">自由创建</option>
+                  <option value="TEMPLATE">从模板开始</option>
+                </select>
+                {startType === "TEMPLATE" && (
+                  <select
+                    aria-label="创作模板"
+                    value={templateKey}
+                    onChange={(event) => setTemplateKey(event.target.value)}
+                    disabled={!selectedWorkspaceId}
+                  >
+                    {V1_TEMPLATES.map((template) => (
+                      <option key={template.key} value={template.key}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <select
+                  aria-label="导演参与度"
+                  value={directorAutonomy}
+                  onChange={(event) =>
+                    setDirectorAutonomy(event.target.value as "AUTO" | "ASSIST" | "MANUAL")
+                  }
+                  disabled={!selectedWorkspaceId}
+                >
+                  <option value="AUTO">导演自动 AUTO</option>
+                  <option value="ASSIST">导演辅助 ASSIST</option>
+                  <option value="MANUAL">手动控制 MANUAL</option>
+                </select>
+                <button
+                  className="primary"
+                  type="submit"
+                  disabled={!selectedWorkspaceId || createProjectMutation.isPending}
+                >
+                  创建项目
+                </button>
+              </form>
+              <div className="project-list">
+                {projects.data?.map((project) => (
+                  <button
+                    className="project-row"
+                    type="button"
+                    key={project.id}
+                    onClick={() =>
+                      void navigate({
+                        to: "/projects/$projectId/production",
+                        params: { projectId: project.id },
+                      })
+                    }
+                  >
+                    <span>{project.name}</span>
+                    <span className="muted">
+                      {project.creative_profile?.start_type ?? project.stage} ·{" "}
+                      {project.creative_profile?.director_autonomy ?? project.aspect_ratio}
+                    </span>
+                  </button>
+                ))}
+                {selectedWorkspaceId && !projects.isLoading && !projects.data?.length && (
+                  <p className="muted">暂无项目。</p>
+                )}
+              </div>
+            </section>
+          </>
+        )}
+        {(error || workspacesError) && <p className="flash err">{error ?? workspacesError}</p>}
+      </div>
+    </ProjectLobbyShell>
   );
 }

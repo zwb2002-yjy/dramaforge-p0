@@ -1,0 +1,172 @@
+/** Project-scoped EditingAdapter HTTP client (P9-03A). */
+
+import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import type { components } from "../../shared/api/generated";
+
+export type EditSessionRead = components["schemas"]["EditSessionRead"];
+export type EditTimelinePayload = components["schemas"]["EditTimelinePayload"];
+export type EditExportRead = components["schemas"]["EditExportRead"];
+export type EditingDirectorSuggestionRequest =
+  components["schemas"]["EditingDirectorSuggestionRequest"];
+export type EditingDirectorSuggestionCandidate =
+  components["schemas"]["EditingDirectorSuggestionCandidate"];
+export type EditingDirectorSuggestionRead = components["schemas"]["EditingDirectorSuggestionRead"];
+export type EditingRepairRoutingRead = components["schemas"]["EditingRepairRoutingRead"];
+export type EditingRepairRoutingRequest = components["schemas"]["EditingRepairRoutingRequest"];
+export type FinalFilmPrepareRead = components["schemas"]["FinalFilmPrepareRead"];
+export type FinalFilmRead = components["schemas"]["FinalFilmRead"];
+export type FinalFilmJobRead = components["schemas"]["FinalFilmJobRead"];
+
+const editSessionPath = (projectId: string, suffix = "") =>
+  `/api/v1/projects/${projectId}/edit-sessions${suffix}`;
+
+export async function createEditSession(
+  projectId: string,
+  name?: string,
+): Promise<EditSessionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<EditSessionRead>(
+    "POST",
+    editSessionPath(projectId),
+    name === undefined ? {} : { name },
+    csrf,
+  );
+}
+
+export function fetchEditSession(projectId: string, sessionId: string): Promise<EditSessionRead> {
+  return apiGet<EditSessionRead>(editSessionPath(projectId, `/${encodeURIComponent(sessionId)}`));
+}
+
+export async function saveEditTimeline(
+  projectId: string,
+  sessionId: string,
+  timeline: Pick<EditTimelinePayload, "clips" | "metadata">,
+): Promise<EditSessionRead> {
+  const csrf = await fetchCsrf();
+  const { clips = [], metadata = {} } = timeline;
+  return apiSend<EditSessionRead>(
+    "PATCH",
+    editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/timeline`),
+    { timeline: { clips, metadata } },
+    csrf,
+  );
+}
+
+export function exportEditSession(projectId: string, sessionId: string): Promise<EditExportRead> {
+  return apiGet<EditExportRead>(
+    editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/export`),
+  );
+}
+
+/**
+ * Ask the P9-04C bridge for one proposal-only suggestion against the exact
+ * persisted EditSession. The route owns project/session identity; the body is
+ * deliberately rebuilt from the two allow-listed request fields.
+ */
+export async function requestEditingDirectorSuggestion(
+  projectId: string,
+  sessionId: string,
+  input: Pick<EditingDirectorSuggestionRequest, "expected_session_version" | "user_instruction">,
+): Promise<EditingDirectorSuggestionRead> {
+  const userInstruction = input.user_instruction.trim();
+  if (!userInstruction) {
+    throw new Error("user_instruction must not be blank");
+  }
+  const csrf = await fetchCsrf();
+  return apiSend<EditingDirectorSuggestionRead>(
+    "POST",
+    editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/director-suggestion`),
+    {
+      expected_session_version: input.expected_session_version,
+      user_instruction: userInstruction,
+    },
+    csrf,
+  );
+}
+
+/** Explicit alias for callers that prefer the verb used by the Director API. */
+export const suggestEditingDirector = requestEditingDirectorSuggestion;
+
+export async function requestProactiveEditingDirectorSuggestion(
+  projectId: string,
+  sessionId: string,
+  expected_session_version: number,
+): Promise<EditingDirectorSuggestionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<EditingDirectorSuggestionRead>(
+    "POST",
+    editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/director-proactive-suggestion`),
+    { expected_session_version },
+    csrf,
+  );
+}
+
+/**
+ * Ask the server-side Director whether the current editing issue must go to
+ * production Repair.  A can_fix_in_timeline=True response means the caller
+ * should keep using the normal editing suggestion path; False returns the
+ * exact persisted Repair Proposal identity without executing any repair.
+ */
+export async function routeEditingDirectorRepair(
+  projectId: string,
+  sessionId: string,
+  input: Pick<EditingRepairRoutingRequest, "expected_session_version" | "user_instruction">,
+): Promise<EditingRepairRoutingRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<EditingRepairRoutingRead>(
+    "POST",
+    editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/director-repair-routing`),
+    {
+      expected_session_version: input.expected_session_version,
+      user_instruction: input.user_instruction,
+    },
+    csrf,
+  );
+}
+
+/** Prepare the Formal shot tail required by an EditSession Timeline version. */
+export async function prepareFinalFilm(
+  projectId: string,
+  sessionId: string,
+  expectedTimelineVersion: number,
+): Promise<FinalFilmPrepareRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<FinalFilmPrepareRead>(
+    "POST",
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/prepare`,
+    {
+      edit_session_id: sessionId,
+      expected_timeline_version: expectedTimelineVersion,
+    },
+    csrf,
+  );
+}
+
+export async function renderFinalFilm(
+  projectId: string,
+  sessionId: string,
+  expectedTimelineVersion: number,
+  idempotencyKey: string,
+): Promise<FinalFilmJobRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<FinalFilmJobRead>(
+    "POST",
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/render`,
+    {
+      edit_session_id: sessionId,
+      expected_timeline_version: expectedTimelineVersion,
+      name: "V1 Final Film",
+    },
+    csrf,
+    { "Idempotency-Key": idempotencyKey },
+  );
+}
+
+export function fetchFinalFilmStatus(
+  projectId: string,
+  nodeRunId: string,
+): Promise<FinalFilmJobRead> {
+  return apiGet<FinalFilmJobRead>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/runs/${encodeURIComponent(nodeRunId)}`,
+  );
+}

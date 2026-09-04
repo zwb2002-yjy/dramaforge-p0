@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -19,12 +20,40 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+@dataclass(frozen=True)
+class NodeRunRlsScope:
+    """Ownership context reconstructed from NodeRun -> Project -> Workspace."""
+
+    user_id: UUID
+    workspace_id: UUID
+    project_id: UUID
+
+
+@dataclass(frozen=True)
+class ArtifactRlsScope:
+    """Ownership context reconstructed from Artifact -> Project -> Workspace."""
+
+    user_id: UUID
+    workspace_id: UUID
+    project_id: UUID
+
+
+@dataclass(frozen=True)
+class OutboxEventRlsScope:
+    """Ownership context reconstructed from an outbox event's project."""
+
+    event_id: UUID
+    user_id: UUID | None
+    workspace_id: UUID | None
+    project_id: UUID | None
+
+
 def get_engine(settings: Settings | None = None) -> AsyncEngine:
     """Create or return the process-wide async engine."""
     global _engine, _session_factory
     if _engine is None:
         cfg = settings or get_settings()
-        # Local/dev asyncpg: disable TLS handshake (common behind WSL/port proxies).
+        # Local/dev asyncpg: disable TLS handshake for local Compose connections.
         _engine = create_async_engine(
             cfg.database_url,
             pool_pre_ping=True,
@@ -51,7 +80,7 @@ async def set_rls_context(
     session: AsyncSession,
     *,
     user_id: UUID | None = None,
-    organization_id: UUID | None = None,
+    workspace_id: UUID | None = None,
     project_id: UUID | None = None,
 ) -> None:
     """SET LOCAL app.* for the current transaction (PostgreSQL). No-op on SQLite."""
@@ -70,8 +99,341 @@ async def set_rls_context(
             )
 
     await _set("app.current_user_id", user_id)
-    await _set("app.current_organization_id", organization_id)
+    await _set("app.current_workspace_id", workspace_id)
     await _set("app.current_project_id", project_id)
+
+
+async def resolve_node_run_rls_scope(
+    session: AsyncSession,
+    *,
+    node_run_id: UUID,
+) -> NodeRunRlsScope | None:
+    """Resolve worker ownership from persisted records, never queue payloads."""
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT owner_user_id, workspace_id, project_id
+                FROM app.node_run_context(:node_run_id)
+                """
+            ),
+            {"node_run_id": node_run_id},
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return NodeRunRlsScope(
+            user_id=row["owner_user_id"],
+            workspace_id=row["workspace_id"],
+            project_id=row["project_id"],
+        )
+
+    from app.access.models import Project, Workspace
+    from app.execution.models import NodeRun
+
+    run = await session.get(NodeRun, node_run_id)
+    if run is None:
+        return None
+    project = await session.get(Project, run.project_id)
+    if project is None:
+        return None
+    workspace = await session.get(Workspace, project.workspace_id)
+    if workspace is None:
+        return None
+    return NodeRunRlsScope(
+        user_id=workspace.owner_user_id,
+        workspace_id=workspace.id,
+        project_id=project.id,
+    )
+
+
+async def set_node_run_rls_context(
+    session: AsyncSession,
+    *,
+    node_run_id: UUID,
+) -> NodeRunRlsScope | None:
+    """Apply the workspace-owner scope for one NodeRun to this transaction."""
+    scope = await resolve_node_run_rls_scope(session, node_run_id=node_run_id)
+    if scope is None:
+        return None
+    await set_rls_context(
+        session,
+        user_id=scope.user_id,
+        workspace_id=scope.workspace_id,
+        project_id=scope.project_id,
+    )
+    return scope
+
+
+async def resolve_artifact_rls_scope(
+    session: AsyncSession,
+    *,
+    artifact_id: UUID,
+) -> ArtifactRlsScope | None:
+    """Resolve an Artifact's owner scope without weakening project RLS."""
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT owner_user_id, workspace_id, project_id
+                FROM app.artifact_context(:artifact_id)
+                """
+            ),
+            {"artifact_id": artifact_id},
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return ArtifactRlsScope(
+            user_id=row["owner_user_id"],
+            workspace_id=row["workspace_id"],
+            project_id=row["project_id"],
+        )
+
+    from app.access.models import Project, Workspace
+    from app.execution.models import Artifact
+
+    artifact = await session.get(Artifact, artifact_id)
+    if artifact is None:
+        return None
+    project = await session.get(Project, artifact.project_id)
+    if project is None:
+        return None
+    workspace = await session.get(Workspace, project.workspace_id)
+    if workspace is None:
+        return None
+    return ArtifactRlsScope(
+        user_id=workspace.owner_user_id,
+        workspace_id=workspace.id,
+        project_id=project.id,
+    )
+
+
+async def set_artifact_rls_context(
+    session: AsyncSession,
+    *,
+    artifact_id: UUID,
+    expected_workspace_id: UUID,
+) -> ArtifactRlsScope | None:
+    """Apply an Artifact's project scope only when it belongs to the workspace."""
+    scope = await resolve_artifact_rls_scope(session, artifact_id=artifact_id)
+    if scope is None or scope.workspace_id != expected_workspace_id:
+        return None
+    await set_rls_context(
+        session,
+        user_id=scope.user_id,
+        workspace_id=scope.workspace_id,
+        project_id=scope.project_id,
+    )
+    return scope
+
+
+async def list_queued_node_run_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    project_id: UUID | None = None,
+    source_commit: str | None = None,
+) -> list[tuple[UUID, NodeRunRlsScope]]:
+    """Find queued work and ownership through the narrowly scoped DB resolver.
+
+    Formal stacks bind a source commit at process start. Filtering by that
+    value prevents a new commit-scoped Arq queue from replaying queued work
+    that was created by an older runtime.
+    """
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT node_run_id, owner_user_id, workspace_id, project_id
+                FROM app.queued_node_run_contexts(:limit, :project_id, :source_commit)
+                """
+            ),
+            {
+                "limit": limit,
+                "project_id": project_id,
+                "source_commit": source_commit,
+            },
+        )
+        return [
+            (
+                row["node_run_id"],
+                NodeRunRlsScope(
+                    user_id=row["owner_user_id"],
+                    workspace_id=row["workspace_id"],
+                    project_id=row["project_id"],
+                ),
+            )
+            for row in result.mappings().all()
+        ]
+
+    from sqlalchemy import select
+
+    from app.execution.models import NodeRun
+
+    stmt = (
+        select(NodeRun.id)
+        .where(NodeRun.status == "queued")
+        .order_by(NodeRun.created_at, NodeRun.id)
+        .limit(limit)
+    )
+    if project_id is not None:
+        stmt = stmt.where(NodeRun.project_id == project_id)
+    if source_commit is not None:
+        stmt = stmt.where(NodeRun.input_snapshot["source_commit"].as_string() == source_commit)
+    result = await session.execute(stmt)
+    scopes: list[tuple[UUID, NodeRunRlsScope]] = []
+    for node_run_id in result.scalars().all():
+        scope = await resolve_node_run_rls_scope(session, node_run_id=node_run_id)
+        if scope is not None:
+            scopes.append((node_run_id, scope))
+    return scopes
+
+
+async def list_resumable_provider_node_run_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    source_commit: str | None = None,
+) -> list[tuple[UUID, NodeRunRlsScope]]:
+    """Find interrupted Unified polls without exposing unrelated runtime rows."""
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT node_run_id, owner_user_id, workspace_id, project_id
+                FROM app.resumable_provider_node_run_contexts(:limit, :source_commit)
+                """
+            ),
+            {"limit": limit, "source_commit": source_commit},
+        )
+        return [
+            (
+                row["node_run_id"],
+                NodeRunRlsScope(
+                    user_id=row["owner_user_id"],
+                    workspace_id=row["workspace_id"],
+                    project_id=row["project_id"],
+                ),
+            )
+            for row in result.mappings().all()
+        ]
+
+    from app.execution.models import NodeRun, ProviderOperation
+
+    stmt = (
+        select(NodeRun.id)
+        .join(ProviderOperation, ProviderOperation.node_run_id == NodeRun.id)
+        .where(
+            NodeRun.status == "running",
+            ProviderOperation.execution_path_version == "unified-v1",
+            ProviderOperation.status.in_({"submitted", "running", "timed_out"}),
+            ProviderOperation.provider_operation_id.is_not(None),
+        )
+        .distinct()
+        .order_by(NodeRun.id)
+        .limit(limit)
+    )
+    if source_commit is not None:
+        stmt = stmt.where(
+            NodeRun.input_snapshot["source_commit"].as_string() == source_commit
+        )
+    scopes: list[tuple[UUID, NodeRunRlsScope]] = []
+    for node_run_id in (await session.execute(stmt)).scalars().all():
+        scope = await resolve_node_run_rls_scope(session, node_run_id=node_run_id)
+        if scope is not None:
+            scopes.append((node_run_id, scope))
+    return scopes
+
+
+async def list_pending_outbox_event_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    project_id: UUID | None = None,
+) -> list[OutboxEventRlsScope]:
+    """Find dispatchable events with ownership resolved independently of RLS context."""
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT outbox_event_id, owner_user_id, workspace_id, project_id
+                FROM app.pending_outbox_event_contexts(:limit, :project_id)
+                """
+            ),
+            {"limit": limit, "project_id": project_id},
+        )
+        return [
+            OutboxEventRlsScope(
+                event_id=row["outbox_event_id"],
+                user_id=row["owner_user_id"],
+                workspace_id=row["workspace_id"],
+                project_id=row["project_id"],
+            )
+            for row in result.mappings().all()
+        ]
+
+    from datetime import UTC, datetime
+
+    from app.events.models import OutboxEvent
+    from app.shared.enums import OutboxStatus
+
+    now = datetime.now(UTC)
+    stmt = (
+        select(OutboxEvent)
+        .where(
+            or_(
+                (OutboxEvent.status == OutboxStatus.PENDING.value)
+                & (OutboxEvent.next_attempt_at <= now),
+                (OutboxEvent.status == OutboxStatus.LEASED.value)
+                & (OutboxEvent.leased_until < now),
+            )
+        )
+        .order_by(OutboxEvent.created_at, OutboxEvent.event_id)
+        .limit(limit)
+    )
+    if project_id is not None:
+        stmt = stmt.where(OutboxEvent.project_id == project_id)
+    result = await session.execute(stmt)
+    scopes: list[OutboxEventRlsScope] = []
+    for event in result.scalars().all():
+        if event.project_id is None:
+            scopes.append(
+                OutboxEventRlsScope(
+                    event_id=event.event_id,
+                    user_id=None,
+                    workspace_id=None,
+                    project_id=None,
+                )
+            )
+            continue
+        from app.access.models import Project, Workspace
+
+        project = await session.get(Project, event.project_id)
+        if project is None:
+            continue
+        workspace = await session.get(Workspace, project.workspace_id)
+        if workspace is None:
+            continue
+        scopes.append(
+            OutboxEventRlsScope(
+                event_id=event.event_id,
+                user_id=workspace.owner_user_id,
+                workspace_id=workspace.id,
+                project_id=project.id,
+            )
+        )
+    return scopes
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
@@ -84,7 +446,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def get_session_with_rls(
     *,
     user_id: UUID | None = None,
-    organization_id: UUID | None = None,
+    workspace_id: UUID | None = None,
     project_id: UUID | None = None,
 ) -> AsyncGenerator[AsyncSession, None]:
     """Worker/service helper: open session and apply RLS GUC."""
@@ -93,7 +455,7 @@ async def get_session_with_rls(
         await set_rls_context(
             session,
             user_id=user_id,
-            organization_id=organization_id,
+            workspace_id=workspace_id,
             project_id=project_id,
         )
         yield session

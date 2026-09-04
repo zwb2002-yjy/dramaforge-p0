@@ -1,0 +1,80 @@
+{
+  "ok": true,
+  "source_commit": "942b380c54f07cacb5b9a4885104210f59517cc3",
+  "dirty": false,
+  "skill_composition": {
+    "status": "RESOLVED",
+    "keys": [
+      "suspense-reversal-v1",
+      "dialogue-scene-direction-v1",
+      "continuity-guardian-v1"
+    ],
+    "count": 3
+  },
+  "compiled_provenance": {
+    "genre": {
+      "key": "short_drama_suspense_v1",
+      "version": "1",
+      "contract_hash": "9374ea95c9577daaf8109aec6a57eb85fae8dad902e143417b29ae7b2df61917"
+    },
+    "skills": [
+      "suspense-reversal-v1@1",
+      "dialogue-scene-direction-v1@1",
+      "continuity-guardian-v1@1"
+    ],
+    "style": {
+      "key": "film_noir_v1",
+      "version": "1",
+      "contract_hash": "314f58dd62fecd62f2b03cd4e059d3a30929b7dc95b8d0672acfcf029e8e4c57"
+    },
+    "shot_language": {
+      "key": "subjective_tension_v1",
+      "version": "1",
+      "contract_hash": "0b93ec378a380e13ed5abd7e03eddf2c1dd9b3997d8615a7ef7d689a5c0d1b59"
+    },
+    "quality_policy": {
+      "key": "multi_character_quality_v1",
+      "version": "1",
+      "contract_hash": "d22aae6d357e07d5343e53d9a733d34b2b9741030346dd10f64c93021b9730f8"
+    }
+  },
+  "visual_bible_patch": {
+    "style_key": "film_noir_v1",
+    "style_version": "1",
+    "patches": {
+      "lighting": "硬光, 大量百叶窗/烟雾轮廓",
+      "contrast": "高, 深邃阴影",
+      "texture": "粗颗粒, 胶片质感",
+      "lens_language": "广角变形感, 低机位",
+      "composition": "framed 构图, 明暗切割",
+      "camera_behavior": "tripod",
+      "motion_feel": "weighted",
+      "production_design": "黑暗场景, 霓虹反射, 斑驳墙面",
+      "post_processing": "黑白/去饱和, 颗粒重",
+      "palette": {
+        "shadow": "#050505",
+        "highlight": "#e8dcc0",
+        "accent": "#c8a04a"
+      }
+    },
+    "suggestions": [
+      "参考 40-50 年代黑色电影",
+      "强阴影轮廓"
+    ],
+    "provenance": "style-pack"
+  },
+  "shot_director_intent_patch": null,
+  "workflow_template": {
+    "template_key": "two-character-dialogue-v1",
+    "template_version": "1.0.0",
+    "template_contract_hash": "a42277423ffb20f7dbff736967e35c6f4f393e800367366ab5412f6377972b2b",
+    "resolution_status": "RESOLVED",
+    "quality_policy_id": "two-character-dialogue-quality-v1",
+    "supported_character_count": [
+      2,
+      2
+    ]
+  },
+  "no_provider_request": true,
+  "no_second_graph": true
+}

@@ -8,35 +8,60 @@ from uuid import uuid4
 import pytest
 from app.events.models import OutboxEvent
 from app.events.outbox import OutboxDispatcher
-from app.providers.flux import ProviderNotConfiguredError, get_flux_adapter
+from app.providers.errors import ProviderNotConfiguredError
 from app.providers.local_tts import get_local_tts_adapter
 from app.shared.enums import OutboxStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-def test_get_flux_adapter_fail_closed_outside_test(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.delenv("AGNES_API_KEY", raising=False)
-    monkeypatch.setenv("AGNES_ENABLED", "false")
-    from app.config import clear_settings_cache
+def test_queue_scoped_job_id_prevents_stale_job_collision_after_stack_restart() -> None:
+    from app.runtime.scheduler import queue_scoped_job_id
 
+    node_run_id = uuid4()
+    old_queue = "dramaforge:heavy:old-source"
+    new_queue = "dramaforge:heavy:new-source"
+
+    old_job_id = queue_scoped_job_id(
+        queue_name=old_queue,
+        node_run_id=node_run_id,
+    )
+    new_job_id = queue_scoped_job_id(
+        queue_name=new_queue,
+        node_run_id=node_run_id,
+    )
+    repeated_new_job_id = queue_scoped_job_id(
+        queue_name=new_queue,
+        node_run_id=node_run_id,
+    )
+
+    assert old_job_id != new_job_id
+    assert new_job_id == repeated_new_job_id
+
+    recovery_job_id = queue_scoped_job_id(
+        queue_name=new_queue,
+        node_run_id=node_run_id,
+        dispatch_generation="repair-resume-1",
+    )
+    assert recovery_job_id != new_job_id
+    assert recovery_job_id == queue_scoped_job_id(
+        queue_name=new_queue,
+        node_run_id=node_run_id,
+        dispatch_generation="repair-resume-1",
+    )
+
+
+def test_formal_dispatch_uses_its_bound_source_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import clear_settings_cache
+    from app.runtime.scheduler import dispatch_source_commit
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DRAMAFORGE_SOURCE_COMMIT", "source-for-runtime")
     clear_settings_cache()
     try:
-        with pytest.raises(ProviderNotConfiguredError) as ei:
-            get_flux_adapter(allow_live=True, allow_fake=False)
-        assert ei.value.code == "PROVIDER_NOT_CONFIGURED"
+        assert dispatch_source_commit() == "source-for-runtime"
     finally:
         monkeypatch.setenv("APP_ENV", "test")
         clear_settings_cache()
-
-
-def test_get_flux_adapter_fake_only_in_test(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APP_ENV", "test")
-    from app.config import clear_settings_cache
-
-    clear_settings_cache()
-    ad = get_flux_adapter()
-    assert type(ad).__name__ == "FakeFluxAdapter"
 
 
 def test_local_tts_adapter_fail_closed_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,13 +85,13 @@ async def test_enqueue_does_not_return_local_on_redis_failure(
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
-    from app.runtime.scheduler import AgentRunScheduler
+    from app.runtime.scheduler import NodeRunScheduler
     from app.shared.errors import ValidationAppError
 
     session = MagicMock()
     session.get = AsyncMock(return_value=None)
     session.commit = AsyncMock()
-    sched = AgentRunScheduler(session)
+    sched = NodeRunScheduler(session)
 
     async def boom(*_a, **_k):
         raise OSError("redis down")
@@ -84,7 +109,7 @@ async def test_media_node_enqueues_on_heavy_queue(monkeypatch: pytest.MonkeyPatc
     from unittest.mock import AsyncMock, MagicMock
 
     from app.config import get_settings
-    from app.runtime.scheduler import AgentRunScheduler
+    from app.runtime.scheduler import NodeRunScheduler
 
     session = MagicMock()
     session.get = AsyncMock(
@@ -102,7 +127,7 @@ async def test_media_node_enqueues_on_heavy_queue(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr("arq.create_pool", create_pool)
 
-    job_id = await AgentRunScheduler(session)._enqueue_node_run(uuid4())
+    job_id = await NodeRunScheduler(session)._enqueue_node_run(uuid4())
 
     assert job_id == "heavy-job"
     assert redis.enqueue_job.await_args.kwargs["_queue_name"] == get_settings().arq_heavy_queue_name
@@ -147,28 +172,21 @@ async def test_outbox_reclaim_expired_lease() -> None:
     await engine.dispose()
 
 
-def test_stack_script_does_not_force_memory_store() -> None:
+def test_compose_stack_does_not_force_memory_store() -> None:
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[3]
-    text = (repo / "scripts" / "start_p0_wsl_stack.sh").read_text(encoding="utf-8")
-    # Must never assign formal force-memory (=1); comments may mention the forbidden value.
-    assert 'export DRAMA_FORCE_MEMORY_STORE="1"' not in text
-    assert "DRAMA_FORCE_MEMORY_STORE=1" not in [
-        ln.strip() for ln in text.splitlines() if not ln.strip().startswith("#")
-    ]
-    assert "unset DRAMA_FORCE_MEMORY_STORE" in text or 'DRAMA_FORCE_MEMORY_STORE=""' in text
-    api = (repo / "scripts" / "start_api_wsl_stable.sh").read_text(encoding="utf-8")
-    assert 'export DRAMA_FORCE_MEMORY_STORE="1"' not in api
+    text = (repo / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "DRAMA_FORCE_MEMORY_STORE" not in text
 
 
-def test_insightface_status_reports_backend() -> None:
-    from app.consistency.image_embed import insightface_status
+def test_identity_review_has_no_biometric_runtime_contract() -> None:
+    from app.consistency.identity_policy import identity_evidence_policy_snapshot
 
-    st = insightface_status()
-    assert "available" in st
-    assert st["embedding_dim"] == 512
-    assert st["backend"] in {"insightface+onnx", "hash_placeholder"}
+    policy = identity_evidence_policy_snapshot()
+    assert policy["automatic_identity_decision"] is False
+    assert "threshold" not in policy
+    assert "embedding" not in policy
 
 
 @pytest.mark.asyncio
@@ -188,15 +206,3 @@ async def test_resolve_media_bytes_no_stub_outside_test(monkeypatch: pytest.Monk
     finally:
         monkeypatch.setenv("APP_ENV", "test")
         clear_settings_cache()
-
-
-def test_full_product_script_refuses_force_memory() -> None:
-    from pathlib import Path
-
-    repo = Path(__file__).resolve().parents[3]
-    text = (repo / "scripts" / "run_p0_full_product.py").read_text(encoding="utf-8")
-    assert 'setdefault("DRAMA_FORCE_MEMORY_STORE"' not in text
-    assert "DRAMA_FORCE_MEMORY_STORE\", \"1\")" not in text
-    assert "WorkerRuntime" not in text or "do NOT call WorkerRuntime" in text
-    # must not silent FakeFlux for canonical
-    assert "canon fallback" not in text

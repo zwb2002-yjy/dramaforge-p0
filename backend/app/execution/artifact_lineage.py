@@ -21,6 +21,7 @@ async def get_or_create_artifact(
     mime_type: str,
     byte_size: int,
     produced_by_run_id: UUID | None,
+    allow_cross_run_reuse: bool = False,
 ) -> Artifact:
     """Persist an Artifact without reassigning Shot media between NodeRuns."""
     existing = (
@@ -34,7 +35,8 @@ async def get_or_create_artifact(
     ).scalar_one_or_none()
     if existing is not None:
         if (
-            produced_by_run_id is not None
+            artifact_type != "document"
+            and produced_by_run_id is not None
             and existing.produced_by_run_id is not None
             and existing.produced_by_run_id != produced_by_run_id
         ):
@@ -46,7 +48,7 @@ async def get_or_create_artifact(
             source_shot_id = str(
                 (source_run.input_snapshot or {}).get("shot_id") if source_run else ""
             )
-            if current_shot_id:
+            if current_shot_id and not allow_cross_run_reuse:
                 raise ValidationAppError(
                     "ARTIFACT_NOT_INDEPENDENT: Shot NodeRun produced bytes already "
                     "claimed by a different NodeRun",

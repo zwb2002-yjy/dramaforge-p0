@@ -6,6 +6,7 @@ Never logs full API keys or full prompt/response bodies.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -14,13 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.providers.fake import FakeOpenAIAdapter
-from app.providers.organization_credentials import settings_for_organization_provider
+from app.providers.workspace_credentials import settings_for_workspace_provider
 
 
 class AnthropicCompatibleTextAdapter:
     """POST to the configured text LLM API style without exposing request contents."""
 
     provider = "openai"
+    _MAX_ATTEMPTS = 3
+    _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
 
     def __init__(
         self,
@@ -54,14 +57,33 @@ class AnthropicCompatibleTextAdapter:
         if self._settings.text_llm_api_style == "openai":
             if base.endswith("/chat/completions"):
                 return base
-            if base.endswith("/v1"):
-                return f"{base}/chat/completions"
-            return f"{base}/v1/chat/completions"
+            return f"{base}/chat/completions"
         if base.endswith("/messages"):
             return base
         if base.endswith("/v1"):
             return f"{base}/messages"
         return f"{base}/v1/messages"
+
+    def _build_body(
+        self, request: dict[str, Any], *, api_style: str | None = None,
+    ) -> dict[str, Any]:
+        style = api_style or self._settings.text_llm_api_style
+        prompt = str(request.get("prompt") or request.get("text") or "")
+        max_tokens = int(request.get("max_tokens") or 512)
+        if style == "openai":
+            # DeepSeek reasoning models: use max_completion_tokens
+            # so reasoning tokens don't consume the output budget.
+            return {
+                "model": self._settings.text_llm_model,
+                "max_completion_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+                "reasoning": {"enabled": True},
+            }
+        return {
+            "model": self._settings.text_llm_model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
 
     async def create(self, request: dict[str, Any]) -> dict[str, Any]:
         if not self.configured():
@@ -71,36 +93,47 @@ class AnthropicCompatibleTextAdapter:
         self.calls.append(
             {"op": "create", "prompt_chars": len(prompt), "kind": request.get("kind")}
         )
-        body = {
-            "model": self._settings.text_llm_model,
-            "max_tokens": int(request.get("max_tokens") or 512),
-            "messages": [{"role": "user", "content": prompt}],
-        }
+        body = self._build_body(request)
         url = self._messages_url()
         async with httpx.AsyncClient(
             timeout=120.0,
             transport=self._transport,
+            proxy=None,
+            trust_env=False,
         ) as client:
-            resp = await client.post(url, headers=self._headers(), json=body)
-            try:
-                data = resp.json()
-            except Exception:
-                data = {"raw_status": resp.status_code, "text": resp.text[:200]}
-            if resp.status_code >= 400:
-                err = f"text_llm http {resp.status_code}: {str(data)[:160]}"
-                self._tasks[task_id] = {"status": "failed", "error": err, "text": ""}
-                return {"remote_task_id": task_id, "status": "failed", "error": err}
-            text_out = _extract_text(data)
-            self._tasks[task_id] = {
-                "status": "succeeded",
-                "text": text_out,
-                "usage": data.get("usage") if isinstance(data, dict) else None,
-            }
-            return {
-                "remote_task_id": task_id,
-                "status": "succeeded",
-                "text": text_out,
-            }
+            last_error = "text_llm request failed"
+            for attempt in range(1, self._MAX_ATTEMPTS + 1):
+                try:
+                    resp = await client.post(url, headers=self._headers(), json=body)
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {"raw_status": resp.status_code, "text": resp.text[:200]}
+                    if resp.status_code < 400:
+                        text_out = _extract_text(data)
+                        self._tasks[task_id] = {
+                            "status": "succeeded",
+                            "text": text_out,
+                            "usage": data.get("usage") if isinstance(data, dict) else None,
+                        }
+                        return {
+                            "remote_task_id": task_id,
+                            "status": "succeeded",
+                            "text": text_out,
+                        }
+                    last_error = f"text_llm http {resp.status_code}: {str(data)[:160]}"
+                    if resp.status_code not in self._RETRYABLE_STATUSES:
+                        break
+                except (
+                    httpx.TimeoutException,
+                    httpx.NetworkError,
+                    httpx.RemoteProtocolError,
+                ) as exc:
+                    last_error = f"text_llm {type(exc).__name__}: {exc}"
+                if attempt < self._MAX_ATTEMPTS:
+                    await asyncio.sleep(min(2.0 ** (attempt - 1), 4.0))
+            self._tasks[task_id] = {"status": "failed", "error": last_error, "text": ""}
+            return {"remote_task_id": task_id, "status": "failed", "error": last_error}
 
     async def poll(self, remote_task_id: str) -> dict[str, Any]:
         task = self._tasks.get(remote_task_id)
@@ -171,16 +204,16 @@ def get_openai_adapter(
     return FakeOpenAIAdapter()
 
 
-async def get_openai_adapter_for_organization(
+async def get_openai_adapter_for_workspace(
     session: AsyncSession,
     *,
-    organization_id: UUID,
+    workspace_id: UUID,
     allow_live: bool = False,
 ) -> Any:
-    """Resolve the project organization credential before creating a text adapter."""
-    settings = await settings_for_organization_provider(
+    """Resolve the project workspace credential before creating a text adapter."""
+    settings = await settings_for_workspace_provider(
         session,
-        organization_id=organization_id,
+        workspace_id=workspace_id,
         provider="text",
     )
     return get_openai_adapter(allow_live=allow_live, settings=settings)

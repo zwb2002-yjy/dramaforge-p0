@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -49,7 +50,12 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=422,
             code="VALIDATION_ERROR",
             message="Request validation failed",
-            details={"errors": exc.errors()},
+            details={
+                "errors": jsonable_encoder(
+                    exc.errors(),
+                    custom_encoder={Exception: str, ValueError: str},
+                )
+            },
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -73,7 +79,10 @@ def register_exception_handlers(app: FastAPI) -> None:
             return problem_response(
                 status_code=503,
                 code="DATABASE_UNAVAILABLE",
-                message="数据库不可用（PostgreSQL 连接失败）。请启动 WSL Postgres 后重试。",
+                message=(
+                    "数据库不可用（PostgreSQL 连接失败）。"
+                    "请启动 Docker Compose PostgreSQL 后重试。"
+                ),
                 details={"error_type": name},
             )
         # sqlalchemy wraps asyncpg errors

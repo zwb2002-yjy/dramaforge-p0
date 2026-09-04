@@ -1,0 +1,20 @@
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  litellm:
+    ports:
+      - "4000:4000"
+
+  # The frontend gateway remains the only application entry on host port 8080.
+  # The API keeps its container-only port 8000 and is reached by the gateway.

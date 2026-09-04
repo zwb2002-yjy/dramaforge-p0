@@ -26,7 +26,6 @@ _SHOT_RE = re.compile(
     re.IGNORECASE,
 )
 _EPISODE_RE = re.compile(r"^#\s*Episode\s+(\d+)\s*[—\-–:]\s*(.+)$", re.IGNORECASE)
-_CHAR_RE = re.compile(r"^Lead:\s*(.+)$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -53,7 +52,6 @@ class ParsedScript:
     episode_number: int
     title: str
     synopsis: str
-    lead_character: str | None
     scenes: list[ParsedScene]
 
 
@@ -64,21 +62,22 @@ class ImportResult:
     scene_count: int
     shot_count: int
     shot_ids: list[UUID]
-    lead_character: str | None
     content_hash: str
 
 
 def parse_script_markdown(text: str) -> ParsedScript:
     """Parse a simple markdown script fixture into episodes/scenes/shots.
 
-    Expected shape (fixtures/scripts/p0_10_shots.md):
+    Expected shape (fixtures/scripts/episode_script.md):
       # Episode 1 — Title
-      Lead: Hero Name
       ## Scene 1 — Location / night
       synopsis...
       ### Shot 1 — medium
       Visual: ...
       Dialogue: ...
+
+    All non-structural lines remain story text. Identity assets and their
+    references are attached explicitly in the Asset/Shot workbench flows.
     """
     if not text or not text.strip():
         raise ValidationAppError("empty script")
@@ -86,7 +85,6 @@ def parse_script_markdown(text: str) -> ParsedScript:
     episode_number = 1
     title = "Untitled"
     synopsis_parts: list[str] = []
-    lead: str | None = None
     scenes: list[ParsedScene] = []
     cur_scene: dict[str, Any] | None = None
     cur_shot: dict[str, Any] | None = None
@@ -131,10 +129,6 @@ def parse_script_markdown(text: str) -> ParsedScript:
             flush_scene()
             episode_number = int(m_ep.group(1))
             title = m_ep.group(2).strip()
-            continue
-        m_char = _CHAR_RE.match(line.strip())
-        if m_char:
-            lead = m_char.group(1).strip()
             continue
         m_sc = _SCENE_RE.match(line)
         if m_sc:
@@ -188,7 +182,6 @@ def parse_script_markdown(text: str) -> ParsedScript:
         episode_number=episode_number,
         title=title,
         synopsis=" ".join(synopsis_parts).strip(),
-        lead_character=lead,
         scenes=scenes,
     )
 
@@ -202,9 +195,9 @@ async def import_script(
     text: str,
     actor: User | None = None,
 ) -> ImportResult:
-    """Persist ScriptDocument + Episode + Scenes + Shots under project membership."""
+    """Persist ScriptDocument + Episode + Scenes + Shots under an owned project."""
     if actor is not None:
-        await ProjectService(session).get_project_for_member(project_id=project_id, actor=actor)
+        await ProjectService(session).get_project_for_owner(project_id=project_id, actor=actor)
     parsed = parse_script_markdown(text)
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     existing_doc = (
@@ -287,7 +280,6 @@ async def import_script(
             scene_count=len(parsed.scenes),
             shot_count=len(ordered_shots),
             shot_ids=[shot.id for shot in ordered_shots],
-            lead_character=parsed.lead_character,
             content_hash=content_hash,
         )
 
@@ -425,6 +417,5 @@ async def import_script(
         scene_count=len(parsed.scenes),
         shot_count=len(shot_ids),
         shot_ids=shot_ids,
-        lead_character=parsed.lead_character,
         content_hash=content_hash,
     )

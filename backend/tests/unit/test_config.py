@@ -1,9 +1,13 @@
+
 """Settings validation tests."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
-from app.config import Settings, clear_settings_cache
+from app.config import Settings, clear_settings_cache, project_env_file
+from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
 
@@ -18,6 +22,9 @@ def test_default_settings_load() -> None:
     assert settings.arq_default_queue_name
     assert settings.arq_heavy_queue_name
     assert settings.arq_heavy_max_jobs == 4
+    assert Settings.model_fields["public_registration_enabled"].default is False
+    assert settings.session_cookie_secure is False
+    assert settings.worker_token == ""
 
 
 def test_cors_origins_from_csv(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -30,6 +37,42 @@ def test_cors_origins_from_csv(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.cors_origins == ["http://a.local", "http://b.local"]
 
 
+def test_litellm_logical_models_from_compose_csv(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LITELLM_LOGICAL_MODELS", "script-quality, script-fast")
+    clear_settings_cache()
+    settings = Settings(
+        session_secret="test-session-secret-32chars-min",
+        byok_fernet_key="test-byok-fernet-key-replace==",
+    )
+    assert settings.litellm_logical_models == ["script-quality", "script-fast"]
+
+
 def test_session_secret_min_length() -> None:
     with pytest.raises(ValidationError):
         Settings(session_secret="short", byok_fernet_key="test-byok-fernet-key-replace==")
+
+
+def test_production_rejects_published_or_missing_secrets() -> None:
+    with pytest.raises(ValidationError):
+        Settings(app_env="production")
+
+
+def test_production_accepts_generated_secrets() -> None:
+    settings = Settings(
+        app_env="production",
+        session_secret="s" * 48,
+        worker_token="w" * 48,
+        byok_fernet_key=Fernet.generate_key().decode(),
+    )
+    assert settings.app_env == "production"
+
+
+def test_project_env_file_does_not_depend_on_working_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    env_file = project_env_file()
+
+    assert env_file == Path(__file__).resolve().parents[3] / ".env"
+    assert Settings.model_config.get("env_file") == env_file

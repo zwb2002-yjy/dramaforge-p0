@@ -1,0 +1,72 @@
+services:
+  postgres-quality:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: dramaforge
+      POSTGRES_USER: dramaforge
+      POSTGRES_PASSWORD: quality-postgres-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dramaforge -d dramaforge"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend-quality:
+    image: dramaforge-backend-quality:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.quality
+    depends_on:
+      postgres-quality:
+        condition: service_healthy
+    environment:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://dramaforge:quality-postgres-password@postgres-quality:5432/dramaforge
+      SESSION_SECRET: quality-session-secret-32-characters
+      BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      AGNES_ENABLED: "false"
+      TEXT_LLM_ENABLED: "false"
+      TEST_PG_ENABLED: "1"
+      TEST_PG_HOST: postgres-quality
+      TEST_PG_PORT: "5432"
+      TEST_PG_USER: dramaforge
+      TEST_PG_PASSWORD: quality-postgres-password
+      PUBLIC_REGISTRATION_ENABLED: "true"
+    volumes:
+      - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract
+
+  frontend-quality:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.quality
+    depends_on:
+      backend-quality:
+        condition: service_completed_successfully
+    environment:
+      DRAMAFORGE_OPENAPI_JSON: /contract/openapi.json
+    volumes:
+      - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract:ro
+
+  litellm-quality:
+    image: ghcr.io/berriai/litellm:v1.96.0
+    environment:
+      LITELLM_MASTER_KEY: sk-integration-test-master-key
+    volumes:
+      - ./infra/litellm/quality-config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  litellm-integration-quality:
+    image: dramaforge-backend-quality:local
+    depends_on:
+      litellm-quality:
+        condition: service_healthy
+    environment:
+      APP_ENV: test
+      LITELLM_INTEGRATION_REQUIRED: "1"
+      LITELLM_INTEGRATION_URL: http://litellm-quality:4000
+    command: ["sh", "-c", "set -eu; uv run --directory backend pytest tests/integration/test_litellm_real_proxy.py -q -rs --fail-on-skip"]

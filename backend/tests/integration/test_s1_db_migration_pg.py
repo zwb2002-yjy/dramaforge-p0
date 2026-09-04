@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from pg_support import available
 from sqlalchemy import create_engine, text
 
 REPO = Path(__file__).resolve().parents[3]
@@ -20,26 +21,20 @@ DEFAULT_URL = "postgresql+psycopg://dramaforge:dramaforge@127.0.0.1:5432/dramafo
 def _sync_url() -> str:
     url = os.environ.get("DATABASE_URL", DEFAULT_URL)
     # alembic/app use asyncpg; sync tests use psycopg
-    return (
-        url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
-        .replace("postgresql+psycopg2://", "postgresql+psycopg://")
+    return url.replace("postgresql+asyncpg://", "postgresql+psycopg://").replace(
+        "postgresql+psycopg2://", "postgresql+psycopg://"
     )
 
 
 def _pg_available() -> bool:
-    try:
-        engine = create_engine(_sync_url(), pool_pre_ping=True)
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        engine.dispose()
-        return True
-    except Exception:
-        return False
+    return available(_sync_url())
 
 
 pytestmark = pytest.mark.skipif(
-    not _pg_available(),
-    reason="PostgreSQL not reachable at DATABASE_URL; start docker compose postgres",
+    os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available(),
+    reason=(
+        "set TEST_PG_ENABLED=1 with an explicitly configured PostgreSQL target"
+    ),
 )
 
 
@@ -49,16 +44,22 @@ REQUIRED_TABLES = (
     "node_runs",
     "artifacts",
     "provider_operations",
-    "creative_briefs",
-    "creative_brief_revisions",
-    "creation_plans",
-    "planning_authorizations",
-    "agent_runs",
-    "materialization_operations",
+    "director_threads",
+    "director_messages",
+    "director_proposals",
+    "director_proposal_items",
+    "asset_version_references",
+    "provider_connections",
+    "provider_capability_evidence",
+    "provider_model_bindings",
+    "project_provider_bindings",
+    "provider_quality_evidence",
+    "artifact_reference_tokens",
+    "provider_model_catalog_entries",
 )
 
 
-def test_migration_head_creates_execution_creation_tables() -> None:
+def test_migration_head_creates_canonical_schema_and_removes_retired_tables() -> None:
     engine = create_engine(_sync_url(), pool_pre_ping=True)
     with engine.connect() as conn:
         rows = conn.execute(
@@ -71,9 +72,37 @@ def test_migration_head_creates_execution_creation_tables() -> None:
             {"names": list(REQUIRED_TABLES)},
         ).fetchall()
         present = {r[0] for r in rows}
+        node_run_status = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    """
+                    SELECT e.enumlabel
+                    FROM pg_type t
+                    JOIN pg_enum e ON e.enumtypid = t.oid
+                    WHERE t.typname = 'node_run_status'
+                    """
+                )
+            ).fetchall()
+        }
     engine.dispose()
     missing = set(REQUIRED_TABLES) - present
     assert not missing, f"missing tables after upgrade: {sorted(missing)}"
+    retired = {
+        "creative_briefs",
+        "creative_brief_revisions",
+        "creation_plans",
+        "planning_authorizations",
+        "agent_runs",
+        "materialization_operations",
+        "director_workflow_runs",
+        "production_batches",
+        "budget_authorizations",
+        "characters",
+        "character_references",
+    }
+    assert not retired & present, f"retired tables still present: {sorted(retired & present)}"
+    assert "blocked_budget" not in node_run_status
 
 
 def test_can_insert_graph_node_and_artifact_shell() -> None:
@@ -81,12 +110,6 @@ def test_can_insert_graph_node_and_artifact_shell() -> None:
     engine = create_engine(_sync_url(), pool_pre_ping=True)
     suffix = uuid.uuid4().hex[:8]
     with engine.begin() as conn:
-        org_id = conn.execute(
-            text(
-                "INSERT INTO organizations (name) VALUES (:n) RETURNING id"
-            ),
-            {"n": f"db-test-org-{suffix}"},
-        ).scalar_one()
         user_id = conn.execute(
             text(
                 """
@@ -96,15 +119,24 @@ def test_can_insert_graph_node_and_artifact_shell() -> None:
             ),
             {"e": f"db-{suffix}@example.com"},
         ).scalar_one()
+        workspace_id = conn.execute(
+            text(
+                """
+                INSERT INTO workspaces (owner_user_id, name)
+                VALUES (:u, :n) RETURNING id
+                """
+            ),
+            {"u": user_id, "n": f"db-test-workspace-{suffix}"},
+        ).scalar_one()
         proj_id = conn.execute(
             text(
                 """
                 INSERT INTO projects (
-                  organization_id, name, aspect_ratio, budget_limit
+                  workspace_id, name, aspect_ratio, budget_limit
                 ) VALUES (:o, :n, '9:16', 0) RETURNING id
                 """
             ),
-            {"o": org_id, "n": f"db-proj-{suffix}"},
+            {"o": workspace_id, "n": f"db-proj-{suffix}"},
         ).scalar_one()
         graph_id = conn.execute(
             text(

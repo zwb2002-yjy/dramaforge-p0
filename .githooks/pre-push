@@ -4,7 +4,7 @@ set -eu
 while read -r local_ref local_sha remote_ref remote_sha
 do
   if [ "$remote_ref" = "refs/heads/main" ]; then
-    echo "Direct pushes to main are blocked. Push an agent/* branch and merge through a PR." >&2
+    echo "Direct pushes to main are blocked. Push routine work to dev and merge dev through a protected PR." >&2
     exit 1
   fi
 done

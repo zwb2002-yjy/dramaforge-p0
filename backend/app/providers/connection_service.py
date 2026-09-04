@@ -1,0 +1,1358 @@
+﻿"""Provider Connection, capability evidence, and binding use cases."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from typing import cast
+from uuid import UUID
+
+import httpx
+from PIL import Image, UnidentifiedImageError
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.access.models import Project, User
+from app.config import Settings, get_settings
+from app.consistency.identity_policy import identity_evidence_policy_snapshot
+from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
+from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_service import ModelCatalogService
+from app.providers.models import (
+    ProjectProviderBinding,
+    ProviderCapabilityEvidence,
+    ProviderConnection,
+    ProviderConnectionRevision,
+    ProviderModelBinding,
+    ProviderQualityEvidence,
+)
+from app.providers.reference_delivery import issue_artifact_reference
+from app.providers.registry import ProviderPlugin, get_plugin
+from app.providers.workspace_credentials import configured_byok_keyring
+from app.security.credentials import read_credential_by_id, store_credential
+from app.security.models import EncryptedProviderCredential
+from app.shared.db import set_artifact_rls_context
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
+from app.storage.minio_store import get_object_store
+
+_CAPABILITIES = frozenset(
+    {
+        "auth_models",
+        "image_t2i",
+        "image_i2i",
+        "video_i2v",
+        "video_poll_download",
+    }
+)
+
+
+def _resolve_plugin(provider_type: str, protocol_profile: str) -> ProviderPlugin:
+    try:
+        plugin = get_plugin(provider_type, protocol_profile)
+    except LookupError:
+        raise ValidationAppError(
+            "unknown provider plugin",
+            details={"code": "PROVIDER_PLUGIN_UNKNOWN"},
+        ) from None
+    if not plugin.implemented:
+        raise ValidationAppError(
+            "provider plugin is not implemented",
+            details={"code": "PROVIDER_PLUGIN_NOT_IMPLEMENTED"},
+        )
+    return plugin
+
+
+class ProviderConnectionService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create_connection(
+        self,
+        *,
+        workspace_id: UUID,
+        actor: User,
+        display_name: str,
+        api_key: str,
+        enabled: bool,
+        provider_type: str = "agnes",
+        protocol_profile: str = "agnes_cn_v1",
+        base_url: str | None = None,
+    ) -> ProviderConnection:
+        plugin = _resolve_plugin(provider_type, protocol_profile)
+        secret = api_key.strip()
+        if not secret:
+            raise ValidationAppError("api_key must not be empty")
+        existing = await self._session.scalar(
+            select(ProviderConnection.id).where(
+                ProviderConnection.workspace_id == workspace_id,
+                ProviderConnection.provider_type == provider_type,
+                ProviderConnection.protocol_profile == protocol_profile,
+            )
+        )
+        if existing is not None:
+            raise ConflictError(
+                f"{plugin.display_name} connection already exists for this Workspace",
+                details={"code": "PROVIDER_CONNECTION_EXISTS"},
+            )
+        host = (base_url or plugin.default_base_url).strip().rstrip("/")
+        if not host:
+            raise ValidationAppError("base_url must not be empty")
+        credential = await store_credential(
+            self._session,
+            workspace_id=workspace_id,
+            provider=plugin.credential_key,
+            plaintext=secret,
+            keyring=configured_byok_keyring(),
+        )
+        connection = ProviderConnection(
+            workspace_id=workspace_id,
+            provider_type=provider_type,
+            display_name=display_name.strip() or plugin.display_name,
+            base_url=host,
+            protocol_profile=protocol_profile,
+            credential_id=credential.id,
+            credential_revision=credential.revision_no,
+            enabled=enabled,
+            verification_status="unverified",
+            created_by=actor.id,
+            updated_by=actor.id,
+        )
+        self._session.add(connection)
+        await self._session.flush()
+        await self.create_connection_revision(connection=connection)
+        return connection
+
+    async def list_connections(self, *, workspace_id: UUID) -> list[ProviderConnection]:
+        return list(
+            (
+                await self._session.execute(
+                    select(ProviderConnection)
+                    .where(ProviderConnection.workspace_id == workspace_id)
+                    .order_by(ProviderConnection.created_at, ProviderConnection.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def set_binding_pricing(
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        model_binding_id: UUID,
+        actor: User,
+        unit_amount: Decimal,
+        currency: str,
+        billing_unit: str,
+        source_note: str,
+    ) -> ProviderModelBinding:
+        await self.get_connection(workspace_id=workspace_id, connection_id=connection_id)
+        binding = await self._session.scalar(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.id == model_binding_id,
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.connection_id == connection_id,
+            )
+        )
+        if binding is None:
+            raise NotFoundError("model binding not found")
+        if unit_amount < 0 or len(currency.strip()) != 3 or not billing_unit.strip():
+            raise ValidationAppError("invalid binding pricing snapshot")
+        binding.pricing_snapshot_json = {
+            "unit_amount": str(unit_amount),
+            "currency": currency.upper(),
+            "billing_unit": billing_unit.strip(),
+            "source": "workspace_owner_verified",
+            "source_note": source_note.strip(),
+            "verified_at": datetime.now(UTC).isoformat(),
+            "verified_by": str(actor.id),
+            "catalog_entry_id": (
+                str(binding.catalog_entry_id) if binding.catalog_entry_id else None
+            ),
+            "capability_manifest_hash": binding.capability_manifest_hash,
+        }
+        binding.updated_by = actor.id
+        await self._session.flush()
+        return binding
+
+    async def get_connection(
+        self, *, workspace_id: UUID, connection_id: UUID
+    ) -> ProviderConnection:
+        connection = await self._session.scalar(
+            select(ProviderConnection).where(
+                ProviderConnection.id == connection_id,
+                ProviderConnection.workspace_id == workspace_id,
+            )
+        )
+        if connection is None:
+            raise NotFoundError("provider connection not found")
+        return connection
+
+    async def create_connection_revision(
+        self,
+        *,
+        connection: ProviderConnection,
+    ) -> ProviderConnectionRevision:
+        """Persist the current executable connection configuration as a revision.
+
+        A revision is only valid when its credential is the concrete immutable
+        credential row for the same workspace and provider plugin.  This keeps
+        the light revision table from becoming a second mutable connection
+        truth while still making operation identity durable.
+        """
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        credential = await self._session.scalar(
+            select(EncryptedProviderCredential).where(
+                EncryptedProviderCredential.id == connection.credential_id,
+                EncryptedProviderCredential.workspace_id == connection.workspace_id,
+            )
+        )
+        if credential is None or credential.provider != plugin.credential_key:
+            raise ValidationAppError(
+                "provider connection credential revision is invalid",
+                details={"code": "PROVIDER_CONNECTION_CREDENTIAL_INVALID"},
+            )
+        latest = await self._session.scalar(
+            select(ProviderConnectionRevision)
+            .where(ProviderConnectionRevision.connection_id == connection.id)
+            .order_by(ProviderConnectionRevision.revision_no.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        revision = ProviderConnectionRevision(
+            connection_id=connection.id,
+            revision_no=(latest.revision_no + 1) if latest is not None else 1,
+            provider_type=connection.provider_type,
+            protocol_profile=connection.protocol_profile,
+            base_url=connection.base_url,
+            credential_revision_id=credential.id,
+        )
+        self._session.add(revision)
+        await self._session.flush()
+        return revision
+
+    async def current_connection_revision(
+        self,
+        *,
+        connection: ProviderConnection,
+    ) -> ProviderConnectionRevision:
+        """Return the latest revision for a workspace-owned connection."""
+        revision = await self._session.scalar(
+            select(ProviderConnectionRevision)
+            .join(
+                ProviderConnection,
+                ProviderConnection.id == ProviderConnectionRevision.connection_id,
+            )
+            .where(
+                ProviderConnectionRevision.connection_id == connection.id,
+                ProviderConnection.workspace_id == connection.workspace_id,
+            )
+            .order_by(ProviderConnectionRevision.revision_no.desc())
+            .limit(1)
+        )
+        if revision is None:
+            raise ValidationAppError(
+                "provider connection revision is missing",
+                details={"code": "PROVIDER_CONNECTION_REVISION_MISSING"},
+            )
+        return revision
+
+    async def credential_version(self, connection: ProviderConnection) -> str | None:
+        credential = await self._session.scalar(
+            select(EncryptedProviderCredential).where(
+                EncryptedProviderCredential.id == connection.credential_id,
+                EncryptedProviderCredential.workspace_id == connection.workspace_id,
+            )
+        )
+        if credential is None:
+            return None
+        return f"{credential.revision_no}:{credential.key_version}"
+
+    async def update_connection(
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        actor: User,
+        display_name: str | None,
+        enabled: bool | None,
+        base_url: str | None = None,
+        protocol_profile: str | None = None,
+    ) -> ProviderConnection:
+        connection = await self.get_connection(
+            workspace_id=workspace_id, connection_id=connection_id
+        )
+        if display_name is not None:
+            connection.display_name = display_name.strip() or connection.display_name
+        if enabled is not None:
+            connection.enabled = enabled
+        execution_changed = False
+        if protocol_profile is not None:
+            profile = protocol_profile.strip()
+            if not profile:
+                raise ValidationAppError("protocol_profile must not be empty")
+            if profile != connection.protocol_profile:
+                plugin = _resolve_plugin(connection.provider_type, profile)
+                duplicate = await self._session.scalar(
+                    select(ProviderConnection.id).where(
+                        ProviderConnection.workspace_id == workspace_id,
+                        ProviderConnection.provider_type == connection.provider_type,
+                        ProviderConnection.protocol_profile == profile,
+                        ProviderConnection.id != connection.id,
+                    )
+                )
+                if duplicate is not None:
+                    raise ConflictError(
+                        "provider connection already exists for this Workspace",
+                        details={"code": "PROVIDER_CONNECTION_EXISTS"},
+                    )
+                credential = await self._session.scalar(
+                    select(EncryptedProviderCredential).where(
+                        EncryptedProviderCredential.id == connection.credential_id,
+                        EncryptedProviderCredential.workspace_id == workspace_id,
+                    )
+                )
+                if credential is None or credential.provider != plugin.credential_key:
+                    raise ValidationAppError(
+                        "provider connection credential does not match protocol profile",
+                        details={"code": "PROVIDER_CONNECTION_CREDENTIAL_INVALID"},
+                    )
+                connection.protocol_profile = profile
+                execution_changed = True
+        if base_url is not None:
+            host = base_url.strip().rstrip("/")
+            if not host:
+                raise ValidationAppError("base_url must not be empty")
+            if host != connection.base_url:
+                connection.base_url = host
+                execution_changed = True
+        if execution_changed:
+            await self.create_connection_revision(connection=connection)
+            await self._invalidate_connection_evidence(connection=connection, actor=actor)
+        connection.updated_by = actor.id
+        await self._session.flush()
+        return connection
+
+    async def _invalidate_connection_evidence(
+        self,
+        *,
+        connection: ProviderConnection,
+        actor: User,
+    ) -> None:
+        """Invalidate evidence whenever the effective account endpoint changes.
+
+        A key rotation and a Base URL change can both point at another account.
+        Capability/quality evidence is therefore tied to both, never retained
+        merely because the connection row keeps the same id.
+        """
+        connection.verification_status = "unverified"
+        connection.verified_at = None
+        await self._session.execute(
+            delete(ProviderCapabilityEvidence).where(
+                ProviderCapabilityEvidence.connection_id == connection.id
+            )
+        )
+        await self._session.execute(
+            delete(ProviderQualityEvidence).where(
+                ProviderQualityEvidence.model_binding_id.in_(
+                    select(ProviderModelBinding.id).where(
+                        ProviderModelBinding.connection_id == connection.id
+                    )
+                )
+            )
+        )
+        bindings = list(
+            (
+                await self._session.execute(
+                    select(ProviderModelBinding).where(
+                        ProviderModelBinding.connection_id == connection.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for binding in bindings:
+            binding.account_verified = False
+            binding.quality_gated = False
+            binding.updated_by = actor.id
+
+    async def update_credential(
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        actor: User,
+        api_key: str,
+    ) -> ProviderConnection:
+        connection = await self.get_connection(
+            workspace_id=workspace_id, connection_id=connection_id
+        )
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        secret = api_key.strip()
+        if not secret:
+            raise ValidationAppError("api_key must not be empty")
+        credential = await store_credential(
+            self._session,
+            workspace_id=workspace_id,
+            provider=plugin.credential_key,
+            plaintext=secret,
+            keyring=configured_byok_keyring(),
+        )
+        connection.credential_id = credential.id
+        connection.credential_revision = credential.revision_no
+        await self.create_connection_revision(connection=connection)
+        connection.updated_by = actor.id
+        await self._invalidate_connection_evidence(connection=connection, actor=actor)
+        await self._session.flush()
+        return connection
+
+    async def _connection_settings(self, connection: ProviderConnection) -> Settings:
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        secret = await read_credential_by_id(
+            self._session,
+            workspace_id=connection.workspace_id,
+            credential_id=connection.credential_id,
+            keyring=configured_byok_keyring(),
+        )
+        if not secret:
+            raise ValidationAppError(
+                "provider credential is missing",
+                details={"code": "PROVIDER_NOT_CONFIGURED"},
+            )
+        prefix = plugin.prefix
+        return get_settings().model_copy(
+            update={
+                f"{prefix}_enabled": connection.enabled,
+                f"{prefix}_api_key": secret,
+                f"{prefix}_base_url": connection.base_url,
+            }
+        )
+
+    async def _probe_settings(
+        self,
+        connection: ProviderConnection,
+        binding: ProviderModelBinding | None,
+    ) -> Settings:
+        """Settings whose model fields resolve to the probed binding's
+        ``invoke_model_value`` when a binding is given (never Settings defaults
+        for a binding-scoped probe)."""
+        cfg = await self._connection_settings(connection)
+        if binding is None:
+            return cfg
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        model_field = f"{plugin.prefix}_{binding.media_type}_model"
+        return cfg.model_copy(update={model_field: binding.invoke_model_value})
+
+    async def _get_probe_binding(
+        self,
+        *,
+        workspace_id: UUID,
+        connection: ProviderConnection,
+        model_binding_id: UUID | None,
+    ) -> ProviderModelBinding | None:
+        if model_binding_id is None:
+            return None
+        binding = await self._session.scalar(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.id == model_binding_id,
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.connection_id == connection.id,
+            )
+        )
+        if binding is None:
+            raise NotFoundError("model binding not found")
+        await self._require_active_binding_contract(
+            binding=binding,
+            connection=connection,
+        )
+        return binding
+
+    async def _require_active_binding_contract(
+        self,
+        *,
+        binding: ProviderModelBinding,
+        connection: ProviderConnection,
+    ) -> ModelCatalogEntry:
+        entry = (
+            await self._session.get(ModelCatalogEntry, binding.catalog_entry_id)
+            if binding.catalog_entry_id is not None
+            else None
+        )
+        if (
+            entry is None
+            or entry.lifecycle != "active"
+            or entry.provider_type != connection.provider_type
+            or entry.protocol_profile != connection.protocol_profile
+            or entry.model_id != binding.model_id
+            or entry.media_kind != binding.media_type
+            or binding.capability_manifest_hash != entry.contract_manifest_hash
+        ):
+            raise ValidationAppError(
+                "model binding does not reference the active catalog contract",
+                details={"code": "MODEL_BINDING_CONTRACT_INACTIVE"},
+            )
+        return entry
+
+    @staticmethod
+    def _probe_currency(
+        binding: ProviderModelBinding | None,
+        *,
+        require_pricing: bool = False,
+    ) -> str:
+        if binding is None:
+            return "USD"
+        raw_currency = (binding.pricing_snapshot_json or {}).get("currency")
+        if not isinstance(raw_currency, str) and not require_pricing:
+            return "USD"
+        if not isinstance(raw_currency, str):
+            raise ValidationAppError(
+                "model capability Probe requires a verified Binding pricing currency",
+                details={"code": "PROBE_PRICING_CURRENCY_REQUIRED"},
+            )
+        currency = raw_currency.strip().upper()
+        if len(currency) == 3 and currency.isalpha():
+            return currency
+        if not require_pricing:
+            return "USD"
+        raise ValidationAppError(
+            "model capability Probe has an invalid Binding pricing currency",
+            details={"code": "PROBE_PRICING_CURRENCY_INVALID"},
+        )
+
+    async def probe(
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        actor: User,
+        capability: str,
+        model_binding_id: UUID | None = None,
+        reference_artifact_id: UUID | None = None,
+        remote_task_id: str | None = None,
+        remote_query_kind: str | None = None,
+        paid_request_confirmed: bool = False,
+    ) -> ProviderCapabilityEvidence:
+        if capability not in _CAPABILITIES:
+            raise ValidationAppError("unsupported Provider capability")
+        # Only auth_models is a connection-level probe. Every model capability
+        # probe must name a binding: proving one model must never advance a
+        # sibling binding on the same connection (review gate 5).
+        if capability != "auth_models" and model_binding_id is None:
+            raise ValidationAppError(
+                "model capability Probe requires a model_binding_id",
+                details={"code": "PROBE_BINDING_REQUIRED"},
+            )
+        connection = await self.get_connection(
+            workspace_id=workspace_id, connection_id=connection_id
+        )
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        if not connection.enabled:
+            raise ValidationAppError(
+                "provider connection is disabled",
+                details={"code": "PROVIDER_CONNECTION_DISABLED"},
+            )
+        if capability in plugin.paid_capabilities and not paid_request_confirmed:
+            raise ValidationAppError(
+                "paid Probe requires explicit request confirmation",
+                details={"code": "PAID_REQUEST_CONFIRMATION_REQUIRED"},
+            )
+        binding = await self._get_probe_binding(
+            workspace_id=workspace_id,
+            connection=connection,
+            model_binding_id=model_binding_id,
+        )
+        probe_currency = self._probe_currency(
+            binding,
+            require_pricing=capability in plugin.paid_capabilities,
+        )
+        recent = await self._session.scalar(
+            select(ProviderCapabilityEvidence)
+            .where(
+                ProviderCapabilityEvidence.connection_id == connection.id,
+                ProviderCapabilityEvidence.capability == capability,
+                ProviderCapabilityEvidence.tested_at > datetime.now(UTC) - timedelta(seconds=30),
+            )
+            .order_by(ProviderCapabilityEvidence.tested_at.desc())
+        )
+        if recent is not None:
+            raise ValidationAppError(
+                "probe rate limited; wait before retrying",
+                details={"code": "PROBE_RATE_LIMITED"},
+            )
+        cfg = await self._probe_settings(connection, binding)
+        client = plugin.build_client(cfg, host=connection.base_url)
+        reference_artifact: Artifact | None = None
+        reference_bytes: bytes | None = None
+        reference_mime = "image/png"
+        reference_url: str | None = None
+        if reference_artifact_id is not None:
+            reference_artifact, reference_bytes = await self._validated_reference_artifact(
+                workspace_id=workspace_id,
+                artifact_id=reference_artifact_id,
+            )
+            reference_mime = reference_artifact.mime_type
+            if (
+                capability == "image_i2i"
+                and plugin.image_i2i_probe_transport == "public_url"
+            ):
+                grant = await issue_artifact_reference(
+                    self._session,
+                    artifact=reference_artifact,
+                    workspace_id=workspace_id,
+                    created_by_user_id=actor.id,
+                )
+                reference_url = grant.url
+                # Provider requests run outside this transaction. Commit the
+                # grant first so a separate public delivery request can see it,
+                # then restore the authenticated Workspace RLS context.
+                await self._session.commit()
+                from app.shared.db import set_rls_context
+
+                await set_rls_context(
+                    self._session,
+                    user_id=actor.id,
+                    workspace_id=workspace_id,
+                )
+        request_fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "capability": capability,
+                    "connection_id": str(connection.id),
+                    "credential_revision": connection.credential_revision,
+                    "reference_artifact_id": (
+                        str(reference_artifact_id) if reference_artifact_id else None
+                    ),
+                    "remote_task_id": remote_task_id,
+                    "remote_query_kind": remote_query_kind,
+                    "paid_request_confirmed": paid_request_confirmed,
+                    "currency": probe_currency,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        status = "failed"
+        http_status: int | None = None
+        provider_request_id: str | None = None
+        error_code: str | None = None
+        evidence_model_id: str | None = None
+        listed_model_ids: set[str] = set()
+        if capability == "auth_models":
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as http:
+                    response = await http.get(
+                        f"{connection.base_url}{plugin.model_list_path}",
+                        headers={
+                            "Authorization": f"Bearer {getattr(cfg, f'{plugin.prefix}_api_key')}"
+                        },
+                )
+                http_status = response.status_code
+                status = "passed" if response.status_code < 400 else "failed"
+                if status == "passed":
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = None
+                    raw_models = (
+                        payload.get("data") or payload.get("models")
+                        if isinstance(payload, dict)
+                        else None
+                    )
+                    if isinstance(raw_models, list):
+                        listed_model_ids = {
+                            str(item.get("id") or item.get("model") or "").strip()
+                            for item in raw_models
+                            if isinstance(item, dict)
+                        }
+                        listed_model_ids.discard("")
+                    if not listed_model_ids:
+                        status = "failed"
+                        error_code = "PROVIDER_MODELS_RESPONSE_INVALID"
+                elif response.status_code == 401:
+                    error_code = "PROVIDER_AUTH_FAILED"
+                elif response.status_code == 403:
+                    error_code = "PROVIDER_FORBIDDEN"
+                elif response.status_code >= 400:
+                    error_code = "PROVIDER_REQUEST_FAILED"
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
+                error_code = "PROVIDER_UNAVAILABLE"
+        elif capability == "image_t2i":
+            evidence_model_id = (
+                binding.invoke_model_value
+                if binding is not None
+                else getattr(cfg, f"{plugin.prefix}_image_model")
+            )
+            result = await client.create_image(
+                prompt="Cinematic portrait contract probe",
+            )
+            result_status = str(result.get("status") or "failed")
+            status = "passed" if result_status == "succeeded" else result_status
+            provider_request_id = str(result.get("remote_task_id") or "") or None
+            http_status = int(result["http_status"]) if result.get("http_status") else None
+            error_code = str(result.get("error_code") or "") or None
+        elif capability == "image_i2i":
+            evidence_model_id = (
+                binding.invoke_model_value
+                if binding is not None
+                else getattr(cfg, f"{plugin.prefix}_image_model")
+            )
+            if reference_bytes is None:
+                error_code = "PROBE_REFERENCE_REQUIRED"
+            else:
+                if plugin.image_i2i_probe_transport == "public_url":
+                    if reference_url is None:
+                        error_code = "PROBE_REFERENCE_REQUIRED"
+                    else:
+                        result = await client.create_image(
+                            prompt="Preserve the supplied character identity",
+                            reference_url=reference_url,
+                            reference_artifact_id=str(reference_artifact_id),
+                            reference_fingerprint=(
+                                reference_artifact.content_hash
+                                if reference_artifact is not None
+                                else None
+                            ),
+                        )
+                        result_status = str(result.get("status") or "failed")
+                        status = "passed" if result_status == "succeeded" else result_status
+                        provider_request_id = str(result.get("remote_task_id") or "") or None
+                        http_status = (
+                            int(result["http_status"]) if result.get("http_status") else None
+                        )
+                        error_code = str(result.get("error_code") or "") or None
+                else:
+                    result = await client.create_image(
+                        prompt="Preserve the supplied character identity",
+                        canonical_image_bytes=reference_bytes,
+                        canonical_image_mime=reference_mime,
+                    )
+                    result_status = str(result.get("status") or "failed")
+                    status = "passed" if result_status == "succeeded" else result_status
+                    provider_request_id = str(result.get("remote_task_id") or "") or None
+                    http_status = int(result["http_status"]) if result.get("http_status") else None
+                    error_code = str(result.get("error_code") or "") or None
+        elif capability == "video_i2v":
+            evidence_model_id = (
+                binding.invoke_model_value
+                if binding is not None
+                else getattr(cfg, f"{plugin.prefix}_video_model")
+            )
+            if reference_bytes is None:
+                error_code = "PROBE_REFERENCE_REQUIRED"
+            else:
+                result = await client.create_video(
+                    prompt="Controlled camera motion with stable facial appearance",
+                    image_bytes=reference_bytes,
+                    image_mime=reference_mime,
+                    reference_artifact_ids=[str(reference_artifact_id)],
+                    reference_fingerprints=(
+                        [reference_artifact.content_hash]
+                        if reference_artifact is not None
+                        else []
+                    ),
+                )
+                result_status = str(result.get("status") or "failed")
+                status = (
+                    "passed"
+                    if result_status in {"succeeded", "queued", "running"}
+                    and result.get("remote_task_id")
+                    else result_status
+                )
+                provider_request_id = str(result.get("remote_task_id") or "") or None
+                http_status = int(result["http_status"]) if result.get("http_status") else None
+                error_code = str(result.get("error_code") or "") or None
+        else:
+            evidence_model_id = (
+                binding.invoke_model_value
+                if binding is not None
+                else getattr(cfg, f"{plugin.prefix}_video_model")
+            )
+            if remote_task_id is None or remote_query_kind not in {"video_id", "task_id"}:
+                error_code = "PROBE_REMOTE_TASK_REQUIRED"
+            else:
+                poll = await client.poll_video(
+                    remote_task_id,
+                    query_kind=remote_query_kind,
+                )
+                poll_status = str(poll.get("status") or "failed")
+                status = "passed" if poll_status == "succeeded" else poll_status
+                provider_request_id = remote_task_id
+                http_status = int(poll["http_status"]) if poll.get("http_status") else None
+                error_code = str(poll.get("error_code") or "") or None
+
+        evidence = ProviderCapabilityEvidence(
+            workspace_id=workspace_id,
+            connection_id=connection.id,
+            capability=capability,
+            model_id=evidence_model_id,
+            status=status,
+            evidence_level="account_verified",
+            http_status=http_status,
+            provider_request_id=provider_request_id,
+            reference_artifact_id=reference_artifact_id,
+            remote_query_kind=remote_query_kind,
+            request_fingerprint=request_fingerprint,
+            provider_cost=None,
+            currency=probe_currency,
+            cost_status="not_reported",
+            error_code=error_code,
+            model_binding_id=binding.id if binding is not None else None,
+            capability_manifest_hash=(
+                binding.capability_manifest_hash if binding is not None else None
+            ),
+            credential_revision=connection.credential_revision,
+            created_by=actor.id,
+        )
+        self._session.add(evidence)
+        if capability == "auth_models" and status == "passed":
+            connection.verification_status = "verified"
+            connection.verified_at = datetime.now(UTC)
+            await self._mark_listed_models_verified(
+                connection_id=connection.id,
+                model_ids=listed_model_ids,
+                actor=actor,
+            )
+        if status in {"passed", "succeeded"}:
+            await self._mark_capability_verified(
+                connection_id=connection.id,
+                capability=capability,
+                actor=actor,
+                model_binding_id=binding.id if binding is not None else None,
+            )
+        await self._session.flush()
+        return evidence
+
+    async def _mark_listed_models_verified(
+        self,
+        *,
+        connection_id: UUID,
+        model_ids: set[str],
+        actor: User,
+    ) -> None:
+        """Verify only Bindings named by the authenticated Provider catalog."""
+
+        if not model_ids:
+            return
+        bindings = list(
+            (
+                await self._session.execute(
+                    select(ProviderModelBinding).where(
+                        ProviderModelBinding.connection_id == connection_id,
+                        ProviderModelBinding.invoke_model_value.in_(model_ids),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for binding in bindings:
+            binding.account_verified = True
+            binding.updated_by = actor.id
+
+    async def _validated_reference_artifact(
+        self,
+        *,
+        workspace_id: UUID,
+        artifact_id: UUID,
+    ) -> tuple[Artifact, bytes]:
+        scope = await set_artifact_rls_context(
+            self._session,
+            artifact_id=artifact_id,
+            expected_workspace_id=workspace_id,
+        )
+        if scope is None:
+            raise NotFoundError("reference Artifact not found")
+        artifact = await self._session.get(Artifact, artifact_id)
+        project = await self._session.get(Project, artifact.project_id) if artifact else None
+        if (
+            artifact is None
+            or project is None
+            or project.workspace_id != workspace_id
+            or artifact.storage_state != "available"
+            or artifact.deleted_at is not None
+            or artifact.artifact_type != "image"
+            or artifact.mime_type not in {"image/png", "image/jpeg", "image/webp"}
+        ):
+            raise NotFoundError("reference Artifact not found")
+        try:
+            data = await get_object_store().get_bytes(object_key=artifact.object_key)
+        except Exception as exc:
+            raise NotFoundError("reference Artifact not found") from exc
+        if not data or hashlib.sha256(data).hexdigest() != artifact.content_hash:
+            raise ValidationAppError(
+                "reference Artifact content hash mismatch",
+                details={"code": "REFERENCE_ARTIFACT_HASH_MISMATCH"},
+            )
+        try:
+            from io import BytesIO
+
+            with Image.open(BytesIO(data)) as image:
+                image.verify()
+                detected = Image.MIME.get(image.format or "")
+        except (UnidentifiedImageError, OSError) as exc:
+            raise ValidationAppError(
+                "reference Artifact is not a valid image",
+                details={"code": "REFERENCE_ARTIFACT_INVALID"},
+            ) from exc
+        if detected != artifact.mime_type:
+            raise ValidationAppError(
+                "reference Artifact MIME does not match its bytes",
+                details={"code": "REFERENCE_ARTIFACT_MIME_MISMATCH"},
+            )
+        return artifact, data
+
+    async def _mark_capability_verified(
+        self,
+        *,
+        connection_id: UUID,
+        capability: str,
+        actor: User,
+        model_binding_id: UUID | None = None,
+    ) -> None:
+        """Advance account_verified for the probed binding only.
+
+        A binding-scoped probe proves exactly one model; it must never mark a
+        sibling binding on the same connection as verified. Model-capability
+        probes require a binding (enforced in ``probe``); a missing binding here
+        therefore never spreads evidence.
+        """
+        connection = await self._session.scalar(
+            select(ProviderConnection).where(ProviderConnection.id == connection_id)
+        )
+        if connection is None:
+            return
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        purpose = plugin.capability_purposes.get(capability)
+        if purpose is None or model_binding_id is None:
+            return
+        binding = await self._session.scalar(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.id == model_binding_id,
+                ProviderModelBinding.connection_id == connection_id,
+            )
+        )
+        if binding is not None and binding.purpose == purpose:
+            binding.account_verified = True
+            binding.updated_by = actor.id
+
+    async def create_model_binding(
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        actor: User,
+        media_type: str,
+        model_id: str,
+        purpose: str,
+        enabled: bool,
+    ) -> ProviderModelBinding:
+        connection = await self.get_connection(
+            workspace_id=workspace_id, connection_id=connection_id
+        )
+        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        if (media_type, purpose) not in {("image", "keyframe"), ("video", "video")}:
+            raise ValidationAppError("unsupported model binding purpose")
+        # The binding must reference an active catalog entry of the same
+        # provider/profile/media; the single-model contract map is gone.
+        entry = await ModelCatalogService(self._session).active_entry_for(
+            provider_type=plugin.provider_type,
+            protocol_profile=plugin.protocol_profile,
+            model_id=model_id,
+        )
+        if entry is None:
+            raise ValidationAppError(
+                "model binding has no active catalog entry",
+                details={"code": "MODEL_NOT_IN_CATALOG"},
+            )
+        if entry.media_kind != media_type:
+            raise ValidationAppError("model binding media type mismatch")
+        operation_kind = "image.generate" if media_type == "image" else "video.generate"
+        operations = entry.capability_manifest_json.get("operations") or {}
+        if operation_kind not in operations:
+            raise ValidationAppError(
+                "model binding operation is not supported by the catalog entry"
+            )
+        duplicate = await self._session.scalar(
+            select(ProviderModelBinding.id).where(
+                ProviderModelBinding.connection_id == connection.id,
+                ProviderModelBinding.media_type == media_type,
+                ProviderModelBinding.catalog_entry_id == entry.id,
+                ProviderModelBinding.purpose == purpose,
+            )
+        )
+        if duplicate is not None:
+            raise ConflictError(
+                "Provider model binding already exists",
+                details={"code": "PROVIDER_MODEL_BINDING_EXISTS"},
+            )
+        binding = ProviderModelBinding(
+            workspace_id=workspace_id,
+            connection_id=connection.id,
+            media_type=media_type,
+            model_id=model_id,
+            purpose=purpose,
+            enabled=enabled,
+            documented=True,
+            contract_tested=True,
+            # A new binding has no evidence of its own; only a binding-scoped
+            # probe of this exact model advances account_verified.
+            account_verified=False,
+            quality_gated=False,
+            catalog_entry_id=entry.id,
+            capability_manifest_hash=entry.contract_manifest_hash,
+            remote_resource_kind="model",
+            remote_resource_id=model_id,
+            invoke_model_value=model_id,
+            created_by=actor.id,
+            updated_by=actor.id,
+        )
+        self._session.add(binding)
+        await self._session.flush()
+        return binding
+
+    async def list_capability_evidence(
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+    ) -> list[ProviderCapabilityEvidence]:
+        await self.get_connection(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+        )
+        return list(
+            (
+                await self._session.execute(
+                    select(ProviderCapabilityEvidence)
+                    .where(
+                        ProviderCapabilityEvidence.workspace_id == workspace_id,
+                        ProviderCapabilityEvidence.connection_id == connection_id,
+                    )
+                    .order_by(
+                        ProviderCapabilityEvidence.tested_at.desc(),
+                        ProviderCapabilityEvidence.id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def _quality_producer_operation(
+        self,
+        *,
+        review_run: NodeRun,
+    ) -> ProviderOperation | None:
+        """Find the ProviderOperation that produced the media this review gate
+        consumed (keyframe for identity_review, video for video_drift_review), so the
+        quality evidence can be tied to the exact model binding (review gate 6)."""
+        node = await self._session.get(GraphNode, review_run.graph_node_id)
+        if node is None:
+            return None
+        upstream_key = {
+            "identity_review": "keyframe",
+            "video_drift_review": "video",
+        }.get(node.node_key)
+        if upstream_key is None:
+            return None
+        upstream_node = await self._session.scalar(
+            select(GraphNode)
+            .join(GraphEdge, GraphEdge.upstream_node_id == GraphNode.id)
+            .where(
+                GraphEdge.graph_version_id == review_run.graph_version_id,
+                GraphEdge.downstream_node_id == node.id,
+                GraphEdge.required.is_(True),
+                GraphNode.node_key == upstream_key,
+            )
+        )
+        if upstream_node is None:
+            return None
+        shot_id = str((review_run.input_snapshot or {}).get("shot_id") or "")
+        frozen_source_id = (review_run.input_snapshot or {}).get("source_run_id")
+        if frozen_source_id is not None:
+            try:
+                source_id = UUID(str(frozen_source_id))
+            except (TypeError, ValueError, AttributeError):
+                return None
+            source = await self._session.get(NodeRun, source_id)
+            if (
+                source is None
+                or source.project_id != review_run.project_id
+                or source.graph_version_id != review_run.graph_version_id
+                or source.graph_node_id != upstream_node.id
+                or source.status not in {"completed", "cached"}
+                or str((source.input_snapshot or {}).get("shot_id") or "") != shot_id
+            ):
+                return None
+            return cast(
+                ProviderOperation | None,
+                await self._session.scalar(
+                    select(ProviderOperation)
+                    .where(ProviderOperation.node_run_id == source.id)
+                    .order_by(
+                        ProviderOperation.attempt_no.desc(),
+                        ProviderOperation.created_at.desc(),
+                    )
+                    .limit(1)
+                ),
+            )
+        candidates = list(
+            (
+                await self._session.execute(
+                    select(NodeRun).where(
+                        NodeRun.project_id == review_run.project_id,
+                        NodeRun.graph_version_id == review_run.graph_version_id,
+                        NodeRun.graph_node_id == upstream_node.id,
+                        NodeRun.status.in_({"completed", "cached"}),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        source = next(
+            (
+                candidate
+                for candidate in sorted(
+                    candidates,
+                    key=lambda item: (item.created_at, str(item.id)),
+                    reverse=True,
+                )
+                if str((candidate.input_snapshot or {}).get("shot_id") or "") == shot_id
+            ),
+            None,
+        )
+        if source is None:
+            return None
+        return cast(
+            ProviderOperation | None,
+            await self._session.scalar(
+                select(ProviderOperation)
+                .where(ProviderOperation.node_run_id == source.id)
+                .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
+                .limit(1)
+            ),
+        )
+
+    async def record_quality_evidence(
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        model_binding_id: UUID,
+        node_run_id: UUID,
+        artifact_id: UUID,
+        actor: User,
+    ) -> ProviderQualityEvidence:
+        await self.get_connection(
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+        )
+        binding = await self._session.scalar(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.id == model_binding_id,
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.connection_id == connection_id,
+            )
+        )
+        if binding is None:
+            raise NotFoundError("model binding not found")
+        if not binding.enabled or not binding.account_verified:
+            raise ValidationAppError(
+                "model binding has no account-verified capability",
+                details={"code": "MODEL_BINDING_NOT_ACCOUNT_VERIFIED"},
+            )
+        run = await self._session.get(NodeRun, node_run_id)
+        artifact = await self._session.get(Artifact, artifact_id)
+        node = await self._session.get(GraphNode, run.graph_node_id) if run else None
+        project = await self._session.get(Project, run.project_id) if run else None
+        if (
+            run is None
+            or artifact is None
+            or node is None
+            or project is None
+            or project.workspace_id != workspace_id
+            or run.status not in {"completed", "cached"}
+            or run.result_artifact_id != artifact.id
+            or artifact.project_id != run.project_id
+            or artifact.storage_state != "available"
+            or artifact.deleted_at is not None
+        ):
+            raise NotFoundError("quality evidence not found")
+        # Review gate 6: the media this gate consumed must have been produced by
+        # this exact model binding. A different model's合格 artifact must not be
+        # able to push this binding to quality_gated.
+        producer_op = await self._quality_producer_operation(review_run=run)
+        if producer_op is None:
+            raise ValidationAppError(
+                "quality Artifact producer has no ProviderOperation",
+                details={"code": "MODEL_BINDING_NOT_VERIFIED"},
+            )
+        if producer_op.model_binding_id is not None:
+            if producer_op.model_binding_id != binding.id:
+                raise ValidationAppError(
+                    "quality Artifact was produced by a different model binding",
+                    details={"code": "MODEL_BINDING_NOT_VERIFIED"},
+                )
+        elif producer_op.actual_model != binding.model_id:
+            raise ValidationAppError(
+                "quality Artifact producer model does not match binding",
+                details={"code": "MODEL_BINDING_NOT_VERIFIED"},
+            )
+        summary = run.output_summary or {}
+        score: Decimal | None = None
+        if binding.purpose == "keyframe":
+            if node.node_key != "identity_review":
+                raise ValidationAppError("keyframe quality proof must be an Identity Review")
+            if (run.input_snapshot or {}).get(
+                "identity_evidence_policy"
+            ) != identity_evidence_policy_snapshot():
+                raise ValidationAppError(
+                    "Identity Review does not use the published evidence policy",
+                    details={"code": "QUALITY_GATE_NOT_SATISFIED"},
+                )
+            if summary.get("status") != "passed" or not bool(summary.get("human_approved")):
+                raise ValidationAppError(
+                    "Identity Review requires an audited human acceptance result",
+                    details={"code": "IDENTITY_REVIEW_REQUIRED"},
+                )
+            evidence_kind = "identity_review"
+            policy_id = str(identity_evidence_policy_snapshot()["policy_id"])
+        else:
+            policy = summary.get("video_drift_policy")
+            if (
+                node.node_key != "video_drift_review"
+                or summary.get("status") != "passed"
+                or not bool(summary.get("human_approved"))
+                or not isinstance(policy, dict)
+                or not policy.get("approval_id")
+            ):
+                raise ValidationAppError(
+                    "Video temporal review requires an audited human acceptance result",
+                    details={"code": "IDENTITY_REVIEW_REQUIRED"},
+                )
+            evidence_kind = "video_drift_review"
+            policy_id = str(policy.get("policy_id") or policy["approval_id"])
+        existing = await self._session.scalar(
+            select(ProviderQualityEvidence).where(
+                ProviderQualityEvidence.model_binding_id == binding.id,
+                ProviderQualityEvidence.node_run_id == run.id,
+            )
+        )
+        if existing is not None:
+            return existing
+        evidence = ProviderQualityEvidence(
+            workspace_id=workspace_id,
+            model_binding_id=binding.id,
+            node_run_id=run.id,
+            artifact_id=artifact.id,
+            evidence_kind=evidence_kind,
+            policy_id=policy_id,
+            score=score,
+            approved_by=actor.id,
+        )
+        self._session.add(evidence)
+        binding.quality_gated = True
+        binding.updated_by = actor.id
+        await self._session.flush()
+        return evidence
+
+    async def list_model_bindings(
+        self, *, workspace_id: UUID, connection_id: UUID
+    ) -> list[ProviderModelBinding]:
+        await self.get_connection(workspace_id=workspace_id, connection_id=connection_id)
+        return list(
+            (
+                await self._session.execute(
+                    select(ProviderModelBinding)
+                    .where(
+                        ProviderModelBinding.workspace_id == workspace_id,
+                        ProviderModelBinding.connection_id == connection_id,
+                    )
+                    .order_by(ProviderModelBinding.media_type, ProviderModelBinding.model_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def bind_project(
+        self,
+        *,
+        project: Project,
+        purpose: str,
+        model_binding_id: UUID,
+        fallback_policy: str,
+        actor: User,
+        selection_strategy: str = "explicit_binding",
+    ) -> ProjectProviderBinding:
+        if purpose not in {"keyframe", "video"} or fallback_policy != "none":
+            raise ValidationAppError("unsupported project Provider binding")
+        if selection_strategy != "explicit_binding":
+            raise ValidationAppError(
+                "auto selection strategy is not enabled in stage A+B",
+                details={"code": "SELECTION_STRATEGY_UNAVAILABLE"},
+            )
+        model = await self._session.scalar(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.id == model_binding_id,
+                ProviderModelBinding.workspace_id == project.workspace_id,
+                ProviderModelBinding.purpose == purpose,
+            )
+        )
+        if model is None:
+            raise NotFoundError("model binding not found")
+        model_connection = await self._session.get(
+            ProviderConnection, model.connection_id
+        )
+        if model_connection is None:
+            raise ValidationAppError(
+                "model binding does not reference the active catalog contract",
+                details={"code": "MODEL_BINDING_CONTRACT_INACTIVE"},
+            )
+        await self._require_active_binding_contract(
+            binding=model,
+            connection=model_connection,
+        )
+        # A fresh installation cannot have project-level quality evidence before
+        # its first representative proof. Allow an account-verified binding to
+        # enter the project, then require accepted evidence before formal
+        # Workbench execution.
+        if not (
+            model.enabled
+            and model.documented
+            and model.contract_tested
+            and model.account_verified
+        ):
+            raise ValidationAppError(
+            "model binding is not eligible for Workbench execution",
+                details={"code": "MODEL_BINDING_NOT_VERIFIED"},
+            )
+        binding = await self._session.scalar(
+            select(ProjectProviderBinding).where(
+                ProjectProviderBinding.project_id == project.id,
+                ProjectProviderBinding.purpose == purpose,
+            )
+        )
+        if binding is None:
+            binding = ProjectProviderBinding(
+                project_id=project.id,
+                workspace_id=project.workspace_id,
+                purpose=purpose,
+                model_binding_id=model.id,
+                selection_strategy="explicit_binding",
+                fallback_policy="none",
+                updated_by=actor.id,
+            )
+            self._session.add(binding)
+        else:
+            binding.model_binding_id = model.id
+            binding.selection_strategy = "explicit_binding"
+            binding.fallback_policy = "none"
+            binding.updated_by = actor.id
+        await self._session.flush()
+        return binding

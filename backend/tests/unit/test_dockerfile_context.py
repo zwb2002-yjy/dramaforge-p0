@@ -33,6 +33,7 @@ def test_dockerfile_copy_sources_exist_on_disk() -> None:
     sources = _parse_copy_sources(text)
     assert "README.md" in sources, "Dockerfile must COPY README.md (pyproject readme)"
     assert "pyproject.toml" in sources
+    assert "uv.lock" in sources, "release image dependencies must come from the lockfile"
     for src in sources:
         path = BACKEND / src
         assert path.exists(), f"Dockerfile COPY source missing: {src}"
@@ -65,3 +66,30 @@ def test_docker_build_context_editable_install_succeeds(tmp_path: Path) -> None:
     assert (stage / readme).is_file()
     assert packages == ["app"]
     assert all((stage / package).is_dir() for package in packages)
+
+
+def test_dockerignore_excludes_local_heavy_and_sensitive_paths() -> None:
+    backend_ignore = (BACKEND / ".dockerignore").read_text(encoding="utf-8")
+    root_ignore = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8")
+    for required in (".env", ".venv", "**/__pycache__", "*.onnx"):
+        assert required in backend_ignore
+    for required in (".env", "**/.venv", "**/node_modules", "*.onnx"):
+        assert required in root_ignore
+
+
+def test_dockerfile_installs_only_locked_python_dependencies() -> None:
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert "Acquire::Retries=10" in text
+    assert "Acquire::Queue-Mode=access" in text
+    assert "Acquire::http::Pipeline-Depth=0" in text
+    assert "https://deb.debian.org" in text
+    assert "type=cache,target=/var/cache/apt" in text
+    assert "type=cache,target=/var/lib/apt/lists" in text
+    assert "uv export --frozen --no-dev --no-emit-project" in text
+    assert "pip install --no-deps insightface" not in text
+    assert 'pip install "requests' not in text
+    assert "DRAMAFORGE_SOURCE_COMMIT" in text
+    assert "org.opencontainers.image.revision" in text
+    assert text.index("org.opencontainers.image.revision") > text.index(
+        "uv export --frozen"
+    )
