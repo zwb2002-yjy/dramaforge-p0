@@ -7,6 +7,13 @@ type ShotStripProps = {
   selectedShotId: string | null;
   onSelectShot: (shotId: string) => void;
   traceByShot?: Record<string, unknown[]>;
+  /**
+   * V2 Canvas-first (UI-1): compact (default) is a navigation strip —
+   * thumbnail, number, shot type only. Expanded adds duration and
+   * formal/warning status rows.
+   */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 };
 
 const FAILED_STATUSES = new Set(["failed", "error", "cancelled", "canceled"]);
@@ -25,22 +32,40 @@ function durationLabel(value: ShotLite["duration_seconds"]): string {
   return Number.isFinite(parsed) ? `${parsed}s` : `${value || "—"}s`;
 }
 
-/** Bottom horizontal storyboard / timeline hybrid for one Scene. */
+/** Bottom horizontal storyboard strip for one Scene. */
 export function ShotStrip({
   projectId,
   shots,
   selectedShotId,
   onSelectShot,
   traceByShot = {},
+  expanded = false,
+  onToggleExpanded,
 }: ShotStripProps) {
   return (
-    <section className="qc-shot-strip-panel" data-testid="shot-strip-panel" aria-label="镜头时间条">
+    <section
+      className={`qc-shot-strip-panel${expanded ? " is-expanded" : " is-compact"}`}
+      data-testid="shot-strip-panel"
+      data-expanded={expanded ? "true" : "false"}
+      aria-label="镜头时间条"
+    >
       <header className="qc-shot-strip-header">
         <div>
-          <span className="director-stage-kicker">分镜 / 时间线</span>
+          <span className="director-stage-kicker">分镜</span>
           <strong>场景镜头</strong>
         </div>
         <span>{shots.length} 镜</span>
+        {onToggleExpanded && (
+          <button
+            type="button"
+            className="qc-shot-strip-toggle"
+            data-testid="shot-strip-toggle"
+            aria-expanded={expanded}
+            onClick={onToggleExpanded}
+          >
+            {expanded ? "收起" : "展开详情"}
+          </button>
+        )}
       </header>
       <ol
         className="qc-shot-strip"
@@ -75,17 +100,19 @@ export function ShotStrip({
                 <span className="qc-shot-strip-copy">
                   <strong>#{shot.shot_number}</strong>
                   <span>{shot.shot_type}</span>
-                  <small>{durationLabel(shot.duration_seconds)}</small>
+                  {expanded && <small>{durationLabel(shot.duration_seconds)}</small>}
                 </span>
-                <span className="qc-shot-strip-status" aria-label="正式状态">
-                  <em className={shot.formal_keyframe_artifact_id ? "ready" : undefined}>
-                    关键帧 {shot.formal_keyframe_artifact_id ? "已确认" : "待确认"}
-                  </em>
-                  <em className={shot.formal_video_artifact_id ? "ready" : undefined}>
-                    视频 {shot.formal_video_artifact_id ? "已确认" : "待确认"}
-                  </em>
-                  {risk && <em className="risk">生产失败风险</em>}
-                </span>
+                {expanded && (
+                  <span className="qc-shot-strip-status" aria-label="正式状态">
+                    <em className={shot.formal_keyframe_artifact_id ? "ready" : undefined}>
+                      关键帧 {shot.formal_keyframe_artifact_id ? "已确认" : "待确认"}
+                    </em>
+                    <em className={shot.formal_video_artifact_id ? "ready" : undefined}>
+                      视频 {shot.formal_video_artifact_id ? "已确认" : "待确认"}
+                    </em>
+                    {risk && <em className="risk">生产失败风险</em>}
+                  </span>
+                )}
               </button>
             </li>
           );

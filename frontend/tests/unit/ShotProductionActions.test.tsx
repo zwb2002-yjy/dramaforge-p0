@@ -96,7 +96,7 @@ describe("ShotProductionActions", () => {
       plan_fingerprint: "a".repeat(64),
       accepted_approximations: [],
     });
-    expect(screen.getByTestId("shot-production-status")).toHaveTextContent("queued");
+    expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已排队");
   });
 
   it("sends video through the backend formal-keyframe gate and surfaces its error", async () => {

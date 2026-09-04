@@ -11,8 +11,6 @@ export type ShotExecutionRead = components["schemas"]["ExecutionRead"];
 export type FormalKeyframeRead = components["schemas"]["FormalKeyframeRead"];
 export type FormalVideoRead = components["schemas"]["FormalVideoRead"];
 
-export const SHOT_PRODUCTION_TRACE_QUERY_KEY = "shot-production-trace" as const;
-
 export type ShotExecutionInput = Omit<
   components["schemas"]["ExecutionPlanBody"],
   "stage" | "prompt" | "semantic_intent" | "mode_id" | "expected_shot_version"

@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { queryKeys } from "../../lib/queryKeys";
 import {
   createShotExecution,
-  SHOT_PRODUCTION_TRACE_QUERY_KEY,
   type ShotExecutionRead,
   type ShotExecutionStage,
   type ShotExecutionReference,
@@ -119,7 +119,7 @@ export function ShotProductionActions({
       setFeedback({
         kind: "success",
         stage,
-        message: `NodeRun：${result.status}`,
+        message: result.status,
       });
 
       // SceneWorkspace carries the shot and its trace in one backend read
@@ -127,16 +127,16 @@ export function ShotProductionActions({
       // later navigation cannot display stale production state.
       await Promise.all([
         queryClient.invalidateQueries({
-          queryKey: ["scene-workspace", projectId, shot.scene_id],
+          queryKey: queryKeys.scene.workspace(projectId, shot.scene_id),
         }),
         queryClient.invalidateQueries({
-          queryKey: ["scene-summaries", projectId],
+          queryKey: queryKeys.scene.summaries(projectId),
         }),
         queryClient.invalidateQueries({
-          queryKey: [SHOT_PRODUCTION_TRACE_QUERY_KEY, projectId, shot.id],
+          queryKey: queryKeys.shot.productionTrace(projectId, shot.id),
         }),
         queryClient.invalidateQueries({
-          queryKey: ["shot-workbench", projectId, shot.id],
+          queryKey: queryKeys.shot.workbench(projectId, shot.id),
         }),
       ]);
       await onExecuted?.(result);
@@ -159,10 +159,9 @@ export function ShotProductionActions({
     >
       <header>
         <div>
-          <span className="director-stage-kicker">当前镜头生产</span>
-          <strong>#{shot.shot_number} · 受控执行</strong>
+          <span className="director-stage-kicker">当前镜头</span>
+          <strong>#{shot.shot_number} 生成</strong>
         </div>
-        <span className="qc-shot-production-version">v{shot.version}</span>
       </header>
 
       <dl className="qc-shot-production-lineage">
@@ -206,8 +205,13 @@ export function ShotProductionActions({
       )}
 
       {feedback?.kind === "success" && (
-        <p className="qc-shot-production-status" data-testid="shot-production-status" role="status">
-          {STAGE_LABEL[feedback.stage]}已提交：{feedback.message}
+        <p
+          className="qc-shot-production-status"
+          data-testid="shot-production-status"
+          data-status={feedback.message}
+          role="status"
+        >
+          {STAGE_LABEL[feedback.stage]}已提交，{feedback.message === "queued" ? "已排队" : "处理中"}
         </p>
       )}
       {feedback?.kind === "error" && (

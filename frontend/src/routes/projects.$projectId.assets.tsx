@@ -1,6 +1,6 @@
 import { createRoute } from "@tanstack/react-router";
 
-import { AssetCardsPanel } from "../features/assets/AssetCardsPanel";
+import { LazyAssetCardsPanel } from "./pages";
 import { projectRoute } from "./projects.$projectId";
 
 export const projectAssetsRoute = createRoute({
@@ -11,5 +11,5 @@ export const projectAssetsRoute = createRoute({
 
 function AssetsPage() {
   const { projectId } = projectAssetsRoute.useParams();
-  return <AssetCardsPanel projectId={projectId} />;
+  return <LazyAssetCardsPanel projectId={projectId} />;
 }

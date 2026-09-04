@@ -47,24 +47,43 @@ const SHOTS = [
 ];
 
 describe("ShotStrip", () => {
-  it("renders a bottom horizontal storyboard with formal thumbnails and trace risk", () => {
-    render(
+  it("defaults to compact navigation and expands to formal status details", () => {
+    const traceByShot = {
+      "shot-2": [{ node_key: "video", status: "failed", error_code: "TIMEOUT" }],
+    };
+    const { rerender } = render(
       <ShotStrip
         projectId="project-1"
         shots={SHOTS}
         selectedShotId="shot-1"
         onSelectShot={vi.fn()}
-        traceByShot={{ "shot-2": [{ node_key: "video", status: "failed", error_code: "TIMEOUT" }] }}
+        traceByShot={traceByShot}
       />,
     );
 
     expect(screen.getByTestId("shot-strip")).toHaveAttribute("data-layout", "bottom-horizontal");
     expect(screen.getByTestId("shot-strip")).toHaveAttribute("data-selected-shot-id", "shot-1");
+    expect(screen.getByTestId("shot-strip-panel")).toHaveAttribute("data-expanded", "false");
     expect(screen.getByTestId("shot-strip-thumb-shot-1").querySelector("img")).toHaveAttribute(
       "src",
       "/api/v1/projects/project-1/artifacts/formal-keyframe-1/content",
     );
     expect(screen.getByTestId("shot-strip-card-shot-1")).toHaveClass("active");
+    // Compact hides production status metadata; it is navigation only.
+    expect(screen.getByTestId("shot-strip-card-shot-2")).not.toHaveTextContent("生产失败风险");
+    expect(screen.getByTestId("shot-strip-card-shot-2")).not.toHaveTextContent("4s");
+
+    rerender(
+      <ShotStrip
+        projectId="project-1"
+        shots={SHOTS}
+        selectedShotId="shot-1"
+        onSelectShot={vi.fn()}
+        traceByShot={traceByShot}
+        expanded
+      />,
+    );
+    expect(screen.getByTestId("shot-strip-panel")).toHaveAttribute("data-expanded", "true");
     expect(screen.getByTestId("shot-strip-card-shot-2")).toHaveTextContent("生产失败风险");
     expect(screen.getByTestId("shot-strip-card-shot-2")).toHaveTextContent("4s");
   });

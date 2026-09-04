@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiGet, apiSend, fetchCsrf } from "../lib/api";
+import { queryKeys } from "../lib/queryKeys";
 
 /**
  * Phase 1 workspace state: last-view restoration and panel facts are the only
@@ -53,7 +54,7 @@ export function useProjectWorkspaceState(projectId: string) {
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    queryKey: ["workspace-state", projectId],
+    queryKey: queryKeys.workspace.state(projectId),
     queryFn: () => fetchWorkspaceState(projectId),
     enabled: Boolean(projectId) && projectId !== "demo",
     staleTime: 30_000,

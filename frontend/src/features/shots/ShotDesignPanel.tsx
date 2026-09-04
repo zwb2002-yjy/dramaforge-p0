@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { updateShotDesign } from "./api";
 import type { ShotLite } from "./api";
 
+export type ShotDesignFocus = "character" | "camera" | "motion" | "look" | "all";
+
 type ShotDesignPanelProps = {
   projectId: string;
   shot: ShotLite;
@@ -15,6 +17,8 @@ type ShotDesignPanelProps = {
    * the existing explicit /design mutation.
    */
   applyDraft?: ShotDesignDraft | null;
+  /** Context Dock tool focus. Hidden fields stay in the draft and still save. */
+  focus?: ShotDesignFocus;
 };
 
 export type ShotDesignDraft = {
@@ -53,7 +57,12 @@ export function ShotDesignPanel({
   onSaved,
   onDirtyChange,
   applyDraft,
+  focus = "all",
 }: ShotDesignPanelProps) {
+  const showCharacter = focus === "all" || focus === "character";
+  const showCamera = focus === "all" || focus === "camera";
+  const showMotion = focus === "all" || focus === "motion";
+  const showLook = focus === "all" || focus === "look";
   const [visual, setVisual] = useState(shot.visual_description);
   const [imagePrompt, setImagePrompt] = useState(shot.image_prompt);
   const [videoPrompt, setVideoPrompt] = useState(shot.video_prompt);
@@ -130,45 +139,78 @@ export function ShotDesignPanel({
     },
   });
 
+  const focusTitle =
+    focus === "character"
+      ? "角色"
+      : focus === "camera"
+        ? "机位"
+        : focus === "motion"
+          ? "运动"
+          : focus === "look"
+            ? "画面"
+            : "镜头设计";
+
   return (
-    <div className="qc-shot-design-panel" data-testid="shot-design-panel" data-shot-id={shot.id}>
+    <div
+      className="qc-shot-design-panel"
+      data-testid="shot-design-panel"
+      data-shot-id={shot.id}
+      data-design-focus={focus}
+    >
       <header>
-        <strong>#{shot.shot_number} 镜头设计</strong>
-        <span>v{shot.version}</span>
+        <strong>
+          #{shot.shot_number} {focusTitle}
+        </strong>
       </header>
-      <label>
-        画面描述
-        <textarea
-          aria-label="画面描述"
-          value={visual}
-          onChange={(event) => setVisual(event.target.value)}
-        />
-      </label>
-      <label>
-        图片提示词
-        <textarea
-          aria-label="图片提示词"
-          value={imagePrompt}
-          onChange={(event) => setImagePrompt(event.target.value)}
-        />
-      </label>
-      <label>
-        视频提示词
-        <textarea
-          aria-label="视频提示词"
-          value={videoPrompt}
-          onChange={(event) => setVideoPrompt(event.target.value)}
-        />
-      </label>
-      <label>
-        导演状态（JSON）
-        <textarea
-          aria-label="导演状态"
-          value={directorStateText}
-          onChange={(event) => setDirectorStateText(event.target.value)}
-          spellCheck={false}
-        />
-      </label>
+      {showCharacter ? (
+        <label>
+          画面描述
+          <textarea
+            aria-label="画面描述"
+            value={visual}
+            onChange={(event) => setVisual(event.target.value)}
+          />
+        </label>
+      ) : null}
+      {showCamera ? (
+        <dl className="qc-shot-design-facts" data-testid="shot-design-camera-facts">
+          <dt>镜头类型</dt>
+          <dd>{shot.shot_type || "—"}</dd>
+          <dt>机位运动</dt>
+          <dd>{shot.camera_move || "—"}</dd>
+        </dl>
+      ) : null}
+      {showLook ? (
+        <label>
+          图片提示词
+          <textarea
+            aria-label="图片提示词"
+            value={imagePrompt}
+            onChange={(event) => setImagePrompt(event.target.value)}
+          />
+        </label>
+      ) : null}
+      {showMotion ? (
+        <label>
+          视频提示词
+          <textarea
+            aria-label="视频提示词"
+            value={videoPrompt}
+            onChange={(event) => setVideoPrompt(event.target.value)}
+          />
+        </label>
+      ) : null}
+      {focus === "all" || focus === "camera" ? (
+        <label>
+          导演状态（JSON）
+          <textarea
+            aria-label="导演状态"
+            value={directorStateText}
+            onChange={(event) => setDirectorStateText(event.target.value)}
+            spellCheck={false}
+          />
+        </label>
+      ) : null}
       <button
         type="button"
         onClick={() => save.mutate()}

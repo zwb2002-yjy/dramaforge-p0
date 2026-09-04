@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 
 import { fetchProjectAssets, type AssetRead } from "../../lib/api";
+import { queryKeys } from "../../lib/queryKeys";
 
 export type MentionSuggestion = {
   asset_id: string;
@@ -40,7 +41,7 @@ export function AssetMentionInput({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const assets = useQuery({
-    queryKey: ["mention-assets", projectId],
+    queryKey: queryKeys.asset.mentions(projectId),
     queryFn: () => fetchProjectAssets(projectId),
     enabled: Boolean(projectId) && projectId !== "demo",
   });

@@ -10,11 +10,21 @@ test("manual professional production: Scene Workbench design → candidate previ
 
   // Scene Workbench is the authoring surface: read scene, edit shot design,
   // generate the selected Shot, preview a candidate locally, then explicitly
-  // confirm it on the formal line.
+  // confirm it on the formal line. Canvas-first UI-1 keeps the operation panel
+  // closed until the Context Dock opens it.
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
   await expect(page.getByTestId("shot-strip")).toBeVisible();
-  await expect(page.getByTestId("shot-design-panel")).toContainText("v1");
+  await expect(page.getByTestId("context-dock")).toBeVisible();
+  await expect(page.getByTestId("context-dock-character")).toBeVisible();
+  await expect(page.getByTestId("context-dock-camera")).toBeVisible();
+  await expect(page.getByTestId("context-dock-motion")).toBeVisible();
+  await expect(page.getByTestId("context-dock-look")).toBeVisible();
+  await expect(page.getByTestId("context-dock-generate")).toBeVisible();
+  await expect(page.getByTestId("context-dock-director")).toBeVisible();
+  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("shot-details-sheet")).toHaveCount(0);
+  await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
   await expect(page.locator(".qc-project-mode")).toHaveText("场景工作台");
   await expect(
@@ -27,11 +37,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
-  const canvasBox = await page.getByTestId("cinematic-canvas").boundingBox();
-  const operationBox = await page.getByTestId("director-sidebar").boundingBox();
-  expect(canvasBox?.width ?? 0).toBeGreaterThan(operationBox?.width ?? 0);
-  expect(operationBox?.width ?? 0).toBeGreaterThanOrEqual(340);
-  expect(operationBox?.width ?? 0).toBeLessThanOrEqual(380);
+
   const desktopLayout = await page.getByTestId("cinematic-canvas").evaluate((element) => {
     const canvas = getComputedStyle(element);
     const sceneLayout = getComputedStyle(element.closest(".qc-scene-layout") as Element);
@@ -42,8 +48,16 @@ test("manual professional production: Scene Workbench design → candidate previ
     };
   });
   expect(desktopLayout.borderRadius).toBe("4px");
-  expect(desktopLayout.columns).toBe(2);
+  expect(desktopLayout.columns).toBe(1);
   expect(desktopLayout.noPageOverflow).toBe(true);
+
+  await page.getByTestId("context-dock-motion").click();
+  const operationBox = await page.getByTestId("director-sidebar").boundingBox();
+  const canvasBox = await page.getByTestId("cinematic-canvas").boundingBox();
+  expect(canvasBox?.width ?? 0).toBeGreaterThan(operationBox?.width ?? 0);
+  expect(operationBox?.width ?? 0).toBeGreaterThanOrEqual(300);
+  expect(operationBox?.width ?? 0).toBeLessThanOrEqual(380);
+  await expect(page.getByTestId("shot-design-panel")).toBeVisible();
   await page.getByLabel("视频提示词").fill("slow push-in, locked frame");
   await page.getByRole("button", { name: "保存设计" }).click();
   await expect(page.getByText("已保存设计（版本已递增）")).toBeVisible();
@@ -52,13 +66,19 @@ test("manual professional production: Scene Workbench design → candidate previ
   );
   expect(designRequest?.body).toMatchObject({ expected_version: 1 });
   expect(state.shotVersion).toBe(2);
-  await expect(page.getByTestId("shot-design-panel")).toContainText("v2");
+  await page.getByTestId("director-sheet-close").click();
+  await page.getByTestId("context-dock-details").click();
+  await expect(page.getByTestId("shot-details-sheet")).toContainText("v2");
+  await page.getByTestId("shot-details-close").click();
 
-  await page.getByTestId("director-tab-production").click();
-  await expect(page.getByTestId("shot-production-actions")).toContainText("v2");
+  await page.getByTestId("context-dock-generate").click();
+  await expect(page.getByTestId("shot-production-actions")).toBeVisible();
+  await expect(page.getByTestId("director-sidebar")).not.toContainText("NodeRun");
+  await expect(page.getByTestId("shot-production-trace")).toHaveCount(0);
   await page.getByRole("button", { name: "生成关键帧" }).click();
-  await expect(page.getByTestId("shot-production-status")).toContainText("queued");
+  await expect(page.getByTestId("shot-production-status")).toContainText("已排队");
   await expect.poll(() => state.candidates.length).toBe(1);
+  await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
 
   const executionPlanRequest = state.editing.requests.find(
     (request) => request.path.endsWith("/execution-plan") && request.method === "POST",
@@ -88,8 +108,11 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("shot-keyframe")).toBeVisible();
   await expect(page.getByTestId("shot-formal-output")).toBeVisible();
   await expect(page.getByTestId("shot-candidate")).toHaveCount(0);
-  await expect(page.getByTestId("shot-production-actions")).toContainText("v3");
   expect(state.shotVersion).toBe(3);
+  await page.getByTestId("context-dock-details").click();
+  await expect(page.getByTestId("shot-details-sheet")).toContainText("v3");
+  await expect(page.getByTestId("shot-production-trace")).toBeVisible();
+  await page.getByTestId("shot-details-close").click();
 
   // The same Artifact can still be selected for a temporary comparison while
   // formal remains authoritative after the preview is cleared.
@@ -111,6 +134,13 @@ test("manual professional production: Scene Workbench design → candidate previ
     path: `/api/v1/projects/${PROJECT_ID}/shots/${SHOT_ID}/formal-keyframe`,
     body: { artifact_id: "candidate-keyframe-1", expected_shot_version: 2 },
   });
+
+  // Clearing the local preview restores the formal keyframe without a write.
+  await page.reload();
+  await expect(page.getByTestId("scene-workspace")).toBeVisible();
+  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("shot-formal-output")).toBeVisible();
+  await expect(page.getByTestId("shot-keyframe")).toBeVisible();
 
   // Production monitor: cross-scene stats + scene row.
   await page.goto(`/projects/${PROJECT_ID}/production`);
@@ -136,9 +166,16 @@ test("Scene Workbench remains readable at 910px and other views retain evidence"
   await expect(page.locator(".qc-project-mode")).toHaveText("场景工作台");
   await expect(page.getByTestId("scene-stage")).toBeVisible();
   await expect(page.getByTestId("cinematic-canvas")).toBeVisible();
+  await expect(page.getByTestId("context-dock")).toBeVisible();
+  await expect(page.getByTestId("context-dock-character")).toBeVisible();
+  await expect(page.getByTestId("context-dock-camera")).toBeVisible();
+  await expect(page.getByTestId("context-dock-motion")).toBeVisible();
+  await expect(page.getByTestId("context-dock-look")).toBeVisible();
+  await expect(page.getByTestId("context-dock-generate")).toBeVisible();
+  await expect(page.getByTestId("context-dock-director")).toBeVisible();
   await expect(page.getByTestId("shot-candidate-tray")).toBeVisible();
   await expect(page.getByTestId("shot-strip")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toBeVisible();
+  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
   const sceneLayout = await page.locator(".qc-scene-layout").evaluate((element) => {
     const style = getComputedStyle(element);
     return {
@@ -148,6 +185,12 @@ test("Scene Workbench remains readable at 910px and other views retain evidence"
   });
   expect(sceneLayout.columns).toBe(1);
   expect(sceneLayout.documentFits).toBe(true);
+
+  await page.getByTestId("context-dock-look").click();
+  await expect(page.getByTestId("director-sidebar")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true);
 
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("project-evidence-inspector")).toBeVisible();
