@@ -171,6 +171,40 @@ describe("SceneWorkspace", () => {
     expect(screen.queryByTestId("shot-details-sheet")).not.toBeInTheDocument();
   });
 
+  it("keeps the Context Sheet and Details mutually exclusive without collapsing Takes", async () => {
+    mockBackend();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SceneWorkspace projectId="project-1" sceneId="scene-1" />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Studio");
+    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
+
+    fireEvent.click(screen.getByTestId("context-dock-look"));
+    expect(await screen.findByTestId("director-sidebar")).toBeInTheDocument();
+    expect(screen.queryByTestId("shot-details-sheet")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("context-dock-details"));
+    expect(await screen.findByTestId("shot-details-sheet")).toBeInTheDocument();
+    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("context-dock-generate"));
+    expect(await screen.findByTestId("director-sidebar")).toBeInTheDocument();
+    expect(screen.queryByTestId("shot-details-sheet")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("context-dock-takes"));
+    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
+    expect(screen.getByTestId("director-sidebar")).toBeInTheDocument();
+    expect(screen.queryByTestId("shot-details-sheet")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("context-dock-details"));
+    expect(await screen.findByTestId("shot-details-sheet")).toBeInTheDocument();
+    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
+  });
+
   it("saves image/video prompt edits via the design panel", async () => {
     const calls = mockBackend();
     const queryClient = new QueryClient();
@@ -485,7 +519,9 @@ describe("SceneWorkspace", () => {
     fireEvent.click(screen.getByTestId("context-dock-details"));
     expect(screen.getByTestId("shot-details-sheet")).toHaveAttribute("data-shot-id", "shot-2");
     expect(screen.getByTestId("shot-production-trace")).toHaveAttribute("data-shot-id", "shot-2");
+    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("shot-details-close"));
+    fireEvent.click(screen.getByTestId("context-dock-generate"));
     fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
     await waitFor(() => {
       const plans = calls.filter(

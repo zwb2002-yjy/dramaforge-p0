@@ -120,8 +120,20 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   }, []);
 
   const selectTool = useCallback((tool: ContextTool) => {
+    // Context Sheet and Details are mutually exclusive. Takes stays independent
+    // so Generate can still auto-expand the Candidate Tray.
+    setDetailsOpen(false);
     setActiveTool((current) => (current === tool ? null : tool));
   }, []);
+
+  const toggleDetails = useCallback(() => {
+    if (detailsOpen) {
+      setDetailsOpen(false);
+      return;
+    }
+    setActiveTool(null);
+    setDetailsOpen(true);
+  }, [detailsOpen]);
 
   const handleExecuted = useCallback(async () => {
     // Generate fired: surface the Candidate review surface without leaving the
@@ -229,7 +241,7 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
             hasShot={Boolean(selected)}
             onSelectTool={selectTool}
             onToggleTray={() => setTrayExpanded((value) => !value)}
-            onToggleDetails={() => setDetailsOpen((value) => !value)}
+            onToggleDetails={toggleDetails}
           />
           <ShotCandidateTray
             projectId={projectId}
