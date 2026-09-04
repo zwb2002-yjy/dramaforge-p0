@@ -3,6 +3,7 @@
 ## Status
 
 - **State:** READY FOR ROOT REVIEW (not merged)
+- **PR:** [#45](https://github.com/zwb2002-yjy/dramaforge-p0/pull/45) (`agent/v2-canvas-first-ui1-perf-foundation` → `dev`). Closed [#44](https://github.com/zwb2002-yjy/dramaforge-p0/pull/44) was the same work under the disallowed `feat/` head.
 - **Task id:** `v2-canvas-first-ui-1-and-perf-foundation`
 - **Program order:** P10 UI consolidation and Visual 2.1 refinement → **V2 Canvas-first UI-1 + frontend engineering governance**
 - **Boundary:** One frontend-convergence PR: Canvas-first V2 first productization round, frontend engineering debt governance (route splitting / vendor chunks / gzip / query key factory), loading/error/empty state completion for touched views, and full verification against the formal 8080 Nginx entry. Does not touch creative/production facts or API semantics.
