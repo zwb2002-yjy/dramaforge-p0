@@ -9,7 +9,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
@@ -56,6 +56,12 @@ class FreezeCreativeBody(BaseModel):
     scene_id: UUID | None = None
     shot_id: UUID | None = None
     user_intent: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_exactly_one_target(self) -> FreezeCreativeBody:
+        if (self.scene_id is None) == (self.shot_id is None):
+            raise ValueError("freeze requires exactly one of scene_id or shot_id")
+        return self
 
 
 class CreativeStateResponse(BaseModel):

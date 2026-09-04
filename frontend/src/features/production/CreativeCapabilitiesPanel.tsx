@@ -101,8 +101,12 @@ export function CreativeCapabilitiesPanel({
         shot_language_key: shotLanguage || undefined,
         quality_policy_key: quality || undefined,
         skill_keys: skills,
-        scene_id: sceneId ?? undefined,
         shot_id: shotId ?? undefined,
+        // Freeze and read must address the same canonical target.  When the
+        // production page has a selected Shot it also knows its parent Scene;
+        // sending both made the backend freeze the Scene while this panel read
+        // the Shot provenance.
+        scene_id: shotId ? undefined : (sceneId ?? undefined),
       }),
     onSuccess: () => {
       setMsg("已冻结创意能力与 provenance。");

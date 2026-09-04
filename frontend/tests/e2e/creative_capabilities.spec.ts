@@ -9,7 +9,7 @@ function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installMock(page: Page) {
+async function installMock(page: Page, onFreeze?: (body: Record<string, unknown>) => void) {
   await page.addInitScript((workspaceId) => {
     sessionStorage.setItem("dramaforge.selected-workspace-id", workspaceId);
   }, WORKSPACE_ID);
@@ -31,7 +31,8 @@ async function installMock(page: Page) {
       });
     }
     if (path.endsWith("/creative-capabilities/freeze") && method === "POST") {
-      const body = request.postDataJSON?.() ?? {};
+      const body = (request.postDataJSON?.() ?? {}) as Record<string, unknown>;
+      onFreeze?.(body);
       return json(route, {
         creative_capabilities: {
           genre: { key: body.genre_key, contract_hash: "c" },
@@ -74,7 +75,10 @@ async function installMock(page: Page) {
 }
 
 test("creative capabilities panel reads and freezes provenance", async ({ page }) => {
-  await installMock(page);
+  let freezeBody: Record<string, unknown> | undefined;
+  await installMock(page, (body) => {
+    freezeBody = body;
+  });
   await page.goto(`/projects/${PROJECT_ID}/production`);
 
   await expect(page.getByTestId("creative-capabilities-panel")).toBeVisible();
@@ -88,4 +92,6 @@ test("creative capabilities panel reads and freezes provenance", async ({ page }
   await page.getByLabel("Style").selectOption("film_noir_v1");
   await page.getByRole("button", { name: "冻结创意能力" }).click();
   await expect(page.getByText("已冻结创意能力与 provenance。")).toBeVisible();
+  expect(freezeBody).toMatchObject({ shot_id: SHOT_ID });
+  expect(freezeBody).not.toHaveProperty("scene_id");
 });

@@ -67,6 +67,12 @@
   internal commit. The fix rebinds owner/workspace/project scope before reading
   the response. A real PostgreSQL non-bypass regression now covers the commit
   boundary.
+- Reproduced an ambiguous creative-capability target from the live Production
+  page: it submitted both the selected Scene and Shot, the API froze the Scene,
+  and the UI read the Shot. The client now submits the selected Shot only (or a
+  Scene only when no Shot exists), while the API rejects zero or multiple
+  targets. Unit, type, lint, format, and live dual-entry verification cover the
+  target contract.
 
 ## Allowed implementation scope
 
