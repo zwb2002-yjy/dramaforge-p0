@@ -2,14 +2,14 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `v2-wuzhen-promo-live-full-flow-20260904`
 - **Goal:** Use the real local 5173 development entry and 8080 formal Nginx
   entry to create and finish one canonical Wuzhen promotional short-film
   Project. Diagnose, fix, test, rebuild, and rerun any blocking defect.
-- **Baseline:** local `dev@218792909ea054e622c9c52b1609fa47969b771b`;
+- **Baseline:** local `dev@876852a7c7e5a742675c2cecc9cd918ed96a661a`;
   PostgreSQL migration `20260903_0055`; API, frontend, Dispatcher, default
-  Worker, and heavy Worker all report the baseline source commit.
+  Worker, and heavy Worker all report this same source commit.
 
 ## Owner-supplied story material
 
@@ -89,6 +89,18 @@
   labeled Shot 2 `需处理`. The monitor and workbench now derive current status
   from the latest attempt per Shot + node + branch + experiment, while the full
   failed history remains available in the canonical snapshot and trace.
+
+## Final verification record (2026-09-04)
+
+- Canonical project: `c11be031-743c-45be-9d27-f8074e6d9e22`, title `乌镇·枕水新生宣传片 20260904-1614`, `9:16`, `FREE` + `ASSIST`; one ScriptDocument, one Episode, three Scenes and three Shots. Every Shot is `5.000s`, has dialogue plus image/video prompts, and has an explicitly selected Formal keyframe and Formal video.
+- Provider path: three successful `agnes-image-2.1-flash` keyframe operations and three successful `agnes-video-v2.0` video operations, all through the canonical Outbox/Dispatcher/Worker path. No additional paid submission was made after the Owner's allowance of exactly three keyframes plus three videos.
+- Formal artifacts: keyframes `a912b557-8179-4c9c-8600-3f2942c0d9f7`, `335eb089-b8fe-4a7c-98c3-50c4633ee1ae`, `e45836ba-2e4c-48f9-9b0d-28b8eac01985`; videos `4e11b4ec-df74-4cf2-8167-090f37a6b099`, `832e04ae-124a-4265-a870-71e688cd2cee`, `9f8f287e-df8a-4a40-9ed1-ea895feb14d5`. Review was opened on 8080 and showed all three Formal pairs.
+- Editing: EditSession `5589c975-ba82-44b7-9780-538c1403fbc7`, timeline version `2`, three ordered clips and three burned subtitle lines. Export `4244f3c8-0bd5-4f98-9bc5-6bf5c2c53bd7` completed as `dramaforge-final-film-v1`.
+- Final Film: run `09bbd5eb-9f92-4c08-9bbf-00fa19fe424e`, artifact `4a9599e7-75a4-42fd-97f5-f1100e875fc5`, `video/mp4`, `704×1280`, `15.173s`, `8,604,429` bytes, SHA-256 `5f3acb71912f980d4e983164b4ed7064133ead80cffbdd3033037189595c5753`. ffprobe records H.264 video and AAC audio; export assertions for MP4, H.264, AAC, burned subtitles, dialogue audio, and applied timeline edits are all true. The playable local copy is `tmp/wuzhen-final-film/wuzhen-pillow-water-rebirth-c11be031.mp4`.
+- Tail repair: the first Shot 2 composite failed closed on a `5.19s > 5.04s` narration/video mismatch. The bounded `atempo` fix allowed the successful attempt-2 composite `819e08c7-0416-44ce-94f3-89664631fbdd` and continuity `31d1d88d-3c7a-4ee9-82e2-faf1de2ebd05`; no speech was truncated. Historical failed attempts remain auditable, while the current monitor reports zero risk.
+- Runtime: migration `20260903_0055`; all five app containers are healthy and image label plus backend environment source identity is `876852a7c7e5a742675c2cecc9cd918ed96a661a`. Current Outbox status is fully `published`, dead-letter count is `0`, and there are no queued/running runs for this project. The two historical failed runs are superseded by successful attempt-2 lineage.
+- Browser acceptance: 5173 authoring and 8080 formal/review/edit entrypoints showed the same project, three-scene/three-shot, Formal, Editing, and Final Film facts. On 8080 the HTML video loaded without media error and advanced during playback; 5173 returned the same artifact id, hash, duration, download target, and completed export through idempotent export lookup.
+- Sanitized machine-readable evidence is kept in `tmp/wuzhen-final-film/evidence.md` alongside the playable MP4.
 
 ## Allowed implementation scope
 
