@@ -54,8 +54,7 @@ export const queryKeys = {
       statusFilter: string,
       nameFilter: string,
       tagFilter: string,
-    ) =>
-      ["project-assets", projectId, kindFilter, statusFilter, nameFilter, tagFilter] as const,
+    ) => ["project-assets", projectId, kindFilter, statusFilter, nameFilter, tagFilter] as const,
     tags: (projectId: string) => ["asset-tags", projectId] as const,
     versions: (projectId: string, assetId: string) =>
       ["asset-versions", projectId, assetId] as const,

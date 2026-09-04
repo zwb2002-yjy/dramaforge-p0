@@ -48,7 +48,9 @@ const SHOTS = [
 
 describe("ShotStrip", () => {
   it("defaults to compact navigation and expands to formal status details", () => {
-    const traceByShot = { "shot-2": [{ node_key: "video", status: "failed", error_code: "TIMEOUT" }] };
+    const traceByShot = {
+      "shot-2": [{ node_key: "video", status: "failed", error_code: "TIMEOUT" }],
+    };
     const { rerender } = render(
       <ShotStrip
         projectId="project-1"

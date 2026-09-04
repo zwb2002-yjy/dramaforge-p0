@@ -272,7 +272,9 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             expected_version: directorBoard.data?.version ?? null,
             ...input,
           });
-          await qc.invalidateQueries({ queryKey: queryKeys.director.board(projectId, revisionShotId) });
+          await qc.invalidateQueries({
+            queryKey: queryKeys.director.board(projectId, revisionShotId),
+          });
         }}
         onStart={(shotId) =>
           void runShotOp(
@@ -340,7 +342,9 @@ export function ProductionPage({ projectId }: { projectId: string }) {
           });
           await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
           await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
-          await qc.invalidateQueries({ queryKey: queryKeys.production.canvasRevisions(projectId, shot.id) });
+          await qc.invalidateQueries({
+            queryKey: queryKeys.production.canvasRevisions(projectId, shot.id),
+          });
           return result;
         }}
         onPropose={async (shot, input) =>

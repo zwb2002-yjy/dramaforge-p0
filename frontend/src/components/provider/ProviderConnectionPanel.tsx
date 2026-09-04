@@ -220,7 +220,9 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
     onMutate: resetFeedback,
     onSuccess: async () => {
       setMessage("质量证据已记录，绑定现可被项目使用。");
-      await queryClient.invalidateQueries({ queryKey: queryKeys.provider.bindingsRoot(workspaceId) });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.provider.bindingsRoot(workspaceId),
+      });
     },
     onError: (cause: Error) => setError(cause.message),
   });

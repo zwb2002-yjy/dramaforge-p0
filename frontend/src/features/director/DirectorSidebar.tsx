@@ -5,11 +5,14 @@ import {
   AssetReferencePicker,
   type ReferenceResolutionState,
 } from "../../components/assets/AssetReferencePicker";
-import { ShotDesignPanel } from "../shots/ShotDesignPanel";
+import {
+  ShotDesignPanel,
+  type ShotDesignDraft,
+  type ShotDesignFocus,
+} from "../shots/ShotDesignPanel";
 import { ShotProductionActions } from "../shots/ShotProductionActions";
-import { ShotProductionTrace } from "../shots/ShotProductionTrace";
 import type { ShotExecutionReference, ShotLite } from "../shots/api";
-import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
+import type { ContextTool } from "../shots/ContextDock";
 import { ShotDirectorSuggestionPanel } from "./ShotDirectorSuggestionPanel";
 
 export type DirectorTab = "shot" | "references" | "production";
@@ -17,7 +20,6 @@ export type DirectorTab = "shot" | "references" | "production";
 type DirectorSidebarProps = {
   projectId: string;
   shot: ShotLite | null;
-  trace: unknown[];
   references: ShotExecutionReference[];
   referencesReady: boolean;
   onReferencesChange: (references: ShotExecutionReference[]) => void;
@@ -25,10 +27,10 @@ type DirectorSidebarProps = {
   onWorkspaceRefresh?: () => void | Promise<void>;
   /**
    * V2 Canvas-first (UI-1): the panel is a floating Context Sheet. SceneWorkspace
-   * owns visibility and the requested tab; closing restores the full Canvas.
+   * owns visibility and the requested tool; closing restores the full Canvas.
    */
   open?: boolean;
-  requestedTab?: DirectorTab;
+  requestedTool?: ContextTool | null;
   onClose?: () => void;
   /** Shared draft state lives in SceneWorkspace so a sheet close keeps it. */
   designDirty?: boolean;
@@ -44,23 +46,43 @@ const TABS: Array<{ id: DirectorTab; label: string; testId: string }> = [
   { id: "production", label: "生成", testId: "director-tab-production" },
 ];
 
+const TOOL_TAB: Record<ContextTool, DirectorTab> = {
+  character: "shot",
+  camera: "shot",
+  motion: "shot",
+  look: "shot",
+  director: "shot",
+  generate: "production",
+};
+
+const TOOL_FOCUS: Record<ContextTool, ShotDesignFocus> = {
+  character: "character",
+  camera: "camera",
+  motion: "motion",
+  look: "look",
+  director: "all",
+  generate: "all",
+};
+
 /**
  * Selected-Shot operation panel. Tabs are local UI state only: the canonical
  * SceneWorkspace snapshot remains the single source for Shot, reference,
  * production and trace facts. Since V2 UI-1 the panel is a Context Sheet that
  * floats over the Canvas and opens on demand instead of a permanent column.
+ *
+ * Execution metadata (Provider / NodeRun / lineage / version / trace) lives in
+ * the Details sheet, not here.
  */
 export function DirectorSidebar({
   projectId,
   shot,
-  trace,
   references,
   referencesReady,
   onReferencesChange,
   onResolutionStateChange,
   onWorkspaceRefresh,
   open = true,
-  requestedTab = "shot",
+  requestedTool = null,
   onClose,
   designDirty,
   onDesignDirtyChange,
@@ -68,9 +90,13 @@ export function DirectorSidebar({
   onApplySuggestionDraft,
   onDesignSaved,
 }: DirectorSidebarProps) {
+  const requestedTab = requestedTool ? TOOL_TAB[requestedTool] : "shot";
   const [activeTab, setActiveTab] = useState<DirectorTab>(requestedTab);
+  const [tabOverride, setTabOverride] = useState(false);
   const [localDirty, setLocalDirty] = useState(false);
   const [localDraft, setLocalDraft] = useState<ShotDesignDraft | null>(null);
+  const designFocus: ShotDesignFocus =
+    !tabOverride && requestedTool ? TOOL_FOCUS[requestedTool] : "all";
 
   const dirty = designDirty ?? localDirty;
   const draft = suggestionDraft ?? localDraft;
@@ -87,7 +113,8 @@ export function DirectorSidebar({
 
   useEffect(() => {
     setActiveTab(requestedTab);
-  }, [requestedTab]);
+    setTabOverride(false);
+  }, [requestedTab, requestedTool]);
 
   // The panel is keyed by Shot identity, but the shell is not. Reset the
   // sibling production guard whenever selection changes so Shot A's draft can
@@ -125,23 +152,35 @@ export function DirectorSidebar({
     <section className="qc-director-sidebar-section" data-testid="director-section-design">
       {shot ? (
         <>
+          {requestedTool === "character" ? (
+            <AssetReferencePicker
+              key={`character-references:${shot.id}`}
+              projectId={projectId}
+              shotId={shot.id}
+              onReferencesChange={onReferencesChange}
+              onResolutionStateChange={onResolutionStateChange}
+            />
+          ) : null}
           <ShotDesignPanel
             key={`design:${shot.id}`}
             projectId={projectId}
             shot={shot}
+            focus={designFocus}
             applyDraft={draft}
             onSaved={handleSaved}
             onDirtyChange={reportDirty}
           />
-          <div className="qc-director-suggestion" data-testid="director-section-suggestion">
-            <ShotDirectorSuggestionPanel
-              key={`suggestion:${shot.id}`}
-              projectId={projectId}
-              shot={shot}
-              dirty={dirty}
-              onApplyDraft={applyDraft}
-            />
-          </div>
+          {requestedTool === "director" ? (
+            <div className="qc-director-suggestion" data-testid="director-section-suggestion">
+              <ShotDirectorSuggestionPanel
+                key={`suggestion:${shot.id}`}
+                projectId={projectId}
+                shot={shot}
+                dirty={dirty}
+                onApplyDraft={applyDraft}
+              />
+            </div>
+          ) : null}
         </>
       ) : (
         <p className="muted">选择一个镜头查看设计。</p>
@@ -168,18 +207,15 @@ export function DirectorSidebar({
   const renderProductionTab = () => (
     <section className="qc-director-sidebar-section" data-testid="director-section-production">
       {shot ? (
-        <>
-          <ShotProductionActions
-            key={`production:${shot.id}`}
-            projectId={projectId}
-            shot={shot}
-            references={references}
-            referencesReady={referencesReady}
-            dirty={dirty}
-            onExecuted={onWorkspaceRefresh}
-          />
-          <ShotProductionTrace shotId={shot.id} trace={trace} />
-        </>
+        <ShotProductionActions
+          key={`production:${shot.id}`}
+          projectId={projectId}
+          shot={shot}
+          references={references}
+          referencesReady={referencesReady}
+          dirty={dirty}
+          onExecuted={onWorkspaceRefresh}
+        />
       ) : (
         <p className="muted">选择一个镜头开始受控生产。</p>
       )}
@@ -224,7 +260,10 @@ export function DirectorSidebar({
               aria-selected={activeTab === tab.id}
               aria-controls={`director-panel-${tab.id}`}
               className={activeTab === tab.id ? "active" : undefined}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                setTabOverride(true);
+              }}
             >
               {tab.label}
             </button>

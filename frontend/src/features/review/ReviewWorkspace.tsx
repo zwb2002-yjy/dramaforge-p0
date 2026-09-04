@@ -69,7 +69,9 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
       createReviewAnnotation(projectId, shotId!, { ...input, note }),
     onSuccess: () => {
       setNote("");
-      void queryClient.invalidateQueries({ queryKey: queryKeys.review.annotations(projectId, shotId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.review.annotations(projectId, shotId),
+      });
     },
   });
 

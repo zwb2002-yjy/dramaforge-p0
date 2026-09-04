@@ -121,7 +121,13 @@ describe("SceneWorkspace", () => {
     // opens the Context Sheet on demand.
     expect(screen.getByTestId("context-dock")).toBeInTheDocument();
     expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("context-dock-design"));
+    expect(screen.getByTestId("context-dock-character")).toBeInTheDocument();
+    expect(screen.getByTestId("context-dock-camera")).toBeInTheDocument();
+    expect(screen.getByTestId("context-dock-motion")).toBeInTheDocument();
+    expect(screen.getByTestId("context-dock-look")).toBeInTheDocument();
+    expect(screen.getByTestId("context-dock-generate")).toBeInTheDocument();
+    expect(screen.getByTestId("context-dock-director")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("context-dock-look"));
     const sidebar = await screen.findByTestId("director-sidebar");
     expect(within(sidebar).getByTestId("director-section-design")).toBeInTheDocument();
     expect(within(sidebar).getByRole("tab", { name: "镜头" })).toHaveAttribute(
@@ -130,14 +136,30 @@ describe("SceneWorkspace", () => {
     );
     expect(within(sidebar).getByRole("tab", { name: "参考" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("tab", { name: "生成" })).toBeInTheDocument();
-    expect(within(sidebar).getByTestId("shot-design-panel")).toBeInTheDocument();
+    expect(within(sidebar).getByTestId("shot-design-panel")).toHaveAttribute(
+      "data-design-focus",
+      "look",
+    );
     expect(within(sidebar).queryByTestId("shot-production-trace")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText(/NodeRun/)).not.toBeInTheDocument();
     fireEvent.click(within(sidebar).getByRole("tab", { name: "参考" }));
     expect(within(sidebar).getByTestId("director-section-references")).toBeInTheDocument();
     expect(within(sidebar).queryByTestId("director-section-design")).not.toBeInTheDocument();
     fireEvent.click(within(sidebar).getByRole("tab", { name: "生成" }));
     expect(within(sidebar).getByTestId("director-section-production")).toBeInTheDocument();
-    expect(within(sidebar).getByTestId("shot-production-trace")).toBeInTheDocument();
+    expect(within(sidebar).queryByTestId("shot-production-trace")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText(/^v\d+$/)).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText(/NodeRun/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("director-sheet-close"));
+    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("context-dock-director"));
+    const directorSheet = await screen.findByTestId("director-sidebar");
+    expect(within(directorSheet).getByTestId("shot-design-panel")).toHaveAttribute(
+      "data-design-focus",
+      "all",
+    );
+    expect(within(directorSheet).getByTestId("director-section-suggestion")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("director-sheet-close"));
     expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
 
@@ -158,7 +180,7 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("Studio");
-    fireEvent.click(screen.getByTestId("context-dock-design"));
+    fireEvent.click(screen.getByTestId("context-dock-look"));
     const image = await screen.findByLabelText("图片提示词");
     fireEvent.change(image, { target: { value: "close up, eye level" } });
     fireEvent.click(screen.getByRole("button", { name: "保存设计" }));
@@ -432,7 +454,7 @@ describe("SceneWorkspace", () => {
     );
     await screen.findByText("Studio");
     expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("context-dock-references"));
+    fireEvent.click(screen.getByTestId("context-dock-character"));
     await screen.findByText("artifact-a");
     fireEvent.click(screen.getByTestId("director-tab-production"));
     fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
@@ -458,8 +480,12 @@ describe("SceneWorkspace", () => {
       within(screen.getByTestId("director-sidebar")).getByTestId("shot-production-actions"),
     ).toHaveAttribute("data-shot-id", "shot-2");
     expect(
-      within(screen.getByTestId("director-sidebar")).getByTestId("shot-production-trace"),
-    ).toHaveAttribute("data-shot-id", "shot-2");
+      within(screen.getByTestId("director-sidebar")).queryByTestId("shot-production-trace"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("context-dock-details"));
+    expect(screen.getByTestId("shot-details-sheet")).toHaveAttribute("data-shot-id", "shot-2");
+    expect(screen.getByTestId("shot-production-trace")).toHaveAttribute("data-shot-id", "shot-2");
+    fireEvent.click(screen.getByTestId("shot-details-close"));
     fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
     await waitFor(() => {
       const plans = calls.filter(

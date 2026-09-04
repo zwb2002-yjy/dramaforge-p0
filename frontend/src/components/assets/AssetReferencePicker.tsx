@@ -88,7 +88,9 @@ export function AssetReferencePicker({
 
   const invalidate = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.asset.shotReferences(projectId, shotId) }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.asset.shotReferences(projectId, shotId),
+      }),
       queryClient.invalidateQueries({ queryKey: resolutionQueryKey }),
     ]);
   };

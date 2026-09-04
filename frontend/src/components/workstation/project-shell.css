@@ -1210,6 +1210,23 @@
   resize: vertical;
 }
 
+.qc-shot-design-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--df-space-1) var(--df-space-3);
+  margin: 0;
+  font-size: var(--df-text-xs);
+}
+
+.qc-shot-design-facts dt {
+  color: var(--df-text-muted);
+}
+
+.qc-shot-design-facts dd {
+  margin: 0;
+  color: var(--df-text-secondary);
+}
+
 .qc-shot-production-actions header > div {
   display: grid;
   gap: var(--df-space-1);

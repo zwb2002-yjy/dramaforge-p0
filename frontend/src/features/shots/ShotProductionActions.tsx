@@ -119,7 +119,7 @@ export function ShotProductionActions({
       setFeedback({
         kind: "success",
         stage,
-        message: `NodeRun：${result.status}`,
+        message: result.status,
       });
 
       // SceneWorkspace carries the shot and its trace in one backend read
@@ -159,10 +159,9 @@ export function ShotProductionActions({
     >
       <header>
         <div>
-          <span className="director-stage-kicker">当前镜头生产</span>
-          <strong>#{shot.shot_number} · 受控执行</strong>
+          <span className="director-stage-kicker">当前镜头</span>
+          <strong>#{shot.shot_number} 生成</strong>
         </div>
-        <span className="qc-shot-production-version">v{shot.version}</span>
       </header>
 
       <dl className="qc-shot-production-lineage">
@@ -206,8 +205,13 @@ export function ShotProductionActions({
       )}
 
       {feedback?.kind === "success" && (
-        <p className="qc-shot-production-status" data-testid="shot-production-status" role="status">
-          {STAGE_LABEL[feedback.stage]}已提交：{feedback.message}
+        <p
+          className="qc-shot-production-status"
+          data-testid="shot-production-status"
+          data-status={feedback.message}
+          role="status"
+        >
+          {STAGE_LABEL[feedback.stage]}已提交，{feedback.message === "queued" ? "已排队" : "处理中"}
         </p>
       )}
       {feedback?.kind === "error" && (

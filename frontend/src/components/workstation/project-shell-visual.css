@@ -461,6 +461,7 @@
      ======================================================================== */
   .qc-context-dock {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--df-space-2);
     padding: var(--df-space-2) var(--df-space-3);

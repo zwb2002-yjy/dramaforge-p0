@@ -73,14 +73,17 @@
 
 ## Implementation evidence
 
-- Branch: `feat/v2-canvas-first-ui1-perf-foundation` from `dev` (`a2c3720`).
+- Branch: `agent/v2-canvas-first-ui1-perf-foundation` from `dev` (`a2c3720`). CI `policy` requires `agent/*` HEAD for PRs into `dev`; the original `feat/…` name is retired.
 - Layered commits (no `Co-Authored-By`):
   1. `64f8986` `docs(plan): add V2 Canvas-first UI-1 and perf foundation task contract`
   2. `6ca92c8` `perf(frontend): establish production delivery foundation`
   3. `0722ba2` `refactor(frontend): centralize query keys`
   4. `105b349` `feat(workbench): implement canvas-first UI-1`
   5. `dc32856` `test(frontend): cover canvas-first and production-entry regressions`
-- UI-1 composition: `ContextDock` + floating `DirectorSidebar` Context Sheet (320–360px) + collapsed Candidate Tray + compact ShotStrip + on-demand `ShotDetailsPanel`. Pure UI state only (`activeTool`, `trayExpanded`, `stripExpanded`, `detailsOpen`). `DirectorSidebar` filename kept. Scene layout is a single column; sheets float over the Canvas.
+  6. `648cb7f` `docs(plan): record V2 UI-1 8080 acceptance evidence`
+  7. review follow-up (this commit): `agent/*` rename, Prettier on the 6 failing files, compression lockfile `resolved` URLs aligned to `registry.npmmirror.com`, Context Dock tools, technical metadata sunk into Details.
+- UI-1 composition: `ContextDock` tools are Character / Camera / Motion / Look / Generate / Director / Takes / Details. Character opens identity references + description; Camera / Motion / Look focus the existing Shot design fields; Director is the suggestion surface; Generate is production actions only. `DirectorSidebar` filename kept as a floating 320–360px Context Sheet. Candidate Tray collapsed + compact ShotStrip + on-demand `ShotDetailsPanel`. Pure UI state only (`activeTool`, `trayExpanded`, `stripExpanded`, `detailsOpen`). Scene layout is a single column; sheets float over the Canvas.
+- Generate no longer mounts `ShotProductionTrace`, `v{shot.version}`, or `NodeRun：status`. Those facts live in the Details sheet. Production-facing status is `已排队` / `处理中`.
 - Query keys: factory consumed across frontend; tuple shapes unchanged. `generated.ts` untouched.
 - Route splitting: code-based `lazyRouteComponent` wrappers in `frontend/src/routes/pages.ts`. No file-based router rewrite.
 - Gzip: `vite-plugin-compression2` `algorithms: ["gzip"]` only; `nginx.conf` `gzip_static on;`.
@@ -102,7 +105,7 @@ Before Commit 1 the SPA entry was a single ~448 KB JS file. Entry is now 52.73 K
 
 ## Verification
 
-- `frontend/`: `npm run lint` PASS; `npm run typecheck` PASS; `npm run test` PASS (114); `npm run build` PASS; `npm run test:e2e` PASS (15); `git diff --check` PASS.
+- `frontend/`: `npm run lint` PASS; `npm run typecheck` PASS; `npm run test` PASS (114); `npm run format:check` PASS; `npm run test:e2e` PASS (15); `git diff --check` PASS. Review follow-up re-ran lint / typecheck / 114 unit / 15 E2E / format:check.
 - `npm run api:check` not run on the Windows host: `backend/.venv` is a Linux uv venv (`bin/python`) and host Python has no FastAPI. `frontend/src/shared/api/generated.ts` was not modified in this PR; skip is not a frontend regression.
 - Frontend image rebuilt as `dramaforge-frontend:local` and `dramaforge-frontend-1` recreated. Acceptance against `http://127.0.0.1:8080`:
   - `/gateway-health` → 200 `ok`

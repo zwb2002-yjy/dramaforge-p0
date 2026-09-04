@@ -1,21 +1,25 @@
+export type ContextTool = "character" | "camera" | "motion" | "look" | "generate" | "director";
+
 type ContextDockProps = {
-  activeTool: string | null;
+  activeTool: ContextTool | null;
   candidateCount: number;
   trayExpanded: boolean;
   detailsOpen: boolean;
   hasShot: boolean;
-  onSelectTool: (tool: "design" | "references" | "generate" | "director") => void;
+  onSelectTool: (tool: ContextTool) => void;
   onToggleTray: () => void;
   onToggleDetails: () => void;
 };
 
 const TOOLS: Array<{
-  id: "design" | "references" | "generate" | "director";
+  id: ContextTool;
   label: string;
   testId: string;
 }> = [
-  { id: "design", label: "镜头设计", testId: "context-dock-design" },
-  { id: "references", label: "参考素材", testId: "context-dock-references" },
+  { id: "character", label: "角色", testId: "context-dock-character" },
+  { id: "camera", label: "机位", testId: "context-dock-camera" },
+  { id: "motion", label: "运动", testId: "context-dock-motion" },
+  { id: "look", label: "画面", testId: "context-dock-look" },
   { id: "generate", label: "生成", testId: "context-dock-generate" },
   { id: "director", label: "导演", testId: "context-dock-director" },
 ];
@@ -65,7 +69,7 @@ export function ContextDock({
         disabled={!hasShot}
         onClick={onToggleTray}
       >
-        候选 · {candidateCount}
+        Takes · {candidateCount}
       </button>
       <button
         type="button"
@@ -75,7 +79,7 @@ export function ContextDock({
         disabled={!hasShot}
         onClick={onToggleDetails}
       >
-        ⋯ 详情
+        详情
       </button>
     </nav>
   );

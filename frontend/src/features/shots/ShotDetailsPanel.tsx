@@ -55,6 +55,8 @@ export function ShotDetailsPanel({ open, shot, trace, onClose }: ShotDetailsPane
       {shot ? (
         <div className="qc-shot-details-body">
           <dl>
+            <dt>镜头版本</dt>
+            <dd>v{shot.version}</dd>
             <dt>镜头状态</dt>
             <dd>{shot.status}</dd>
             <dt>时长</dt>

@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 
-import { DirectorSidebar, type DirectorTab } from "../director/DirectorSidebar";
+import { DirectorSidebar } from "../director/DirectorSidebar";
 import type { ReferenceResolutionState } from "../../components/assets/AssetReferencePicker";
-import { ContextDock } from "../shots/ContextDock";
+import { ContextDock, type ContextTool } from "../shots/ContextDock";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotCandidateTray } from "../shots/ShotCandidateTray";
 import { ShotDetailsPanel } from "../shots/ShotDetailsPanel";
@@ -21,19 +21,6 @@ import { queryKeys } from "../../lib/queryKeys";
 type SceneWorkspaceProps = {
   projectId: string;
   sceneId: string;
-};
-
-/**
- * V2 Canvas-first Context Dock tool (UI-1). Pure UI state — not a workspace
- * state machine and never persisted to the backend.
- */
-type ContextTool = "design" | "references" | "generate" | "director" | null;
-
-const TOOL_TAB: Record<Exclude<ContextTool, null>, DirectorTab> = {
-  design: "shot",
-  director: "shot",
-  references: "references",
-  generate: "production",
 };
 
 type ShotReferenceContext = {
@@ -63,7 +50,7 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   const [previewCandidate, setPreviewCandidate] = useState<ShotCandidate | null>(null);
   const [referenceDrafts, setReferenceDrafts] = useState<Record<string, ShotReferenceContext>>({});
   // Context Dock / sheet / tray / strip / details are pure UI state.
-  const [activeTool, setActiveTool] = useState<ContextTool>(null);
+  const [activeTool, setActiveTool] = useState<ContextTool | null>(null);
   const [trayExpanded, setTrayExpanded] = useState(false);
   const [stripExpanded, setStripExpanded] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -132,7 +119,7 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
     setPreviewCandidate(null);
   }, []);
 
-  const selectTool = useCallback((tool: Exclude<ContextTool, null>) => {
+  const selectTool = useCallback((tool: ContextTool) => {
     setActiveTool((current) => (current === tool ? null : tool));
   }, []);
 
@@ -269,14 +256,13 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
           <DirectorSidebar
             projectId={projectId}
             shot={selected}
-            trace={trace}
             references={selectedReferences}
             referencesReady={selectedReferencesReady}
             onReferencesChange={updateSelectedReferences}
             onResolutionStateChange={updateReferenceResolutionState}
             onWorkspaceRefresh={handleExecuted}
             open={activeTool !== null}
-            requestedTab={activeTool ? TOOL_TAB[activeTool] : "shot"}
+            requestedTool={activeTool}
             onClose={() => setActiveTool(null)}
             designDirty={designDirty}
             onDesignDirtyChange={setDesignDirty}
