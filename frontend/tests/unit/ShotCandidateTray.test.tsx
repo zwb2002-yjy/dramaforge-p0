@@ -83,6 +83,30 @@ function renderTray(onPreviewCandidate = vi.fn()) {
 describe("ShotCandidateTray", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("collapses to a Takes line without rendering candidate cards", () => {
+    const onToggleExpanded = vi.fn();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ShotCandidateTray
+          projectId={SHOT.project_id}
+          shot={SHOT}
+          candidates={CANDIDATES}
+          expanded={false}
+          onToggleExpanded={onToggleExpanded}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
+    expect(screen.getByTestId("shot-candidate-tray")).toHaveTextContent("Takes · 2");
+    expect(screen.queryByTestId("shot-candidate-artifact-keyframe")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("shot-candidate-tray"));
+    expect(onToggleExpanded).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects opaque ExperimentBranch rows and only renders concrete media candidates", () => {
     const parsed = parseShotCandidates(CANDIDATES);
     expect(parsed.map((candidate) => candidate.artifactId)).toEqual([

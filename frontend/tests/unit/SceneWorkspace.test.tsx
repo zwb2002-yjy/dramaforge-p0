@@ -140,6 +140,13 @@ describe("SceneWorkspace", () => {
     expect(within(sidebar).getByTestId("shot-production-trace")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("director-sheet-close"));
     expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("context-dock-details"));
+    const details = await screen.findByTestId("shot-details-sheet");
+    expect(details).toHaveAttribute("data-shot-id", "shot-1");
+    expect(within(details).getByTestId("shot-production-trace")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("shot-details-close"));
+    expect(screen.queryByTestId("shot-details-sheet")).not.toBeInTheDocument();
   });
 
   it("saves image/video prompt edits via the design panel", async () => {
