@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** READY FOR ROOT REVIEW (not merged)
 - **Task id:** `v2-canvas-first-ui-1-and-perf-foundation`
 - **Program order:** P10 UI consolidation and Visual 2.1 refinement → **V2 Canvas-first UI-1 + frontend engineering governance**
 - **Boundary:** One frontend-convergence PR: Canvas-first V2 first productization round, frontend engineering debt governance (route splitting / vendor chunks / gzip / query key factory), loading/error/empty state completion for touched views, and full verification against the formal 8080 Nginx entry. Does not touch creative/production facts or API semantics.
@@ -73,8 +73,45 @@
 
 ## Implementation evidence
 
-_(filled on completion)_
+- Branch: `feat/v2-canvas-first-ui1-perf-foundation` from `dev` (`a2c3720`).
+- Layered commits (no `Co-Authored-By`):
+  1. `64f8986` `docs(plan): add V2 Canvas-first UI-1 and perf foundation task contract`
+  2. `6ca92c8` `perf(frontend): establish production delivery foundation`
+  3. `0722ba2` `refactor(frontend): centralize query keys`
+  4. `105b349` `feat(workbench): implement canvas-first UI-1`
+  5. `dc32856` `test(frontend): cover canvas-first and production-entry regressions`
+- UI-1 composition: `ContextDock` + floating `DirectorSidebar` Context Sheet (320–360px) + collapsed Candidate Tray + compact ShotStrip + on-demand `ShotDetailsPanel`. Pure UI state only (`activeTool`, `trayExpanded`, `stripExpanded`, `detailsOpen`). `DirectorSidebar` filename kept. Scene layout is a single column; sheets float over the Canvas.
+- Query keys: factory consumed across frontend; tuple shapes unchanged. `generated.ts` untouched.
+- Route splitting: code-based `lazyRouteComponent` wrappers in `frontend/src/routes/pages.ts`. No file-based router rewrite.
+- Gzip: `vite-plugin-compression2` `algorithms: ["gzip"]` only; `nginx.conf` `gzip_static on;`.
+
+### Bundle (Vite production, this HEAD)
+
+| chunk | raw | gzip |
+| --- | ---: | ---: |
+| `index-Dxgs7vNr.js` (entry) | 52.73 KB | 16.02 KB |
+| `vendor-react-CZODMRGO.js` | 142.94 KB | 45.78 KB |
+| `vendor-tanstack-DB12fQOR.js` | 129.81 KB | 40.97 KB |
+| `vendor-lucide-DPWvzUW5.js` | 7.32 KB | 1.99 KB |
+| `SceneWorkspace-Dv84Hhyc.js` | 41.41 KB | 11.44 KB |
+| `production-page-Dzyw3A7Y.js` | 43.29 KB | 12.72 KB |
+| `EditingWorkspace-Ct1jm-dx.js` | 26.95 KB | 8.07 KB |
+| `index-Dg0OZ6Vo.css` | 115.48 KB | 17.20 KB |
+
+Before Commit 1 the SPA entry was a single ~448 KB JS file. Entry is now 52.73 KB (gzip 16.02 KB); vendor families and Scene/production/edit routes are separate chunks with `.gz` siblings.
 
 ## Verification
 
-_(filled on completion)_
+- `frontend/`: `npm run lint` PASS; `npm run typecheck` PASS; `npm run test` PASS (114); `npm run build` PASS; `npm run test:e2e` PASS (15); `git diff --check` PASS.
+- `npm run api:check` not run on the Windows host: `backend/.venv` is a Linux uv venv (`bin/python`) and host Python has no FastAPI. `frontend/src/shared/api/generated.ts` was not modified in this PR; skip is not a frontend regression.
+- Frontend image rebuilt as `dramaforge-frontend:local` and `dramaforge-frontend-1` recreated. Acceptance against `http://127.0.0.1:8080`:
+  - `/gateway-health` → 200 `ok`
+  - `/health` → 200 JSON
+  - `/` → 200 HTML, `Content-Encoding: gzip`
+  - `/assets/index-Dxgs7vNr.js` and `/assets/vendor-react-CZODMRGO.js` → 200, `Content-Encoding: gzip`
+  - `/assets/SceneWorkspace-Dv84Hhyc.js` → 200, `Content-Encoding: gzip` (11415 bytes)
+  - SPA fallback: `/projects/.../scenes/...` → 200 `index.html`
+  - `/api/v1/auth/login` + `/api/v1/auth/me` + `/api/v1/workspaces` same-origin proxy works
+  - image contains `--with-http_gzip_static_module`; `gzip_static on;` in `/etc/nginx/conf.d/default.conf`; 16 `.gz` siblings under `/usr/share/nginx/html/assets`
+- Live 8080 Scene (`/projects/da618e29-e46d-4b74-824a-2cca1428b8f2/scenes/fb799a90-15d7-4335-b6aa-18d5a57a3914`): Context Dock present; no `director-sidebar`; ShotStrip compact (`data-expanded=false`); Canvas ~1122px in a 1-column `.qc-scene-layout`; no horizontal overflow; hard refresh keeps the same shell. Workspace GET currently 500 `ProgrammingError` (`column node_runs.production_batch_id does not exist`) — pre-existing API/schema drift, not this frontend PR. Canvas-first chrome still renders and reports the server error in `.flash.err`.
+- Unit/E2E cover: default no permanent right panel; dock-first Context Sheet; collapsed tray; Candidate Preview zero POST; Formal confirm + refetch; 1440×900 and 910×838 no overflow.
