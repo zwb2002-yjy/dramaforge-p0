@@ -23,6 +23,7 @@ from app.director.proposal_service import (
     ProposalService,
 )
 from app.director.story_proposal import create_story_proposal
+from app.shared.db import set_rls_context
 from app.shared.errors import NotFoundError
 
 router = APIRouter(tags=["story"], dependencies=[Depends(require_selected_workspace)])
@@ -128,6 +129,14 @@ async def create_project_story_proposal(
         idempotency_key=body.idempotency_key,
     )
     await session.commit()
+    # The request RLS scope is transaction-local.  Re-bind it after commit so
+    # the response can read the proposal items under the application role.
+    await set_rls_context(
+        session,
+        user_id=user.id,
+        workspace_id=project.workspace_id,
+        project_id=project.id,
+    )
     return await _proposal_read(session, project_id=project.id, proposal=result.proposal)
 
 

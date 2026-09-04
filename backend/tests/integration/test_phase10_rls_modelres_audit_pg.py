@@ -26,6 +26,7 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, ProjectCreativeProfile, User, Workspace
 from app.api.v1.projects import list_workspace_projects
+from app.api.v1.story import StoryProposalCreateBody, create_project_story_proposal
 from app.assets.models import Asset, AssetVersion, Shot
 from app.assets.script_import import import_script
 from app.delivery.models import ReviewAnnotation
@@ -369,6 +370,67 @@ async def test_workspace_project_list_rebinds_profile_scope_pg(
     reads = await list_workspace_projects(workspace.id, user, pg_session)
     assert {read.id for read in reads} == {project.id for project in projects}
     assert all(read.creative_profile.start_type == "FREE" for read in reads)
+
+
+@pytest.mark.asyncio
+async def test_story_proposal_create_rebinds_scope_after_commit_pg(
+    pg_session: AsyncSession,
+) -> None:
+    """A create response keeps its typed diff visible after its internal commit."""
+    suffix = uuid4().hex[:8]
+    user = User(
+        email=f"story-create-{suffix}@example.com",
+        display_name="Story create owner",
+        password_hash=hash_password("password123"),
+    )
+    pg_session.add(user)
+    await pg_session.flush()
+    workspace = Workspace(owner_user_id=user.id, name=f"Story create {suffix}")
+    pg_session.add(workspace)
+    await pg_session.flush()
+    project = Project(
+        workspace_id=workspace.id,
+        name=f"Story create {suffix}",
+        aspect_ratio="9:16",
+        budget_limit=Decimal("0"),
+    )
+    pg_session.add(project)
+    await pg_session.commit()
+
+    # SET ROLE is session-scoped, while the route's commit clears app.* GUCs.
+    # This mirrors the permanently non-bypass role used by the API container.
+    await pg_session.execute(text("SET ROLE dramaforge_app"))
+    pg_session.info["selected_workspace_id"] = workspace.id
+    await set_rls_context(
+        pg_session,
+        user_id=user.id,
+        workspace_id=workspace.id,
+        project_id=project.id,
+    )
+    try:
+        response = await create_project_story_proposal(
+            project.id,
+            StoryProposalCreateBody(
+                idempotency_key=f"story-create-{suffix}",
+                brief="RLS response proof",
+                filename="story-create.md",
+                draft_text=_SCRIPT,
+            ),
+            user,
+            pg_session,
+            None,
+        )
+        assert response.status == "pending"
+        assert response.operations
+        assert {operation.command for operation in response.operations} >= {
+            "story.set_script_document",
+            "story.upsert_episode",
+            "story.upsert_scene",
+            "story.upsert_shot",
+        }
+    finally:
+        await pg_session.rollback()
+        await pg_session.execute(text("RESET ROLE"))
 
 
 @pytest.mark.asyncio
