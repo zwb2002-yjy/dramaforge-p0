@@ -16,6 +16,7 @@ from app.execution import models as _xm  # noqa: F401
 from app.execution.composite_media import (
     CompositeInputs,
     CompositeRenderError,
+    _voice_audio_filter,
     composite_inputs_pending,
     composite_lineage_fingerprint,
     deterministic_composite_test_bytes,
@@ -41,6 +42,17 @@ _SOURCE_META = {
     "voice": ("audio", "audio/wav"),
     "subtitle": ("subtitle", "application/x-subrip"),
 }
+
+
+def test_voice_audio_filter_fits_small_overrun_without_truncation() -> None:
+    audio_filter = _voice_audio_filter(video_duration=5.04, voice_duration=5.19)
+
+    assert audio_filter == "atempo=1.029762,apad"
+
+
+def test_voice_audio_filter_rejects_excessive_speedup() -> None:
+    with pytest.raises(CompositeRenderError, match="required speed-up"):
+        _voice_audio_filter(video_duration=5.0, voice_duration=7.0)
 
 
 @dataclass(frozen=True)

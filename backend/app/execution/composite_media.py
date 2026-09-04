@@ -25,6 +25,7 @@ _MEDIA_REQUIREMENTS = {
     "voice": ("audio", "audio/"),
     "subtitle": ("subtitle", "application/x-subrip"),
 }
+_MAX_VOICE_SPEEDUP = 1.25
 
 
 class CompositeInputMissingError(RuntimeError):
@@ -33,6 +34,22 @@ class CompositeInputMissingError(RuntimeError):
 
 class CompositeRenderError(RuntimeError):
     """Raised when local FFmpeg rendering fails."""
+
+
+def _voice_audio_filter(*, video_duration: float, voice_duration: float) -> str:
+    """Fit a small narration overrun without truncating spoken content."""
+    if video_duration <= 0 or voice_duration <= 0:
+        raise CompositeRenderError("video and voice durations must be positive")
+    if voice_duration <= video_duration + 0.1:
+        return "apad"
+    speed = voice_duration / video_duration
+    if speed > _MAX_VOICE_SPEEDUP:
+        raise CompositeRenderError(
+            "voice duration exceeds video duration "
+            f"({voice_duration:.2f}s > {video_duration:.2f}s; "
+            f"required speed-up {speed:.3f}x exceeds {_MAX_VOICE_SPEEDUP:.2f}x)"
+        )
+    return f"atempo={speed:.6f},apad"
 
 
 @dataclass(frozen=True)
@@ -286,11 +303,10 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
 
         video_duration = await media_duration(video_path)
         voice_duration = await media_duration(voice_path)
-        if voice_duration > video_duration + 0.1:
-            raise CompositeRenderError(
-                "voice duration exceeds video duration "
-                f"({voice_duration:.2f}s > {video_duration:.2f}s)"
-            )
+        audio_filter = _voice_audio_filter(
+            video_duration=video_duration,
+            voice_duration=voice_duration,
+        )
 
         subtitle_filter_path = (
             subtitle_path.as_posix().replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
@@ -309,7 +325,7 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
             "-map",
             "1:a:0",
             "-af",
-            "apad",
+            audio_filter,
             "-c:v",
             "libx264",
             "-c:a",

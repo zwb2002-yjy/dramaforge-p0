@@ -79,6 +79,11 @@
   to stage + nonce (Project uniqueness is already the database scope), and the
   backend deterministically hashes any still-oversized caller key before
   persistence. The confirmed Provider-call allowance remains unused.
+- Final Film preparation completed the first and third Formal tail, but the
+  second composite failed closed because its 5.19s narration exceeded the
+  5.04s Formal video by 0.15s. Composite rendering now preserves the complete
+  narration with a bounded FFmpeg `atempo` speed-up (maximum 1.25x); larger
+  mismatches still fail closed instead of truncating speech.
 
 ## Allowed implementation scope
 
