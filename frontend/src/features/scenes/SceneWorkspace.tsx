@@ -1,19 +1,39 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 
-import { DirectorSidebar } from "../director/DirectorSidebar";
+import { DirectorSidebar, type DirectorTab } from "../director/DirectorSidebar";
 import type { ReferenceResolutionState } from "../../components/assets/AssetReferencePicker";
+import { ContextDock } from "../shots/ContextDock";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotCandidateTray } from "../shots/ShotCandidateTray";
+import { ShotDetailsPanel } from "../shots/ShotDetailsPanel";
 import { ShotStrip } from "../shots/ShotStrip";
-import type { ShotCandidate } from "../shots/shotCandidates";
+import {
+  isConfirmableShotCandidate,
+  parseShotCandidates,
+  type ShotCandidate,
+} from "../shots/shotCandidates";
 import type { ShotExecutionReference, ShotLite } from "../shots/api";
+import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
 import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
 
 type SceneWorkspaceProps = {
   projectId: string;
   sceneId: string;
+};
+
+/**
+ * V2 Canvas-first Context Dock tool (UI-1). Pure UI state — not a workspace
+ * state machine and never persisted to the backend.
+ */
+type ContextTool = "design" | "references" | "generate" | "director" | null;
+
+const TOOL_TAB: Record<Exclude<ContextTool, null>, DirectorTab> = {
+  design: "shot",
+  director: "shot",
+  references: "references",
+  generate: "production",
 };
 
 type ShotReferenceContext = {
@@ -28,17 +48,28 @@ function sameReferences(left: ShotExecutionReference[], right: ShotExecutionRefe
 }
 
 /**
- * Stage-first Scene/Shot Workbench composition.
+ * Canvas-first Scene/Shot Workbench orchestrator (V2 UI-1).
  *
  * SceneWorkspaceRead remains the only server snapshot. selectedShotId, local
- * candidate preview, and reference resolution drafts are view state and are
- * scoped to the current Scene; none create a second media or production fact
- * source.
+ * candidate preview, reference resolution drafts, and the new Context Dock /
+ * sheet / tray / strip UI state are view state scoped to the current Scene;
+ * none create a second media or production fact source. The Canvas keeps
+ * dominant visual weight: the operation panel and Details are floating sheets
+ * opened on demand, the Candidate Tray is a conditional review surface, and
+ * the ShotStrip defaults to compact navigation.
  */
 export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [previewCandidate, setPreviewCandidate] = useState<ShotCandidate | null>(null);
   const [referenceDrafts, setReferenceDrafts] = useState<Record<string, ShotReferenceContext>>({});
+  // Context Dock / sheet / tray / strip / details are pure UI state.
+  const [activeTool, setActiveTool] = useState<ContextTool>(null);
+  const [trayExpanded, setTrayExpanded] = useState(false);
+  const [stripExpanded, setStripExpanded] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  // Shared design draft lives here so closing the Context Sheet keeps it.
+  const [designDirty, setDesignDirty] = useState(false);
+  const [suggestionDraft, setSuggestionDraft] = useState<ShotDesignDraft | null>(null);
   const workspace = useQuery({
     queryKey: queryKeys.scene.workspace(projectId, sceneId),
     queryFn: () => fetchSceneWorkspace(projectId, sceneId),
@@ -49,6 +80,12 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
     setSelectedShotId(null);
     setPreviewCandidate(null);
     setReferenceDrafts({});
+    setActiveTool(null);
+    setTrayExpanded(false);
+    setStripExpanded(false);
+    setDetailsOpen(false);
+    setDesignDirty(false);
+    setSuggestionDraft(null);
   }, [projectId, sceneId]);
 
   const data = workspace.data as SceneWorkspaceRead | undefined;
@@ -82,15 +119,34 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   }, [selectedShotHasBindings, selectedShotKey]);
 
   useEffect(() => {
-    // Canvas previews are local and must never bleed into a newly selected
-    // Shot. Formal confirmation also clears this state before refetching.
+    // Canvas previews and design drafts are local and must never bleed into a
+    // newly selected Shot. Formal confirmation also clears preview state
+    // before refetching.
     setPreviewCandidate(null);
+    setDesignDirty(false);
+    setSuggestionDraft(null);
   }, [selectedShotKey]);
 
   const selectShot = useCallback((shotId: string) => {
     setSelectedShotId(shotId);
     setPreviewCandidate(null);
   }, []);
+
+  const selectTool = useCallback((tool: Exclude<ContextTool, null>) => {
+    setActiveTool((current) => (current === tool ? null : tool));
+  }, []);
+
+  const handleExecuted = useCallback(async () => {
+    // Generate fired: surface the Candidate review surface without leaving the
+    // Canvas. The tray re-reads candidates from the refreshed workspace.
+    setTrayExpanded(true);
+    await workspace.refetch();
+  }, [workspace]);
+
+  const handleDesignSaved = useCallback(async () => {
+    setSuggestionDraft(null);
+    await workspace.refetch();
+  }, [workspace]);
 
   const updateSelectedReferences = useCallback(
     (references: ShotExecutionReference[]) => {
@@ -133,6 +189,7 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   const selectedReferences = selectedReferenceContext.references;
   const selectedReferencesReady = selectedReferenceContext.ready;
   const candidates = selected ? (data?.candidates?.[selected.id] ?? []) : [];
+  const candidateCount = parseShotCandidates(candidates).filter(isConfirmableShotCandidate).length;
   const trace = selected ? (data?.trace?.[selected.id] ?? []) : [];
 
   return (
@@ -177,11 +234,23 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
             selectedCandidate={previewCandidate}
             trace={trace}
           />
+          <ContextDock
+            activeTool={activeTool}
+            candidateCount={candidateCount}
+            trayExpanded={trayExpanded}
+            detailsOpen={detailsOpen}
+            hasShot={Boolean(selected)}
+            onSelectTool={selectTool}
+            onToggleTray={() => setTrayExpanded((value) => !value)}
+            onToggleDetails={() => setDetailsOpen((value) => !value)}
+          />
           <ShotCandidateTray
             projectId={projectId}
             shot={selected}
             candidates={candidates}
             selectedCandidate={previewCandidate}
+            expanded={trayExpanded}
+            onToggleExpanded={() => setTrayExpanded((value) => !value)}
             onPreviewCandidate={setPreviewCandidate}
             onConfirmed={async () => {
               setPreviewCandidate(null);
@@ -193,21 +262,35 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
             shots={shots}
             selectedShotId={selectedShotKey}
             onSelectShot={selectShot}
+            expanded={stripExpanded}
+            onToggleExpanded={() => setStripExpanded((value) => !value)}
             traceByShot={(data?.trace ?? {}) as Record<string, unknown[]>}
           />
+          <DirectorSidebar
+            projectId={projectId}
+            shot={selected}
+            trace={trace}
+            references={selectedReferences}
+            referencesReady={selectedReferencesReady}
+            onReferencesChange={updateSelectedReferences}
+            onResolutionStateChange={updateReferenceResolutionState}
+            onWorkspaceRefresh={handleExecuted}
+            open={activeTool !== null}
+            requestedTab={activeTool ? TOOL_TAB[activeTool] : "shot"}
+            onClose={() => setActiveTool(null)}
+            designDirty={designDirty}
+            onDesignDirtyChange={setDesignDirty}
+            suggestionDraft={suggestionDraft}
+            onApplySuggestionDraft={setSuggestionDraft}
+            onDesignSaved={handleDesignSaved}
+          />
+          <ShotDetailsPanel
+            open={detailsOpen}
+            shot={selected}
+            trace={trace}
+            onClose={() => setDetailsOpen(false)}
+          />
         </div>
-        <DirectorSidebar
-          projectId={projectId}
-          shot={selected}
-          trace={trace}
-          references={selectedReferences}
-          referencesReady={selectedReferencesReady}
-          onReferencesChange={updateSelectedReferences}
-          onResolutionStateChange={updateReferenceResolutionState}
-          onWorkspaceRefresh={async () => {
-            await workspace.refetch();
-          }}
-        />
       </div>
     </div>
   );

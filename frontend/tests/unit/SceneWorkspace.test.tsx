@@ -108,8 +108,21 @@ describe("SceneWorkspace", () => {
     expect(screen.getByTestId("shot-placeholder")).toHaveTextContent("A turns");
     expect(screen.getByTestId("no-formal-result")).toHaveTextContent("尚未选择正式结果");
     expect(screen.getByTestId("scene-stage")).toContainElement(screen.getByTestId("shot-strip"));
-    const sidebar = screen.getByTestId("director-sidebar");
-    expect(sidebar).toBeInTheDocument();
+    const canvas = screen.getByTestId("cinematic-canvas");
+    expect(within(canvas).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(within(canvas).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.getByTestId("shot-execution-status")).toHaveTextContent("completed");
+    expect(screen.getByTestId("scene-edit-entry")).toHaveAttribute(
+      "href",
+      "/projects/project-1/edit",
+    );
+
+    // Canvas-first default: no permanent operation panel. The Context Dock
+    // opens the Context Sheet on demand.
+    expect(screen.getByTestId("context-dock")).toBeInTheDocument();
+    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("context-dock-design"));
+    const sidebar = await screen.findByTestId("director-sidebar");
     expect(within(sidebar).getByTestId("director-section-design")).toBeInTheDocument();
     expect(within(sidebar).getByRole("tab", { name: "镜头" })).toHaveAttribute(
       "aria-selected",
@@ -119,21 +132,14 @@ describe("SceneWorkspace", () => {
     expect(within(sidebar).getByRole("tab", { name: "生成" })).toBeInTheDocument();
     expect(within(sidebar).getByTestId("shot-design-panel")).toBeInTheDocument();
     expect(within(sidebar).queryByTestId("shot-production-trace")).not.toBeInTheDocument();
-    const canvas = screen.getByTestId("cinematic-canvas");
-    expect(within(canvas).queryByRole("textbox")).not.toBeInTheDocument();
-    expect(within(canvas).queryByRole("combobox")).not.toBeInTheDocument();
-    expect(within(canvas).queryByRole("button")).not.toBeInTheDocument();
-    expect(screen.getByTestId("shot-execution-status")).toHaveTextContent("completed");
     fireEvent.click(within(sidebar).getByRole("tab", { name: "参考" }));
     expect(within(sidebar).getByTestId("director-section-references")).toBeInTheDocument();
     expect(within(sidebar).queryByTestId("director-section-design")).not.toBeInTheDocument();
     fireEvent.click(within(sidebar).getByRole("tab", { name: "生成" }));
     expect(within(sidebar).getByTestId("director-section-production")).toBeInTheDocument();
     expect(within(sidebar).getByTestId("shot-production-trace")).toBeInTheDocument();
-    expect(screen.getByTestId("scene-edit-entry")).toHaveAttribute(
-      "href",
-      "/projects/project-1/edit",
-    );
+    fireEvent.click(screen.getByTestId("director-sheet-close"));
+    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
   });
 
   it("saves image/video prompt edits via the design panel", async () => {
@@ -145,6 +151,7 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("Studio");
+    fireEvent.click(screen.getByTestId("context-dock-design"));
     const image = await screen.findByLabelText("图片提示词");
     fireEvent.change(image, { target: { value: "close up, eye level" } });
     fireEvent.click(screen.getByRole("button", { name: "保存设计" }));
@@ -228,17 +235,21 @@ describe("SceneWorkspace", () => {
         <SceneWorkspace projectId="project-1" sceneId="scene-1" />
       </QueryClientProvider>,
     );
-    await screen.findByTestId("shot-candidate-artifact-1");
+    await screen.findByText("Studio");
+    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
     expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute(
       "data-preview-candidate",
       "image_keyframe:artifact-1",
     );
-    fireEvent.click(screen.getByRole("button", { name: /#2/ }));
-    await screen.findByTestId("shot-candidate-artifact-2");
-    expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute(
-      "data-preview-candidate",
-      "image_keyframe:artifact-2",
-    );
+    fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
+    await waitFor(() => {
+      expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute(
+        "data-preview-candidate",
+        "image_keyframe:artifact-2",
+      );
+    });
+    fireEvent.click(screen.getByTestId("context-dock-takes"));
+    expect(await screen.findByTestId("shot-candidate-artifact-2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "设为正式关键帧" }));
     await screen.findByTestId("shot-candidate-success");
 
@@ -412,7 +423,9 @@ describe("SceneWorkspace", () => {
         <SceneWorkspace projectId="project-1" sceneId="scene-1" />
       </QueryClientProvider>,
     );
-    fireEvent.click(screen.getByTestId("director-tab-references"));
+    await screen.findByText("Studio");
+    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("context-dock-references"));
     await screen.findByText("artifact-a");
     fireEvent.click(screen.getByTestId("director-tab-production"));
     fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
@@ -424,7 +437,7 @@ describe("SceneWorkspace", () => {
       { binding_id: "binding-a", artifact_id: "artifact-a" },
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: /#2/ }));
+    fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
     expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-2");
     expect(screen.getByTestId("cinematic-canvas")).toHaveTextContent("B looks back");
     expect(screen.getByTestId("director-sidebar")).toHaveAttribute("data-shot-id", "shot-2");

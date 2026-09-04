@@ -27,6 +27,13 @@ type ShotCandidateTrayProps = {
   onPreviewCandidate?: (candidate: ShotCandidate) => void;
   /** Clear the canvas preview and refetch the SceneWorkspace after success. */
   onConfirmed?: (result: FormalKeyframeRead | FormalVideoRead) => void | Promise<void>;
+  /**
+   * V2 Canvas-first (UI-1): the tray is a conditional review surface.
+   * Collapsed (default) it renders a single "Takes · N" line; it expands
+   * after Generate, in review, or when the user opens it from the dock.
+   */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 };
 
 function errorMessage(error: unknown): string {
@@ -49,6 +56,8 @@ export function ShotCandidateTray({
   selectedCandidate = null,
   onPreviewCandidate,
   onConfirmed,
+  expanded = true,
+  onToggleExpanded,
 }: ShotCandidateTrayProps) {
   const queryClient = useQueryClient();
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(
@@ -118,12 +127,30 @@ export function ShotCandidateTray({
     );
   }
 
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        className="qc-shot-candidate-tray is-collapsed"
+        data-testid="shot-candidate-tray"
+        data-shot-id={shot.id}
+        data-expanded="false"
+        aria-expanded="false"
+        onClick={onToggleExpanded}
+      >
+        <span className="director-stage-kicker">候选</span>
+        <strong>Takes · {parsedCandidates.length}</strong>
+      </button>
+    );
+  }
+
   const activeArtifactId = confirm.isPending ? confirm.variables?.artifactId : null;
   return (
     <section
       className="qc-shot-candidate-tray"
       data-testid="shot-candidate-tray"
       data-shot-id={shot.id}
+      data-expanded="true"
       aria-label="候选结果"
     >
       <header className="qc-shot-candidate-tray-header">
@@ -134,6 +161,17 @@ export function ShotCandidateTray({
         <span className="qc-shot-candidate-count">
           {parsedCandidates.length ? `${parsedCandidates.length} 个可确认候选` : "暂无可确认候选"}
         </span>
+        {onToggleExpanded && (
+          <button
+            type="button"
+            className="qc-shot-candidate-collapse"
+            data-testid="shot-candidate-collapse"
+            aria-expanded="true"
+            onClick={onToggleExpanded}
+          >
+            收起
+          </button>
+        )}
       </header>
 
       {parsedCandidates.length === 0 ? (

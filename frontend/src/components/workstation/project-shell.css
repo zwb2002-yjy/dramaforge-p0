@@ -906,7 +906,7 @@
 
 .qc-scene-layout {
   display: grid;
-  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) minmax(300px, 380px);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--df-space-4);
   align-items: start;
   min-width: 0;
@@ -1048,10 +1048,6 @@
   border: 1px solid var(--df-border);
   border-radius: var(--df-radius-md);
   background: var(--df-surface-0);
-}
-
-.qc-director-sidebar.is-collapsed {
-  align-self: start;
 }
 
 .qc-director-sidebar-header {
@@ -1363,7 +1359,7 @@
 
 @media (max-width: 1180px) {
   .qc-scene-layout {
-    grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .qc-director-sidebar {
@@ -1469,19 +1465,15 @@
 
 .qc-scene-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 380px);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--df-space-4);
   align-items: start;
   min-width: 0;
 }
 
-.qc-scene-layout:has(.qc-director-sidebar.is-collapsed) {
-  grid-template-columns: minmax(0, 1fr) 52px;
-}
-
 .qc-scene-stage {
   display: grid;
-  grid-template-rows: minmax(420px, 62vh) auto auto;
+  grid-template-rows: minmax(420px, 62vh) auto auto auto;
   gap: var(--df-space-3);
   align-content: start;
   min-width: 0;
@@ -1798,27 +1790,21 @@
 
 @media (max-width: 1080px) {
   .qc-scene-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 900px) {
-  .qc-scene-layout,
-  .qc-scene-layout:has(.qc-director-sidebar.is-collapsed) {
+  .qc-scene-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .qc-scene-stage {
-    grid-template-rows: minmax(360px, 58vh) auto auto;
+    grid-template-rows: minmax(360px, 58vh) auto auto auto;
   }
 
-  .qc-director-sidebar,
-  .qc-director-sidebar.is-collapsed {
+  .qc-director-sidebar {
     max-height: none;
-  }
-
-  .qc-director-sidebar.is-collapsed {
-    display: grid;
   }
 }
 
@@ -1834,6 +1820,6 @@
   }
 
   .qc-scene-stage {
-    grid-template-rows: minmax(300px, 52vh) auto auto;
+    grid-template-rows: minmax(300px, 52vh) auto auto auto;
   }
 }
