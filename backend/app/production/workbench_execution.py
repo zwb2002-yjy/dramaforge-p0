@@ -69,6 +69,25 @@ _STAGE_CONTRACT: Final[dict[PlanStage, tuple[ModelSlot, Capability, str, str]]] 
 }
 
 _PURE_UPSTREAM_NODE_TYPES = frozenset({"prompt", "prompt_compose"})
+_NODE_RUN_IDEMPOTENCY_MAX_LENGTH: Final[int] = 160
+
+
+def _workbench_idempotency_key(
+    *,
+    stage: PlanStage,
+    override: str | None,
+    plan_fingerprint: str,
+) -> str:
+    """Keep caller idempotency deterministic while respecting the DB contract."""
+    raw = (
+        f"workbench:{stage}:{override}"
+        if override
+        else f"workbench:{stage}:{plan_fingerprint}"
+    )
+    if len(raw) <= _NODE_RUN_IDEMPOTENCY_MAX_LENGTH:
+        return raw
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return f"workbench:{stage}:sha256:{digest}"
 
 
 def _chain_input_hash(payload: dict[str, object]) -> str:
@@ -648,10 +667,10 @@ class WorkbenchExecutionService:
             project_id=project.id,
             graph_version_id=version.id,
             graph_node_id=node.id,
-            idempotency_key=(
-                f"workbench:{plan.stage}:{idempotency_key_override}"
-                if idempotency_key_override
-                else f"workbench:{plan.stage}:{plan.plan_fingerprint}"
+            idempotency_key=_workbench_idempotency_key(
+                stage=plan.stage,
+                override=idempotency_key_override,
+                plan_fingerprint=plan.plan_fingerprint or input_hash,
             ),
             input_hash=input_hash,
             status="queued",

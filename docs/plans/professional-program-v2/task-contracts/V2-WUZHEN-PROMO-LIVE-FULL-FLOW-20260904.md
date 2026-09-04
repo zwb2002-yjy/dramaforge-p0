@@ -73,6 +73,12 @@
   Scene only when no Shot exists), while the API rejects zero or multiple
   targets. Unit, type, lint, format, and live dual-entry verification cover the
   target contract.
+- The first paid keyframe click was rejected before NodeRun creation and before
+  any ProviderOperation because the Workbench-prefixed client idempotency key
+  exceeded the `VARCHAR(160)` persistence contract. Client keys are now scoped
+  to stage + nonce (Project uniqueness is already the database scope), and the
+  backend deterministically hashes any still-oversized caller key before
+  persistence. The confirmed Provider-call allowance remains unused.
 
 ## Allowed implementation scope
 

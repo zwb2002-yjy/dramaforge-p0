@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import AsyncGenerator
 from datetime import date
 from uuid import uuid4
@@ -437,6 +438,29 @@ async def test_create_and_dispatch_creates_queued_node_run(session: AsyncSession
     # no provider operation created (dispatch is queue-only)
     ops = (await session.execute(select(ProviderOperation))).scalars().all()
     assert ops == []
+
+
+@pytest.mark.asyncio
+async def test_create_and_dispatch_bounds_long_caller_idempotency_key(
+    session: AsyncSession,
+) -> None:
+    project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    override = "shot-production:" + ("x" * 144)
+    raw = f"workbench:video:{override}"
+
+    run = await service.create_and_dispatch(
+        project=project,
+        execution_input=_input(shot_id=shot.id, requested_binding_id=binding.id),
+        idempotency_key_override=override,
+    )
+
+    assert run.status == "queued"
+    assert len(run.idempotency_key) <= 160
+    assert run.idempotency_key == (
+        f"workbench:video:sha256:{hashlib.sha256(raw.encode('utf-8')).hexdigest()}"
+    )
 
 
 @pytest.mark.asyncio

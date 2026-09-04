@@ -38,7 +38,11 @@ const STAGE_MODE: Record<ShotExecutionStage, string> = {
 
 function idempotencyKey(projectId: string, shotId: string, stage: ShotExecutionStage): string {
   const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`;
-  return `shot-production:${projectId}:${shotId}:${stage}:${nonce}`;
+  // NodeRun uniqueness is already scoped by Project; repeating both UUIDs in
+  // the header made the server's workbench prefix exceed VARCHAR(160).
+  void projectId;
+  void shotId;
+  return `shot-production:${stage}:${nonce}`;
 }
 
 function errorMessage(error: unknown): string {
