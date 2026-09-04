@@ -13,6 +13,7 @@ import type {
   ShotChangeProposalResult,
   ShotRead,
 } from "../../lib/api";
+import { latestEffectiveNodeRuns } from "./effectiveRuns";
 
 type Suggestion = {
   id: string;
@@ -118,9 +119,10 @@ function statusTone(status: string): string {
 }
 
 function shotRunStatus(shot: ShotRead, snapshot?: ProjectSnapshot): string {
-  const runs =
+  const runs = latestEffectiveNodeRuns(
     snapshot?.node_runs.filter((run) => String(run.input_snapshot?.shot_id ?? "") === shot.id) ??
-    [];
+      [],
+  );
   if (runs.some((run) => run.status === "failed")) return "failed";
   if (runs.some((run) => ["queued", "running", "leased"].includes(run.status))) return "running";
   if (runs.some((run) => ["completed", "cached", "completed_after_cancel"].includes(run.status)))

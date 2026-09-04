@@ -74,4 +74,41 @@ describe("ProfessionalWorkbench", () => {
     expect(screen.queryByText("补齐动作因果")).not.toBeInTheDocument();
     expect(editor).toHaveValue(shots[0].visual_description);
   });
+
+  it("uses the latest retry when labeling the current shot status", () => {
+    render(
+      <ProfessionalWorkbench
+        projectId="project-1"
+        shots={shots}
+        selectedShotId="shot-1"
+        onSelectShot={() => undefined}
+        snapshot={
+          {
+            node_runs: [
+              {
+                id: "retry-success",
+                node_key: "composite",
+                status: "completed",
+                attempt_no: 2,
+                input_snapshot: { shot_id: "shot-1", execution_branch: "formal" },
+              },
+              {
+                id: "old-failure",
+                node_key: "composite",
+                status: "failed",
+                attempt_no: 1,
+                input_snapshot: { shot_id: "shot-1", execution_branch: "formal" },
+              },
+            ],
+          } as never
+        }
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: /01 中近景 我终于明白了。 已完成/,
+      }),
+    ).toBeInTheDocument();
+  });
 });

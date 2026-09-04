@@ -8,6 +8,7 @@
  */
 import type { ProjectSnapshot } from "../../lib/api";
 import type { SceneSummary } from "../scenes/api";
+import { latestEffectiveNodeRuns } from "./effectiveRuns";
 
 type ProductionMonitorProps = {
   projectId: string;
@@ -34,7 +35,7 @@ export function ProductionMonitor({
   snapshot,
   experimentCount,
 }: ProductionMonitorProps) {
-  const runs = snapshot?.node_runs ?? [];
+  const runs = latestEffectiveNodeRuns(snapshot?.node_runs ?? []);
   const completedRuns = runs.filter((r) => DONE.has(r.status)).length;
   const runningRuns = runs.filter((r) => RUNNING.has(r.status)).length;
   const failedRuns = runs.filter((r) => r.status === "failed").length;

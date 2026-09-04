@@ -61,9 +61,27 @@ const snapshot = {
   project_id: "project-1",
   name: "验收",
   node_runs: [
-    { id: "run-1", node_key: "video", status: "completed", attempt_no: 1 },
-    { id: "run-2", node_key: "video", status: "failed", attempt_no: 1 },
-    { id: "run-3", node_key: "subtitle", status: "queued", attempt_no: 1 },
+    {
+      id: "run-1",
+      node_key: "video",
+      status: "completed",
+      attempt_no: 1,
+      input_snapshot: { shot_id: "shot-1" },
+    },
+    {
+      id: "run-2",
+      node_key: "video",
+      status: "failed",
+      attempt_no: 1,
+      input_snapshot: { shot_id: "shot-2" },
+    },
+    {
+      id: "run-3",
+      node_key: "subtitle",
+      status: "queued",
+      attempt_no: 1,
+      input_snapshot: { shot_id: "shot-1" },
+    },
   ],
   artifacts: [{ id: "art-1", object_key: "kf/art-1.png", byte_size: 10 }],
   provider_operations: [],
@@ -112,5 +130,40 @@ describe("ProductionMonitor", () => {
       />,
     );
     expect(screen.getByText("尚无场景。请在场景工作区创建场景与镜头。")).toBeInTheDocument();
+  });
+
+  it("does not report a failed attempt after the same node succeeds", () => {
+    render(
+      <ProductionMonitor
+        projectId="project-1"
+        scenes={[{ ...scenes[0], risk_count: 0 }]}
+        shots={[shots[0]]}
+        snapshot={
+          {
+            ...snapshot,
+            node_runs: [
+              {
+                id: "retry-success",
+                node_key: "composite",
+                status: "completed",
+                attempt_no: 2,
+                input_snapshot: { shot_id: "shot-1", execution_branch: "formal" },
+              },
+              {
+                id: "old-failure",
+                node_key: "composite",
+                status: "failed",
+                attempt_no: 1,
+                input_snapshot: { shot_id: "shot-1", execution_branch: "formal" },
+              },
+            ],
+          } as never
+        }
+        experimentCount={0}
+      />,
+    );
+
+    expect(screen.getByTestId("stat-completed")).toHaveTextContent("1");
+    expect(screen.getByTestId("stat-failed")).toHaveTextContent("0");
   });
 });

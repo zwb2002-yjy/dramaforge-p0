@@ -84,6 +84,11 @@
   5.04s Formal video by 0.15s. Composite rendering now preserves the complete
   narration with a bounded FFmpeg `atempo` speed-up (maximum 1.25x); larger
   mismatches still fail closed instead of truncating speech.
+- After the successful retry and Final Film, Production Monitor still counted
+  the superseded failed composite/continuity attempts as current risk and
+  labeled Shot 2 `需处理`. The monitor and workbench now derive current status
+  from the latest attempt per Shot + node + branch + experiment, while the full
+  failed history remains available in the canonical snapshot and trace.
 
 ## Allowed implementation scope
 
