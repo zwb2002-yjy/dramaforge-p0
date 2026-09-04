@@ -24,7 +24,8 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from app.access.models import Project, User, Workspace
+from app.access.models import Project, ProjectCreativeProfile, User, Workspace
+from app.api.v1.projects import list_workspace_projects
 from app.assets.models import Asset, AssetVersion, Shot
 from app.assets.script_import import import_script
 from app.delivery.models import ReviewAnnotation
@@ -311,6 +312,63 @@ async def test_phase10_rls_tables_forced_pg(pg_session: AsyncSession) -> None:
         if not forced or policies < 1:
             missing.append(f"{table}(forced={forced}, policies={policies})")
     assert not missing, "P10-05 tables missing FORCE RLS or policies: " + ", ".join(missing)
+
+
+@pytest.mark.asyncio
+async def test_workspace_project_list_rebinds_profile_scope_pg(
+    pg_session: AsyncSession,
+) -> None:
+    """Workspace lobby reads each Creative Profile under its Project RLS scope."""
+    suffix = uuid4().hex[:8]
+    user = User(
+        email=f"project-list-{suffix}@example.com",
+        display_name="Project list owner",
+        password_hash=hash_password("password123"),
+    )
+    pg_session.add(user)
+    await pg_session.flush()
+    workspace = Workspace(owner_user_id=user.id, name=f"Project list {suffix}")
+    pg_session.add(workspace)
+    await pg_session.flush()
+
+    projects = [
+        Project(
+            workspace_id=workspace.id,
+            name=f"Project {number} {suffix}",
+            aspect_ratio="9:16",
+            budget_limit=Decimal("0"),
+        )
+        for number in (1, 2)
+    ]
+    pg_session.add_all(projects)
+    await pg_session.flush()
+    pg_session.add_all(
+        [
+            ProjectCreativeProfile(
+                project_id=project.id,
+                start_type="FREE",
+                director_autonomy="ASSIST",
+                selected_style_ids=[],
+                selected_skill_ids=[],
+                asset_slot_requirements={"required": [], "optional": []},
+                strategy_snapshot={"source": "free"},
+            )
+            for project in projects
+        ]
+    )
+    await pg_session.flush()
+
+    await pg_session.execute(text("SET LOCAL ROLE dramaforge_app"))
+    pg_session.info["selected_workspace_id"] = workspace.id
+    await set_rls_context(
+        pg_session,
+        user_id=user.id,
+        workspace_id=workspace.id,
+    )
+
+    reads = await list_workspace_projects(workspace.id, user, pg_session)
+    assert {read.id for read in reads} == {project.id for project in projects}
+    assert all(read.creative_profile.start_type == "FREE" for read in reads)
 
 
 @pytest.mark.asyncio

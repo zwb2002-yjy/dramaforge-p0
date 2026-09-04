@@ -164,25 +164,19 @@ async def list_workspace_projects(
     projects = await ProjectService(session).list_projects_for_owner(
         workspace_id=workspace_id, actor=user
     )
-    profiles = list(
-        (
-            await session.execute(
-                select(ProjectCreativeProfile).where(
-                    ProjectCreativeProfile.project_id.in_(
-                        [project.id for project in projects]
-                    )
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    profiles_by_project = {profile.project_id: profile for profile in profiles}
     result: list[ProjectRead] = []
     for project in projects:
-        profile = profiles_by_project.get(project.id)
-        if profile is None:
-            profile = await _profile_for_project(session, project.id)
+        # Creative profiles are deliberately project-scoped by FORCE RLS.
+        # A workspace-wide profile query therefore sees zero rows. Rebind the
+        # project context for each already-authorized Project before reading
+        # its profile; never weaken the database policy for lobby convenience.
+        await set_rls_context(
+            session,
+            user_id=user.id,
+            workspace_id=workspace_id,
+            project_id=project.id,
+        )
+        profile = await _profile_for_project(session, project.id)
         result.append(_project_read(project, profile))
     return result
 

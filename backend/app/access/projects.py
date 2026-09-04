@@ -6,6 +6,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import (
@@ -18,7 +19,19 @@ from app.access.models import (
 from app.director.creative_capabilities.creative_templates import get_creative_template
 from app.shared.db import set_rls_context
 from app.shared.enums import ProjectStage
-from app.shared.errors import ForbiddenError, NotFoundError, ValidationAppError
+from app.shared.errors import (
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    ValidationAppError,
+)
+
+
+def _project_name_conflict(name: str) -> ConflictError:
+    return ConflictError(
+        "当前空间已存在同名项目，请修改项目名后重试。",
+        details={"code": "PROJECT_NAME_CONFLICT", "name": name},
+    )
 
 
 class ProjectService:
@@ -77,6 +90,14 @@ class ProjectService:
         if budget_limit < 0:
             raise ValidationAppError("budget_limit must be >= 0")
         await self._get_owned_workspace(workspace_id=workspace_id, actor=actor)
+        existing_project_id = await self._session.scalar(
+            select(Project.id).where(
+                Project.workspace_id == workspace_id,
+                Project.name == name,
+            )
+        )
+        if existing_project_id is not None:
+            raise _project_name_conflict(name)
         project = Project(
             workspace_id=workspace_id,
             name=name,
@@ -89,7 +110,15 @@ class ProjectService:
             provider_dispatch_frozen=False,
         )
         self._session.add(project)
-        await self._session.flush()
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            # The pre-check gives normal requests a useful response. The
+            # database constraint remains authoritative for concurrent creates.
+            if "uq_projects_workspace_name" not in str(exc):
+                raise
+            await self._session.rollback()
+            raise _project_name_conflict(name) from exc
         await set_rls_context(
             self._session,
             user_id=actor.id,
