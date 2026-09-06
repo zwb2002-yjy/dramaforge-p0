@@ -366,14 +366,14 @@ jobs:
           path: docs/reviews/evidence/v1-current-head
           if-no-files-found: error
       - name: Attest backend image provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-name: ${{ steps.image.outputs.backend }}
           subject-digest: ${{ steps.backend-push.outputs.digest }}
           push-to-registry: true
       - name: Attest frontend image provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-name: ${{ steps.image.outputs.frontend }}
