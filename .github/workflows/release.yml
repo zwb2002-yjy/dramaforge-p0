@@ -25,7 +25,7 @@ jobs:
       version: ${{ steps.identity.outputs.version }}
       migration_head: ${{ steps.migration-head.outputs.migration_head }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Bind tag to repository version
         id: identity
         shell: bash
@@ -104,7 +104,7 @@ jobs:
       DRAMAFORGE_VERSION: ${{ needs.verify-release-source.outputs.version }}
       DRAMAFORGE_SOURCE_COMMIT: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Validate Compose topology
