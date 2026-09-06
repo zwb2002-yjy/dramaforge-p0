@@ -347,7 +347,7 @@ jobs:
           dramaforge-offline-linux-amd64-v*.tar.gz
           LICENSE NOTICE
           > SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-candidate-${{ steps.image.outputs.tag }}
           path: |
@@ -360,7 +360,7 @@ jobs:
             NOTICE
       - name: Upload current-head Golden and Final Film evidence
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && contains(github.event.head_commit.message, '[release-candidate]') }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: v1-current-head-golden-${{ github.sha }}
           path: docs/reviews/evidence/v1-current-head
