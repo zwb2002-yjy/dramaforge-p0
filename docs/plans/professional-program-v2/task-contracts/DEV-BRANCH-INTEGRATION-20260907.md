@@ -35,7 +35,7 @@
 
 - The historical branch carries frozen 720bde4 Golden/release evidence and stale COMPLETE/READY status updates. Preserve all six source files under an explicitly historical archive, retaining their hashes and original paths; do not replace the current Goal/Task/release statuses with these older claims. Historical data is evidence, not fresh acceptance or authority.
 - Python Dockerfiles target 3.14 while project metadata currently permits only 3.12. Expand supported Python versions through 3.14 and reconcile the locked environment; keep the existing minimum and static targets unless an actual compatibility check requires a documented change. Verify the quality/runtime images actually execute Python 3.14, not an implicitly downloaded 3.12 interpreter.
-- TypeScript 7 removes the JavaScript compiler API consumed by existing tools. Use Microsoft's documented coexistence pattern: TypeScript 7 under a native-compiler npm alias, and @typescript/typescript6 under the `typescript` API name. `tsc` must resolve to version 7, the API peer must satisfy typescript-eslint's <6.1 bound, and no --legacy-peer-deps or --force install is allowed.
+- TypeScript 7 removes the JavaScript compiler API consumed by existing tools. Keep native TypeScript 7 under `@typescript/native` and call its bin explicitly from every project typecheck/build command. Actual npm metadata adds a tighter constraint than the initial TypeScript-6 bridge proposal: openapi-typescript 7.13.0 requires a TypeScript ^5.x peer, so the separate JavaScript API remains TypeScript 5.9.3, satisfying both the generator and typescript-eslint. Do not let a bare legacy `tsc` executable silently replace the native 7 compiler; verify the explicit compiler reports 7.0.2. No --legacy-peer-deps or --force install is allowed.
 - Reconcile all requested npm versions and the six Python requirement updates in lockfiles using project/isolated container tooling. No global runtime/dependency installation or unrelated package upgrade.
 - Non-overlapping Docker/Action version changes are preserved; release-only Action upgrades receive static contract/tag/input validation, not a live publication run. No release tag or [release-candidate] trigger.
 - Source branch merge parents are retained so reachability proves integration. Resolve intermediate lockfile conflicts deterministically, then generate and verify the combined exact lock before any final candidate claim.
@@ -87,3 +87,19 @@ Use a single allowed agent/* → dev integration PR for the combined result. Ret
 - Microsoft TypeScript 7 announcement: official compiler/API coexistence guidance; npm metadata confirms typescript-eslint 8.69.0 peers >=4.8.4 <6.1.0 and @typescript/typescript6 6.0.2.
 - `D:/dramaforge/tmp/branch-integration-20260907/branches.json` freezes all 20 source identities.
 - This task does not claim whole-project, new paid Golden or deployment/release completion.
+
+## Compatibility evidence refinement
+
+An initial API-6 lock resolution emitted an incompatible OpenAPI peer warning. That candidate is not accepted. The existing generator has no released compatible API-6 peer range, so preserve its existing 5.9.3 API while keeping the requested native 7 compiler as an explicit independent command. Regenerate with strict peer checks and verify npm ci/npm ls; no peer constraint is disabled and no production model fallback is involved. The discarded intermediate resolver log remains evidence, not a passing gate.
+
+## Security reconciliation
+
+A fresh full npm audit exposed a high-severity Browserslist finding already present in the baseline lock (GHSA-c83g-rgw3-j3cx / GHSA-73wf-gq98-2v4g; affected <=4.28.6, fixed from 4.28.7). The lock now uses 4.28.9 within the existing parent ranges, with only its browser-database dependencies updated. Record the lock delta and require a clean final audit; do not suppress audit findings or reduce severity gates. The original failure remains evidence, not a passing gate.
+
+## Local compatibility prechecks (not the final gate)
+
+- Node 26.8.1 ran the explicit native compiler 7.0.2 while the generator/ESLint API reported 5.9.3. npm dependency-tree validation, frontend lint/type/format/unit/build and 17 E2E scenarios passed on the pre-security-patch quality image; rerun the final image after the Browserslist lock correction.
+- Python 3.14.7 with Ruff 0.16.6 and mypy 2.3.1 passed full backend static checks (236 app source files) and five new integration-contract tests. Ruff's newly enforced UP046 required only a manual PEP-695 syntax update to PackRegistry, preserving its BaseModel bound and every method body; a regression checks highest-version selection and refusal to overwrite a mismatched contract. No rule was disabled.
+- All five upgraded Actions exist at their requested tags and every supplied workflow input is accepted by their action metadata. Release-only operations remain statically checked, not published/executed.
+- The first Python image metadata fetch timed out before any build step. A normal repeat pull succeeded; the requested 3.14 image was used, never a lower-version fallback.
+- Final exact-commit quality images, full PostgreSQL/proxy/API gates, runtime smoke, npm audit and remote CI/Security are still required before the integration/deletion claim.
