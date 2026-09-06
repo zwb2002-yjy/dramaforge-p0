@@ -78,3 +78,7 @@ The root dev worktree intentionally retains unrelated Owner changes, so the exis
 - `tmp/acceptance-git-closeout-20260906/selected-frontend-results.json`
 - `tmp/acceptance-git-closeout-20260906/source-equivalence.json`
 - `docs/reviews/acceptance-repair-20260906.md`
+
+## Exact-head CI follow-up
+
+The first push (`f7d84e1`) passed backend and frontend static/unit/build gates and Security, but two browser tests still clicked the removed canned suggestion's “采纳” button. This is stale test behavior against the explicitly approved A03 change, not authorization to restore fabricated analysis or skip assertions. Extend owned paths to `frontend/tests/e2e/director-assistant.spec.ts`, `director_workflow.spec.ts`, new `contextual-director.ts`, and only the Director design state/persistence fixture changes in `professional-mocks.ts` (its pre-existing navigation fixture edits remain excluded). Exercise exact Scene/Shot entry, no auto request, real contextual suggestion endpoint with controlled mock response, preview/no write, local apply/no write, explicit versioned design save, persistence on reload, and retain separate Canvas/board/asset/review/experiment checks. No product code, timeout, retry or CI gate is relaxed.

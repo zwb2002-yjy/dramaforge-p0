@@ -35,3 +35,9 @@ The selected code tree is `66582bbe808080d4debc6fcda649e503d90bb2e2`. The full e
 Code integration is not whole-project acceptance or a new paid Golden. The vNext Runtime is not implemented by this batch. The root-clean lifecycle guard remains blocked by preserved unrelated edits, so no formal COMPLETED or MERGED ledger entry is fabricated. There is no release tag, publication dispatch, direct main push or branch-protection bypass.
 
 Detailed local logs, preservation hashes and exact source records remain under `D:/dramaforge/tmp/acceptance-repair-20260906/` and `D:/dramaforge/tmp/acceptance-git-closeout-20260906/`.
+
+## Exact-head browser gate follow-up
+
+The first remote run on `f7d84e1` found two obsolete E2E scenarios that still clicked the removed canned suggestion's “采纳” button. They now traverse Production → exact Scene/Shot Director → explicit suggestion request → preview → local draft apply → versioned design save → reload. The fixture persists Director design state and the request assertions reject creative writes before explicit save; the existing last-view preference PATCH is separately checked for its exact navigation-only shape. Canvas, asset, review, Director board and experiment assertions are retained. The duplicated workflow mock was replaced with the repository's shared fixture.
+
+The selected-source follow-up passed typecheck, lint, formatting, the two focused scenarios and all 15 browser E2E tests with no skips. APIs are intercepted by controlled fixtures and the local fallback API is bound to an unused endpoint, not the live service. No application code, timeout, retry, dependency or CI gate was changed. The current-head remote checks remain a separate required gate before merge.

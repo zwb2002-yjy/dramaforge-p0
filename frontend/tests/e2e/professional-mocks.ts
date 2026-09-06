@@ -76,6 +76,7 @@ export type ProfessionalMockState = {
   visual: string;
   imagePrompt: string;
   videoPrompt: string;
+  directorState: Record<string, unknown>;
   editing: EditingMockState;
 };
 
@@ -271,7 +272,7 @@ function workspaceShot(
     ...shotRow(state, version, shotId, shotNumber),
     project_id: PROJECT_ID,
     duration_seconds: shotNumber === 1 ? "5" : "4",
-    director_state: {},
+    director_state: shotNumber === 1 ? clone(state.directorState) : {},
     image_prompt: shotNumber === 1 ? state.imagePrompt : "medium close up",
     video_prompt: shotNumber === 1 ? state.videoPrompt : "locked",
     formal_keyframe_artifact_id: shotId === SHOT_ID ? state.formalKeyframeArtifactId : null,
@@ -421,6 +422,7 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     visual: "主角在雨夜街口转身看向镜头",
     imagePrompt: "close up",
     videoPrompt: "locked",
+    directorState: {},
     editing: {
       session: initialEditingSession(),
       created: false,
@@ -526,8 +528,9 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       state.visual = String(body.visual_description ?? state.visual);
       state.imagePrompt = String(body.image_prompt ?? state.imagePrompt);
       state.videoPrompt = String(body.video_prompt ?? state.videoPrompt);
+      state.directorState = clone(body.director_state ?? state.directorState);
       state.shotVersion += 1;
-      return json(route, shotRow(state, state.shotVersion));
+      return json(route, workspaceShot(state, state.shotVersion, SHOT_ID, 1));
     }
     if (path.endsWith("/execution-plan") && method === "POST") {
       if (body.expected_shot_version !== state.shotVersion) {
