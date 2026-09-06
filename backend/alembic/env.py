@@ -6,17 +6,22 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
+from app.config import get_settings
+from app.shared.base import Base
+from app.shared.model_registry import load_all_models
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-
-from app.config import get_settings
-from app.shared.base import Base
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Alembic runs in a fresh process and does not go through the API/worker
+# startup imports.  Register the complete ORM graph before exposing metadata;
+# otherwise ``--autogenerate`` silently sees an empty Base and cannot detect
+# drift (or resolve cross-domain foreign keys).
+load_all_models()
 target_metadata = Base.metadata
 
 

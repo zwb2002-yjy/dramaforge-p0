@@ -7,29 +7,59 @@ from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Force test-safe defaults before importing the app (never live BYOK in unit tests).
 os.environ["APP_ENV"] = "test"
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-32chars-min")
 os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
-# Keep live keys out of accidental adapter selection if present in parent env.
-os.environ.setdefault("AGNES_ENABLED", "false")
-os.environ.setdefault("TEXT_LLM_ENABLED", "false")
+# Keep live keys out of accidental adapter selection, including ones in root .env.
+os.environ["AGNES_ENABLED"] = "false"
+os.environ["TEXT_LLM_ENABLED"] = "false"
+os.environ["LITELLM_GATEWAY_URL"] = ""
+os.environ["LITELLM_API_KEY"] = ""
+os.environ["WORKER_TOKEN"] = ""
+os.environ["REDIS_URL"] = "redis://127.0.0.1:6399/0"  # nothing listens; fail fast in unit tests
 os.environ.setdefault("DRAMAFORGE_SOURCE_COMMIT", "test-source-commit")
-os.environ.setdefault("INSIGHTFACE_ENABLED", "false")
+# Most legacy isolation tests intentionally create multiple users in one
+# in-memory app. The dedicated bootstrap tests below exercise the release
+# default (false) explicitly.
+os.environ.setdefault("PUBLIC_REGISTRATION_ENABLED", "true")
 
 from app.access import models as _access_models  # noqa: E402,F401
 from app.config import clear_settings_cache, get_settings  # noqa: E402
-from app.creation import models as _creation_models  # noqa: E402,F401
 from app.delivery import models as _delivery_models  # noqa: E402,F401
+from app.director import assistant_models as _director_assistant_models  # noqa: E402,F401
 from app.events import models as _event_models  # noqa: E402,F401
 from app.execution import models as _execution_models  # noqa: E402,F401
 from app.main import create_app  # noqa: E402
 from app.production import models as _production_models  # noqa: E402,F401
+from app.providers import models as _provider_models  # noqa: E402,F401
+from app.providers.model_profiles import orm as _provider_profile_models  # noqa: E402,F401
 from app.security import models as _security_models  # noqa: E402,F401
 from app.shared.base import Base  # noqa: E402
 from app.shared.db import get_session  # noqa: E402
+
+
+def _mirror_postgresql_partial_indexes_on_sqlite() -> None:
+    """Keep SQLite ``create_all`` fixtures faithful to PostgreSQL predicates.
+
+    SQLAlchemy only sees ``postgresql_where`` on the schema-authoritative ORM
+    indexes.  SQLite otherwise creates those indexes without a predicate,
+    turning a partial index into an unrelated table-wide uniqueness rule (for
+    example, making a workspace profile and its project snapshot conflict).
+    Unit tests still exercise every constraint; this only gives SQLite the same
+    partial-index predicate that PostgreSQL uses.
+    """
+    for table in Base.metadata.tables.values():
+        for index in table.indexes:
+            postgres_where = index.dialect_options["postgresql"].get("where")
+            if postgres_where is not None:
+                index.dialect_options["sqlite"]["where"] = text(str(postgres_where))
+
+
+_mirror_postgresql_partial_indexes_on_sqlite()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -45,7 +75,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if not session.config.getoption("--fail-on-skip"):
         return
     reporter = session.config.pluginmanager.getplugin("terminalreporter")
-    skipped = len(reporter.stats.get("skipped", [])) if reporter is not None else 0
+    skipped = len(reporter.stats.get("skipped", [])) if reporter is not None else 0  # type: ignore[union-attr]
     if skipped:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 

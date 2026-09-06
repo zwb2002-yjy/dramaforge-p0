@@ -1,0 +1,91 @@
+{
+  "status": "rejected",
+  "reviewed_at": "2026-08-18T00:00:00+08:00",
+  "project_id": "07a7ff32-ee11-465c-98a2-ad1ced13b2d2",
+  "workflow_run_id": "94a7e3b2-51cd-47c9-ab2c-19a6467b8aa0",
+  "production_batch_id": "02794ecc-2ab6-4bcd-8391-c9024c19e7db",
+  "logical_shot_id": "shot-1",
+  "video_node_run_id": "d8e55479-39bc-48c8-86c5-080082d60b2d",
+  "artifact_id": "decc209b-05e7-4231-98d2-60942ee35461",
+  "artifact_sha256": "985ff363c3f434c0f0201b414ed77ce82e7b9a6a982f26cf7809c0abe3c85a62",
+  "media": {
+    "mime_type": "video/mp4",
+    "width": 704,
+    "height": 1280,
+    "frame_rate": 24,
+    "frame_count": 121,
+    "duration_seconds": 5.041667
+  },
+  "evidence": {
+    "sampling": "2 fps contact sheet over the complete clip",
+    "contact_sheet": "tmp/quality-review/shot-1/contact-small.jpg",
+    "contact_sheet_note": "Derived review image only; original video Artifact remains unchanged.",
+    "observed_interval_seconds": "approximately 0.5-2.5",
+    "observation": "The granddaughter's arm/hand crosses from behind the grandfather and appears through or over his shoulder. Limb ownership and occlusion are anatomically ambiguous, and later frames show pose drift."
+  },
+  "classification": {
+    "quality_layer": "Q3",
+    "issue_type": "unexpected_person_or_limb",
+    "severity": "blocking_for_acceptance",
+    "dimensions": [
+      "character_count",
+      "limb_ownership",
+      "anatomy",
+      "cross_frame_pose_consistency"
+    ]
+  },
+  "human_decision": {
+    "decision": "reject",
+    "reason": "A severe visible limb/occlusion hallucination makes the shot unsuitable for final delivery.",
+    "override_allowed": true,
+    "override_applied": false
+  },
+  "provider_contract": {
+    "provider": "agnes",
+    "model": "agnes-video-v2.0",
+    "official_parameter_source": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-v20.md",
+    "supported_request_fields": [
+      "model",
+      "prompt",
+      "image",
+      "mode",
+      "height",
+      "width",
+      "num_frames",
+      "frame_rate"
+    ],
+    "unsupported_native_controls": [
+      "negative_prompt",
+      "person_count_lock",
+      "anatomy_or_hand_repair",
+      "identity_strength",
+      "seed",
+      "cfg",
+      "denoise_strength"
+    ]
+  },
+  "repair": {
+    "reuse": [
+      "existing keyframe",
+      "voice",
+      "subtitle"
+    ],
+    "invalidate": [
+      "video",
+      "video_drift_review",
+      "composite",
+      "continuity_review"
+    ],
+    "prompt_constraints": [
+      "exactly two visible people",
+      "clear side-by-side composition",
+      "visible shoulder boundaries",
+      "arms remain on their owner's side",
+      "no crossing behind or through the other person's shoulder or torso",
+      "no touching or embrace",
+      "no additional person or limb",
+      "stable body positions with only subtle secondary motion"
+    ],
+    "paid_resubmission_performed": false
+  }
+}

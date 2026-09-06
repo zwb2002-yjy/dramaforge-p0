@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.events.models import OutboxDeadLetter, OutboxEvent
@@ -95,6 +95,39 @@ class OutboxDispatcher:
             row.attempt_count += 1
         await self._session.flush()
         return rows
+
+    async def claim_one_by_event_id(
+        self, *, event_id: UUID, worker_id: str
+    ) -> OutboxEvent | None:
+        """Lease one pending or expired event without scanning sibling projects."""
+        now = datetime.now(UTC)
+        stmt = select(OutboxEvent).where(
+            OutboxEvent.event_id == event_id,
+            or_(
+                and_(
+                    OutboxEvent.status == OutboxStatus.PENDING.value,
+                    OutboxEvent.next_attempt_at <= now,
+                ),
+                and_(
+                    OutboxEvent.status == OutboxStatus.LEASED.value,
+                    OutboxEvent.leased_until < now,
+                ),
+            ),
+        )
+        bind = self._session.get_bind()
+        dialect = getattr(getattr(bind, "dialect", None), "name", "") or ""
+        if dialect.startswith("postgres"):
+            stmt = stmt.with_for_update(skip_locked=True)
+        result = await self._session.execute(stmt)
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        row.status = OutboxStatus.LEASED.value
+        row.locked_by = worker_id
+        row.leased_until = now + timedelta(seconds=self._lease_seconds)
+        row.attempt_count += 1
+        await self._session.flush()
+        return row
 
     async def publish_leased(self, event: OutboxEvent) -> None:
         if event.status == OutboxStatus.PUBLISHED.value:

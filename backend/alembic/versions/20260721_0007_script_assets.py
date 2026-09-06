@@ -6,16 +6,16 @@ Revises: 20260721_0006
 
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "20260721_0007"
-down_revision: Union[str, None] = "20260721_0006"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "20260721_0006"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -121,6 +121,83 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["character_id"], ["characters.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["artifact_id"], ["artifacts.id"], ondelete="RESTRICT"),
+    )
+
+    for table in ("script_documents", "episodes", "shots", "assets"):
+        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        op.execute(f"DROP POLICY IF EXISTS {table}_project_scope ON {table}")
+        op.execute(
+            f"""
+            CREATE POLICY {table}_project_scope ON {table}
+            FOR ALL
+            USING (project_id = app.current_project_id())
+            WITH CHECK (project_id = app.current_project_id())
+            """
+        )
+
+    op.execute("ALTER TABLE scenes ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE scenes FORCE ROW LEVEL SECURITY")
+    op.execute("DROP POLICY IF EXISTS scenes_project_scope ON scenes")
+    op.execute(
+        """
+        CREATE POLICY scenes_project_scope ON scenes
+        FOR ALL
+        USING (EXISTS (
+          SELECT 1 FROM episodes e
+          WHERE e.id = scenes.episode_id
+            AND e.project_id = app.current_project_id()
+        ))
+        WITH CHECK (EXISTS (
+          SELECT 1 FROM episodes e
+          WHERE e.id = scenes.episode_id
+            AND e.project_id = app.current_project_id()
+        ))
+        """
+    )
+
+    op.execute("ALTER TABLE characters ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE characters FORCE ROW LEVEL SECURITY")
+    op.execute("DROP POLICY IF EXISTS characters_project_scope ON characters")
+    op.execute(
+        """
+        CREATE POLICY characters_project_scope ON characters
+        FOR ALL
+        USING (EXISTS (
+          SELECT 1 FROM assets a
+          WHERE a.id = characters.id
+            AND a.project_id = app.current_project_id()
+        ))
+        WITH CHECK (EXISTS (
+          SELECT 1 FROM assets a
+          WHERE a.id = characters.id
+            AND a.project_id = app.current_project_id()
+        ))
+        """
+    )
+
+    op.execute("ALTER TABLE character_references ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE character_references FORCE ROW LEVEL SECURITY")
+    op.execute("DROP POLICY IF EXISTS character_references_project_scope ON character_references")
+    op.execute(
+        """
+        CREATE POLICY character_references_project_scope ON character_references
+        FOR ALL
+        USING (EXISTS (
+          SELECT 1
+          FROM characters c
+          JOIN assets a ON a.id = c.id
+          WHERE c.id = character_references.character_id
+            AND a.project_id = app.current_project_id()
+        ))
+        WITH CHECK (EXISTS (
+          SELECT 1
+          FROM characters c
+          JOIN assets a ON a.id = c.id
+          WHERE c.id = character_references.character_id
+            AND a.project_id = app.current_project_id()
+        ))
+        """
     )
 
 

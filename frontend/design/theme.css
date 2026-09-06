@@ -1,0 +1,72 @@
+/* ============================================================
+   DramaForge Visual System 2.0 — Theme
+   ============================================================
+   Consumes tokens.css loaded by main.tsx. Defines global resets, surface styles,
+   and maps tokens to CSS custom properties used by components.
+   ============================================================ */
+
+/* ---- Reset ---- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--df-font-sans);
+  font-size: var(--df-text-md);
+  line-height: var(--df-leading-normal);
+  color: var(--df-text-primary);
+  background: var(--df-surface-0);
+  min-height: 100vh;
+}
+
+/* ---- Global Links ---- */
+a {
+  color: var(--df-verdigris);
+  text-decoration: none;
+  transition: color var(--df-duration-fast) var(--df-ease);
+}
+a:hover {
+  color: var(--df-text-primary);
+}
+
+/* ---- Global Form Reset ---- */
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---- Scrollbar (minimal) ---- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--df-border);
+  border-radius: var(--df-radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--df-border-strong);
+}
+
+/* ---- Selection ---- */
+::selection {
+  background: var(--df-selection);
+  color: var(--df-text-primary);
+}

@@ -1,0 +1,39 @@
+# Handoff descriptor only. This is NOT an official or verified AIOS manifest.
+schema: dramaforge.compose-adapter/v1
+application: dramaforge
+status: unverified
+runtime:
+  kind: docker-compose
+  files:
+    - docker-compose.yml
+  start: docker compose up -d --build
+  stop: docker compose down
+entrypoint:
+  scheme: http
+  bind_address_env: DRAMAFORGE_BIND_ADDRESS
+  port_env: DRAMAFORGE_PORT
+  default_port: 8080
+health:
+  gateway: /gateway-health
+  application: /health
+persistence:
+  volumes:
+    - postgres_data
+    - minio_data
+    - litellm_db_data
+secrets:
+  required:
+    - POSTGRES_PASSWORD
+    - MINIO_ROOT_PASSWORD
+    - LITELLM_DB_PASSWORD
+    - LITELLM_MASTER_KEY
+    - SESSION_SECRET
+    - WORKER_TOKEN
+    - BYOK_FERNET_KEY
+verification:
+  required_before_claiming_compatibility:
+    - map_to_official_aios_manifest_schema
+    - deploy_in_target_aios_environment
+    - verify_persistent_volume_restore
+    - verify_gateway_and_application_health
+    - verify_first_owner_bootstrap

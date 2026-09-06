@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.config import Settings, get_settings
-from app.providers.flux import ProviderNotConfiguredError
+from app.providers.errors import ProviderNotConfiguredError
 
 
 class LocalEspeakAdapter:

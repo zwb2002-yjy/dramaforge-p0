@@ -25,6 +25,8 @@ class ObjectStore(Protocol):
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
 
+    async def delete_bytes(self, *, object_key: str) -> None: ...
+
     def clear(self) -> None: ...
 
 
@@ -52,6 +54,8 @@ class _MinioClient(Protocol):
 
     def get_object(self, bucket_name: str, object_name: str) -> _MinioResponse: ...
 
+    def remove_object(self, bucket_name: str, object_name: str) -> None: ...
+
 
 class InMemoryObjectStore:
     """Process-wide test/dev store (shared singleton via get_object_store)."""
@@ -74,6 +78,9 @@ class InMemoryObjectStore:
         if object_key not in self._objects:
             raise KeyError(object_key)
         return self._objects[object_key]
+
+    async def delete_bytes(self, *, object_key: str) -> None:
+        self._objects.pop(object_key, None)
 
     def clear(self) -> None:
         self._objects.clear()
@@ -99,7 +106,7 @@ class MinioObjectStore:
             "https://", ""
         )
         secure = self._settings.minio_endpoint.startswith("https://")
-        self._client = cast(
+        client = cast(
             _MinioClient,
             Minio(
                 endpoint,
@@ -109,10 +116,20 @@ class MinioObjectStore:
                 region=self._settings.minio_region,
             ),
         )
+        self._ensure_bucket(client)
+        self._client = client
+        return client
+
+    def _ensure_bucket(self, client: _MinioClient) -> None:
         bucket = self._settings.minio_bucket
-        if not self._client.bucket_exists(bucket):
-            self._client.make_bucket(bucket)
-        return self._client
+        if client.bucket_exists(bucket):
+            return
+        try:
+            client.make_bucket(bucket)
+        except Exception:
+            # Another API/Worker process may create the bucket after our check.
+            if not client.bucket_exists(bucket):
+                raise
 
     async def put_bytes(
         self, *, object_key: str, data: bytes, mime_type: str
@@ -141,6 +158,10 @@ class MinioObjectStore:
         finally:
             response.close()
             response.release_conn()
+
+    async def delete_bytes(self, *, object_key: str) -> None:
+        client = self._ensure_client()
+        client.remove_object(self._settings.minio_bucket, object_key)
 
 
 # Process-wide singleton — Worker, export, and tests MUST share this when not using MinIO.
@@ -171,7 +192,7 @@ def get_object_store(settings: Settings | None = None) -> ObjectStore:
 
         raise ValidationAppError(
             f"OBJECT_STORE_UNAVAILABLE: MinIO not reachable ({type(exc).__name__}: {exc}). "
-            "Start formal stack (scripts/start_p0_wsl_stack.sh). "
+            "Start the Docker Compose stack (docker compose up -d). "
             "Memory store is only allowed for APP_ENV=test or DRAMA_FORCE_MEMORY_STORE=1."
         ) from exc
 

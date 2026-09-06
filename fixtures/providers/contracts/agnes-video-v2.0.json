@@ -1,0 +1,84 @@
+{
+  "contract": {
+    "documentation_source": {
+      "notes": "Public docs specify a public HTTPS URL for top-level image and extra_body.mode=keyframes for keyframes. Raw base64 without a data: prefix is retained only as a vendor-confirmed, live-probed compatibility path.",
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-v20.md",
+      "verified_at": "2026-08-05"
+    },
+    "wire_template": {
+      "host": "https://api.agnes-ai.cn",
+      "method": "POST",
+      "path": "/v1/videos",
+      "poll": {
+        "task_id": "GET /v1/videos/{id}",
+        "video_id": "GET /agnesapi?video_id={id}"
+      },
+      "request_body": {
+        "frame_rate": 24,
+        "height": 1280,
+        "image": "<https-url-or-raw-base64>",
+        "model": "agnes-video-v2.0",
+        "num_frames": 121,
+        "prompt": "<prompt>",
+        "width": 720
+      },
+      "status_machine": [
+        "queued",
+        "running",
+        "succeeded"
+      ],
+      "success_response": {
+        "status": "queued",
+        "task_id": "task-...",
+        "video_id": "vid-..."
+      }
+    }
+  },
+  "manifest": {
+    "catalog_source": "official_static",
+    "display_name": "Agnes Video V2.0",
+    "documented_at": "2026-08-10",
+    "lifecycle": "active",
+    "manifest_version": "2026-08-10",
+    "media_kind": "video",
+    "model_id": "agnes-video-v2.0",
+    "model_revision": "v1",
+    "operations": {
+      "video.generate": {
+        "capabilities": [
+          "video.i2v.first_frame"
+        ],
+        "exclusive_groups": [],
+        "operation": "video.generate",
+        "output_constraints": {
+          "aspect_ratio": "9:16",
+          "frame_rate": {
+            "allowed": [
+              24
+            ]
+          },
+          "height": 1280,
+          "num_frames": {
+            "allowed": [
+              121
+            ]
+          },
+          "width": 720
+        },
+        "reference_constraints": {
+          "first_frame": {
+            "max": 1,
+            "min": 1
+          }
+        }
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "protocol_profile": "agnes_cn_v1",
+    "provider_type": "agnes"
+  },
+  "manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025"
+}

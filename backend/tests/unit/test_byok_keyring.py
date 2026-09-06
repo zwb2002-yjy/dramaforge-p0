@@ -6,6 +6,7 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+from app.access.models import User, Workspace
 from app.security.byok_keyring import (
     KeyringConfigurationError,
     UnknownKeyVersionError,
@@ -66,11 +67,28 @@ def test_credential_rotation_reencrypts_and_records_metadata_only_audit() -> Non
             encoded=f"v1:{old_key},v2:{new_key}",
             legacy_key="",
         )
-        organization_id = uuid4()
+        owner_id = uuid4()
+        workspace_id = uuid4()
         async with factory() as session:
+            session.add(
+                User(
+                    id=owner_id,
+                    email="byok-owner@example.com",
+                    display_name="Owner",
+                    password_hash="hash",
+                )
+            )
+            session.add(
+                Workspace(
+                    id=workspace_id,
+                    owner_user_id=owner_id,
+                    name="BYOK workspace",
+                )
+            )
+            await session.flush()
             record = await store_credential(
                 session,
-                organization_id=organization_id,
+                workspace_id=workspace_id,
                 provider="text",
                 plaintext="provider-token",
                 keyring=old,
@@ -85,7 +103,7 @@ def test_credential_rotation_reencrypts_and_records_metadata_only_audit() -> Non
         async with factory() as session:
             assert await read_credential(
                 session,
-                organization_id=organization_id,
+                workspace_id=workspace_id,
                 provider="text",
                 keyring=both,
             ) == "provider-token"

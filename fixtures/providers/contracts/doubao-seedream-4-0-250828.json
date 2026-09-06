@@ -1,0 +1,72 @@
+{
+  "contract": {
+    "documentation_source": {
+      "notes": "Verified via official Ark docs + arkcli +gen --dry-run.",
+      "url": "https://www.volcengine.com/docs/82379",
+      "verified_at": "2026-08-07"
+    },
+    "wire_template": {
+      "host": "https://ark.cn-beijing.volces.com/api/v3",
+      "method": "POST",
+      "path": "/images/generations",
+      "request_body": {
+        "image": [
+          "https://ref.example/i.png"
+        ],
+        "model": "doubao-seedream-4-0-250828",
+        "prompt": "<prompt>",
+        "response_format": "url",
+        "size": "2048x2048",
+        "watermark": false
+      },
+      "status_machine": [
+        "synchronous"
+      ],
+      "success_response": {
+        "data": [
+          {
+            "url": "https://tos-presigned.example/i.png"
+          }
+        ]
+      }
+    }
+  },
+  "manifest": {
+    "catalog_source": "official_static",
+    "display_name": "Seedream 4.0",
+    "documented_at": "2026-08-10",
+    "lifecycle": "active",
+    "manifest_version": "2026-08-10",
+    "media_kind": "image",
+    "model_id": "doubao-seedream-4-0-250828",
+    "model_revision": "v1",
+    "operations": {
+      "image.generate": {
+        "capabilities": [
+          "image.t2i",
+          "image.i2i"
+        ],
+        "exclusive_groups": [],
+        "operation": "image.generate",
+        "output_constraints": {
+          "response_format": "url",
+          "size": "2048x2048",
+          "watermark": false
+        },
+        "reference_constraints": {
+          "reference_image": {
+            "max": 1,
+            "min": 0
+          }
+        }
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "protocol_profile": "ark_cn_v1",
+    "provider_type": "volcengine"
+  },
+  "manifest_hash": "8cec18e61bf09ca76399f6d49db38ca45a5b712c230973d16688b4ccbf19f77c"
+}

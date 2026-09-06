@@ -1,4 +1,4 @@
-"""Authorized export download tokens (membership-gated, no permanent public URLs)."""
+"""Authorized export download tokens for owned projects, without public URLs."""
 
 from __future__ import annotations
 
@@ -80,11 +80,11 @@ async def authorize_export_download(
     actor: User,
     object_role: str = "timeline_json",
 ) -> DownloadGrant:
-    """Member-only grant for one export object key."""
+    """Owner-only grant for one export object key."""
     exp = await session.get(Export, export_id)
     if exp is None:
         raise NotFoundError("export not found")
-    await ProjectService(session).get_project_for_member(
+    await ProjectService(session).get_project_for_owner(
         project_id=exp.project_id, actor=actor
     )
     manifest = exp.manifest or {}

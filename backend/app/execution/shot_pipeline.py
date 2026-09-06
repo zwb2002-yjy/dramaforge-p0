@@ -1,4 +1,4 @@
-"""Canonical definition of the formal P0 Shot production pipeline."""
+﻿"""Canonical definition of the formal P0 Shot production pipeline."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ class ShotPipelineNode:
 SHOT_PIPELINE_NODES: tuple[ShotPipelineNode, ...] = (
     ShotPipelineNode("prompt", "prompt_compose", "Prompt"),
     ShotPipelineNode("keyframe", "keyframe", "Keyframe"),
-    ShotPipelineNode("face_review", "face_review", "Face review"),
+    ShotPipelineNode("identity_review", "identity_review", "Identity review"),
     ShotPipelineNode("video", "video", "Video"),
     ShotPipelineNode("video_drift_review", "video_review", "Video drift review"),
     ShotPipelineNode("voice", "voice", "Voice"),
@@ -34,10 +34,10 @@ SHOT_PIPELINE_NODES: tuple[ShotPipelineNode, ...] = (
 
 SHOT_PIPELINE_EDGES: tuple[tuple[str, str], ...] = (
     ("prompt", "keyframe"),
-    ("keyframe", "face_review"),
-    ("face_review", "video"),
+    ("keyframe", "identity_review"),
+    ("keyframe", "video"),
     ("video", "video_drift_review"),
-    ("video_drift_review", "composite"),
+    ("video", "composite"),
     ("voice", "composite"),
     ("subtitle", "composite"),
     ("composite", "continuity_review"),

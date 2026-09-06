@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export FastAPI OpenAPI schema to a JSON file (used by generate_openapi_types.ps1)."""
+"""Export FastAPI OpenAPI schema to a JSON file for the generated API contract."""
 
 from __future__ import annotations
 

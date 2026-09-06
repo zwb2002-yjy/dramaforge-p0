@@ -1,4 +1,4 @@
-﻿"""Structural tests for scripts/run_quality.ps1 toolchain selection."""
+"""Structural tests for the container-owned quality entrypoint."""
 
 from __future__ import annotations
 
@@ -8,19 +8,19 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 QUALITY = REPO_ROOT / "scripts" / "run_quality.ps1"
 
 
-def test_run_quality_script_prefers_project_venv() -> None:
+def test_run_quality_script_delegates_to_container_gate() -> None:
     text = QUALITY.read_text(encoding="utf-8")
-    assert "Get-ProjectPython" in text
-    assert "venv" in text and "python.exe" in text
-    assert "& $Python -m ruff" in text
-    assert "& $Python -m mypy" in text
-    assert "& $Python -m pytest" in text
-    assert "basetemp" in text
-    assert "pytest-basetemp" in text
-    assert "codex-pytest-*" in text
+    assert "run_quality_in_docker.ps1" in text
+    assert "@args" in text
+    assert "Get-ProjectPython" not in text
+    assert "pip install" not in text
 
 
-def test_run_quality_uses_npm_cmd_not_bare_python_for_frontend() -> None:
-    text = QUALITY.read_text(encoding="utf-8")
-    assert "Get-NpmCmd" in text or "npm.cmd" in text
-    assert "& $Npm run lint" in text or "npm.cmd run lint" in text
+def test_container_quality_script_owns_all_project_checks() -> None:
+    text = (REPO_ROOT / "scripts" / "run_quality_in_docker.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "docker compose -f docker-compose.quality.yml build" in text
+    assert "backend-quality" in text
+    assert "frontend-quality" in text
+    assert "litellm-integration-quality" in text

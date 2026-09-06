@@ -1,0 +1,33 @@
+services:
+  migrate: &backend-build
+    image: dramaforge-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
+        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+
+  api:
+    <<: *backend-build
+
+  dispatcher:
+    <<: *backend-build
+
+  worker-default:
+    <<: *backend-build
+
+  worker-heavy:
+    <<: *backend-build
+
+  maintenance:
+    <<: *backend-build
+
+  frontend:
+    image: dramaforge-frontend:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
+        DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}

@@ -9,7 +9,7 @@ description = "DramaForge P0 API and workers"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "fastapi>=0.115.0,<0.116",
+  "fastapi>=0.141.1,<0.142",
   "uvicorn[standard]>=0.32.0,<0.35",
   "pydantic>=2.9.0,<3",
   "pydantic-settings>=2.6.0,<3",
@@ -18,8 +18,10 @@ dependencies = [
   "asyncpg>=0.30.0,<0.31",
   "alembic>=1.14.0,<2",
   "httpx>=0.28.0,<0.29",
-  "cryptography>=43.0.0,<45",
-  "Pillow>=11.0.0,<12",
+  "cryptography>=50.0.0,<51",
+  "Pillow>=12.3.0,<13",
+  "numpy>=1.26.0,<2",
+  "opencv-python-headless>=4.10.0,<5",
   "arq>=0.26.0,<0.27",
   "redis>=5.2.0,<6",
   "prometheus-client>=0.21.0,<0.22",
@@ -32,8 +34,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.3.0,<9",
-  "pytest-asyncio>=0.24.0,<0.26",
+  "pytest>=9.0.3,<10",
+  "pytest-asyncio>=1.4.0,<2",
   "ruff>=0.8.0,<0.10",
   "mypy>=1.13.0,<2",
   "types-redis>=4.6.0",
@@ -51,6 +53,11 @@ src = ["app", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Frozen Alembic migration history: keep the SQL/revision logic untouched;
+# style-only line-length is exempted so `ruff check app tests alembic` is clean.
+"alembic/versions/*.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

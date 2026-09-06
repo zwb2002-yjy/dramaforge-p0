@@ -1,0 +1,289 @@
+"""Seed model capability manifests and their stable contract hash.
+
+This module is the single source of truth for the *current* model catalog. It
+is imported by the runtime (``catalog_service`` reads only, never writes) and by
+the tests. The Alembic migration ``20260810_0015`` does **not** import this
+module: it carries a frozen snapshot (``alembic/versions/_seeds_0015.py``) so
+historical migrations stay reproducible. Tests assert the migration seed hash
+equals the hash of this module's manifests.
+
+Only capabilities already covered by a Contract Test, account Probe, or quality
+evidence are declared. Adding an unverified capability here is a bug.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any
+
+MANIFEST_VERSION = "2026-08-10"
+
+# Fixed contract-verification date. NEVER derive from date.today(): the contract
+# hash includes documented_at, so a drifting date would break the frozen-migration
+# hash test every day.
+DOCUMENTED_AT = "2026-08-10"
+
+MINIMAX_MANIFEST_VERSION = "2026-08-13"
+MINIMAX_DOCUMENTED_AT = "2026-08-13"
+
+SEEDANCE_2_MANIFEST_VERSION = "2026-08-17"
+SEEDANCE_2_DOCUMENTED_AT = "2026-08-17"
+
+AGNES_IMAGE_MANIFEST_VERSION = "2026-08-19"
+AGNES_IMAGE_DOCUMENTED_AT = "2026-08-19"
+
+# ---------------------------------------------------------------------------
+# Contract hash: stable canonical JSON sha256. Order- and whitespace-insensitive.
+# ---------------------------------------------------------------------------
+
+
+def hash_manifest(manifest_dict: dict[str, Any]) -> str:
+    """Stable sha256 over the canonical JSON of a manifest dict."""
+    raw = json.dumps(manifest_dict, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _operation(
+    kind: str,
+    *,
+    capabilities: list[str],
+    output_constraints: dict[str, Any] | None = None,
+    reference_constraints: dict[str, dict[str, int]] | None = None,
+    exclusive_groups: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    op: dict[str, Any] = {
+        "operation": kind,
+        "capabilities": capabilities,
+        "output_constraints": output_constraints or {},
+        "reference_constraints": {
+            role: {"min": int(v["min"]), "max": int(v["max"])}
+            for role, v in (reference_constraints or {}).items()
+        },
+        "exclusive_groups": exclusive_groups or [],
+    }
+    return op
+
+
+def _manifest(
+    *,
+    provider_type: str,
+    protocol_profile: str,
+    model_id: str,
+    model_revision: str,
+    media_kind: str,
+    display_name: str,
+    operations: dict[str, dict[str, Any]],
+    option_schema: dict[str, Any] | None = None,
+    manifest_version: str = MANIFEST_VERSION,
+    documented_at: str = DOCUMENTED_AT,
+) -> dict[str, Any]:
+    return {
+        "manifest_version": manifest_version,
+        "provider_type": provider_type,
+        "protocol_profile": protocol_profile,
+        "model_id": model_id,
+        "model_revision": model_revision,
+        "media_kind": media_kind,
+        "display_name": display_name,
+        "lifecycle": "active",
+        "catalog_source": "official_static",
+        "documented_at": documented_at,
+        "operations": operations,
+        "option_schema": option_schema or {"namespace": "", "options": {}},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Current seed manifests. Only verified contracts; wire details live in
+# fixtures/providers/contracts/*.json (same hash — tests enforce equality).
+# ---------------------------------------------------------------------------
+
+SEED_MANIFESTS: list[dict[str, Any]] = [
+    # Agnes China image (Image 2.1 Flash). The v2 catalog revision freezes the
+    # documented native portrait contract: size tier 1K + ratio 9:16, yielding
+    # a documented 736x1312 output. Legacy exact dimensions remain in the
+    # immutable v1 migration row only and are not eligible for new submissions.
+    _manifest(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-image-2.1-flash",
+        model_revision="v2",
+        media_kind="image",
+        display_name="Agnes Image Flash",
+        manifest_version=AGNES_IMAGE_MANIFEST_VERSION,
+        documented_at=AGNES_IMAGE_DOCUMENTED_AT,
+        operations={
+            "image.generate": _operation(
+                "image.generate",
+                capabilities=["image.t2i", "image.i2i"],
+                output_constraints={
+                    "size": "1K",
+                    "aspect_ratio": "9:16",
+                    "width": 736,
+                    "height": 1312,
+                    "response_format": "url",
+                },
+                reference_constraints={
+                    "reference_image": {"min": 0, "max": 1},
+                },
+            )
+        },
+    ),
+    # Agnes China video (Video V2.0). Wire: POST /v1/videos
+    #   {model, prompt, num_frames, frame_rate, height, width, image|extra_body}.
+    # Only first-frame I2V is declared (capability name matches the intent
+    # normalizer's derivation `first_frame -> video.i2v.first_frame`); keyframes /
+    # last_frame / audio have no accepted product-path contract evidence yet.
+    _manifest(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-video-v2.0",
+        model_revision="v1",
+        media_kind="video",
+        display_name="Agnes Video V2.0",
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.i2v.first_frame"],
+                output_constraints={
+                    "num_frames": {"allowed": [121]},
+                    "frame_rate": {"allowed": [24]},
+                    "height": 1280,
+                    "width": 720,
+                    "aspect_ratio": "9:16",
+                },
+                reference_constraints={
+                    "first_frame": {"min": 1, "max": 1},
+                },
+            )
+        },
+    ),
+    # Volcengine Ark Seedream image. Wire: POST {base}/images/generations
+    #   {model, prompt, size, response_format, watermark, seed?, image?:[url]}.
+    # Verified 2026-08-07 via official Ark docs + arkcli +gen --dry-run.
+    _manifest(
+        provider_type="volcengine",
+        protocol_profile="ark_cn_v1",
+        model_id="doubao-seedream-4-0-250828",
+        model_revision="v1",
+        media_kind="image",
+        display_name="Seedream 4.0",
+        operations={
+            "image.generate": _operation(
+                "image.generate",
+                capabilities=["image.t2i", "image.i2i"],
+                output_constraints={
+                    "size": "2048x2048",
+                    "response_format": "url",
+                    "watermark": False,
+                },
+                reference_constraints={
+                    "reference_image": {"min": 0, "max": 1},
+                },
+            )
+        },
+    ),
+    # Volcengine Ark Seedance video. Wire: POST {base}/contents/generations/tasks
+    #   {model, content:[{type:text},{type:image_url, image_url:{url},
+    #   role:"first_frame"}]}. duration/ratio/audio are NOT declared: no accepted
+    #   account-verified evidence for this fixed catalog revision (design §7.2).
+    _manifest(
+        provider_type="volcengine",
+        protocol_profile="ark_cn_v1",
+        model_id="doubao-seedance-1-0-pro-250528",
+        model_revision="v1",
+        media_kind="video",
+        display_name="Seedance 1.0 Pro",
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.i2v.first_frame"],
+                reference_constraints={
+                    "first_frame": {"min": 1, "max": 1},
+                },
+            )
+        },
+    ),
+    # Volcengine Ark Seedance 2.0. The current public model identifier is
+    # account-scoped at execution time, so a real-account Probe remains
+    # mandatory before production. DramaForge exposes only the first-frame I2V
+    # subset already covered by the Ark task compiler; 2.0 audio, duration,
+    # multi-reference and trusted-asset controls stay fail-closed until they
+    # receive separate product and quality evidence.
+    _manifest(
+        provider_type="volcengine",
+        protocol_profile="ark_cn_v1",
+        model_id="doubao-seedance-2-0-260128",
+        model_revision="v1",
+        media_kind="video",
+        display_name="Seedance 2.0",
+        manifest_version=SEEDANCE_2_MANIFEST_VERSION,
+        documented_at=SEEDANCE_2_DOCUMENTED_AT,
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.i2v.first_frame"],
+                reference_constraints={
+                    "first_frame": {"min": 1, "max": 1},
+                },
+            )
+        },
+    ),
+    # MiniMax image-01. Official I2I schema accepts character subject_reference
+    # URLs. The first-launch compiler intentionally exposes one reference and a
+    # fixed 1:1 response; other image controls stay outside the contract.
+    _manifest(
+        provider_type="minimax",
+        protocol_profile="minimax_cn_v1",
+        model_id="image-01",
+        model_revision="v1",
+        media_kind="image",
+        display_name="MiniMax Image 01",
+        manifest_version=MINIMAX_MANIFEST_VERSION,
+        documented_at=MINIMAX_DOCUMENTED_AT,
+        operations={
+            "image.generate": _operation(
+                "image.generate",
+                capabilities=["image.i2i"],
+                output_constraints={
+                    "size": "1024x1024",
+                    "aspect_ratio": "1:1",
+                    "response_format": "url",
+                    "n": 1,
+                },
+                reference_constraints={"reference_image": {"min": 1, "max": 1}},
+            )
+        },
+    ),
+    # MiniMax-H3 Video V2. First-launch scope is one first frame only. H3's
+    # documented last-frame and multimodal-reference modes are deliberately not
+    # declared until they receive their own product/quality contract.
+    _manifest(
+        provider_type="minimax",
+        protocol_profile="minimax_cn_v1",
+        model_id="MiniMax-H3",
+        model_revision="v1",
+        media_kind="video",
+        display_name="MiniMax H3",
+        manifest_version=MINIMAX_MANIFEST_VERSION,
+        documented_at=MINIMAX_DOCUMENTED_AT,
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.i2v.first_frame"],
+                output_constraints={
+                    "resolution": "768P",
+                    "duration_seconds": 5,
+                    "aspect_ratio": "adaptive",
+                    "native_audio": False,
+                },
+                reference_constraints={"first_frame": {"min": 1, "max": 1}},
+            )
+        },
+    ),
+]
+
+
+def seed_manifests_for(*, provider_type: str) -> list[dict[str, Any]]:
+    return [m for m in SEED_MANIFESTS if m["provider_type"] == provider_type]

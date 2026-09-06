@@ -1,0 +1,61 @@
+{
+  "contract": {
+    "documentation_source": {
+      "notes": "Official MiniMax Image I2I API. First-launch subset is one character subject reference and a fixed 1:1 URL response.",
+      "url": "https://platform.minimaxi.com/docs/api-reference/image-generation-i2i.md",
+      "verified_at": "2026-08-13"
+    },
+    "wire_template": {
+      "host": "https://api.minimaxi.com",
+      "method": "POST",
+      "path": "/v1/image_generation",
+      "request_body": {
+        "aigc_watermark": false,
+        "aspect_ratio": "1:1",
+        "model": "image-01",
+        "n": 1,
+        "prompt": "<prompt>",
+        "prompt_optimizer": false,
+        "response_format": "url",
+        "subject_reference": [
+          {
+            "image_file": "https://dramaforge.example/api/v1/provider-references/<token>",
+            "type": "character"
+          }
+        ]
+      },
+      "status_machine": ["synchronous"],
+      "success_response": {
+        "data": {"image_urls": ["https://cdn.minimax.example/image.png"]}
+      }
+    }
+  },
+  "manifest": {
+    "catalog_source": "official_static",
+    "display_name": "MiniMax Image 01",
+    "documented_at": "2026-08-13",
+    "lifecycle": "active",
+    "manifest_version": "2026-08-13",
+    "media_kind": "image",
+    "model_id": "image-01",
+    "model_revision": "v1",
+    "operations": {
+      "image.generate": {
+        "capabilities": ["image.i2i"],
+        "exclusive_groups": [],
+        "operation": "image.generate",
+        "output_constraints": {
+          "aspect_ratio": "1:1",
+          "n": 1,
+          "response_format": "url",
+          "size": "1024x1024"
+        },
+        "reference_constraints": {"reference_image": {"max": 1, "min": 1}}
+      }
+    },
+    "option_schema": {"namespace": "", "options": {}},
+    "protocol_profile": "minimax_cn_v1",
+    "provider_type": "minimax"
+  },
+  "manifest_hash": "30793572ba52b743ab05b3d6237354110a4c51e1b9adb29f5a2b8b51e9e01e3e"
+}

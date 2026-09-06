@@ -30,8 +30,15 @@ def utc_now() -> str:
 
 
 def _git(repo_root: Path, *args: str) -> str:
+    # Recovery verifiers mount the host repository read-only into a Linux
+    # container. Its ownership naturally differs from the unprivileged image
+    # user, so pass Git's scoped safe-directory exception per invocation rather
+    # than mutating the mounted repository or relying on a global container
+    # setting. The path is resolved by the caller and never comes from evidence
+    # input.
+    root = repo_root.resolve()
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
+        ["git", "-c", f"safe.directory={root}", "-C", str(root), *args],
         check=False,
         capture_output=True,
         text=True,
@@ -46,6 +53,17 @@ def _git(repo_root: Path, *args: str) -> str:
 
 def capture_source(repo_root: Path) -> dict[str, Any]:
     root = repo_root.resolve()
+    # Containerized recovery drills may intentionally copy only the verifier
+    # scripts into an image without the repository's .git directory. The host
+    # supplies the commit identity explicitly; dirty defaults to true so this
+    # path can never masquerade as a clean release artifact.
+    override_commit = os.environ.get("DRAMAFORGE_EVIDENCE_SOURCE_COMMIT", "").strip()
+    if override_commit:
+        return {
+            "source_commit": override_commit,
+            "dirty": os.environ.get("DRAMAFORGE_EVIDENCE_DIRTY", "1") != "0",
+            "captured_at_utc": utc_now(),
+        }
     commit = _git(root, "rev-parse", "HEAD")
     status = _git(root, "status", "--porcelain=v1", "--untracked-files=normal")
     return {
@@ -87,7 +105,6 @@ def environment_summary(*, cwd: Path | None = None) -> dict[str, Any]:
         "cwd": str((cwd or Path.cwd()).resolve()),
         "app_env": os.getenv("APP_ENV"),
         "ci": os.getenv("CI"),
-        "wsl_distro_name": os.getenv("WSL_DISTRO_NAME"),
     }
 
 
@@ -144,7 +161,17 @@ def require_ignored_evidence_path(repo_root: Path, path: Path) -> Path:
     except ValueError:
         return resolved
     proc = subprocess.run(
-        ["git", "-C", str(root), "check-ignore", "--quiet", "--", relative.as_posix()],
+        [
+            "git",
+            "-c",
+            f"safe.directory={root}",
+            "-C",
+            str(root),
+            "check-ignore",
+            "--quiet",
+            "--",
+            relative.as_posix(),
+        ],
         check=False,
         capture_output=True,
         text=True,

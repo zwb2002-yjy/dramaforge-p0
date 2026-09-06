@@ -15,18 +15,50 @@ import json
 import sys
 from pathlib import Path
 
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "backend"))
 
 from app.config import get_settings  # noqa: E402
 from app.security.byok_keyring import parse_keyring  # noqa: E402
 from app.security.credentials import rotate_credentials  # noqa: E402
-from app.shared.db import get_session_factory  # noqa: E402
 from app.shared.model_registry import load_all_models  # noqa: E402
 
 
+ROTATION_ROLE = "dramaforge_byok_rotation"
+
+
+def _rotation_session_factory(
+    database_url: str,
+) -> tuple[async_sessionmaker[AsyncSession], AsyncEngine]:
+    """Create an isolated maintenance engine, never reusing the app pool."""
+    engine = create_async_engine(
+        database_url,
+        pool_pre_ping=True,
+        connect_args={"ssl": False},
+    )
+    return (
+        async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False),
+        engine,
+    )
+
+
+async def _activate_rotation_role(session: AsyncSession) -> None:
+    """Require the constrained maintenance role before credential access."""
+    await session.execute(text(f"SET LOCAL ROLE {ROTATION_ROLE}"))
+    bypasses_rls = await session.scalar(
+        text("SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user")
+    )
+    if bypasses_rls is not True:
+        raise RuntimeError(
+            "BYOK rotation requires the dramaforge_byok_rotation maintenance role"
+        )
+
+
 async def _rotate(actor_label: str) -> dict[str, object]:
-    # Rotation touches credential rows with organization foreign keys. Load the
+    # Rotation touches credential rows with workspace foreign keys. Load the
     # complete registry so SQLAlchemy can resolve those mappings when flushing.
     load_all_models()
     settings = get_settings()
@@ -35,14 +67,23 @@ async def _rotate(actor_label: str) -> dict[str, object]:
         encoded=settings.byok_keyring,
         legacy_key=settings.byok_fernet_key,
     )
-    factory = get_session_factory(settings)
-    async with factory() as session:
-        result = await rotate_credentials(
-            session,
-            keyring=keyring,
-            actor_label=actor_label,
+    database_url = settings.byok_rotation_database_url.strip()
+    if not database_url:
+        raise RuntimeError(
+            "BYOK_ROTATION_DATABASE_URL is required and must use a maintenance login"
         )
-        await session.commit()
+    factory, engine = _rotation_session_factory(database_url)
+    try:
+        async with factory() as session:
+            await _activate_rotation_role(session)
+            result = await rotate_credentials(
+                session,
+                keyring=keyring,
+                actor_label=actor_label,
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
     return {
         "ok": True,
         "primary_key_version": keyring.primary_version,

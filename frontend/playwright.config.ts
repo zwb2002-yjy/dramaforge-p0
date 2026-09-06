@@ -19,6 +19,12 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${e2ePort}`,
     trace: "on-first-retry",
+    launchOptions: process.env.DRAMAFORGE_E2E_EXECUTABLE_PATH
+      ? {
+          executablePath: process.env.DRAMAFORGE_E2E_EXECUTABLE_PATH,
+          args: ["--no-sandbox", "--disable-dev-shm-usage"],
+        }
+      : undefined,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

@@ -1,0 +1,1135 @@
+/* ============================================================
+   DramaForge Visual System 2.0 — Components
+   ============================================================
+   All component styles. Consumes tokens.css via theme.css.
+   Organized by component: AppShell, Sidebar, TopBar,
+   PageHeader, Card, Button, Input, Tabs, Badge.
+   ============================================================ */
+
+/* ============================================================
+   1. APP SHELL
+   ============================================================ */
+
+.df-app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--df-surface-0);
+}
+
+.df-app-body {
+  display: grid;
+  grid-template-columns: 0 minmax(0, 1fr);
+  min-height: calc(100vh - var(--df-topbar-h));
+  transition: grid-template-columns var(--df-duration-base) var(--df-ease);
+}
+
+.df-app-body.nav-open {
+  grid-template-columns: var(--df-sidebar-w) minmax(0, 1fr);
+}
+
+.df-app-body.has-inspector {
+  grid-template-columns: 0 minmax(0, 1fr) var(--df-inspector-w);
+}
+
+.df-app-body.nav-open.has-inspector {
+  grid-template-columns: var(--df-sidebar-w) minmax(0, 1fr) var(--df-inspector-w);
+}
+
+@media (max-width: 1100px) {
+  .df-app-body {
+    grid-template-columns: 1fr;
+  }
+  .df-app-body.nav-open,
+  .df-app-body.has-inspector,
+  .df-app-body.nav-open.has-inspector {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   2. SIDEBAR (Left Navigation)
+   ============================================================ */
+
+.df-sidebar {
+  border-right: 1px solid var(--df-border);
+  background: var(--df-surface-1);
+  padding: var(--df-space-3) var(--df-space-2);
+  min-width: 0;
+  overflow: hidden;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--df-duration-fast) var(--df-ease),
+    visibility var(--df-duration-fast) var(--df-ease);
+}
+
+.df-sidebar.open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.df-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-1);
+}
+
+.df-sidebar-link {
+  color: var(--df-text-secondary);
+  padding: var(--df-space-2) var(--df-space-3);
+  border-radius: var(--df-radius-md);
+  text-decoration: none;
+  font-size: var(--df-text-md);
+  transition:
+    background var(--df-duration-fast) var(--df-ease),
+    color var(--df-duration-fast) var(--df-ease);
+}
+
+.df-sidebar-link:hover {
+  background: var(--df-surface-2);
+  color: var(--df-text-primary);
+}
+
+.df-sidebar-link.active {
+  background: var(--df-surface-3);
+  color: var(--df-text-primary);
+  font-weight: var(--df-weight-medium);
+}
+
+.df-sidebar-section {
+  margin: var(--df-space-4) var(--df-space-2) var(--df-space-1);
+  font-size: var(--df-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  color: var(--df-text-muted);
+  font-weight: var(--df-weight-semibold);
+}
+
+.df-sidebar-hint {
+  padding: 0 var(--df-space-3);
+  font-size: var(--df-text-sm);
+  color: var(--df-text-muted);
+  line-height: var(--df-leading-relaxed);
+}
+
+/* Sidebar scrim (mobile overlay) */
+.df-sidebar-scrim {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .df-sidebar {
+    display: block;
+    position: fixed;
+    top: var(--df-topbar-h);
+    bottom: 0;
+    left: 0;
+    width: min(var(--df-sidebar-w), 84vw);
+    z-index: var(--df-z-sticky);
+    box-shadow: var(--df-shadow-xl);
+    transform: translateX(-100%);
+    transition:
+      transform var(--df-duration-base) var(--df-ease),
+      visibility var(--df-duration-base) var(--df-ease);
+  }
+
+  .df-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .df-sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: var(--df-topbar-h) 0 0;
+    z-index: var(--df-z-dropdown);
+    border: 0;
+    border-radius: 0;
+    background: rgba(0, 0, 0, 0.5);
+    cursor: default;
+  }
+}
+
+/* ============================================================
+   3. TOP BAR
+   ============================================================ */
+
+.df-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-3);
+  padding: var(--df-space-2) var(--df-space-4);
+  border-bottom: 1px solid var(--df-border);
+  background: var(--df-surface-overlay);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: var(--df-z-sticky);
+  min-height: var(--df-topbar-h);
+}
+
+.df-topbar-brand {
+  font-weight: var(--df-weight-bold);
+  font-size: var(--df-text-lg);
+  letter-spacing: 0;
+  color: var(--df-text-primary);
+  text-decoration: none;
+}
+
+.df-topbar-brand .df-topbar-accent {
+  color: var(--df-verdigris);
+}
+
+.df-topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-3);
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+}
+
+/* ============================================================
+   4. TABS (Mode Switcher)
+   ============================================================ */
+
+.df-tabs {
+  display: flex;
+  gap: var(--df-space-1);
+  background: var(--df-surface-2);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-md);
+  padding: 2px;
+}
+
+.df-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--df-text-muted);
+  text-decoration: none;
+  padding: var(--df-space-1) var(--df-space-3);
+  border-radius: calc(var(--df-radius-md) - 2px);
+  font-size: var(--df-text-sm);
+  font-weight: var(--df-weight-medium);
+  line-height: var(--df-leading-normal);
+  cursor: pointer;
+  transition:
+    background var(--df-duration-fast) var(--df-ease),
+    color var(--df-duration-fast) var(--df-ease);
+}
+
+.df-tab:hover {
+  border-color: transparent;
+  background: transparent;
+  color: var(--df-text-primary);
+}
+
+.df-tab.active {
+  background: var(--df-surface-3);
+  color: var(--df-text-primary);
+}
+
+/* ============================================================
+   5. BADGE (Status Indicators)
+   ============================================================ */
+
+.df-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--df-space-1);
+  font-size: var(--df-text-xs);
+  padding: 2px var(--df-space-2);
+  border-radius: var(--df-radius-full);
+  border: 1px solid var(--df-border);
+  color: var(--df-text-secondary);
+  white-space: nowrap;
+  line-height: var(--df-leading-normal);
+}
+
+.df-badge.ok {
+  color: var(--df-success);
+  border-color: var(--df-success-border);
+  background: var(--df-success-dim);
+}
+
+.df-badge.warn {
+  color: var(--df-warning);
+  border-color: var(--df-warning-border);
+  background: var(--df-warning-dim);
+}
+
+.df-badge.err {
+  color: var(--df-danger);
+  border-color: var(--df-danger-border);
+  background: var(--df-danger-dim);
+}
+
+.df-badge.info {
+  color: var(--df-info);
+  border-color: var(--df-info-border);
+  background: var(--df-info-dim);
+}
+
+.df-badge.verdigris {
+  color: var(--df-verdigris);
+  border-color: var(--df-success-border);
+  background: var(--df-verdigris-tint);
+}
+
+/* ============================================================
+   6. PAGE HEADER
+   ============================================================ */
+
+.df-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--df-space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--df-space-2);
+}
+
+.df-page-header h1 {
+  margin: 0;
+}
+
+.df-page-header-actions {
+  display: flex;
+  gap: var(--df-space-2);
+  align-items: center;
+}
+
+/* ============================================================
+   7. CARD
+   ============================================================ */
+
+.df-card {
+  background: var(--df-surface-2);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-lg);
+  padding: var(--df-space-5);
+  transition: border-color var(--df-duration-fast) var(--df-ease);
+}
+
+.df-card:hover {
+  border-color: var(--df-border-strong);
+}
+
+.df-card.selected {
+  border-color: var(--df-verdigris);
+  box-shadow: 0 0 0 1px var(--df-focus-ring);
+}
+
+.df-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--df-space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--df-space-3);
+}
+
+.df-card-header h3 {
+  margin: 0;
+}
+
+.df-card-header h2 {
+  margin: 0;
+}
+
+/* ============================================================
+   8. BUTTON
+   ============================================================ */
+
+.df-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--df-space-2);
+  border: 1px solid var(--df-border-strong);
+  background: var(--df-surface-3);
+  color: var(--df-text-primary);
+  border-radius: var(--df-radius-md);
+  padding: var(--df-space-2) var(--df-space-4);
+  cursor: pointer;
+  font-size: var(--df-text-md);
+  font-weight: var(--df-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background var(--df-duration-fast) var(--df-ease),
+    border-color var(--df-duration-fast) var(--df-ease),
+    box-shadow var(--df-duration-fast) var(--df-ease);
+}
+
+.df-btn:hover {
+  border-color: var(--df-verdigris);
+  background: var(--df-surface-raised);
+}
+
+.df-btn:active {
+  transform: scale(0.98);
+}
+
+/* Primary — verdigris filled */
+.df-btn.primary {
+  background: var(--df-verdigris);
+  border-color: var(--df-verdigris);
+  color: var(--df-obsidian);
+  font-weight: var(--df-weight-semibold);
+}
+
+.df-btn.primary:hover {
+  background: var(--df-verdigris-dim);
+  border-color: var(--df-verdigris-dim);
+}
+
+/* Accent — brass */
+.df-btn.accent {
+  background: var(--df-brass);
+  border-color: var(--df-brass);
+  color: var(--df-obsidian);
+  font-weight: var(--df-weight-semibold);
+}
+
+.df-btn.accent:hover {
+  background: var(--df-brass-dim);
+  border-color: var(--df-brass-dim);
+}
+
+/* Ghost — transparent */
+.df-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.df-btn.ghost:hover {
+  background: var(--df-surface-2);
+  border-color: var(--df-border);
+}
+
+/* Danger */
+.df-btn.danger {
+  border-color: var(--df-danger-border);
+  color: var(--df-danger-text);
+}
+
+.df-btn.danger:hover {
+  background: var(--df-danger-dim);
+  border-color: var(--df-danger);
+}
+
+.df-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ============================================================
+   9. INPUT
+   ============================================================ */
+
+.df-input {
+  background: var(--df-surface-0);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-md);
+  color: var(--df-text-primary);
+  padding: var(--df-space-2) var(--df-space-3);
+  font-size: var(--df-text-md);
+  line-height: var(--df-leading-normal);
+  width: 100%;
+  transition:
+    border-color var(--df-duration-fast) var(--df-ease),
+    box-shadow var(--df-duration-fast) var(--df-ease);
+}
+
+.df-input::placeholder {
+  color: var(--df-text-muted);
+}
+
+.df-input:focus {
+  outline: none;
+  border-color: var(--df-verdigris);
+  box-shadow: 0 0 0 2px var(--df-focus-ring);
+}
+
+textarea.df-input {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+select.df-input {
+  cursor: pointer;
+}
+
+/* Form group */
+.df-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-1);
+}
+
+.df-label {
+  font-size: var(--df-text-sm);
+  color: var(--df-text-secondary);
+  font-weight: var(--df-weight-medium);
+}
+
+/* ============================================================
+   10. PANEL (Content Container)
+   ============================================================ */
+
+.df-panel {
+  background: var(--df-surface-2);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-lg);
+  padding: var(--df-space-5);
+  margin-bottom: var(--df-space-4);
+}
+
+.df-panel h2 {
+  margin: 0 0 var(--df-space-2);
+  font-size: var(--df-text-xl);
+}
+
+.df-panel h3 {
+  margin: 0 0 var(--df-space-3);
+  font-size: var(--df-text-lg);
+  color: var(--df-text-primary);
+}
+
+.df-panel h4 {
+  margin: var(--df-space-2) 0;
+  font-size: var(--df-text-md);
+  color: var(--df-text-secondary);
+  font-weight: var(--df-weight-semibold);
+}
+
+/* ============================================================
+   11. INSPECTOR (Right Sidebar)
+   ============================================================ */
+
+.df-inspector {
+  border-left: 1px solid var(--df-border);
+  padding: var(--df-space-4);
+  background: var(--df-surface-1);
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+  overflow: auto;
+}
+
+.df-inspector h3 {
+  margin: 0 0 var(--df-space-2);
+  color: var(--df-text-primary);
+  font-size: var(--df-text-md);
+}
+
+.df-inspector-stat {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--df-space-1) 0;
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+
+.df-inspector-stat strong {
+  color: var(--df-text-primary);
+  font-weight: var(--df-weight-semibold);
+}
+
+/* ============================================================
+   12. CALLOUT
+   ============================================================ */
+
+.df-callout {
+  border-left: 3px solid var(--df-verdigris);
+  padding: var(--df-space-2) var(--df-space-3);
+  background: var(--df-verdigris-tint);
+  border-radius: 0 var(--df-radius-md) var(--df-radius-md) 0;
+  margin: var(--df-space-2) 0;
+  color: var(--df-text-primary);
+  font-size: var(--df-text-md);
+}
+
+.df-callout.warn {
+  border-left-color: var(--df-warning);
+  background: var(--df-warning-dim);
+}
+
+.df-callout.danger {
+  border-left-color: var(--df-danger);
+  background: var(--df-danger-dim);
+}
+
+/* ============================================================
+   13. FLASH (Inline Messages)
+   ============================================================ */
+
+.df-flash {
+  padding: var(--df-space-2) var(--df-space-3);
+  border-radius: var(--df-radius-md);
+  margin: var(--df-space-2) 0;
+  font-size: var(--df-text-md);
+}
+
+.df-flash.ok {
+  background: var(--df-success-dim);
+  border: 1px solid var(--df-success-border);
+  color: var(--df-success-text);
+}
+
+.df-flash.err {
+  background: var(--df-danger-dim);
+  border: 1px solid var(--df-danger-border);
+  color: var(--df-danger-text);
+}
+
+/* ============================================================
+   14. TOOLBAR
+   ============================================================ */
+
+.df-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+  margin: var(--df-space-2) 0;
+}
+
+/* ============================================================
+   15. STATUS
+   ============================================================ */
+
+.df-status-ok {
+  color: var(--df-success);
+}
+.df-status-bad {
+  color: var(--df-danger);
+}
+.df-status-pending {
+  color: var(--df-warning);
+}
+
+/* ============================================================
+   16. MISC UTILITY
+   ============================================================ */
+
+.df-muted {
+  color: var(--df-text-muted);
+}
+
+/* Design preview */
+.df-design-preview {
+  width: min(100%, 1040px);
+  margin: 0 auto;
+}
+
+.df-preview-section {
+  padding: var(--df-space-6) 0;
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+
+.df-preview-section > h2 {
+  margin: 0 0 var(--df-space-4);
+  font-size: var(--df-text-lg);
+}
+
+.df-preview-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--df-space-2);
+}
+
+.df-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  gap: var(--df-space-3);
+}
+
+.df-swatch {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--df-space-3);
+  min-width: 0;
+}
+
+.df-swatch-color {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--df-border-strong);
+  border-radius: var(--df-radius-sm);
+}
+
+.df-swatch strong,
+.df-swatch code {
+  display: block;
+}
+
+.df-type-specimen {
+  display: grid;
+  gap: var(--df-space-2);
+}
+
+.df-preview-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--df-space-4);
+  max-width: 760px;
+}
+
+.df-preview-form .df-form-group:nth-child(2) {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.df-preview-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--df-space-3);
+}
+
+.df-card-quality {
+  border-left: 3px solid var(--df-success);
+}
+
+.df-pill {
+  display: inline-block;
+  padding: 2px var(--df-space-2);
+  border-radius: var(--df-radius-full);
+  border: 1px solid var(--df-border);
+  font-size: var(--df-text-xs);
+}
+
+/* ============================================================
+   LEGACY COMPATIBILITY — Maps old class names to new tokens
+   ============================================================ */
+
+:root {
+  /* Old var names → new tokens (for gradual migration) */
+  --bg: var(--df-surface-0);
+  --bg-elevated: var(--df-surface-1);
+  --panel: var(--df-surface-2);
+  --panel-2: var(--df-surface-3);
+  --border: var(--df-border);
+  --border-strong: var(--df-border-strong);
+  --text: var(--df-text-primary);
+  --muted: var(--df-text-secondary);
+  --accent: var(--df-verdigris);
+  --accent-dim: var(--df-verdigris-dim);
+  --brand: var(--df-verdigris);
+  --warn: var(--df-warning);
+  --danger: var(--df-danger);
+  --ok: var(--df-success);
+  --radius: var(--df-radius-lg);
+  --shadow: var(--df-shadow-xl);
+  --stage-w: 280px;
+}
+
+/* Legacy shell classes → new tokens */
+.workstation {
+  background: var(--df-surface-0);
+}
+
+.workstation-topbar {
+  background: var(--df-surface-overlay);
+  border-bottom-color: var(--df-border);
+  min-height: var(--df-topbar-h);
+}
+
+.workstation-topbar .brand {
+  color: var(--df-text-primary);
+}
+.workstation-topbar .brand span {
+  color: var(--df-verdigris);
+}
+
+.workstation-body {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+.workstation-body.nav-open {
+  grid-template-columns: var(--df-sidebar-w) minmax(0, 1fr);
+}
+.workstation-body.has-inspector {
+  grid-template-columns: 0 minmax(0, 1fr) var(--df-inspector-w);
+}
+.workstation-body.nav-open.has-inspector {
+  grid-template-columns: var(--df-sidebar-w) minmax(0, 1fr) var(--df-inspector-w);
+}
+
+.nav {
+  background: var(--df-surface-1);
+  border-right-color: var(--df-border);
+}
+.nav a {
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-md);
+}
+.nav a:hover,
+.nav a.active {
+  background: var(--df-surface-2);
+  color: var(--df-text-primary);
+}
+.nav .nav-section {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+}
+
+.workstation-main {
+  padding: var(--df-space-4) var(--df-space-5) var(--df-space-8);
+}
+
+.inspector {
+  background: var(--df-surface-1);
+  border-left-color: var(--df-border);
+  color: var(--df-text-secondary);
+}
+.inspector h3 {
+  color: var(--df-text-primary);
+}
+.inspector .pill {
+  border-color: var(--df-border);
+  color: var(--df-text-secondary);
+}
+.inspector-stat {
+  border-bottom-color: var(--df-border-subtle);
+}
+.inspector-stat strong {
+  color: var(--df-text-primary);
+}
+
+/* Legacy panels → new tokens */
+.panel {
+  background: var(--df-surface-2);
+  border-color: var(--df-border);
+  box-shadow: var(--df-shadow-md);
+}
+.panel h2,
+.panel h3 {
+  color: var(--df-text-primary);
+}
+.panel h4 {
+  color: var(--df-text-secondary);
+}
+
+.panel-header {
+  gap: var(--df-space-4);
+  margin-bottom: var(--df-space-3);
+}
+.panel-header h1 {
+  font-size: var(--df-text-lg);
+}
+
+/* Legacy forms */
+input,
+textarea,
+select {
+  background: var(--df-surface-0);
+  border-color: var(--df-border);
+  color: var(--df-text-primary);
+}
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--df-verdigris);
+  box-shadow: 0 0 0 2px var(--df-focus-ring);
+}
+
+label {
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+}
+
+/* Legacy buttons → new tokens */
+button {
+  background: var(--df-surface-3);
+  border-color: var(--df-border-strong);
+  color: var(--df-text-primary);
+  border-radius: var(--df-radius-md);
+  cursor: pointer;
+  font-size: var(--df-text-md);
+}
+button.primary {
+  background: var(--df-verdigris);
+  border-color: var(--df-verdigris);
+  color: var(--df-obsidian);
+}
+button.accent {
+  background: var(--df-brass);
+  border-color: var(--df-brass);
+  color: var(--df-obsidian);
+}
+button.ghost {
+  background: transparent;
+}
+button.danger {
+  border-color: var(--df-danger-border);
+  color: var(--df-danger-text);
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+button:not(:disabled):hover {
+  border-color: var(--df-verdigris);
+}
+
+/* Legacy status */
+.status-ok {
+  color: var(--df-success);
+}
+.status-bad {
+  color: var(--df-danger);
+}
+.status-pending {
+  color: var(--df-warning);
+}
+
+.status-card {
+  border-color: var(--df-border);
+  background: var(--df-surface-3);
+}
+.status-label {
+  color: var(--df-text-muted);
+}
+
+/* Legacy callout */
+.callout {
+  border-left-color: var(--df-verdigris);
+  background: var(--df-verdigris-tint);
+}
+.callout.warn {
+  border-left-color: var(--df-warning);
+  background: var(--df-warning-dim);
+}
+
+/* Legacy flash */
+.flash {
+  border-radius: var(--df-radius-md);
+}
+.flash.ok {
+  background: var(--df-success-dim);
+  border-color: var(--df-success-border);
+  color: var(--df-success-text);
+}
+.flash.err {
+  background: var(--df-danger-dim);
+  border-color: var(--df-danger-border);
+  color: var(--df-danger-text);
+}
+
+/* Legacy code */
+code {
+  color: var(--df-verdigris);
+  background: var(--df-surface-2);
+  border-color: var(--df-border-subtle);
+}
+
+/* Legacy muted */
+.muted {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-md);
+}
+
+/* Legacy pill */
+.pill {
+  border-color: var(--df-border);
+  color: var(--df-text-secondary);
+}
+
+/* Legacy nav-scrim */
+.nav-scrim {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* Legacy workspace rows */
+.workspace-select:hover,
+.project-row:hover {
+  background: var(--df-surface-3);
+}
+.workspace-row.selected {
+  background: var(--df-verdigris-tint);
+}
+
+/* Legacy provider */
+.provider-fixed-fields > div {
+  border-color: var(--df-border);
+  background: var(--df-surface-0);
+}
+.provider-binding {
+  border-color: var(--df-border);
+  background: var(--df-surface-0);
+}
+
+/* Legacy evidence states */
+.evidence-state {
+  border-color: var(--df-border);
+}
+.evidence-state.passed {
+  color: var(--df-success);
+  border-color: var(--df-success-border);
+  background: var(--df-success-dim);
+}
+.evidence-state.pending {
+  color: var(--df-warning);
+  border-color: var(--df-warning-border);
+  background: var(--df-warning-dim);
+}
+
+/* Shared Director Assistant label */
+.director-stage-kicker {
+  color: var(--df-verdigris);
+}
+
+.mode-banner {
+  background: var(--df-verdigris-tint);
+  border-color: var(--df-border);
+}
+.mode-banner strong {
+  color: var(--df-verdigris);
+}
+
+/* Legacy stage badge */
+.stage-badge {
+  background: rgba(0, 0, 0, 0.7);
+  border-color: var(--df-border);
+  color: var(--df-verdigris);
+}
+
+/* Legacy workflow steps */
+.workflow-steps li {
+  border-color: var(--df-border);
+  color: var(--df-text-muted);
+}
+.workflow-steps li.active {
+  color: var(--df-verdigris);
+  border-color: rgba(79, 159, 140, 0.4);
+  background: var(--df-verdigris-tint);
+}
+.workflow-steps li.done {
+  color: var(--df-success);
+  border-color: rgba(77, 147, 122, 0.35);
+}
+
+/* Legacy shot card */
+.shot-card {
+  border-color: var(--df-border);
+  background: var(--df-surface-0);
+}
+.shot-card:hover {
+  border-color: var(--df-border-strong);
+}
+.shot-card.selected {
+  border-color: var(--df-verdigris);
+  box-shadow: 0 0 0 1px var(--df-verdigris-dim);
+}
+.shot-card .dot {
+  background: var(--df-surface-3);
+}
+.shot-card .dot.done {
+  background: var(--df-success);
+}
+.shot-card .dot.fail {
+  background: var(--df-danger);
+}
+.shot-card .dot.run {
+  background: var(--df-warning);
+}
+
+/* Legacy pipeline */
+.pipeline-node {
+  border-color: var(--df-border);
+  background: var(--df-surface-0);
+  color: var(--df-text-muted);
+}
+.pipeline-node.done {
+  color: var(--df-success);
+  border-color: rgba(77, 147, 122, 0.35);
+  background: var(--df-success-dim);
+}
+.pipeline-node.fail {
+  color: var(--df-danger);
+  border-color: rgba(192, 57, 43, 0.35);
+  background: var(--df-danger-dim);
+}
+.pipeline-node.run {
+  color: var(--df-warning);
+  border-color: rgba(184, 134, 11, 0.35);
+  background: var(--df-warning-dim);
+}
+
+/* Legacy ref chip, timeline, detail */
+.ref-chip {
+  border-color: var(--df-border);
+  background: var(--df-surface-0);
+}
+.timeline-chip {
+  border-color: var(--df-border);
+  background: var(--df-surface-0);
+  color: var(--df-text-muted);
+}
+.timeline-chip.selected {
+  border-color: var(--df-verdigris);
+  color: var(--df-text-primary);
+}
+.detail-panel {
+  border-color: var(--df-border);
+  background: var(--df-surface-3);
+}
+
+/* Legacy node runtime */
+.node-runtime-row {
+  border-color: var(--df-border);
+  background: var(--df-surface-0);
+}
+.node-runtime-state.done {
+  color: var(--df-success);
+}
+.node-runtime-state.fail {
+  color: var(--df-danger);
+}
+.node-runtime-state.run {
+  color: var(--df-warning);
+}
+
+/* ============================================================
+   BODY BACKGROUND
+   ============================================================ */
+body {
+  background: var(--df-surface-0);
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 900px) {
+  .df-inspector {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .df-topbar {
+    gap: var(--df-space-2);
+    padding: var(--df-space-2) var(--df-space-3);
+  }
+  .df-topbar-meta span:first-child {
+    display: none;
+  }
+  .df-page-header {
+    flex-direction: column;
+  }
+  .df-page-header-actions {
+    width: 100%;
+  }
+  .df-preview-form,
+  .df-preview-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .df-preview-form .df-form-group:nth-child(2) {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}

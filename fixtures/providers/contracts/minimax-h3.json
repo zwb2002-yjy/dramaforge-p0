@@ -1,0 +1,60 @@
+{
+  "contract": {
+    "documentation_source": {
+      "notes": "Official MiniMax H3 Video V2 API. First-launch subset is one HTTPS first frame with fixed 768P, five seconds, adaptive ratio, and no native audio.",
+      "url": "https://platform.minimaxi.com/docs/api-reference/video-generation-v2-create.md",
+      "verified_at": "2026-08-13"
+    },
+    "wire_template": {
+      "host": "https://api.minimaxi.com",
+      "method": "POST",
+      "path": "/v2/video_generation",
+      "poll": {"task_id": "GET /v2/query/video_generation/{id}"},
+      "request_body": {
+        "aigc_watermark": false,
+        "content": [
+          {"text": "<prompt>", "type": "text"},
+          {
+            "image_url": {"url": "https://dramaforge.example/api/v1/provider-references/<token>"},
+            "role": "first_frame",
+            "type": "image_url"
+          }
+        ],
+        "duration": 5,
+        "model": "MiniMax-H3",
+        "ratio": "adaptive",
+        "resolution": "768P"
+      },
+      "status_machine": ["queued", "running", "succeeded"],
+      "success_response": {"task_id": "task-..."}
+    }
+  },
+  "manifest": {
+    "catalog_source": "official_static",
+    "display_name": "MiniMax H3",
+    "documented_at": "2026-08-13",
+    "lifecycle": "active",
+    "manifest_version": "2026-08-13",
+    "media_kind": "video",
+    "model_id": "MiniMax-H3",
+    "model_revision": "v1",
+    "operations": {
+      "video.generate": {
+        "capabilities": ["video.i2v.first_frame"],
+        "exclusive_groups": [],
+        "operation": "video.generate",
+        "output_constraints": {
+          "aspect_ratio": "adaptive",
+          "duration_seconds": 5,
+          "native_audio": false,
+          "resolution": "768P"
+        },
+        "reference_constraints": {"first_frame": {"max": 1, "min": 1}}
+      }
+    },
+    "option_schema": {"namespace": "", "options": {}},
+    "protocol_profile": "minimax_cn_v1",
+    "provider_type": "minimax"
+  },
+  "manifest_hash": "04dd2d914a517a45bbc14a6a5ab91c525185a76b9145d8a2b5f040f6a8e00ba8"
+}

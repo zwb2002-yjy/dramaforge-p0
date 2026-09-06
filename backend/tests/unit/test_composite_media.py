@@ -1,21 +1,22 @@
-"""Contract tests for local composite media execution."""
+﻿"""Contract tests for local composite media execution."""
 
 from __future__ import annotations
 
 import hashlib
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
-from app.access.models import Organization, OrganizationMember, User
+from app.access.models import User, Workspace
 from app.access.projects import ProjectService
 from app.config import clear_settings_cache
-from app.creation import models as _cm  # noqa: F401
 from app.execution import models as _xm  # noqa: F401
 from app.execution.composite_media import (
     CompositeInputs,
     CompositeRenderError,
+    _voice_audio_filter,
     composite_inputs_pending,
     composite_lineage_fingerprint,
     deterministic_composite_test_bytes,
@@ -25,7 +26,6 @@ from app.execution.product_path import execute_media_node_run
 from app.production import models as _pm  # noqa: F401
 from app.production.service import GraphService
 from app.shared.base import Base
-from app.shared.enums import MemberRole
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import InMemoryObjectStore, reset_object_store_for_tests
@@ -44,6 +44,17 @@ _SOURCE_META = {
 }
 
 
+def test_voice_audio_filter_fits_small_overrun_without_truncation() -> None:
+    audio_filter = _voice_audio_filter(video_duration=5.04, voice_duration=5.19)
+
+    assert audio_filter == "atempo=1.029762,apad"
+
+
+def test_voice_audio_filter_rejects_excessive_speedup() -> None:
+    with pytest.raises(CompositeRenderError, match="required speed-up"):
+        _voice_audio_filter(video_duration=5.0, voice_duration=7.0)
+
+
 @dataclass(frozen=True)
 class SourceMedia:
     run: NodeRun
@@ -59,7 +70,7 @@ class CompositeFixture:
 
 
 @pytest.fixture
-async def session() -> AsyncSession:
+async def session() -> AsyncGenerator[AsyncSession, None]:
     reset_object_store_for_tests()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -69,23 +80,6 @@ async def session() -> AsyncSession:
         yield db_session
     await engine.dispose()
     reset_object_store_for_tests()
-
-
-class ExplodingAdapter:
-    provider = "kling"
-
-    def __init__(self) -> None:
-        self.called = False
-
-    async def create(self, request: dict[str, object]) -> dict[str, object]:
-        self.called = True
-        raise AssertionError(f"composite must not call Provider: {request}")
-
-    async def poll(self, remote_task_id: str) -> dict[str, object]:
-        raise AssertionError(f"composite must not poll Provider: {remote_task_id}")
-
-    async def fetch_cost(self, remote_task_id: str) -> dict[str, object]:
-        raise AssertionError(f"composite must not fetch Provider cost: {remote_task_id}")
 
 
 async def _make_composite_fixture(
@@ -105,19 +99,12 @@ async def _make_composite_fixture(
     )
     session.add(user)
     await session.flush()
-    org = Organization(name=f"Composite-{uuid4().hex[:8]}")
-    session.add(org)
+    workspace = Workspace(owner_user_id=user.id, name=f"Composite-{uuid4().hex[:8]}")
+    session.add(workspace)
     await session.flush()
-    session.add(
-        OrganizationMember(
-            organization_id=org.id,
-            user_id=user.id,
-            role=MemberRole.OWNER.value,
-        )
-    )
     await session.flush()
     project = await ProjectService(session).create_project(
-        organization_id=org.id,
+        workspace_id=workspace.id,
         name="Composite media",
         aspect_ratio="9:16",
         actor=user,
@@ -267,18 +254,17 @@ async def test_composite_runs_locally_with_complete_media_lineage(
     session: AsyncSession,
 ) -> None:
     fixture = await _make_composite_fixture(session, add_older_video=True)
-    adapter = ExplodingAdapter()
 
     result = await execute_media_node_run(
         session,
         node_run_id=fixture.composite_run.id,
         store=fixture.store,
-        flux=adapter,  # type: ignore[arg-type]
     )
 
     expected_inputs = _media_lineage(fixture.sources)
     expected_bytes = deterministic_composite_test_bytes(
         CompositeInputs(
+            composite_run_id=str(fixture.composite_run.id),
             media_inputs=expected_inputs,
             video=fixture.sources["video"].data,
             voice=fixture.sources["voice"].data,
@@ -295,7 +281,6 @@ async def test_composite_runs_locally_with_complete_media_lineage(
         )
     ).scalars().all()
 
-    assert adapter.called is False
     assert operations == []
     assert run is not None
     assert run.status == "completed"
@@ -310,8 +295,8 @@ async def test_composite_runs_locally_with_complete_media_lineage(
     assert result.provider_operation_id is None
 
 
-def test_deterministic_composite_bytes_bind_source_run_lineage() -> None:
-    """Identical media from independent NodeRuns must not collapse to one Artifact."""
+def test_deterministic_composite_bytes_bind_source_and_output_run_lineage() -> None:
+    """Independent composite NodeRuns must not collapse to one Artifact."""
     base_inputs = {
         key: {
             "artifact_id": f"artifact-{key}",
@@ -331,12 +316,14 @@ def test_deterministic_composite_bytes_bind_source_run_lineage() -> None:
         for key, value in base_inputs.items()
     }
     first = CompositeInputs(
+        composite_run_id="composite-first",
         media_inputs=base_inputs,
         video=_SOURCE_BYTES["video"],
         voice=_SOURCE_BYTES["voice"],
         subtitle=_SOURCE_BYTES["subtitle"],
     )
     second = CompositeInputs(
+        composite_run_id="composite-second",
         media_inputs=second_inputs,
         video=_SOURCE_BYTES["video"],
         voice=_SOURCE_BYTES["voice"],
@@ -345,6 +332,37 @@ def test_deterministic_composite_bytes_bind_source_run_lineage() -> None:
 
     assert composite_lineage_fingerprint(first) != composite_lineage_fingerprint(second)
     assert deterministic_composite_test_bytes(first) != deterministic_composite_test_bytes(second)
+
+
+def test_deterministic_composite_bytes_distinguish_reruns_with_same_inputs() -> None:
+    """A legal composite re-run has new output ownership even with unchanged media."""
+    inputs = {
+        key: {
+            "artifact_id": f"artifact-{key}",
+            "object_key": f"projects/p/nodes/{key}/source",
+            "content_hash": hashlib.sha256(data).hexdigest(),
+            "mime_type": _SOURCE_META[key][1],
+            "source_node_run_id": f"source-{key}",
+        }
+        for key, data in _SOURCE_BYTES.items()
+    }
+    first = CompositeInputs(
+        composite_run_id="composite-first",
+        media_inputs=inputs,
+        video=_SOURCE_BYTES["video"],
+        voice=_SOURCE_BYTES["voice"],
+        subtitle=_SOURCE_BYTES["subtitle"],
+    )
+    rerun = CompositeInputs(
+        composite_run_id="composite-rerun",
+        media_inputs=inputs,
+        video=_SOURCE_BYTES["video"],
+        voice=_SOURCE_BYTES["voice"],
+        subtitle=_SOURCE_BYTES["subtitle"],
+    )
+
+    assert composite_lineage_fingerprint(first) != composite_lineage_fingerprint(rerun)
+    assert deterministic_composite_test_bytes(first) != deterministic_composite_test_bytes(rerun)
 
 
 @pytest.mark.asyncio
@@ -380,14 +398,12 @@ async def test_composite_missing_required_input_fails_without_provider_operation
         session,
         source_keys=set(_SOURCE_BYTES) - {missing_key},
     )
-    adapter = ExplodingAdapter()
 
     with pytest.raises(ValidationAppError, match="COMPOSITE_INPUT_MISSING"):
         await execute_media_node_run(
             session,
             node_run_id=fixture.composite_run.id,
             store=fixture.store,
-            flux=adapter,  # type: ignore[arg-type]
         )
 
     run = await session.get(NodeRun, fixture.composite_run.id)
@@ -398,7 +414,6 @@ async def test_composite_missing_required_input_fails_without_provider_operation
             )
         )
     ).scalars().all()
-    assert adapter.called is False
     assert operations == []
     assert run is not None
     assert run.status == "failed"
@@ -422,14 +437,12 @@ async def test_composite_unavailable_or_unreadable_input_fails_closed(
         unreadable_key=unreadable_key,
         invalid_hash_key=invalid_hash_key,
     )
-    adapter = ExplodingAdapter()
 
     with pytest.raises(ValidationAppError, match="COMPOSITE_INPUT_MISSING"):
         await execute_media_node_run(
             session,
             node_run_id=fixture.composite_run.id,
             store=fixture.store,
-            flux=adapter,  # type: ignore[arg-type]
         )
 
     run = await session.get(NodeRun, fixture.composite_run.id)
@@ -440,7 +453,6 @@ async def test_composite_unavailable_or_unreadable_input_fails_closed(
             )
         )
     ).scalars().all()
-    assert adapter.called is False
     assert operations == []
     assert run is not None
     assert run.status == "failed"
@@ -455,7 +467,6 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
     app_env: str,
 ) -> None:
     fixture = await _make_composite_fixture(session)
-    adapter = ExplodingAdapter()
     called = False
 
     async def failing_ffmpeg(_: CompositeInputs) -> bytes:
@@ -464,6 +475,16 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
         raise CompositeRenderError("ffmpeg test failure")
 
     monkeypatch.setenv("APP_ENV", app_env)
+    if app_env == "production":
+        monkeypatch.setenv(
+            "SESSION_SECRET", "test-production-session-secret-32-characters"
+        )
+        monkeypatch.setenv(
+            "WORKER_TOKEN", "test-production-worker-token-32-characters"
+        )
+        monkeypatch.setenv(
+            "BYOK_FERNET_KEY", "v0v3D-eSZ4JB_qjFNWVlfYUUKulGroB1bVVa8Seifqc="
+        )
     clear_settings_cache()
     monkeypatch.setattr("app.execution.composite_media._render_with_ffmpeg", failing_ffmpeg)
     try:
@@ -472,7 +493,6 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
                 session,
                 node_run_id=fixture.composite_run.id,
                 store=fixture.store,
-                flux=adapter,  # type: ignore[arg-type]
             )
     finally:
         clear_settings_cache()
@@ -486,7 +506,6 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
         )
     ).scalars().all()
     assert called is True
-    assert adapter.called is False
     assert operations == []
     assert run is not None
     assert run.status == "failed"

@@ -1,0 +1,1319 @@
+/* ========================================================================
+   Visual 2.1 workstation refinement
+   ------------------------------------------------------------------------
+   This layer consumes the existing Visual 2.0 tokens and intentionally sits
+   after the shared shell rules above. It establishes one calm
+   shell rhythm without changing any page's business state or API behavior.
+   ======================================================================== */
+@scope (.qc-project-shell) {
+  .qc-preview-shell {
+    grid-template-columns: 72px minmax(0, 1fr);
+    background: var(--df-surface-0);
+  }
+
+  .qc-sidebar {
+    width: 72px;
+    padding: var(--df-space-5) var(--df-space-2);
+    border-right-color: var(--df-border-subtle);
+    background: var(--df-surface-1);
+  }
+
+  .sidebar-expanded .qc-sidebar {
+    width: 216px;
+    box-shadow: var(--df-shadow-lg);
+  }
+
+  .qc-sidebar-head {
+    min-height: 40px;
+    margin-bottom: var(--df-space-6);
+  }
+
+  .qc-sidebar-toggle {
+    border-radius: var(--df-radius-sm);
+  }
+
+  .qc-sidebar a {
+    min-height: 42px;
+    gap: var(--df-space-3);
+    padding: var(--df-space-2) var(--df-space-3);
+    border-radius: var(--df-radius-sm);
+    font-size: var(--df-text-sm);
+  }
+
+  .sidebar-expanded .qc-sidebar a {
+    padding-inline: var(--df-space-3);
+  }
+
+  .qc-sidebar a:hover {
+    background: var(--df-surface-2);
+    color: var(--df-text-primary);
+  }
+
+  .qc-sidebar a.active {
+    background: var(--df-surface-2);
+    box-shadow: inset 3px 0 0 var(--df-brass);
+  }
+
+  .qc-sidebar a.active svg {
+    color: var(--df-brass);
+  }
+
+  .qc-workspace {
+    min-width: 0;
+    background: var(--df-surface-0);
+  }
+
+  .qc-project-bar {
+    position: sticky;
+    top: 0;
+    z-index: var(--df-z-sticky);
+    height: 56px;
+    padding: 0 clamp(var(--df-space-4), 2.4vw, var(--df-space-8));
+    border-bottom-color: var(--df-border-subtle);
+    background: var(--df-surface-overlay);
+    box-shadow: 0 1px 0 rgb(0 0 0 / 16%);
+  }
+
+  .qc-project-name {
+    color: var(--df-ivory);
+    font-size: var(--df-text-md);
+    font-weight: var(--df-weight-semibold);
+  }
+
+  .qc-project-save {
+    color: var(--df-success-text);
+    font-size: var(--df-text-xs);
+  }
+
+  .qc-project-mode {
+    color: var(--df-text-muted);
+    font-size: var(--df-text-xs);
+    letter-spacing: 0.03em;
+  }
+
+  .qc-avatar {
+    border-radius: var(--df-radius-sm);
+    border-color: var(--df-border);
+  }
+
+  .qc-content-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 320px);
+    min-height: calc(100vh - 56px);
+    background: var(--df-surface-0);
+  }
+
+  .director-collapsed .qc-content-grid {
+    grid-template-columns: minmax(0, 1fr) 48px;
+  }
+
+  .qc-project-shell .qc-main-canvas {
+    width: min(100%, 1440px);
+    max-width: 1440px;
+    padding: var(--df-space-6) clamp(var(--df-space-5), 3vw, var(--df-space-10)) var(--df-space-12);
+  }
+
+  .qc-project-shell .qc-project-canvas {
+    margin: 0 auto;
+  }
+
+  .qc-project-shell .qc-content-grid.no-inspector {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qc-project-shell.scene-view .qc-main-canvas,
+  .qc-project-shell.scene-view .qc-project-canvas {
+    width: 100%;
+    max-width: none;
+    padding: var(--df-space-5) clamp(var(--df-space-5), 2.4vw, var(--df-space-10))
+      var(--df-space-10);
+  }
+
+  .qc-page-heading {
+    padding: var(--df-space-3) 0 var(--df-space-5);
+  }
+
+  .qc-page-heading > p,
+  .qc-section-heading p,
+  .qc-constraints > p,
+  .qc-director-kicker,
+  .director-stage-kicker {
+    color: var(--df-brass);
+    font-size: 0.625rem;
+    font-weight: var(--df-weight-semibold);
+    letter-spacing: 0.08em;
+  }
+
+  .qc-page-heading h1 {
+    margin: var(--df-space-1) 0 var(--df-space-2);
+    font-family: var(--df-font-display);
+    font-size: clamp(1.7rem, 2.2vw, 2.15rem);
+    font-weight: var(--df-weight-semibold);
+    line-height: 1.2;
+  }
+
+  .qc-page-heading > span {
+    max-width: 54rem;
+    color: var(--df-text-secondary);
+    font-size: var(--df-text-sm);
+    line-height: var(--df-leading-normal);
+  }
+
+  .qc-director-panel {
+    top: 56px;
+    height: calc(100vh - 56px);
+    padding: var(--df-space-5);
+    border-left-color: var(--df-border-subtle);
+    background: var(--df-surface-1);
+  }
+
+  .qc-director-header {
+    padding-bottom: var(--df-space-4);
+    border-bottom-color: var(--df-border-subtle);
+  }
+
+  .qc-director-mark {
+    border-radius: var(--df-radius-sm);
+  }
+
+  .qc-story-card,
+  .qc-scene-card,
+  .qc-overview-grid article {
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+    box-shadow: none;
+  }
+
+  .qc-story-media,
+  .qc-scene-thumb {
+    border-radius: 2px;
+  }
+
+  /* Scene Workbench: keep the stage dominant and demote nested card chrome. */
+  .qc-scene-workspace {
+    gap: var(--df-space-5);
+  }
+
+  .qc-scene-header {
+    align-items: center;
+    padding: var(--df-space-1) 0 var(--df-space-4);
+    border-bottom-color: var(--df-border);
+  }
+
+  .qc-scene-header .qc-scene-context h1 {
+    font-size: clamp(1.35rem, 1.8vw, 1.75rem);
+  }
+
+  .qc-scene-header-actions .qc-overview-primary {
+    min-height: 36px;
+    border-radius: var(--df-radius-sm);
+    font-size: var(--df-text-sm);
+  }
+
+  /* Canvas-first V2 (UI-1): the Scene view is a single-column stage. The
+     operation panel is a floating Context Sheet opened from the Context Dock,
+     not a permanent second column. */
+  .qc-scene-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--df-space-5);
+  }
+
+  .qc-scene-stage {
+    position: relative;
+    grid-template-rows: minmax(420px, 61vh) auto auto auto;
+    gap: var(--df-space-3);
+  }
+
+  .qc-scene-stage .qc-cinematic-canvas {
+    border-color: var(--df-border-strong);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-obsidian);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 24%);
+  }
+
+  .qc-canvas-media {
+    gap: var(--df-space-3);
+    padding: var(--df-space-5);
+  }
+
+  .qc-canvas-state {
+    color: var(--df-brass);
+    font-size: 0.625rem;
+    letter-spacing: 0.08em;
+  }
+
+  .qc-canvas-media small {
+    color: var(--df-text-muted);
+    font-size: 0.625rem;
+  }
+
+  .qc-canvas-status {
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+  }
+
+  .qc-shot-candidate-tray,
+  .qc-shot-strip-panel {
+    border-color: var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+  }
+
+  .qc-shot-candidate-tray {
+    gap: var(--df-space-3);
+    padding: var(--df-space-3) var(--df-space-4);
+  }
+
+  .qc-shot-candidate-tray-header,
+  .qc-shot-strip-header {
+    min-height: 24px;
+  }
+
+  .qc-shot-candidate-tray-header strong,
+  .qc-shot-strip-header strong {
+    font-size: var(--df-text-sm);
+    font-weight: var(--df-weight-semibold);
+  }
+
+  .qc-shot-candidate-list {
+    gap: var(--df-space-3);
+  }
+
+  .qc-shot-candidate-card {
+    padding: var(--df-space-2);
+    border-color: var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-0);
+  }
+
+  .qc-shot-candidate-card.selected {
+    border-color: var(--df-brass);
+    box-shadow: inset 0 0 0 1px var(--df-brass-dim);
+  }
+
+  .qc-shot-candidate-preview {
+    border-radius: 2px;
+  }
+
+  .qc-shot-candidate-confirm {
+    min-height: 30px;
+    border-radius: 2px;
+  }
+
+  .qc-shot-strip-panel {
+    gap: var(--df-space-2);
+    padding: var(--df-space-3) var(--df-space-4);
+  }
+
+  .qc-shot-strip {
+    gap: var(--df-space-3);
+  }
+
+  .qc-shot-strip button {
+    min-height: 72px;
+    border-radius: 2px;
+    border-color: var(--df-border-subtle);
+    background: var(--df-surface-0);
+  }
+
+  .qc-shot-strip button.active {
+    border-color: var(--df-brass);
+    box-shadow: inset 3px 0 0 var(--df-brass);
+  }
+
+  .qc-shot-strip-thumb {
+    background: var(--df-surface-2);
+  }
+
+  .qc-director-sidebar {
+    max-height: calc(100vh - 8.5rem);
+    border-color: var(--df-border);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+  }
+
+  .qc-director-sidebar-header {
+    padding: var(--df-space-4);
+    border-bottom-color: var(--df-border-subtle);
+  }
+
+  .qc-director-sidebar-content {
+    gap: var(--df-space-3);
+    padding: var(--df-space-3);
+  }
+
+  .qc-director-tabs {
+    border-color: var(--df-border);
+    border-radius: 2px;
+    background: var(--df-surface-0);
+  }
+
+  .qc-director-tabs button {
+    min-height: 34px;
+    color: var(--df-text-muted);
+    border-radius: 2px;
+  }
+
+  .qc-director-tabs button.active,
+  .qc-director-tabs button:hover,
+  .qc-director-tabs button:focus-visible {
+    background: var(--df-surface-2);
+    color: var(--df-text-primary);
+  }
+
+  .qc-director-tabs button.active {
+    box-shadow: inset 0 -2px 0 var(--df-brass);
+  }
+
+  .qc-director-tab-panel .qc-shot-design-panel,
+  .qc-director-tab-panel .qc-shot-production-actions,
+  .qc-director-tab-panel .qc-reference-picker,
+  .qc-director-tab-panel .qc-production-trace {
+    padding: var(--df-space-3) var(--df-space-2);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .qc-director-tab-panel .qc-shot-design-panel textarea,
+  .qc-director-tab-panel .qc-reference-picker select,
+  .qc-director-tab-panel .qc-reference-picker input {
+    border-radius: 2px;
+  }
+
+  @media (max-width: 1100px) {
+    .qc-preview-shell {
+      grid-template-columns: 60px minmax(0, 1fr);
+    }
+
+    .qc-sidebar {
+      width: 60px;
+    }
+
+    .sidebar-expanded .qc-sidebar {
+      width: 204px;
+    }
+
+    .qc-content-grid,
+    .director-collapsed .qc-content-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .qc-director-panel {
+      position: relative;
+      top: auto;
+      height: auto;
+      max-height: none;
+      border-top: 1px solid var(--df-border-subtle);
+      border-left: 0;
+    }
+
+    .qc-project-shell.scene-view .qc-scene-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .qc-project-shell.scene-view .qc-director-sidebar {
+      max-height: none;
+    }
+
+    /* Canvas-first V2: on narrow screens the Context Sheet and Details sheet
+       stack in flow instead of floating over the Canvas. */
+    .qc-project-shell.scene-view .qc-director-context-sheet,
+    .qc-project-shell.scene-view .qc-shot-details-sheet {
+      position: static;
+      width: auto;
+      max-height: none;
+      box-shadow: none;
+    }
+  }
+
+  @media (max-width: 620px) {
+    .qc-preview-shell {
+      grid-template-columns: 56px minmax(0, 1fr);
+    }
+
+    .qc-sidebar {
+      width: 56px;
+      padding-inline: var(--df-space-1);
+    }
+
+    .sidebar-expanded .qc-sidebar {
+      width: 188px;
+    }
+
+    .qc-project-shell .qc-main-canvas,
+    .qc-project-shell.scene-view .qc-main-canvas,
+    .qc-project-shell.scene-view .qc-project-canvas {
+      padding-inline: var(--df-space-4);
+    }
+
+    .qc-project-bar {
+      padding-inline: var(--df-space-4);
+    }
+  }
+
+  /* ========================================================================
+     Canvas-first V2 (UI-1) — Context Dock, Context Sheet, conditional tray
+     ------------------------------------------------------------------------
+     The default Scene view keeps the Canvas as the dominant visual region.
+     Tools float in on demand from the Context Dock; technical facts sink
+     into the Details sheet. Reuses existing --df-* tokens and the Visual 2.1
+     surface language (small radius, calm borders, restrained brass).
+     ======================================================================== */
+  .qc-context-dock {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--df-space-2);
+    padding: var(--df-space-2) var(--df-space-3);
+    border: 1px solid var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+  }
+
+  .qc-context-dock button {
+    min-height: 32px;
+    padding: var(--df-space-1) var(--df-space-3);
+    border: 1px solid transparent;
+    border-radius: var(--df-radius-sm);
+    background: transparent;
+    color: var(--df-text-secondary);
+    font-size: var(--df-text-sm);
+    font-weight: var(--df-weight-medium);
+  }
+
+  .qc-context-dock button:hover:not(:disabled),
+  .qc-context-dock button:focus-visible {
+    border-color: var(--df-border);
+    background: var(--df-surface-2);
+    color: var(--df-text-primary);
+  }
+
+  .qc-context-dock button.active {
+    border-color: var(--df-brass);
+    background: var(--df-surface-0);
+    color: var(--df-brass);
+  }
+
+  .qc-context-dock button:disabled {
+    opacity: 0.42;
+  }
+
+  .qc-context-dock-divider {
+    width: 1px;
+    align-self: stretch;
+    background: var(--df-border-subtle);
+  }
+
+  .qc-director-context-sheet {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: clamp(320px, 26vw, 360px);
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--df-border);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+    box-shadow: var(--df-shadow-lg);
+  }
+
+  .qc-director-context-sheet .qc-director-sidebar-content {
+    flex: 1;
+    overflow: auto;
+  }
+
+  .qc-shot-candidate-tray.is-collapsed {
+    display: flex;
+    align-items: center;
+    gap: var(--df-space-3);
+    width: 100%;
+    padding: var(--df-space-2) var(--df-space-4);
+    border: 1px solid var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+    color: var(--df-text-secondary);
+    font-size: var(--df-text-sm);
+    text-align: left;
+  }
+
+  .qc-shot-candidate-tray.is-collapsed:hover {
+    border-color: var(--df-border-strong);
+    color: var(--df-text-primary);
+  }
+
+  .qc-shot-candidate-tray.is-collapsed strong {
+    color: var(--df-text-primary);
+    font-weight: var(--df-weight-semibold);
+  }
+
+  .qc-shot-candidate-collapse,
+  .qc-shot-strip-toggle {
+    min-height: 28px;
+    margin-left: auto;
+    padding: var(--df-space-1) var(--df-space-3);
+    border: 1px solid var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: transparent;
+    color: var(--df-text-muted);
+    font-size: var(--df-text-xs);
+  }
+
+  .qc-shot-candidate-collapse:hover,
+  .qc-shot-strip-toggle:hover {
+    border-color: var(--df-border-strong);
+    color: var(--df-text-primary);
+  }
+
+  .qc-shot-strip-panel.is-compact .qc-shot-strip button {
+    min-height: 56px;
+  }
+
+  .qc-shot-strip-header {
+    display: flex;
+    align-items: center;
+    gap: var(--df-space-3);
+  }
+
+  .qc-shot-details-sheet {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    width: clamp(300px, 24vw, 340px);
+    padding: var(--df-space-4);
+    border: 1px solid var(--df-border);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+    box-shadow: var(--df-shadow-lg);
+    overflow: auto;
+  }
+
+  .qc-shot-details-sheet > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--df-space-3);
+    margin-bottom: var(--df-space-4);
+  }
+
+  .qc-shot-details-sheet > header strong {
+    display: block;
+    color: var(--df-text-primary);
+  }
+
+  .qc-shot-details-body dl {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--df-space-1) var(--df-space-3);
+    margin: 0 0 var(--df-space-4);
+    font-size: var(--df-text-sm);
+  }
+
+  .qc-shot-details-body dt {
+    color: var(--df-text-muted);
+  }
+
+  .qc-shot-details-body dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--df-text-secondary);
+  }
+
+  .qc-shot-details-sheet .qc-production-trace {
+    border: 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  /* ========================================================================
+   Visual 2.1 shared page language
+   ------------------------------------------------------------------------
+   The application still has a few shared page primitives (`panel`,
+   `status-card`, `callout`). Keep those class names for behavior and tests,
+   but make their surfaces consume the same Visual 2.0 token vocabulary.
+   ======================================================================== */
+  .qc-project-page,
+  .production-monitor {
+    display: grid;
+    gap: var(--df-space-5);
+    min-width: 0;
+  }
+
+  .qc-project-page > .qc-page-heading {
+    margin-bottom: 0;
+  }
+
+  .qc-project-page > .qc-page-heading > span,
+  .production-monitor > .page-title-row p {
+    max-width: 58rem;
+    color: var(--df-text-secondary);
+    font-size: var(--df-text-sm);
+    line-height: var(--df-leading-normal);
+  }
+
+  .page-title-row {
+    align-items: end;
+    margin: 0;
+    padding: var(--df-space-2) 0 var(--df-space-3);
+    border-bottom: 1px solid var(--df-border-subtle);
+  }
+
+  .page-title-row h2 {
+    color: var(--df-text-primary);
+    font-family: var(--df-font-display);
+    font-size: var(--df-text-2xl);
+    font-weight: var(--df-weight-semibold);
+    line-height: 1.2;
+  }
+
+  .page-title-row p {
+    margin-top: var(--df-space-1);
+  }
+
+  .panel {
+    margin: 0;
+    padding: var(--df-space-5);
+    border-color: var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+    box-shadow: none;
+  }
+
+  .panel-header {
+    margin-bottom: var(--df-space-4);
+    padding-bottom: var(--df-space-3);
+    border-bottom: 1px solid var(--df-border-subtle);
+  }
+
+  .panel-header h1,
+  .panel-header h2,
+  .panel-header h3 {
+    font-size: var(--df-text-lg);
+  }
+
+  .panel h2 {
+    font-size: var(--df-text-xl);
+  }
+
+  .panel h3 {
+    font-size: var(--df-text-md);
+  }
+
+  label {
+    gap: var(--df-space-1);
+    color: var(--df-text-secondary);
+    font-size: var(--df-text-sm);
+    line-height: var(--df-leading-normal);
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    border-color: var(--df-border);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-0);
+    color: var(--df-text-primary);
+    font-size: var(--df-text-sm);
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select {
+    min-height: 36px;
+    padding: var(--df-space-2) var(--df-space-3);
+  }
+
+  textarea {
+    min-height: 88px;
+    padding: var(--df-space-2) var(--df-space-3);
+    line-height: var(--df-leading-normal);
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):focus,
+  textarea:focus,
+  select:focus {
+    border-color: var(--df-verdigris);
+    box-shadow: 0 0 0 2px var(--df-focus-ring);
+    outline: none;
+  }
+
+  .qc-project-shell :where(button:not(.qc-icon-button)) {
+    min-height: 36px;
+    border-radius: var(--df-radius-sm);
+    padding: var(--df-space-2) var(--df-space-4);
+    background: var(--df-surface-3);
+    border-color: var(--df-border-strong);
+    color: var(--df-text-primary);
+    font-size: var(--df-text-sm);
+    font-weight: var(--df-weight-medium);
+    line-height: 1.2;
+  }
+
+  .qc-project-shell :where(button:not(.qc-icon-button):not(:disabled)):hover {
+    border-color: var(--df-verdigris);
+    background: var(--df-surface-raised);
+  }
+
+  button.primary:not(:disabled),
+  button.df-btn.primary:not(:disabled) {
+    background: var(--df-verdigris);
+    border-color: var(--df-verdigris);
+    color: var(--df-obsidian);
+  }
+
+  button.accent:not(:disabled),
+  button.df-btn.accent:not(:disabled) {
+    background: var(--df-brass);
+    border-color: var(--df-brass);
+    color: var(--df-obsidian);
+  }
+
+  button.ghost,
+  button.df-btn.ghost {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  button.danger,
+  button.df-btn.danger {
+    border-color: var(--df-danger-border);
+    color: var(--df-danger-text);
+  }
+
+  button:disabled {
+    opacity: 0.42;
+  }
+
+  .status-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--df-space-3);
+    margin: 0;
+  }
+
+  .status-card {
+    min-width: 0;
+    gap: var(--df-space-1);
+    padding: var(--df-space-4);
+    border-color: var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+  }
+
+  .status-card strong {
+    color: var(--df-text-primary);
+    font-size: var(--df-text-2xl);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+
+  .status-label {
+    color: var(--df-text-muted);
+    font-size: var(--df-text-xs);
+  }
+
+  .status-ok {
+    color: var(--df-success) !important;
+  }
+
+  .status-pending {
+    color: var(--df-warning) !important;
+  }
+
+  .status-bad {
+    color: var(--df-danger) !important;
+  }
+
+  .toolbar {
+    gap: var(--df-space-2);
+    margin: 0;
+    padding-top: var(--df-space-2);
+  }
+
+  .callout {
+    margin: 0;
+    padding: var(--df-space-3) var(--df-space-4);
+    border-left: 2px solid var(--df-verdigris);
+    border-radius: 0 var(--df-radius-sm) var(--df-radius-sm) 0;
+    background: var(--df-verdigris-tint);
+    color: var(--df-text-secondary);
+    font-size: var(--df-text-sm);
+    line-height: var(--df-leading-normal);
+  }
+
+  .callout.warn {
+    border-left-color: var(--df-brass);
+    background: var(--df-warning-dim);
+  }
+
+  .flash {
+    margin: 0;
+    padding: var(--df-space-3) var(--df-space-4);
+    border-radius: var(--df-radius-sm);
+    font-size: var(--df-text-sm);
+  }
+
+  .muted {
+    color: var(--df-text-muted);
+    font-size: var(--df-text-sm);
+  }
+
+  .monitor-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--df-text-sm);
+  }
+
+  .monitor-table th,
+  .monitor-table td {
+    padding: var(--df-space-3) var(--df-space-2);
+    border-bottom: 1px solid var(--df-border-subtle);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .monitor-table th {
+    color: var(--df-text-muted);
+    font-size: var(--df-text-xs);
+    font-weight: var(--df-weight-semibold);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .monitor-table td {
+    color: var(--df-text-secondary);
+  }
+
+  .monitor-table tbody tr:hover {
+    background: var(--df-surface-2);
+  }
+
+  /* Asset library */
+  .qc-asset-filters {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--df-space-3);
+    padding: var(--df-space-4);
+    border: 1px solid var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+  }
+
+  .qc-asset-filters label {
+    display: grid;
+    min-width: 0;
+  }
+
+  .qc-asset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--df-space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .qc-asset-card {
+    display: grid;
+    gap: var(--df-space-3);
+    min-width: 0;
+    padding: var(--df-space-4);
+    border: 1px solid var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+  }
+
+  .qc-asset-card:hover {
+    border-color: var(--df-border-strong);
+  }
+
+  .qc-asset-card header,
+  .qc-asset-card footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--df-space-2);
+    min-width: 0;
+  }
+
+  .qc-asset-card header {
+    justify-content: space-between;
+    padding-bottom: var(--df-space-2);
+    border-bottom: 1px solid var(--df-border-subtle);
+  }
+
+  .qc-asset-card header strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .qc-asset-card header span,
+  .qc-asset-card footer,
+  .qc-asset-card .muted {
+    color: var(--df-text-muted);
+    font-size: var(--df-text-xs);
+  }
+
+  .qc-asset-card > p {
+    min-height: 2.8em;
+    margin: 0;
+    line-height: var(--df-leading-normal);
+  }
+
+  .qc-asset-card footer form {
+    display: flex;
+    flex: 1 1 100%;
+    min-width: 0;
+    gap: var(--df-space-1);
+  }
+
+  .qc-asset-card footer form input {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .qc-asset-status,
+  .fact-source-badge,
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: var(--df-space-1) var(--df-space-2);
+    border: 1px solid var(--df-border);
+    border-radius: var(--df-radius-sm);
+    font-size: var(--df-text-xs);
+    line-height: 1.2;
+  }
+
+  .qc-asset-status.active {
+    border-color: var(--df-success-border);
+    color: var(--df-success-text);
+    background: var(--df-success-dim);
+  }
+
+  .qc-asset-status.recycled {
+    border-color: var(--df-border);
+    color: var(--df-text-muted);
+  }
+
+  .qc-asset-versions {
+    display: grid;
+    grid-column: 1 / -1;
+    gap: var(--df-space-2);
+    padding-top: var(--df-space-3);
+    border-top: 1px solid var(--df-border-subtle);
+  }
+
+  .qc-asset-versions > form {
+    display: flex;
+    gap: var(--df-space-2);
+  }
+
+  .qc-asset-versions > form input {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .qc-asset-versions ul {
+    display: grid;
+    gap: var(--df-space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .qc-asset-versions li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--df-space-2);
+    padding: var(--df-space-2) 0;
+    border-bottom: 1px solid var(--df-border-subtle);
+    color: var(--df-text-secondary);
+    font-size: var(--df-text-xs);
+  }
+
+  /* Script / review / editing pages share the same quiet document surfaces. */
+  .qc-script-document,
+  .qc-script-episode,
+  .editing-session-facts,
+  .editing-session-editor,
+  .editing-session-export,
+  .editing-director-suggestion,
+  .review-annotation-workspace,
+  .director-board-workspace {
+    min-width: 0;
+    border-color: var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+    box-shadow: none;
+  }
+
+  .qc-script-document,
+  .qc-script-episode {
+    padding: var(--df-space-5);
+  }
+
+  .qc-script-document h2,
+  .qc-script-episode h3 {
+    margin-bottom: var(--df-space-3);
+    font-size: var(--df-text-lg);
+  }
+
+  .qc-script-raw {
+    display: block;
+    max-height: 16rem;
+    overflow: auto;
+    padding: var(--df-space-3);
+    border: 1px solid var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-0);
+    color: var(--df-text-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: var(--df-leading-normal);
+  }
+
+  .qc-script-episode > ul {
+    display: grid;
+    gap: var(--df-space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .qc-script-scene {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--df-space-1) var(--df-space-3);
+    padding: var(--df-space-3) 0;
+    border-top: 1px solid var(--df-border-subtle);
+  }
+
+  .qc-script-scene span {
+    color: var(--df-text-muted);
+    font-size: var(--df-text-xs);
+  }
+
+  .qc-script-scene p {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+
+  .qc-script-import-form {
+    display: grid;
+    gap: var(--df-space-3);
+    padding-top: var(--df-space-4);
+    border-top: 1px solid var(--df-border-subtle);
+  }
+
+  .qc-script-import-form textarea {
+    min-height: 15rem;
+    font-family: var(--df-font-mono);
+    font-size: var(--df-text-xs);
+  }
+
+  .review-annotation-workspace,
+  .director-board-workspace {
+    margin: 0;
+    padding: var(--df-space-4);
+  }
+
+  .editing-session-facts,
+  .editing-session-editor,
+  .editing-session-export,
+  .editing-director-suggestion {
+    margin-top: 0;
+    padding: var(--df-space-5);
+  }
+
+  .editing-session-editor li {
+    border-color: var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-2);
+  }
+
+  /* Production sub-surfaces: hierarchy comes from rules and spacing, not glow. */
+  .workflow-navigator,
+  .creative-capabilities-panel,
+  .professional-workbench,
+  .asset-card-workspace {
+    margin: 0;
+    border-color: var(--df-border-subtle);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+    box-shadow: none;
+  }
+
+  .workflow-navigator,
+  .creative-capabilities-panel,
+  .asset-card-workspace {
+    padding: var(--df-space-4);
+  }
+
+  .professional-workbench {
+    overflow: hidden;
+  }
+
+  .professional-workbench-header {
+    padding: var(--df-space-4) var(--df-space-5);
+    border-bottom-color: var(--df-border-subtle);
+    background: var(--df-surface-2);
+  }
+
+  .workbench-tabs,
+  .assistant-mode-switch {
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-0);
+  }
+
+  .scene-rail,
+  .director-assistant {
+    background: var(--df-surface-0);
+  }
+
+  .canvas-preview-placeholder {
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-0);
+  }
+
+  .detail-panel,
+  .mode-banner,
+  .node-runtime-row,
+  .timeline-chip,
+  .editing-director-suggestion-preview,
+  .editing-session-editor li,
+  .qc-script-document,
+  .qc-script-episode {
+    border-radius: var(--df-radius-sm);
+  }
+
+  @media (max-width: 1100px) {
+    .status-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .qc-asset-filters {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 720px) {
+    .status-grid,
+    .qc-asset-filters {
+      grid-template-columns: 1fr;
+    }
+
+    .qc-project-page,
+    .production-monitor {
+      gap: var(--df-space-4);
+    }
+
+    .qc-asset-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .qc-script-scene {
+      grid-template-columns: 1fr;
+    }
+
+    .qc-script-scene span {
+      grid-column: 1;
+    }
+
+    .monitor-table {
+      display: block;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+  }
+}
+
+/* The scoped layer intentionally isolates the project shell. Explicitly
+   repeat the root grid rule outside @scope because the
+   scope root itself is not a descendant match in all supported engines. */
+.qc-project-shell.qc-preview-shell {
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+@media (max-width: 1100px) {
+  .qc-project-shell.qc-preview-shell {
+    grid-template-columns: 60px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  .qc-project-shell.qc-preview-shell {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+}
+
+/* Keep responsive behavior explicit for browsers that do not scope nested
+   media queries consistently. Every selector remains project-shell scoped so
+   the project shell stays on its existing layout. */
+@media (max-width: 1100px) {
+  .qc-project-shell {
+    grid-template-columns: 60px minmax(0, 1fr);
+  }
+
+  .qc-project-shell .qc-sidebar {
+    width: 60px;
+  }
+
+  .qc-project-shell.sidebar-expanded .qc-sidebar {
+    width: 204px;
+  }
+
+  .qc-project-shell .qc-content-grid,
+  .qc-project-shell.director-collapsed .qc-content-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qc-project-shell .qc-director-panel {
+    position: relative;
+    top: auto;
+    height: auto;
+    max-height: none;
+    border-top: 1px solid var(--df-border-subtle);
+    border-left: 0;
+  }
+
+  .qc-project-shell.scene-view .qc-scene-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qc-project-shell.scene-view .qc-director-sidebar {
+    max-height: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .qc-project-shell {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .qc-project-shell .qc-sidebar {
+    width: 56px;
+    padding-inline: var(--df-space-1);
+  }
+
+  .qc-project-shell.sidebar-expanded .qc-sidebar {
+    width: 188px;
+  }
+
+  .qc-project-shell .qc-main-canvas,
+  .qc-project-shell.scene-view .qc-main-canvas,
+  .qc-project-shell.scene-view .qc-project-canvas {
+    padding-inline: var(--df-space-4);
+  }
+
+  .qc-project-shell .qc-project-bar {
+    padding-inline: var(--df-space-4);
+  }
+}

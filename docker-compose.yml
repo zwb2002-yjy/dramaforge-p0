@@ -1,24 +1,23 @@
+x-dramaforge-release:
+  version: ${DRAMAFORGE_VERSION:-0.1.0}
+
 services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: dramaforge
-      POSTGRES_PASSWORD: dramaforge
-      POSTGRES_DB: dramaforge
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-dramaforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}
+      POSTGRES_DB: ${POSTGRES_DB:-dramaforge}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dramaforge -d dramaforge"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -29,11 +28,8 @@ services:
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
     volumes:
       - minio_data:/data
     healthcheck:
@@ -42,89 +38,409 @@ services:
       timeout: 5s
       retries: 10
 
-  api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+  # LiteLLM Proxy (fix spec §4.1/§6/§11). Official BerriAI image, pinned. The
+  # Proxy is DramaForge's unified LLM scheduler: it owns Router load-balancing /
+  # retry / fallback / cost / virtual keys. DramaForge talks to it over HTTP
+  # (never installs the litellm SDK). LiteLLM down does NOT block DramaForge
+  # startup (fix spec §13/§122) — api/workers have no hard depends_on here.
+  litellm-db:
+    image: postgres:15-alpine
     environment:
-      APP_ENV: development
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
-      REDIS_URL: redis://redis:6379/0
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET: dramaforge
-      SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
-      CORS_ORIGINS: http://localhost:5173
-    ports:
-      - "8000:8000"
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?Run python scripts/init_env.py first}
+      POSTGRES_DB: litellm
+    volumes:
+      - litellm_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  litellm:
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0}
+    environment:
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?Run python scripts/init_env.py first}@litellm-db:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Run python scripts/init_env.py first}
+      # Deployment env for the logical aliases in infra/litellm/config.yaml.
+      # Empty values are valid (config loads); an alias is usable only when its
+      # api_base+api_key (or mock_response) are set. Never commit real keys.
+      LITELLM_SCRIPT_QUALITY_MODEL: ${LITELLM_SCRIPT_QUALITY_MODEL:-openai/script-quality-deployment}
+      LITELLM_SCRIPT_QUALITY_API_BASE: ${LITELLM_SCRIPT_QUALITY_API_BASE:-}
+      LITELLM_SCRIPT_QUALITY_API_KEY: ${LITELLM_SCRIPT_QUALITY_API_KEY:-}
+      LITELLM_SCRIPT_QUALITY_MOCK_RESPONSE: ${LITELLM_SCRIPT_QUALITY_MOCK_RESPONSE:-}
+      LITELLM_SCRIPT_FAST_MODEL: ${LITELLM_SCRIPT_FAST_MODEL:-openai/script-fast-deployment}
+      LITELLM_SCRIPT_FAST_API_BASE: ${LITELLM_SCRIPT_FAST_API_BASE:-}
+      LITELLM_SCRIPT_FAST_API_KEY: ${LITELLM_SCRIPT_FAST_API_KEY:-}
+      LITELLM_SCRIPT_FAST_MOCK_RESPONSE: ${LITELLM_SCRIPT_FAST_MOCK_RESPONSE:-}
+      LITELLM_LEGACY_TEXT_MODEL: ${LITELLM_LEGACY_TEXT_MODEL:-openai/legacy-text-deployment}
+      LITELLM_LEGACY_TEXT_API_BASE: ${LITELLM_LEGACY_TEXT_API_BASE:-}
+      LITELLM_LEGACY_TEXT_API_KEY: ${LITELLM_LEGACY_TEXT_API_KEY:-}
+      LITELLM_LEGACY_TEXT_MOCK_RESPONSE: ${LITELLM_LEGACY_TEXT_MOCK_RESPONSE:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
+    volumes:
+      - ./infra/litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    healthcheck:
+      # liveliness only — never probe /health (may hit models + cost, §12).
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
+    command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  api:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
+      MINIO_BUCKET: dramaforge
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
+      PUBLIC_REGISTRATION_ENABLED: ${PUBLIC_REGISTRATION_ENABLED:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      CORS_ORIGINS: ${DRAMAFORGE_PUBLIC_ORIGIN:-http://localhost:8080}
+      AGNES_ENABLED: ${AGNES_ENABLED:-false}
+      AGNES_API_KEY: ${AGNES_API_KEY:-}
+      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
+      AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
+      AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      AGNES_IMAGE_REQUEST_TIMEOUT_SECONDS: ${AGNES_IMAGE_REQUEST_TIMEOUT_SECONDS:-300}
+      AGNES_MAX_CONCURRENT_SUBMISSIONS: ${AGNES_MAX_CONCURRENT_SUBMISSIONS:-1}
+      MINIMAX_ENABLED: ${MINIMAX_ENABLED:-false}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimaxi.com}
+      MINIMAX_IMAGE_MODEL: ${MINIMAX_IMAGE_MODEL:-image-01}
+      MINIMAX_VIDEO_MODEL: ${MINIMAX_VIDEO_MODEL:-MiniMax-H3}
+      VOLCENGINE_ENABLED: ${VOLCENGINE_ENABLED:-false}
+      VOLCENGINE_API_KEY: ${VOLCENGINE_API_KEY:-}
+      VOLCENGINE_BASE_URL: ${VOLCENGINE_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      VOLCENGINE_IMAGE_MODEL: ${VOLCENGINE_IMAGE_MODEL:-doubao-seedream-4-0-250828}
+      VOLCENGINE_VIDEO_MODEL: ${VOLCENGINE_VIDEO_MODEL:-doubao-seedance-2-0-260128}
+      REFERENCE_PUBLIC_BASE_URL: ${REFERENCE_PUBLIC_BASE_URL:-}
+      REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
+      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
+      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
+      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
+      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
+      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
+      LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
+      TTS_ENABLED: ${TTS_ENABLED:-false}
+      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
+      TTS_VOICE: ${TTS_VOICE:-zh}
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 10
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
 
-  worker-default:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    environment:
-      APP_ENV: development
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
-      REDIS_URL: redis://redis:6379/0
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
-      WORKER_KIND: default
+  frontend:
+    image: ${DRAMAFORGE_FRONTEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-frontend:v0.1.0}
+    ports:
+      - "${DRAMAFORGE_BIND_ADDRESS:-127.0.0.1}:${DRAMAFORGE_PORT:-8080}:8080"
     depends_on:
-      redis:
+      api:
         condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/gateway-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  database-bootstrap:
+    image: postgres:15-alpine
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-dramaforge}
+      PGUSER: ${POSTGRES_USER:-dramaforge}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-dramaforge_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -ec
+      - |
+        psql --set=ON_ERROR_STOP=1 --set=app_user="$$POSTGRES_APP_USER" --set=app_password="$$POSTGRES_APP_PASSWORD" <<'SQL'
+        SELECT format('ALTER ROLE %I LOGIN NOINHERIT NOBYPASSRLS PASSWORD %L', :'app_user', :'app_password') \gexec
+        SQL
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  maintenance:
+    profiles: ["maintenance"]
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace:ro
+      - ./tmp:/workspace/tmp
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
+      MINIO_BUCKET: dramaforge
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      P0_BACKUP_FERNET_KEY: ${P0_BACKUP_FERNET_KEY:-}
+    depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["python", "/workspace/scripts/p0_backup_restore.py"]
+
+  dispatcher:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
+      MINIO_BUCKET: dramaforge
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
+      OUTBOX_DISPATCH_INTERVAL_SECONDS: ${OUTBOX_DISPATCH_INTERVAL_SECONDS:-1}
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.dispatcher"]
+
+  worker-default:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
+      WORKER_KIND: default
+      AGNES_ENABLED: ${AGNES_ENABLED:-false}
+      AGNES_API_KEY: ${AGNES_API_KEY:-}
+      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
+      AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
+      AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      AGNES_IMAGE_REQUEST_TIMEOUT_SECONDS: ${AGNES_IMAGE_REQUEST_TIMEOUT_SECONDS:-300}
+      AGNES_MAX_CONCURRENT_SUBMISSIONS: ${AGNES_MAX_CONCURRENT_SUBMISSIONS:-1}
+      MINIMAX_ENABLED: ${MINIMAX_ENABLED:-false}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimaxi.com}
+      MINIMAX_IMAGE_MODEL: ${MINIMAX_IMAGE_MODEL:-image-01}
+      MINIMAX_VIDEO_MODEL: ${MINIMAX_VIDEO_MODEL:-MiniMax-H3}
+      VOLCENGINE_ENABLED: ${VOLCENGINE_ENABLED:-false}
+      VOLCENGINE_API_KEY: ${VOLCENGINE_API_KEY:-}
+      VOLCENGINE_BASE_URL: ${VOLCENGINE_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      VOLCENGINE_IMAGE_MODEL: ${VOLCENGINE_IMAGE_MODEL:-doubao-seedream-4-0-250828}
+      VOLCENGINE_VIDEO_MODEL: ${VOLCENGINE_VIDEO_MODEL:-doubao-seedance-2-0-260128}
+      REFERENCE_PUBLIC_BASE_URL: ${REFERENCE_PUBLIC_BASE_URL:-}
+      REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
+      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
+      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
+      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
+      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
+      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
+      LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
+      TTS_ENABLED: ${TTS_ENABLED:-false}
+      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
+      TTS_VOICE: ${TTS_VOICE:-zh}
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     command:
       [
         "sh",
         "-c",
         "python -m app.workers.main default && arq app.workers.default.WorkerSettings",
       ]
+    restart: unless-stopped
 
   worker-heavy:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
     environment:
-      APP_ENV: development
-      DATABASE_URL: postgresql+asyncpg://dramaforge:dramaforge@postgres:5432/dramaforge
+      APP_ENV: ${APP_ENV:-development}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      SESSION_SECRET: dev-only-change-me-to-a-long-random-string
-      BYOK_FERNET_KEY: dev-only-fernet-key-replace-in-prod==
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Run python scripts/init_env.py first}
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
+      BYOK_KEYRING: ${BYOK_KEYRING:-}
       WORKER_KIND: heavy
+      ARQ_HEAVY_MAX_JOBS: ${ARQ_HEAVY_MAX_JOBS:-4}
+      AGNES_ENABLED: ${AGNES_ENABLED:-false}
+      AGNES_API_KEY: ${AGNES_API_KEY:-}
+      AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
+      AGNES_IMAGE_MODEL: ${AGNES_IMAGE_MODEL:-agnes-image-2.1-flash}
+      AGNES_VIDEO_MODEL: ${AGNES_VIDEO_MODEL:-agnes-video-v2.0}
+      AGNES_IMAGE_REQUEST_TIMEOUT_SECONDS: ${AGNES_IMAGE_REQUEST_TIMEOUT_SECONDS:-300}
+      AGNES_MAX_CONCURRENT_SUBMISSIONS: ${AGNES_MAX_CONCURRENT_SUBMISSIONS:-1}
+      MINIMAX_ENABLED: ${MINIMAX_ENABLED:-false}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimaxi.com}
+      MINIMAX_IMAGE_MODEL: ${MINIMAX_IMAGE_MODEL:-image-01}
+      MINIMAX_VIDEO_MODEL: ${MINIMAX_VIDEO_MODEL:-MiniMax-H3}
+      VOLCENGINE_ENABLED: ${VOLCENGINE_ENABLED:-false}
+      VOLCENGINE_API_KEY: ${VOLCENGINE_API_KEY:-}
+      VOLCENGINE_BASE_URL: ${VOLCENGINE_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      VOLCENGINE_IMAGE_MODEL: ${VOLCENGINE_IMAGE_MODEL:-doubao-seedream-4-0-250828}
+      VOLCENGINE_VIDEO_MODEL: ${VOLCENGINE_VIDEO_MODEL:-doubao-seedance-2-0-260128}
+      REFERENCE_PUBLIC_BASE_URL: ${REFERENCE_PUBLIC_BASE_URL:-}
+      REFERENCE_TOKEN_TTL_SECONDS: ${REFERENCE_TOKEN_TTL_SECONDS:-3600}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
+      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
+      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
+      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
+      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
+      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
+      LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
+      TTS_ENABLED: ${TTS_ENABLED:-false}
+      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
+      TTS_VOICE: ${TTS_VOICE:-zh}
     depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     command:
       [
         "sh",
         "-c",
         "python -m app.workers.main heavy && arq app.workers.heavy.WorkerSettings",
       ]
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   minio_data:
+  litellm_db_data:
