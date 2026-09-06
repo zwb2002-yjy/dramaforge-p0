@@ -6,7 +6,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.27.4-alpine
+FROM nginxinc/nginx-unprivileged:1.31.5-alpine
 
 ARG DRAMAFORGE_VERSION=0.1.0
 ARG DRAMAFORGE_SOURCE_COMMIT=local
