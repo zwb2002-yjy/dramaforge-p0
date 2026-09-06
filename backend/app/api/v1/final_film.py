@@ -14,6 +14,7 @@ from app.production.final_film import (
     FinalFilmJobRead,
     FinalFilmPrepareRead,
     get_final_film_status,
+    list_final_film_jobs,
     prepare_formal_tail,
     queue_final_film_render,
 )
@@ -82,6 +83,20 @@ async def render_final_film_route(
         idempotency_key=idempotency_key,
         name=body.name,
     )
+
+
+@router.get(
+    "/projects/{project_id}/edit-sessions/{session_id}/final-films",
+    response_model=list[FinalFilmJobRead],
+)
+async def get_edit_session_final_films(
+    project_id: UUID,
+    session_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[FinalFilmJobRead]:
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await list_final_film_jobs(session, project_id=project.id, edit_session_id=session_id)
 
 
 @router.get(

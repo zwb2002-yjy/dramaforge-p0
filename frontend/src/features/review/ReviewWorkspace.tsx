@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   artifactContentUrl,
@@ -54,6 +54,12 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
     enabled: projectId !== "demo",
   });
   const shotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
+  const currentShot = useRef(shotId);
+  currentShot.current = shotId;
+  useEffect(() => {
+    setNote("");
+  }, [shotId]);
+
   const workbench = useQuery({
     queryKey: queryKeys.shot.reviewWorkbench(projectId, shotId),
     queryFn: () => fetchShotWorkbench(projectId, shotId!),
@@ -65,12 +71,15 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
     enabled: projectId !== "demo" && Boolean(shotId),
   });
   const addAnnotation = useMutation({
-    mutationFn: (input: Omit<Parameters<typeof createReviewAnnotation>[2], "note">) =>
-      createReviewAnnotation(projectId, shotId!, { ...input, note }),
-    onSuccess: () => {
-      setNote("");
+    mutationFn: (input: Parameters<typeof createReviewAnnotation>[2] & { shotId: string }) => {
+      const { shotId: targetShotId, ...body } = input;
+      return createReviewAnnotation(projectId, targetShotId, body);
+    },
+    retry: false,
+    onSuccess: (saved) => {
+      if (saved.shot_id === currentShot.current) setNote("");
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.review.annotations(projectId, shotId),
+        queryKey: queryKeys.review.annotations(projectId, saved.shot_id),
       });
     },
   });
@@ -78,11 +87,19 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
   const shot = workbench.data?.shot ?? null;
   const rows = annotations.data ?? [];
   const regions = rows
-    .filter((annotation) => annotation.target_kind === "image_region")
+    .filter(
+      (annotation) =>
+        annotation.target_kind === "image_region" &&
+        annotation.artifact_id === shot?.formal_keyframe_artifact_id,
+    )
     .map(imageRegion)
     .filter((region): region is NormalizedRegion => region !== null);
   const videoRows = rows
-    .filter((annotation) => annotation.target_kind === "video_time")
+    .filter(
+      (annotation) =>
+        annotation.target_kind === "video_time" &&
+        annotation.artifact_id === shot?.formal_video_artifact_id,
+    )
     .map(videoAnnotation)
     .filter((annotation): annotation is VideoAnnotation => annotation !== null);
   const durationSeconds = Number(shot?.duration_seconds ?? 0);
@@ -128,8 +145,10 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
             regions={regions}
             mode="region"
             onAddRegion={(region) => {
-              if (!shotId || !note.trim()) return;
+              if (!shotId || !note.trim() || addAnnotation.isPending) return;
               addAnnotation.mutate({
+                shotId,
+                note: note.trim(),
                 artifact_id: shot.formal_keyframe_artifact_id,
                 target_kind: "image_region",
                 x: String(region.x),
@@ -147,12 +166,30 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
       <section>
         <h2>视频时间线</h2>
         {shot?.formal_video_artifact_id ? (
-          <VideoReviewTimeline durationSeconds={durationSeconds} annotations={videoRows} />
+          <VideoReviewTimeline
+            key={`${shot.id}:${shot.formal_video_artifact_id}`}
+            videoUrl={artifactContentUrl(projectId, shot.formal_video_artifact_id)}
+            durationSeconds={durationSeconds}
+            annotations={videoRows}
+            note={note}
+            pending={addAnnotation.isPending}
+            onAddAnnotation={async (startSeconds, endSeconds) => {
+              if (!shotId || !note.trim() || addAnnotation.isPending) return;
+              await addAnnotation.mutateAsync({
+                shotId,
+                artifact_id: shot.formal_video_artifact_id,
+                target_kind: "video_time",
+                note: note.trim(),
+                time_start: String(startSeconds),
+                time_end: endSeconds === null ? null : String(endSeconds),
+              });
+            }}
+          />
         ) : (
           <p className="muted">尚未选择正式视频，当前没有可供时间批注的正式产物。</p>
         )}
       </section>
-      {addAnnotation.isError && (
+      {addAnnotation.isError && addAnnotation.variables?.shotId === shotId && (
         <div className="flash err">批注保存失败：{String(addAnnotation.error)}</div>
       )}
     </div>

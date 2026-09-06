@@ -20,6 +20,9 @@ function EditPage() {
     <LazyEditingWorkspace
       projectId={projectId}
       sessionId={sessionId}
+      onSessionSelected={(selectedSessionId) =>
+        navigate({ search: { sessionId: selectedSessionId } })
+      }
       onSessionCreated={(createdSessionId) => navigate({ search: { sessionId: createdSessionId } })}
     />
   );

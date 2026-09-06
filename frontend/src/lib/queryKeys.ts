@@ -92,6 +92,9 @@ export const queryKeys = {
   },
 
   editing: {
+    sessions: (projectId: string) => ["edit-sessions", projectId] as const,
+    films: (projectId: string, sessionId: string | undefined, version: number | undefined) =>
+      ["edit-final-films", projectId, sessionId, version] as const,
     session: (projectId: string, sessionId: string | null | undefined) =>
       ["edit-session", projectId, sessionId] as const,
   },

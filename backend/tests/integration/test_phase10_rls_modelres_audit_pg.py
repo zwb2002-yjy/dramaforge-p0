@@ -730,3 +730,65 @@ async def test_phase10_professional_resolution_no_bypass_pg(pg_session: AsyncSes
     # frozen identity travels to the worker; no direct provider HTTP at dispatch.
     assert run.status == "queued"
     assert stored.get("node_key") == "video"
+
+
+async def test_editing_recovery_reads_obey_runtime_role_and_frozen_scope_pg(
+    pg_session: AsyncSession,
+) -> None:
+    from app.api.v1.editing import list_edit_sessions
+    from app.api.v1.final_film import get_edit_session_final_films
+    from app.editing.adapter import EditingAdapter
+    from app.production.final_film import _ensure_final_graph, list_final_film_jobs
+    from app.shared.errors import NotFoundError
+
+    seeded = await _seed_user_workspace_projects(pg_session, uuid4().hex[:8])
+    user, workspace = seeded["user"], seeded["workspace"]
+    project_a, project_b = seeded["project_a"], seeded["project_b"]
+    await set_rls_context(
+        pg_session, user_id=user.id, workspace_id=workspace.id, project_id=project_b.id
+    )
+    edit = await pg_session.scalar(
+        select(EditSession).where(EditSession.project_id == project_b.id)
+    )
+    assert edit is not None
+    graph, node, _version = await _ensure_final_graph(
+        pg_session, project_id=project_b.id, actor_id=user.id
+    )
+    run = NodeRun(
+        project_id=project_b.id,
+        graph_version_id=graph.current_version_id,
+        graph_node_id=node.id,
+        created_by=user.id,
+        attempt_no=1,
+        idempotency_key=f"recovery-{uuid4()}",
+        input_hash="c" * 64,
+        status="queued",
+        input_snapshot={
+            "edit_session_id": str(edit.id),
+            "timeline_version": 7,
+            "timeline": {"clips": []},
+        },
+    )
+    pg_session.add(run)
+    await pg_session.flush()
+    run_id, edit_id = run.id, edit.id
+    await pg_session.execute(text("SET LOCAL ROLE dramaforge_app"))
+    pg_session.info["selected_workspace_id"] = workspace.id
+    await set_rls_context(
+        pg_session, user_id=user.id, workspace_id=workspace.id, project_id=project_a.id
+    )
+    assert await EditingAdapter(pg_session).list_sessions(project_id=project_b.id) == []
+    with pytest.raises(NotFoundError):
+        await list_final_film_jobs(pg_session, project_id=project_a.id, edit_session_id=edit_id)
+    # A separate HTTP request starts with user/workspace context, not the
+    # previous negative probe's project-A transaction scope.
+    await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id)
+    rows = await list_edit_sessions(project_id=project_b.id, user=user, session=pg_session)
+    assert [row.id for row in rows] == [edit_id]
+    history = await get_edit_session_final_films(
+        project_id=project_b.id, session_id=edit_id, user=user, session=pg_session
+    )
+    assert [job.node_run_id for job in history] == [run_id]
+    assert history[0].timeline_version == 7
+    assert history[0].result is None
+    assert not pg_session.new and not pg_session.dirty

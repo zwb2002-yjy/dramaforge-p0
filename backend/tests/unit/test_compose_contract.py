@@ -242,3 +242,13 @@ def test_compose_requires_unique_runtime_secrets_and_disables_public_registratio
         "sk-dev-change-me",
     ):
         assert forbidden not in compose_text
+
+
+def test_frontend_html_cannot_cache_old_chunk_entrypoints() -> None:
+    nginx = (REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
+    assert 'map $uri $frontend_cache_control' in nginx
+    assert '/index.html "no-store";' in nginx
+    assert 'add_header Cache-Control $frontend_cache_control;' in nginx
+    assert 'location ^~ /assets/' in nginx
+    assert 'try_files $uri =404;' in nginx
+    assert 'add_header X-Content-Type-Options "nosniff" always;' in nginx

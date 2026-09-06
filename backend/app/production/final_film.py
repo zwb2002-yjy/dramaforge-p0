@@ -708,7 +708,11 @@ async def _final_film_read(
     refs: list[_TimelineRef],
 ) -> FinalFilmRead:
     artifact = await session.get(Artifact, export.result_artifact_id)
-    if artifact is None or artifact.storage_state != "available":
+    if (
+        artifact is None
+        or artifact.project_id != export.project_id
+        or artifact.storage_state != "available"
+    ):
         raise ValidationAppError(
             "Final Film Artifact is not available",
             details={"code": "FINAL_FILM_ARTIFACT_UNAVAILABLE"},
@@ -964,6 +968,50 @@ async def queue_final_film_render(
         status="queued",
         job_id=job,
     )
+
+
+async def list_final_film_jobs(
+    session: AsyncSession, *, project_id: UUID, edit_session_id: UUID
+) -> list[FinalFilmJobRead]:
+    """Read frozen render history, never prepare, render, retry or mutate media."""
+    edit_session = await session.scalar(
+        select(EditSession).where(
+            EditSession.id == edit_session_id, EditSession.project_id == project_id
+        )
+    )
+    if edit_session is None:
+        raise NotFoundError("Final Film EditSession not found")
+    runs = await session.scalars(
+        select(NodeRun)
+        .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+        .where(
+            NodeRun.project_id == project_id,
+            GraphNode.node_key == _FINAL_FILM_GRAPH_KEY,
+            NodeRun.input_snapshot["edit_session_id"].as_string() == str(edit_session_id),
+        )
+        .order_by(NodeRun.created_at.desc(), NodeRun.id.desc())
+    )
+    results: list[FinalFilmJobRead] = []
+    for run in runs:
+        try:
+            results.append(await _job_read(session, run=run, edit_session=edit_session))
+        except ValidationAppError as exc:
+            # An unavailable historical artifact must not hide the other exports.
+            results.append(
+                FinalFilmJobRead(
+                    project_id=project_id,
+                    edit_session_id=edit_session_id,
+                    timeline_version=int(
+                        str((run.input_snapshot or {}).get("timeline_version") or 1)
+                    ),
+                    node_run_id=run.id,
+                    attempt_no=run.attempt_no,
+                    status=run.status,
+                    error_code=str(exc.details.get("code", "FINAL_FILM_RESULT_UNAVAILABLE")),
+                    error_summary=str(exc),
+                )
+            )
+    return results
 
 
 async def get_final_film_status(

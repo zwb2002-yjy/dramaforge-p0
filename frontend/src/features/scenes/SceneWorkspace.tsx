@@ -21,6 +21,9 @@ import { queryKeys } from "../../lib/queryKeys";
 type SceneWorkspaceProps = {
   projectId: string;
   sceneId: string;
+  initialShotId?: string;
+  openDirector?: boolean;
+  onOpenEditing?: () => void;
 };
 
 type ShotReferenceContext = {
@@ -45,12 +48,20 @@ function sameReferences(left: ShotExecutionReference[], right: ShotExecutionRefe
  * opened on demand, the Candidate Tray is a conditional review surface, and
  * the ShotStrip defaults to compact navigation.
  */
-export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
-  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+export function SceneWorkspace({
+  projectId,
+  sceneId,
+  initialShotId,
+  openDirector = false,
+  onOpenEditing,
+}: SceneWorkspaceProps) {
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(initialShotId ?? null);
   const [previewCandidate, setPreviewCandidate] = useState<ShotCandidate | null>(null);
   const [referenceDrafts, setReferenceDrafts] = useState<Record<string, ShotReferenceContext>>({});
   // Context Dock / sheet / tray / strip / details are pure UI state.
-  const [activeTool, setActiveTool] = useState<ContextTool | null>(null);
+  const [activeTool, setActiveTool] = useState<ContextTool | null>(
+    openDirector ? "director" : null,
+  );
   const [trayExpanded, setTrayExpanded] = useState(false);
   const [stripExpanded, setStripExpanded] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -64,22 +75,24 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
   });
 
   useEffect(() => {
-    setSelectedShotId(null);
+    setSelectedShotId(initialShotId ?? null);
     setPreviewCandidate(null);
     setReferenceDrafts({});
-    setActiveTool(null);
+    setActiveTool(openDirector ? "director" : null);
     setTrayExpanded(false);
     setStripExpanded(false);
     setDetailsOpen(false);
     setDesignDirty(false);
     setSuggestionDraft(null);
-  }, [projectId, sceneId]);
+  }, [projectId, sceneId, initialShotId, openDirector]);
 
   const data = workspace.data as SceneWorkspaceRead | undefined;
   const shots = data?.shots ?? [];
-  const selected = (shots.find((shot) => shot.id === selectedShotId) ??
-    shots[0] ??
-    null) as ShotLite | null;
+  const selected = (
+    selectedShotId !== null
+      ? (shots.find((shot) => shot.id === selectedShotId) ?? null)
+      : (shots[0] ?? null)
+  ) as ShotLite | null;
   const selectedShotKey = selected?.id ?? null;
   const selectedBindingRows = selected ? (data?.references?.[selected.id] ?? []) : [];
   const selectedShotHasBindings = selectedBindingRows.length > 0;
@@ -209,12 +222,21 @@ export function SceneWorkspace({ projectId, sceneId }: SceneWorkspaceProps) {
             className="qc-overview-primary"
             href={`/projects/${projectId}/edit`}
             data-testid="scene-edit-entry"
+            onClick={(event) => {
+              if (onOpenEditing) {
+                event.preventDefault();
+                onOpenEditing();
+              }
+            }}
           >
             进入剪辑
           </a>
         </div>
       </header>
 
+      {data && selectedShotId !== null && !selected && (
+        <p role="alert">目标镜头不在此场景，请重新选择镜头。</p>
+      )}
       {workspace.isError && (
         <div className="flash err">无法读取场景工作区：{String(workspace.error)}</div>
       )}

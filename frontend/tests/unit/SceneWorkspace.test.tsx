@@ -539,3 +539,54 @@ describe("SceneWorkspace", () => {
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("Contextual Director entry", () => {
+  it("opens the real selected-shot panel without requesting or applying a suggestion", async () => {
+    const calls = mockBackend();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SceneWorkspace
+          projectId="project-1"
+          sceneId="scene-1"
+          initialShotId="shot-1"
+          openDirector
+        />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "主动分析当前镜头" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "生成镜头建议" })).toBeDisabled();
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+  });
+  it("does not replace an invalid explicit target with a different shot", async () => {
+    const calls = mockBackend();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SceneWorkspace
+          projectId="project-1"
+          sceneId="scene-1"
+          initialShotId="foreign-shot"
+          openDirector
+        />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("目标镜头不在此场景");
+    expect(screen.queryByRole("button", { name: "主动分析当前镜头" })).not.toBeInTheDocument();
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+  });
+});
+
+it("uses route-owned editing navigation instead of reloading a cached HTML route", async () => {
+  mockBackend();
+  const onOpenEditing = vi.fn();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <SceneWorkspace projectId="project-1" sceneId="scene-1" onOpenEditing={onOpenEditing} />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Studio");
+  fireEvent.click(screen.getByTestId("scene-edit-entry"));
+  expect(onOpenEditing).toHaveBeenCalledTimes(1);
+});

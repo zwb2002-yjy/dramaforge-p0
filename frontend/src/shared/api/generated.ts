@@ -681,7 +681,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Edit Sessions */
+        get: operations["list_edit_sessions_api_v1_projects__project_id__edit_sessions_get"];
         put?: never;
         /**
          * Create Edit Session
@@ -1936,6 +1937,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/final-films": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Edit Session Final Films */
+        get: operations["get_edit_session_final_films_api_v1_projects__project_id__edit_sessions__session_id__final_films_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/final-film/runs/{node_run_id}": {
         parameters: {
             query?: never;
@@ -2915,6 +2933,37 @@ export interface components {
             production_lineage: {
                 [key: string]: components["schemas"]["JsonValue"];
             };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** EditSessionSummaryRead */
+        EditSessionSummaryRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Version */
+            version: number;
+            /** Clip Count */
+            clip_count: number;
             /**
              * Created At
              * Format: date-time
@@ -7509,6 +7558,43 @@ export interface operations {
             };
         };
     };
+    list_edit_sessions_api_v1_projects__project_id__edit_sessions_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditSessionSummaryRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_edit_session_api_v1_projects__project_id__edit_sessions_post: {
         parameters: {
             query?: {
@@ -10854,6 +10940,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FinalFilmJobRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_edit_session_final_films_api_v1_projects__project_id__edit_sessions__session_id__final_films_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinalFilmJobRead"][];
                 };
             };
             /** @description Validation Error */

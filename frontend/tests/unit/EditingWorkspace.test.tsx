@@ -19,6 +19,21 @@ function json(body: unknown, status = 200): Promise<Response> {
   );
 }
 
+// Discovery is exercised end-to-end by EditingRecovery.test.tsx. Keep these
+// pre-existing lifecycle fixtures focused on their exact session/manifest calls;
+// only the two new read-only GET endpoints are answered here, never a POST.
+function mockEditingFetch(implementation: typeof fetch) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    if (
+      (init?.method ?? "GET") === "GET" &&
+      (url.endsWith("/edit-sessions") || url.endsWith("/final-films"))
+    )
+      return json([]);
+    return implementation(input, init);
+  });
+}
+
 function manifest(
   clips: Array<Record<string, unknown>>,
   shots: Array<Record<string, unknown>>,
@@ -249,7 +264,7 @@ afterEach(() => {
 describe("EditingWorkspace", () => {
   it("loads the real manifest GET and renders project, scene, shot, and storage lineage", async () => {
     const calls: Array<{ method: string; url: string }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       calls.push({ method: init?.method ?? "GET", url: String(input) });
       return json(manifest([formalClip("artifact-formal")], [shot(SHOT_ID, "artifact-formal")]));
     });
@@ -270,7 +285,7 @@ describe("EditingWorkspace", () => {
 
   it("creates a persisted session only after an explicit click and sends no production input", async () => {
     const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       const body = init?.body
@@ -310,7 +325,7 @@ describe("EditingWorkspace", () => {
 
   it("loads the exact persisted session and keeps lineage visibly read-only", async () => {
     const calls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockEditingFetch((input) => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
@@ -327,7 +342,7 @@ describe("EditingWorkspace", () => {
 
   it("edits only local clip order/duration until an explicit save", async () => {
     const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       calls.push({ method: init?.method ?? "GET", url });
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
@@ -361,7 +376,7 @@ describe("EditingWorkspace", () => {
       ],
       metadata: { auto_built: true, edited: true },
     });
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       const body = init?.body
         ? (JSON.parse(String(init.body)) as Record<string, unknown>)
@@ -418,7 +433,7 @@ describe("EditingWorkspace", () => {
 
   it("reopens the exact session from the server instead of merging a fresh manifest", async () => {
     const calls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockEditingFetch((input) => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) {
@@ -444,7 +459,7 @@ describe("EditingWorkspace", () => {
 
   it("exports the persisted session by exact id and displays only manifest summary", async () => {
     const calls: Array<{ method: string; url: string }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       calls.push({ method: init?.method ?? "GET", url });
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
@@ -475,7 +490,7 @@ describe("EditingWorkspace", () => {
   });
 
   it("keeps a dirty draft after save failure and shows the real server error", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockEditingFetch((input) => {
       const url = String(input);
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-save" });
@@ -498,7 +513,7 @@ describe("EditingWorkspace", () => {
 
   it("requests a proposal with the current session version and keeps it separate from timeline save", async () => {
     const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       const body = init?.body
         ? (JSON.parse(String(init.body)) as Record<string, unknown>)
@@ -561,7 +576,7 @@ describe("EditingWorkspace", () => {
       ],
       metadata: { auto_built: true, director_suggestion_applied: 1 },
     };
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`) && method === "GET") {
@@ -601,7 +616,7 @@ describe("EditingWorkspace", () => {
 
   it("partially applies only selected operations and rejects the rest", async () => {
     let patchBody: Record<string, unknown> | undefined;
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`) && method === "GET") {
@@ -638,7 +653,7 @@ describe("EditingWorkspace", () => {
 
   it("rejects the editing suggestion preview without a timeline mutation", async () => {
     const calls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockEditingFetch((input) => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
@@ -664,7 +679,7 @@ describe("EditingWorkspace", () => {
 
   it("exports Final Film from the persisted EditSession timeline with idempotency", async () => {
     const calls: Array<{ method: string; url: string; headers?: Record<string, string> }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       const headers = (init?.headers ?? {}) as Record<string, string>;
       calls.push({ method: init?.method ?? "GET", url, headers });
@@ -696,7 +711,8 @@ describe("EditingWorkspace", () => {
       return json({});
     });
 
-    renderPersistedSession();
+    const client = renderPersistedSession();
+    const invalidation = vi.spyOn(client, "invalidateQueries");
     await screen.findByTestId("edit-session-editor");
     fireEvent.click(screen.getByTestId("export-final-film"));
 
@@ -711,11 +727,14 @@ describe("EditingWorkspace", () => {
       `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-final-1/content`,
     );
     expect(screen.getByTestId("final-film-download")).toHaveAttribute("download");
+    expect(invalidation).toHaveBeenCalledWith({
+      queryKey: ["edit-final-films", PROJECT_ID, SESSION_ID, 1],
+    });
   });
 
   it("blocks Final Film export while the timeline draft is dirty", async () => {
     const calls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockEditingFetch((input) => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
@@ -732,7 +751,7 @@ describe("EditingWorkspace", () => {
 
   it("requests a proactive editing suggestion without a user instruction", async () => {
     const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       const body = init?.body
         ? (JSON.parse(String(init.body)) as Record<string, unknown>)
@@ -760,7 +779,7 @@ describe("EditingWorkspace", () => {
   });
 
   it("marks a pending preview stale when the loaded session version changes", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockEditingFetch((input) => {
       const url = String(input);
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-suggestion" });
@@ -788,7 +807,7 @@ describe("EditingWorkspace", () => {
 
   it("routes a production-repair issue to a Repair Proposal without saving the timeline", async () => {
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    mockEditingFetch((input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -820,7 +839,7 @@ describe("EditingWorkspace", () => {
   });
 
   it("keeps the timeline path when the Director says the timeline can fix the issue", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockEditingFetch((input) => {
       const url = String(input);
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-repair-yes" });
@@ -847,7 +866,7 @@ describe("EditingWorkspace", () => {
     "fails closed on a %s suggestion response without timeline save",
     async (status) => {
       const calls: string[] = [];
-      vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      mockEditingFetch((input) => {
         const url = String(input);
         calls.push(url);
         if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
@@ -874,7 +893,7 @@ describe("EditingWorkspace", () => {
 
   it("does not submit an empty or whitespace-only instruction", async () => {
     const calls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockEditingFetch((input) => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
@@ -896,7 +915,7 @@ describe("EditingWorkspace", () => {
     const suggestionResponse = new Promise<Response>((resolve) => {
       resolveSuggestion = resolve;
     });
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    mockEditingFetch((input) => {
       const url = String(input);
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-suggestion" });
@@ -925,14 +944,20 @@ describe("EditingWorkspace", () => {
   });
 
   it("surfaces an empty project and partial formal-video hand-off", async () => {
-    const empty = vi.spyOn(globalThis, "fetch").mockImplementation(() => json(manifest([], [])));
+    const empty = mockEditingFetch(() => json(manifest([], [])));
     renderWorkspace();
     expect(await screen.findByTestId("editing-empty-project")).toHaveTextContent("暂无镜头");
     expect(screen.getByTestId("editing-no-clips")).toBeInTheDocument();
-    expect(empty).toHaveBeenCalledTimes(1);
+    expect(empty).toHaveBeenCalledTimes(2);
+    expect(empty.mock.calls.map(([url]) => String(url))).toEqual(
+      expect.arrayContaining([
+        "/api/v1/projects/project-1/edit-sessions",
+        "/api/v1/projects/project-1/opencut-manifest",
+      ]),
+    );
 
     vi.restoreAllMocks();
-    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+    mockEditingFetch(() =>
       json(
         manifest(
           [formalClip("artifact-formal")],
@@ -955,9 +980,7 @@ describe("EditingWorkspace", () => {
   });
 
   it("does not render a fake timeline when the manifest API fails", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-      json({ detail: "manifest unavailable" }, 503),
-    );
+    mockEditingFetch(() => json({ detail: "manifest unavailable" }, 503));
     renderWorkspace();
 
     expect(await screen.findByText(/无法读取剪辑时间线/)).toBeInTheDocument();
@@ -967,7 +990,7 @@ describe("EditingWorkspace", () => {
 
   it("reflects a changed manifest after refetch", async () => {
     let requestCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+    mockEditingFetch(() => {
       requestCount += 1;
       return json(
         requestCount === 1

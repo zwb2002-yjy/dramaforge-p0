@@ -8,11 +8,9 @@ import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabi
 import { fetchScenes } from "../features/scenes/api";
 import { createShotExecution } from "../features/shots/api";
 import {
-  confirmShotChangeProposal,
   createExperiment,
   createProjectAsset,
   createReviewAnnotation,
-  createShotChangeProposal,
   decideExperiment,
   fetchDirectorBoard,
   fetchExperiments,
@@ -347,19 +345,6 @@ export function ProductionPage({ projectId }: { projectId: string }) {
           });
           return result;
         }}
-        onPropose={async (shot, input) =>
-          createShotChangeProposal(projectId, shot.id, {
-            idempotency_key: `canvas-${shot.id}-${shot.version}-${input.summary}`,
-            summary: input.summary,
-            expected_version: shot.version,
-            replacement_payload: input.replacement_payload,
-            affected_node_keys: input.affected_node_keys,
-            reusable_artifact_ids: input.reusable_artifact_ids,
-          })
-        }
-        onConfirmProposal={(shotId, proposalId) =>
-          confirmShotChangeProposal(projectId, shotId, proposalId).then(() => undefined)
-        }
       />
 
       <div className="pipeline-rail" aria-label="shot-p0-v1">

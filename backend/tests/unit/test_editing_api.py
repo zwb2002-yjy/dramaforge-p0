@@ -102,9 +102,7 @@ def _create_project(client: TestClient, *, name: str) -> str:
     return str(response.json()["id"])
 
 
-async def _seed_formal_facts(
-    factory: async_sessionmaker[AsyncSession], project_id: str
-) -> None:
+async def _seed_formal_facts(factory: async_sessionmaker[AsyncSession], project_id: str) -> None:
     async with factory() as session:
         project = await session.get(Project, UUID(project_id))
         assert project is not None
@@ -247,9 +245,7 @@ async def _formal_snapshot(
             )
         ).scalar_one()
         graph_version = (
-            await session.execute(
-                select(GraphVersion).where(GraphVersion.graph_id == graph.id)
-            )
+            await session.execute(select(GraphVersion).where(GraphVersion.graph_id == graph.id))
         ).scalar_one()
         run = (
             await session.execute(select(NodeRun).where(NodeRun.project_id == UUID(project_id)))
@@ -334,9 +330,7 @@ def test_editing_http_lifecycle_preserves_formal_facts(
     assert reopened.status_code == 200, reopened.text
     assert reopened.json()["timeline"] == edited_timeline
 
-    exported = client.get(
-        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/export"
-    )
+    exported = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/export")
     assert exported.status_code == 200, exported.text
     assert exported.json()["session_id"] == session_id
     assert exported.json()["clip_count"] == 1
@@ -563,3 +557,23 @@ def test_editing_http_is_project_scoped(
     assert reverse_get.status_code == 404, reverse_get.text
     unknown_get = client.get(f"/api/v1/projects/{project_a}/edit-sessions/{uuid4()}")
     assert unknown_get.status_code == 404, unknown_get.text
+
+
+def test_list_sessions_is_project_scoped_and_never_creates_a_session(api: Any) -> None:
+    client, _factory = api
+    _register(client)
+    project_id = _create_project(client, name="Session recovery")
+    other_project = _create_project(client, name="Other project")
+    base = f"/api/v1/projects/{project_id}/edit-sessions"
+    assert client.get(base).json() == []
+    created = client.post(base, json={"name": "Existing cut"}, headers={CSRF_HEADER: _csrf(client)})
+    assert created.status_code == 201, created.text
+    rows = client.get(base)
+    assert rows.status_code == 200, rows.text
+    assert [row["id"] for row in rows.json()] == [created.json()["id"]]
+    assert rows.json()[0]["clip_count"] == 0
+    assert "timeline" not in rows.json()[0]
+    assert client.get(f"/api/v1/projects/{other_project}/edit-sessions").json() == []
+    assert client.get(base).json() == rows.json()
+    client.headers.pop("X-Workspace-Id")
+    assert client.get(base).status_code in {400, 403, 422}

@@ -484,19 +484,27 @@ async def test_worker_renders_frozen_timeline_and_persists_lineage(
     artifact = await session.get(Artifact, result.artifact_id)
     assert artifact is not None and artifact.produced_by_run_id == run.id
     export = (
-        await session.execute(select(Export).where(Export.project_id == project.id))
-    ).scalars().one()
+        (await session.execute(select(Export).where(Export.project_id == project.id)))
+        .scalars()
+        .one()
+    )
     assert export.result_artifact_id == artifact.id
     items = (
-        await session.execute(select(ExportItem).where(ExportItem.export_id == export.id))
-    ).scalars().all()
+        (await session.execute(select(ExportItem).where(ExportItem.export_id == export.id)))
+        .scalars()
+        .all()
+    )
     assert len(items) == len(shots)
     assert all(item.metadata_json["timeline_edit"] for item in items)
     operation = (
-        await session.execute(
-            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        (
+            await session.execute(
+                select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+            )
         )
-    ).scalars().one()
+        .scalars()
+        .one()
+    )
     assert operation.status == "succeeded"
     assert operation.execution_path_version == "local-final-film-worker-v2"
 
@@ -536,3 +544,75 @@ async def test_missing_edit_session_is_not_found(session: AsyncSession) -> None:
             idempotency_key=None,
             name="Final",
         )
+
+
+async def test_history_uses_frozen_timeline_and_survives_unavailable_media(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.production.final_film import list_final_film_jobs
+
+    async def fake_enqueue(_self: NodeRunScheduler, _run_id: object) -> str:
+        return "history-fixture-job"
+
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", fake_enqueue)
+
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session)
+    job = await queue_final_film_render(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+        idempotency_key="history-only-fixture",
+        name="History fixture",
+    )
+    run = await session.get(NodeRun, job.node_run_id)
+    assert run is not None
+    run.status = "completed"
+    artifact = Artifact(
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key="history-only.mp4",
+        content_hash="a" * 64,
+        mime_type="video/mp4",
+        byte_size=32,
+        duration_seconds=Decimal("5"),
+    )
+    session.add(artifact)
+    await session.flush()
+    exported = Export(
+        project_id=project.id,
+        format="dramaforge-final-film-v1",
+        status="completed",
+        requested_by=user.id,
+        result_artifact_id=artifact.id,
+        manifest={
+            "node_run_id": str(run.id),
+            "provider_operation_id": str(uuid4()),
+            "edit_session_id": str(edit.id),
+            "timeline_version": 1,
+        },
+    )
+    session.add(exported)
+    edit.version = 2
+    edit.timeline = {"clips": [], "metadata": {}}
+    await session.flush()
+    history = await list_final_film_jobs(session, project_id=project.id, edit_session_id=edit.id)
+    assert len(history) == 1
+    assert history[0].timeline_version == 1
+    assert history[0].result is not None
+    assert history[0].result.timeline_version == 1
+    assert history[0].result.timeline_clip_count == 1
+    assert history[0].result.artifact_id == artifact.id
+    assert not session.new and not session.dirty
+    with pytest.raises(NotFoundError):
+        await list_final_film_jobs(session, project_id=uuid4(), edit_session_id=edit.id)
+    artifact.storage_state = "deleted"
+    await session.flush()
+    unavailable = await list_final_film_jobs(
+        session, project_id=project.id, edit_session_id=edit.id
+    )
+    assert unavailable[0].result is None
+    assert unavailable[0].error_code == "FINAL_FILM_ARTIFACT_UNAVAILABLE"

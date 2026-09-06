@@ -1,6 +1,9 @@
+import { FinalFilmPlayback } from "./FinalFilmPlayback";
+import "./editing-recovery.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { EditingSessionPicker } from "./EditingSessionPicker";
 import { queryKeys } from "../../lib/queryKeys";
 import {
   artifactContentUrl,
@@ -13,6 +16,7 @@ import {
   createEditSession,
   exportEditSession,
   fetchFinalFilmStatus,
+  fetchEditFinalFilms,
   fetchEditSession,
   prepareFinalFilm,
   renderFinalFilm,
@@ -35,6 +39,7 @@ type EditingWorkspaceProps = {
   sessionId?: string;
   /** The route owns URL identity and navigates after explicit creation. */
   onSessionCreated?: (sessionId: string) => void;
+  onSessionSelected?: (sessionId: string) => void;
 };
 
 type EditableClip = NonNullable<EditTimelinePayload["clips"]>[number];
@@ -191,6 +196,7 @@ export function EditingWorkspace({
   projectId,
   sessionId,
   onSessionCreated,
+  onSessionSelected,
 }: EditingWorkspaceProps) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<EditableTimeline | null>(null);
@@ -213,9 +219,13 @@ export function EditingWorkspace({
   const [repairRouting, setRepairRouting] = useState<EditingRepairRoutingRead | null>(null);
   const [repairError, setRepairError] = useState<string | null>(null);
   const [selectedSuggestionOps, setSelectedSuggestionOps] = useState<Record<number, boolean>>({});
+  const finalFilmSequenceRef = useRef(0);
+  const finalFilmScopeRef = useRef({ projectId, sessionId });
+  finalFilmScopeRef.current = { projectId, sessionId };
   const suggestionSequenceRef = useRef(0);
   const suggestionIdentityRef = useRef<EditingSuggestionPreviewContext | null>(null);
 
+  const [selectedHistoryRun, setSelectedHistoryRun] = useState<string | null>(null);
   const hasSession = Boolean(sessionId);
   const manifest = useQuery({
     queryKey: queryKeys.production.opencutManifest(projectId),
@@ -229,6 +239,26 @@ export function EditingWorkspace({
   });
 
   const currentSessionVersion = persistedSession.data?.version;
+  const filmHistory = useQuery({
+    queryKey: queryKeys.editing.films(projectId, sessionId, currentSessionVersion),
+    queryFn: () => fetchEditFinalFilms(projectId, sessionId!),
+    enabled: projectId !== "demo" && hasSession && currentSessionVersion !== undefined,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.some((job) =>
+        ["queued", "running", "cancel_requested"].includes(job.status),
+      )
+        ? 5000
+        : false,
+  });
+  const recoveredFilm = selectedHistoryRun
+    ? filmHistory.data?.find((job) => job.node_run_id === selectedHistoryRun)?.result
+    : filmHistory.data?.find((job) => job.result)?.result;
+  const displayedFilm =
+    [finalFilm, recoveredFilm].find(
+      (film) => film?.project_id === projectId && film.edit_session_id === sessionId,
+    ) ?? null;
+
   suggestionIdentityRef.current =
     sessionId && isSessionVersion(currentSessionVersion)
       ? { projectId, sessionId, sessionVersion: currentSessionVersion }
@@ -265,6 +295,8 @@ export function EditingWorkspace({
     setFeedback(null);
     setExported(null);
     setFinalFilm(null);
+    setSelectedHistoryRun(null);
+    finalFilmSequenceRef.current += 1;
     setFinalFilmError(null);
     setFinalFilmPending(null);
     setSuggestionInstruction("");
@@ -293,6 +325,7 @@ export function EditingWorkspace({
     mutationFn: () => createEditSession(projectId),
     onSuccess: (created) => {
       setFeedback(null);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.editing.sessions(projectId) });
       onSessionCreated?.(created.id);
     },
     onError: (error: unknown) => {
@@ -317,6 +350,7 @@ export function EditingWorkspace({
       setSuggestionError(null);
       setSelectedSuggestionOps({});
       queryClient.setQueryData(["edit-session", projectId, sessionId], saved);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.editing.sessions(projectId) });
     },
     onError: (error: unknown) => {
       // Keep draft/baseline untouched so failed saves leave the editor dirty.
@@ -348,24 +382,34 @@ export function EditingWorkspace({
       return;
     }
     const idempotencyKey = `final-${projectId}-${sessionId}-${currentSessionVersion}`;
+    const sequence = ++finalFilmSequenceRef.current;
+    const isCurrent = () =>
+      sequence === finalFilmSequenceRef.current &&
+      finalFilmScopeRef.current.projectId === projectId &&
+      finalFilmScopeRef.current.sessionId === sessionId;
+    const historyKey = queryKeys.editing.films(projectId, sessionId, currentSessionVersion);
+
     try {
       setFinalFilmError(null);
       setFinalFilmPending("prepare");
       const prepared = await prepareFinalFilm(projectId, sessionId, currentSessionVersion);
-      setFinalFilmPending("tail");
+      if (isCurrent()) setFinalFilmPending("tail");
       await waitForPreparedTail(projectId, prepared.node_run_ids);
-      setFinalFilmPending("render");
+      if (isCurrent()) setFinalFilmPending("render");
       const queued = await renderFinalFilm(
         projectId,
         sessionId,
         currentSessionVersion,
         idempotencyKey,
       );
-      setFinalFilm(await waitForFinalFilmJob(projectId, queued));
-      setFinalFilmPending(null);
+      void queryClient.invalidateQueries({ queryKey: historyKey });
+      const result = await waitForFinalFilmJob(projectId, queued);
+      if (isCurrent()) setFinalFilm(result);
     } catch (error: unknown) {
-      setFinalFilmError(`Final Film 导出失败：${errorMessage(error)}`);
-      setFinalFilmPending(null);
+      if (isCurrent()) setFinalFilmError(`Final Film 导出失败：${errorMessage(error)}`);
+    } finally {
+      if (isCurrent()) setFinalFilmPending(null);
+      void queryClient.invalidateQueries({ queryKey: historyKey });
     }
   }
 
@@ -660,6 +704,15 @@ export function EditingWorkspace({
   if (hasSession) {
     return (
       <div className="qc-project-page" data-testid="editing-workspace" data-session-id={sessionId}>
+        <EditingSessionPicker
+          projectId={projectId}
+          sessionId={sessionId}
+          disabled={
+            dirty || finalFilmPending !== null || save.isPending || exportMutation.isPending
+          }
+          onSelect={onSessionSelected}
+        />
+
         <header className="qc-page-heading">
           <p>剪辑</p>
           <h1>持久化 EditSession</h1>
@@ -1166,50 +1219,83 @@ export function EditingWorkspace({
               )}
             </section>
 
-            {finalFilm && (
+            <section aria-label="历史成片与导出状态">
+              <h2>历史成片与导出状态</h2>
+              <p>读取已有生产结果，不会重新导出。历史版本不会冒充当前时间线。</p>
+              <button type="button" onClick={() => void filmHistory.refetch()}>
+                刷新成片历史
+              </button>
+              {filmHistory.isLoading && <p role="status">正在读取成片历史…</p>}
+              {filmHistory.isError && (
+                <p role="alert">无法读取成片历史：{String(filmHistory.error)}</p>
+              )}
+              {filmHistory.data?.length === 0 && <p>此会话还没有成片导出记录。</p>}
+              <ul>
+                {(filmHistory.data ?? []).map((job) => (
+                  <li key={job.node_run_id}>
+                    Timeline v{job.timeline_version} · {job.status}
+                    {job.error_summary && <p role="status">{job.error_summary}</p>}
+                    {job.result && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFinalFilm(null);
+                          setSelectedHistoryRun(job.node_run_id);
+                        }}
+                      >
+                        查看成片 · v{job.timeline_version}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            {displayedFilm && (
               <section className="final-film-result" data-testid="final-film-result">
                 <h2>Final Film Artifact</h2>
+                <p>
+                  {displayedFilm.timeline_version === currentSessionVersion
+                    ? "当前时间线版本的已完成成片"
+                    : `历史成片 · Timeline v${displayedFilm.timeline_version}（当前 v${currentSessionVersion}）`}
+                </p>
                 <dl>
                   <dt>EditSession</dt>
-                  <dd>{finalFilm.edit_session_id}</dd>
+                  <dd>{displayedFilm.edit_session_id}</dd>
                   <dt>Timeline version</dt>
-                  <dd>{finalFilm.timeline_version}</dd>
+                  <dd>{displayedFilm.timeline_version}</dd>
                   <dt>Artifact</dt>
-                  <dd>{finalFilm.artifact_id}</dd>
+                  <dd>{displayedFilm.artifact_id}</dd>
                   <dt>duration_seconds</dt>
-                  <dd>{finalFilm.duration_seconds}</dd>
+                  <dd>{displayedFilm.duration_seconds}</dd>
                   <dt>mime_type</dt>
-                  <dd>{finalFilm.mime_type}</dd>
+                  <dd>{displayedFilm.mime_type}</dd>
                   <dt>byte_size</dt>
-                  <dd>{finalFilm.byte_size}</dd>
+                  <dd>{displayedFilm.byte_size}</dd>
                   <dt>content_hash</dt>
-                  <dd>{finalFilm.content_hash}</dd>
+                  <dd>{displayedFilm.content_hash}</dd>
                   <dt>storage_state</dt>
-                  <dd>{finalFilm.storage_state}</dd>
+                  <dd>{displayedFilm.storage_state}</dd>
                   <dt>可播放性断言</dt>
                   <dd>
-                    {finalFilm.ffprobe?.assertions &&
-                    typeof finalFilm.ffprobe.assertions === "object" &&
-                    !Array.isArray(finalFilm.ffprobe.assertions)
-                      ? Object.entries(finalFilm.ffprobe.assertions as Record<string, unknown>)
+                    {displayedFilm.ffprobe?.assertions &&
+                    typeof displayedFilm.ffprobe.assertions === "object" &&
+                    !Array.isArray(displayedFilm.ffprobe.assertions)
+                      ? Object.entries(displayedFilm.ffprobe.assertions as Record<string, unknown>)
                           .map(([key, value]) => `${key}=${String(value)}`)
                           .join(" · ")
                       : "未提供"}
                   </dd>
                 </dl>
-                <video
-                  controls
-                  playsInline
-                  preload="metadata"
-                  data-testid="final-film-player"
-                  src={artifactContentUrl(projectId, finalFilm.artifact_id)}
-                >
-                  当前浏览器不支持视频播放。
-                </video>
+                <FinalFilmPlayback
+                  key={`${projectId}:${displayedFilm.artifact_id}`}
+                  projectId={projectId}
+                  artifactId={displayedFilm.artifact_id}
+                />
                 <a
                   data-testid="final-film-download"
-                  href={artifactContentUrl(projectId, finalFilm.artifact_id)}
-                  download={`dramaforge-final-film-${finalFilm.content_hash.slice(0, 12)}.mp4`}
+                  href={artifactContentUrl(projectId, displayedFilm.artifact_id)}
+                  download={`dramaforge-final-film-${displayedFilm.content_hash.slice(0, 12)}.mp4`}
                 >
                   下载 Final Film MP4
                 </a>
@@ -1250,6 +1336,8 @@ export function EditingWorkspace({
 
   return (
     <div className="qc-project-page" data-testid="editing-workspace">
+      <EditingSessionPicker projectId={projectId} onSelect={onSessionSelected} />
+
       <header className="qc-page-heading">
         <p>剪辑</p>
         <h1>OpenCut 剪辑交接</h1>

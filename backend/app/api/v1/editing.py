@@ -39,6 +39,19 @@ router = APIRouter(tags=["editing"], dependencies=[Depends(require_selected_work
 _DEFAULT_SESSION_NAME = "Long-form Edit"
 
 
+class EditSessionSummaryRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    project_id: UUID
+    name: str
+    status: str
+    version: int
+    clip_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
 class EditSessionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -149,6 +162,34 @@ async def _owned_session(
         project_id=project_id,
         session_id=session_id,
     )
+
+
+@router.get(
+    "/projects/{project_id}/edit-sessions",
+    response_model=list[EditSessionSummaryRead],
+)
+async def list_edit_sessions(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[EditSessionSummaryRead]:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    rows = await EditingAdapter(session).list_sessions(project_id=project_id)
+    return [
+        EditSessionSummaryRead(
+            id=row.id,
+            project_id=row.project_id,
+            name=row.name,
+            status=row.status,
+            version=row.version,
+            clip_count=(
+                len(clips) if isinstance(clips := (row.timeline or {}).get("clips"), list) else 0
+            ),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+        for row in rows
+    ]
 
 
 @router.post(

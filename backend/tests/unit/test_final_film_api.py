@@ -112,14 +112,10 @@ async def _count_rows(
 ) -> tuple[int, int]:
     async with factory() as session:
         run_count = await session.scalar(
-            select(func.count()).select_from(NodeRun).where(
-                NodeRun.project_id == UUID(project_id)
-            )
+            select(func.count()).select_from(NodeRun).where(NodeRun.project_id == UUID(project_id))
         )
         export_count = await session.scalar(
-            select(func.count()).select_from(Export).where(
-                Export.project_id == UUID(project_id)
-            )
+            select(func.count()).select_from(Export).where(Export.project_id == UUID(project_id))
         )
         return int(run_count or 0), int(export_count or 0)
 
@@ -178,3 +174,21 @@ def test_final_film_routes_fail_closed_for_stale_timeline_and_non_owner(
         return await _count_rows(factory, project_id)
 
     assert asyncio.run(count_rows()) == (0, 0)
+
+
+def test_final_film_history_empty_and_wrong_session_are_read_only(api: Any) -> None:
+    client, factory = api
+    _register(client)
+    project_id = _create_project(client)
+    edit_id = _create_edit_session(client, project_id)
+    url = f"/api/v1/projects/{project_id}/edit-sessions/{edit_id}/final-films"
+    before = asyncio.run(_count_rows(factory, project_id))
+    response = client.get(url)
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+    assert asyncio.run(_count_rows(factory, project_id)) == before
+    missing = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{uuid4()}/final-films")
+    assert missing.status_code == 404
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    _register(client)
+    assert client.get(url).status_code == 404

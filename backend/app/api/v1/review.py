@@ -126,9 +126,7 @@ async def create_annotation(
     if shot is None or shot.project_id != project_id:
         raise NotFoundError("shot not found")
     artifact = await session.get(Artifact, body.artifact_id) if body.artifact_id else None
-    if body.artifact_id is not None and (
-        artifact is None or artifact.project_id != project_id
-    ):
+    if body.artifact_id is not None and (artifact is None or artifact.project_id != project_id):
         raise NotFoundError("annotation Artifact not found")
     if (
         body.time_start is not None
@@ -151,11 +149,24 @@ async def create_annotation(
             target_kind = "shot"
     if target_kind == "shot" and (has_time or has_point or has_size):
         raise ConflictError("shot annotation cannot contain time or image coordinates")
+    if not body.note.strip():
+        raise ConflictError("annotation note must not be blank")
     if target_kind == "video_time":
         if body.time_start is None or has_point or has_size:
             raise ConflictError("video annotation requires a time point or range only")
         if artifact is not None and artifact.artifact_type != "video":
             raise ConflictError("video annotation Artifact must be a video")
+        duration = artifact.duration_seconds if artifact is not None else shot.duration_seconds
+        if (
+            duration is not None
+            and duration > 0
+            and (
+                body.time_start > duration
+                or (body.time_end is not None and body.time_end > duration)
+            )
+        ):
+            raise ConflictError("video annotation time exceeds media duration")
+
     if target_kind == "image_point":
         if body.x is None or body.y is None or has_size or has_time:
             raise ConflictError("image point annotation requires normalized x and y only")
@@ -189,7 +200,7 @@ async def create_annotation(
         y=body.y,
         width=body.width,
         height=body.height,
-        note=body.note,
+        note=body.note.strip(),
         severity=body.severity,
         created_by=user.id,
     )

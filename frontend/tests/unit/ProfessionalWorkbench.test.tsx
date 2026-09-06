@@ -44,22 +44,23 @@ describe("ProfessionalWorkbench", () => {
 
     expect(screen.getByTestId("professional-workbench")).toBeInTheDocument();
     expect(screen.getByText("正式事实源")).toBeInTheDocument();
-    expect(screen.getByText("补齐动作因果")).toBeInTheDocument();
-
-    fireEvent.click(screen.getAllByRole("button", { name: "采纳" })[0]);
-    await waitFor(() => expect(screen.getByText("已采纳")).toBeInTheDocument());
-    expect(screen.getByText(/保存画布后才会成为正式事实/)).toBeInTheDocument();
+    expect(screen.queryByText("补齐动作因果")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开当前镜头的导演建议" })).toHaveAttribute(
+      "href",
+      "/projects/project-1/scenes/scene-1?shotId=shot-1&tool=director",
+    );
 
     const editor = screen.getByRole("textbox", { name: "镜头导演语义" });
     fireEvent.change(editor, { target: { value: "用户手动改写的正式镜头语义" } });
     expect(screen.getByText("有未保存变更")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "打开当前镜头的导演建议" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "保存画布版本" }));
     await waitFor(() =>
       expect(screen.getByText(/后续执行将以这份正式镜头语义为事实源/)).toBeInTheDocument(),
     );
   });
 
-  it("lets the user reject a suggestion without changing the canvas", () => {
+  it("does not fabricate detected facts or edit the canvas on entry", () => {
     render(
       <ProfessionalWorkbench
         projectId="project-1"
@@ -70,7 +71,8 @@ describe("ProfessionalWorkbench", () => {
     );
     const editor = screen.getByRole("textbox", { name: "镜头导演语义" });
     expect(editor).toHaveValue(shots[0].visual_description);
-    fireEvent.click(screen.getAllByRole("button", { name: "拒绝" })[0]);
+    expect(screen.queryByRole("button", { name: "拒绝" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/检测到该镜头包含主角/)).not.toBeInTheDocument();
     expect(screen.queryByText("补齐动作因果")).not.toBeInTheDocument();
     expect(editor).toHaveValue(shots[0].visual_description);
   });

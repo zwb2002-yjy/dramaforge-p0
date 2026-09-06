@@ -10,18 +10,9 @@ import type {
   ProjectSnapshot,
   ReviewAnnotationRead,
   ShotCanvasUpdateResponse,
-  ShotChangeProposalResult,
   ShotRead,
 } from "../../lib/api";
 import { latestEffectiveNodeRuns } from "./effectiveRuns";
-
-type Suggestion = {
-  id: string;
-  title: string;
-  body: string;
-  change: string;
-  impact: string;
-};
 
 type CanvasSaveResult = ShotRead | ShotCanvasUpdateResponse | void;
 
@@ -43,16 +34,6 @@ type ProfessionalWorkbenchProps = {
       duration_seconds: string;
     },
   ) => Promise<CanvasSaveResult>;
-  onPropose?: (
-    shot: ShotRead,
-    input: {
-      summary: string;
-      replacement_payload: Record<string, unknown>;
-      affected_node_keys: string[];
-      reusable_artifact_ids: string[];
-    },
-  ) => Promise<ShotChangeProposalResult>;
-  onConfirmProposal?: (shotId: string, proposalId: string) => Promise<void>;
   revisions?: CanvasRevisionRead[];
   assets?: AssetRead[];
   onCreateAsset?: (input: {
@@ -144,8 +125,6 @@ export function ProfessionalWorkbench({
   onStart,
   onSave,
   revisions = [],
-  onPropose,
-  onConfirmProposal,
   assets = [],
   onCreateAsset,
   onUpdateAsset,
@@ -160,14 +139,11 @@ export function ProfessionalWorkbench({
   directorBoard,
   onSaveDirectorBoard,
 }: ProfessionalWorkbenchProps) {
-  const [assistantMode, setAssistantMode] = useState<"auto" | "manual">("manual");
   const [activeTab, setActiveTab] = useState<"canvas" | "assets" | "director" | "review">("canvas");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savedDrafts, setSavedDrafts] = useState<Record<string, string>>({});
   const [durationDrafts, setDurationDrafts] = useState<Record<string, string>>({});
   const [savedDurationDrafts, setSavedDurationDrafts] = useState<Record<string, string>>({});
-  const [rejected, setRejected] = useState<Record<string, boolean>>({});
-  const [accepted, setAccepted] = useState<Record<string, boolean>>({});
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [assetKind, setAssetKind] = useState("character");
   const [assetName, setAssetName] = useState("");
@@ -193,10 +169,6 @@ export function ProfessionalWorkbench({
   const [annotationWidth, setAnnotationWidth] = useState("");
   const [annotationHeight, setAnnotationHeight] = useState("");
   const [annotationNote, setAnnotationNote] = useState("");
-  const [proposalIds, setProposalIds] = useState<Record<string, string>>({});
-  const [proposalImpacts, setProposalImpacts] = useState<
-    Record<string, ShotChangeProposalResult["impact"]>
-  >({});
 
   useEffect(() => {
     if (!shots.length) return;
@@ -261,64 +233,6 @@ export function ProfessionalWorkbench({
     return [...groups.entries()];
   }, [shots]);
 
-  const suggestions = useMemo<Suggestion[]>(() => {
-    if (!selectedShot) return [];
-    return [
-      {
-        id: `${selectedShot.id}:blocking`,
-        title: "补齐动作因果",
-        body: "当前镜头只有结果描述，建议补充动作起点、终点与角色反应，方便视频模型保持连续性。",
-        change: "增加动作起点 / 终点 / 反应",
-        impact: "只影响当前镜头的视频节点；关键帧可复用。",
-      },
-      {
-        id: `${selectedShot.id}:camera`,
-        title: "明确机位与景别",
-        body: "建议把景别和镜头运动写入导演语义，不替你选择风格，只让模型执行更可追溯。",
-        change: "补充中近景、缓慢推进",
-        impact: "会让当前镜头提示词版本产生新快照。",
-      },
-      {
-        id: `${selectedShot.id}:identity`,
-        title: "锁定身份锚点",
-        body: "检测到该镜头包含主角。建议显式引用角色身份资产，避免关键帧通过后视频阶段漂移。",
-        change: "引用角色 Canonical 身份锚点",
-        impact: "不会重跑历史结果；下次视频执行使用该引用。",
-      },
-    ];
-  }, [selectedShot]);
-
-  async function applySuggestion(suggestion: Suggestion) {
-    if (!selectedId || !selectedShot) return;
-    const suffix = `
-
-[导演助手建议 · ${suggestion.title}] ${suggestion.change}。`;
-    const nextText = `${drafts[selectedId] ?? ""}${suffix}`.trim();
-    setDrafts((current) => ({ ...current, [selectedId]: nextText }));
-    setRejected((current) => ({ ...current, [suggestion.id]: false }));
-    try {
-      const proposal = await onPropose?.(selectedShot, {
-        summary: suggestion.title,
-        replacement_payload: { visual_description: nextText, suggestion_id: suggestion.id },
-        affected_node_keys: [suggestion.id.endsWith(":camera") ? "prompt" : "video"],
-        reusable_artifact_ids: ["keyframe"],
-      });
-      if (proposal) {
-        setProposalIds((current) => ({ ...current, [suggestion.id]: proposal.proposal.id }));
-        setProposalImpacts((current) => ({ ...current, [suggestion.id]: proposal.impact }));
-      }
-      setAccepted((current) => ({ ...current, [suggestion.id]: true }));
-      setSaveMessage(
-        proposal
-          ? "结构化变更提案已创建；保存画布后才会确认并写入正式事实。"
-          : "建议已写入变更预览，保存画布后才会成为正式事实。",
-      );
-    } catch (error) {
-      setSaveMessage(
-        error instanceof Error ? `提案创建失败：${error.message}` : "提案创建失败，请重试。",
-      );
-    }
-  }
   function referenceAsset(asset: AssetRead) {
     if (!selectedId) return;
     const usage = asset.kind === "character" ? "身份" : asset.kind === "action" ? "动作" : "视觉";
@@ -329,11 +243,6 @@ export function ProfessionalWorkbench({
     }));
     setSaveMessage(`已引用 @${asset.name}；保存画布后成为正式输入。`);
   }
-  function rejectSuggestion(suggestion: Suggestion) {
-    setRejected((current) => ({ ...current, [suggestion.id]: true }));
-    setAccepted((current) => ({ ...current, [suggestion.id]: false }));
-  }
-
   async function saveCanvas() {
     if (!selectedId || !selectedShot) return;
     try {
@@ -345,27 +254,6 @@ export function ProfessionalWorkbench({
         duration_seconds: selectedDuration,
       });
       const savedShot = saved && "shot" in saved ? saved.shot : saved;
-      const pendingProposalIds = Object.entries(proposalIds)
-        .filter(([key]) => key.startsWith(`${selectedId}:`))
-        .map(([, proposalId]) => proposalId)
-        .filter(Boolean);
-      if (onConfirmProposal && pendingProposalIds.length > 0) {
-        // §19.5: acceptance applies the proposal atomically; it creates its own
-        // revision, so no prior revision id is required.
-        await Promise.all(
-          pendingProposalIds.map((proposalId) => onConfirmProposal(selectedId, proposalId)),
-        );
-        setProposalIds((current) =>
-          Object.fromEntries(
-            Object.entries(current).filter(([key]) => !key.startsWith(`${selectedId}:`)),
-          ),
-        );
-        setProposalImpacts((current) =>
-          Object.fromEntries(
-            Object.entries(current).filter(([key]) => !key.startsWith(`${selectedId}:`)),
-          ),
-        );
-      }
       setSavedDrafts((current) => ({ ...current, [selectedId]: selectedText }));
       setSavedDurationDrafts((current) => ({ ...current, [selectedId]: selectedDuration }));
       setSaveMessage(
@@ -934,96 +822,21 @@ export function ProfessionalWorkbench({
         </main>
 
         <aside className="director-assistant" aria-label="导演助手">
-          <div className="assistant-header">
-            <div>
-              <span className="director-stage-kicker">Director Assistant</span>
-              <h3>导演助手</h3>
-            </div>
-            <div className="assistant-mode-switch">
-              <button
-                type="button"
-                className={assistantMode === "auto" ? "active" : ""}
-                onClick={() => setAssistantMode("auto")}
-              >
-                自动
-              </button>
-              <button
-                type="button"
-                className={assistantMode === "manual" ? "active" : ""}
-                onClick={() => setAssistantMode("manual")}
-              >
-                手动
-              </button>
-            </div>
-          </div>
-          <div className="assistant-rule">
-            {assistantMode === "manual"
-              ? "手动模式：只在你点击后提出下一项建议。"
-              : "自动模式：建议仍需逐项确认，不能直接改正式画布。"}
-          </div>
-          <div className="assistant-fact-card">
-            <strong>当前镜头</strong>
-            <span>
-              {selectedShot
-                ? `S${selectedShot.shot_number} · ${selectedShot.shot_type || "镜头"}`
-                : "未选择"}
-            </span>
-            <small>已锁定版本不会被助手暗改 · 历史修订 {revisions.length} 条</small>
-          </div>
-          <div className="assistant-suggestions">
-            <div className="assistant-section-title">
-              <span>建议与变更预览</span>
-              <small>{suggestions.filter((item) => !rejected[item.id]).length} 项</small>
-            </div>
-            {!selectedShot && <p className="muted">选择镜头后，助手会根据当前画布提出建议。</p>}
-            {suggestions.map((suggestion) =>
-              rejected[suggestion.id] ? null : (
-                <article
-                  key={suggestion.id}
-                  className={`suggestion-card ${accepted[suggestion.id] ? "accepted" : ""}`}
-                >
-                  <div className="suggestion-card-title">
-                    <strong>{suggestion.title}</strong>
-                    {accepted[suggestion.id] && (
-                      <span>{proposalIds[suggestion.id] ? "提案已创建" : "已采纳"}</span>
-                    )}
-                  </div>
-                  <p>{suggestion.body}</p>
-                  <small>变更：{suggestion.change}</small>
-                  <small>影响：{suggestion.impact}</small>
-                  {proposalImpacts[suggestion.id] && (
-                    <small>
-                      失效节点：
-                      {proposalImpacts[suggestion.id].invalidated_node_keys.join("、") || "—"} ·
-                      可复用：{proposalImpacts[suggestion.id].reusable_artifact_ids.length}
-                    </small>
-                  )}
-                  {!accepted[suggestion.id] && (
-                    <div className="suggestion-actions">
-                      <button
-                        type="button"
-                        className="df-btn primary"
-                        onClick={() => applySuggestion(suggestion)}
-                      >
-                        采纳
-                      </button>
-                      <button
-                        type="button"
-                        className="df-btn ghost"
-                        onClick={() => rejectSuggestion(suggestion)}
-                      >
-                        拒绝
-                      </button>
-                    </div>
-                  )}
-                </article>
-              ),
-            )}
-          </div>
-          <div className="assistant-footer">
-            <span className="status-dot done" />
-            助手不能直接写入正式画布
-          </div>
+          <h3>导演助手</h3>
+          <p>尚未分析。导演建议只在场景工作台中根据当前镜头的真实上下文生成。</p>
+          <p>同一条建议链：显式请求 → 预览 → 采用到本地草稿 → 显式保存。</p>
+          {selectedShot && !isDirty ? (
+            <a
+              className="df-btn primary"
+              data-testid="open-contextual-director"
+              href={`/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(selectedShot.scene_id)}?shotId=${encodeURIComponent(selectedShot.id)}&tool=director`}
+            >
+              打开当前镜头的导演建议
+            </a>
+          ) : (
+            <p>{isDirty ? "请先保存当前画布，再打开导演建议。" : "先选择镜头。"}</p>
+          )}
+          <small>打开面板不会自动分析、生产或更改正式结果。</small>
         </aside>
       </div>
 

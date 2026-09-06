@@ -59,6 +59,15 @@ class EditingAdapter:
         await self._session.flush()
         return session_row
 
+    async def list_sessions(self, *, project_id: UUID) -> list[EditSession]:
+        """Discover existing sessions without creating or touching a timeline."""
+        rows = await self._session.scalars(
+            select(EditSession)
+            .where(EditSession.project_id == project_id)
+            .order_by(EditSession.updated_at.desc(), EditSession.id.desc())
+        )
+        return list(rows)
+
     async def load_timeline(self, *, project_id: UUID, session_id: UUID) -> EditSession:
         row = await self._session.scalar(
             select(EditSession).where(
@@ -89,9 +98,7 @@ class EditingAdapter:
         row = await self.load_timeline(project_id=project_id, session_id=session_id)
         raw_clips = cast(list[object], (row.timeline or {}).get("clips", []))
         clips = [clip for clip in raw_clips if isinstance(clip, dict)]
-        total = sum(
-            float(clip.get("duration_seconds", 0)) for clip in clips
-        )
+        total = sum(float(clip.get("duration_seconds", 0)) for clip in clips)
         return {
             "session_id": str(row.id),
             "format": "dramaforge-edit-v1",

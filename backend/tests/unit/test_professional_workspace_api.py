@@ -168,6 +168,8 @@ def test_review_rejects_ambiguous_image_coordinates(client: TestClient) -> None:
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert response.status_code == 409, response.text
+
+
 def test_professional_board_and_retired_shot_start_route_is_gone(client: TestClient) -> None:
     _, project_id = _project(client)
     shot_id = _shot(client, project_id)
@@ -202,3 +204,28 @@ def test_professional_board_and_retired_shot_start_route_is_gone(client: TestCli
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert retired_start.status_code == 404
+
+
+def test_video_annotation_rejects_out_of_bounds_blank_or_reversed_input(client: TestClient) -> None:
+    _, project_id = _project(client)
+    shot_id = _shot(client, project_id)
+    url = f"/api/v1/projects/{project_id}/shots/{shot_id}/annotations"
+    for payload in [
+        {"time_start": "999", "note": "past end"},
+        {"time_start": "2", "time_end": "1", "note": "reversed"},
+        {"time_start": "1", "note": "   "},
+        {"time_start": "NaN", "note": "invalid"},
+    ]:
+        response = client.post(
+            url, json={"target_kind": "video_time", **payload}, headers={CSRF_HEADER: _csrf(client)}
+        )
+        assert response.status_code in {409, 422}, response.text
+    assert client.get(url).json() == []
+    saved = client.post(
+        url,
+        json={"target_kind": "video_time", "time_start": "1", "note": " valid point "},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["note"] == "valid point"
+    assert len(client.get(url).json()) == 1
