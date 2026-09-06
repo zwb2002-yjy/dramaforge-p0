@@ -1,0 +1,37 @@
+{
+  "source_branch": "agent/release-evidence-720bde4",
+  "source_commit": "1b2a6a2c129bfa09e9fcc0ec1ce971aab216d6d3",
+  "frozen_application_commit": "720bde4",
+  "files": [
+    {
+      "original_path": "docs/plans/professional-program-v2/task-contracts/V1-G7D-DUAL-PATH-FINAL-FILM-20260903.md",
+      "sha256": "fa415e855ebcd9f6624e7d99caf65c5f625c848e18c42a5be1e7faffba93be74",
+      "archive_storage": "source-documents.json"
+    },
+    {
+      "original_path": "docs/plans/professional-program-v2/task-contracts/V1-G8-RELEASE-GATE-20260903.md",
+      "sha256": "d4b871467c6a9db72cfb35c28eb0fb8e0689da5e55c87c973021586e9389adf9",
+      "archive_storage": "source-documents.json"
+    },
+    {
+      "original_path": "docs/plans/professional-program-v2/v1-goal/GOAL-STATUS-20260903.md",
+      "sha256": "d40e595c4b3d95d5a465b008e63a53a536e7ea932a0d141f0a61c234f5262358",
+      "archive_storage": "source-documents.json"
+    },
+    {
+      "original_path": "docs/reviews/GOLDEN-FREE-ASSIST-FROZEN-720bde4.json",
+      "sha256": "8786b0bf54ae5b4a9193234abb6121dbbc889d3a5af7594bf353a580355d429d",
+      "archive_storage": "GOLDEN-FREE-ASSIST-FROZEN-720bde4.json"
+    },
+    {
+      "original_path": "docs/reviews/GOLDEN-TEMPLATE-AUTO-FROZEN-720bde4.json",
+      "sha256": "a423346c95418a94db1027abf332b64180c4fd24d5633b089101d0967b224191",
+      "archive_storage": "GOLDEN-TEMPLATE-AUTO-FROZEN-720bde4.json"
+    },
+    {
+      "original_path": "docs/reviews/V1-RELEASE-GATE-REPORT.md",
+      "sha256": "95306919dbf2ce0651bc889b2f64a4f51a56e9606a86b51f446c8ace91663da1",
+      "archive_storage": "source-documents.json"
+    }
+  ]
+}
