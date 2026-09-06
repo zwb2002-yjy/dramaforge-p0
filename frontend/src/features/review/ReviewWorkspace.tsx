@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -106,8 +107,16 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
 
   return (
     <div className="qc-project-page" data-testid="review-workspace">
+      <nav className="qc-local-tabs" aria-label="制作视图">
+        <Link to="/projects/$projectId/production" params={{ projectId }}>
+          生产概览
+        </Link>
+        <Link to="/projects/$projectId/review" params={{ projectId }} aria-current="page">
+          待审内容
+        </Link>
+      </nav>
       <header className="qc-page-heading">
-        <p>审片</p>
+        <p>制作 · 待审内容</p>
         <h1>镜头审片与批注</h1>
         <span>批注写入 ReviewAnnotation；正式产物与生产血缘保持不变。</span>
       </header>

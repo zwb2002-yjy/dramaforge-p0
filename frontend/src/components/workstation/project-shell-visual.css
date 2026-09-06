@@ -6,6 +6,11 @@
    shell rhythm without changing any page's business state or API behavior.
    ======================================================================== */
 @scope (.qc-project-shell) {
+  :scope {
+    min-width: 0;
+    background: var(--df-surface-0);
+  }
+
   .qc-preview-shell {
     grid-template-columns: 72px minmax(0, 1fr);
     background: var(--df-surface-0);

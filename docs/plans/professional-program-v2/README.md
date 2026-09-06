@@ -49,6 +49,26 @@
 
 ## Owner amendments
 
+### 2026-09-04 — Unified navigation and Project Lobby information architecture
+
+The Owner established a stable two-level navigation model and separated the
+Project Lobby from settings and workspace administration. DramaForge continues
+to have one product, one creative mainchain, and one workbench: Template / Free
+Start and AUTO / ASSIST / MANUAL remain orthogonal configuration dimensions and
+must not recreate Quick / Professional product modes.
+
+The registered design and execution sources are:
+
+- [`navigation-ia/DramaForge_统一导航与项目大厅信息架构设计方案.md`](navigation-ia/DramaForge_统一导航与项目大厅信息架构设计方案.md)
+- [`navigation-ia/DramaForge_统一导航与项目大厅执行方案.md`](navigation-ia/DramaForge_统一导航与项目大厅执行方案.md)
+
+The bounded implementation authority and verification gates are recorded in
+[`task-contracts/V2-UNIFIED-NAVIGATION-AND-PROJECT-LOBBY-20260904.md`](task-contracts/V2-UNIFIED-NAVIGATION-AND-PROJECT-LOBBY-20260904.md).
+This amendment changes only navigation ownership, page responsibility,
+product-visible terminology, settings placement, and Project-entry behavior.
+It does not alter Scene / Shot / Asset facts, Canvas composition, production or
+editing runtime semantics, Provider behavior, or backend contracts.
+
 ### 2026-09-03 — DramaForge V1 统一创作主链（Owner Goal）
 
 The Owner replaced the repository-root agent navigation documents with the

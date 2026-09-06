@@ -1,0 +1,458 @@
+.df-global-shell {
+  --df-primary-nav-width: 68px;
+  --df-context-nav-width: 220px;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: var(--df-primary-nav-width) 0 minmax(0, 1fr);
+  background: var(--df-surface-0);
+  color: var(--df-text-primary);
+  overflow-x: hidden;
+  transition: grid-template-columns var(--df-duration-base) var(--df-ease);
+}
+
+.df-global-shell.secondary-open {
+  grid-template-columns: var(--df-primary-nav-width) var(--df-context-nav-width) minmax(0, 1fr);
+}
+
+.df-primary-sidebar,
+.df-context-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  min-height: 0;
+  background: var(--df-surface-1);
+  border-right: 1px solid var(--df-border-subtle);
+  z-index: var(--df-z-sticky);
+}
+
+.df-primary-sidebar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: var(--df-space-4) var(--df-space-2);
+}
+
+.df-primary-brand,
+.df-primary-sidebar nav > a,
+.df-primary-bottom > a,
+.df-primary-disabled,
+.df-secondary-toggle,
+.df-owner-mark {
+  width: 48px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  border: 0;
+  border-radius: var(--df-radius-sm);
+  background: transparent;
+  color: var(--df-text-muted);
+  text-decoration: none;
+}
+
+.df-primary-brand {
+  margin-bottom: var(--df-space-5);
+  color: var(--df-brass);
+}
+
+.df-primary-sidebar > nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-2);
+}
+
+.df-primary-bottom {
+  display: grid;
+  gap: var(--df-space-2);
+}
+
+.df-primary-sidebar nav > a,
+.df-primary-bottom > a,
+.df-primary-disabled {
+  position: relative;
+  grid-template-rows: 22px auto;
+  gap: 2px;
+  font-size: 0.625rem;
+}
+
+.df-primary-disabled {
+  opacity: 0.45;
+}
+
+.df-primary-sidebar a:hover,
+.df-secondary-toggle:hover {
+  color: var(--df-text-primary);
+  background: var(--df-surface-2);
+}
+
+.df-primary-sidebar a.active {
+  color: var(--df-ivory);
+  background: var(--df-surface-2);
+  box-shadow: inset 3px 0 0 var(--df-brass);
+}
+
+.df-primary-sidebar a.active svg {
+  color: var(--df-brass);
+}
+
+.df-primary-bottom {
+  margin-top: auto;
+}
+
+.df-secondary-toggle {
+  cursor: pointer;
+}
+
+.df-owner-mark {
+  min-height: 36px;
+  height: 36px;
+  border: 1px solid var(--df-border);
+  color: var(--df-ivory);
+  font-size: var(--df-text-xs);
+}
+
+.df-context-sidebar {
+  min-width: 0;
+  overflow: hidden auto;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--df-duration-fast) var(--df-ease),
+    visibility var(--df-duration-fast) var(--df-ease);
+}
+
+.secondary-open .df-context-sidebar {
+  visibility: visible;
+  opacity: 1;
+}
+
+.df-context-sidebar > header {
+  min-width: var(--df-context-nav-width);
+  display: grid;
+  gap: var(--df-space-1);
+  padding: var(--df-space-6) var(--df-space-5) var(--df-space-5);
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+
+.df-context-sidebar > header > span {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+}
+
+.df-context-sidebar > header > strong {
+  color: var(--df-ivory);
+  font-family: var(--df-font-display);
+  font-size: var(--df-text-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.df-project-switcher {
+  width: fit-content;
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-xs);
+}
+
+.df-context-sidebar > nav {
+  min-width: var(--df-context-nav-width);
+  display: grid;
+  gap: var(--df-space-1);
+  padding: var(--df-space-4) var(--df-space-3);
+}
+
+.df-context-sidebar > nav a {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-3);
+  padding: var(--df-space-2) var(--df-space-3);
+  border-radius: var(--df-radius-sm);
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+  text-decoration: none;
+}
+
+.df-context-sidebar > nav a:hover,
+.df-context-sidebar > nav a.active {
+  color: var(--df-text-primary);
+  background: var(--df-surface-2);
+}
+
+.df-context-sidebar > nav a.active {
+  box-shadow: inset 2px 0 0 var(--df-brass);
+}
+
+.df-context-sidebar > nav a.active svg {
+  color: var(--df-brass);
+}
+
+.df-context-primary-action {
+  min-width: calc(var(--df-context-nav-width) - 32px);
+  display: block;
+  margin: var(--df-space-2) var(--df-space-4);
+  padding: var(--df-space-3) var(--df-space-4);
+  border: 1px solid var(--df-brass-dim);
+  border-radius: var(--df-radius-sm);
+  color: var(--df-brass);
+  background: var(--df-brass-tint);
+  font-size: var(--df-text-sm);
+  font-weight: var(--df-weight-semibold);
+  text-align: center;
+  text-decoration: none;
+}
+
+.df-shell-content {
+  grid-column: 3;
+  min-width: 0;
+  min-height: 100vh;
+}
+
+.df-page {
+  width: min(100%, 1240px);
+  margin: 0 auto;
+  padding: var(--df-space-8) clamp(var(--df-space-5), 3vw, var(--df-space-10)) var(--df-space-12);
+}
+
+.df-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--df-space-5);
+  margin-bottom: var(--df-space-6);
+}
+
+.df-page-header h1 {
+  margin: var(--df-space-1) 0 var(--df-space-2);
+  font-family: var(--df-font-display);
+  font-size: clamp(1.8rem, 2.8vw, 2.5rem);
+}
+
+.df-page-header p {
+  margin: 0;
+  color: var(--df-text-secondary);
+}
+
+.df-page-eyebrow {
+  color: var(--df-brass) !important;
+  font-size: var(--df-text-xs);
+  font-weight: var(--df-weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.df-lobby-section,
+.df-settings-section {
+  margin-top: var(--df-space-6);
+}
+
+.df-lobby-section > header,
+.df-settings-section > header {
+  margin-bottom: var(--df-space-4);
+}
+
+.df-lobby-section h2,
+.df-settings-section h2 {
+  margin: 0 0 var(--df-space-1);
+  font-size: var(--df-text-xl);
+}
+
+.df-continue-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--df-space-4);
+  padding: var(--df-space-4);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-md);
+  background: var(--df-surface-1);
+}
+
+.df-project-cover {
+  width: 72px;
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-sm);
+  color: var(--df-brass);
+  background: var(--df-surface-2);
+}
+
+.df-continue-card strong,
+.df-project-card strong {
+  display: block;
+  color: var(--df-ivory);
+}
+
+.df-continue-card p,
+.df-project-card p {
+  margin: var(--df-space-1) 0 0;
+  color: var(--df-text-muted);
+  font-size: var(--df-text-sm);
+}
+
+.df-project-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-3);
+  margin-bottom: var(--df-space-4);
+}
+
+.df-project-filters input {
+  flex: 1;
+}
+
+.df-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--df-space-4);
+}
+
+.df-project-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: var(--df-space-3);
+  padding: var(--df-space-4);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-md);
+  color: var(--df-text-primary);
+  background: var(--df-surface-1);
+  text-align: left;
+}
+
+.df-project-card:hover {
+  border-color: var(--df-border-strong);
+  background: var(--df-surface-2);
+}
+
+.df-project-card .df-project-cover {
+  width: 52px;
+}
+
+.df-create-panel {
+  margin-bottom: var(--df-space-6);
+}
+
+.df-settings-page {
+  width: min(100%, 1080px);
+}
+
+.df-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--df-space-4);
+}
+
+.df-settings-card {
+  padding: var(--df-space-5);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-md);
+  background: var(--df-surface-1);
+}
+
+.df-settings-card h2,
+.df-settings-card h3 {
+  margin-top: 0;
+}
+
+.qc-local-tabs {
+  display: flex;
+  gap: var(--df-space-2);
+  margin-bottom: var(--df-space-4);
+  padding-bottom: var(--df-space-3);
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+
+.qc-local-tabs a {
+  padding: var(--df-space-2) var(--df-space-3);
+  border-radius: var(--df-radius-sm);
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+  text-decoration: none;
+}
+
+.qc-local-tabs a:hover,
+.qc-local-tabs a[aria-current="page"] {
+  color: var(--df-text-primary);
+  background: var(--df-surface-2);
+}
+
+.df-search-field {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-2);
+}
+
+@media (max-width: 1000px) {
+  .df-global-shell {
+    --df-context-nav-width: 196px;
+  }
+}
+
+@media (max-width: 720px) {
+  .df-global-shell,
+  .df-global-shell.secondary-open {
+    --df-primary-nav-width: 56px;
+    grid-template-columns: var(--df-primary-nav-width) minmax(0, 1fr);
+  }
+
+  .df-primary-sidebar {
+    grid-column: 1;
+    grid-row: 1;
+    padding-inline: var(--df-space-1);
+  }
+
+  .df-primary-brand,
+  .df-primary-sidebar nav > a,
+  .df-primary-bottom > a,
+  .df-primary-disabled,
+  .df-secondary-toggle,
+  .df-owner-mark {
+    width: 46px;
+  }
+
+  .df-context-sidebar {
+    position: fixed;
+    left: var(--df-primary-nav-width);
+    width: min(var(--df-context-nav-width), calc(100vw - var(--df-primary-nav-width)));
+    transform: translateX(-105%);
+    box-shadow: var(--df-shadow-xl);
+    transition:
+      transform var(--df-duration-base) var(--df-ease),
+      visibility var(--df-duration-base) var(--df-ease);
+  }
+
+  .secondary-open .df-context-sidebar {
+    transform: translateX(0);
+  }
+
+  .df-shell-content {
+    grid-column: 2;
+  }
+
+  .df-page {
+    padding: var(--df-space-5) var(--df-space-4) var(--df-space-8);
+  }
+
+  .df-page-header,
+  .df-project-filters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .df-continue-card {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .df-continue-card > a,
+  .df-continue-card > button {
+    grid-column: 1 / -1;
+  }
+
+  .df-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}

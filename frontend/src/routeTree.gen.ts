@@ -9,6 +9,15 @@ import { projectSceneWorkspaceRoute } from "./routes/projects.$projectId.scenes.
 import { projectEditRoute } from "./routes/projects.$projectId.edit";
 import { projectReviewRoute } from "./routes/projects.$projectId.review";
 import { designPreviewRoute } from "./routes/design-preview";
+import {
+  settingsAccountRoute,
+  settingsDefaultsRoute,
+  settingsIndexRoute,
+  settingsModelsRoute,
+  settingsProjectRoute,
+  settingsRoute,
+  settingsWorkspacesRoute,
+} from "./routes/settings";
 
 const projectRouteWithChildren = projectRoute.addChildren([
   projectScriptRoute,
@@ -20,8 +29,18 @@ const projectRouteWithChildren = projectRoute.addChildren([
   projectEditRoute,
 ]);
 
+const settingsRouteWithChildren = settingsRoute.addChildren([
+  settingsIndexRoute,
+  settingsAccountRoute,
+  settingsWorkspacesRoute,
+  settingsModelsRoute,
+  settingsDefaultsRoute,
+  settingsProjectRoute,
+]);
+
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   projectRouteWithChildren,
+  settingsRouteWithChildren,
   designPreviewRoute,
 ]);

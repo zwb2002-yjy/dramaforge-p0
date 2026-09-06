@@ -449,6 +449,34 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       assertExactJson(body, {}, "CSRF token request body");
       return json(route, { csrf_token: "csrf-e2e" });
     }
+    if (path === `/api/v1/projects/${PROJECT_ID}` && method === "GET") {
+      return json(route, {
+        id: PROJECT_ID,
+        workspace_id: WORKSPACE_ID,
+        name: "统一创作主链验收",
+        stage: "production",
+        aspect_ratio: "16:9",
+        target_platform: "web",
+        provider_dispatch_frozen: false,
+        version: 1,
+        creative_profile: {
+          id: "profile-professional",
+          project_id: PROJECT_ID,
+          start_type: "FREE",
+          created_from_template_key: null,
+          template_version: null,
+          template_contract_hash: null,
+          director_autonomy: "ASSIST",
+          selected_genre: null,
+          selected_style_ids: [],
+          selected_skill_ids: [],
+          selected_shot_language: null,
+          asset_slot_requirements: {},
+          strategy_snapshot: {},
+          version: 1,
+        },
+      });
+    }
     if (path.endsWith("/director/workspace-snapshot")) return json(route, workspaceSnapshot());
     if (path.endsWith("/scenes")) {
       return json(route, [
@@ -650,6 +678,11 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           capability_specs: {},
         },
       ]);
+    }
+    if (path === "/api/v1/model-slots") return json(route, []);
+    if (path.endsWith("/model-bindings/effective")) return json(route, []);
+    if (path.endsWith("/model-profile") && method === "GET") {
+      return json(route, { id: "project-profile", name: "当前项目", bindings: {}, version: 1 });
     }
     if (path.endsWith("/assets") && method === "GET") return json(route, state.assets);
     if (path.endsWith("/assets") && method === "POST") {

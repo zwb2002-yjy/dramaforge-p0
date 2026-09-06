@@ -31,7 +31,7 @@ export function DesignPreviewPage() {
         eyebrow="DramaForge"
         title="Visual System 2.0"
         actions={
-          <Link to="/" className="df-btn ghost">
+          <Link to="/" search={{ create: false }} className="df-btn ghost">
             <span aria-hidden="true">←</span>
             返回项目大厅
           </Link>

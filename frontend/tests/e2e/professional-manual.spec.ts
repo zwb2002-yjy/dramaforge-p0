@@ -26,7 +26,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("shot-details-sheet")).toHaveCount(0);
   await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("场景工作台");
+  await expect(page.locator(".qc-project-mode")).toHaveText("场景");
   await expect(
     page.locator("[data-testid='scene-stage'] > [data-testid='shot-candidate-tray']"),
   ).toHaveCount(1);
@@ -163,7 +163,7 @@ test("Scene Workbench remains readable at 910px and other views retain evidence"
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("场景工作台");
+  await expect(page.locator(".qc-project-mode")).toHaveText("场景");
   await expect(page.getByTestId("scene-stage")).toBeVisible();
   await expect(page.getByTestId("cinematic-canvas")).toBeVisible();
   await expect(page.getByTestId("context-dock")).toBeVisible();
@@ -194,7 +194,7 @@ test("Scene Workbench remains readable at 910px and other views retain evidence"
 
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("project-evidence-inspector")).toBeVisible();
-  await expect(page.locator(".qc-project-mode")).toHaveText("专业模式");
+  await expect(page.locator(".qc-project-mode")).toHaveText("制作");
   await expect(page.locator(".qc-content-grid")).toHaveCSS("grid-template-columns", /\d+px/);
 
   // Keep the Asset page's own data requests isolated while asserting that the
@@ -208,7 +208,7 @@ test("Scene Workbench remains readable at 910px and other views retain evidence"
   await page.goto(`/projects/${PROJECT_ID}/assets`);
   await expect(page.getByTestId("asset-cards-panel")).toBeVisible();
   await expect(page.getByTestId("project-evidence-inspector")).toBeVisible();
-  await expect(page.locator(".qc-project-mode")).toHaveText("资产库");
+  await expect(page.locator(".qc-project-mode")).toHaveText("资产");
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);

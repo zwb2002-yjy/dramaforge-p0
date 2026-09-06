@@ -126,6 +126,12 @@
   min-width: 0;
 }
 
+.qc-project-shell {
+  min-width: 0;
+  min-height: 100vh;
+  background: var(--df-surface-0);
+}
+
 .qc-project-bar {
   height: 54px;
   display: flex;
