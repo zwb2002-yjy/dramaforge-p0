@@ -2,7 +2,7 @@
 # matching the PostgreSQL 15 service used by the release Compose topology.
 # An unqualified ``python:3.12-slim`` may advance to a newer Debian release
 # and create a pg_dump/pg_restore format mismatch during backup recovery.
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 WORKDIR /app
 
