@@ -379,7 +379,7 @@ jobs:
           subject-name: ${{ steps.image.outputs.frontend }}
           subject-digest: ${{ steps.frontend-push.outputs.digest }}
           push-to-registry: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           generate_release_notes: true
