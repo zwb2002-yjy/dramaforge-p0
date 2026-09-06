@@ -8,6 +8,13 @@
 - Historical planning, prior release boards, old checkpoints, ADRs, and legacy runbooks can explain old implementation or evidence, but cannot generate new work or override the seven-plan program.
 - Do not produce a parallel master plan. Update the seven-plan program only for an Owner-supplied revision; record implementation work in a bounded Task Contract.
 
+## Task Scope and Progressive Reading
+
+- For questions, audits, and non-behavioral wording changes, read only the relevant files and authority needed to answer or verify the change; do not automatically start a Goal, mutate the ledger, launch services, or run full product gates.
+- For implementation or an explicitly active Owner Goal, use [agent.md](agent.md) to choose the task path. Its Goal references are conditional, not a mandatory reading stack for every edit; the Task-specific source order above still applies to behavior changes.
+- Read [AGENT_EXECUTION_PROTOCOL.md](AGENT_EXECUTION_PROTOCOL.md) when contract lifecycle, Git, verification, or formal evidence work needs it. Complete the requested outcome and relevant fixes; an active Goal continues within its authorization, while a standalone task does not create unrelated follow-up work.
+- Skills and dependency documentation are task references, not product authority or permission for global installs, stack changes, cross-session cleanup, or rewriting intended behavior to match a regression.
+
 ## Image Evidence Handling
 
 - Treat Playwright screenshots as evidence artifacts, not conversational input.
