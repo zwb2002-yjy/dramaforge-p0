@@ -40,6 +40,22 @@ function suggestion(baseShotVersion = 5) {
     suggested_video_prompt: "new video prompt",
     suggested_director_state: { action: { description: "new action" } },
     change_summary: "更克制并缓慢推进",
+    director_evidence: {
+      turn_id: "11111111-1111-4111-8111-111111111111",
+      request_key: "suggestion:shot-1:test",
+      context_hash: "a".repeat(64),
+      output_hash: "b".repeat(64),
+      slot: "planning.storyboard",
+      model_id: "litellm/script-quality",
+      model_binding_ref: "production-model-profile:p@1:planning.storyboard",
+      actual_model: "upstream/director-v1",
+      transport_status: "succeeded",
+      token_usage: { total_tokens: 42 },
+      reported_cost: "0.0042",
+      cost_status: "reported",
+      currency: "USD",
+      schema_repair_count: 0,
+    },
   };
 }
 
@@ -61,6 +77,22 @@ function recommendation() {
         value: { beat: "breath_hold", gaze: "down_then_up" },
       },
     ],
+    director_evidence: {
+      turn_id: "22222222-2222-4222-8222-222222222222",
+      request_key: "recommendation:shot-1:test",
+      context_hash: "c".repeat(64),
+      output_hash: "d".repeat(64),
+      slot: "planning.storyboard",
+      model_id: "litellm/script-quality",
+      model_binding_ref: "production-model-profile:p@1:planning.storyboard",
+      actual_model: null,
+      transport_status: "succeeded",
+      token_usage: {},
+      reported_cost: null,
+      cost_status: "unknown",
+      currency: "USD",
+      schema_repair_count: 0,
+    },
   };
 }
 
@@ -98,6 +130,10 @@ describe("ShotDirectorSuggestionPanel", () => {
     fireEvent.click(screen.getByTestId("request-proactive-director-recommendation"));
     expect(await screen.findByTestId("director-recommendation-preview")).toBeInTheDocument();
     expect(screen.getByText(/medium static/)).toBeInTheDocument();
+    expect(screen.getByTestId("recommendation-model-evidence")).toHaveTextContent(
+      "litellm/script-quality",
+    );
+    expect(screen.getByTestId("recommendation-model-evidence")).toHaveTextContent("22222222");
     const request = calls.find((call) => call.endsWith("/recommendation"));
     expect(request).toBe("POST /api/v1/projects/project-1/director/shots/shot-1/recommendation");
 
@@ -146,6 +182,10 @@ describe("ShotDirectorSuggestionPanel", () => {
     expect(screen.getByTestId("suggestion-old-video-prompt")).toHaveTextContent("old video prompt");
     expect(screen.getByTestId("suggestion-new-video-prompt")).toHaveTextContent("new video prompt");
     expect(screen.getByTestId("suggestion-change-summary")).toHaveTextContent("更克制");
+    expect(screen.getByTestId("suggestion-model-evidence")).toHaveTextContent(
+      "upstream/director-v1",
+    );
+    expect(screen.getByTestId("suggestion-model-evidence")).toHaveTextContent("11111111");
 
     const request = calls.find((call) => call.url.endsWith("/suggestion"));
     expect(request?.method).toBe("POST");
@@ -155,6 +195,7 @@ describe("ShotDirectorSuggestionPanel", () => {
       shot_id: "shot-1",
       expected_shot_version: 5,
       user_instruction: "让情绪更克制，镜头缓慢推进",
+      request_key: expect.stringMatching(/^suggestion:shot-1:[0-9a-f-]{36}$/),
     });
 
     fireEvent.click(screen.getByTestId("apply-shot-director-suggestion"));

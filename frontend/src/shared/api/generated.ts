@@ -609,7 +609,7 @@ export interface paths {
         put?: never;
         /**
          * Suggest Shot Design
-         * @description Return one validated, non-persistent suggestion for the selected Shot.
+         * @description Return one validated suggestion with durable text-call evidence.
          */
         post: operations["suggest_shot_design_api_v1_projects__project_id__director_shots__shot_id__suggestion_post"];
         delete?: never;
@@ -2823,6 +2823,54 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * DirectorInvocationEvidence
+         * @description Safe identity returned with a proposal; no credential or raw wire data.
+         */
+        DirectorInvocationEvidence: {
+            /**
+             * Turn Id
+             * Format: uuid
+             */
+            turn_id: string;
+            /** Request Key */
+            request_key: string;
+            /** Context Hash */
+            context_hash: string;
+            /** Output Hash */
+            output_hash: string;
+            slot: components["schemas"]["ModelSlot"];
+            /** Model Id */
+            model_id: string;
+            /** Model Binding Ref */
+            model_binding_ref: string;
+            /** Actual Model */
+            actual_model?: string | null;
+            /**
+             * Transport Status
+             * @default succeeded
+             * @constant
+             */
+            transport_status: "succeeded";
+            /** Token Usage */
+            token_usage?: {
+                [key: string]: unknown;
+            };
+            /** Reported Cost */
+            reported_cost?: string | null;
+            /**
+             * Cost Status
+             * @enum {string}
+             */
+            cost_status: "unknown" | "reported";
+            /**
+             * Currency
+             * @default USD
+             */
+            currency: string;
+            /** Schema Repair Count */
+            schema_repair_count: number;
+        };
         /** DirectorRecommendation */
         DirectorRecommendation: {
             /** Base Shot Version */
@@ -2851,7 +2899,28 @@ export interface components {
             /** Affected Facts */
             affected_facts?: string[];
             /** Typed Operations */
-            typed_operations?: {
+            typed_operations?: components["schemas"]["DirectorRecommendationOperation"][];
+            director_evidence?: components["schemas"]["DirectorInvocationEvidence"] | null;
+        };
+        /**
+         * DirectorRecommendationOperation
+         * @description The only operation a Shot recommendation may place in a draft.
+         */
+        DirectorRecommendationOperation: {
+            /**
+             * Op
+             * @constant
+             */
+            op: "update_director_state";
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "framing" | "camera" | "action" | "expression" | "gaze" | "composition" | "continuity_constraints" | "video_reference_risk" | "performance";
+            /** Value */
+            value: {
+                [key: string]: unknown;
+            } | {
                 [key: string]: unknown;
             }[];
         };
@@ -2869,6 +2938,8 @@ export interface components {
             shot_id: string;
             /** Expected Shot Version */
             expected_shot_version: number;
+            /** Request Key */
+            request_key: string;
         };
         /** DispatchResponse */
         DispatchResponse: {
@@ -3891,6 +3962,12 @@ export interface components {
             /** Capabilities */
             capabilities: string[];
         };
+        /**
+         * ModelSlot
+         * @description Stable business slot vocabulary. Never branch on a provider here.
+         * @enum {string}
+         */
+        ModelSlot: "planning.brief" | "planning.script" | "planning.storyboard" | "visual.character" | "visual.storyboard" | "visual.keyframe" | "visual.image_edit" | "video.shot" | "audio.tts";
         /** ModelSlotRead */
         ModelSlotRead: {
             /** Id */
@@ -5169,7 +5246,7 @@ export interface components {
         };
         /**
          * ShotDirectorSuggestion
-         * @description The complete, non-persistent proposal returned to the Shot UI.
+         * @description Validated proposal plus the exact text invocation identity, when real.
          */
         ShotDirectorSuggestion: {
             /** Base Shot Version */
@@ -5181,6 +5258,7 @@ export interface components {
             suggested_director_state: components["schemas"]["SuggestionDirectorState"];
             /** Change Summary */
             change_summary: string;
+            director_evidence?: components["schemas"]["DirectorInvocationEvidence"] | null;
         };
         /**
          * ShotDirectorSuggestionRequest
@@ -5201,6 +5279,8 @@ export interface components {
             expected_shot_version: number;
             /** User Instruction */
             user_instruction: string;
+            /** Request Key */
+            request_key: string;
         };
         /** ShotFramingState */
         ShotFramingState: {

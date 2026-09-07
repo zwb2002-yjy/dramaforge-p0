@@ -2,8 +2,8 @@
 
 The retired controlled workflow, budget, trial, batch, repair, and export
 commands intentionally have no HTTP compatibility layer. Media execution is
-owned by the canonical Scene/Shot Workbench APIs; this router only exposes the
-read-only Shot suggestion seam.
+owned by the canonical Scene/Shot Workbench APIs; this router exposes bounded
+proposal-only text turns and never mutates Shot design or Formal media.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ async def suggest_shot_design(
     session: SessionDep,
     _: CsrfDep,
 ) -> ShotDirectorSuggestion:
-    """Return one validated, non-persistent suggestion for the selected Shot."""
+    """Return one validated suggestion with durable text-call evidence."""
 
     if body.shot_id != shot_id:
         raise ValidationAppError(

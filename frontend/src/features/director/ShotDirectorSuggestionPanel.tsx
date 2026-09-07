@@ -21,12 +21,17 @@ function formatState(state: Record<string, unknown>): string {
   return JSON.stringify(state, null, 2);
 }
 
+function newDirectorRequestKey(kind: "suggestion" | "recommendation", shotId: string): string {
+  return `${kind}:${shotId}:${globalThis.crypto.randomUUID()}`;
+}
+
 /**
  * One-shot Director suggestion surface.
  *
- * A returned suggestion is held only in component state. Apply sends its
- * design fields to ShotDesignPanel's local draft seam; neither this component
- * nor Apply calls /design, execution-plan, or executions.
+ * A returned suggestion is held in component state while its invocation
+ * evidence is durable on the server. Apply sends only design fields to
+ * ShotDesignPanel's local draft seam; neither this component nor Apply calls
+ * /design, execution-plan, or executions.
  */
 export function ShotDirectorSuggestionPanel({
   projectId,
@@ -60,6 +65,7 @@ export function ShotDirectorSuggestionPanel({
         shot_id: shot.id,
         expected_shot_version: shot.version,
         user_instruction: instruction.trim(),
+        request_key: newDirectorRequestKey("suggestion", shot.id),
       });
     },
     onSuccess: (result) => {
@@ -86,6 +92,7 @@ export function ShotDirectorSuggestionPanel({
         scene_id: shot.scene_id,
         shot_id: shot.id,
         expected_shot_version: shot.version,
+        request_key: newDirectorRequestKey("recommendation", shot.id),
       });
     },
     onSuccess: (result) => {
@@ -201,6 +208,15 @@ export function ShotDirectorSuggestionPanel({
             {stale && <span className="qc-shot-director-suggestion-stale">已过期</span>}
           </header>
           <p data-testid="suggestion-change-summary">{proposal.change_summary}</p>
+          {proposal.director_evidence && (
+            <p className="muted" data-testid="suggestion-model-evidence">
+              模型 {proposal.director_evidence.actual_model ?? proposal.director_evidence.model_id}{" "}
+              · 调用 {proposal.director_evidence.turn_id.slice(0, 8)} ·
+              {proposal.director_evidence.cost_status === "reported"
+                ? ` ${proposal.director_evidence.reported_cost} ${proposal.director_evidence.currency}`
+                : " 费用未返回"}
+            </p>
+          )}
 
           <div className="qc-shot-director-suggestion-diff" data-testid="suggestion-diff">
             <section>
@@ -313,6 +329,14 @@ export function ShotDirectorSuggestionPanel({
             {recStale && <span className="qc-shot-director-suggestion-stale">已过期</span>}
           </header>
           <p>{recommendation.current_state}</p>
+          {recommendation.director_evidence && (
+            <p className="muted" data-testid="recommendation-model-evidence">
+              模型
+              {recommendation.director_evidence.actual_model ??
+                recommendation.director_evidence.model_id}
+              · 调用 {recommendation.director_evidence.turn_id.slice(0, 8)}
+            </p>
+          )}
           <p>
             <strong>建议：</strong>
             {recommendation.suggested_change}

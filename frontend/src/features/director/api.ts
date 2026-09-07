@@ -13,6 +13,7 @@ export async function suggestShotDesign(
     shot_id: string;
     expected_shot_version: number;
     user_instruction: string;
+    request_key: string;
   },
 ): Promise<ShotDirectorSuggestion> {
   const csrf = await fetchCsrf();
@@ -34,6 +35,7 @@ export async function recommendShotDesign(
     scene_id: string;
     shot_id: string;
     expected_shot_version: number;
+    request_key: string;
   },
 ): Promise<DirectorRecommendation> {
   const csrf = await fetchCsrf();

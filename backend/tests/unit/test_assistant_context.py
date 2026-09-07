@@ -50,21 +50,30 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
     from app.assets.models import Episode
 
     episode = Episode(
-        project_id=project.id, episode_number=1, title="Episode 1",
+        project_id=project.id,
+        episode_number=1,
+        title="Episode 1",
     )
     session.add(episode)
     await session.flush()
     scene = Scene(
-        episode_id=episode.id, scene_number=1,
-        location_name="Studio", time_of_day="day",
+        episode_id=episode.id,
+        scene_number=1,
+        location_name="Studio",
+        time_of_day="day",
         synopsis="Golden scene",
     )
     session.add(scene)
     await session.flush()
     shot = Shot(
-        project_id=project.id, scene_id=scene.id, shot_number=1,
-        version=2, visual_description="Shot", image_prompt="kf prompt",
-        video_prompt="video prompt", director_state={"camera": "static"},
+        project_id=project.id,
+        scene_id=scene.id,
+        shot_number=1,
+        version=2,
+        visual_description="Shot",
+        image_prompt="kf prompt",
+        video_prompt="video prompt",
+        director_state={"camera": "static"},
     )
     session.add(shot)
     await session.flush()
@@ -75,7 +84,9 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
 async def test_context_reads_db_facts_and_messages(session: AsyncSession) -> None:
     project, shot, user = await _seed(session)
     thread = DirectorThread(
-        project_id=project.id, scope_type="shot", scope_entity_id=shot.id,
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=shot.id,
         created_by=user.id,
     )
     session.add(thread)
@@ -84,27 +95,47 @@ async def test_context_reads_db_facts_and_messages(session: AsyncSession) -> Non
 
     now = datetime.now(UTC)
     session.add(
-        DirectorMessage(thread_id=thread.id, project_id=project.id, role="user",
-                        content="建议改低机位", created_by=user.id, created_at=now)
+        DirectorMessage(
+            thread_id=thread.id,
+            project_id=project.id,
+            role="user",
+            content="建议改低机位",
+            created_by=user.id,
+            created_at=now,
+        )
     )
     await session.flush()
     session.add(
-        DirectorMessage(thread_id=thread.id, project_id=project.id, role="assistant",
-                        content="proposal v1", created_by=None,
-                        created_at=now + timedelta(seconds=1))
+        DirectorMessage(
+            thread_id=thread.id,
+            project_id=project.id,
+            role="assistant",
+            content="proposal v1",
+            created_by=None,
+            created_at=now + timedelta(seconds=1),
+        )
     )
     await session.flush()
     session.add(
         ReviewAnnotation(
-            project_id=project.id, shot_id=shot.id, created_by=user.id,
-            time_start=2.3, time_end=3.1, note="人物漂移", severity="warning",
+            project_id=project.id,
+            shot_id=shot.id,
+            created_by=user.id,
+            time_start=2.3,
+            time_end=3.1,
+            note="人物漂移",
+            severity="warning",
             status="open",
         )
     )
     session.add(
         ShotReferenceBinding(
-            project_id=project.id, shot_id=shot.id, purpose="identity",
-            asset_id=uuid4(), sort_order=1, created_by=user.id,
+            project_id=project.id,
+            shot_id=shot.id,
+            purpose="identity",
+            asset_id=uuid4(),
+            sort_order=1,
+            created_by=user.id,
         )
     )
     await session.flush()
@@ -115,6 +146,9 @@ async def test_context_reads_db_facts_and_messages(session: AsyncSession) -> Non
         current_user_message="再看看镜头",
     )
     assert ctx.project["visual_standard"]["palette"] == "teal"
+    assert ctx.scene is not None
+    assert ctx.scene["id"] == str(shot.scene_id)
+    assert ctx.scene["location_name"] == "Studio"
     assert ctx.shot is not None
     assert ctx.shot["version"] == 2
     assert ctx.shot["director_state"]["camera"] == "static"
@@ -130,7 +164,9 @@ async def test_context_reads_db_facts_and_messages(session: AsyncSession) -> Non
 async def test_context_scope_scene(session: AsyncSession) -> None:
     project, shot, user = await _seed(session)
     thread = DirectorThread(
-        project_id=project.id, scope_type="scene", scope_entity_id=shot.scene_id,
+        project_id=project.id,
+        scope_type="scene",
+        scope_entity_id=shot.scene_id,
         created_by=user.id,
     )
     session.add(thread)

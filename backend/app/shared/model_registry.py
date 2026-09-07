@@ -10,6 +10,7 @@ def load_all_models() -> None:
     from app.delivery import models as delivery_models
     from app.director import assistant_models as director_assistant_models
     from app.director import proposal_models as director_proposal_models
+    from app.director import turn_models as director_turn_models
     from app.editing import models as editing_models
     from app.events import models as event_models
     from app.execution import models as execution_models
@@ -25,6 +26,7 @@ def load_all_models() -> None:
         delivery_models,
         director_assistant_models,
         director_proposal_models,
+        director_turn_models,
         editing_models,
         event_models,
         execution_models,

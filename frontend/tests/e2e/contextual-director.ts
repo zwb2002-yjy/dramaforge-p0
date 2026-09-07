@@ -11,6 +11,22 @@ export async function installContextualDirectorMock(page: Page, state: Professio
     suggested_video_prompt: "slow push-in, pause before turning toward camera",
     suggested_director_state: { performance: { beat: "pause_then_turn" } },
     change_summary: "人物先停顿再转头，镜头缓慢推进",
+    director_evidence: {
+      turn_id: "33333333-3333-4333-8333-333333333333",
+      request_key: "suggestion:shot:e2e",
+      context_hash: "e".repeat(64),
+      output_hash: "f".repeat(64),
+      slot: "planning.storyboard",
+      model_id: "litellm/script-quality",
+      model_binding_ref: "production-model-profile:e2e@4:planning.storyboard",
+      actual_model: "upstream/director-e2e",
+      transport_status: "succeeded",
+      token_usage: { total_tokens: 55 },
+      reported_cost: "0.003",
+      cost_status: "reported",
+      currency: "USD",
+      schema_repair_count: 0,
+    },
   };
   await page.route(`**${suggestionPath}`, async (route) => {
     const request = route.request();
@@ -22,6 +38,7 @@ export async function installContextualDirectorMock(page: Page, state: Professio
       shot_id: SHOT_ID,
       expected_shot_version: suggestion.base_shot_version,
       user_instruction: "让人物更克制，先停顿再转头，镜头缓慢推进",
+      request_key: expect.stringMatching(new RegExp(`^suggestion:${SHOT_ID}:[0-9a-f-]{36}$`)),
     });
     await route.fulfill({ json: suggestion });
   });
@@ -75,6 +92,10 @@ export async function exerciseContextualDirector(
     .fill("让人物更克制，先停顿再转头，镜头缓慢推进");
   await page.getByTestId("request-shot-director-suggestion").click();
   await expect(page.getByTestId("shot-director-suggestion-proposal")).toBeVisible();
+  await expect(page.getByTestId("suggestion-model-evidence")).toContainText(
+    "upstream/director-e2e",
+  );
+  await expect(page.getByTestId("suggestion-model-evidence")).toContainText("33333333");
   await expect(page.getByTestId("suggestion-old-image-prompt")).toHaveText(before.image);
   await expect(page.getByTestId("suggestion-new-image-prompt")).toHaveText(
     suggestion.suggested_image_prompt,
