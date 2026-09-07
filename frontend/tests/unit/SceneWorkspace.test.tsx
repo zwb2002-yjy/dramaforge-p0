@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SceneWorkspace } from "../../src/features/scenes/SceneWorkspace";
@@ -32,6 +32,16 @@ const SHOT_1 = {
   formal_keyframe_artifact_id: null,
   formal_video_artifact_id: null,
   formal_composite_artifact_id: null,
+};
+
+const SHOT_2 = {
+  ...SHOT_1,
+  id: "shot-2",
+  shot_number: 2,
+  sort_order: 2,
+  visual_description: "B looks back",
+  image_prompt: "second keyframe",
+  video_prompt: "second motion",
 };
 
 function mockBackend() {
@@ -224,6 +234,244 @@ describe("SceneWorkspace", () => {
       );
     });
     expect(await screen.findByText(/已保存设计/)).toBeInTheDocument();
+  });
+
+  it("keeps a draft across sheet close and guards a Shot switch until discard", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/workspace") && method === "GET") {
+        return json({
+          scene: {
+            id: "scene-1",
+            episode_id: "episode-1",
+            episode_number: 1,
+            scene_number: 1,
+            location_name: "Studio",
+            time_of_day: "day",
+            synopsis: "intro",
+            version: 1,
+            design_state: {},
+          },
+          shots: [SHOT_1, SHOT_2],
+          references: { "shot-1": [], "shot-2": [] },
+          candidates: { "shot-1": [], "shot-2": [] },
+          trace: { "shot-1": [], "shot-2": [] },
+        });
+      }
+      return json({});
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SceneWorkspace projectId="project-1" sceneId="scene-1" />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Studio");
+    fireEvent.click(screen.getByTestId("context-dock-look"));
+    fireEvent.change(screen.getByLabelText("图片提示词"), {
+      target: { value: "A unsaved keyframe" },
+    });
+    expect(await screen.findByTestId("shot-design-dirty")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("director-sheet-close"));
+    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("context-dock-look"));
+    expect(screen.getByLabelText("图片提示词")).toHaveValue("A unsaved keyframe");
+
+    fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
+    expect(await screen.findByTestId("unsaved-changes-guard")).toBeInTheDocument();
+    expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-1");
+    fireEvent.click(screen.getByRole("button", { name: "返回保存" }));
+    expect(screen.queryByTestId("unsaved-changes-guard")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("图片提示词")).toHaveValue("A unsaved keyframe");
+
+    fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
+    fireEvent.click(await screen.findByRole("button", { name: "放弃并切换" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-2"),
+    );
+    expect(screen.getByLabelText("图片提示词")).toHaveValue("second keyframe");
+    expect(screen.getByLabelText("图片提示词")).not.toHaveValue("A unsaved keyframe");
+  });
+
+  it("keeps the controlled draft and production gate after a save failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/workspace") && method === "GET") {
+        return json({
+          scene: {
+            id: "scene-1",
+            episode_id: "episode-1",
+            episode_number: 1,
+            scene_number: 1,
+            location_name: "Studio",
+            time_of_day: "day",
+            synopsis: "intro",
+            version: 1,
+            design_state: {},
+          },
+          shots: [SHOT_1],
+          references: { "shot-1": [] },
+          candidates: { "shot-1": [] },
+          trace: { "shot-1": [] },
+        });
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/design") && method === "PATCH") {
+        return json({ code: "VERSION_CONFLICT", detail: "shot changed" }, 409);
+      }
+      return json({});
+    });
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <SceneWorkspace projectId="project-1" sceneId="scene-1" />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Studio");
+    fireEvent.click(screen.getByTestId("context-dock-look"));
+    fireEvent.change(screen.getByLabelText("图片提示词"), {
+      target: { value: "keep after failure" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存设计" }));
+    expect(await screen.findByText(/保存失败/)).toBeInTheDocument();
+    expect(screen.getByLabelText("图片提示词")).toHaveValue("keep after failure");
+    fireEvent.click(screen.getByTestId("director-tab-production"));
+    expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
+    expect(screen.getByTestId("shot-production-unsaved")).toBeInTheDocument();
+  });
+
+  it("polls effective active runs to completion and stops at terminal state", async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/workspace") && method === "GET") {
+        reads += 1;
+        const status = reads === 1 ? "queued" : reads === 2 ? "running" : "completed";
+        return json({
+          scene: {
+            id: "scene-1",
+            episode_id: "episode-1",
+            episode_number: 1,
+            scene_number: 1,
+            location_name: "Studio",
+            time_of_day: "day",
+            synopsis: "intro",
+            version: 1,
+            design_state: {},
+          },
+          shots: [SHOT_1],
+          references: { "shot-1": [] },
+          candidates:
+            status === "completed"
+              ? {
+                  "shot-1": [
+                    {
+                      artifact_id: "artifact-completed",
+                      node_run_id: "run-new",
+                      stage: "image_keyframe",
+                      status: "completed",
+                      artifact_type: "image",
+                    },
+                  ],
+                }
+              : { "shot-1": [] },
+          trace: {
+            "shot-1": [
+              { node_run_id: "run-new", node_key: "keyframe", status },
+              { node_run_id: "run-old", node_key: "keyframe", status: "failed" },
+            ],
+          },
+        });
+      }
+      return json({});
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SceneWorkspace projectId="project-1" sceneId="scene-1" />
+      </QueryClientProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(reads).toBe(1);
+    expect(screen.getByTestId("scene-active-sync")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    expect(reads).toBe(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    expect(reads).toBe(3);
+    expect(screen.getByTestId("shot-candidate-preview-artifact-completed")).toBeInTheDocument();
+    expect(screen.queryByTestId("scene-active-sync")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(reads).toBe(3);
+  });
+
+  it("keeps the last server run truthful when a polling refresh loses connection", async () => {
+    let reads = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/workspace") && method === "GET") {
+        reads += 1;
+        if (reads > 1) return Promise.reject(new Error("network offline"));
+        return json({
+          scene: {
+            id: "scene-1",
+            episode_id: "episode-1",
+            episode_number: 1,
+            scene_number: 1,
+            location_name: "Studio",
+            time_of_day: "day",
+            synopsis: "intro",
+            version: 1,
+            design_state: {},
+          },
+          shots: [SHOT_1],
+          references: { "shot-1": [] },
+          candidates: { "shot-1": [] },
+          trace: {
+            "shot-1": [{ node_run_id: "run-1", node_key: "keyframe", status: "queued" }],
+          },
+        });
+      }
+      return json({});
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SceneWorkspace projectId="project-1" sceneId="scene-1" />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Studio");
+    expect(screen.getByTestId("shot-execution-status")).toHaveTextContent("queued");
+    await act(async () => {
+      await client.refetchQueries();
+    });
+    expect(reads).toBe(2);
+    await waitFor(() =>
+      expect(screen.getByTestId("scene-sync-error")).toHaveTextContent("连接中断，状态待同步"),
+    );
+    expect(screen.getByTestId("shot-execution-status")).toHaveTextContent("queued");
+    expect(screen.getByTestId("scene-active-sync")).toBeInTheDocument();
   });
 
   it("binds formal confirmation to the currently selected shot", async () => {
@@ -538,7 +786,10 @@ describe("SceneWorkspace", () => {
   });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("Contextual Director entry", () => {
   it("opens the real selected-shot panel without requesting or applying a suggestion", async () => {

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { queryKeys } from "../../lib/queryKeys";
+import { activeStageStatus } from "../production/sceneRunState";
 import {
   createShotExecution,
   type ShotExecutionRead,
@@ -17,6 +18,8 @@ type ShotProductionActionsProps = {
   referencesReady?: boolean;
   /** Block production until the selected Shot design has been persisted. */
   dirty?: boolean;
+  /** Newest-first server NodeRun summary for this Shot. */
+  trace?: unknown[];
   onExecuted?: (result: ShotExecutionRead) => void | Promise<void>;
 };
 
@@ -49,6 +52,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function serverStatusLabel(status: string): string {
+  if (status === "queued") return "已排队";
+  if (status === "running") return "处理中";
+  if (status === "cancel_requested") return "取消中";
+  return status;
+}
+
 /**
  * The selected-shot production controls for the canonical Workbench path.
  *
@@ -62,6 +72,7 @@ export function ShotProductionActions({
   references = [],
   referencesReady = true,
   dirty = false,
+  trace = [],
   onExecuted,
 }: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
@@ -154,6 +165,17 @@ export function ShotProductionActions({
   });
 
   const activeStage = produce.isPending ? produce.variables : null;
+  const keyframeStatus = activeStageStatus(trace, "image_keyframe");
+  const videoStatus = activeStageStatus(trace, "video");
+
+  const buttonLabel = (stage: ShotExecutionStage, serverStatus: string | null) => {
+    const label = STAGE_LABEL[stage];
+    if (activeStage === stage) return `${label}请求提交中…`;
+    if (serverStatus === "queued") return `${label}已排队`;
+    if (serverStatus === "cancel_requested") return `${label}取消中…`;
+    if (serverStatus === "running") return `${label}生成中…`;
+    return `生成${label}`;
+  };
 
   return (
     <section
@@ -180,17 +202,17 @@ export function ShotProductionActions({
           type="button"
           data-testid="generate-keyframe"
           onClick={() => produce.mutate("image_keyframe")}
-          disabled={produce.isPending || !referencesReady || dirty}
+          disabled={produce.isPending || Boolean(keyframeStatus) || !referencesReady || dirty}
         >
-          {activeStage === "image_keyframe" ? "关键帧入队中…" : "生成关键帧"}
+          {buttonLabel("image_keyframe", keyframeStatus)}
         </button>
         <button
           type="button"
           data-testid="generate-video"
           onClick={() => produce.mutate("video")}
-          disabled={produce.isPending || !referencesReady || dirty}
+          disabled={produce.isPending || Boolean(videoStatus) || !referencesReady || dirty}
         >
-          {activeStage === "video" ? "视频入队中…" : "生成视频"}
+          {buttonLabel("video", videoStatus)}
         </button>
       </div>
 
@@ -200,6 +222,11 @@ export function ShotProductionActions({
       {!referencesReady && (
         <p className="qc-shot-production-hint" role="status">
           正在解析当前镜头的资产引用；解析完成前不会提交生产请求。
+        </p>
+      )}
+      {(keyframeStatus || videoStatus) && (
+        <p className="qc-shot-production-hint" data-testid="shot-production-running" role="status">
+          服务端任务仍在执行；页面会自动同步，当前阶段不会重复提交。
         </p>
       )}
       {dirty && (
@@ -215,7 +242,8 @@ export function ShotProductionActions({
           data-status={feedback.message}
           role="status"
         >
-          {STAGE_LABEL[feedback.stage]}已提交，{feedback.message === "queued" ? "已排队" : "处理中"}
+          {STAGE_LABEL[feedback.stage]}请求已提交，服务器状态：
+          {serverStatusLabel(feedback.message)}
         </p>
       )}
       {feedback?.kind === "error" && (

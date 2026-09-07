@@ -11,6 +11,9 @@ type ShotDesignPanelProps = {
   shot: ShotLite;
   onSaved?: () => void | Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  /** Optional Scene-owned draft so closing the Context Sheet cannot drop it. */
+  draft?: ShotDesignDraft;
+  onDraftChange?: (draft: ShotDesignDraft) => void;
   /**
    * One-shot external draft replacement used by the Director suggestion
    * preview. Applying it only changes this editor's local draft; save remains
@@ -25,6 +28,8 @@ export type ShotDesignDraft = {
   image_prompt: string;
   video_prompt: string;
   director_state: Record<string, unknown>;
+  /** Preserve an in-progress JSON edit, including temporarily invalid text. */
+  director_state_text?: string;
 };
 
 function serializeDirectorState(state: Record<string, unknown> | null | undefined): string {
@@ -56,6 +61,8 @@ export function ShotDesignPanel({
   shot,
   onSaved,
   onDirtyChange,
+  draft: controlledDraft,
+  onDraftChange,
   applyDraft,
   focus = "all",
 }: ShotDesignPanelProps) {
@@ -64,17 +71,29 @@ export function ShotDesignPanel({
   const showMotion = focus === "all" || focus === "motion";
   const showLook = focus === "all" || focus === "look";
   const [visual, setVisual] = useState(shot.visual_description);
-  const [imagePrompt, setImagePrompt] = useState(shot.image_prompt);
-  const [videoPrompt, setVideoPrompt] = useState(shot.video_prompt);
-  const [directorStateText, setDirectorStateText] = useState(() =>
-    serializeDirectorState(shot.director_state),
-  );
+  const [localDraft, setLocalDraft] = useState<ShotDesignDraft>(() => ({
+    image_prompt: shot.image_prompt,
+    video_prompt: shot.video_prompt,
+    director_state: { ...shot.director_state },
+    director_state_text: serializeDirectorState(shot.director_state),
+  }));
   const [message, setMessage] = useState("");
+
+  const draft = controlledDraft ?? localDraft;
+  const directorStateText =
+    draft.director_state_text ?? serializeDirectorState(draft.director_state);
+  const updateDraft = (next: ShotDesignDraft) => {
+    if (onDraftChange) {
+      onDraftChange(next);
+      return;
+    }
+    setLocalDraft(next);
+  };
 
   const serverDirectorStateText = serializeDirectorState(shot.director_state);
   const dirty =
-    imagePrompt !== shot.image_prompt ||
-    videoPrompt !== shot.video_prompt ||
+    draft.image_prompt !== shot.image_prompt ||
+    draft.video_prompt !== shot.video_prompt ||
     directorStateText !== serverDirectorStateText;
 
   // The panel remains mounted while the shot strip changes selection. Reset
@@ -83,9 +102,14 @@ export function ShotDesignPanel({
   // is also a server refresh signal after a successful save.
   useEffect(() => {
     setVisual(shot.visual_description);
-    setImagePrompt(shot.image_prompt);
-    setVideoPrompt(shot.video_prompt);
-    setDirectorStateText(serializeDirectorState(shot.director_state));
+    if (!onDraftChange) {
+      setLocalDraft({
+        image_prompt: shot.image_prompt,
+        video_prompt: shot.video_prompt,
+        director_state: { ...shot.director_state },
+        director_state_text: serializeDirectorState(shot.director_state),
+      });
+    }
   }, [
     shot.id,
     shot.version,
@@ -93,6 +117,7 @@ export function ShotDesignPanel({
     shot.image_prompt,
     shot.video_prompt,
     shot.director_state,
+    onDraftChange,
   ]);
 
   useEffect(() => {
@@ -101,11 +126,14 @@ export function ShotDesignPanel({
 
   useEffect(() => {
     if (!applyDraft) return;
-    setImagePrompt(applyDraft.image_prompt);
-    setVideoPrompt(applyDraft.video_prompt);
-    setDirectorStateText(serializeDirectorState(applyDraft.director_state));
+    updateDraft({
+      image_prompt: applyDraft.image_prompt,
+      video_prompt: applyDraft.video_prompt,
+      director_state: { ...applyDraft.director_state },
+      director_state_text: serializeDirectorState(applyDraft.director_state),
+    });
     setMessage("建议已应用到草稿；请保存镜头设计后才会成为服务器事实");
-  }, [applyDraft]);
+  }, [applyDraft]); // eslint-disable-line react-hooks/exhaustive-deps -- apply is one-shot
 
   // Keep the sibling production controls informed without persisting a
   // second copy of the design. The callback is deliberately effect-based so
@@ -120,8 +148,8 @@ export function ShotDesignPanel({
       return updateShotDesign(projectId, shot.id, {
         expected_version: shot.version,
         director_state: directorState,
-        image_prompt: imagePrompt,
-        video_prompt: videoPrompt,
+        image_prompt: draft.image_prompt,
+        video_prompt: draft.video_prompt,
       });
     },
     onSuccess: async () => {
@@ -185,8 +213,8 @@ export function ShotDesignPanel({
           图片提示词
           <textarea
             aria-label="图片提示词"
-            value={imagePrompt}
-            onChange={(event) => setImagePrompt(event.target.value)}
+            value={draft.image_prompt}
+            onChange={(event) => updateDraft({ ...draft, image_prompt: event.target.value })}
           />
         </label>
       ) : null}
@@ -195,8 +223,8 @@ export function ShotDesignPanel({
           视频提示词
           <textarea
             aria-label="视频提示词"
-            value={videoPrompt}
-            onChange={(event) => setVideoPrompt(event.target.value)}
+            value={draft.video_prompt}
+            onChange={(event) => updateDraft({ ...draft, video_prompt: event.target.value })}
           />
         </label>
       ) : null}
@@ -206,7 +234,7 @@ export function ShotDesignPanel({
           <textarea
             aria-label="导演状态"
             value={directorStateText}
-            onChange={(event) => setDirectorStateText(event.target.value)}
+            onChange={(event) => updateDraft({ ...draft, director_state_text: event.target.value })}
             spellCheck={false}
           />
         </label>

@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-import { PROJECT_ID, SCENE_ID, SHOT_ID, installProfessionalMock } from "./professional-mocks";
+import {
+  PROJECT_ID,
+  SCENE_ID,
+  SECOND_SHOT_ID,
+  SHOT_ID,
+  installProfessionalMock,
+} from "./professional-mocks";
 
 test("manual professional production: Scene Workbench design → candidate preview → formal", async ({
   page,
@@ -212,6 +218,42 @@ test("Scene Workbench remains readable at 910px and other views retain evidence"
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
+});
+
+test("Scene draft survives sheet close and guards route departure", async ({ page }) => {
+  const state = await installProfessionalMock(page);
+  await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
+  await expect(page.getByTestId("scene-workspace")).toBeVisible();
+
+  await page.getByTestId("context-dock-look").click();
+  await page.getByLabel("图片提示词").fill("unsaved guarded keyframe");
+  await expect(page.getByTestId("shot-design-dirty")).toBeVisible();
+  await page.getByTestId("director-sheet-close").click();
+  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+
+  await page.getByTestId("context-dock-look").click();
+  await expect(page.getByLabel("图片提示词")).toHaveValue("unsaved guarded keyframe");
+  await page.getByTestId(`shot-strip-card-${SECOND_SHOT_ID}`).click();
+  await expect(page.getByTestId("unsaved-changes-guard")).toBeVisible();
+  await expect(page.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", SHOT_ID);
+  await page.getByRole("button", { name: "返回保存" }).click();
+  await expect(page.getByLabel("图片提示词")).toHaveValue("unsaved guarded keyframe");
+
+  await page.getByTestId("scene-edit-entry").click();
+  await expect(page.getByTestId("unsaved-changes-guard")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/scenes/${SCENE_ID}$`));
+
+  await page.getByRole("button", { name: "返回保存" }).click();
+  await expect(page.getByTestId("unsaved-changes-guard")).toHaveCount(0);
+  await expect(page.getByLabel("图片提示词")).toHaveValue("unsaved guarded keyframe");
+  await page.getByTestId("scene-edit-entry").click();
+  await page.getByRole("button", { name: "放弃并离开" }).click();
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/edit`);
+  expect(
+    state.editing.requests.filter(
+      (request) => request.method === "PATCH" && request.path.endsWith("/design"),
+    ),
+  ).toHaveLength(0);
 });
 
 test("production monitor never surfaces legacy budget UI", async ({ page }) => {

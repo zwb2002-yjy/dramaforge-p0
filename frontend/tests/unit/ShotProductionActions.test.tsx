@@ -35,13 +35,18 @@ function json(body: unknown, status = 200) {
   );
 }
 
-function renderActions(references: ShotExecutionReference[] = []) {
+function renderActions(references: ShotExecutionReference[] = [], trace: unknown[] = []) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={queryClient}>
-      <ShotProductionActions projectId={SHOT.project_id} shot={SHOT} references={references} />
+      <ShotProductionActions
+        projectId={SHOT.project_id}
+        shot={SHOT}
+        references={references}
+        trace={trace}
+      />
     </QueryClientProvider>,
   );
 }
@@ -174,5 +179,34 @@ describe("ShotProductionActions", () => {
     const execution = calls.find((call) => call.url.endsWith("/executions"));
     expect(plan?.body.references).toEqual([reference]);
     expect(execution?.body.references).toEqual([reference]);
+  });
+
+  it("disables only the active server stage and ignores an older attempt", () => {
+    renderActions(
+      [],
+      [
+        { node_run_id: "run-new", node_key: "keyframe", status: "running" },
+        { node_run_id: "run-old", node_key: "keyframe", status: "failed" },
+      ],
+    );
+
+    expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
+    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("关键帧生成中");
+    expect(screen.getByTestId("generate-video")).toBeEnabled();
+    expect(screen.getByTestId("shot-production-running")).toHaveTextContent("不会重复提交");
+  });
+
+  it("treats a newer terminal retry as effective over an older active attempt", () => {
+    renderActions(
+      [],
+      [
+        { node_run_id: "run-new", node_key: "keyframe", status: "completed" },
+        { node_run_id: "run-old", node_key: "keyframe", status: "running" },
+      ],
+    );
+
+    expect(screen.getByTestId("generate-keyframe")).toBeEnabled();
+    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("生成关键帧");
+    expect(screen.queryByTestId("shot-production-running")).not.toBeInTheDocument();
   });
 });

@@ -10,9 +10,8 @@
 
 ## State
 
-- Status: GOAL_BLOCKED（验收复核发现 Final Film Timeline 真渲染、Worker
-  异步链、重试语义、前端等待/dirty gate 与 current-HEAD 证据仍未闭环）
-- Baseline: dev@71ed8147f3e4c4cb89a0b328a87029058f5d0cc8
+- Status: GOAL_IN_PROGRESS（R0–R1 已闭环；R2–R8 仍需实现与同候选验收）
+- Baseline: dev@67bbde25f6e9739ff2259f678394c63b2c37284a
 - Gate condition: only the execution plan's GOAL_DONE/GOAL_READY_FOR_OWNER_MERGE states count.
 
 ## Task Index
@@ -34,8 +33,8 @@
 | Revision task | Contract | Status |
 |---|---|---|
 | R0 基线校准与证据重算 | task-contracts/V1-R0-RECONCILIATION-20260907.md | COMPLETE |
-| R1 Scene 等待、草稿和阶段操作 | task-contracts/V1-R1-SCENE-WORKFLOW-20260907.md | READY |
-| R2 真实文本导演接通 | pending bounded supplement | BLOCKED BY R1 |
+| R1 Scene 等待、草稿和阶段操作 | task-contracts/V1-R1-SCENE-WORKFLOW-20260907.md | COMPLETE |
+| R2 真实文本导演接通 | pending bounded supplement | READY |
 | R3 用户意图、Skills 与模型能力闭环 | pending bounded supplement | BLOCKED BY R2 |
 | R4 有限导演推进与恢复 | pending bounded supplement | BLOCKED BY R1–R3 |
 | R5 生产恢复与重试验收 | pending bounded supplement | READY FOR EVIDENCE; FINAL PASS AFTER R4 |
