@@ -49,6 +49,21 @@
 
 ## Owner amendments
 
+### 2026-09-07 — V1 current-state completion revision
+
+The Owner supplied a current-code-based revision and authorized implementation
+through the existing V1 Goal. These documents refine the remaining G4/G6/G7/G8
+work into R0–R8 without replacing the seven preserved source plans or creating a
+second runtime:
+
+- [`v1-goal/DramaForge_V1_设计方案_20260907.md`](v1-goal/DramaForge_V1_设计方案_20260907.md)
+- [`v1-goal/DramaForge_V1_实施方案_20260907_修订版.md`](v1-goal/DramaForge_V1_实施方案_20260907_修订版.md)
+
+For the remaining V1 work, these revisions supersede stale implementation-state
+claims while preserving the existing canonical facts, explicit Apply/Save/Formal/
+Export gates, execution identity, project isolation, and model no-fallback rules.
+Implementation remains bounded by the current R-task contract and evidence.
+
 ### 2026-09-04 — Unified navigation and Project Lobby information architecture
 
 The Owner established a stable two-level navigation model and separated the
