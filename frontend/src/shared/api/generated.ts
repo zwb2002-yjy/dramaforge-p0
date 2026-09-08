@@ -11027,6 +11027,7 @@ export interface operations {
             };
             header?: {
                 "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
             };
             path: {
                 project_id: string;
@@ -11034,6 +11035,7 @@ export interface operations {
             };
             cookie?: {
                 dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
             };
         };
         requestBody?: never;

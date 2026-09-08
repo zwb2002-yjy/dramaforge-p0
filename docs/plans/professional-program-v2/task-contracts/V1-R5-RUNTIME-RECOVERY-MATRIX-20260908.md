@@ -48,7 +48,7 @@ despite the typed product-path prefix.
 - `backend/app/api/v1/generations.py` (CSRF/state projection if required)
 - `backend/alembic/versions/20260908_0060_cancel_recovery.py` (new)
 - focused unit and real PostgreSQL recovery-matrix tests
-- migration-head assertions, this contract and V1 Goal status
+- generated OpenAPI client, migration-head assertions, this contract and V1 Goal status
 
 ## Non-scope and authorization
 
@@ -119,3 +119,7 @@ one real configured remote task and the cross-provider Golden.
 - Original failed fixture runs remain evidence. PostgreSQL enum/edge requirements
   were corrected in the new fixtures rather than weakening schema constraints.
   The old ledger rejects preserved root inputs; no lifecycle event is forged.
+
+- First immutable candidate `9c94ab3` exposed the missing generated CSRF header/
+  cookie schema on the cancellation route. The generated client is updated, not
+  the consistency gate weakened; final candidate images/gates will be rebound.
