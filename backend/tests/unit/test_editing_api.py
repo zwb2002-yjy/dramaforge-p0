@@ -320,10 +320,17 @@ def test_editing_http_lifecycle_preserves_formal_facts(
         async with factory() as db:
             project = await db.get(Project, UUID(project_id))
             workspace = await db.get(Workspace, project.workspace_id)
-            turn = DirectorTurn(project_id=project.id, workspace_id=workspace.id,
-                actor_id=workspace.owner_user_id, scope_type="edit_session",
-                scope_entity_id=UUID(session_id), request_key="manual-edit:turn",
-                context_hash="f" * 64, status="awaiting_user", step_count=1)
+            turn = DirectorTurn(
+                project_id=project.id,
+                workspace_id=workspace.id,
+                actor_id=workspace.owner_user_id,
+                scope_type="edit_session",
+                scope_entity_id=UUID(session_id),
+                request_key="manual-edit:turn",
+                context_hash="f" * 64,
+                status="awaiting_user",
+                step_count=1,
+            )
             db.add(turn)
             await db.commit()
             return str(turn.id)
@@ -475,6 +482,85 @@ def test_editing_director_suggestion_http_returns_exact_persisted_identity(
         "edit_session_id": session_id,
         "plan": suggestion["plan"],
     }
+
+    async def seed_turn():
+        from app.access.models import Project, Workspace
+        from app.director.turn_models import DirectorTurn
+
+        async with factory() as session:
+            project = await session.get(Project, UUID(project_id))
+            workspace = await session.get(Workspace, project.workspace_id)
+            turn = DirectorTurn(
+                project_id=project.id,
+                workspace_id=workspace.id,
+                actor_id=workspace.owner_user_id,
+                scope_type="edit_session",
+                scope_entity_id=UUID(session_id),
+                request_key="editing:reject",
+                context_hash="d" * 64,
+                proposal_id=proposal_id,
+                status="awaiting_user",
+                step_count=1,
+                request_summary={"max_steps": 4},
+            )
+            session.add(turn)
+            await session.commit()
+            return turn.id
+
+    turn_id = _run(factory, seed_turn())
+    reject_url = (
+        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}"
+        f"/director-suggestions/{proposal_id}/reject"
+    )
+    assert client.post(reject_url, json={"expected_session_version": 1}).status_code == 403
+    assert (
+        client.post(
+            reject_url, json={"expected_session_version": 9}, headers={CSRF_HEADER: _csrf(client)}
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            reject_url.replace(session_id, str(uuid4())),
+            json={"expected_session_version": 1},
+            headers={CSRF_HEADER: _csrf(client)},
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            reject_url,
+            json={"expected_session_version": 1, "execute": True},
+            headers={CSRF_HEADER: _csrf(client)},
+        ).status_code
+        == 422
+    )
+    rejected = client.post(
+        reject_url, json={"expected_session_version": 1}, headers={CSRF_HEADER: _csrf(client)}
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
+    assert rejected.json()["rejected_item_ids"] == [str(item_id)]
+    replay = client.post(
+        reject_url, json={"expected_session_version": 1}, headers={CSRF_HEADER: _csrf(client)}
+    )
+    assert replay.json() == rejected.json()
+    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
+    assert turn["status"] == "completed" and turn["wait_reason"] == "proposal_rejected"
+
+    async def refused_context():
+        from app.director.turn_service import DirectorTurnService
+        from app.shared.errors import ConflictError
+
+        async with factory() as session:
+            with pytest.raises(ConflictError) as refused:
+                await DirectorTurnService(session).assert_context_not_rejected(
+                    project_id=UUID(project_id),
+                    context_hash="d" * 64,
+                )
+            assert refused.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
+
+    _run(factory, refused_context())
 
     reopened = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}")
     assert reopened.status_code == 200, reopened.text

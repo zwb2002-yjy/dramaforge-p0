@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EditingWorkspace } from "../../src/features/editing/EditingWorkspace";
+import { queryKeys } from "../../src/lib/queryKeys";
 import type { OpenCutManifestRead } from "../../src/lib/api";
 
 const PROJECT_ID = "project-1";
@@ -732,6 +733,8 @@ describe("EditingWorkspace", () => {
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-reject" });
       if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      if (url.endsWith("/reject"))
+        return json({ proposal_id: editingSuggestion().proposal_id, status: "rejected" });
       return json({});
     });
 
@@ -744,10 +747,76 @@ describe("EditingWorkspace", () => {
     await screen.findByTestId("editing-suggestion-preview");
     fireEvent.click(screen.getByTestId("editing-suggestion-reject"));
 
-    expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument(),
+    );
     expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
-    expect(screen.getByText("已拒绝当前剪辑建议预览。")).toBeInTheDocument();
+    expect(
+      screen.getByText("已持久拒绝当前剪辑建议，刷新后不会重新提交该分支。"),
+    ).toBeInTheDocument();
+    expect(calls.some((url) => url.endsWith("/reject"))).toBe(true);
     expect(calls.some((url) => url.endsWith("/timeline"))).toBe(false);
+  });
+
+  it("retains the editing preview when durable rejection fails", async () => {
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-reject" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      if (url.endsWith("/reject")) return json({ detail: "rejection unavailable" }, 503);
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "调整节奏" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    await screen.findByTestId("editing-suggestion-preview");
+    fireEvent.click(screen.getByTestId("editing-suggestion-reject"));
+    expect(await screen.findByTestId("editing-suggestion-error")).toHaveTextContent(
+      "rejection unavailable",
+    );
+    expect(screen.getByTestId("editing-suggestion-preview")).toBeInTheDocument();
+    expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
+  });
+
+  it("ignores a late rejection acknowledgement after the session version changes", async () => {
+    let resolveReject!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveReject = resolve;
+    });
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-reject" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      if (url.endsWith("/reject")) return pending;
+      return json({});
+    });
+    const client = renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "调整节奏" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    await screen.findByTestId("editing-suggestion-preview");
+    fireEvent.click(screen.getByTestId("editing-suggestion-reject"));
+    await waitFor(() => expect(screen.getByTestId("editing-suggestion-reject")).toBeDisabled());
+    expect(screen.getByTestId("editing-suggestion-apply-all")).toBeDisabled();
+    client.setQueryData(
+      queryKeys.editing.session(PROJECT_ID, SESSION_ID),
+      persistedSession(DEFAULT_SESSION_TIMELINE, 2),
+    );
+    await screen.findByTestId("editing-suggestion-stale");
+    resolveReject(await json({ proposal_id: editingSuggestion().proposal_id, status: "rejected" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("editing-suggestion-preview")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText("已持久拒绝当前剪辑建议，刷新后不会重新提交该分支。"),
+    ).not.toBeInTheDocument();
   });
 
   it("exports Final Film from the persisted EditSession timeline with idempotency", async () => {

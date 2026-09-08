@@ -21,6 +21,7 @@ import {
   prepareFinalFilm,
   renderFinalFilm,
   requestEditingDirectorSuggestion,
+  rejectEditingDirectorSuggestion,
   requestProactiveEditingDirectorSuggestion,
   routeEditingDirectorRepair,
   saveEditTimeline,
@@ -478,6 +479,51 @@ export function EditingWorkspace({
       setSelectedSuggestionOps({});
     },
   });
+  const suggestionRejection = useMutation({
+    mutationFn: (input: {
+      sequence: number;
+      projectId: string;
+      sessionId: string;
+      proposalId: string;
+      version: number;
+    }) =>
+      rejectEditingDirectorSuggestion(
+        input.projectId,
+        input.sessionId,
+        input.proposalId,
+        input.version,
+      ),
+    onSuccess: (_result, input) => {
+      const identity = suggestionIdentityRef.current;
+      if (
+        input.sequence !== suggestionSequenceRef.current ||
+        identity?.projectId !== input.projectId ||
+        identity?.sessionId !== input.sessionId ||
+        identity?.sessionVersion !== input.version
+      )
+        return;
+      setSuggestionPreview(null);
+      setSuggestionPreviewContext(null);
+      setSuggestionStale(false);
+      setSelectedSuggestionOps({});
+      setSuggestionError(null);
+      setFeedback("已持久拒绝当前剪辑建议，刷新后不会重新提交该分支。");
+    },
+    onError: (error: unknown, input) => {
+      const identity = suggestionIdentityRef.current;
+      if (
+        input.sequence !== suggestionSequenceRef.current ||
+        identity?.projectId !== input.projectId ||
+        identity?.sessionId !== input.sessionId ||
+        identity?.sessionVersion !== input.version
+      )
+        return;
+      setSuggestionError(`拒绝保存失败，建议预览已保留：${errorMessage(error)}`);
+    },
+  });
+  const rejectionResetRef = useRef(suggestionRejection.reset);
+  rejectionResetRef.current = suggestionRejection.reset;
+
   const repairRoutingMutation = useMutation<
     EditingRepairRoutingRead,
     unknown,
@@ -523,6 +569,7 @@ export function EditingWorkspace({
     // response if the transport cannot be cancelled.
     suggestionRequestResetRef.current();
     repairRoutingMutationResetRef.current();
+    rejectionResetRef.current();
   }, [projectId, sessionId]);
 
   useEffect(() => {
@@ -547,6 +594,7 @@ export function EditingWorkspace({
       suggestionPreviewContext.sessionVersion !== currentSessionVersion);
 
   function submitSuggestion() {
+    if (suggestionRejection.isPending) return;
     const userInstruction = suggestionInstruction.trim();
     if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
       setSuggestionError("无法请求建议：当前 EditSession 版本尚未加载。");
@@ -574,6 +622,7 @@ export function EditingWorkspace({
   }
 
   function submitProactiveSuggestion() {
+    if (suggestionRejection.isPending) return;
     if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
       setSuggestionError("无法主动分析：当前 EditSession 版本尚未加载。");
       return;
@@ -627,7 +676,7 @@ export function EditingWorkspace({
   }
 
   function applySuggestionToDraft(operationIndices: number[] | null) {
-    if (!suggestionPreview || !draft) return;
+    if (!suggestionPreview || !draft || suggestionRejection.isPending) return;
     const operations = suggestionPreview.suggestion.plan.operations;
     const indices = operationIndices ?? operations.map((_operation, index) => index);
     if (indices.length === 0) {
@@ -683,11 +732,21 @@ export function EditingWorkspace({
   }
 
   function rejectSuggestion() {
-    setSuggestionPreview(null);
-    setSuggestionPreviewContext(null);
-    setSuggestionStale(false);
-    setSelectedSuggestionOps({});
-    setFeedback("已拒绝当前剪辑建议预览。");
+    if (
+      !suggestionPreview ||
+      !sessionId ||
+      suggestionIsStale ||
+      suggestionRejection.isPending ||
+      !isSessionVersion(currentSessionVersion)
+    )
+      return;
+    suggestionRejection.mutate({
+      sequence: suggestionSequenceRef.current,
+      projectId,
+      sessionId,
+      proposalId: suggestionPreview.proposal_id,
+      version: currentSessionVersion,
+    });
   }
 
   function updateClipDuration(index: number, value: string) {
@@ -954,7 +1013,7 @@ export function EditingWorkspace({
                                 data-testid={`editing-suggestion-op-select-${index}`}
                                 aria-label={`采用第 ${index + 1} 条剪辑操作`}
                                 checked={selectedSuggestionOps[index] === true}
-                                disabled={suggestionIsStale}
+                                disabled={suggestionIsStale || suggestionRejection.isPending}
                                 onChange={(event) =>
                                   setSelectedSuggestionOps((current) => ({
                                     ...current,
@@ -988,6 +1047,7 @@ export function EditingWorkspace({
                         onClick={() => applySuggestionToDraft(null)}
                         disabled={
                           suggestionIsStale ||
+                          suggestionRejection.isPending ||
                           suggestionPreview.suggestion.plan.operations.length === 0
                         }
                       >
@@ -1004,7 +1064,9 @@ export function EditingWorkspace({
                           )
                         }
                         disabled={
-                          suggestionIsStale || !Object.values(selectedSuggestionOps).some(Boolean)
+                          suggestionIsStale ||
+                          suggestionRejection.isPending ||
+                          !Object.values(selectedSuggestionOps).some(Boolean)
                         }
                       >
                         采用所选到草稿
@@ -1013,7 +1075,7 @@ export function EditingWorkspace({
                         type="button"
                         data-testid="editing-suggestion-reject"
                         onClick={rejectSuggestion}
-                        disabled={suggestionIsStale}
+                        disabled={suggestionIsStale || suggestionRejection.isPending}
                       >
                         拒绝建议
                       </button>

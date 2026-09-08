@@ -856,6 +856,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestions/{proposal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Editing Suggestion */
+        post: operations["reject_editing_suggestion_api_v1_projects__project_id__edit_sessions__session_id__director_suggestions__proposal_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-proactive-suggestion": {
         parameters: {
             query?: never;
@@ -3508,6 +3525,23 @@ export interface components {
              * @default
              */
             user_instruction: string;
+        };
+        /** EditingSuggestionRejectBody */
+        EditingSuggestionRejectBody: {
+            /** Expected Session Version */
+            expected_session_version: number;
+        };
+        /** EditingSuggestionRejectRead */
+        EditingSuggestionRejectRead: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /** Status */
+            status: string;
+            /** Rejected Item Ids */
+            rejected_item_ids: string[];
         };
         /** EffectiveBindingRead */
         EffectiveBindingRead: {
@@ -8667,6 +8701,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditingDirectorSuggestionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_editing_suggestion_api_v1_projects__project_id__edit_sessions__session_id__director_suggestions__proposal_id__reject_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+                proposal_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditingSuggestionRejectBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingSuggestionRejectRead"];
                 };
             };
             /** @description Validation Error */

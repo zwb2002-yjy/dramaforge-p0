@@ -75,3 +75,37 @@ flush queues, or cancel their tasks merely to obtain a clean candidate.
 7. Evidence is redacted and committed, source/image binding audited; R8 CI,
    security, release candidate and Owner-only merge remain separate. The existing
    root-ledger registration issue stays visible until legitimately resolved.
+
+## Preflight and discovered-gap progress
+
+- Private stack `dramaforge-r7-acceptance` is initialized at 0060 on loopback
+  8088, with exact preflight images built from `fa164e0`. The original 8080 stack
+  and its live work are unchanged. The private config copy has one workspace,
+  two verified Agnes bindings, one encrypted credential, and zero NodeRuns/
+  Artifacts/Outbox copied. Secret rows flowed in memory only, never to logs/Git.
+- Live read-only registry preflight confirms configured `litellm/script-quality`
+  and Agnes image/video; MiniMax and Seedance are unconfigured. The private
+  LiteLLM aliases point to configured DeepSeek and have no mock response. No paid
+  call has yet been made. The original model identities are not relabeled.
+- Separate Template+AUTO and Free+ASSIST projects and an explicit workspace text
+  profile have been created through the new API. Checkpoints are kept in
+  `tmp/r7-acceptance/acceptance.json`; setup facts in `api-preflight.json` and
+  `config-copy-result.json`.
+- `scripts/prove_v1_r7_acceptance.py` records a durable checkpoint before each
+  write; unknown outcomes cannot replay, completed steps restore responses,
+  evidence removes secrets/signed query strings, and paid phases require both
+  --real and a health-verified exact --candidate source (never app_env=test).
+  Safety unit tests cover redaction, no-call opt-in and replay/unknown handling.
+- R7 preflight exposed the local-only Editing rejection gap. Bounded fix
+  `V1-R7A-EDITING-REJECTION-20260908.md` now wires canonical durable rejection.
+  This is an acceptance-driven fix, not permission to rewrite the editing runtime.
+  Rebuild only the private stack before real calls; other tasks remain untouched.
+- The driver explicitly leaves review/Repair, real remote recovery, browser UI,
+  Editing-advice application and MP4/SRT download as NOT_VERIFIED until their
+  actual evidence is collected. A primary chain alone cannot set complete=true.
+
+- Capability preflight found the verified current Agnes bindings are portrait
+  (9:16). The initial 16:9 empty scaffold projects are retained as preflight
+  artifacts, not relabeled. Real acceptance will use separately created 9:16
+  projects/checkpoints; no model or aspect fallback is performed after a paid
+  request. The original two empty projects produced zero Provider/NodeRun rows.

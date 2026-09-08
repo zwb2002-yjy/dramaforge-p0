@@ -193,3 +193,25 @@ export function fetchFinalFilmStatus(
     `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/runs/${encodeURIComponent(nodeRunId)}`,
   );
 }
+
+/** Persist an explicit rejection without changing the timeline or production. */
+export async function rejectEditingDirectorSuggestion(
+  projectId: string,
+  sessionId: string,
+  proposalId: string,
+  expectedSessionVersion: number,
+): Promise<void> {
+  const csrf = await fetchCsrf();
+  const result = await apiSend<{ proposal_id: string; status: string }>(
+    "POST",
+    editSessionPath(
+      projectId,
+      `/${encodeURIComponent(sessionId)}/director-suggestions/${encodeURIComponent(proposalId)}/reject`,
+    ),
+    { expected_session_version: expectedSessionVersion },
+    csrf,
+  );
+  if (result.proposal_id !== proposalId || result.status !== "rejected") {
+    throw new Error("剪辑建议拒绝回执无效，预览已保留。");
+  }
+}
