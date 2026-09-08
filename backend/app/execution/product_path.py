@@ -2735,6 +2735,7 @@ async def _complete_pure_node(
         mime_type=stored.mime_type,
         byte_size=stored.byte_size,
         produced_by_run_id=run.id,
+        allow_cross_run_reuse=art_type == "audio",
     )
 
     run.status = "completed"

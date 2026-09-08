@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.api.deps import settings_dep
@@ -54,6 +54,10 @@ def api() -> Iterator[tuple[TestClient, Any]]:
 
 def _csrf(client: TestClient) -> str:
     return str(client.get("/api/v1/auth/csrf").json()["csrf_token"])
+
+
+def _run(coro: Any) -> Any:
+    return asyncio.run(coro)
 
 
 def _register(client: TestClient) -> str:
@@ -272,6 +276,79 @@ class TestGenerationCreate:
         # is the error body, not a generation response
         assert "operation_id" not in second.json()
         assert second.json()["detail"] is not None
+
+    def test_queued_cancel_is_terminal_idempotent_and_never_creates_provider_operation(
+        self, api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, _factory = api
+        workspace_id = _register(client)
+        project_id = _create_project(client, workspace_id)
+
+        async def fake_enqueue(self: object, node_run_id: Any) -> str:
+            return f"fake-{node_run_id}"
+
+        monkeypatch.setattr(
+            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
+            fake_enqueue,
+        )
+        created = client.post(
+            f"/api/v1/projects/{project_id}/generations",
+            json={"capability": "image.generate", "input": {"prompt": "cancel before submit"}},
+            headers={CSRF_HEADER: _csrf(client)},
+        )
+        assert created.status_code == 201, created.text
+        operation_id = created.json()["operation_id"]
+        path = f"/api/v1/projects/{project_id}/generations/{operation_id}/cancel"
+        assert client.post(path).status_code == 403
+
+        cancelled = client.post(path, headers={CSRF_HEADER: _csrf(client)})
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["status"] == "cancelled"
+        assert cancelled.json()["provider_operation"]["provider_operation_id"] is None
+        duplicate = client.post(path, headers={CSRF_HEADER: _csrf(client)})
+        assert duplicate.status_code == 200
+        assert duplicate.json() == cancelled.json()
+        read = client.get(f"/api/v1/projects/{project_id}/generations/{operation_id}")
+        assert read.json()["status"] == "cancelled"
+
+    def test_running_cancel_stays_pending_for_same_remote_observation(
+        self, api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, factory = api
+        workspace_id = _register(client)
+        project_id = _create_project(client, workspace_id)
+
+        async def fake_enqueue(self: object, node_run_id: Any) -> str:
+            return f"fake-{node_run_id}"
+
+        monkeypatch.setattr(
+            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
+            fake_enqueue,
+        )
+        created = client.post(
+            f"/api/v1/projects/{project_id}/generations",
+            json={"capability": "image.generate", "input": {"prompt": "cancel in flight"}},
+            headers={CSRF_HEADER: _csrf(client)},
+        )
+        operation_id = created.json()["operation_id"]
+
+        async def mark_running() -> None:
+            from app.execution.models import NodeRun
+
+            async with factory() as session:
+                run = await session.get(NodeRun, UUID(operation_id))
+                assert run is not None
+                run.status = "running"
+                await session.commit()
+
+        _run(mark_running())
+        path = f"/api/v1/projects/{project_id}/generations/{operation_id}/cancel"
+        first = client.post(path, headers={CSRF_HEADER: _csrf(client)})
+        assert first.status_code == 200, first.text
+        assert first.json()["status"] == "cancel_requested"
+        duplicate = client.post(path, headers={CSRF_HEADER: _csrf(client)})
+        assert duplicate.status_code == 200
+        assert duplicate.json()["status"] == "cancel_requested"
 
 
 def test_queued_cancel_is_csrf_scoped_idempotent_and_terminal(api, monkeypatch):
