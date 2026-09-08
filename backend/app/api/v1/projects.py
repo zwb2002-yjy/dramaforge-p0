@@ -14,6 +14,7 @@ from app.access.models import Project, ProjectCreativeProfile
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1 import workbench as _workbench
+from app.director.turn_service import DirectorTurnService
 from app.shared.db import set_rls_context
 from app.shared.enums import ProjectStage
 from app.shared.errors import ConflictError, NotFoundError
@@ -68,6 +69,8 @@ class ProjectRead(BaseModel):
 
 
 class CreativeProfileUpdateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     expected_version: int = Field(ge=1)
     director_autonomy: Literal["AUTO", "ASSIST", "MANUAL"]
 
@@ -222,6 +225,11 @@ async def update_project_creative_profile(
                 "expected_version": body.expected_version,
                 "actual_version": profile.version,
             },
+        )
+    if profile.director_autonomy != body.director_autonomy:
+        await DirectorTurnService(session).mark_project_stale(
+            project_id=project_id,
+            reason=f"User changed Director autonomy to {body.director_autonomy}.",
         )
     profile.director_autonomy = body.director_autonomy
     profile.version = (profile.version or 1) + 1

@@ -522,3 +522,42 @@ async def test_shot_changed_in_another_transaction_marks_late_result_stale(tmp_p
         assert stored is not None
         assert stored.version == 6
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_rejected_context_new_request_key_never_calls_text_provider(session: AsyncSession):
+    from app.director.turn_service import DirectorTurnService
+
+    user, project, scene, shot, _second = await _seed(session)
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
+        })
+
+    bridge = DirectorTextTransport(session, registry=_registry(handler))
+    service = ShotDirectorSuggestionService(session, text_transport=bridge)
+    result = await service.suggest(
+        project_id=project.id, actor=user, request=_request(scene, shot, key="rejection:one"),
+    )
+    turn = await session.get(DirectorTurn, result.director_evidence.turn_id)
+    await DirectorTurnService(session).record_user_decision(
+        project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
+        decision="reject", accepted_operation_indices=[],
+    )
+    await session.commit()
+    with pytest.raises(ConflictError) as rejected:
+        await service.suggest(
+            project_id=project.id, actor=user,
+            request=_request(scene, shot, key="rejection:new-key"),
+        )
+    assert rejected.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
+    assert len(calls) == 1
+    assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 1
+    await service.suggest(
+        project_id=project.id, actor=user,
+        request=_request(scene, shot, key="rejection:changed", instruction="Changed goal"),
+    )
+    assert len(calls) == 2

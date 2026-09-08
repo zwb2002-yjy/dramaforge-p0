@@ -394,6 +394,49 @@ async def test_only_one_postgres_worker_claims_and_restart_recovery_is_fail_stop
             )
             assert reopened.action == "review_production_result"
             assert waiting.revision == 3
+        # R4c1 JSON decision guards and mode invalidation survive transaction
+        # boundaries on real PostgreSQL, while submitted media stays terminal.
+        decision_id = uuid.uuid4()
+        async with factory() as session:
+            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
+                                  project_id=ids["project"])
+            session.add(DirectorTurn(
+                id=decision_id, workspace_id=ids["workspace"], project_id=ids["project"],
+                actor_id=ids["user"], scope_type="shot", scope_entity_id=ids["scope"],
+                request_key="decision:pg", context_hash="a" * 64,
+                request_summary={"task": "shot_director_suggestion", "max_steps": 4},
+                output_snapshot={"suggested_director_state": {}}, output_hash="b" * 64,
+                status="awaiting_user", step_count=1,
+            ))
+            await session.commit()
+        async with factory() as session:
+            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
+                                  project_id=ids["project"])
+            await DirectorTurnService(session).record_user_decision(
+                project_id=ids["project"], turn_id=decision_id, expected_revision=1,
+                decision="reject", accepted_operation_indices=[],
+            )
+            await session.commit()
+        async with factory() as session:
+            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
+                                  project_id=ids["project"])
+            with pytest.raises(ConflictError) as rejection:
+                await DirectorTurnService(session).assert_context_not_rejected(
+                    project_id=ids["project"], context_hash="a" * 64,
+                )
+            assert rejection.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
+            await DirectorTurnService(session).mark_project_stale(
+                project_id=ids["project"], reason="User switched to MANUAL",
+            )
+            await session.commit()
+        async with factory() as session:
+            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
+                                  project_id=ids["project"])
+            rejected_turn = await session.get(DirectorTurn, decision_id)
+            assert rejected_turn.status == "completed"
+            assert rejected_turn.response_summary["user_decision"]["decision"] == "reject"
+            assert (await session.get(DirectorTurn, ids["waiting_turn"])).status == "stale"
+            assert (await session.get(NodeRun, ids["node_run"])).status == "completed"
         await engine.dispose()
     finally:
         await _drop_database(dbname)

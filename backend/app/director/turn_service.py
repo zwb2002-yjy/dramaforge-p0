@@ -122,6 +122,7 @@ class DirectorTurnService:
                 details={"code": "DIRECTOR_STEP_LIMIT_INVALID"},
             )
         fingerprint = _context_hash(context_snapshot)
+        await self.assert_context_not_rejected(project_id=project.id, context_hash=fingerprint)
         existing = await self._by_request_key(project_id=project.id, request_key=key)
         if existing is not None:
             self._require_same_context(existing, fingerprint)
@@ -197,6 +198,7 @@ class DirectorTurnService:
         max_steps = self._max_steps(current)
         claimed = await self._session.scalar(
             update(DirectorTurn)
+            .execution_options(synchronize_session=False)
             .where(
                 DirectorTurn.id == turn_id,
                 DirectorTurn.project_id == project_id,
@@ -291,6 +293,7 @@ class DirectorTurnService:
             values["step_count"] = DirectorTurn.step_count + 1
         changed = await self._session.scalar(
             statement.values(**values).returning(DirectorTurn.id)
+            .execution_options(synchronize_session=False)
         )
         if changed is None:
             await self._session.refresh(turn)
@@ -333,6 +336,142 @@ class DirectorTurnService:
                 "last_error": "New Director actions stopped by user; in-flight media is unchanged.",
             },
         )
+
+    async def assert_context_not_rejected(self, *, project_id: UUID, context_hash: str) -> None:
+        rejected = await self._session.scalar(
+            select(DirectorTurn.id).where(
+                DirectorTurn.project_id == project_id,
+                DirectorTurn.context_hash == context_hash,
+                DirectorTurn.status == "completed",
+                or_(
+                    DirectorTurn.response_summary["user_decision"]["decision"].as_string()
+                    == "reject",
+                    DirectorTurn.wait_reason == "proposal_rejected",
+                ),
+            ).limit(1)
+        )
+        if rejected is not None:
+            raise ConflictError(
+                "This unchanged suggestion context was already rejected by the user",
+                details={"code": "DIRECTOR_CONTEXT_REJECTED", "turn_id": str(rejected)},
+            )
+
+    async def record_user_decision(
+        self, *, project_id: UUID, turn_id: UUID, expected_revision: int,
+        decision: str, accepted_operation_indices: Sequence[int],
+    ) -> DirectorTurn:
+        """Record a detached Shot suggestion decision, never apply its content."""
+        turn = await self.get(project_id=project_id, turn_id=turn_id)
+        task = (turn.request_summary or {}).get("task")
+        if (
+            turn.proposal_id is not None or turn.node_run_ids or turn.dispatched_command_key
+            or task not in {"shot_director_suggestion", "shot_director_recommendation"}
+        ):
+            raise ValidationAppError(
+                "Use the canonical Proposal decision API for linked or unsupported suggestions",
+                details={"code": "DIRECTOR_DECISION_UNSUPPORTED"},
+            )
+        output = turn.output_snapshot or {}
+        if task == "shot_director_suggestion":
+            count = 1 if "suggested_director_state" in output else 0
+        else:
+            operations = output.get("typed_operations")
+            count = len(operations) if isinstance(operations, list) else 0
+        indices = list(accepted_operation_indices)
+        if (
+            decision not in {"accept", "reject"}
+            or any(type(index) is not int or index < 0 or index >= count for index in indices)
+            or len(indices) != len(set(indices))
+            or (decision == "accept" and not indices)
+            or (decision == "reject" and indices)
+            or not turn.output_hash
+        ):
+            raise ValidationAppError(
+                "Decision must name only accepted operations from the persisted suggestion",
+                details={"code": "DIRECTOR_DECISION_INVALID"},
+            )
+        audit: dict[str, object] = {
+            "decision": decision,
+            "accepted_operation_indices": sorted(indices),
+            "rejected_operation_indices": [index for index in range(count) if index not in indices],
+            "output_hash": turn.output_hash,
+        }
+        summary = dict(turn.response_summary or {})
+        previous = summary.get("user_decision")
+        if previous is not None:
+            if previous == audit:
+                return turn
+            raise ConflictError(
+                "This suggestion already has a different explicit decision",
+                details={"code": "DIRECTOR_DECISION_CONFLICT"},
+            )
+        if turn.status != "awaiting_user" or turn.revision != expected_revision:
+            raise ConflictError(
+                "Director decision checkpoint changed",
+                details={"code": "DIRECTOR_TURN_REVISION_CONFLICT", "revision": turn.revision},
+            )
+        if decision == "accept":
+            from app.assets.models import Shot
+
+            shot = await self._session.scalar(
+                select(Shot).where(
+                    Shot.id == turn.scope_entity_id, Shot.project_id == project_id,
+                ).with_for_update().execution_options(populate_existing=True)
+            )
+            expected_shot = (turn.input_versions or {}).get("shot")
+            if (
+                turn.scope_type != "shot" or shot is None
+                or expected_shot != shot.version
+                or output.get("base_shot_version") != shot.version
+            ):
+                raise ConflictError(
+                    "Shot changed since this suggestion was produced",
+                    details={"code": "DIRECTOR_DECISION_STALE"},
+                )
+        summary["user_decision"] = audit
+        try:
+            turn = await self.compare_and_set(
+                turn=turn, expected_statuses=("awaiting_user",),
+                target_status="completed" if decision == "reject" else "awaiting_user",
+                updates={
+                    "response_summary": summary,
+                    "wait_reason": "user_rejected" if decision == "reject" else "design_save",
+                },
+                increment_step=decision == "accept",
+            )
+        except ConflictError:
+            await self._session.refresh(turn)
+            if (turn.response_summary or {}).get("user_decision") == audit:
+                return turn
+            raise
+        if decision == "reject":
+            # Close already-in-flight sibling requests for the same business
+            # context. Their paid transport, if submitted, is not cancelled.
+            await self._session.execute(
+                update(DirectorTurn).where(
+                    DirectorTurn.project_id == project_id,
+                    DirectorTurn.context_hash == turn.context_hash,
+                    DirectorTurn.id != turn.id,
+                    DirectorTurn.status.in_(tuple(ACTIVE_TURN_STATUSES)),
+                ).values(
+                    status="stale", wait_reason="context_rejected",
+                    last_error="The user rejected this unchanged suggestion context.",
+                    revision=DirectorTurn.revision + 1,
+                )
+            )
+        return turn
+
+    async def mark_project_stale(self, *, project_id: UUID, reason: str) -> int:
+        changed = await self._session.execute(
+            update(DirectorTurn).where(
+                DirectorTurn.project_id == project_id,
+                DirectorTurn.status.in_(tuple(ACTIVE_TURN_STATUSES)),
+            ).values(
+                status="stale", wait_reason="autonomy_changed", last_error=_bounded(reason),
+                revision=DirectorTurn.revision + 1,
+            ).returning(DirectorTurn.id)
+        )
+        return len(list(changed.scalars().all()))
 
     async def mark_scope_stale(
         self,

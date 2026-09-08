@@ -9,10 +9,11 @@ proposal-only text turns and never mutates Shot design or Formal media.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
@@ -121,6 +122,14 @@ class DirectorTurnResumeBody(BaseModel):
 
     expected_revision: int = Field(ge=1)
     event_key: str = Field(min_length=1, max_length=200)
+
+
+class DirectorTurnDecisionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    decision: Literal["accept", "reject"]
+    accepted_operation_indices: list[StrictInt] = Field(default_factory=list, max_length=20)
 
 
 @router.post(
@@ -261,6 +270,28 @@ async def resume_director_turn(
         raise
     await session.commit()
     return result
+
+
+@router.post(
+    "/projects/{project_id}/director/turns/{turn_id}/decision",
+    response_model=DirectorTurnRead,
+)
+async def decide_director_turn(
+    project_id: UUID, turn_id: UUID, body: DirectorTurnDecisionBody,
+    user: CurrentUser, session: SessionDep, _csrf: CsrfDep,
+) -> DirectorTurnRead:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    try:
+        turn = await DirectorTurnService(session).record_user_decision(
+            project_id=project_id, turn_id=turn_id, expected_revision=body.expected_revision,
+            decision=body.decision, accepted_operation_indices=body.accepted_operation_indices,
+        )
+    except ConflictError as exc:
+        if exc.details.get("code") == "DIRECTOR_TURN_LIMIT_REACHED":
+            await session.commit()
+        raise
+    await session.commit()
+    return DirectorTurnRead.from_model(turn)
 
 
 __all__ = ["router", "suggest_shot_design"]

@@ -483,6 +483,13 @@ class DirectorTextTransport:
         *,
         proposal_id: UUID | None = None,
     ) -> None:
+        try:
+            await self._turns.assert_context_not_rejected(
+                project_id=turn.project_id, context_hash=turn.context_hash,
+            )
+        except ConflictError:
+            await self.mark_stale(turn, reason="The user rejected this suggestion context.")
+            raise
         if turn.status == "awaiting_user" and (
             proposal_id is None or proposal_id == turn.proposal_id
         ):

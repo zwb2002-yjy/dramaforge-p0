@@ -703,6 +703,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/director/turns/{turn_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Director Turn */
+        post: operations["decide_director_turn_api_v1_projects__project_id__director_turns__turn_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/director-board": {
         parameters: {
             query?: never;
@@ -3113,6 +3130,18 @@ export interface components {
             expected_shot_version: number;
             /** Request Key */
             request_key: string;
+        };
+        /** DirectorTurnDecisionBody */
+        DirectorTurnDecisionBody: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "accept" | "reject";
+            /** Accepted Operation Indices */
+            accepted_operation_indices?: number[];
         };
         /**
          * DirectorTurnRead
@@ -8184,6 +8213,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DirectorNextActionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_director_turn_api_v1_projects__project_id__director_turns__turn_id__decision_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                turn_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectorTurnDecisionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorTurnRead"];
                 };
             };
             /** @description Validation Error */

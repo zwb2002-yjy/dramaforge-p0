@@ -227,3 +227,57 @@ def test_resume_limit_failure_is_persisted_across_requests(api: tuple[TestClient
     assert read.status_code == 200
     assert read.json()["status"] == "failed"
     assert read.json()["wait_reason"] == "step_limit_reached"
+
+
+def test_user_rejection_api_is_scoped_strict_and_persists_across_requests(api):
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _project(client, workspace_id, "Decision")
+    other_id = _project(client, workspace_id, "Other decision")
+    turn = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+
+    async def prepare():
+        async with factory() as session:
+            row = await session.get(DirectorTurn, turn.id)
+            row.request_summary = {"task": "shot_director_suggestion", "max_steps": 4}
+            row.output_snapshot = {"suggested_director_state": {}}
+            row.node_run_ids = []
+            row.dispatched_command_key = None
+            await session.commit()
+
+    _run(prepare())
+    url = f"/api/v1/projects/{project_id}/director/turns/{turn.id}/decision"
+    body = {"expected_revision": turn.revision, "decision": "reject"}
+    assert client.post(url, json=body).status_code == 403
+    assert client.post(url.replace(project_id, other_id), json=body,
+                       headers={CSRF_HEADER: _csrf(client)}).status_code == 404
+    assert client.post(url, json={**body, "execute": True},
+                       headers={CSRF_HEADER: _csrf(client)}).status_code == 422
+    assert client.post(url, json={**body, "accepted_operation_indices": [True]},
+                       headers={CSRF_HEADER: _csrf(client)}).status_code == 422
+    response = client.post(url, json=body, headers={CSRF_HEADER: _csrf(client)})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "completed"
+    duplicate = client.post(url, json=body, headers={CSRF_HEADER: _csrf(client)})
+    assert duplicate.json() == response.json()
+    read = client.get(url.removesuffix("/decision"))
+    assert read.json()["response_summary"]["user_decision"]["decision"] == "reject"
+
+
+def test_autonomy_change_invalidates_coordination_but_preserves_submitted_links(api):
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _project(client, workspace_id, "Autonomy intervention")
+    active = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+    profile = client.get(f"/api/v1/projects/{project_id}").json()["creative_profile"]
+    response = client.patch(
+        f"/api/v1/projects/{project_id}/creative-profile",
+        headers={CSRF_HEADER: _csrf(client)},
+        json={"expected_version": profile["version"], "director_autonomy": "MANUAL"},
+    )
+    assert response.status_code == 200, response.text
+    read = client.get(f"/api/v1/projects/{project_id}/director/turns/{active.id}").json()
+    assert read["status"] == "stale"
+    assert read["wait_reason"] == "autonomy_changed"
+    assert read["node_run_ids"] == active.node_run_ids
+    assert read["dispatched_command_key"] == active.dispatched_command_key

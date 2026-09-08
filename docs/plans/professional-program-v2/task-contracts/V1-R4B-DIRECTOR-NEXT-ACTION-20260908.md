@@ -2,7 +2,7 @@
 
 **Task:** `v1-r4b-director-next-action-20260908`\
 **Parent:** G3 / G4 / G6 / R4a\
-**Status:** IN PROGRESS\
+**Status:** IMPLEMENTED / VERIFIED (formal ledger registration unresolved)\
 **Baseline:** `dev@eaff325532fae780f521737fe2fac4648443ff4a`
 
 ## Current evidence and drift
@@ -122,3 +122,14 @@
   expired deadline still stops a repeated scan. The first source commit is
   `ac521d2`; a trailing blank line identified by diff-check is removed before
   the immutable-source candidate is assembled.
+
+## Immutable-source result
+
+`773febf` passed the clean-worktree Docker gates and was pushed to `origin/dev`.
+Ruff, MyPy (241 files), 949 backend unit tests, migration upgrade/drift, 22 PG
+integration tests, generated API, frontend static/build, 145 frontend unit tests
+and 19 Playwright tests passed. Image identities and exact-source facts are in
+`tmp/r4b-quality-contract/result-773febf.json`; corresponding complete logs are
+`backend-773febf.log` and `frontend-773febf.log` in that directory. No real paid
+Provider was called. R4c code work can proceed; this does not claim the blocked
+ledger event, R7 Golden, or R8 release gate complete.

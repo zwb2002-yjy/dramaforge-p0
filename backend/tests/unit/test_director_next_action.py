@@ -489,3 +489,19 @@ async def test_final_allowed_checkpoint_replays_without_spending_another_step(
         await service.reconcile(project=project, turn_id=turn.id)
     assert error.value.details["wait_reason"] == "step_limit_reached"
     assert turn.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_detached_decision_endpoint_cannot_bypass_canonical_proposal_items(session):
+    from app.director.turn_service import DirectorTurnService
+
+    project, turn, items = await _proposal_turn(session, statuses=["pending"])
+    turn.request_summary = {"task": "shot_director_recommendation"}
+    with pytest.raises(ValidationAppError) as unsupported:
+        await DirectorTurnService(session).record_user_decision(
+            project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
+            decision="reject", accepted_operation_indices=[],
+        )
+    assert unsupported.value.details["code"] == "DIRECTOR_DECISION_UNSUPPORTED"
+    assert items[0].status == "pending"
+    assert turn.status == "awaiting_user"

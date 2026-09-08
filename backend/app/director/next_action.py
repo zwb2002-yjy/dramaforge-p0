@@ -323,6 +323,19 @@ class DirectorNextActionService:
             )
 
         if turn.proposal_id is None:
+            user_decision = _mapping((turn.response_summary or {}).get("user_decision"))
+            if user_decision.get("decision") == "accept":
+                return (
+                    self._decision(
+                        DirectorNextAction.REVIEW_ACCEPTED_CHANGES,
+                        confirmation=True,
+                        reason="Review accepted operations; an explicit save is required.",
+                    ),
+                    "awaiting_user",
+                    "design_save",
+                    {"kind": "detached_decision", "autonomy": autonomy,
+                     "output_hash": turn.output_hash, "user_decision": user_decision},
+                )
             facts = {
                 "kind": "suggestion",
                 "autonomy": autonomy,
