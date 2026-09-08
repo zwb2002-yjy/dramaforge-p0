@@ -2,7 +2,7 @@
 
 **Task:** `v1-r6-final-film-subtitle-delivery-20260908`\
 **Parent:** G7D / G7E / R6\
-**Status:** IN PROGRESS\
+**Status:** IMPLEMENTED / VERIFIED (formal ledger registration unresolved)\
 **Baseline:** `dev@f4986f0`
 
 ## Authority and current evidence
@@ -105,3 +105,18 @@ Preserve all existing files/evidence and independently-created Owner tasks.
   source-in trimming as well as ordering, and subtitle-band white pixel counts
   prove visible burn-in against the empty-caption render. No evidence screenshot
   was loaded or modified. Final same-commit validation follows this source commit.
+
+## Exact-candidate result
+
+Clean source `af4a0d8` passed backend unit 989, integration 43 (including real
+FFmpeg and PostgreSQL paired delivery), frontend unit 150, Playwright 19, Ruff,
+MyPy 243 files, migration drift, directory/canonical and generated API checks.
+`tmp/r6-quality-contract/result-af4a0d8.json` binds image ids/source and structured
+render, subtitle-lineage and zero-media-rerender facts. Complete logs and JUnit
+are in the same directory. This closes R5's Timeline-only rerender delta proof.
+No real paid Provider was used; R7/R8 and the root-ledger limitation remain.
+
+For R7 preflight, the current 8080 stack was read-only inspected: its backend
+services still advertise `worktree-acceptance-20260906-32216450fd43`, not this
+candidate. No running services were replaced. Another task has created Wuzhen
+contracts in the root; those inputs and any related runtime work were untouched.
