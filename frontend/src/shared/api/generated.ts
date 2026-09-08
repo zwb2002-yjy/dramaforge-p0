@@ -4039,6 +4039,20 @@ export interface components {
             render_summary?: {
                 [key: string]: unknown;
             } | null;
+            /** Subtitle Artifact Id */
+            subtitle_artifact_id?: string | null;
+            /** Subtitle Content Hash */
+            subtitle_content_hash?: string | null;
+            /**
+             * Subtitle Byte Size
+             * @default 0
+             */
+            subtitle_byte_size: number;
+            /**
+             * Subtitle Cue Count
+             * @default 0
+             */
+            subtitle_cue_count: number;
         };
         /** FinalFilmRenderBody */
         FinalFilmRenderBody: {

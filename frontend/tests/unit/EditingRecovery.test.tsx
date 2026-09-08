@@ -110,6 +110,8 @@ describe("Editing recovery", () => {
       "href",
       "/api/v1/projects/p1/artifacts/film-1/content",
     );
+    expect(screen.getByTestId("final-film-no-subtitles")).toHaveTextContent("无字幕内容");
+    expect(screen.queryByTestId("final-film-subtitle-download")).not.toBeInTheDocument();
     view.rerender(view.view("cut-2"));
     await waitFor(() => expect(screen.queryByTestId("final-film-player")).not.toBeInTheDocument());
   });

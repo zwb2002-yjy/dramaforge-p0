@@ -778,7 +778,13 @@ describe("EditingWorkspace", () => {
           node_run_id: "node-run-final-1",
           attempt_no: 1,
           status: "completed",
-          result: finalFilmRead(),
+          result: {
+            ...finalFilmRead(),
+            subtitle_artifact_id: "subtitle-final-1",
+            subtitle_content_hash: "b".repeat(64),
+            subtitle_byte_size: 100,
+            subtitle_cue_count: 2,
+          },
         });
       }
       return json({});
@@ -800,6 +806,11 @@ describe("EditingWorkspace", () => {
       `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-final-1/content`,
     );
     expect(screen.getByTestId("final-film-download")).toHaveAttribute("download");
+    expect(screen.getByTestId("final-film-subtitle-download")).toHaveAttribute(
+      "href",
+      `/api/v1/projects/${PROJECT_ID}/artifacts/subtitle-final-1/content`,
+    );
+    expect(screen.getByTestId("final-film-subtitle-download")).toHaveTextContent("2 条");
     expect(invalidation).toHaveBeenCalledWith({
       queryKey: ["edit-final-films", PROJECT_ID, SESSION_ID, 1],
     });

@@ -1325,6 +1325,17 @@ export function EditingWorkspace({
                 >
                   下载 Final Film MP4
                 </a>
+                {displayedFilm.subtitle_artifact_id ? (
+                  <a
+                    data-testid="final-film-subtitle-download"
+                    href={artifactContentUrl(projectId, displayedFilm.subtitle_artifact_id)}
+                    download={`dramaforge-final-film-${displayedFilm.content_hash.slice(0, 12)}.srt`}
+                  >
+                    下载字幕 SRT（{displayedFilm.subtitle_cue_count} 条）
+                  </a>
+                ) : (
+                  <p data-testid="final-film-no-subtitles">此版本无字幕内容，无独立 SRT 文件。</p>
+                )}
               </section>
             )}
             {finalFilmError && (

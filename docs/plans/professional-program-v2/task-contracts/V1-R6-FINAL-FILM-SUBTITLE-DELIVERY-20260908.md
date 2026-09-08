@@ -70,3 +70,38 @@ Preserve all existing files/evidence and independently-created Owner tasks.
    substitute. UI has accessible subtitle download/empty-state and regression.
 6. Full relevant backend/PG/generated frontend gates and exact-source evidence
    pass; failures remain reported and fixed in scope. R7/R8 still due afterward.
+
+## Implementation evidence so far
+
+- Added one millisecond Timeline map used for cut/crossfade offsets, trim/retime
+  durations, subtitle cues, burn-in and summary evidence. Per-clip burn-in is
+  replaced by a final subtitle pass using exactly the downloadable SRT bytes.
+- Default dialogue is frozen separately from the user's idempotency request hash;
+  same-key replay after a live dialogue edit retains the original queued result.
+  Older queued snapshots may read their own frozen formal-reference dialogue,
+  never a live Shot value. Explicit empty and disabled subtitles remain absent.
+- SRT is an Artifact(type=subtitle) plus ExportItem(role=final_subtitle) with the
+  same Export/NodeRun/Timeline version as MP4. Failed paired storage rolls back
+  the entire delivery transaction and removes only its test/request-owned output
+  objects; it cannot leave a half-published available Artifact.
+- Subtitle-less/muted edits are valid exports; dialogue/burned-subtitle flags are
+  diagnostic facts, not unconditional gates. Container, codecs, Timeline duration
+  and requested subtitle behavior remain required and fail closed.
+- Real FFmpeg tests generated local red/blue clips and music, verified H264/AAC,
+  3.5-second overlapping Timeline, Unicode/multiline cues, trimmed/retimed source
+  intervals, color-order samples, and an empty-subtitle export. They do not use
+  app_env=test render substitutes and do not contact a real Provider.
+- PG delivery tests verify hashes, ExportItem lineage, role-scoped access, same
+  request replay, frozen dialogue and a second muted/empty Timeline version with
+  zero new source-image/video ProviderOperations. UI exposes SRT download plus an
+  explicit no-subtitle state in both current result and history.
+- Focused renderer/worker/frontend tests pass. Full mounted-source precheck is
+  underway; exact committed-candidate gates and evidence are still required.
+
+- Full development precheck: backend unit 989 and integration 43 PASS; frontend
+  unit 150, build and Playwright 19 PASS. Subsequent focused tests cover the last
+  source-default idempotency refinement and storage atomicity. A 320x240 real
+  fixture now starts with black leader frames: sampled red/blue output proves
+  source-in trimming as well as ordering, and subtitle-band white pixel counts
+  prove visible burn-in against the empty-caption render. No evidence screenshot
+  was loaded or modified. Final same-commit validation follows this source commit.

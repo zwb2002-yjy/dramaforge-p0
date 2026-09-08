@@ -12,11 +12,15 @@ import hashlib
 import json
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
+from app.production.timeline_subtitles import (
+    TimelineTimingError,
+    build_timeline_subtitles,
+)
 
 
 class TimelineRenderError(RuntimeError):
@@ -35,6 +39,7 @@ class TimelineRenderClip:
     transition_kind: str | None = None
     transition_duration_seconds: float = 0.0
     audio_artifact_id: str | None = None
+    source_out_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -42,25 +47,11 @@ class TimelineRenderResult:
     data: bytes
     ffprobe: dict[str, Any]
     summary: dict[str, Any]
+    subtitle_data: bytes = b""
 
 
 def _quote_subtitle_path(path: Path) -> str:
     return path.as_posix().replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
-
-
-def _srt_timestamp(seconds: float) -> str:
-    milliseconds = max(0, int(round(seconds * 1000)))
-    hours, remainder = divmod(milliseconds, 3_600_000)
-    minutes, remainder = divmod(remainder, 60_000)
-    whole_seconds, millis = divmod(remainder, 1000)
-    return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d},{millis:03d}"
-
-
-def _subtitle_bytes(text: str, duration_seconds: float) -> bytes:
-    clean = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not clean:
-        return b""
-    return (f"1\n00:00:00,000 --> {_srt_timestamp(duration_seconds)}\n{clean}\n").encode()
 
 
 async def _run(command: list[str], *, timeout: float) -> tuple[bytes, bytes]:
@@ -110,19 +101,25 @@ async def _render_clip(clip: TimelineRenderClip, *, directory: Path, index: int)
         raise TimelineRenderError("ffmpeg executable not found")
     video = directory / f"source-{index}.mp4"
     audio = directory / f"audio-{index}.wav"
-    subtitle = directory / f"subtitle-{index}.srt"
     output = directory / f"timeline-clip-{index}.mp4"
     video.write_bytes(clip.video_bytes)
-    subtitle.write_bytes(_subtitle_bytes(clip.subtitle_text, clip.duration_seconds))
 
-    command = [ffmpeg, "-y", "-ss", f"{clip.source_in_seconds:.3f}", "-i", str(video)]
+    command = [ffmpeg, "-y", "-ss", f"{clip.source_in_seconds:.3f}"]
+    source_duration = (
+        clip.source_out_seconds - clip.source_in_seconds
+        if clip.source_out_seconds is not None
+        else clip.duration_seconds
+    )
+    command.extend(["-t", f"{source_duration:.3f}", "-i", str(video)])
     if clip.audio_bytes:
         audio.write_bytes(clip.audio_bytes)
         command.extend(["-i", str(audio)])
     else:
         command.extend(["-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono"])
-    if clip.subtitle_text.strip():
-        command.extend(["-vf", f"subtitles=filename='{_quote_subtitle_path(subtitle)}'"])
+    if abs(source_duration - clip.duration_seconds) > 0.0005:
+        command.extend(
+            ["-vf", f"setpts=(PTS-STARTPTS)*{clip.duration_seconds / source_duration:.9f}"]
+        )
     command.extend(
         [
             "-map",
@@ -204,26 +201,23 @@ async def _assemble_segments(
         filters.append(f"[{index}:a]asetpts=PTS-STARTPTS[a{index}]")
     current_video = "v0"
     current_audio = "a0"
-    current_duration = clips[0].duration_seconds
+    time_map = build_timeline_subtitles(clips)
     for index in range(1, len(paths)):
-        duration = clips[index].transition_duration_seconds
+        timing = time_map.clips[index]
+        duration = timing.overlap_ms / 1000
         next_video = f"vxf{index}"
         next_audio = f"axf{index}"
         if clips[index].transition_kind == "crossfade":
-            if duration <= 0 or duration >= min(current_duration, clips[index].duration_seconds):
-                raise TimelineRenderError("crossfade duration must be shorter than both clips")
             filters.append(
                 f"[{current_video}][v{index}]xfade=transition=fade:duration="
-                f"{duration:.3f}:offset={current_duration - duration:.3f}[{next_video}]"
+                f"{duration:.3f}:offset={timing.start_ms / 1000:.3f}[{next_video}]"
             )
             filters.append(
                 f"[{current_audio}][a{index}]acrossfade=d={duration:.3f}:c1=tri:c2=tri[{next_audio}]"
             )
-            current_duration += clips[index].duration_seconds - duration
         else:
             filters.append(f"[{current_video}][v{index}]concat=n=2:v=1:a=0[{next_video}]")
             filters.append(f"[{current_audio}][a{index}]concat=n=2:v=0:a=1[{next_audio}]")
-            current_duration += clips[index].duration_seconds
         current_video = next_video
         current_audio = next_audio
     filters.append(f"[{current_video}]format=yuv420p[vout]")
@@ -296,13 +290,16 @@ async def _mix_music(
 
 def _test_render(clips: list[TimelineRenderClip], *, lineage: str) -> TimelineRenderResult:
     digest = hashlib.sha256(lineage.encode("utf-8"))
+    time_map = build_timeline_subtitles(clips)
+    digest.update(json.dumps(time_map.evidence(), sort_keys=True).encode("utf-8"))
     for clip in clips:
         digest.update(clip.video_artifact_id.encode("utf-8"))
         digest.update(clip.video_bytes)
+        digest.update(clip.audio_bytes or b"")
         digest.update(clip.subtitle_text.encode("utf-8"))
         digest.update(f"{clip.source_in_seconds:.3f}:{clip.duration_seconds:.3f}".encode())
     data = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + digest.digest()
-    duration = sum(clip.duration_seconds for clip in clips)
+    duration = time_map.duration_ms / 1000
     probe = {
         "format": {"duration": f"{duration:.3f}", "format_name": "mp4"},
         "streams": [
@@ -313,7 +310,12 @@ def _test_render(clips: list[TimelineRenderClip], *, lineage: str) -> TimelineRe
     return TimelineRenderResult(
         data=data,
         ffprobe=probe,
+        subtitle_data=time_map.srt_bytes,
         summary={
+            "subtitle_cue_count": time_map.cue_count,
+            "timeline_time_map": time_map.evidence(),
+            "rendered_duration_seconds": duration,
+            "subtitle_burn_applied": bool(time_map.srt_bytes),
             "test_render": True,
             "timeline_renderer": "ffmpeg-v2",
             "clip_count": len(clips),
@@ -335,6 +337,20 @@ async def render_timeline(
         raise TimelineRenderError("Timeline has no clips")
     if any(clip.source_in_seconds < 0 or clip.duration_seconds <= 0 for clip in clips):
         raise TimelineRenderError("Timeline clip trim/duration is invalid")
+    try:
+        time_map = build_timeline_subtitles(clips)
+    except TimelineTimingError as exc:
+        raise TimelineRenderError(str(exc)) from exc
+    clips = [
+        replace(
+            clip,
+            source_in_seconds=timing.source_in_ms / 1000,
+            source_out_seconds=timing.source_out_ms / 1000,
+            duration_seconds=timing.duration_ms / 1000,
+            transition_duration_seconds=timing.overlap_ms / 1000,
+        )
+        for clip, timing in zip(clips, time_map.clips, strict=True)
+    ]
     if get_settings().app_env == "test":
         return _test_render(clips, lineage=lineage)
 
@@ -350,9 +366,7 @@ async def render_timeline(
             await _assemble_segments(clips, paths, output=assembled, lineage=lineage)
         else:
             await _concat_cuts(paths, output=assembled, lineage=lineage)
-        duration = sum(clip.duration_seconds for clip in clips)
-        if has_crossfade:
-            duration -= sum(clip.transition_duration_seconds for clip in clips[1:])
+        duration = time_map.duration_ms / 1000
         if music_bytes:
             mixed = directory / "mixed.mp4"
             await _mix_music(
@@ -363,12 +377,48 @@ async def render_timeline(
                 duration=duration,
             )
             assembled = mixed
+        if time_map.srt_bytes:
+            subtitle = directory / "final-subtitles.srt"
+            subtitle.write_bytes(time_map.srt_bytes)
+            burned = directory / "subtitled.mp4"
+            ffmpeg = shutil.which("ffmpeg")
+            if ffmpeg is None:
+                raise TimelineRenderError("ffmpeg executable not found")
+            await _run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-i",
+                    str(assembled),
+                    "-vf",
+                    f"subtitles=filename='{_quote_subtitle_path(subtitle)}'",
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "0:a:0",
+                    "-c:v",
+                    "libx264",
+                    "-c:a",
+                    "copy",
+                    "-t",
+                    f"{duration:.3f}",
+                    "-movflags",
+                    "+faststart",
+                    str(burned),
+                ],
+                timeout=300.0,
+            )
+            assembled = burned
         data = assembled.read_bytes()
         probe = await _probe(assembled)
         return TimelineRenderResult(
             data=data,
             ffprobe=probe,
+            subtitle_data=time_map.srt_bytes,
             summary={
+                "subtitle_cue_count": time_map.cue_count,
+                "timeline_time_map": time_map.evidence(),
+                "subtitle_burn_applied": bool(time_map.srt_bytes),
                 "timeline_renderer": "ffmpeg-v2",
                 "clip_count": len(clips),
                 "crossfade": has_crossfade,
