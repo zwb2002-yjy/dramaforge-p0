@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.config import get_settings
-from app.execution.models import GraphNode, NodeRun
+from app.execution.models import GraphNode, NodeRun, ProviderOperation
 from app.providers.capabilities import Capability
 from app.providers.contracts import ArtifactRef, ImageGenerateRequest
 from app.providers.idempotency import v3_request_fingerprint
@@ -109,9 +109,7 @@ class GenerationService:
                     from app.providers.model_profiles.errors import profile_slot_unknown
 
                     raise profile_slot_unknown(slot_value) from exc
-                resolver = ModelBindingResolver(
-                    self._session, registry=self._router.registry
-                )
+                resolver = ModelBindingResolver(self._session, registry=self._router.registry)
                 resolved = await resolver.resolve(
                     workspace_id=project.workspace_id,
                     project_id=project.id,
@@ -146,9 +144,7 @@ class GenerationService:
         # Idempotency identity is the CLIENT's request (capability + input +
         # requested model), not the server-side resolved model — a retry of the
         # same key after a profile change must reuse the original operation.
-        fingerprint = v3_request_fingerprint(
-            capability, request, model_id=requested_model_id or ""
-        )
+        fingerprint = v3_request_fingerprint(capability, request, model_id=requested_model_id or "")
         # Merge profile native options into the request (request body wins) and
         # validate the merged set, so profile-level options actually reach the
         # provider (spec §46 priority: request > project profile > manifest).
@@ -218,9 +214,7 @@ class GenerationService:
             await self._session.rollback()
             if idempotency_key is None:
                 raise exc from None
-            winner = await self._load_winner(
-                project_id=project_id, idempotency_key=idempotency_key
-            )
+            winner = await self._load_winner(project_id=project_id, idempotency_key=idempotency_key)
             if winner is not None and winner.input_hash != fingerprint:
                 raise ConflictError(
                     "idempotency key was reused with a different request",
@@ -230,9 +224,7 @@ class GenerationService:
                 return winner
             raise exc from None
 
-    async def _existing_by_key(
-        self, *, project_id: UUID, idempotency_key: str
-    ) -> NodeRun | None:
+    async def _existing_by_key(self, *, project_id: UUID, idempotency_key: str) -> NodeRun | None:
         from typing import cast
 
         return cast(
@@ -245,9 +237,7 @@ class GenerationService:
             ),
         )
 
-    async def _load_winner(
-        self, *, project_id: UUID, idempotency_key: str
-    ) -> NodeRun | None:
+    async def _load_winner(self, *, project_id: UUID, idempotency_key: str) -> NodeRun | None:
         """Direct re-select used by the IntegrityError recovery. Kept separate
         from the patchable pre-check so the race recovery always reads the real
         winner row."""
@@ -279,11 +269,48 @@ class GenerationService:
         return run
 
     async def cancel_generation(self, *, project: Project, operation_id: UUID) -> NodeRun:
-        run = await self.get_generation(project=project, operation_id=operation_id)
+        run = await self._session.scalar(
+            select(NodeRun)
+            .where(
+                NodeRun.id == operation_id,
+                NodeRun.project_id == project.id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if run is None:
+            raise NotFoundError("generation operation not found")
+        if run.status in {"cancel_requested", "cancelled", "completed_after_cancel"}:
+            return run
         if run.status not in {"queued", "running"}:
             raise ConflictError("generation is not cancellable in its current state")
-        run.status = "cancel_requested"
         run.cancellation_requested_at = datetime.now(UTC)
+        submitted = await self._session.scalar(
+            select(ProviderOperation.id)
+            .where(
+                ProviderOperation.node_run_id == run.id,
+                ProviderOperation.status.in_(
+                    {
+                        "submission_started",
+                        "unknown_submission",
+                        "submitted",
+                        "running",
+                        "timed_out",
+                        "cancel_requested",
+                    }
+                ),
+            )
+            .limit(1)
+        )
+        if run.status == "queued" and submitted is None:
+            run.status = "cancelled"
+            run.finished_at = run.cancellation_requested_at
+            run.output_summary = {
+                "status": "cancelled",
+                "cancelled_before_submission": True,
+            }
+        else:
+            run.status = "cancel_requested"
         await self._session.flush()
         return run
 

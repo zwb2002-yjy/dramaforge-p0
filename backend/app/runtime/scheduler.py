@@ -24,6 +24,7 @@ from app.shared.errors import (
     NodeRunAlreadyClaimedError,
     NotFoundError,
     ProviderRateLimitedError,
+    ProviderTaskCancelledError,
     ProviderTaskPendingError,
     ValidationAppError,
 )
@@ -192,10 +193,13 @@ class NodeRunScheduler:
         from app.shared.db import set_node_run_rls_context
         from app.shared.enums import OutboxStatus
 
-        if await set_node_run_rls_context(
-            self._session,
-            node_run_id=node_run_id,
-        ) is None:
+        if (
+            await set_node_run_rls_context(
+                self._session,
+                node_run_id=node_run_id,
+            )
+            is None
+        ):
             raise NotFoundError("node_run not found")
         run = await self._session.get(NodeRun, node_run_id)
         if run is None:
@@ -207,13 +211,10 @@ class NodeRunScheduler:
                 OutboxEvent.topic == "node_run.enqueue",
             )
         )
-        dispatch_generation = str(
-            (run.input_snapshot or {}).get("dispatch_generation") or ""
-        )
+        dispatch_generation = str((run.input_snapshot or {}).get("dispatch_generation") or "")
         has_enqueue_event = any(
             str((event.payload or {}).get("node_run_id")) == str(node_run_id)
-            and str((event.payload or {}).get("dispatch_generation") or "")
-            == dispatch_generation
+            and str((event.payload or {}).get("dispatch_generation") or "") == dispatch_generation
             for event in existing.scalars().all()
         )
         if not has_enqueue_event:
@@ -238,10 +239,13 @@ class NodeRunScheduler:
         # COMMIT first — eliminate flush-then-Redis race
         await self._session.commit()
         try:
-            if await set_node_run_rls_context(
-                self._session,
-                node_run_id=node_run_id,
-            ) is None:
+            if (
+                await set_node_run_rls_context(
+                    self._session,
+                    node_run_id=node_run_id,
+                )
+                is None
+            ):
                 raise NotFoundError("node_run not found")
             job_id = await self._enqueue_node_run(node_run_id)
         except Exception as exc:
@@ -291,12 +295,7 @@ class NodeRunScheduler:
             queue_name=queue_name,
             node_run_id=node_run_id,
             dispatch_generation=(
-                str(
-                    (getattr(run, "input_snapshot", None) or {}).get(
-                        "dispatch_generation"
-                    )
-                    or ""
-                )
+                str((getattr(run, "input_snapshot", None) or {}).get("dispatch_generation") or "")
                 or None
                 if run is not None
                 else None
@@ -378,6 +377,9 @@ class WorkerRuntime:
                     current = await self._session.get(NodeRun, run_id)
                     if current is None:
                         continue
+                    if current.status == "cancelled":
+                        progressed = True
+                        continue
                     dependency = await evaluate_required_dependencies(self._session, run=current)
                     if dependency.action == "defer":
                         next_deferred.append((run_id, scope))
@@ -411,6 +413,9 @@ class WorkerRuntime:
                     await self._rollback_if_active()
                     next_deferred.append((run_id, scope))
                     continue
+                except ProviderTaskCancelledError:
+                    await self._commit_if_active()
+                    progressed = True
                 except ProviderRateLimitedError:
                     await self._rollback_if_active()
                     # Requeue the claimed run so a later dispatch retries after
@@ -467,6 +472,8 @@ class WorkerRuntime:
         current = await self._session.get(NodeRun, node_run_id)
         if current is None:
             raise NotFoundError("node_run not found")
+        if current.status == "cancelled":
+            return True
         dependency = await evaluate_required_dependencies(self._session, run=current)
         if dependency.action == "defer":
             return False
@@ -492,5 +499,8 @@ class WorkerRuntime:
         except ProviderTaskPendingError:
             await self._rollback_if_active()
             return False
+        except ProviderTaskCancelledError:
+            await self._commit_if_active()
+            return True
         await self._session.commit()
         return True

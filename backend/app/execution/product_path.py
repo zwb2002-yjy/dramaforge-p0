@@ -42,6 +42,7 @@ from app.providers.request_summary import normalize_request_summary
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
     NodeRunAlreadyClaimedError,
+    ProviderTaskCancelledError,
     ProviderTaskPendingError,
     ValidationAppError,
 )
@@ -197,6 +198,10 @@ async def _download_provider_media(
                 body.extend(chunk)
                 if len(body) > _MAX_PROVIDER_MEDIA_BYTES:
                     raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
+            if content_length and int(content_length) != len(body):
+                raise ValidationAppError(
+                    "PROVIDER_MEDIA_INVALID: Content-Length does not match bytes"
+                )
             return _validate_provider_media(
                 kind=kind,
                 data=bytes(body),
@@ -243,6 +248,10 @@ async def _download_provider_media(
                 body.extend(chunk)
                 if len(body) > _MAX_PROVIDER_MEDIA_BYTES:
                     raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
+            if content_length and int(content_length) != len(body):
+                raise ValidationAppError(
+                    "PROVIDER_MEDIA_INVALID: Content-Length does not match bytes"
+                )
             return _validate_provider_media(
                 kind=kind,
                 data=bytes(body),
@@ -297,9 +306,7 @@ def _inspect_media_metadata(*, kind: str, data: bytes) -> _MediaMetadata:
                 return _MediaMetadata(width=image.width, height=image.height)
         except (UnidentifiedImageError, OSError) as exc:
             if get_settings().app_env != "test":
-                raise ValidationAppError(
-                    "PROVIDER_MEDIA_INVALID: image cannot be decoded"
-                ) from exc
+                raise ValidationAppError("PROVIDER_MEDIA_INVALID: image cannot be decoded") from exc
             return _MediaMetadata()
     if kind not in {"video", "video_review", "composite"}:
         return _MediaMetadata()
@@ -321,9 +328,7 @@ def _inspect_media_metadata(*, kind: str, data: bytes) -> _MediaMetadata:
             if width <= 0 or height <= 0 or frame_count <= 0 or frame_rate <= 0:
                 if get_settings().app_env == "test":
                     return _MediaMetadata()
-                raise ValidationAppError(
-                    "PROVIDER_MEDIA_INVALID: video metadata is invalid"
-                )
+                raise ValidationAppError("PROVIDER_MEDIA_INVALID: video metadata is invalid")
             return _MediaMetadata(
                 width=width,
                 height=height,
@@ -549,7 +554,6 @@ async def _read_bound_artifact(
     return artifact, data
 
 
-
 def identity_priority_keyframe_prompt(
     prompt: str,
     *,
@@ -592,6 +596,106 @@ async def _commit_terminal_failure(
     await set_node_run_rls_context(session, node_run_id=run.id)
 
 
+def _cancellation_requested(run: NodeRun) -> bool:
+    return run.cancellation_requested_at is not None or run.status == "cancel_requested"
+
+
+async def _commit_provider_cancelled(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    operation: ProviderOperation,
+    reason: str,
+) -> None:
+    """Persist a confirmed remote cancellation before leaving the Worker."""
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    operation.status = "cancelled"
+    operation.error_code = None
+    operation.error_summary = None
+    operation.completed_at = now
+    summary = dict(operation.response_summary or {})
+    summary.update({"cancel_result_status": "cancelled", "cancel_reason": reason})
+    operation.response_summary = summary
+    run.status = "cancelled"
+    run.error_code = None
+    run.error_summary = None
+    run.finished_at = now
+    run.output_summary = {
+        "status": "cancelled",
+        "provider_operation_id": str(operation.id),
+        "reason": reason,
+    }
+    await session.flush()
+    await session.commit()
+    await set_node_run_rls_context(session, node_run_id=run.id)
+
+
+async def _request_remote_cancellation_once(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    operation: ProviderOperation,
+    runtime: object,
+    resume: object,
+) -> tuple[bool, bool]:
+    """Observe cancellation and issue at most one remote cancel request.
+
+    The durable marker is committed before I/O. If the process dies after the
+    request, recovery polls the existing remote id and never repeats cancel or
+    create. The second return value means the Provider confirmed terminal
+    cancellation; otherwise the caller keeps polling the same task.
+    """
+    from datetime import UTC, datetime
+
+    await session.refresh(run)
+    requested = _cancellation_requested(run)
+    if not requested:
+        return False, False
+    summary = dict(operation.response_summary or {})
+    if summary.get("cancel_result_status") == "cancelled":
+        return True, True
+    if operation.cancel_requested_at is not None:
+        return True, False
+
+    summary["cancel_request_state"] = "started"
+    claimed = await session.scalar(
+        update(ProviderOperation)
+        .where(
+            ProviderOperation.id == operation.id,
+            ProviderOperation.cancel_requested_at.is_(None),
+        )
+        .values(
+            status="cancel_requested",
+            cancel_requested_at=datetime.now(UTC),
+            response_summary=summary,
+        )
+        .returning(ProviderOperation.id)
+        .execution_options(synchronize_session=False)
+    )
+    await session.refresh(operation)
+    if claimed is None:
+        return True, (operation.response_summary or {}).get("cancel_result_status") == "cancelled"
+    await session.commit()
+    await set_node_run_rls_context(session, node_run_id=run.id)
+    try:
+        cancel = await runtime.cancel_video(resume)  # type: ignore[attr-defined]
+        cancel_status = str(getattr(cancel, "status", "unknown"))
+    except Exception as exc:  # noqa: BLE001 - polling remains authoritative
+        cancel_status = "error"
+        summary = dict(operation.response_summary or {})
+        summary["cancel_error_class"] = type(exc).__name__[:120]
+    else:
+        summary = dict(operation.response_summary or {})
+    summary["cancel_request_state"] = "completed"
+    summary["cancel_result_status"] = cancel_status[:80]
+    operation.response_summary = summary
+    await session.commit()
+    await set_node_run_rls_context(session, node_run_id=run.id)
+    return True, cancel_status == "cancelled"
+
+
 async def claim_media_node_run(
     session: AsyncSession,
     *,
@@ -616,12 +720,14 @@ async def claim_media_node_run(
         await session.refresh(run)
         if run.status in {"completed", "cached", "completed_after_cancel"}:
             return run
-        if run.status == "running":
+        if run.status in {"running", "cancel_requested"}:
             resumable = await session.scalar(
                 select(ProviderOperation.id).where(
                     ProviderOperation.node_run_id == run.id,
                     ProviderOperation.provider_operation_id.is_not(None),
-                    ProviderOperation.status.in_({"submitted", "running", "timed_out"}),
+                    ProviderOperation.status.in_(
+                        {"submitted", "running", "timed_out", "cancel_requested"}
+                    ),
                 )
             )
             if resumable is not None:
@@ -633,6 +739,7 @@ async def claim_media_node_run(
     await set_node_run_rls_context(session, node_run_id=run.id)
     await session.refresh(run)
     return run
+
 
 UNIFIED_PATH_VERSION = "unified-v1"
 
@@ -765,9 +872,7 @@ async def _execute_unified_media_node_run(
     )
     run_identity = snap.get("execution_identity")
     persisted_identities = [
-        value
-        for value in (operation_identity, request_identity, run_identity)
-        if value is not None
+        value for value in (operation_identity, request_identity, run_identity) if value is not None
     ]
     if persisted_identities and any(
         value != persisted_identities[0] for value in persisted_identities[1:]
@@ -850,9 +955,7 @@ async def _execute_unified_media_node_run(
         # Resume only. Never create a second remote task. Rebuild the runtime
         # exclusively from the persisted execution identity.
         if frozen_identity is not None:
-            runtime = await ProviderRuntimeResolver(
-                session
-            ).resume_runtime_for_identity(
+            runtime = await ProviderRuntimeResolver(session).resume_runtime_for_identity(
                 identity=frozen_identity,
                 workspace_id=project.workspace_id,
                 operation=op,
@@ -879,9 +982,7 @@ async def _execute_unified_media_node_run(
     if op is None or resubmit:
         # New submission. Resolve via the shared selection engine.
         frozen_binding_id = (
-            frozen_identity.provider_model_binding_id
-            if frozen_identity is not None
-            else None
+            frozen_identity.provider_model_binding_id if frozen_identity is not None else None
         )
         if frozen_binding_id is None and snap.get("model_binding_id") is not None:
             try:
@@ -1065,11 +1166,9 @@ async def _execute_unified_media_node_run(
             if (
                 frozen_resolution.provider_model_binding_id
                 != frozen_identity.provider_model_binding_id
-                or frozen_resolution.resolved_model_id
-                != frozen_identity.resolved_model
+                or frozen_resolution.resolved_model_id != frozen_identity.resolved_model
                 or frozen_resolution.manifest_hash != frozen_identity.manifest_hash
-                or frozen_resolution.invoke_model_value
-                != frozen_identity.invoke_model_value
+                or frozen_resolution.invoke_model_value != frozen_identity.invoke_model_value
             ):
                 raise ValidationAppError(
                     "frozen model resolution does not match execution identity",
@@ -1168,9 +1267,7 @@ async def _execute_unified_media_node_run(
                 binding = await session.get(
                     ProviderModelBinding, frozen_resolution.provider_model_binding_id
                 )
-                entry = await session.get(
-                    ModelCatalogEntry, frozen_resolution.catalog_entry_id
-                )
+                entry = await session.get(ModelCatalogEntry, frozen_resolution.catalog_entry_id)
                 if connection is None or binding is None or entry is None:
                     raise ValidationAppError(
                         "professional workbench plan references missing identity",
@@ -1222,9 +1319,7 @@ async def _execute_unified_media_node_run(
                         details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
                     )
                 pricing_currency = _binding_pricing_currency(binding, required=False)
-                resolved = await ProviderRuntimeResolver(
-                    session
-                ).resolve_runtime_for_resolution(
+                resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
                     resolution=frozen_resolution,
                     workspace_id=project.workspace_id,
                     connection_revision_id=connection_revision.id,
@@ -1269,8 +1364,8 @@ async def _execute_unified_media_node_run(
                         details={"code": "EXECUTION_IDENTITY_INVALID"},
                     )
                 selection_snapshot = json.loads(json.dumps(raw_frozen_selection))
-                selection_snapshot["execution_model_resolution"] = (
-                    frozen_resolution.model_dump(mode="json")
+                selection_snapshot["execution_model_resolution"] = frozen_resolution.model_dump(
+                    mode="json"
                 )
             else:
                 if node_type == "keyframe":
@@ -1316,9 +1411,7 @@ async def _execute_unified_media_node_run(
                         "unified selection has no provider connection revision",
                         details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
                     )
-                resolved = await ProviderRuntimeResolver(
-                    session
-                ).resolve_runtime_for_resolution(
+                resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
                     resolution=plan.execution_model_resolution,
                     workspace_id=project.workspace_id,
                     connection_revision_id=connection_revision.id,
@@ -1378,9 +1471,9 @@ async def _execute_unified_media_node_run(
                     shot_row = None
                 if shot_row is not None:
                     participation_snapshot = {
-                        "workflow_participations": (
-                            shot_row.director_state or {}
-                        ).get("workflow_participations")
+                        "workflow_participations": (shot_row.director_state or {}).get(
+                            "workflow_participations"
+                        )
                     }
             gate = dispatch_capability_gate(
                 snapshot=participation_snapshot,
@@ -1452,9 +1545,7 @@ async def _execute_unified_media_node_run(
             content_bytes = existing_bytes if artifact.id == artifact_id else None
             if content_bytes is None:
                 try:
-                    content_bytes = await obj_store.get_bytes(
-                        object_key=artifact.object_key
-                    )
+                    content_bytes = await obj_store.get_bytes(object_key=artifact.object_key)
                 except Exception as exc:
                     raise ValidationAppError(
                         "frozen Workbench reference bytes are unavailable",
@@ -1618,14 +1709,10 @@ async def _execute_unified_media_node_run(
             "model_id": compiled.model_id,
             "prompt_fingerprint": prompt_fingerprint,
             "common_options": effective_options,
-            "reference_artifact_ids": [
-                str(value) for value in compiled.reference_artifact_ids
-            ],
+            "reference_artifact_ids": [str(value) for value in compiled.reference_artifact_ids],
             "reference_fingerprints": list(compiled.reference_fingerprints),
         }
-        raw_transformations = compiled.safe_request_summary.get(
-            "translation_transformations"
-        )
+        raw_transformations = compiled.safe_request_summary.get("translation_transformations")
         if raw_transformations is None:
             transformations: list[dict[str, object]] = []
         elif isinstance(raw_transformations, list):
@@ -1677,9 +1764,7 @@ async def _execute_unified_media_node_run(
             # runtime from that identity before persisting submission_started
             # so an endpoint/credential update between selection and submit
             # cannot change the first Provider request.
-            resolved = await ProviderRuntimeResolver(
-                session
-            ).resolve_runtime_for_identity(
+            resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_identity(
                 identity=identity,
                 workspace_id=project.workspace_id,
             )
@@ -1745,31 +1830,33 @@ async def _execute_unified_media_node_run(
                 protocol_profile=protocol_profile,
                 request_fingerprint=fingerprint,
                 status="submission_started",
-                request_summary=normalize_request_summary({
-                    "kind": kind,
-                    "execution_path": UNIFIED_PATH_VERSION,
-                    "intent": (
-                        image_intent.model_dump(mode="json")
-                        if image_intent is not None
-                        else video_intent.model_dump(mode="json")
-                        if video_intent is not None
-                        else {}
-                    ),
-                    "compiled_request": compiled.safe_request_summary,
-                    "effective_request": effective_request,
-                    "translation_report": translation_report,
-                    "reference_artifact_ids": [
-                        str(value) for value in compiled.reference_artifact_ids
-                    ],
-                    "reference_fingerprints": list(compiled.reference_fingerprints),
-                    "frozen_model_binding_id": str(binding.id),
-                    "provider_connection_revision_id": str(connection_revision.id),
-                    "execution_identity": identity_json,
-                    "capability_manifest_hash": plan.manifest_hash,
-                    "execution_model_resolution": plan.execution_model_resolution.model_dump(
-                        mode="json"
-                    ),
-                }),
+                request_summary=normalize_request_summary(
+                    {
+                        "kind": kind,
+                        "execution_path": UNIFIED_PATH_VERSION,
+                        "intent": (
+                            image_intent.model_dump(mode="json")
+                            if image_intent is not None
+                            else video_intent.model_dump(mode="json")
+                            if video_intent is not None
+                            else {}
+                        ),
+                        "compiled_request": compiled.safe_request_summary,
+                        "effective_request": effective_request,
+                        "translation_report": translation_report,
+                        "reference_artifact_ids": [
+                            str(value) for value in compiled.reference_artifact_ids
+                        ],
+                        "reference_fingerprints": list(compiled.reference_fingerprints),
+                        "frozen_model_binding_id": str(binding.id),
+                        "provider_connection_revision_id": str(connection_revision.id),
+                        "execution_identity": identity_json,
+                        "capability_manifest_hash": plan.manifest_hash,
+                        "execution_model_resolution": plan.execution_model_resolution.model_dump(
+                            mode="json"
+                        ),
+                    }
+                ),
                 response_summary={},
                 submitted_at=now,
                 connection_id=connection.id,
@@ -1798,6 +1885,20 @@ async def _execute_unified_media_node_run(
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
+
+        # A user cancellation that committed while the request was being
+        # compiled wins before the paid boundary. The submission marker proves
+        # no Provider call has happened yet, so this cancellation is terminal
+        # without remote I/O.
+        await session.refresh(run)
+        if _cancellation_requested(run):
+            await _commit_provider_cancelled(
+                session,
+                run=run,
+                operation=op,
+                reason="cancelled_before_provider_submission",
+            )
+            raise ProviderTaskCancelledError()
 
         if isinstance(compiled, CompiledImageRequest):
             result = await resolved.runtime.submit_image(compiled)
@@ -1902,6 +2003,21 @@ async def _execute_unified_media_node_run(
     # Poll loop (resume token driven). Synchronous image submissions already
     # carry the result URL and skip polling entirely.
     if not synchronous_image:
+        _cancel_requested, cancel_confirmed = await _request_remote_cancellation_once(
+            session,
+            run=run,
+            operation=op,
+            runtime=runtime,
+            resume=resume,
+        )
+        if cancel_confirmed:
+            await _commit_provider_cancelled(
+                session,
+                run=run,
+                operation=op,
+                reason="provider_confirmed_cancellation",
+            )
+            raise ProviderTaskCancelledError()
         poll_timeout_s = 1_620.0 if node_type in {"video", "video_review"} else 120.0
         poll_interval_s = 5.0 if node_type in {"video", "video_review"} else 3.0
         deadline = asyncio.get_running_loop().time() + poll_timeout_s
@@ -1912,7 +2028,8 @@ async def _execute_unified_media_node_run(
             poll_count += 1
             status = str(poll.status)
             op.last_polled_at = datetime.now(UTC)
-            op.status = "running"
+            if op.status != "cancel_requested":
+                op.status = "running"
             poll_error = poll.error_code
             if poll.http_status is not None or poll_error:
                 summary = dict(op.response_summary or {})
@@ -1924,7 +2041,26 @@ async def _execute_unified_media_node_run(
                 op.response_summary = summary
                 await session.commit()
                 await set_node_run_rls_context(session, node_run_id=run.id)
-            if status in {"succeeded", "completed", "success", "failed", "cancelled"}:
+            cancel_confirmed = False
+            # Terminal poll truth wins. In particular a late success must be
+            # imported as completed_after_cancel, not overwritten by a cancel ack.
+            if status not in {"succeeded", "completed", "success", "failed", "cancelled"}:
+                _cancel_requested, cancel_confirmed = await _request_remote_cancellation_once(
+                    session,
+                    run=run,
+                    operation=op,
+                    runtime=runtime,
+                    resume=resume,
+                )
+            if cancel_confirmed or status == "cancelled":
+                await _commit_provider_cancelled(
+                    session,
+                    run=run,
+                    operation=op,
+                    reason="provider_confirmed_cancellation",
+                )
+                raise ProviderTaskCancelledError()
+            if status in {"succeeded", "completed", "success", "failed"}:
                 break
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
@@ -1934,6 +2070,7 @@ async def _execute_unified_media_node_run(
                     f"remote task still pending after {poll_timeout_s:.0f}s; resume polling"
                 )
                 op.response_summary = {
+                    **dict(op.response_summary or {}),
                     "create_status": create_status,
                     "final_status": "running",
                     "poll_count": poll_count,
@@ -1962,19 +2099,17 @@ async def _execute_unified_media_node_run(
     status = str(poll.status)
     cost_amount = getattr(cost, "amount", None)
     cost_status = str(getattr(cost, "cost_status", "not_reported"))
-    op.provider_cost = (
-        Decimal(str(cost_amount)) if cost_amount is not None else None
-    )
+    op.provider_cost = Decimal(str(cost_amount)) if cost_amount is not None else None
     if cost_amount is not None or cost_status in {"reported", "reconciled"}:
         op.currency = str(getattr(cost, "currency", op.currency)).upper()
+    prior_response_summary = dict(op.response_summary or {})
     op.response_summary = {
+        **prior_response_summary,
         "create_status": create_status,
         "final_status": status,
         "poll_count": poll_count,
         "query_kind": resume.query_kind,
-        "provider_reported_cost": (
-            str(op.provider_cost) if op.provider_cost is not None else None
-        ),
+        "provider_reported_cost": (str(op.provider_cost) if op.provider_cost is not None else None),
         "cost_status": cost_status,
     }
     if status not in {"succeeded", "completed", "success"}:
@@ -2017,7 +2152,12 @@ async def _execute_unified_media_node_run(
     )
     _apply_media_metadata(art, media_metadata)
 
-    run.status = "completed"
+    # Serialize the final local state with a concurrent cancellation request.
+    # If cancellation committed first, retain the immutable late Artifact but
+    # never make it the graph's latest successful/Formal input.
+    await session.refresh(run, with_for_update=True)
+    completed_after_cancel = _cancellation_requested(run)
+    run.status = "completed_after_cancel" if completed_after_cancel else "completed"
     run.result_artifact_id = art.id
     run.provider_cost = op.provider_cost or Decimal("0")
     run.finished_at = datetime.now(UTC)
@@ -2029,8 +2169,11 @@ async def _execute_unified_media_node_run(
         "source_commit": get_settings().source_commit,
         "identity_evidence_policy": identity_evidence_policy_snapshot(),
         "execution_path": UNIFIED_PATH_VERSION,
+        "completed_after_cancel": completed_after_cancel,
+        "adopted_after_cancel": False if completed_after_cancel else None,
     }
-    node.latest_successful_run_id = run.id
+    if not completed_after_cancel:
+        node.latest_successful_run_id = run.id
     await session.flush()
     return ExecuteNodeResult(
         node_run_id=run.id,
@@ -2068,7 +2211,7 @@ async def execute_media_node_run(
         return await _completed_result(session, run=run, node_type=node_type)
 
     if already_claimed:
-        if run.status != "running":
+        if run.status not in {"running", "cancel_requested"}:
             raise ValidationAppError(f"claimed node_run cannot execute from status={run.status}")
     else:
         now = datetime.now(UTC)
@@ -2357,10 +2500,9 @@ async def _complete_composite_node(
         "media_inputs": inputs.media_inputs,
         "source_commit": get_settings().source_commit,
     }
-    if (
-        (run.input_snapshot or {}).get("execution_branch") == "formal"
-        and (run.input_snapshot or {}).get("experiment_id") is None
-    ):
+    if (run.input_snapshot or {}).get("execution_branch") == "formal" and (
+        run.input_snapshot or {}
+    ).get("experiment_id") is None:
         from app.assets.models import Shot
 
         shot_id = (run.input_snapshot or {}).get("shot_id")
@@ -2655,13 +2797,18 @@ async def _resolve_media_bytes(
             mime = header[5:].split(";", 1)[0].strip().lower()
             return _validate_provider_media(kind=kind, data=data, content_type=mime)
         if artifact_uri.startswith("http://") or artifact_uri.startswith("https://"):
-            return await _download_provider_media(kind=kind, artifact_uri=artifact_uri)
+            try:
+                return await _download_provider_media(kind=kind, artifact_uri=artifact_uri)
+            except (httpx.HTTPError, OSError) as exc:
+                raise ValidationAppError(
+                    f"PROVIDER_MEDIA_DOWNLOAD_FAILED: {type(exc).__name__}"
+                ) from exc
         if artifact_uri.startswith("fake://") and get_settings().app_env == "test":
             # Explicit test-only fake URI → synthetic bytes for contract tests
             return f"{kind}-TESTFAKE:{remote}:{prompt}".encode()
-        # Non-URL string payload only if it looks like raw content (not a stub label)
-        if not artifact_uri.startswith(("fake://", "stub://")):
-            return artifact_uri.encode() if not isinstance(artifact_uri, bytes) else artifact_uri
+        raise ValidationAppError(
+            "PROVIDER_MEDIA_INVALID: unsupported artifact URI; expected HTTPS or validated data"
+        )
     if get_settings().app_env == "test":
         # Test adapters without blobs: deterministic bytes for unit tests only
         return f"{kind}-TESTFAKE:{remote}:{prompt}".encode()

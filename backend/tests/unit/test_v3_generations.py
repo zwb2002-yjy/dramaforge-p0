@@ -109,9 +109,7 @@ class TestReadSurface:
         assert "minimax/image-01" in ids
         assert all(item["provider_id"] in {"agnes", "minimax", "volcengine"} for item in models)
 
-    def test_litellm_models_use_gateway_configuration(
-        self, api: tuple[TestClient, Any]
-    ) -> None:
+    def test_litellm_models_use_gateway_configuration(self, api: tuple[TestClient, Any]) -> None:
         client, _ = api
         _register(client)
         gateway_settings = get_settings().model_copy(
@@ -122,9 +120,7 @@ class TestReadSurface:
         )
         client.app.dependency_overrides[settings_dep] = lambda: gateway_settings
         try:
-            response = client.get(
-                "/api/v1/models", params={"capability": "text.generate"}
-            )
+            response = client.get("/api/v1/models", params={"capability": "text.generate"})
         finally:
             client.app.dependency_overrides.pop(settings_dep, None)
         assert response.status_code == 200, response.text
@@ -276,3 +272,49 @@ class TestGenerationCreate:
         # is the error body, not a generation response
         assert "operation_id" not in second.json()
         assert second.json()["detail"] is not None
+
+
+def test_queued_cancel_is_csrf_scoped_idempotent_and_terminal(api, monkeypatch):
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _create_project(client, workspace_id)
+
+    async def enqueue(self, node_run_id):
+        return str(node_run_id)
+
+    monkeypatch.setattr(
+        "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only", enqueue
+    )
+    created = client.post(
+        f"/api/v1/projects/{project_id}/generations",
+        headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": f"cancel-{uuid4().hex}"},
+        json={"capability": "image.generate", "input": {"prompt": "portrait"}},
+    )
+    assert created.status_code == 201, created.text
+    operation_id = created.json()["operation_id"]
+    url = f"/api/v1/projects/{project_id}/generations/{operation_id}/cancel"
+    assert client.post(url).status_code == 403
+    other_response = client.post(
+        "/api/v1/projects",
+        headers={CSRF_HEADER: _csrf(client)},
+        json={
+            "workspace_id": workspace_id,
+            "name": "Other cancellation project",
+            "aspect_ratio": "9:16",
+        },
+    )
+    assert other_response.status_code == 201
+    other = other_response.json()["id"]
+    assert (
+        client.post(
+            url.replace(project_id, other), headers={CSRF_HEADER: _csrf(client)}
+        ).status_code
+        == 404
+    )
+    result = client.post(url, headers={CSRF_HEADER: _csrf(client)})
+    assert result.status_code == 200, result.text
+    assert result.json()["status"] == "cancelled"
+    replay = client.post(url, headers={CSRF_HEADER: _csrf(client)})
+    assert replay.json() == result.json()
+    read = client.get(url.removesuffix("/cancel"))
+    assert read.json()["status"] == "cancelled"

@@ -15,6 +15,7 @@ from app.shared.errors import (
     AppError,
     NodeRunAlreadyClaimedError,
     ProviderRateLimitedError,
+    ProviderTaskCancelledError,
     ProviderTaskPendingError,
 )
 from app.shared.model_registry import load_all_models
@@ -30,8 +31,18 @@ def _worker_failure_code(exc: Exception) -> str:
     prefix = message.partition(":")[0].strip()
     if prefix in {
         "CANONICAL_REFERENCE_REQUIRED",
+        "PROVIDER_CREATE_FAILED",
         "PROVIDER_FAILED",
+        "PROVIDER_MEDIA_INVALID",
+        "PROVIDER_MEDIA_DOWNLOAD_FAILED",
+        "PROVIDER_MEDIA_URL_INVALID",
+        "PROVIDER_MEDIA_MISSING",
         "PROVIDER_NOT_CONFIGURED",
+        "PROVIDER_RESPONSE_INVALID",
+        "PROVIDER_SUBMISSION_UNKNOWN",
+        "UPSTREAM_ARTIFACT_MISSING",
+        "UPSTREAM_RUN_MISSING",
+        "UPSTREAM_TERMINAL_FAILURE",
     }:
         return prefix
     if isinstance(exc, AppError) and exc.code != "VALIDATION_ERROR":
@@ -46,6 +57,8 @@ async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
 
 async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
     """Resume polling persisted remote tasks after a Heavy Worker restart."""
+    from datetime import UTC, datetime, timedelta
+
     from sqlalchemy import select
 
     from app.execution.models import NodeRun, ProviderOperation
@@ -79,25 +92,53 @@ async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
                 .where(
                     ProviderOperation.node_run_id == node_run_id,
                     ProviderOperation.execution_path_version == "unified-v1",
-                    ProviderOperation.status.in_({"submitted", "running", "timed_out"}),
-                    ProviderOperation.provider_operation_id.is_not(None),
                 )
                 .order_by(ProviderOperation.attempt_no.desc())
                 .limit(1)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
-            if run is None or run.status != "running" or operation is None:
+            if (
+                run is None
+                or run.status not in {"running", "cancel_requested"}
+                or operation is None
+            ):
+                await session.rollback()
+                continue
+            if operation.provider_operation_id is None:
+                started = operation.created_at
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=UTC)
+                if operation.status == "submission_started" and started < datetime.now(
+                    UTC
+                ) - timedelta(minutes=30):
+                    operation.status = "unknown_submission"
+                    operation.error_code = "PROVIDER_SUBMISSION_UNKNOWN"
+                    operation.error_summary = (
+                        "Interrupted submission has no remote identity; do not resubmit."
+                    )
+                    run.status = "failed"
+                    run.error_code = operation.error_code
+                    run.error_summary = operation.error_summary
+                    run.finished_at = operation.completed_at = datetime.now(UTC)
+                    await session.commit()
+                else:
+                    await session.rollback()
+                continue
+            if operation.status not in {"submitted", "running", "timed_out", "cancel_requested"}:
                 await session.rollback()
                 continue
             snapshot = dict(run.input_snapshot or {})
             raw_resume_count = snapshot.get("provider_poll_resume_count")
-            resume_count = (
-                raw_resume_count if isinstance(raw_resume_count, int) else 0
-            ) + 1
+            resume_count = (raw_resume_count if isinstance(raw_resume_count, int) else 0) + 1
             snapshot["provider_poll_resume_count"] = resume_count
             snapshot["dispatch_generation"] = (
                 f"provider-resume-{str(operation.id)[:12]}-{resume_count}"
             )
             run.input_snapshot = snapshot
+            # The queued status makes the existing claim path reusable, while
+            # cancellation_requested_at remains the authoritative instruction
+            # to cancel/observe the same remote operation after restart.
             run.status = "queued"
             run.error_code = None
             run.error_summary = None
@@ -239,6 +280,8 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             run = await session.get(NodeRun, run_uuid)
             if run is None:
                 return {"status": "failed", "error": "node_run not visible under RLS"}
+            if run.status == "cancelled":
+                return {"status": "cancelled", "node_run_id": node_run_id}
             dependency = await evaluate_required_dependencies(session, run=run)
             if dependency.action == "defer":
                 raise Retry(defer=5)
@@ -262,9 +305,10 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                 node_run_id=run_uuid,
                 already_claimed=True,
             )
+            terminal_status = run.status
             await session.commit()
             return {
-                "status": "completed",
+                "status": terminal_status,
                 "node_run_id": str(result.node_run_id),
                 "artifact_id": str(result.artifact_id),
                 "object_key": result.object_key,
@@ -279,6 +323,9 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
         except ProviderTaskPendingError:
             await session.rollback()
             raise Retry(defer=5) from None
+        except ProviderTaskCancelledError:
+            await session.rollback()
+            return {"status": "cancelled", "node_run_id": node_run_id}
         except ProviderRateLimitedError as exc:
             await session.rollback()
             retry_after = float(exc.details.get("retry_after_seconds") or 5.0)
@@ -310,7 +357,11 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                     if await set_node_run_rls_context(s2, node_run_id=run_uuid) is None:
                         return {"status": "failed", "error": str(exc)[:300]}
                     run2 = await s2.get(NodeRun, run_uuid)
-                    if run2 is not None and run2.status in {"queued", "running"}:
+                    if run2 is not None and run2.status in {
+                        "queued",
+                        "running",
+                        "cancel_requested",
+                    }:
                         run2.status = "failed"
                         run2.error_code = _worker_failure_code(exc)
                         # Some transport errors have an empty str() (e.g. a bare
@@ -318,9 +369,7 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                         # network failure is diagnosable instead of an empty summary.
                         message = str(exc).strip()
                         run2.error_summary = (
-                            message[:500]
-                            if message
-                            else f"{type(exc).__name__} (no message)"
+                            message[:500] if message else f"{type(exc).__name__} (no message)"
                         )
                         from datetime import UTC, datetime
 

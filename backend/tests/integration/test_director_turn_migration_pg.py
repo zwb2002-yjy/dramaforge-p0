@@ -99,7 +99,7 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
         ids = {key: uuid.uuid4() for key in ("user", "workspace", "project", "scope")}
         with engine.begin() as connection:
             head = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head == "20260908_0059"
+            assert head == "20260908_0060"
             columns = {
                 row[0]
                 for row in connection.execute(
@@ -145,6 +145,27 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
                 )
             ).scalar_one()
             assert recovery_function is not None
+            provider_recovery_definition = connection.execute(
+                text(
+                    "SELECT pg_get_functiondef("
+                    "'app.resumable_provider_node_run_contexts(integer,text)'::regprocedure)"
+                )
+            ).scalar_one()
+            assert "cancel_requested" in provider_recovery_definition
+            provider_recovery_security = connection.execute(
+                text(
+                    "SELECT p.prosecdef, r.rolname, "
+                    "NOT EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, "
+                    "acldefault('f', p.proowner))) a WHERE a.grantee = 0 "
+                    "AND a.privilege_type = 'EXECUTE') AS no_public "
+                    "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner "
+                    "WHERE p.oid = "
+                    "'app.resumable_provider_node_run_contexts(integer,text)'::regprocedure"
+                )
+            ).one()
+            assert provider_recovery_security.prosecdef
+            assert provider_recovery_security.no_public
+            assert provider_recovery_security.rolname == "dramaforge_worker_resolver"
             waiting_function = connection.execute(
                 text(
                     "SELECT to_regprocedure("
