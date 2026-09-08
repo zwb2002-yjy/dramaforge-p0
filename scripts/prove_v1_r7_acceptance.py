@@ -229,12 +229,14 @@ class Acceptance:
         }
 
     def shots(self, project):
-        return sorted(
-            self.read(f"/projects/{project}/shots"), key=lambda row: (row["sort_order"], row["id"])
-        )
+        rows = self.read(f"/projects/{project}/shots")
+        return sorted(rows, key=lambda row: (row["sort_order"], row["id"]))
 
     def shot(self, project, shot_id):
-        return next(row for row in self.shots(project) if row["id"] == shot_id)
+        basic = next(row for row in self.shots(project) if row["id"] == shot_id)
+        workbench = self.read(f"/projects/{project}/shots/{shot_id}/workbench")
+        detailed = workbench.get("shot") if isinstance(workbench, dict) else None
+        return {**basic, **(detailed if isinstance(detailed, dict) else {})}
 
     def preflight(self):
         models = self.read("/models")
