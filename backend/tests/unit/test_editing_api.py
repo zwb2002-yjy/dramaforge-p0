@@ -388,6 +388,7 @@ def test_editing_http_rejects_lineage_and_missing_csrf(
 
 def test_editing_director_suggestion_http_returns_exact_persisted_identity(
     api: tuple[TestClient, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, factory = api
     _register(client)
@@ -401,10 +402,26 @@ def test_editing_director_suggestion_http_returns_exact_persisted_identity(
     )
     assert created.status_code == 201, created.text
     session_id = created.json()["id"]
+    from app.director.editing_suggestion import (
+        DeterministicEditingDirectorSuggestionTransport,
+        EditingDirectorSuggestionService,
+    )
+
+    monkeypatch.setattr(
+        "app.api.v1.editing.EditingDirectorSuggestionService",
+        lambda session: EditingDirectorSuggestionService(
+            session,
+            transport=DeterministicEditingDirectorSuggestionTransport(),
+        ),
+    )
 
     response = client.post(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 1, "user_instruction": "放慢节奏"},
+        json={
+            "expected_session_version": 1,
+            "user_instruction": "放慢节奏",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert response.status_code == 200, response.text
@@ -463,7 +480,11 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
 
     missing_csrf = client.post(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 1, "user_instruction": "要求"},
+        json={
+            "expected_session_version": 1,
+            "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
     )
     assert missing_csrf.status_code == 403, missing_csrf.text
 
@@ -472,6 +493,7 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
         json={
             "expected_session_version": 1,
             "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
             "timeline": {},
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -480,7 +502,11 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
 
     stale = client.post(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 2, "user_instruction": "要求"},
+        json={
+            "expected_session_version": 2,
+            "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert stale.status_code == 409, stale.text
@@ -488,7 +514,11 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
 
     foreign = client.post(
         f"/api/v1/projects/{other_project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 1, "user_instruction": "要求"},
+        json={
+            "expected_session_version": 1,
+            "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert foreign.status_code == 404, foreign.text
@@ -507,7 +537,11 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
     client.headers["X-Workspace-Id"] = other_workspace_id
     non_owner = client.post(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 1, "user_instruction": "要求"},
+        json={
+            "expected_session_version": 1,
+            "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     # The selected-workspace dependency may hide the foreign project as 404;

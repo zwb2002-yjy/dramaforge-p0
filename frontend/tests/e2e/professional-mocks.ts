@@ -895,12 +895,13 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       }
       assertExactKeys(
         body,
-        ["expected_session_version", "user_instruction"],
+        ["expected_session_version", "request_key", "user_instruction"],
         "Director suggestion body",
       );
       const expectedVersion = (body as { expected_session_version?: unknown })
         .expected_session_version;
       const instruction = (body as { user_instruction?: unknown }).user_instruction;
+      const requestKey = (body as { request_key?: unknown }).request_key;
       if (expectedVersion !== state.editing.session.version) {
         throw new Error(
           `Director suggestion must use current session version ${state.editing.session.version}`,
@@ -908,6 +909,12 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       }
       if (typeof instruction !== "string" || !instruction.trim()) {
         throw new Error("Director suggestion instruction must be non-blank");
+      }
+      if (
+        typeof requestKey !== "string" ||
+        !/^editing-suggestion:[0-9a-f-]{36}$/.test(requestKey)
+      ) {
+        throw new Error("Director suggestion requires a stable request_key");
       }
       const currentClips = state.editing.session.timeline.clips;
       const suggestion = {
@@ -926,6 +933,11 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
                 clip_id: currentClips[0]?.id ?? "",
                 duration_seconds: currentClips[0]?.duration_seconds ?? 0,
               },
+              {
+                operation: "set_clip_subtitle",
+                clip_id: currentClips[0]?.id ?? "",
+                subtitle: "停一下。\n再回答。",
+              },
             ],
           },
           rationale: `根据“${instruction.trim()}”审阅当前剪辑顺序与停顿。`,
@@ -933,6 +945,22 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           cost: "需要人工确认并保存时间线版本。",
           risk: "顺序或时长变化会影响剪辑节奏。",
           impact: "仅影响当前 EditSession；production lineage 保持只读。",
+        },
+        director_evidence: {
+          turn_id: "99999999-9999-4999-8999-999999999999",
+          request_key: requestKey,
+          context_hash: "a".repeat(64),
+          output_hash: "b".repeat(64),
+          slot: "planning.storyboard",
+          model_id: "litellm/script-quality",
+          model_binding_ref: "production-model-profile:e2e@4:planning.storyboard",
+          actual_model: "upstream/editor-e2e",
+          transport_status: "succeeded",
+          token_usage: { total_tokens: 70 },
+          reported_cost: "0.004",
+          cost_status: "reported",
+          currency: "USD",
+          schema_repair_count: 0,
         },
       };
       state.editing.suggestionResponses.push(clone(suggestion));

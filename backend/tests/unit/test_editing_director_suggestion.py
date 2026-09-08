@@ -18,6 +18,7 @@ from app.director.editing_repair import (
     EditingRepairRoutingService,
 )
 from app.director.editing_suggestion import (
+    DeterministicEditingDirectorSuggestionTransport,
     EditingDirectorSuggestionCandidate,
     EditingDirectorSuggestionContext,
     EditingDirectorSuggestionRequest,
@@ -206,6 +207,7 @@ def _request(version: int) -> EditingDirectorSuggestionRequest:
     return EditingDirectorSuggestionRequest(
         expected_session_version=version,
         user_instruction="把节奏放慢一点",
+        request_key=f"editing-suggestion:{uuid4()}",
     )
 
 
@@ -238,19 +240,19 @@ class RecordingTransport:
 
 async def _proposal_counts(session: AsyncSession, project_id: UUID) -> tuple[int, int, int]:
     proposals = await session.scalar(
-        select(func.count()).select_from(DirectorProposal).where(
-            DirectorProposal.project_id == project_id
-        )
+        select(func.count())
+        .select_from(DirectorProposal)
+        .where(DirectorProposal.project_id == project_id)
     )
     items = await session.scalar(
-        select(func.count()).select_from(DirectorProposalItem).where(
-            DirectorProposalItem.project_id == project_id
-        )
+        select(func.count())
+        .select_from(DirectorProposalItem)
+        .where(DirectorProposalItem.project_id == project_id)
     )
     threads = await session.scalar(
-        select(func.count()).select_from(DirectorThread).where(
-            DirectorThread.project_id == project_id
-        )
+        select(func.count())
+        .select_from(DirectorThread)
+        .where(DirectorThread.project_id == project_id)
     )
     return int(proposals or 0), int(items or 0), int(threads or 0)
 
@@ -271,7 +273,7 @@ async def test_server_truth_context_and_one_pending_proposal(session: AsyncSessi
     assert candidate.item_id is not None
     assert candidate.candidate is not candidate
     assert candidate.candidate.model_dump(mode="json") == candidate.model_dump(
-        mode="json", exclude={"proposal_id", "item_id"}
+        mode="json", exclude={"proposal_id", "item_id", "director_evidence"}
     )
     assert len(transport.calls) == 1
     context = transport.calls[0]
@@ -282,6 +284,7 @@ async def test_server_truth_context_and_one_pending_proposal(session: AsyncSessi
     assert [clip.clip_id for clip in context.clips] == ["clip-a", "clip-b"]
     assert [clip.order for clip in context.clips] == [1, 2]
     assert [clip.duration_seconds for clip in context.clips] == [2.0, 3.0]
+    assert [clip.subtitle for clip in context.clips] == ["A", "B"]
     assert context.clips[0].shot_id == str(shot.id)
     assert "artifact_id" not in context.clips[0].model_dump()
     assert context.metadata == {"auto_built": True, "editor_note": "keep"}
@@ -419,7 +422,10 @@ async def test_default_deterministic_transport_uses_existing_clips_and_preserves
     timeline_before = deepcopy(edit_session.timeline)
     lineage_before = deepcopy(edit_session.production_lineage)
 
-    candidate = await EditingDirectorSuggestionService(session).suggest(
+    candidate = await EditingDirectorSuggestionService(
+        session,
+        transport=DeterministicEditingDirectorSuggestionTransport(),
+    ).suggest(
         project_id=project.id,
         session_id=edit_session.id,
         actor=user,
@@ -586,24 +592,32 @@ async def test_same_project_reuses_project_thread_and_creates_two_proposals(
     )
     assert await _proposal_counts(session, project.id) == (2, 2, 1)
     threads = (
-        await session.execute(
-            select(DirectorThread).where(
-                DirectorThread.project_id == project.id,
-                DirectorThread.scope_type == "project",
-                DirectorThread.scope_entity_id == project.id,
+        (
+            await session.execute(
+                select(DirectorThread).where(
+                    DirectorThread.project_id == project.id,
+                    DirectorThread.scope_type == "project",
+                    DirectorThread.scope_entity_id == project.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(threads) == 1
     assert threads[0].scope_type == "project"
     assert threads[0].scope_entity_id == project.id
     proposals = (
-        await session.execute(
-            select(DirectorProposal)
-            .where(DirectorProposal.project_id == project.id)
-            .order_by(DirectorProposal.created_at, DirectorProposal.id)
+        (
+            await session.execute(
+                select(DirectorProposal)
+                .where(DirectorProposal.project_id == project.id)
+                .order_by(DirectorProposal.created_at, DirectorProposal.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(proposals) == 2
     assert {proposal.thread_id for proposal in proposals} == {threads[0].id}
     assert {proposal.scope_type for proposal in proposals} == {"edit_session"}
@@ -615,6 +629,7 @@ def test_proactive_request_forbids_user_instruction() -> None:
         EditingProactiveSuggestionRequest.model_validate(
             {
                 "expected_session_version": 1,
+                "request_key": f"editing-proactive:{uuid4()}",
                 "user_instruction": "客户端不能上传",
             }
         )
@@ -625,12 +640,16 @@ async def test_proactive_suggestion_works_without_instruction(
     session: AsyncSession,
 ) -> None:
     project, edit_session, user, _shot, _asset, _graph, _run, _operation = await _seed(session)
-    result = await EditingDirectorSuggestionService(session).suggest_proactive(
+    result = await EditingDirectorSuggestionService(
+        session,
+        transport=DeterministicEditingDirectorSuggestionTransport(),
+    ).suggest_proactive(
         project_id=project.id,
         session_id=edit_session.id,
         actor=user,
         request=EditingProactiveSuggestionRequest(
             expected_session_version=edit_session.version,
+            request_key=f"editing-proactive:{uuid4()}",
         ),
     )
     assert result.candidate.base_session_version == edit_session.version

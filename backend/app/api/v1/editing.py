@@ -29,6 +29,7 @@ from app.director.editing_suggestion import (
     EditingDirectorSuggestionService,
     EditingProactiveSuggestionRequest,
 )
+from app.director.text_transport import DirectorInvocationEvidence
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.editing.timeline_builder import build_edit_session_for_project
@@ -111,6 +112,7 @@ class EditingDirectorSuggestionRead(BaseModel):
     proposal_id: UUID
     item_id: UUID
     suggestion: EditingDirectorSuggestionCandidate
+    director_evidence: DirectorInvocationEvidence | None = None
 
 
 def _normalize_key(key: object) -> str:
@@ -282,7 +284,7 @@ async def create_editing_director_suggestion(
     session: SessionDep,
     _: CsrfDep,
 ) -> EditingDirectorSuggestionRead:
-    """Generate one deterministic proposal-only suggestion for an EditSession.
+    """Generate one audited proposal-only suggestion for an EditSession.
 
     Route identifiers are the only target identity accepted here.  The service
     performs ownership, project/session scoping, both stale gates and strict
@@ -300,6 +302,7 @@ async def create_editing_director_suggestion(
         proposal_id=result.proposal_id,
         item_id=result.item_id,
         suggestion=result.candidate,
+        director_evidence=result.director_evidence,
     )
 
 
@@ -325,6 +328,7 @@ async def create_editing_proactive_suggestion(
         proposal_id=result.proposal_id,
         item_id=result.item_id,
         suggestion=result.candidate,
+        director_evidence=result.director_evidence,
     )
 
 

@@ -54,6 +54,7 @@ type EditingSuggestionMutationInput = {
   sessionId: string;
   expectedSessionVersion: number;
   userInstruction: string;
+  requestKey: string;
   proactive?: boolean;
   sequence: number;
 };
@@ -423,6 +424,7 @@ export function EditingWorkspace({
       sessionId: requestSessionId,
       expectedSessionVersion,
       userInstruction,
+      requestKey,
       proactive = false,
     }) =>
       proactive
@@ -430,10 +432,12 @@ export function EditingWorkspace({
             requestProjectId,
             requestSessionId,
             expectedSessionVersion,
+            requestKey,
           )
         : requestEditingDirectorSuggestion(requestProjectId, requestSessionId, {
             expected_session_version: expectedSessionVersion,
             user_instruction: userInstruction,
+            request_key: requestKey,
           }),
     onSuccess: (result, variables) => {
       const currentIdentity = suggestionIdentityRef.current;
@@ -563,6 +567,7 @@ export function EditingWorkspace({
       sessionId,
       expectedSessionVersion: currentSessionVersion,
       userInstruction,
+      requestKey: `editing-suggestion:${globalThis.crypto.randomUUID()}`,
       sequence,
     });
     setSelectedSuggestionOps({});
@@ -584,6 +589,7 @@ export function EditingWorkspace({
       sessionId,
       expectedSessionVersion: currentSessionVersion,
       userInstruction: "",
+      requestKey: `editing-proactive:${globalThis.crypto.randomUUID()}`,
       proactive: true,
       sequence,
     });
@@ -654,6 +660,12 @@ export function EditingWorkspace({
         nextClips = nextClips.map((clip) =>
           clip.id === operation.clip_id || clipValue(clip, "shot_id") === operation.clip_id
             ? { ...clip, duration_seconds: operation.duration_seconds }
+            : clip,
+        );
+      } else if (operation.operation === "set_clip_subtitle") {
+        nextClips = nextClips.map((clip) =>
+          clip.id === operation.clip_id || clipValue(clip, "shot_id") === operation.clip_id
+            ? { ...clip, subtitle: operation.subtitle }
             : clip,
         );
       }
@@ -909,6 +921,16 @@ export function EditingWorkspace({
                     <dd data-testid="editing-suggestion-base-version">
                       v{suggestionPreview.suggestion.base_session_version}
                     </dd>
+                    {suggestionPreview.director_evidence && (
+                      <>
+                        <dt>文本模型</dt>
+                        <dd data-testid="editing-suggestion-model-evidence">
+                          {suggestionPreview.director_evidence.actual_model ??
+                            suggestionPreview.director_evidence.model_id}
+                          · {suggestionPreview.director_evidence.turn_id.slice(0, 8)}
+                        </dd>
+                      </>
+                    )}
                   </dl>
 
                   <section
@@ -945,9 +967,13 @@ export function EditingWorkspace({
                             <strong>{operation.operation}</strong>
                             {operation.operation === "reorder_clips" ? (
                               <span>顺序：{operation.clip_ids.join(" → ")}</span>
-                            ) : (
+                            ) : operation.operation === "set_clip_duration" ? (
                               <span>
                                 片段 {operation.clip_id} · 时长 {operation.duration_seconds}s
+                              </span>
+                            ) : (
+                              <span>
+                                片段 {operation.clip_id} · 字幕 {operation.subtitle || "（关闭）"}
                               </span>
                             )}
                             <pre>{formatJson(operation)}</pre>
@@ -1087,8 +1113,8 @@ export function EditingWorkspace({
                       </label>
                       <label>
                         字幕文本
-                        <input
-                          type="text"
+                        <textarea
+                          rows={2}
                           data-testid={`clip-subtitle-${index}`}
                           aria-label={`镜头 ${index + 1} 字幕`}
                           value={editableValue(clip, "subtitle")}

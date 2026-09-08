@@ -1,7 +1,7 @@
 """Typed, proposal-only edit-session timeline operations.
 
 The plan is intentionally smaller than the persisted timeline document.  It
-can reorder existing clip ids and change an existing clip's duration, but it
+can reorder existing clip ids and change an existing clip's duration/subtitle, but it
 cannot carry replacement JSON, paths, provider/runtime instructions, or a
 production-lineage payload.
 """
@@ -144,8 +144,34 @@ class SetClipDurationOperation(_StrictPlanModel):
         return _normalize_operation_tag(value)
 
 
+class SetClipSubtitleOperation(_StrictPlanModel):
+    """Replace one existing clip's subtitle; an empty string disables it."""
+
+    operation: Literal["set_clip_subtitle"]
+    clip_id: str = Field(min_length=1, max_length=200)
+    subtitle: str = Field(default="", max_length=4000)
+
+    @field_validator("clip_id")
+    @classmethod
+    def validate_clip_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("clip_id must not be blank")
+        return normalized
+
+    @field_validator("subtitle")
+    @classmethod
+    def normalize_subtitle(cls, value: str) -> str:
+        return value.replace("\r\n", "\n").replace("\r", "\n")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_operation(cls, value: object) -> object:
+        return _normalize_operation_tag(value)
+
+
 EditSessionTimelineOperation = Annotated[
-    ReorderClipsOperation | SetClipDurationOperation,
+    ReorderClipsOperation | SetClipDurationOperation | SetClipSubtitleOperation,
     Field(discriminator="operation"),
 ]
 
@@ -213,5 +239,6 @@ __all__ = [
     "EditSessionTimelinePlan",
     "ReorderClipsOperation",
     "SetClipDurationOperation",
+    "SetClipSubtitleOperation",
     "validate_edit_session_timeline_command",
 ]

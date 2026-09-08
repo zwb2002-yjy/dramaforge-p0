@@ -25,6 +25,7 @@ from app.editing.proposal_plan import (
     EditSessionTimelineCommand,
     ReorderClipsOperation,
     SetClipDurationOperation,
+    SetClipSubtitleOperation,
 )
 from app.production.experiment_service import (
     ExperimentCreateInput,
@@ -209,9 +210,7 @@ async def _apply_story_set_script_document(
     content_hash = str(payload.get("content_hash") or "")
     raw_text = str(payload.get("raw_text") or "")
     if not content_hash or not raw_text.strip():
-        raise ProposalCommandError(
-            "story.set_script_document requires content_hash and raw_text"
-        )
+        raise ProposalCommandError("story.set_script_document requires content_hash and raw_text")
     existing = await session.scalar(
         select(ScriptDocument)
         .where(
@@ -371,9 +370,7 @@ async def _apply_story_upsert_shot(
     shot.camera_move = str(payload.get("camera_move") or shot.camera_move)[:80]
     shot.visual_description = str(payload.get("visual_description") or shot.visual_description)
     shot.dialogue = str(
-        payload.get("dialogue")
-        if payload.get("dialogue") is not None
-        else shot.dialogue
+        payload.get("dialogue") if payload.get("dialogue") is not None else shot.dialogue
     )
     shot.duration_seconds = Decimal(str(payload.get("duration_seconds") or shot.duration_seconds))
     shot.sort_order = int(payload.get("sort_order") or shot.sort_order)
@@ -492,9 +489,7 @@ async def _apply_story_delete_scene(
     )
     assert scene is not None
     shot_count = await session.scalar(
-        select(Shot.id)
-        .where(Shot.project_id == project_id, Shot.scene_id == scene.id)
-        .limit(1)
+        select(Shot.id).where(Shot.project_id == project_id, Shot.scene_id == scene.id).limit(1)
     )
     if shot_count is not None:
         raise ProposalCommandError(
@@ -522,9 +517,7 @@ async def _apply_story_delete_episode(
     )
     assert episode is not None
     scene_count = await session.scalar(
-        select(Scene.id)
-        .where(Scene.episode_id == episode.id)
-        .limit(1)
+        select(Scene.id).where(Scene.episode_id == episode.id).limit(1)
     )
     if scene_count is not None:
         raise ProposalCommandError(
@@ -671,6 +664,16 @@ async def _apply_edit_session_timeline_plan(
             for clip in clips:
                 if clip.get("id") == operation.clip_id:
                     clip["duration_seconds"] = operation.duration_seconds
+                    break
+        elif isinstance(operation, SetClipSubtitleOperation):
+            if operation.clip_id not in current_ids:
+                raise _edit_session_plan_error(
+                    "set_clip_subtitle requires an existing clip id",
+                    code="INVALID_EDIT_SESSION_TIMELINE_PLAN",
+                )
+            for clip in clips:
+                if clip.get("id") == operation.clip_id:
+                    clip["subtitle"] = operation.subtitle
                     break
 
     timeline["clips"] = clips

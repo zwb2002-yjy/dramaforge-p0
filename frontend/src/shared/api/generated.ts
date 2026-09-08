@@ -740,7 +740,7 @@ export interface paths {
         put?: never;
         /**
          * Create Editing Director Suggestion
-         * @description Generate one deterministic proposal-only suggestion for an EditSession.
+         * @description Generate one audited proposal-only suggestion for an EditSession.
          *
          *     Route identifiers are the only target identity accepted here.  The service
          *     performs ownership, project/session scoping, both stale gates and strict
@@ -3072,7 +3072,7 @@ export interface components {
          */
         EditSessionTimelinePlan: {
             /** Operations */
-            operations: (components["schemas"]["ReorderClipsOperation"] | components["schemas"]["SetClipDurationOperation"])[];
+            operations: (components["schemas"]["ReorderClipsOperation"] | components["schemas"]["SetClipDurationOperation"] | components["schemas"]["SetClipSubtitleOperation"])[];
         };
         /**
          * EditTimelinePayload
@@ -3127,6 +3127,7 @@ export interface components {
              */
             item_id: string;
             suggestion: components["schemas"]["EditingDirectorSuggestionCandidate"];
+            director_evidence?: components["schemas"]["DirectorInvocationEvidence"] | null;
         };
         /**
          * EditingDirectorSuggestionRequest
@@ -3137,6 +3138,8 @@ export interface components {
             expected_session_version: number;
             /** User Instruction */
             user_instruction: string;
+            /** Request Key */
+            request_key: string;
         };
         /**
          * EditingProactiveSuggestionRequest
@@ -3145,6 +3148,8 @@ export interface components {
         EditingProactiveSuggestionRequest: {
             /** Expected Session Version */
             expected_session_version: number;
+            /** Request Key */
+            request_key: string;
         };
         /** EditingRepairRoutingRead */
         EditingRepairRoutingRead: {
@@ -5076,6 +5081,24 @@ export interface components {
             clip_id: string;
             /** Duration Seconds */
             duration_seconds: number;
+        };
+        /**
+         * SetClipSubtitleOperation
+         * @description Replace one existing clip's subtitle; an empty string disables it.
+         */
+        SetClipSubtitleOperation: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            operation: "set_clip_subtitle";
+            /** Clip Id */
+            clip_id: string;
+            /**
+             * Subtitle
+             * @default
+             */
+            subtitle: string;
         };
         /** ShotActionState */
         ShotActionState: {

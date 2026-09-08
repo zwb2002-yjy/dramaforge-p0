@@ -1,7 +1,7 @@
 """Server-fact-driven Director suggestions for persisted EditSessions.
 
 This is deliberately a service seam, not an HTTP or UI surface.  It reads one
-server-owned EditSession, asks a deterministic no-network transport for a
+server-owned EditSession, asks the configured audited text transport for a
 typed plan, rechecks the session version, and persists exactly one existing
 DirectorProposal plus one typed command item.  It never applies the command
 or touches production/execution facts.
@@ -33,14 +33,19 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.director.assistant_models import DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
+from app.director.turn_models import DirectorTurn
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.editing.proposal_plan import (
     EditSessionTimelinePlan,
     ReorderClipsOperation,
     SetClipDurationOperation,
+    SetClipSubtitleOperation,
 )
-from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
+from app.providers.model_profiles.slots import ModelSlot
+from app.shared.db import set_rls_context
+from app.shared.errors import AppError, ConflictError, NotFoundError, ValidationAppError
 
 
 class EditingDirectorSuggestionRequest(BaseModel):
@@ -50,6 +55,7 @@ class EditingDirectorSuggestionRequest(BaseModel):
 
     expected_session_version: int = Field(ge=1)
     user_instruction: str = Field(min_length=1, max_length=4000)
+    request_key: str = Field(min_length=8, max_length=200, pattern=r"^[A-Za-z0-9._:-]+$")
 
     @field_validator("user_instruction")
     @classmethod
@@ -66,6 +72,7 @@ class EditingProactiveSuggestionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_session_version: int = Field(ge=1)
+    request_key: str = Field(min_length=8, max_length=200, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
 class EditingDirectorClipContext(BaseModel):
@@ -77,6 +84,7 @@ class EditingDirectorClipContext(BaseModel):
     order: int = Field(ge=1)
     duration_seconds: float = Field(ge=0, allow_inf_nan=False)
     shot_id: str | None = Field(default=None, max_length=200)
+    subtitle: str = Field(default="", max_length=4000)
 
 
 class EditingDirectorSuggestionContext(BaseModel):
@@ -213,6 +221,7 @@ class EditingDirectorSuggestionResult(EditingDirectorSuggestionCandidate):
 
     proposal_id: UUID
     item_id: UUID
+    director_evidence: DirectorInvocationEvidence | None = None
     _candidate: EditingDirectorSuggestionCandidate = PrivateAttr()
 
     @property
@@ -234,7 +243,7 @@ class EditingDirectorSuggestionTransport(Protocol):
 
 
 class DeterministicEditingDirectorSuggestionTransport:
-    """Safe no-network adapter used until an explicitly approved LLM seam."""
+    """No-network fixture; production never selects it implicitly."""
 
     async def generate(self, context: EditingDirectorSuggestionContext) -> object:
         clip_ids = [clip.clip_id for clip in context.clips]
@@ -265,7 +274,7 @@ class DeterministicEditingDirectorSuggestionTransport:
 
 
 def get_editing_director_suggestion_transport() -> EditingDirectorSuggestionTransport:
-    """Resolve the deterministic transport; tests may replace this seam."""
+    """Return the explicit deterministic fixture for focused tests."""
 
     return DeterministicEditingDirectorSuggestionTransport()
 
@@ -315,6 +324,12 @@ def _timeline_context(timeline: Mapping[str, object]) -> _TimelineContext:
             )
         raw_shot_id = raw_clip.get("shot_id")
         shot_id = str(raw_shot_id) if raw_shot_id is not None else None
+        raw_subtitle = raw_clip.get("subtitle", "")
+        if not isinstance(raw_subtitle, str):
+            raise ValidationAppError(
+                "edit session timeline clip subtitle must be text",
+                details={"code": "INVALID_EDIT_SESSION_TIMELINE"},
+            )
         seen_ids.add(clip_id)
         contexts.append(
             EditingDirectorClipContext(
@@ -322,6 +337,7 @@ def _timeline_context(timeline: Mapping[str, object]) -> _TimelineContext:
                 order=order,
                 duration_seconds=duration,
                 shot_id=shot_id,
+                subtitle=raw_subtitle,
             )
         )
     contexts.sort(key=lambda clip: (clip.order, clip.clip_id))
@@ -356,6 +372,12 @@ def _validate_plan_targets(
                     "set_clip_duration requires an existing clip id",
                     details={"code": "INVALID_EDITING_DIRECTOR_PLAN"},
                 )
+        elif isinstance(operation, SetClipSubtitleOperation):
+            if operation.clip_id not in current_ids:
+                raise ValidationAppError(
+                    "set_clip_subtitle requires an existing clip id",
+                    details={"code": "INVALID_EDITING_DIRECTOR_PLAN"},
+                )
 
 
 class EditingDirectorSuggestionService:
@@ -366,9 +388,11 @@ class EditingDirectorSuggestionService:
         session: AsyncSession,
         *,
         transport: EditingDirectorSuggestionTransport | None = None,
+        text_transport: DirectorTextTransport | None = None,
     ) -> None:
         self._session = session
-        self._transport = transport or get_editing_director_suggestion_transport()
+        self._transport = transport
+        self._text_transport = text_transport or DirectorTextTransport(session)
 
     async def suggest(
         self,
@@ -406,31 +430,71 @@ class EditingDirectorSuggestionService:
             metadata=context_data.metadata,
             user_instruction=request.user_instruction,
         )
+        text_result = None
         try:
-            candidate = EditingDirectorSuggestionCandidate.model_validate(
-                await self._transport.generate(context)
-            )
+            if self._transport is not None:
+                candidate = EditingDirectorSuggestionCandidate.model_validate(
+                    await self._transport.generate(context)
+                )
+            else:
+                text_result = await self._text_transport.generate_structured(
+                    project=project,
+                    actor=actor,
+                    scope_type="edit_session",
+                    scope_entity_id=edit_session.id,
+                    request_key=request.request_key,
+                    slot=ModelSlot.PLANNING_STORYBOARD,
+                    task_name="editing_director_suggestion",
+                    system_instruction=(
+                        "Act as a film editor. Propose a bounded Timeline plan using only "
+                        "reorder_clips, set_clip_duration, or set_clip_subtitle. Every target "
+                        "must be an existing clip id. Preserve the user's explicit wording and "
+                        "never request media regeneration."
+                    ),
+                    input_versions={
+                        "project": project.version,
+                        "edit_session": edit_session.version,
+                    },
+                    intent_snapshot={"user_instruction": request.user_instruction},
+                    context_payload={"timeline": context.model_dump(mode="json")},
+                    output_type=EditingDirectorSuggestionCandidate,
+                )
+                candidate = text_result.value
         except ValidationError as exc:
             raise ValidationAppError(
                 "editing Director suggestion failed structured validation",
                 details={"code": "INVALID_EDITING_DIRECTOR_SUGGESTION", "errors": exc.errors()},
             ) from exc
+        except (ValidationAppError, ConflictError):
+            raise
         except Exception as exc:  # noqa: BLE001 - transport boundary is fail-closed
             raise ValidationAppError(
                 f"editing Director suggestion failed: {exc}",
                 details={"code": "EDITING_DIRECTOR_SUGGESTION_FAILED", "manual_ok": True},
             ) from exc
 
-        if candidate.base_session_version != context.session_version:
-            raise ValidationAppError(
-                "editing Director suggestion base version does not match the server session",
-                details={
-                    "code": "INVALID_EDITING_DIRECTOR_BASE_VERSION",
-                    "expected_version": context.session_version,
-                    "actual_version": candidate.base_session_version,
-                },
+        try:
+            if candidate.base_session_version != context.session_version:
+                raise ValidationAppError(
+                    "editing Director suggestion base version does not match the server session",
+                    details={
+                        "code": "INVALID_EDITING_DIRECTOR_BASE_VERSION",
+                        "expected_version": context.session_version,
+                        "actual_version": candidate.base_session_version,
+                    },
+                )
+            _validate_plan_targets(
+                candidate.plan,
+                clip_ids=[clip.clip_id for clip in context.clips],
             )
-        _validate_plan_targets(candidate.plan, clip_ids=[clip.clip_id for clip in context.clips])
+        except ValidationAppError as exc:
+            if text_result is not None:
+                await self._text_transport.mark_failed(
+                    text_result.turn,
+                    reason=f"Editing plan validation failed: {exc}",
+                    wait_reason="proposal_invalid",
+                )
+            raise
 
         # Read the persisted scalar directly instead of selecting the ORM row.
         # The latter can return the already-loaded identity-map instance and
@@ -444,8 +508,21 @@ class EditingDirectorSuggestionService:
             )
         )
         if latest_version is None:
+            if text_result is not None:
+                await self._text_transport.mark_stale(
+                    text_result.turn,
+                    reason="EditSession was removed while the suggestion was in flight",
+                )
             raise NotFoundError("edit session not found")
         if latest_version != context.session_version:
+            if text_result is not None:
+                await self._text_transport.mark_stale(
+                    text_result.turn,
+                    reason=(
+                        f"EditSession changed during inference: expected "
+                        f"{context.session_version}, current {latest_version}"
+                    ),
+                )
             raise ConflictError(
                 "edit session changed while the suggestion was generated",
                 details={
@@ -455,62 +532,165 @@ class EditingDirectorSuggestionService:
                 },
             )
 
-        thread = await self._session.scalar(
-            select(DirectorThread).where(
-                DirectorThread.project_id == project.id,
-                DirectorThread.scope_type == "project",
-                DirectorThread.scope_entity_id == project.id,
+        if text_result is not None and text_result.turn.proposal_id is not None:
+            existing_proposal = await self._session.scalar(
+                select(DirectorProposal).where(
+                    DirectorProposal.id == text_result.turn.proposal_id,
+                    DirectorProposal.project_id == project.id,
+                    DirectorProposal.scope_type == "edit_session",
+                    DirectorProposal.scope_entity_id == edit_session.id,
+                )
             )
-        )
-        if thread is None:
-            thread = DirectorThread(
+            existing_item = (
+                await self._session.scalar(
+                    select(DirectorProposalItem)
+                    .where(
+                        DirectorProposalItem.proposal_id == text_result.turn.proposal_id,
+                        DirectorProposalItem.project_id == project.id,
+                    )
+                    .order_by(DirectorProposalItem.created_at, DirectorProposalItem.id)
+                    .limit(1)
+                )
+                if existing_proposal is not None
+                else None
+            )
+            if existing_proposal is None or existing_item is None:
+                raise ConflictError(
+                    "DirectorTurn proposal link is incomplete",
+                    details={
+                        "code": "EDITING_DIRECTOR_PROPOSAL_LINK_INVALID",
+                        "turn_id": str(text_result.turn.id),
+                    },
+                )
+            return self._result(
+                candidate=candidate,
+                proposal_id=existing_proposal.id,
+                item_id=existing_item.id,
+                evidence=text_result.evidence,
+            )
+
+        try:
+            thread = await self._session.scalar(
+                select(DirectorThread).where(
+                    DirectorThread.project_id == project.id,
+                    DirectorThread.scope_type == "project",
+                    DirectorThread.scope_entity_id == project.id,
+                )
+            )
+            if thread is None:
+                thread = DirectorThread(
+                    project_id=project.id,
+                    scope_type="project",
+                    scope_entity_id=project.id,
+                    created_by=actor.id,
+                )
+                self._session.add(thread)
+                await self._session.flush()
+
+            proposal = DirectorProposal(
                 project_id=project.id,
-                scope_type="project",
-                scope_entity_id=project.id,
+                thread_id=thread.id,
+                scope_type="edit_session",
+                scope_entity_id=edit_session.id,
+                status="pending",
                 created_by=actor.id,
             )
-            self._session.add(thread)
+            self._session.add(proposal)
             await self._session.flush()
+            item = DirectorProposalItem(
+                proposal_id=proposal.id,
+                project_id=project.id,
+                command="edit_session.apply_timeline_plan",
+                payload={
+                    "edit_session_id": str(edit_session.id),
+                    "plan": candidate.plan.model_dump(mode="json"),
+                },
+                expected_target_version=context.session_version,
+                rationale=candidate.rationale,
+                benefit=candidate.benefit,
+                cost=candidate.cost,
+                risk=candidate.risk,
+                impact=candidate.impact,
+                status="pending",
+            )
+            self._session.add(item)
+            # Both ids are read from rows created in this invocation; never a
+            # timestamp-based "latest" query.
+            await self._session.flush()
+        except Exception as exc:  # noqa: BLE001 - keep text evidence durable
+            if text_result is not None:
+                await self._record_persistence_failure(
+                    turn_id=text_result.turn.id,
+                    actor_id=actor.id,
+                    workspace_id=project.workspace_id,
+                    project_id=project.id,
+                    exc=exc,
+                )
+            if isinstance(exc, AppError):
+                raise
+            raise ValidationAppError(
+                "editing Director proposal persistence failed",
+                details={
+                    "code": "EDITING_DIRECTOR_PROPOSAL_PERSISTENCE_FAILED",
+                    "manual_ok": True,
+                    "turn_id": str(text_result.turn.id) if text_result is not None else None,
+                },
+            ) from exc
 
-        proposal = DirectorProposal(
-            project_id=project.id,
-            thread_id=thread.id,
-            scope_type="edit_session",
-            scope_entity_id=edit_session.id,
-            status="pending",
-            created_by=actor.id,
-        )
-        self._session.add(proposal)
-        await self._session.flush()
-        item = DirectorProposalItem(
-            proposal_id=proposal.id,
-            project_id=project.id,
-            command="edit_session.apply_timeline_plan",
-            payload={
-                "edit_session_id": str(edit_session.id),
-                "plan": candidate.plan.model_dump(mode="json"),
-            },
-            expected_target_version=context.session_version,
-            rationale=candidate.rationale,
-            benefit=candidate.benefit,
-            cost=candidate.cost,
-            risk=candidate.risk,
-            impact=candidate.impact,
-            status="pending",
-        )
-        self._session.add(item)
-        # Both ids are read from the rows created in this invocation.  Do not
-        # re-query a proposal/item by timestamp or "latest" ordering: that
-        # would be ambiguous under concurrent suggestions.
-        await self._session.flush()
-        result = EditingDirectorSuggestionResult(
-            **candidate.model_dump(mode="python"),
+        if text_result is not None:
+            await self._text_transport.mark_awaiting_user(
+                text_result.turn,
+                proposal_id=proposal.id,
+            )
+        else:
+            await self._session.commit()
+        return self._result(
+            candidate=candidate,
             proposal_id=proposal.id,
             item_id=item.id,
+            evidence=text_result.evidence if text_result is not None else None,
+        )
+
+    @staticmethod
+    def _result(
+        *,
+        candidate: EditingDirectorSuggestionCandidate,
+        proposal_id: UUID,
+        item_id: UUID,
+        evidence: DirectorInvocationEvidence | None,
+    ) -> EditingDirectorSuggestionResult:
+        result = EditingDirectorSuggestionResult(
+            **candidate.model_dump(mode="python"),
+            proposal_id=proposal_id,
+            item_id=item_id,
+            director_evidence=evidence,
         )
         result._candidate = candidate
-        await self._session.commit()
         return result
+
+    async def _record_persistence_failure(
+        self,
+        *,
+        turn_id: UUID,
+        actor_id: UUID,
+        workspace_id: UUID,
+        project_id: UUID,
+        exc: Exception,
+    ) -> None:
+        await self._session.rollback()
+        await set_rls_context(
+            self._session,
+            user_id=actor_id,
+            workspace_id=workspace_id,
+            project_id=project_id,
+        )
+        turn = await self._session.get(DirectorTurn, turn_id)
+        if turn is not None:
+            await self._text_transport.mark_failed(
+                turn,
+                reason=f"Editing proposal persistence failed: {type(exc).__name__}: {exc}",
+                wait_reason="proposal_invalid",
+            )
 
     async def suggest_proactive(
         self,
@@ -529,6 +709,7 @@ class EditingDirectorSuggestionService:
             request=EditingDirectorSuggestionRequest(
                 expected_session_version=request.expected_session_version,
                 user_instruction="主动分析当前时间线节奏与转场，不要求用户输入",
+                request_key=request.request_key,
             ),
         )
 
