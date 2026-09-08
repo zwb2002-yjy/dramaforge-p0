@@ -2674,12 +2674,38 @@ export interface components {
             created_at: string;
         };
         /**
+         * Capability
+         * @description Stable business capabilities the product layer can request.
+         * @enum {string}
+         */
+        Capability: "text.generate" | "image.generate" | "image.edit" | "video.text_to_video" | "video.image_to_video" | "video.first_last_frame" | "video.reference_to_video" | "audio.tts";
+        /**
          * CapabilityCatalogBody
          * @description The resolvable creative capability catalog (read-only).
          */
         CapabilityCatalogBody: {
             /** Available Staged Strategies */
             available_staged_strategies?: string[];
+        };
+        /**
+         * CapabilityGap
+         * @description A capability/control the chosen model cannot honor.
+         *
+         *     ``severity="fatal"`` means execution must fail closed; ``"warning"`` means
+         *     the plan may proceed only with an explicit user acceptance of the
+         *     approximation.
+         */
+        CapabilityGap: {
+            capability: components["schemas"]["Capability"];
+            /** Controls */
+            controls?: string[];
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "fatal" | "warning";
+            /** Reason */
+            reason: string;
         };
         /** CapabilityRead */
         CapabilityRead: {
@@ -2757,6 +2783,29 @@ export interface components {
             verification_status: string;
             /** Verified At */
             verified_at: string | null;
+        };
+        /**
+         * ControlTranslation
+         * @description One semantic control → ModelManifest option translation.
+         *
+         *     ``status`` classifies the delivery as ``exact``, ``approximate`` or
+         *     ``unsupported``.  Unsupported controls must never be silently dropped:
+         *     they surface here and in ``CapabilityGap``.
+         */
+        ControlTranslation: {
+            /** Control */
+            control: string;
+            /** Option */
+            option: string;
+            from_value?: components["schemas"]["JsonValue"] | null;
+            to_value?: components["schemas"]["JsonValue"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "exact" | "approximate" | "unsupported";
+            /** Reason */
+            reason: string;
         };
         /** CreativeProfileUpdateBody */
         CreativeProfileUpdateBody: {
@@ -3265,11 +3314,56 @@ export interface components {
             /** References */
             references?: components["schemas"]["ShotReferenceIntent"][];
             /** Expected Shot Version */
-            expected_shot_version?: number | null;
+            expected_shot_version: number;
             /** Plan Fingerprint */
             plan_fingerprint: string;
             /** Accepted Approximations */
             accepted_approximations?: string[];
+        };
+        /**
+         * ExecutionModelResolution
+         * @description Frozen, secret-free concrete model identity for one execution.
+         */
+        ExecutionModelResolution: {
+            /** Requested Model Id */
+            requested_model_id?: string | null;
+            /** Resolved Model Id */
+            resolved_model_id?: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "request_override" | "project_profile" | "workspace_profile" | "system_default";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "RESOLVED" | "UNAVAILABLE";
+            /** Reason */
+            reason?: string | null;
+            /** Provider Model Binding Id */
+            provider_model_binding_id?: string | null;
+            /** Provider Connection Id */
+            provider_connection_id?: string | null;
+            /** Provider Connection Revision Id */
+            provider_connection_revision_id?: string | null;
+            /** Credential Revision Id */
+            credential_revision_id?: string | null;
+            /** Catalog Entry Id */
+            catalog_entry_id?: string | null;
+            /** Model Revision */
+            model_revision?: string | null;
+            /** Manifest Hash */
+            manifest_hash?: string | null;
+            /** Invoke Model Value */
+            invoke_model_value?: string | null;
+            capability: components["schemas"]["Capability"];
+            /** Mode Id */
+            mode_id?: string | null;
+            /** Native Options */
+            native_options?: {
+                [key: string]: unknown;
+            };
         };
         /** ExecutionPlanBody */
         ExecutionPlanBody: {
@@ -3298,14 +3392,11 @@ export interface components {
             /** References */
             references?: components["schemas"]["ShotReferenceIntent"][];
             /** Expected Shot Version */
-            expected_shot_version?: number | null;
+            expected_shot_version: number;
         };
         /** ExecutionPlanRead */
         ExecutionPlanRead: {
-            /** Plan */
-            plan: {
-                [key: string]: components["schemas"]["JsonValue"];
-            };
+            plan: components["schemas"]["WorkbenchExecutionPlan"];
             /** Plan Fingerprint */
             plan_fingerprint: string;
         };
@@ -3768,6 +3859,10 @@ export interface components {
             shot_id?: string | null;
             /** User Intent */
             user_intent?: {
+                [key: string]: unknown;
+            };
+            /** Accepted Proposal */
+            accepted_proposal?: {
                 [key: string]: unknown;
             };
         };
@@ -4311,6 +4406,47 @@ export interface components {
              */
             dialogue_role: string;
         };
+        /**
+         * PlannedReference
+         * @description One shot reference planned for a model execution.
+         *
+         *     Distinct from ``app.providers.runtime.ResolvedReference`` (runtime
+         *     byte/URL delivery).  A plan reference carries business purpose, artifact
+         *     identity and the delivery classification only.  ``role`` is the
+         *     ModelManifest input slot assigned by the reference compiler (P4-02).
+         */
+        PlannedReference: {
+            /** Binding Id */
+            binding_id?: string | null;
+            /** Purpose */
+            purpose: string;
+            /** Role */
+            role?: string | null;
+            /** Asset Version Id */
+            asset_version_id?: string | null;
+            /** Artifact Id */
+            artifact_id?: string | null;
+            /**
+             * Resolution Mode
+             * @default current_formal
+             */
+            resolution_mode: string;
+            /**
+             * Mime Type
+             * @default image/png
+             */
+            mime_type: string;
+            /** Fingerprint */
+            fingerprint?: string | null;
+            /**
+             * Delivery
+             * @default exact
+             * @enum {string}
+             */
+            delivery: "exact" | "approximate" | "unsupported";
+            /** Reason */
+            reason?: string | null;
+        };
         /** ProbeRead */
         ProbeRead: {
             /**
@@ -4826,6 +4962,20 @@ export interface components {
             expected_rerun_scope: string;
             /** Annotation Count */
             annotation_count: number;
+        };
+        /**
+         * RequestTransformation
+         * @description One observable field change during translation (spec §29).
+         */
+        RequestTransformation: {
+            /** Field */
+            field: string;
+            /** From Value */
+            from_value?: unknown | null;
+            /** To Value */
+            to_value?: unknown | null;
+            /** Reason */
+            reason: string;
         };
         /** ResolvedReferenceRead */
         ResolvedReferenceRead: {
@@ -5644,6 +5794,27 @@ export interface components {
         SuggestionDirectorState: {
             [key: string]: unknown;
         };
+        /**
+         * TranslationReport
+         * @description Auditable record of what the user requested vs what the model received
+         *     (spec §29). Never contains secrets (spec §2.8).
+         */
+        TranslationReport: {
+            /** Requested Options */
+            requested_options?: {
+                [key: string]: unknown;
+            };
+            /** Effective Options */
+            effective_options?: {
+                [key: string]: unknown;
+            };
+            /** Transformations */
+            transformations?: components["schemas"]["RequestTransformation"][];
+            /** Dropped Options */
+            dropped_options?: string[];
+            /** Warnings */
+            warnings?: string[];
+        };
         /** UpstreamDependencyRead */
         UpstreamDependencyRead: {
             /** Node Key */
@@ -5693,6 +5864,72 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * WorkbenchExecutionPlan
+         * @description Semantic execution plan for one shot execution (P4-01).
+         *
+         *     Carries the resolved model identity (``ExecutionModelResolution``),
+         *     ``mode_id``, connection/credential revision identity, the planned
+         *     references, control translations and the translation report.
+         *
+         *     ``plan_fingerprint`` is empty until :meth:`freeze` computes it from the
+         *     canonical JSON payload; the execution API (P4-07) re-validates the frozen
+         *     fingerprint before dispatching.
+         */
+        WorkbenchExecutionPlan: {
+            /** Plan Fingerprint */
+            plan_fingerprint?: string | null;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Shot Experiment Id */
+            shot_experiment_id?: string | null;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "image_keyframe" | "video";
+            /** Prompt */
+            prompt: string;
+            /** Semantic Intent */
+            semantic_intent?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Mode Id */
+            mode_id: string;
+            resolved_model: components["schemas"]["ExecutionModelResolution"];
+            capability: components["schemas"]["Capability"];
+            /** Planned References */
+            planned_references?: components["schemas"]["PlannedReference"][];
+            /** Exact Controls */
+            exact_controls?: components["schemas"]["ControlTranslation"][];
+            /** Approximate Controls */
+            approximate_controls?: components["schemas"]["ControlTranslation"][];
+            /** Unsupported Controls */
+            unsupported_controls?: components["schemas"]["ControlTranslation"][];
+            /** Capability Gaps */
+            capability_gaps?: components["schemas"]["CapabilityGap"][];
+            /** Semantic Request Preview */
+            semantic_request_preview?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Connection Revision Id */
+            connection_revision_id?: string | null;
+            /** Credential Revision Id */
+            credential_revision_id?: string | null;
+            translation_report?: components["schemas"]["TranslationReport"] | null;
+            /** Accepted Approximations */
+            accepted_approximations?: string[];
+            /** Expected Shot Version */
+            expected_shot_version?: number | null;
         };
         /** WorkerTickResponse */
         WorkerTickResponse: {

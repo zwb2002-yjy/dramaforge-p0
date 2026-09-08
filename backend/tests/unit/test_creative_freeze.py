@@ -83,6 +83,10 @@ async def test_freeze_scene_writes_provenance(session) -> None:
     assert isinstance(froze, dict)
     assert froze["genre"]["key"] == "short_drama_suspense_v1"
     assert froze["style"]["key"] == "film_noir_v1"
+    assert froze["schema_version"] == "2"
+    assert len(froze["compiled_hash"]) == 64
+    assert froze["effective_intent"]
+    assert froze["skill_guidance"][0]["strategy"]
     assert got.version == 2
 
 
@@ -97,6 +101,8 @@ async def test_freeze_shot_writes_provenance(session) -> None:
     froze = (got.director_state or {}).get("creative_capabilities")
     assert isinstance(froze, dict)
     assert froze["skills"]
+    assert froze["skill_guidance"]
+    assert "effective_intent" in froze
     assert got.version == 2
 
 

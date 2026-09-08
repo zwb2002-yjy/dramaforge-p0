@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Final, Literal
+from collections.abc import Mapping
+from typing import Final, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -25,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
-from app.assets.models import Asset, AssetVersion, AssetVersionReference, Shot
+from app.assets.models import Asset, AssetVersion, AssetVersionReference, Episode, Scene, Shot
 from app.config import get_settings
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
 from app.execution.shot_pipeline import (
@@ -79,11 +80,7 @@ def _workbench_idempotency_key(
     plan_fingerprint: str,
 ) -> str:
     """Keep caller idempotency deterministic while respecting the DB contract."""
-    raw = (
-        f"workbench:{stage}:{override}"
-        if override
-        else f"workbench:{stage}:{plan_fingerprint}"
-    )
+    raw = f"workbench:{stage}:{override}" if override else f"workbench:{stage}:{plan_fingerprint}"
     if len(raw) <= _NODE_RUN_IDEMPOTENCY_MAX_LENGTH:
         return raw
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -121,15 +118,19 @@ async def _ensure_pure_chain_upstreams(
     dispatcher/worker path; the media run waits/retries until they complete.
     """
     edges = (
-        await session.execute(
-            select(GraphEdge, GraphNode)
-            .join(GraphNode, GraphNode.id == GraphEdge.upstream_node_id)
-            .where(GraphEdge.graph_version_id == graph_version_id)
-            .where(GraphEdge.downstream_node_id == target_node_id)
-            .where(GraphEdge.required.is_(True))
-            .order_by(GraphEdge.input_port, GraphEdge.position)
+        (
+            await session.execute(
+                select(GraphEdge, GraphNode)
+                .join(GraphNode, GraphNode.id == GraphEdge.upstream_node_id)
+                .where(GraphEdge.graph_version_id == graph_version_id)
+                .where(GraphEdge.downstream_node_id == target_node_id)
+                .where(GraphEdge.required.is_(True))
+                .order_by(GraphEdge.input_port, GraphEdge.position)
+            )
         )
-    ).tuples().all()
+        .tuples()
+        .all()
+    )
     source_commit = get_settings().source_commit.strip() or "development"
     for _edge, node in edges:
         if node.node_type not in _PURE_UPSTREAM_NODE_TYPES:
@@ -174,9 +175,7 @@ async def _ensure_pure_chain_upstreams(
                 graph_version_id=graph_version_id,
                 graph_node_id=node.id,
                 attempt_no=attempt_no,
-                idempotency_key=(
-                    f"workbench:chain:{stage}:{node.node_key}:{shot_id}:{attempt_no}"
-                ),
+                idempotency_key=(f"workbench:chain:{stage}:{node.node_key}:{shot_id}:{attempt_no}"),
                 input_hash=_chain_input_hash(payload),
                 status="queued",
                 input_snapshot=payload,
@@ -220,6 +219,77 @@ def _node_run_input_hash(snapshot: dict[str, object]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _mapping(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _deep_merge(left: Mapping[str, object], right: Mapping[str, object]) -> dict[str, object]:
+    merged = dict(left)
+    for key, value in right.items():
+        if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
+            merged[key] = _deep_merge(
+                cast(Mapping[str, object], merged[key]),
+                value,
+            )
+        else:
+            merged[key] = value
+    return merged
+
+
+def _skill_guidance(*snapshots: Mapping[str, object]) -> list[dict[str, object]]:
+    ordered: dict[str, dict[str, object]] = {}
+    for snapshot in snapshots:
+        raw = snapshot.get("skill_guidance")
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, Mapping):
+                continue
+            key = str(item.get("skill_key") or "")
+            if key:
+                ordered[key] = dict(item)
+    return list(ordered.values())
+
+
+def _compose_effective_prompt(
+    *,
+    base_prompt: str,
+    effective_intent: Mapping[str, object],
+    skill_guidance: list[dict[str, object]],
+    shot_language: Mapping[str, object],
+    continuity_context: Mapping[str, object],
+) -> str:
+    guidance = {
+        "priority": ("saved user values > accepted proposal > project override > pack default"),
+        "effective_intent": dict(effective_intent),
+        "skills": [
+            {
+                "skill_key": row.get("skill_key"),
+                "skill_version": row.get("skill_version"),
+                "strategy": row.get("strategy"),
+                "outputs": row.get("outputs", []),
+            }
+            for row in skill_guidance
+        ],
+        "shot_language": dict(shot_language),
+        "continuity": dict(continuity_context),
+    }
+    if not any((effective_intent, skill_guidance, shot_language, continuity_context)):
+        return base_prompt
+    encoded = json.dumps(
+        guidance,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if len(encoded) > 20_000:
+        raise WorkbenchExecutionError(
+            "frozen effective creative intent is too large",
+            details={"code": "EFFECTIVE_CREATIVE_INTENT_TOO_LARGE"},
+        )
+    return f"{base_prompt}\n\n[FROZEN_EFFECTIVE_CREATIVE_INTENT]\n{encoded}"
+
+
 class WorkbenchExecutionService:
     """Professional workbench execution orchestration (P4-05)."""
 
@@ -260,44 +330,52 @@ class WorkbenchExecutionService:
         bindings: dict[UUID, ShotReferenceBinding] = {}
         if binding_ids:
             binding_rows = (
-                await self._session.execute(
-                    select(ShotReferenceBinding).where(
-                        ShotReferenceBinding.id.in_(binding_ids),
-                        ShotReferenceBinding.project_id == project.id,
-                        ShotReferenceBinding.shot_id == shot.id,
+                (
+                    await self._session.execute(
+                        select(ShotReferenceBinding).where(
+                            ShotReferenceBinding.id.in_(binding_ids),
+                            ShotReferenceBinding.project_id == project.id,
+                            ShotReferenceBinding.shot_id == shot.id,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             bindings = {binding.id: binding for binding in binding_rows}
 
-        artifact_ids = {
-            reference.artifact_id for reference in references if reference.artifact_id
-        }
+        artifact_ids = {reference.artifact_id for reference in references if reference.artifact_id}
         artifact_rows = (
-            await self._session.execute(
-                select(Artifact).where(
-                    Artifact.id.in_(artifact_ids),
-                    Artifact.project_id == project.id,
+            (
+                await self._session.execute(
+                    select(Artifact).where(
+                        Artifact.id.in_(artifact_ids),
+                        Artifact.project_id == project.id,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         artifacts = {artifact.id: artifact for artifact in artifact_rows}
 
         version_ids = {
-            reference.asset_version_id
-            for reference in references
-            if reference.asset_version_id
+            reference.asset_version_id for reference in references if reference.asset_version_id
         }
         versions: dict[UUID, AssetVersion] = {}
         if version_ids:
             version_rows = (
-                await self._session.execute(
-                    select(AssetVersion).where(
-                        AssetVersion.id.in_(version_ids),
-                        AssetVersion.project_id == project.id,
+                (
+                    await self._session.execute(
+                        select(AssetVersion).where(
+                            AssetVersion.id.in_(version_ids),
+                            AssetVersion.project_id == project.id,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             versions = {version.id: version for version in version_rows}
 
         hydrated: list[ShotReferenceIntent] = []
@@ -396,17 +474,148 @@ class WorkbenchExecutionService:
             )
         return hydrated
 
+    async def _authoritative_creative_input(
+        self,
+        *,
+        project: Project,
+        execution_input: WorkbenchExecutionInput,
+    ) -> tuple[str, dict[str, JsonValue]]:
+        shot = await self._session.scalar(
+            select(Shot).where(
+                Shot.id == execution_input.shot_id,
+                Shot.project_id == project.id,
+            )
+        )
+        if shot is None:
+            raise WorkbenchExecutionError(
+                "shot not found",
+                details={"code": "SHOT_NOT_FOUND"},
+            )
+        if (
+            execution_input.expected_shot_version is not None
+            and shot.version != execution_input.expected_shot_version
+        ):
+            raise WorkbenchExecutionError(
+                "shot changed before execution plan preview",
+                details={
+                    "code": "SHOT_VERSION_MISMATCH",
+                    "expected_version": execution_input.expected_shot_version,
+                    "actual_version": shot.version,
+                },
+            )
+        configured_prompt = (
+            shot.image_prompt if execution_input.stage == "image_keyframe" else shot.video_prompt
+        )
+        base_prompt = (configured_prompt or "").strip() or shot.visual_description.strip()
+        if not base_prompt:
+            raise WorkbenchExecutionError(
+                "saved Shot has no executable prompt",
+                details={"code": "SHOT_PROMPT_REQUIRED"},
+            )
+        if execution_input.prompt.strip() != base_prompt:
+            raise WorkbenchExecutionError(
+                "submitted prompt does not match the saved Shot design",
+                details={"code": "EXECUTION_PROMPT_MISMATCH"},
+            )
+
+        scene = await self._session.scalar(
+            select(Scene)
+            .join(Episode, Episode.id == Scene.episode_id)
+            .where(
+                Scene.id == shot.scene_id,
+                Episode.project_id == project.id,
+            )
+        )
+        if scene is None:
+            raise WorkbenchExecutionError(
+                "scene not found",
+                details={"code": "SCENE_NOT_FOUND"},
+            )
+        scene_design = _mapping(scene.design_state)
+        shot_state = _mapping(shot.director_state)
+        scene_snapshot = _mapping(scene_design.get("creative_capabilities"))
+        shot_snapshot = _mapping(shot_state.get("creative_capabilities"))
+        effective_intent = _deep_merge(
+            _mapping(scene_snapshot.get("effective_intent")),
+            _mapping(shot_snapshot.get("effective_intent")),
+        )
+        value_sources = {
+            **{
+                str(key): str(value)
+                for key, value in _mapping(scene_snapshot.get("value_sources")).items()
+            },
+            **{
+                str(key): str(value)
+                for key, value in _mapping(shot_snapshot.get("value_sources")).items()
+            },
+        }
+        skills = _skill_guidance(scene_snapshot, shot_snapshot)
+        shot_language = _deep_merge(
+            _mapping(scene_snapshot.get("shot_director_intent_patch")),
+            _mapping(shot_snapshot.get("shot_director_intent_patch")),
+        )
+        continuity_context = _mapping(scene_design.get("continuity_context"))
+        prompt = _compose_effective_prompt(
+            base_prompt=base_prompt,
+            effective_intent=effective_intent,
+            skill_guidance=skills,
+            shot_language=shot_language,
+            continuity_context=continuity_context,
+        )
+        director_state = dict(shot_state)
+        director_state.pop("creative_capabilities", None)
+        request_tags = {
+            key: value
+            for key, value in execution_input.semantic_intent.items()
+            if key in {"repair"}
+        }
+        semantic: dict[str, JsonValue] = {
+            "intent": (
+                "shot_keyframe" if execution_input.stage == "image_keyframe" else "shot_video"
+            ),
+            "project_id": str(project.id),
+            "scene_id": str(scene.id),
+            "shot_id": str(shot.id),
+            "shot_version": shot.version,
+            "scene_version": scene.version,
+            "visual_description": shot.visual_description,
+            "director_state": cast(JsonValue, director_state),
+            "effective_creative_intent": cast(JsonValue, effective_intent),
+            "creative_value_sources": cast(JsonValue, value_sources),
+            "skill_guidance": cast(JsonValue, skills),
+            "shot_language": cast(JsonValue, shot_language),
+            "continuity_context": cast(JsonValue, continuity_context),
+            "creative_snapshot_hashes": cast(
+                JsonValue,
+                {
+                    "scene": scene_snapshot.get("compiled_hash"),
+                    "shot": shot_snapshot.get("compiled_hash"),
+                },
+            ),
+            "request_tags": cast(JsonValue, request_tags),
+        }
+        # Repair is the sole allow-listed caller tag. Keep its historical
+        # top-level shape for Worker/trace compatibility while also grouping
+        # all caller tags under request_tags for inspection.
+        semantic.update(request_tags)
+        return prompt, semantic
+
     async def build_plan(
         self,
         *,
         project: Project,
         execution_input: WorkbenchExecutionInput,
+        allow_unaccepted_approximations: bool = False,
     ) -> WorkbenchExecutionPlan:
         """Resolve model, compile references and freeze a WorkbenchExecutionPlan.
 
         Fails closed (raises) when the model is unavailable or when capability
         gaps remain (unsupported references are never silently dropped).
         """
+        prompt, semantic_intent = await self._authoritative_creative_input(
+            project=project,
+            execution_input=execution_input,
+        )
         references = await self._hydrate_and_validate_references(
             project=project,
             shot_id=execution_input.shot_id,
@@ -425,8 +634,7 @@ class WorkbenchExecutionService:
         )
         if resolution.status != "RESOLVED" or resolution.catalog_entry_id is None:
             raise WorkbenchExecutionError(
-                "selected execution model is unavailable: "
-                f"{resolution.reason or resolution.status}"
+                f"selected execution model is unavailable: {resolution.reason or resolution.status}"
             )
 
         # Connection / credential revision identity for the plan (07 §16).
@@ -437,14 +645,11 @@ class WorkbenchExecutionService:
                 ProviderConnection, resolution.provider_connection_id
             )
             if connection is None or connection.workspace_id != project.workspace_id:
-                raise WorkbenchExecutionError(
-                    "resolved provider connection is unavailable"
-                )
+                raise WorkbenchExecutionError("resolved provider connection is unavailable")
             current_revision = await self._session.scalar(
                 select(ProviderConnectionRevision)
                 .where(
-                    ProviderConnectionRevision.connection_id
-                    == resolution.provider_connection_id
+                    ProviderConnectionRevision.connection_id == resolution.provider_connection_id
                 )
                 .order_by(ProviderConnectionRevision.revision_no.desc())
                 .limit(1)
@@ -453,9 +658,7 @@ class WorkbenchExecutionService:
                 connection_revision_id = current_revision.id
                 credential_revision_id = current_revision.credential_revision_id
         if connection_revision_id is None or credential_revision_id is None:
-            raise WorkbenchExecutionError(
-                "resolved provider connection revision is unavailable"
-            )
+            raise WorkbenchExecutionError("resolved provider connection revision is unavailable")
         # Carry the immutable revision identity with the typed model
         # resolution.  The worker must be able to reconstruct the exact
         # Provider runtime without resolving the mutable connection again.
@@ -469,9 +672,7 @@ class WorkbenchExecutionService:
         entry = await self._session.get(ModelCatalogEntry, resolution.catalog_entry_id)
         if entry is None:
             raise WorkbenchExecutionError("resolved catalog entry not found")
-        capability_manifest = ModelCapabilityManifest.model_validate(
-            entry.capability_manifest_json
-        )
+        capability_manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
         v3_manifest = to_v3_model_manifest(
             capability_manifest,
             transport_profile_id="workbench",
@@ -514,15 +715,15 @@ class WorkbenchExecutionService:
             shot_id=execution_input.shot_id,
             shot_experiment_id=execution_input.shot_experiment_id,
             stage=execution_input.stage,
-            prompt=execution_input.prompt,
-            semantic_intent=execution_input.semantic_intent,
+            prompt=prompt,
+            semantic_intent=semantic_intent,
             mode_id=execution_input.mode_id,
             resolved_model=resolution,
             capability=capability,
             planned_references=compiled.planned_references,
             capability_gaps=compiled.capability_gaps,
             semantic_request_preview={
-                "intent": execution_input.semantic_intent,
+                "intent": semantic_intent,
                 "references": len(compiled.planned_references),
             },
             connection_revision_id=connection_revision_id,
@@ -533,8 +734,13 @@ class WorkbenchExecutionService:
 
         # Fail closed on any remaining capability gap (fatal gaps always remain;
         # warning gaps disappear only when the caller accepted approximations).
-        if plan.capability_gaps:
-            reasons = "; ".join(gap.reason for gap in plan.capability_gaps)
+        blocking_gaps = [
+            gap
+            for gap in plan.capability_gaps
+            if gap.severity == "fatal" or not allow_unaccepted_approximations
+        ]
+        if blocking_gaps:
+            reasons = "; ".join(gap.reason for gap in blocking_gaps)
             raise WorkbenchExecutionError(f"workbench plan has capability gaps: {reasons}")
         return plan
 
@@ -544,6 +750,7 @@ class WorkbenchExecutionService:
         project: Project,
         execution_input: WorkbenchExecutionInput,
         idempotency_key_override: str | None = None,
+        prepared_plan: WorkbenchExecutionPlan | None = None,
     ) -> NodeRun:
         """Resolve the shot graph, create a queued NodeRun and persist the
         frozen plan snapshot for the worker.
@@ -551,7 +758,20 @@ class WorkbenchExecutionService:
         The NodeRun ``status="queued"`` is the dispatch: the worker claims and
         executes it. No direct Provider HTTP, no legacy budget / agent gate.
         """
-        plan = await self.build_plan(project=project, execution_input=execution_input)
+        plan = prepared_plan or await self.build_plan(
+            project=project,
+            execution_input=execution_input,
+        )
+        if (
+            plan.plan_fingerprint is None
+            or plan.project_id != project.id
+            or plan.shot_id != execution_input.shot_id
+            or plan.stage != execution_input.stage
+        ):
+            raise WorkbenchExecutionError(
+                "prepared workbench plan does not match the execution input",
+                details={"code": "EXECUTION_PLAN_INVALID"},
+            )
         _slot, _capability, _purpose, node_key = _STAGE_CONTRACT[execution_input.stage]
 
         graphs = GraphService(self._session)
@@ -598,16 +818,10 @@ class WorkbenchExecutionService:
         )
         provider_connection_id = plan.resolved_model.provider_connection_id
         if provider_connection_id is None:
-            raise WorkbenchExecutionError(
-                "frozen execution model has no provider connection"
-            )
-        provider_connection = await self._session.get(
-            ProviderConnection, provider_connection_id
-        )
+            raise WorkbenchExecutionError("frozen execution model has no provider connection")
+        provider_connection = await self._session.get(ProviderConnection, provider_connection_id)
         if provider_connection is None or provider_connection.workspace_id != project.workspace_id:
-            raise WorkbenchExecutionError(
-                "frozen provider connection is unavailable"
-            )
+            raise WorkbenchExecutionError("frozen provider connection is unavailable")
 
         snapshot: dict[str, object] = {
             "workbench_plan": plan.model_dump(mode="json"),
@@ -615,8 +829,7 @@ class WorkbenchExecutionService:
             # well as inside the typed plan.  The Worker consumes this frozen
             # list; it must never re-resolve mutable Asset/Binding state.
             "references": [
-                reference.model_dump(mode="json")
-                for reference in plan.planned_references
+                reference.model_dump(mode="json") for reference in plan.planned_references
             ],
             "plan_fingerprint": plan.plan_fingerprint,
             "stage": plan.stage,
@@ -691,16 +904,20 @@ class WorkbenchExecutionService:
     ) -> list[WorkbenchExecutionPlan]:
         """Read back frozen plan snapshots (preview / trace support)."""
         rows = (
-            await self._session.execute(
-                select(NodeRun)
-                .where(
-                    NodeRun.project_id == project_id,
-                    NodeRun.input_snapshot["shot_id"].as_string() == str(shot_id),
+            (
+                await self._session.execute(
+                    select(NodeRun)
+                    .where(
+                        NodeRun.project_id == project_id,
+                        NodeRun.input_snapshot["shot_id"].as_string() == str(shot_id),
+                    )
+                    .order_by(NodeRun.created_at.desc())
+                    .limit(limit)
                 )
-                .order_by(NodeRun.created_at.desc())
-                .limit(limit)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         plans: list[WorkbenchExecutionPlan] = []
         for run in rows:
             raw = (run.input_snapshot or {}).get("workbench_plan")

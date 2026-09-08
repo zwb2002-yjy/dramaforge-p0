@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
+from app.assets.models import Episode, Scene
 from app.execution.models import NodeRun, ProviderOperation
 from app.production.workbench_execution import (
     WorkbenchExecutionError,
@@ -123,6 +124,92 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     return project, binding, user
 
 
+async def _seed_scene(session: AsyncSession, project: Project) -> Scene:
+    episode = Episode(project_id=project.id, episode_number=1, title="E1", synopsis="")
+    session.add(episode)
+    await session.flush()
+    scene = Scene(
+        episode_id=episode.id,
+        scene_number=1,
+        location_name="Studio",
+        time_of_day="day",
+        synopsis="",
+    )
+    session.add(scene)
+    await session.flush()
+    return scene
+
+
+async def _seed_image_shot(
+    session: AsyncSession,
+    *,
+    project: Project,
+    user: User,
+    connection_id: object,
+) -> tuple[object, object, ProviderModelBinding]:
+    from app.assets.models import Shot
+    from app.execution.models import Artifact
+
+    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash")
+    entry = ModelCatalogEntry(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-image-2.1-flash",
+        model_revision="v2",
+        display_name="Agnes Image",
+        media_kind="image",
+        lifecycle="active",
+        catalog_source="official_static",
+        capability_manifest_json=manifest,
+        option_schema_json={},
+        documented_at=date.fromisoformat("2026-08-19"),
+        contract_manifest_hash=hash_manifest(manifest),
+    )
+    session.add(entry)
+    await session.flush()
+    binding = ProviderModelBinding(
+        workspace_id=project.workspace_id,
+        connection_id=connection_id,
+        media_type="image",
+        model_id="agnes-image-2.1-flash",
+        purpose="keyframe",
+        enabled=True,
+        documented=True,
+        contract_tested=True,
+        account_verified=True,
+        quality_gated=True,
+        catalog_entry_id=entry.id,
+        capability_manifest_hash=entry.contract_manifest_hash,
+        remote_resource_kind="model",
+        remote_resource_id="agnes-image-2.1-flash",
+        invoke_model_value="agnes-image-2.1-flash",
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(binding)
+    scene = await _seed_scene(session, project)
+    shot = Shot(
+        project_id=project.id,
+        scene_id=scene.id,
+        shot_number=1,
+        version=1,
+        visual_description="Image shot",
+        image_prompt="character walks into frame",
+    )
+    artifact = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="e" * 64,
+        mime_type="image/png",
+        byte_size=1,
+    )
+    session.add_all([shot, artifact])
+    await session.flush()
+    return shot, artifact, binding
+
+
 def _input(
     *,
     shot_id=None,
@@ -164,6 +251,39 @@ async def test_build_plan_resolved_and_frozen(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_plan_rejects_unsaved_browser_prompt_and_stale_shot_version(
+    session: AsyncSession,
+) -> None:
+    project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    runs_before = list((await session.execute(select(NodeRun))).scalars())
+    with pytest.raises(WorkbenchExecutionError) as prompt_error:
+        await service.build_plan(
+            project=project,
+            execution_input=_input(
+                shot_id=shot.id,
+                requested_binding_id=binding.id,
+                prompt="unsaved browser draft",
+                expected_shot_version=shot.version,
+            ),
+        )
+    assert prompt_error.value.details["code"] == "EXECUTION_PROMPT_MISMATCH"
+    with pytest.raises(WorkbenchExecutionError) as stale_error:
+        await service.build_plan(
+            project=project,
+            execution_input=_input(
+                shot_id=shot.id,
+                requested_binding_id=binding.id,
+                expected_shot_version=shot.version - 1,
+            ),
+        )
+    assert stale_error.value.details["code"] == "SHOT_VERSION_MISMATCH"
+    runs_after = list((await session.execute(select(NodeRun))).scalars())
+    assert [run.id for run in runs_after] == [run.id for run in runs_before]
+
+
+@pytest.mark.asyncio
 async def test_build_plan_fails_closed_when_model_unavailable(session: AsyncSession) -> None:
     project, _binding, user = await _seed(session)
     service = WorkbenchExecutionService(session, user_id=user.id)
@@ -182,13 +302,14 @@ async def test_build_plan_fails_closed_on_fatal_reference_gap(session: AsyncSess
     from app.production.reference_intents import ShotReferenceIntent
 
     project, binding, user = await _seed(session)
-    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot, artifact = await _seed_video_shot(session, project=project, user=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
     bad_reference = ShotReferenceIntent(
         purpose="brand_new_unknown_purpose",
-        artifact_id=uuid4(),
+        artifact_id=artifact.id,
     )
-    with pytest.raises(WorkbenchExecutionError):
+    runs_before = list((await session.execute(select(NodeRun))).scalars())
+    with pytest.raises(WorkbenchExecutionError, match="capability gaps"):
         await service.build_plan(
             project=project,
             execution_input=_input(
@@ -197,6 +318,60 @@ async def test_build_plan_fails_closed_on_fatal_reference_gap(session: AsyncSess
                 references=[bad_reference],
             ),
         )
+    runs_after = list((await session.execute(select(NodeRun))).scalars())
+    assert [run.id for run in runs_after] == [run.id for run in runs_before]
+
+
+@pytest.mark.asyncio
+async def test_approximate_reference_requires_preview_then_explicit_acceptance(
+    session: AsyncSession,
+) -> None:
+    from app.production.reference_intents import ShotReferenceIntent
+
+    project, video_binding, user = await _seed(session)
+    shot, artifact, binding = await _seed_image_shot(
+        session,
+        project=project,
+        user=user,
+        connection_id=video_binding.connection_id,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    unaccepted = _input(
+        shot_id=shot.id,
+        stage="image_keyframe",
+        requested_binding_id=binding.id,
+        mode_id="text_to_image",
+        expected_shot_version=shot.version,
+        references=[ShotReferenceIntent(purpose="style", artifact_id=artifact.id)],
+    )
+    runs_before = list((await session.execute(select(NodeRun))).scalars())
+
+    preview = await service.build_plan(
+        project=project,
+        execution_input=unaccepted,
+        allow_unaccepted_approximations=True,
+    )
+    assert [reference.delivery for reference in preview.planned_references] == ["approximate"]
+    assert preview.accepted_approximations == []
+    assert [gap.severity for gap in preview.capability_gaps] == ["warning"]
+    assert [run.id for run in (await session.execute(select(NodeRun))).scalars()] == [
+        run.id for run in runs_before
+    ]
+
+    with pytest.raises(WorkbenchExecutionError, match="explicit acceptance"):
+        await service.build_plan(project=project, execution_input=unaccepted)
+
+    accepted = unaccepted.model_copy(update={"accept_approximations": True})
+    accepted_preview = await service.build_plan(project=project, execution_input=accepted)
+    assert accepted_preview.accepted_approximations == ["style"]
+    assert accepted_preview.capability_gaps == []
+    assert accepted_preview.plan_fingerprint != preview.plan_fingerprint
+
+    run = await service.create_and_dispatch(project=project, execution_input=accepted)
+    assert run.input_snapshot is not None
+    frozen = run.input_snapshot["workbench_plan"]
+    assert frozen["accepted_approximations"] == ["style"]
+    assert frozen["planned_references"][0]["delivery"] == "approximate"
 
 
 @pytest.mark.asyncio
@@ -254,12 +429,14 @@ async def test_reference_identity_is_hydrated_and_frozen_in_node_run_snapshot(
     session.add(image_binding)
     await session.flush()
 
+    scene = await _seed_scene(session, project)
     shot = Shot(
         project_id=project.id,
-        scene_id=uuid4(),
+        scene_id=scene.id,
         shot_number=11,
         version=1,
         visual_description="Reference keyframe",
+        image_prompt="character walks into frame",
     )
     session.add(shot)
     await session.flush()
@@ -362,9 +539,7 @@ async def test_reference_identity_is_hydrated_and_frozen_in_node_run_snapshot(
     node_keys = {str((item.input_snapshot or {}).get("node_key")) for item in runs}
     assert {"prompt", "keyframe"} <= node_keys
     prompt_run = next(
-        item
-        for item in runs
-        if str((item.input_snapshot or {}).get("node_key")) == "prompt"
+        item for item in runs if str((item.input_snapshot or {}).get("node_key")) == "prompt"
     )
     assert prompt_run.status == "queued"
     assert prompt_run.input_snapshot is not None
@@ -528,12 +703,14 @@ async def _seed_video_shot(
     from app.production.formal_selection import set_formal_keyframe
     from app.production.service import GraphService
 
+    scene = await _seed_scene(session, project)
     shot = Shot(
         project_id=project.id,
-        scene_id=_uuid4(),
+        scene_id=scene.id,
         shot_number=1,
         version=1,
         visual_description="A video shot",
+        video_prompt="character walks into frame",
     )
     session.add(shot)
     await session.flush()
@@ -591,12 +768,14 @@ async def test_video_plan_fails_closed_without_formal_keyframe(session: AsyncSes
     project, binding, user = await _seed(session)
     from app.assets.models import Shot
 
+    scene = await _seed_scene(session, project)
     shot = Shot(
         project_id=project.id,
-        scene_id=uuid4(),
+        scene_id=scene.id,
         shot_number=2,
         version=1,
         visual_description="No formal keyframe yet",
+        video_prompt="character walks into frame",
     )
     session.add(shot)
     await session.flush()
@@ -620,3 +799,116 @@ async def test_video_plan_injects_formal_keyframe_reference(session: AsyncSessio
     first_frame = [r for r in plan.planned_references if r.purpose == "first_frame"]
     assert len(first_frame) == 1
     assert first_frame[0].artifact_id == artifact.id
+
+
+@pytest.mark.asyncio
+async def test_frozen_effective_creative_content_enters_plan_and_run(
+    session: AsyncSession,
+) -> None:
+    from app.director.creative_capabilities.creative_compiler import (
+        CreativeCapabilityCompiler,
+    )
+    from app.director.creative_capabilities.freeze import freeze_shot_capabilities
+    from app.director.creative_capabilities.packs_library import STYLE_PACKS
+    from app.director.creative_capabilities.shot_language_library import (
+        SHOT_LANGUAGE_PACKS,
+    )
+    from app.director.creative_capabilities.skill_library import BASELINE_SKILLS
+
+    project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    base_prompt = "lead wears a white suit; static camera; do not push in"
+    shot.video_prompt = base_prompt
+    shot.director_state = {
+        "camera": {"movement": "static_no_push"},
+        "production_design": "white suit on the lead",
+    }
+    scene = await session.get(Scene, shot.scene_id)
+    assert scene is not None
+    scene.design_state = {
+        "continuity_context": {
+            "scene_id": str(scene.id),
+            "character_asset_versions": {},
+            "wardrobe_asset_versions": {},
+            "location_asset_versions": {},
+            "visual_bible_revision": 2,
+            "voice_design": {},
+            "story_entry_state": "explicit wardrobe change to red in this scene",
+            "story_exit_target": "keep red wardrobe",
+            "previous_formal_evidence": [],
+        }
+    }
+    style = next(item for item in STYLE_PACKS if item.style_key == "cinematic_realism_v1")
+    style = style.model_copy(update={"production_design": "black suit on the lead"})
+    shot_language = SHOT_LANGUAGE_PACKS[1].model_copy(update={"camera_motion": "dolly_in"})
+    skill = next(item for item in BASELINE_SKILLS if item.skill_key == "emotional-performance-v1")
+    intent = CreativeCapabilityCompiler().compile(
+        user_intent={
+            "production_design": "white suit on the lead",
+            "camera_motion": "static_no_push",
+        },
+        accepted_proposal={"camera_motion": "slow_push"},
+        style=style,
+        shot_language=shot_language,
+        skill_stack=[skill],
+    )
+    await freeze_shot_capabilities(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        intent=intent,
+        actor_id=user.id,
+    )
+    await session.flush()
+
+    execution_input = _input(
+        shot_id=shot.id,
+        requested_binding_id=binding.id,
+        prompt=base_prompt,
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    assert "white suit on the lead" in plan.prompt
+    assert "static_no_push" in plan.prompt
+    assert skill.strategy in plan.prompt
+    assert "black suit on the lead" not in plan.prompt
+    assert "dolly_in" not in plan.prompt
+    assert "slow_push" not in plan.prompt
+    assert plan.semantic_intent["continuity_context"]["story_entry_state"] == (
+        "explicit wardrobe change to red in this scene"
+    )
+    assert plan.semantic_intent["creative_value_sources"]["camera_motion"] == (
+        "user_confirmed"
+    )
+
+    run = await service.create_and_dispatch(
+        project=project,
+        execution_input=execution_input,
+    )
+    frozen_plan = run.input_snapshot["workbench_plan"]
+    assert frozen_plan["prompt"] == plan.prompt
+    assert frozen_plan["semantic_intent"]["continuity_context"] == (
+        plan.semantic_intent["continuity_context"]
+    )
+
+    # Resume reads the NodeRun's frozen plan, not mutable Scene/Shot state.
+    scene.design_state = {
+        "continuity_context": {
+            "story_entry_state": "later edit: green wardrobe",
+            "visual_bible_revision": 99,
+        }
+    }
+    shot.director_state = {"camera": {"movement": "later_dolly_in"}}
+    await session.flush()
+    resumed = await service.get_recent_plan(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="video",
+    )
+    assert len(resumed) == 1
+    assert resumed[0].semantic_intent["continuity_context"]["story_entry_state"] == (
+        "explicit wardrobe change to red in this scene"
+    )
+    assert "later edit: green wardrobe" not in resumed[0].prompt
+    assert "later_dolly_in" not in resumed[0].prompt

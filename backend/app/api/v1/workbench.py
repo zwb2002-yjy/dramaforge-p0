@@ -14,6 +14,7 @@ from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_work
 from app.api.v1.schemas.workbench import ShotWorkbenchRead
 from app.assets.models import Shot
 from app.assets.schemas import ShotDirectorState
+from app.production.execution_plan import WorkbenchExecutionPlan
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
 from app.production.models import GraphVersion
 from app.production.reference_intents import ShotReferenceIntent
@@ -152,11 +153,11 @@ class ExecutionPlanBody(BaseModel):
     requested_binding_id: UUID | None = None
     accept_approximations: bool = False
     references: list[ShotReferenceIntent] = Field(default_factory=list)
-    expected_shot_version: int | None = None
+    expected_shot_version: int = Field(ge=1)
 
 
 class ExecutionPlanRead(BaseModel):
-    plan: dict[str, JsonValue]
+    plan: WorkbenchExecutionPlan
     plan_fingerprint: str
 
 
@@ -206,16 +207,15 @@ async def create_execution_plan(
     _csrf: CsrfDep,
 ) -> ExecutionPlanRead:
     """Preview a frozen execution plan. Never calls a Provider."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
     plan = await service.build_plan(
         project=project,
         execution_input=_execution_input(project_id, shot_id, body),
+        allow_unaccepted_approximations=True,
     )
     return ExecutionPlanRead(
-        plan=plan.model_dump(mode="json"),
+        plan=plan,
         plan_fingerprint=plan.plan_fingerprint or "",
     )
 
@@ -236,11 +236,20 @@ async def create_execution(
     """Dispatch one shot execution. The server re-validates the plan
     fingerprint / expected shot version / accepted approximations before
     creating the queued NodeRun (03 §37)."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
-    # 1) Rebuild the plan from the submitted inputs and re-validate fingerprint.
+    # 1) Lock the canonical Shot for the duration of validation + queueing so a
+    # concurrent design save cannot cross the fingerprint/dispatch boundary.
+    shot = await session.get(Shot, shot_id, with_for_update=True)
+    if shot is None or shot.project_id != project_id:
+        raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
+    if shot.version != body.expected_shot_version:
+        raise ValidationAppError(
+            "shot changed since plan preview",
+            details={"code": "SHOT_VERSION_MISMATCH"},
+        )
+    # 2) Rebuild once from current facts and re-validate the fingerprint. This
+    # exact in-memory plan is handed to queueing below; it is not re-resolved.
     rebuilt = await service.build_plan(
         project=project,
         execution_input=_execution_input(project_id, shot_id, body),
@@ -250,21 +259,17 @@ async def create_execution(
             "plan fingerprint mismatch: inputs changed since preview",
             details={"code": "PLAN_FINGERPRINT_MISMATCH"},
         )
-    # 2) Optimistic shot version check.
-    if body.expected_shot_version is not None:
-        shot = await session.get(Shot, shot_id)
-        if shot is None or shot.project_id != project_id:
-            raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
-        if shot.version != body.expected_shot_version:
-            raise ValidationAppError(
-                "shot changed since plan preview",
-                details={"code": "SHOT_VERSION_MISMATCH"},
-            )
-    # 3) Dispatch (queued NodeRun); Idempotency-Key dedupes retries.
+    if sorted(body.accepted_approximations) != sorted(rebuilt.accepted_approximations):
+        raise ValidationAppError(
+            "accepted approximation set does not match the rebuilt plan",
+            details={"code": "ACCEPTED_APPROXIMATIONS_MISMATCH"},
+        )
+    # 3) Dispatch the same validated plan; Idempotency-Key dedupes retries.
     run = await service.create_and_dispatch(
         project=project,
         execution_input=_execution_input(project_id, shot_id, body),
         idempotency_key_override=idempotency_key,
+        prepared_plan=rebuilt,
     )
     await session.commit()
     graph_version = await session.get(GraphVersion, run.graph_version_id)
@@ -276,7 +281,6 @@ async def create_execution(
         status=run.status,
         plan_fingerprint=rebuilt.plan_fingerprint or "",
     )
-
 
 
 class FormalKeyframeBody(BaseModel):
@@ -320,7 +324,6 @@ async def set_shot_formal_keyframe(
     )
 
 
-
 class FormalVideoBody(BaseModel):
     artifact_id: UUID
     expected_shot_version: int | None = None
@@ -362,7 +365,6 @@ async def set_shot_formal_video(
     )
 
 
-
 @router.get(
     "/projects/{project_id}/runs/{run_id}/trace",
     response_model=ExecutionTraceRead,
@@ -380,7 +382,6 @@ async def get_execution_trace(
         project_id=project_id,
         run_id=run_id,
     )
-
 
 
 class RepairExecuteBody(BaseModel):
@@ -405,9 +406,7 @@ async def get_repair_plan(
     session: SessionDep,
 ) -> RepairPlanRead:
     """Compute a repair plan from open annotations (03 §57)."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     return await RepairService(session).build_repair_plan(
         project=project,
         shot_id=shot_id,
@@ -427,9 +426,7 @@ async def execute_repair(
     _csrf: CsrfDep,
 ) -> RepairExecuteRead:
     """Execute a V1 repair rerun with an Idempotency-Key (03 §58)."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     run = await RepairService(session).execute_repair(
         project=project,
         user=user,

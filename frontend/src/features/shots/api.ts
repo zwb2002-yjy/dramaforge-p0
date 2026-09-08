@@ -8,6 +8,7 @@ export type ShotExecutionReference = components["schemas"]["ShotReferenceIntent"
 export type ShotDesignRead = components["schemas"]["ShotDesignRead"];
 export type ShotExecutionStage = components["schemas"]["ExecutionPlanBody"]["stage"];
 export type ShotExecutionRead = components["schemas"]["ExecutionRead"];
+export type ShotExecutionPlanRead = components["schemas"]["ExecutionPlanRead"];
 export type FormalKeyframeRead = components["schemas"]["FormalKeyframeRead"];
 export type FormalVideoRead = components["schemas"]["FormalVideoRead"];
 
@@ -19,7 +20,13 @@ export type ShotExecutionInput = Omit<
   prompt: string;
   semantic_intent: Record<string, unknown>;
   mode_id: string;
-  expected_shot_version?: number | null;
+  expected_shot_version: number;
+};
+
+export type PreparedShotExecution = {
+  input: ShotExecutionInput;
+  preview: ShotExecutionPlanRead;
+  idempotencyKey: string;
 };
 
 export function fetchShotWorkbench(
@@ -93,23 +100,35 @@ export async function setShotFormalVideo(
  * backend; the browser never manufactures a success or picks a fallback
  * artifact.
  */
-export async function createShotExecution(
-  projectId: string,
-  shotId: string,
-  input: ShotExecutionInput,
-  idempotencyKey: string,
-): Promise<ShotExecutionRead> {
-  const csrf = await fetchCsrf();
-  const frozenInput: ShotExecutionInput = {
+function freezeExecutionInput(input: ShotExecutionInput): ShotExecutionInput {
+  return {
     ...input,
     references: (input.references ?? []).map((reference) => ({ ...reference })),
   };
-  const preview = await apiSend<components["schemas"]["ExecutionPlanRead"]>(
+}
+
+export async function previewShotExecution(
+  projectId: string,
+  shotId: string,
+  input: ShotExecutionInput,
+): Promise<ShotExecutionPlanRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<ShotExecutionPlanRead>(
     "POST",
     `/api/v1/projects/${projectId}/shots/${shotId}/execution-plan`,
-    frozenInput,
+    freezeExecutionInput(input),
     csrf,
   );
+}
+
+export async function dispatchShotExecution(
+  projectId: string,
+  shotId: string,
+  prepared: PreparedShotExecution,
+): Promise<ShotExecutionRead> {
+  const csrf = await fetchCsrf();
+  const frozenInput = freezeExecutionInput(prepared.input);
+  const preview = prepared.preview;
   const acceptedApproximations = Array.isArray(preview.plan.accepted_approximations)
     ? preview.plan.accepted_approximations.filter(
         (value): value is string => typeof value === "string",
@@ -124,6 +143,21 @@ export async function createShotExecution(
       accepted_approximations: acceptedApproximations,
     },
     csrf,
-    { "Idempotency-Key": idempotencyKey },
+    { "Idempotency-Key": prepared.idempotencyKey },
   );
+}
+
+export async function createShotExecution(
+  projectId: string,
+  shotId: string,
+  input: ShotExecutionInput,
+  idempotencyKey: string,
+): Promise<ShotExecutionRead> {
+  const frozenInput = freezeExecutionInput(input);
+  const preview = await previewShotExecution(projectId, shotId, frozenInput);
+  return dispatchShotExecution(projectId, shotId, {
+    input: frozenInput,
+    preview,
+    idempotencyKey,
+  });
 }

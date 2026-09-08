@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
-from app.assets.models import Shot
+from app.assets.models import Episode, Scene, Shot
 from app.delivery.models import ReviewAnnotation
 from app.execution.models import Artifact
 from app.production.repair_service import RepairService
@@ -58,9 +58,21 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
     )
     session.add_all([old_keyframe, old_video])
     await session.flush()
+    episode = Episode(project_id=project.id, episode_number=1, title="E1", synopsis="")
+    session.add(episode)
+    await session.flush()
+    scene = Scene(
+        episode_id=episode.id,
+        scene_number=1,
+        location_name="Gate 6 studio",
+        time_of_day="day",
+        synopsis="",
+    )
+    session.add(scene)
+    await session.flush()
     shot = Shot(
         project_id=project.id,
-        scene_id=uuid4(),
+        scene_id=scene.id,
         shot_number=1,
         version=1,
         visual_description="Gate6 shot",

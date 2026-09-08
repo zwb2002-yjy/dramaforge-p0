@@ -86,9 +86,7 @@ def _seed_sync(factory: Any, workspace_id: str) -> str:
             from sqlalchemy import select
 
             workspace = (
-                await session.execute(
-                    select(Workspace).where(Workspace.id == UUID(workspace_id))
-                )
+                await session.execute(select(Workspace).where(Workspace.id == UUID(workspace_id)))
             ).scalar_one_or_none()
             assert workspace is not None
             owner = await session.get(User, workspace.owner_user_id)
@@ -178,6 +176,15 @@ def _run(factory: Any, coro: Any) -> Any:
         loop.close()
 
 
+def _set_binding_enabled(factory: Any, binding_id: str, *, enabled: bool) -> None:
+    async def _update() -> None:
+        async with factory() as session:
+            binding = await session.get(ProviderModelBinding, UUID(binding_id))
+            assert binding is not None
+            binding.enabled = enabled
+            await session.commit()
+
+    _run(factory, _update())
 
 
 def _seed_shot_with_formal_keyframe(factory: Any, project_id: str) -> str:
@@ -187,7 +194,7 @@ def _seed_shot_with_formal_keyframe(factory: Any, project_id: str) -> str:
         from uuid import uuid4 as _uuid4
 
         from app.access.models import Project, User, Workspace
-        from app.assets.models import Shot
+        from app.assets.models import Episode, Scene, Shot
         from app.execution.models import Artifact, NodeRun
         from app.execution.shot_pipeline import (
             SHOT_PIPELINE_TEMPLATE_KEY,
@@ -203,12 +210,30 @@ def _seed_shot_with_formal_keyframe(factory: Any, project_id: str) -> str:
             assert workspace is not None
             owner = await session.get(User, workspace.owner_user_id)
             assert owner is not None
+            episode = Episode(
+                project_id=project.id,
+                episode_number=1,
+                title="E1",
+                synopsis="",
+            )
+            session.add(episode)
+            await session.flush()
+            scene = Scene(
+                episode_id=episode.id,
+                scene_number=1,
+                location_name="Studio",
+                time_of_day="day",
+                synopsis="",
+            )
+            session.add(scene)
+            await session.flush()
             shot = Shot(
                 project_id=project.id,
-                scene_id=_uuid4(),
+                scene_id=scene.id,
                 shot_number=1,
                 version=1,
                 visual_description="API video shot",
+                video_prompt="character walks into frame",
             )
             session.add(shot)
             await session.flush()
@@ -222,9 +247,7 @@ def _seed_shot_with_formal_keyframe(factory: Any, project_id: str) -> str:
                 definition=shot_pipeline_definition(shot_id=str(shot.id)),
             )
             assert graph.current_version_id is not None
-            materialized = await graphs.materialize_definition(
-                version_id=graph.current_version_id
-            )
+            materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
             version = await graphs.publish(
                 version_id=materialized.version.id,
                 published_by=owner.id,
@@ -289,7 +312,7 @@ def _plan_body(binding_id: str) -> dict[str, object]:
         "requested_binding_id": binding_id,
         "accept_approximations": False,
         "references": [],
-        "expected_shot_version": None,
+        "expected_shot_version": 2,
     }
 
 
@@ -378,3 +401,34 @@ def test_executions_dispatch_queued_run_and_revalidate_fingerprint(
 
     keys = _run(factory, _read())
     assert any("test-key-1" in key for key in keys)
+
+
+def test_execution_rejects_binding_change_after_preview(api: tuple[TestClient, Any]) -> None:
+    client, factory = api
+    _register(client)
+    workspace_id = client.headers["X-Workspace-Id"]
+    binding_id = _seed_sync(factory, workspace_id)
+    project_id = _project_id(client)
+    shot_id = _seed_shot_with_formal_keyframe(factory, project_id)
+    body = _plan_body(binding_id)
+
+    preview_response = client.post(
+        f"/api/v1/projects/{project_id}/shots/{shot_id}/execution-plan",
+        headers={CSRF_HEADER: _csrf(client)},
+        json=body,
+    )
+    assert preview_response.status_code == 200, preview_response.text
+    _set_binding_enabled(factory, binding_id, enabled=False)
+
+    execute_response = client.post(
+        f"/api/v1/projects/{project_id}/shots/{shot_id}/executions",
+        headers={CSRF_HEADER: _csrf(client)},
+        json={
+            **body,
+            "plan_fingerprint": preview_response.json()["plan_fingerprint"],
+            "accepted_approximations": [],
+        },
+    )
+    assert execute_response.status_code == 422
+    assert "unavailable" in execute_response.json()["detail"]
+    assert _run(factory, _count_workbench_runs(factory)) == 0

@@ -24,8 +24,19 @@ async function installMock(page: Page, onFreeze?: (body: Record<string, unknown>
     if (path.endsWith("/creative-capabilities/provenance") && method === "GET") {
       return json(route, {
         creative_capabilities: {
+          schema_version: 2,
           genre: { key: "short_drama_suspense_v1", contract_hash: "a" },
           style: { key: "film_noir_v1", contract_hash: "b" },
+          effective_intent: { production_design: "white suit" },
+          value_sources: { production_design: "user_confirmed" },
+          skill_guidance: [
+            {
+              skill_key: "emotional-performance-v1",
+              strategy: "Shape performance through playable emotional beats.",
+              outputs: ["performance beats"],
+            },
+          ],
+          shot_director_intent_patch: { camera: { movement: "static_no_push" } },
         },
         target: "shot",
       });
@@ -35,8 +46,11 @@ async function installMock(page: Page, onFreeze?: (body: Record<string, unknown>
       onFreeze?.(body);
       return json(route, {
         creative_capabilities: {
+          schema_version: 2,
           genre: { key: body.genre_key, contract_hash: "c" },
           style: { key: body.style_key, contract_hash: "d" },
+          effective_intent: { production_design: "white suit" },
+          value_sources: { production_design: "user_confirmed" },
         },
         target: "shot",
       });
@@ -74,7 +88,9 @@ async function installMock(page: Page, onFreeze?: (body: Record<string, unknown>
   });
 }
 
-test("creative capabilities panel reads and freezes provenance", async ({ page }) => {
+test("creative capabilities panel reads and freezes effective intent with provenance", async ({
+  page,
+}) => {
   let freezeBody: Record<string, unknown> | undefined;
   await installMock(page, (body) => {
     freezeBody = body;
@@ -83,15 +99,19 @@ test("creative capabilities panel reads and freezes provenance", async ({ page }
 
   await expect(page.getByTestId("creative-capabilities-panel")).toBeVisible();
 
-  // The frozen provenance is exposed (read-only).
+  // The frozen effective content and its sources are exposed (read-only).
   await expect(page.getByTestId("creative-provenance")).toBeVisible();
   await expect(page.getByTestId("creative-provenance")).toContainText("short_drama_suspense_v1");
+  await expect(page.getByTestId("creative-provenance")).toContainText("effective_intent");
+  await expect(page.getByTestId("creative-provenance")).toContainText(
+    "Shape performance through playable emotional beats.",
+  );
 
   // User selects a genre + style and freezes an explicit selection.
   await page.getByLabel("Genre").selectOption("short_drama_suspense_v1");
   await page.getByLabel("Style").selectOption("film_noir_v1");
   await page.getByRole("button", { name: "冻结创意能力" }).click();
-  await expect(page.getByText("已冻结创意能力与 provenance。")).toBeVisible();
+  await expect(page.getByText("已冻结有效创作意图与来源说明。")).toBeVisible();
   expect(freezeBody).toMatchObject({ shot_id: SHOT_ID });
   expect(freezeBody).not.toHaveProperty("scene_id");
 });
