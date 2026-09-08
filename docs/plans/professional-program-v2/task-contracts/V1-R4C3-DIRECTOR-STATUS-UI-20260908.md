@@ -2,7 +2,7 @@
 
 **Task:** `v1-r4c3-director-status-ui-20260908`\
 **Parent:** G3 / G4 / G6 / R4c\
-**Status:** IMPLEMENTED / VERIFIED (immutable-source pass pending)\
+**Status:** IMPLEMENTED / VERIFIED (formal ledger registration unresolved)\
 **Baseline:** `dev@057a13b`
 
 ## Authority and current drift
@@ -109,3 +109,26 @@ explicit timeline Save boundary; R5/R6 own runtime/final-film evidence.
   media action occurred. Root-ledger registration remains unavailable because
   the preserved Owner input files make the root checkout dirty; no event is
   forged and those files remain untouched.
+
+## Immutable-source result
+
+Source commit `3423bc212a97b6e3fdcbcff12de10cab3cfe57b4` passed from a
+clean detached worktree. Ruff, MyPy (242 app files), 977 backend unit tests,
+23 PostgreSQL integration tests with migration/RLS coverage, generated API,
+Prettier, ESLint, native TypeScript, 150 frontend unit tests, production build
+and 19 Playwright tests passed. The five real-LiteLLM integration cases are a
+separate external-service gate and were intentionally skipped by the PG suite;
+R7 owns real configured-provider evidence.
+
+Evidence logs are `tmp/r4c3-quality-contract/backend-final-3423bc2.log`
+(SHA-256 `7bcf615355ac29718ad1de09a9ceab87cc440f7d4373da3799d2197f1afaf6e9`),
+`postgres-final-3423bc2.log`
+(`e01f6b29a757d7291041ffa347ed24d73d94a9efeab8f2ee50e8fee9fe17560`)
+and `frontend-final-3423bc2.log`
+(`2f9ebff1d824c4dda0ca6d4c10b88e6da7ddbb7d1c6d9a6ecc6941853a396abb`).
+Pinned runtime image ids were backend
+`sha256:e6dffcf8986f2743e8862c7617189dc1be7b6a9ec28b47f4bd6e8db49e2badc9`
+and frontend
+`sha256:69eaec0e0f342af70038d88410b1790f527d6f61afe8b9538137c4da92f54664`.
+No source file changed during the immutable pass. R4 is complete; R5 runtime
+recovery evidence is the next dependency-ready task, while R7/R8 remain due.

@@ -10,7 +10,7 @@
 
 ## State
 
-- Status: GOAL_IN_PROGRESS（R0–R3 已闭环；R4–R8 仍需实现与同候选验收）
+- Status: GOAL_IN_PROGRESS（R0–R4 已闭环；R5–R8 仍需实现与同候选验收）
 - Baseline: dev@67bbde25f6e9739ff2259f678394c63b2c37284a
 - Gate condition: only the execution plan's GOAL_DONE/GOAL_READY_FOR_OWNER_MERGE states count.
 
@@ -36,8 +36,8 @@
 | R1 Scene 等待、草稿和阶段操作 | task-contracts/V1-R1-SCENE-WORKFLOW-20260907.md | COMPLETE |
 | R2 真实文本导演接通 | task-contracts/V1-R2A-SHOT-TEXT-DIRECTOR-20260907.md + task-contracts/V1-R2B-STORY-TEXT-DIRECTOR-20260907.md + task-contracts/V1-R2C-EDITING-TEXT-DIRECTOR-20260908.md | COMPLETE |
 | R3 用户意图、Skills 与模型能力闭环 | task-contracts/V1-R3-EFFECTIVE-CREATIVE-INTENT-20260908.md | COMPLETE |
-| R4 有限导演推进与恢复 | task-contracts/V1-R4A-DIRECTOR-TURN-LIFECYCLE-20260908.md + task-contracts/V1-R4B-DIRECTOR-NEXT-ACTION-20260908.md + task-contracts/V1-R4C1-DIRECTOR-USER-DECISIONS-20260908.md + task-contracts/V1-R4C2-DIRECTOR-BUSINESS-CHECKPOINTS-20260908.md + task-contracts/V1-R4C3-DIRECTOR-STATUS-UI-20260908.md | IN PROGRESS（R4a COMPLETE；R4b VERIFIED / ledger unresolved；R4c1 VERIFIED / ledger unresolved；R4c2 VERIFIED / ledger unresolved；R4c3 IN PROGRESS） |
-| R5 生产恢复与重试验收 | pending bounded supplement | READY FOR EVIDENCE; FINAL PASS AFTER R4 |
+| R4 有限导演推进与恢复 | task-contracts/V1-R4A-DIRECTOR-TURN-LIFECYCLE-20260908.md + task-contracts/V1-R4B-DIRECTOR-NEXT-ACTION-20260908.md + task-contracts/V1-R4C1-DIRECTOR-USER-DECISIONS-20260908.md + task-contracts/V1-R4C2-DIRECTOR-BUSINESS-CHECKPOINTS-20260908.md + task-contracts/V1-R4C3-DIRECTOR-STATUS-UI-20260908.md | COMPLETE（R4a–R4c3 已通过同候选验证；ledger unresolved 限制已如实记录） |
+| R5 生产恢复与重试验收 | pending bounded supplement | READY |
 | R6 Final Film 与最终 SRT | pending bounded supplement | READY AFTER R0; scheduled after R5 |
 | R7 双创作路径与真实用户验收 | pending bounded supplement | BLOCKED BY R1–R6 |
 | R8 最终候选与发布准备 | pending bounded supplement | BLOCKED BY R7 |
