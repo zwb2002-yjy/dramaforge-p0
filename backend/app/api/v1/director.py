@@ -59,6 +59,7 @@ class DirectorTurnRead(BaseModel):
     reported_cost: str | None
     cost_status: str
     currency: str
+    schema_repair_count: int
     output_hash: str | None
     output_snapshot: dict[str, object]
     status: str
@@ -95,6 +96,7 @@ class DirectorTurnRead(BaseModel):
             reported_cost=(str(turn.provider_cost) if turn.provider_cost is not None else None),
             cost_status=turn.cost_status,
             currency=turn.currency,
+            schema_repair_count=turn.schema_repair_count,
             output_hash=turn.output_hash,
             output_snapshot=dict(turn.output_snapshot or {}),
             status=turn.status,

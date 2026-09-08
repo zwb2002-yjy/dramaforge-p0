@@ -2474,3 +2474,33 @@ code {
 .qc-shot-director-suggestion-footer {
   color: var(--muted);
 }
+.qc-director-turn-status {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.qc-director-turn-status > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+.qc-director-turn-status > header > div,
+.qc-director-turn-status article,
+.qc-director-turn-status dl {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+.qc-director-turn-status dt {
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+.qc-director-turn-status dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.68rem;
+}

@@ -1,3 +1,8 @@
+import type { components } from "../../shared/api/generated";
+
+export type DirectorTurnRead = components["schemas"]["DirectorTurnRead"];
+export type DirectorNextActionRead = components["schemas"]["DirectorNextActionRead"];
+
 export type DirectorInvocationEvidence = {
   turn_id: string;
   request_key: string;

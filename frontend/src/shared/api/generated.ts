@@ -3232,6 +3232,8 @@ export interface components {
             cost_status: string;
             /** Currency */
             currency: string;
+            /** Schema Repair Count */
+            schema_repair_count: number;
             /** Output Hash */
             output_hash: string | null;
             /** Output Snapshot */

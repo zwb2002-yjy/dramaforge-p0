@@ -104,6 +104,7 @@ def _seed_turn(factory: Any, *, workspace_id: str, project_id: str) -> DirectorT
                 dispatched_command_key="command:existing",
                 node_run_ids=[str(uuid4())],
                 step_count=1,
+                schema_repair_count=1,
             )
             session.add(turn)
             await session.commit()
@@ -128,6 +129,7 @@ def test_turn_read_list_stop_are_scoped_typed_and_revision_checked(
     assert [row["id"] for row in listed.json()] == [str(turn.id)]
     assert listed.json()[0]["model_resolution"]["model_id"] == "controlled-model"
     assert listed.json()[0]["node_run_ids"] == turn.node_run_ids
+    assert listed.json()[0]["schema_repair_count"] == 1
 
     read = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn.id}")
     assert read.status_code == 200
