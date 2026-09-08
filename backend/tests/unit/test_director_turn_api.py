@@ -1,0 +1,166 @@
+"""R4a typed DirectorTurn read/list/stop HTTP surface."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator, Iterator
+from typing import Any
+from uuid import UUID, uuid4
+
+import pytest
+from app.config import clear_settings_cache, get_settings
+from app.director.turn_models import DirectorTurn
+from app.main import create_app
+from app.shared.base import Base
+from app.shared.db import get_session
+from app.shared.security import CSRF_HEADER
+from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+
+@pytest.fixture
+def api() -> Iterator[tuple[TestClient, Any]]:
+    clear_settings_cache()
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def prepare() -> None:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+    asyncio.run(prepare())
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        async with factory() as session:
+            yield session
+
+    app = create_app(get_settings())
+    app.dependency_overrides[get_session] = override_session
+    with TestClient(app) as client:
+        yield client, factory
+    app.dependency_overrides.clear()
+    asyncio.run(engine.dispose())
+
+
+def _csrf(client: TestClient) -> str:
+    return str(client.get("/api/v1/auth/csrf").json()["csrf_token"])
+
+
+def _register(client: TestClient) -> str:
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": f"turn-api-{uuid4().hex}@example.com",
+            "password": "password123",
+            "display_name": "Turn API owner",
+        },
+    )
+    assert response.status_code in {200, 201}, response.text
+    workspace_id = str(client.get("/api/v1/workspaces").json()[0]["id"])
+    client.headers["X-Workspace-Id"] = workspace_id
+    return workspace_id
+
+
+def _project(client: TestClient, workspace_id: str, name: str) -> str:
+    response = client.post(
+        "/api/v1/projects",
+        headers={CSRF_HEADER: _csrf(client)},
+        json={"name": name, "aspect_ratio": "9:16", "workspace_id": workspace_id},
+    )
+    assert response.status_code in {200, 201}, response.text
+    return str(response.json()["id"])
+
+
+def _run(coro: Any) -> Any:
+    return asyncio.run(coro)
+
+
+def _seed_turn(factory: Any, *, workspace_id: str, project_id: str) -> DirectorTurn:
+    async def seed() -> DirectorTurn:
+        from app.access.models import Workspace
+
+        async with factory() as session:
+            workspace = await session.get(Workspace, UUID(workspace_id))
+            assert workspace is not None
+            turn = DirectorTurn(
+                workspace_id=workspace.id,
+                project_id=UUID(project_id),
+                actor_id=workspace.owner_user_id,
+                scope_type="shot",
+                scope_entity_id=uuid4(),
+                request_key=f"turn-api:{uuid4().hex}",
+                context_hash="a" * 64,
+                input_versions={"shot": 3},
+                intent_snapshot={"goal": "inspect"},
+                model_resolution={"model_id": "controlled-model"},
+                transport_status="succeeded",
+                output_hash="b" * 64,
+                output_snapshot={"summary": "safe result"},
+                status="awaiting_user",
+                wait_reason="proposal_decision",
+                proposal_id=None,
+                dispatched_command_key="command:existing",
+                node_run_ids=[str(uuid4())],
+                step_count=1,
+            )
+            session.add(turn)
+            await session.commit()
+            await session.refresh(turn)
+            session.expunge(turn)
+            return turn
+
+    return _run(seed())
+
+
+def test_turn_read_list_stop_are_scoped_typed_and_revision_checked(
+    api: tuple[TestClient, Any],
+) -> None:
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _project(client, workspace_id, "Turn project")
+    other_project_id = _project(client, workspace_id, "Other project")
+    turn = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+
+    listed = client.get(f"/api/v1/projects/{project_id}/director/turns")
+    assert listed.status_code == 200, listed.text
+    assert [row["id"] for row in listed.json()] == [str(turn.id)]
+    assert listed.json()[0]["model_resolution"]["model_id"] == "controlled-model"
+    assert listed.json()[0]["node_run_ids"] == turn.node_run_ids
+
+    read = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn.id}")
+    assert read.status_code == 200
+    assert read.json()["status"] == "awaiting_user"
+    assert read.json()["output_snapshot"] == {"summary": "safe result"}
+    cross_project = client.get(
+        f"/api/v1/projects/{other_project_id}/director/turns/{turn.id}"
+    )
+    assert cross_project.status_code == 404
+
+    stop_url = f"/api/v1/projects/{project_id}/director/turns/{turn.id}/stop"
+    no_csrf = client.post(stop_url, json={"expected_revision": turn.revision})
+    assert no_csrf.status_code == 403
+    stopped = client.post(
+        stop_url,
+        headers={CSRF_HEADER: _csrf(client)},
+        json={"expected_revision": turn.revision},
+    )
+    assert stopped.status_code == 200, stopped.text
+    assert stopped.json()["status"] == "cancelled"
+    assert stopped.json()["wait_reason"] == "user_stopped"
+    assert stopped.json()["dispatched_command_key"] == "command:existing"
+
+    stale_revision = client.post(
+        stop_url,
+        headers={CSRF_HEADER: _csrf(client)},
+        json={"expected_revision": turn.revision},
+    )
+    assert stale_revision.status_code == 409
+    assert stale_revision.json()["details"]["code"] == "DIRECTOR_TURN_REVISION_CONFLICT"
+    extra_field = client.post(
+        stop_url,
+        headers={CSRF_HEADER: _csrf(client)},
+        json={"expected_revision": stopped.json()["revision"], "execute": True},
+    )
+    assert extra_field.status_code == 422

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Shot
+from app.director.turn_service import DirectorTurnService
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 
@@ -67,5 +68,11 @@ class ShotDesignService:
             shot.video_prompt = video_prompt
         shot.version += 1
         shot.updated_at = datetime.now(UTC)
+        await DirectorTurnService(self._session).mark_scope_stale(
+            project_id=project_id,
+            scope_type="shot",
+            scope_entity_id=shot.id,
+            reason=f"Shot design was saved at version {shot.version} by the user.",
+        )
         await self._session.flush()
         return shot

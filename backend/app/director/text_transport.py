@@ -11,11 +11,11 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.director.turn_models import DirectorTurn
+from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
 from app.providers.capabilities import Capability
 from app.providers.contracts.common import ExecutionContext, GenerationStatus, ProviderCreateResult
 from app.providers.contracts.text import TextGenerateRequest, TextMessage
@@ -143,6 +143,17 @@ def _reported_cost(attempts: list[dict[str, object]]) -> tuple[Decimal | None, s
     return sum(costs, start=Decimal("0")), "reported"
 
 
+def _evidence_reported_cost(turn: DirectorTurn) -> str | None:
+    raw_attempts = (turn.response_summary or {}).get("attempts")
+    attempts = [dict(item) for item in raw_attempts if isinstance(item, dict)] if isinstance(
+        raw_attempts, list
+    ) else []
+    amount, status = _reported_cost(attempts)
+    if status == "reported" and amount is not None:
+        return str(amount)
+    return str(turn.provider_cost) if turn.provider_cost is not None else None
+
+
 class DirectorTextTransport:
     """Resolve one profile model, dispatch at most twice, and persist the turn."""
 
@@ -153,6 +164,7 @@ class DirectorTextTransport:
         registry: ModelRegistry | None = None,
     ) -> None:
         self._session = session
+        self._turns = DirectorTurnService(session)
         if registry is None:
             from app.providers.model_profiles.service import default_model_registry
 
@@ -185,19 +197,29 @@ class DirectorTextTransport:
             "intent": intent_snapshot,
             "context": context_payload,
         }
-        context_fingerprint = content_hash(context_snapshot)
-        existing = await self._session.scalar(
-            select(DirectorTurn).where(
-                DirectorTurn.project_id == project.id,
-                DirectorTurn.request_key == request_key,
-            )
+        turn, created = await self._turns.create_or_get(
+            project=project,
+            actor=actor,
+            scope_type=scope_type,
+            scope_entity_id=scope_entity_id,
+            request_key=request_key,
+            context_snapshot=context_snapshot,
+            input_versions=input_versions,
+            intent_snapshot=intent_snapshot,
+            max_steps=2,
         )
-        if existing is not None:
+        context_fingerprint = turn.context_hash
+        if not created:
             return self._restore_existing(
-                turn=existing,
+                turn=turn,
                 context_hash=context_fingerprint,
                 output_type=output_type,
             )
+        await self._turns.claim(
+            project_id=project.id,
+            turn_id=turn.id,
+            expected_revision=turn.revision,
+        )
 
         try:
             resolved = await ModelBindingResolver(self._session, self._registry).resolve(
@@ -221,26 +243,23 @@ class DirectorTextTransport:
                 "backend": _safe_json(backend) if isinstance(backend, dict) else {},
             }
         except Exception as exc:  # noqa: BLE001 - persist explicit resolution failure
-            turn = DirectorTurn(
-                workspace_id=project.workspace_id,
-                project_id=project.id,
-                actor_id=actor.id,
-                scope_type=scope_type,
-                scope_entity_id=scope_entity_id,
-                request_key=request_key,
-                context_hash=context_fingerprint,
-                input_versions=input_versions,
-                intent_snapshot=intent_snapshot,
-                model_resolution={"slot": str(slot), "error_code": _error_code(exc)},
-                transport_status="failed",
-                request_summary={"task": task_name, "context_hash": context_fingerprint},
-                response_summary={"error_code": _error_code(exc)},
-                status="failed",
-                wait_reason="model_unavailable",
-                step_count=1,
-                last_error=_bounded_error(exc),
+            await self._turns.compare_and_set(
+                turn=turn,
+                expected_statuses=("thinking",),
+                target_status="failed",
+                updates={
+                    "model_resolution": {"slot": str(slot), "error_code": _error_code(exc)},
+                    "transport_status": "failed",
+                    "request_summary": {
+                        "task": task_name,
+                        "context_hash": context_fingerprint,
+                        "max_steps": 2,
+                    },
+                    "response_summary": {"error_code": _error_code(exc)},
+                    "wait_reason": "model_unavailable",
+                    "last_error": _bounded_error(exc),
+                },
             )
-            self._session.add(turn)
             await self._commit_and_restore_scope(turn)
             raise ValidationAppError(
                 "Director text model is not configured or unavailable",
@@ -252,29 +271,23 @@ class DirectorTextTransport:
                 },
             ) from exc
 
-        turn = DirectorTurn(
-            workspace_id=project.workspace_id,
-            project_id=project.id,
-            actor_id=actor.id,
-            scope_type=scope_type,
-            scope_entity_id=scope_entity_id,
-            request_key=request_key,
-            context_hash=context_fingerprint,
-            input_versions=input_versions,
-            intent_snapshot=intent_snapshot,
-            model_resolution=model_resolution,
-            transport_status="submission_started",
-            request_summary={
-                "task": task_name,
-                "slot": str(slot),
-                "context_hash": context_fingerprint,
-                "schema": output_type.__name__,
+        await self._turns.compare_and_set(
+            turn=turn,
+            expected_statuses=("thinking",),
+            target_status="thinking",
+            updates={
+                "model_resolution": model_resolution,
+                "transport_status": "submission_started",
+                "request_summary": {
+                    "task": task_name,
+                    "slot": str(slot),
+                    "context_hash": context_fingerprint,
+                    "schema": output_type.__name__,
+                    "max_steps": 2,
+                },
+                "wait_reason": "text_model",
             },
-            status="thinking",
-            wait_reason="text_model",
-            step_count=1,
         )
-        self._session.add(turn)
         await self._commit_and_restore_scope(turn)
 
         schema = output_type.model_json_schema(mode="validation")
@@ -303,6 +316,7 @@ class DirectorTextTransport:
             native_options=dict(resolved.native_options),
         )
         attempts: list[dict[str, object]] = []
+        schema_repair_count = 0
         try:
             first = await self._dispatch(
                 request=primary_request,
@@ -316,7 +330,7 @@ class DirectorTextTransport:
             try:
                 value = _parse_output(first_text, output_type)
             except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as first_error:
-                turn.schema_repair_count = 1
+                schema_repair_count = 1
                 repair_request = TextGenerateRequest(
                     messages=[
                         TextMessage(
@@ -360,7 +374,12 @@ class DirectorTextTransport:
                         details={"code": "INVALID_DIRECTOR_TEXT_OUTPUT", "manual_ok": True},
                     ) from exc
         except Exception as exc:  # noqa: BLE001 - turn evidence must survive every failure
-            await self._fail_turn(turn=turn, attempts=attempts, exc=exc)
+            await self._fail_turn(
+                turn=turn,
+                attempts=attempts,
+                exc=exc,
+                schema_repair_count=schema_repair_count,
+            )
             code = _error_code(exc)
             if isinstance(exc, ValidationAppError) and code in {
                 "DIRECTOR_TEXT_CALL_FAILED",
@@ -408,20 +427,52 @@ class DirectorTextTransport:
             ),
             None,
         )
-        turn.transport_record_id = request_id
-        turn.transport_status = "succeeded"
-        turn.response_summary = {
+        evidence_patch: dict[str, object] = {
+            "transport_record_id": request_id,
+            "transport_status": "succeeded",
+            "response_summary": {
+                "output_hash": output_fingerprint,
+                "actual_model": actual_model,
+                "attempts": attempts,
+            },
+            "token_usage": _aggregate_usage(attempts),
+            "provider_cost": provider_cost,
+            "cost_status": cost_status,
             "output_hash": output_fingerprint,
-            "actual_model": actual_model,
-            "attempts": attempts,
+            "output_snapshot": output_snapshot,
+            "schema_repair_count": schema_repair_count,
+            "wait_reason": "version_recheck",
         }
-        turn.token_usage = _aggregate_usage(attempts)
-        turn.provider_cost = provider_cost
-        turn.cost_status = cost_status
-        turn.output_hash = output_fingerprint
-        turn.output_snapshot = output_snapshot
-        turn.wait_reason = "version_recheck"
-        turn.revision += 1
+        try:
+            await self._turns.compare_and_set(
+                turn=turn,
+                expected_statuses=("thinking",),
+                target_status="thinking",
+                updates=evidence_patch,
+            )
+        except ConflictError:
+            # A concurrent user stop/manual edit wins the decision state, but
+            # the already-returned model evidence is still recorded without
+            # reviving the turn or applying its output.
+            if turn.status not in {"cancelled", "stale"}:
+                raise
+            terminal_status = turn.status
+            evidence_patch.pop("wait_reason", None)
+            await self._turns.compare_and_set(
+                turn=turn,
+                expected_statuses=(terminal_status,),
+                target_status=terminal_status,
+                updates=evidence_patch,
+            )
+            await self._commit_and_restore_scope(turn)
+            raise ConflictError(
+                "Director turn stopped while the text model was running",
+                details={
+                    "code": "DIRECTOR_TURN_STOPPED",
+                    "turn_id": str(turn.id),
+                    "status": terminal_status,
+                },
+            ) from None
         await self._commit_and_restore_scope(turn)
         evidence = self._evidence(turn)
         return StructuredDirectorTextResult(value=value, turn=turn, evidence=evidence)
@@ -432,18 +483,32 @@ class DirectorTextTransport:
         *,
         proposal_id: UUID | None = None,
     ) -> None:
+        if turn.status == "awaiting_user" and (
+            proposal_id is None or proposal_id == turn.proposal_id
+        ):
+            return
+        updates: dict[str, object] = {"wait_reason": "proposal_decision"}
         if proposal_id is not None:
-            turn.proposal_id = proposal_id
-        turn.status = "awaiting_user"
-        turn.wait_reason = "proposal_decision"
-        turn.revision += 1
+            updates["proposal_id"] = proposal_id
+        await self._turns.compare_and_set(
+            turn=turn,
+            expected_statuses=("thinking",),
+            target_status="awaiting_user",
+            updates=updates,
+        )
         await self._commit_and_restore_scope(turn)
 
     async def mark_stale(self, turn: DirectorTurn, *, reason: str) -> None:
-        turn.status = "stale"
-        turn.wait_reason = "context_changed"
-        turn.last_error = reason[:2000]
-        turn.revision += 1
+        if turn.status == "stale":
+            return
+        if turn.status not in ACTIVE_TURN_STATUSES:
+            return
+        await self._turns.compare_and_set(
+            turn=turn,
+            expected_statuses=tuple(ACTIVE_TURN_STATUSES),
+            target_status="stale",
+            updates={"wait_reason": "context_changed", "last_error": reason},
+        )
         await self._commit_and_restore_scope(turn)
 
     async def mark_failed(
@@ -453,10 +518,14 @@ class DirectorTextTransport:
         reason: str,
         wait_reason: str = "output_invalid",
     ) -> None:
-        turn.status = "failed"
-        turn.wait_reason = wait_reason
-        turn.last_error = reason[:2000]
-        turn.revision += 1
+        if turn.status not in ACTIVE_TURN_STATUSES:
+            return
+        await self._turns.compare_and_set(
+            turn=turn,
+            expected_statuses=tuple(ACTIVE_TURN_STATUSES),
+            target_status="failed",
+            updates={"wait_reason": wait_reason, "last_error": reason},
+        )
         await self._commit_and_restore_scope(turn)
 
     async def _dispatch(
@@ -556,26 +625,45 @@ class DirectorTextTransport:
         turn: DirectorTurn,
         attempts: list[dict[str, object]],
         exc: Exception,
+        schema_repair_count: int,
     ) -> None:
         provider_cost, cost_status = _reported_cost(attempts)
-        turn.transport_status = (
+        transport_status = (
             "unknown_submission" if _error_code(exc) == "DIRECTOR_TEXT_CALL_UNKNOWN" else "failed"
         )
-        turn.response_summary = {
-            "error_code": _error_code(exc),
-            "attempts": attempts,
+        evidence_patch: dict[str, object] = {
+            "transport_status": transport_status,
+            "response_summary": {
+                "error_code": _error_code(exc),
+                "attempts": attempts,
+            },
+            "token_usage": _aggregate_usage(attempts),
+            "provider_cost": provider_cost,
+            "cost_status": cost_status,
+            "schema_repair_count": schema_repair_count,
         }
-        turn.token_usage = _aggregate_usage(attempts)
-        turn.provider_cost = provider_cost
-        turn.cost_status = cost_status
-        turn.status = "failed"
-        turn.wait_reason = (
-            "model_result_unknown"
-            if turn.transport_status == "unknown_submission"
-            else "model_failed"
-        )
-        turn.last_error = _bounded_error(exc)
-        turn.revision += 1
+        if turn.status in {"cancelled", "stale"}:
+            await self._turns.compare_and_set(
+                turn=turn,
+                expected_statuses=(turn.status,),
+                target_status=turn.status,
+                updates=evidence_patch,
+            )
+        else:
+            await self._turns.compare_and_set(
+                turn=turn,
+                expected_statuses=("thinking",),
+                target_status="failed",
+                updates={
+                    **evidence_patch,
+                    "wait_reason": (
+                        "model_result_unknown"
+                        if transport_status == "unknown_submission"
+                        else "model_failed"
+                    ),
+                    "last_error": _bounded_error(exc),
+                },
+            )
         await self._commit_and_restore_scope(turn)
 
     def _restore_existing[OutputT: BaseModel](
@@ -632,7 +720,7 @@ class DirectorTextTransport:
             model_binding_ref=str(resolution["model_binding_ref"]),
             actual_model=str(actual_model) if actual_model else None,
             token_usage=dict(turn.token_usage or {}),
-            reported_cost=str(turn.provider_cost) if turn.provider_cost is not None else None,
+            reported_cost=_evidence_reported_cost(turn),
             cost_status=turn.cost_status,  # type: ignore[arg-type]
             currency=turn.currency,
             schema_repair_count=turn.schema_repair_count,

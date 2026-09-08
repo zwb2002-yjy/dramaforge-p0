@@ -105,6 +105,51 @@ async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
             await NodeRunScheduler(session).enqueue_node_run_only(node_run_id)
 
 
+async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, int]:
+    """Fail-stop stale text submissions and expired turns after restart.
+
+    This recovery path only reads/updates DirectorTurn coordination facts. It
+    never invokes a text model, creates a NodeRun, or submits media.
+    """
+
+    from app.director.turn_service import DirectorTurnService
+    from app.shared.db import (
+        list_recoverable_director_turn_rls_scopes,
+        set_rls_context,
+    )
+
+    _ = ctx
+    factory = get_session_factory()
+    recovered = 0
+    unchanged = 0
+    async with factory() as session:
+        candidates = await list_recoverable_director_turn_rls_scopes(session, limit=50)
+        for turn_id, scope in candidates:
+            await set_rls_context(
+                session,
+                user_id=scope.user_id,
+                workspace_id=scope.workspace_id,
+                project_id=scope.project_id,
+            )
+            try:
+                service = DirectorTurnService(session)
+                before = await service.get(project_id=scope.project_id, turn_id=turn_id)
+                revision = before.revision
+                after = await service.recover_interrupted(
+                    project_id=scope.project_id,
+                    turn_id=turn_id,
+                )
+                if after.revision != revision:
+                    recovered += 1
+                else:
+                    unchanged += 1
+                await session.commit()
+            except Exception:  # noqa: BLE001 - one turn cannot block sibling recovery
+                await session.rollback()
+                logger.exception("Unable to recover DirectorTurn %s", turn_id)
+    return {"recovered": recovered, "unchanged": unchanged}
+
+
 async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, Any]:
     """Worker job: execute media NodeRun via product_path (Adapter OK here)."""
     from app.execution.composite_media import composite_inputs_pending
@@ -244,4 +289,9 @@ async def dispatch_outbox(ctx: dict[str, Any]) -> dict[str, Any]:
             await pub.close()
 
 
-JOB_FUNCTIONS = [health_ping, execute_node_run, dispatch_outbox]
+JOB_FUNCTIONS = [
+    health_ping,
+    execute_node_run,
+    dispatch_outbox,
+    recover_interrupted_director_turns,
+]

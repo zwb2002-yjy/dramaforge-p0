@@ -635,6 +635,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/director/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Director Turns */
+        get: operations["list_director_turns_api_v1_projects__project_id__director_turns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/turns/{turn_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Director Turn */
+        get: operations["get_director_turn_api_v1_projects__project_id__director_turns__turn_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/turns/{turn_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Director Turn */
+        post: operations["stop_director_turn_api_v1_projects__project_id__director_turns__turn_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/director-board": {
         parameters: {
             query?: never;
@@ -3009,6 +3060,116 @@ export interface components {
             expected_shot_version: number;
             /** Request Key */
             request_key: string;
+        };
+        /**
+         * DirectorTurnRead
+         * @description Secret-free durable Director coordination state.
+         */
+        DirectorTurnRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Actor Id
+             * Format: uuid
+             */
+            actor_id: string;
+            /** Scope Type */
+            scope_type: string;
+            /**
+             * Scope Entity Id
+             * Format: uuid
+             */
+            scope_entity_id: string;
+            /** Request Key */
+            request_key: string;
+            /** Context Hash */
+            context_hash: string;
+            /** Input Versions */
+            input_versions: {
+                [key: string]: unknown;
+            };
+            /** Intent Snapshot */
+            intent_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Model Resolution */
+            model_resolution: {
+                [key: string]: unknown;
+            };
+            /** Transport Record Id */
+            transport_record_id: string | null;
+            /** Transport Status */
+            transport_status: string;
+            /** Request Summary */
+            request_summary: {
+                [key: string]: unknown;
+            };
+            /** Response Summary */
+            response_summary: {
+                [key: string]: unknown;
+            };
+            /** Token Usage */
+            token_usage: {
+                [key: string]: unknown;
+            };
+            /** Reported Cost */
+            reported_cost: string | null;
+            /** Cost Status */
+            cost_status: string;
+            /** Currency */
+            currency: string;
+            /** Output Hash */
+            output_hash: string | null;
+            /** Output Snapshot */
+            output_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string;
+            /** Wait Reason */
+            wait_reason: string | null;
+            /** Revision */
+            revision: number;
+            /** Proposal Id */
+            proposal_id: string | null;
+            /** Dispatched Command Key */
+            dispatched_command_key: string | null;
+            /** Node Run Ids */
+            node_run_ids: unknown[];
+            /** Step Count */
+            step_count: number;
+            /** Deadline */
+            deadline: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** DirectorTurnStopBody */
+        DirectorTurnStopBody: {
+            /** Expected Revision */
+            expected_revision: number;
         };
         /** DispatchResponse */
         DispatchResponse: {
@@ -7797,6 +7958,128 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DirectorRecommendation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_director_turns_api_v1_projects__project_id__director_turns_get: {
+        parameters: {
+            query?: {
+                scope_type?: string | null;
+                scope_entity_id?: string | null;
+                limit?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorTurnRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_director_turn_api_v1_projects__project_id__director_turns__turn_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                turn_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorTurnRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_director_turn_api_v1_projects__project_id__director_turns__turn_id__stop_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                turn_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectorTurnStopBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorTurnRead"];
                 };
             };
             /** @description Validation Error */

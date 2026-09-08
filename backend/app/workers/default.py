@@ -5,7 +5,7 @@ from __future__ import annotations
 from arq.connections import RedisSettings
 
 from app.config import get_settings
-from app.workers.jobs import JOB_FUNCTIONS
+from app.workers.jobs import JOB_FUNCTIONS, recover_interrupted_director_turns
 
 
 def _redis_settings() -> RedisSettings:
@@ -17,6 +17,7 @@ class WorkerSettings:
     """Arq WorkerSettings for the default queue."""
 
     functions = JOB_FUNCTIONS
+    on_startup = recover_interrupted_director_turns
     redis_settings = _redis_settings()
     queue_name = get_settings().arq_default_queue_name
     max_jobs = 10
