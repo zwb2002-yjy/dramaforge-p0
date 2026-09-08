@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.director.next_action import DirectorNextActionRead, DirectorNextActionService
 from app.director.recommendation import (
     DirectorRecommendation,
     DirectorRecommendationRequest,
@@ -28,7 +29,7 @@ from app.director.suggestion import (
 )
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
-from app.shared.errors import ValidationAppError
+from app.shared.errors import ConflictError, ValidationAppError
 
 router = APIRouter(tags=["director"], dependencies=[Depends(require_selected_workspace)])
 
@@ -113,6 +114,13 @@ class DirectorTurnStopBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_revision: int = Field(ge=1)
+
+
+class DirectorTurnResumeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    event_key: str = Field(min_length=1, max_length=200)
 
 
 @router.post(
@@ -222,6 +230,37 @@ async def stop_director_turn(
     )
     await session.commit()
     return DirectorTurnRead.from_model(turn)
+
+
+@router.post(
+    "/projects/{project_id}/director/turns/{turn_id}/resume",
+    response_model=DirectorNextActionRead,
+)
+async def resume_director_turn(
+    project_id: UUID,
+    turn_id: UUID,
+    body: DirectorTurnResumeBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> DirectorNextActionRead:
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id,
+        actor=user,
+    )
+    try:
+        result = await DirectorNextActionService(session).reconcile(
+            project=project,
+            turn_id=turn_id,
+            event_key=body.event_key,
+            expected_revision=body.expected_revision,
+        )
+    except ConflictError as exc:
+        if exc.details.get("code") == "DIRECTOR_TURN_LIMIT_REACHED":
+            await session.commit()
+        raise
+    await session.commit()
+    return result
 
 
 __all__ = ["router", "suggest_shot_design"]

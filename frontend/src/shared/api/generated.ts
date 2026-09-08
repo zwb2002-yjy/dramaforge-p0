@@ -686,6 +686,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/director/turns/{turn_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Director Turn */
+        post: operations["resume_director_turn_api_v1_projects__project_id__director_turns__turn_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/director-board": {
         parameters: {
             query?: never;
@@ -2991,6 +3008,42 @@ export interface components {
             /** Schema Repair Count */
             schema_repair_count: number;
         };
+        /**
+         * DirectorNextAction
+         * @enum {string}
+         */
+        DirectorNextAction: "wait_for_execution" | "review_execution_failure" | "confirm_formal_candidate" | "review_production_result" | "review_proposal" | "review_accepted_changes" | "proposal_rejected" | "review_stale_proposal" | "review_suggestion" | "manual_no_advance" | "completed";
+        /** DirectorNextActionRead */
+        DirectorNextActionRead: {
+            /**
+             * Turn Id
+             * Format: uuid
+             */
+            turn_id: string;
+            action: components["schemas"]["DirectorNextAction"];
+            /** Requires Confirmation */
+            requires_confirmation: boolean;
+            /** Reason */
+            reason: string;
+            /** Autonomy */
+            autonomy: string;
+            /** Fact Hash */
+            fact_hash: string;
+            /** Event Key */
+            event_key: string;
+            /** Turn Status */
+            turn_status: string;
+            /** Turn Revision */
+            turn_revision: number;
+            /** Step Count */
+            step_count: number;
+            /** Node Run Ids */
+            node_run_ids?: string[];
+            /** Accepted Item Ids */
+            accepted_item_ids?: string[];
+            /** Rejected Item Ids */
+            rejected_item_ids?: string[];
+        };
         /** DirectorRecommendation */
         DirectorRecommendation: {
             /** Base Shot Version */
@@ -3165,6 +3218,13 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** DirectorTurnResumeBody */
+        DirectorTurnResumeBody: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Event Key */
+            event_key: string;
         };
         /** DirectorTurnStopBody */
         DirectorTurnStopBody: {
@@ -8080,6 +8140,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DirectorTurnRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_director_turn_api_v1_projects__project_id__director_turns__turn_id__resume_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                turn_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectorTurnResumeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorNextActionRead"];
                 };
             };
             /** @description Validation Error */

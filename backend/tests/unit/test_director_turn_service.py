@@ -295,7 +295,15 @@ async def test_stop_and_read_preserve_links_and_do_not_cancel_media(session: Asy
 
 def test_default_worker_registers_director_restart_recovery() -> None:
     from app.workers.default import WorkerSettings
-    from app.workers.jobs import JOB_FUNCTIONS, recover_interrupted_director_turns
+    from app.workers.jobs import (
+        JOB_FUNCTIONS,
+        reconcile_waiting_director_turns,
+        recover_interrupted_director_turns,
+    )
 
     assert recover_interrupted_director_turns in JOB_FUNCTIONS
+    assert reconcile_waiting_director_turns in JOB_FUNCTIONS
     assert WorkerSettings.on_startup is recover_interrupted_director_turns
+    assert [job.coroutine for job in WorkerSettings.cron_jobs] == [
+        reconcile_waiting_director_turns
+    ]

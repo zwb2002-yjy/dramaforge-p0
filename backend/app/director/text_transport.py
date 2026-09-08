@@ -206,7 +206,7 @@ class DirectorTextTransport:
             context_snapshot=context_snapshot,
             input_versions=input_versions,
             intent_snapshot=intent_snapshot,
-            max_steps=2,
+            max_steps=4,
         )
         context_fingerprint = turn.context_hash
         if not created:
@@ -253,7 +253,7 @@ class DirectorTextTransport:
                     "request_summary": {
                         "task": task_name,
                         "context_hash": context_fingerprint,
-                        "max_steps": 2,
+                        "max_steps": 4,
                     },
                     "response_summary": {"error_code": _error_code(exc)},
                     "wait_reason": "model_unavailable",
@@ -283,7 +283,7 @@ class DirectorTextTransport:
                     "slot": str(slot),
                     "context_hash": context_fingerprint,
                     "schema": output_type.__name__,
-                    "max_steps": 2,
+                    "max_steps": 4,
                 },
                 "wait_reason": "text_model",
             },

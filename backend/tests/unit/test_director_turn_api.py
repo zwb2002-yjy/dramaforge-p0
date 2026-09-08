@@ -164,3 +164,66 @@ def test_turn_read_list_stop_are_scoped_typed_and_revision_checked(
         json={"expected_revision": stopped.json()["revision"], "execute": True},
     )
     assert extra_field.status_code == 422
+
+
+def test_turn_resume_is_idempotent_and_reads_current_checkpoint(
+    api: tuple[TestClient, Any],
+) -> None:
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _project(client, workspace_id, "Resume project")
+    other_project_id = _project(client, workspace_id, "Resume other")
+    turn = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+    url = f"/api/v1/projects/{project_id}/director/turns/{turn.id}/resume"
+    body = {"expected_revision": turn.revision, "event_key": "resume:one"}
+
+    response = client.post(url, headers={CSRF_HEADER: _csrf(client)}, json=body)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["action"] == "review_suggestion"
+    assert result["requires_confirmation"] is True
+    assert result["step_count"] == turn.step_count + 1
+
+    duplicate = client.post(url, headers={CSRF_HEADER: _csrf(client)}, json=body)
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json() == result
+    same_facts = client.post(
+        url,
+        headers={CSRF_HEADER: _csrf(client)},
+        json={"expected_revision": turn.revision, "event_key": "resume:new-key"},
+    )
+    assert same_facts.status_code == 200, same_facts.text
+    assert same_facts.json() == result
+    cross = client.post(
+        f"/api/v1/projects/{other_project_id}/director/turns/{turn.id}/resume",
+        headers={CSRF_HEADER: _csrf(client)},
+        json=body,
+    )
+    assert cross.status_code == 404
+
+
+def test_resume_limit_failure_is_persisted_across_requests(api: tuple[TestClient, Any]) -> None:
+    from app.director.turn_models import DirectorTurn
+
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _project(client, workspace_id, "Bounded resume")
+    turn = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+
+    async def exhaust() -> None:
+        async with factory() as session:
+            row = await session.get(DirectorTurn, turn.id)
+            row.step_count = 4
+            await session.commit()
+
+    _run(exhaust())
+    url = f"/api/v1/projects/{project_id}/director/turns/{turn.id}"
+    response = client.post(
+        f"{url}/resume", headers={CSRF_HEADER: _csrf(client)},
+        json={"expected_revision": turn.revision, "event_key": "limit"},
+    )
+    assert response.status_code == 409, response.text
+    read = client.get(url)
+    assert read.status_code == 200
+    assert read.json()["status"] == "failed"
+    assert read.json()["wait_reason"] == "step_limit_reached"

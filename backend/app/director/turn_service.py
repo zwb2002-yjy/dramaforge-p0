@@ -33,8 +33,10 @@ _TRANSITIONS: dict[str, frozenset[str]] = {
     "thinking": frozenset(
         {"awaiting_user", "awaiting_execution", "completed", "failed", "cancelled", "stale"}
     ),
-    "awaiting_user": frozenset({"awaiting_execution", "completed", "cancelled", "stale"}),
-    "awaiting_execution": frozenset({"completed", "failed", "cancelled", "stale"}),
+    "awaiting_user": frozenset({"awaiting_execution", "completed", "failed", "cancelled", "stale"}),
+    "awaiting_execution": frozenset(
+        {"awaiting_user", "completed", "failed", "cancelled", "stale"}
+    ),
 }
 
 _PATCH_FIELDS = frozenset(
@@ -245,6 +247,8 @@ class DirectorTurnService:
         expected_statuses: Sequence[str],
         target_status: str,
         updates: Mapping[str, object] | None = None,
+        increment_step: bool = False,
+        now: datetime | None = None,
     ) -> DirectorTurn:
         if target_status != turn.status and target_status not in _TRANSITIONS.get(
             turn.status, frozenset()
@@ -264,21 +268,29 @@ class DirectorTurnService:
             patch["last_error"] = _bounded(
                 str(patch["last_error"]) if patch["last_error"] is not None else None
             )
+        ts = now or datetime.now(UTC)
+        if increment_step:
+            await self.enforce_limits(turn, now=ts)
         expected_revision = turn.revision
+        statement = update(DirectorTurn).where(
+            DirectorTurn.id == turn.id,
+            DirectorTurn.project_id == turn.project_id,
+            DirectorTurn.revision == expected_revision,
+            DirectorTurn.status.in_(tuple(expected_statuses)),
+        )
+        values: dict[str, object] = {
+            **patch,
+            "status": target_status,
+            "revision": DirectorTurn.revision + 1,
+        }
+        if increment_step:
+            statement = statement.where(
+                DirectorTurn.step_count < self._max_steps(turn),
+                or_(DirectorTurn.deadline.is_(None), DirectorTurn.deadline > ts),
+            )
+            values["step_count"] = DirectorTurn.step_count + 1
         changed = await self._session.scalar(
-            update(DirectorTurn)
-            .where(
-                DirectorTurn.id == turn.id,
-                DirectorTurn.project_id == turn.project_id,
-                DirectorTurn.revision == expected_revision,
-                DirectorTurn.status.in_(tuple(expected_statuses)),
-            )
-            .values(
-                **patch,
-                status=target_status,
-                revision=DirectorTurn.revision + 1,
-            )
-            .returning(DirectorTurn.id)
+            statement.values(**values).returning(DirectorTurn.id)
         )
         if changed is None:
             await self._session.refresh(turn)
@@ -382,6 +394,24 @@ class DirectorTurnService:
                 },
             )
         return turn
+
+    async def enforce_limits(
+        self, turn: DirectorTurn, *, now: datetime | None = None, advancing: bool = True
+    ) -> None:
+        """Fail stopped turns durably in the caller transaction, even on replay."""
+        reason = (
+            "deadline_exceeded"
+            if _deadline_passed(turn.deadline, now or datetime.now(UTC))
+            else "step_limit_reached"
+            if advancing and turn.step_count >= self._max_steps(turn)
+            else None
+        )
+        if reason is not None:
+            await self._fail_limit(turn, reason=reason)
+            raise ConflictError(
+                "Director turn reached its finite limit",
+                details={"code": "DIRECTOR_TURN_LIMIT_REACHED", "wait_reason": reason},
+            )
 
     async def _fail_limit(self, turn: DirectorTurn, *, reason: str) -> None:
         if turn.status not in ACTIVE_TURN_STATUSES:

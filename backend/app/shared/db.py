@@ -521,6 +521,79 @@ async def list_recoverable_director_turn_rls_scopes(
     return scopes
 
 
+async def list_reconcilable_director_turn_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    after_turn_id: UUID | None = None,
+) -> list[tuple[UUID, DirectorTurnRlsScope]]:
+    """Find turns whose current Proposal/NodeRun facts may advance a checkpoint."""
+
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT turn_id, owner_user_id, workspace_id, project_id
+                FROM app.reconcilable_director_turn_contexts(:limit, :after_turn_id)
+                """
+            ),
+            {"limit": limit, "after_turn_id": after_turn_id},
+        )
+        return [
+            (
+                row["turn_id"],
+                DirectorTurnRlsScope(
+                    user_id=row["owner_user_id"],
+                    workspace_id=row["workspace_id"],
+                    project_id=row["project_id"],
+                ),
+            )
+            for row in result.mappings().all()
+        ]
+
+    from app.access.models import Project, Workspace
+    from app.director.turn_models import DirectorTurn
+
+    rows = await session.execute(
+        select(DirectorTurn.id, DirectorTurn.project_id)
+        .where(
+            or_(
+                DirectorTurn.status == "awaiting_execution",
+                (DirectorTurn.status == "awaiting_user")
+                & DirectorTurn.proposal_id.is_not(None),
+            )
+        )
+        .where(
+            DirectorTurn.id > after_turn_id
+            if after_turn_id is not None
+            else DirectorTurn.id.is_not(None)
+        )
+        .order_by(DirectorTurn.id)
+        .limit(limit)
+    )
+    scopes: list[tuple[UUID, DirectorTurnRlsScope]] = []
+    for turn_id, project_id in rows.tuples().all():
+        project = await session.get(Project, project_id)
+        if project is None:
+            continue
+        workspace = await session.get(Workspace, project.workspace_id)
+        if workspace is None:
+            continue
+        scopes.append(
+            (
+                turn_id,
+                DirectorTurnRlsScope(
+                    user_id=workspace.owner_user_id,
+                    workspace_id=workspace.id,
+                    project_id=project.id,
+                ),
+            )
+        )
+    return scopes
+
+
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that yields a request-scoped session (no RLS until set)."""
     factory = get_session_factory()

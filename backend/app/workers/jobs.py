@@ -118,7 +118,9 @@ async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, i
         set_rls_context,
     )
 
-    _ = ctx
+    # ARQ shallow-copies its context per job; initialize shared sweep state at
+    # startup so cursor updates survive across cron invocations in this worker.
+    ctx.setdefault("director_scan_state", {"cursor": None})
     factory = get_session_factory()
     recovered = 0
     unchanged = 0
@@ -148,6 +150,71 @@ async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, i
                 await session.rollback()
                 logger.exception("Unable to recover DirectorTurn %s", turn_id)
     return {"recovered": recovered, "unchanged": unchanged}
+
+
+async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int]:
+    """Low-rate, browser-independent next-checkpoint reconciliation."""
+
+    from app.access.models import Project
+    from app.director.next_action import DirectorNextActionService
+    from app.director.turn_service import DirectorTurnService
+    from app.shared.db import (
+        list_reconcilable_director_turn_rls_scopes,
+        set_rls_context,
+    )
+    from app.shared.errors import ConflictError
+
+    factory = get_session_factory()
+    reconciled = 0
+    unchanged = 0
+    failed = 0
+    async with factory() as session:
+        scan_state = ctx.setdefault("director_scan_state", {"cursor": None})
+        cursor = scan_state["cursor"]
+        candidates = await list_reconcilable_director_turn_rls_scopes(
+            session, limit=50, after_turn_id=UUID(cursor) if cursor else None
+        )
+        # Stable keyset pagination advances past unchanged or invalid turns.
+        # Restart begins a new sweep; reconciliation itself is idempotent.
+        scan_state["cursor"] = str(candidates[-1][0]) if candidates else None
+        for turn_id, scope in candidates:
+            await set_rls_context(
+                session,
+                user_id=scope.user_id,
+                workspace_id=scope.workspace_id,
+                project_id=scope.project_id,
+            )
+            try:
+                project = await session.get(Project, scope.project_id)
+                if project is None:
+                    failed += 1
+                    await session.rollback()
+                    continue
+                turn = await DirectorTurnService(session).get(
+                    project_id=project.id,
+                    turn_id=turn_id,
+                )
+                revision = turn.revision
+                result = await DirectorNextActionService(session).reconcile(
+                    project=project,
+                    turn_id=turn_id,
+                )
+                if result.turn_revision != revision:
+                    reconciled += 1
+                else:
+                    unchanged += 1
+                await session.commit()
+            except ConflictError as exc:
+                failed += 1
+                if exc.details.get("code") == "DIRECTOR_TURN_LIMIT_REACHED":
+                    await session.commit()
+                else:
+                    await session.rollback()
+            except Exception:  # noqa: BLE001 - one turn cannot block sibling reconciliation
+                failed += 1
+                await session.rollback()
+                logger.exception("Unable to reconcile DirectorTurn %s", turn_id)
+    return {"reconciled": reconciled, "unchanged": unchanged, "failed": failed}
 
 
 async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, Any]:
@@ -294,4 +361,5 @@ JOB_FUNCTIONS = [
     execute_node_run,
     dispatch_outbox,
     recover_interrupted_director_turns,
+    reconcile_waiting_director_turns,
 ]

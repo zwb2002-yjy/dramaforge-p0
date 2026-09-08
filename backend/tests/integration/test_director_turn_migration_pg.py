@@ -99,7 +99,7 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
         ids = {key: uuid.uuid4() for key in ("user", "workspace", "project", "scope")}
         with engine.begin() as connection:
             head = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head == "20260908_0057"
+            assert head == "20260908_0058"
             columns = {
                 row[0]
                 for row in connection.execute(
@@ -145,6 +145,13 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
                 )
             ).scalar_one()
             assert recovery_function is not None
+            waiting_function = connection.execute(
+                text(
+                    "SELECT to_regprocedure("
+                    "'app.reconcilable_director_turn_contexts(integer,uuid)')"
+                )
+            ).scalar_one()
+            assert waiting_function is not None
             connection.execute(
                 text(
                     "INSERT INTO users (id,email,display_name,password_hash) "
