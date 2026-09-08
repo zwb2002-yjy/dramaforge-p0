@@ -116,3 +116,9 @@
   of the context, rather than incorrectly assuming one mutable top-level object.
 - These results are development prechecks, not R7 real Provider Golden or R8
   Release Candidate evidence. Final immutable-source checks follow the commit.
+
+- Final focused replay precheck: 22 unit tests passed, including read-only replay
+  of the last allowed step. Only a new decision consumes the step budget; an
+  expired deadline still stops a repeated scan. The first source commit is
+  `ac521d2`; a trailing blank line identified by diff-check is removed before
+  the immutable-source candidate is assembled.

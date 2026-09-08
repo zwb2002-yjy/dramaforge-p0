@@ -54,4 +54,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS app.reconcilable_director_turn_contexts(integer,uuid)")
-
