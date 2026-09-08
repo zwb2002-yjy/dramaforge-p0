@@ -2,7 +2,7 @@
 
 **Task:** `v1-r5-runtime-recovery-matrix-20260908`\
 **Parent:** G7E / Runtime / R4\
-**Status:** IN PROGRESS\
+**Status:** IMPLEMENTED / VERIFIED (formal ledger registration unresolved)\
 **Baseline:** `dev@8d17a67`
 
 ## Authority and current evidence
@@ -131,3 +131,15 @@ one real configured remote task and the cross-provider Golden.
   of asserting that the entire database contains only its fixture. No runtime
   condition or expectation of per-run idempotency was relaxed; other durable
   test rows and evidence are retained.
+
+## Final committed-candidate result
+
+Clean immutable source `f4986f0` passed backend unit 979, PostgreSQL integration
+41, frontend unit 150, Playwright 19, Ruff, MyPy (242 source files), directory/
+canonical checks, migration upgrade/drift and generated API/frontend build.
+Exact source/image hashes and 18 machine-readable fault cases are recorded in
+`tmp/r5-quality-contract/result-f4986f0.json`; full logs and JUnit are alongside.
+The warnings visible in those logs are retained, not converted into a claim of
+warning-free runtime or real-provider acceptance. No paid Provider was called.
+R6 must additionally prove zero new media requests for subtitle/timeline-only
+rerender; the real configured remote task and final candidate Golden remain R7/R8.
