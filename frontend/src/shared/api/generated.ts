@@ -1244,6 +1244,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/story/proposals/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Project Story Proposal
+         * @description Generate one script draft and persist only its reviewable typed proposal.
+         */
+        post: operations["generate_project_story_proposal_api_v1_projects__project_id__story_proposals_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/story/proposals/{proposal_id}": {
         parameters: {
             query?: never;
@@ -3763,6 +3783,13 @@ export interface components {
             /** Template Key */
             template_key: string;
         };
+        /** GeneratedStoryProposalRead */
+        GeneratedStoryProposalRead: {
+            proposal: components["schemas"]["StoryProposalRead"];
+            /** Draft Text */
+            draft_text: string;
+            director_evidence: components["schemas"]["DirectorInvocationEvidence"];
+        };
         /** GenerationCreateBody */
         GenerationCreateBody: {
             /** Capability */
@@ -5505,6 +5532,18 @@ export interface components {
             video_model_id?: string | null;
             /** Expected Version */
             expected_version?: number | null;
+        };
+        /** StoryGenerationRequest */
+        StoryGenerationRequest: {
+            /** Request Key */
+            request_key: string;
+            /** Brief */
+            brief: string;
+            /**
+             * Filename
+             * @default generated-story.md
+             */
+            filename: string;
         };
         /** StoryOperationRead */
         StoryOperationRead: {
@@ -9010,6 +9049,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoryProposalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_project_story_proposal_api_v1_projects__project_id__story_proposals_generate_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoryGenerationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeneratedStoryProposalRead"];
                 };
             };
             /** @description Validation Error */

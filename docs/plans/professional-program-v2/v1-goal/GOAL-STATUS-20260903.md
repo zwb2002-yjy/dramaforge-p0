@@ -34,7 +34,7 @@
 |---|---|---|
 | R0 基线校准与证据重算 | task-contracts/V1-R0-RECONCILIATION-20260907.md | COMPLETE |
 | R1 Scene 等待、草稿和阶段操作 | task-contracts/V1-R1-SCENE-WORKFLOW-20260907.md | COMPLETE |
-| R2 真实文本导演接通 | task-contracts/V1-R2A-SHOT-TEXT-DIRECTOR-20260907.md | R2a COMPLETE; R2b READY |
+| R2 真实文本导演接通 | task-contracts/V1-R2A-SHOT-TEXT-DIRECTOR-20260907.md + task-contracts/V1-R2B-STORY-TEXT-DIRECTOR-20260907.md | R2a–R2b COMPLETE; R2c READY |
 | R3 用户意图、Skills 与模型能力闭环 | pending bounded supplement | BLOCKED BY R2 |
 | R4 有限导演推进与恢复 | pending bounded supplement | BLOCKED BY R1–R3 |
 | R5 生产恢复与重试验收 | pending bounded supplement | READY FOR EVIDENCE; FINAL PASS AFTER R4 |

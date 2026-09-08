@@ -426,7 +426,14 @@ class DirectorTextTransport:
         evidence = self._evidence(turn)
         return StructuredDirectorTextResult(value=value, turn=turn, evidence=evidence)
 
-    async def mark_awaiting_user(self, turn: DirectorTurn) -> None:
+    async def mark_awaiting_user(
+        self,
+        turn: DirectorTurn,
+        *,
+        proposal_id: UUID | None = None,
+    ) -> None:
+        if proposal_id is not None:
+            turn.proposal_id = proposal_id
         turn.status = "awaiting_user"
         turn.wait_reason = "proposal_decision"
         turn.revision += 1

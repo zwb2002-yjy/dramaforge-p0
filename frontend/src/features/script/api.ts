@@ -7,6 +7,7 @@
  */
 
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import type { DirectorInvocationEvidence } from "../director/suggestion-types";
 
 export type SceneRead = {
   id: string;
@@ -71,6 +72,12 @@ export type PartialApplyResult = {
   failed: Array<{ item_id?: string; error?: string }>;
 };
 
+export type GeneratedStoryProposalRead = {
+  proposal: StoryProposalRead;
+  draft_text: string;
+  director_evidence: DirectorInvocationEvidence;
+};
+
 export async function createStoryProposal(
   projectId: string,
   input: { idempotency_key: string; brief: string; filename: string; draft_text: string },
@@ -86,6 +93,19 @@ export async function createStoryProposal(
 
 export async function listStoryProposals(projectId: string): Promise<StoryProposalRead[]> {
   return apiGet<StoryProposalRead[]>(`/api/v1/projects/${projectId}/story/proposals`);
+}
+
+export async function generateStoryProposal(
+  projectId: string,
+  input: { request_key: string; brief: string; filename: string },
+): Promise<GeneratedStoryProposalRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<GeneratedStoryProposalRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/story/proposals/generate`,
+    input,
+    csrf,
+  );
 }
 
 export async function applyStoryProposal(

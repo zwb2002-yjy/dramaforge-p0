@@ -78,6 +78,7 @@ async function installStoryMock(page: Page) {
     sessionStorage.setItem("dramaforge.selected-workspace-id", workspaceId);
   }, "workspace-story");
   let acceptedEpisodeOnly = false;
+  let generationBody: Record<string, unknown> | null = null;
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -87,6 +88,47 @@ async function installStoryMock(page: Page) {
     if (path === "/api/v1/auth/csrf") return json(route, { csrf_token: "csrf-e2e" });
     if (path === `/api/v1/projects/${PROJECT_ID}/script`) {
       return json(route, scriptWorkspace(acceptedEpisodeOnly));
+    }
+    if (path === `/api/v1/projects/${PROJECT_ID}/story/proposals/generate` && method === "POST") {
+      generationBody = request.postDataJSON();
+      if (
+        generationBody?.brief !== "雨夜车站的克制告别" ||
+        typeof generationBody?.request_key !== "string" ||
+        "draft_text" in generationBody
+      ) {
+        return json(route, { code: "VALIDATION_ERROR", detail: "invalid brief request" }, 422);
+      }
+      return json(
+        route,
+        {
+          proposal: {
+            id: "proposal-story",
+            project_id: PROJECT_ID,
+            status: "pending",
+            summary: "Generated Story proposal",
+            created_at: "2026-09-08T00:00:00Z",
+            operations: proposalOperations(),
+          },
+          draft_text: DRAFT,
+          director_evidence: {
+            turn_id: "77777777-7777-4777-8777-777777777777",
+            request_key: generationBody.request_key,
+            context_hash: "c".repeat(64),
+            output_hash: "d".repeat(64),
+            slot: "planning.script",
+            model_id: "litellm/script-quality",
+            model_binding_ref: "production-model-profile:e2e@2:planning.script",
+            actual_model: "upstream/story-e2e",
+            transport_status: "succeeded",
+            token_usage: { total_tokens: 88 },
+            reported_cost: "0.005",
+            cost_status: "reported",
+            currency: "USD",
+            schema_repair_count: 0,
+          },
+        },
+        201,
+      );
     }
     if (path === `/api/v1/projects/${PROJECT_ID}/story/proposals` && method === "POST") {
       const body = request.postDataJSON();
@@ -125,6 +167,9 @@ async function installStoryMock(page: Page) {
     }
     return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
   });
+  return {
+    generationBody: () => generationBody,
+  };
 }
 
 test("Story proposal: create typed diff, partial accept only the episode", async ({ page }) => {
@@ -149,4 +194,29 @@ test("Story proposal: create typed diff, partial accept only the episode", async
   await expect(page.getByRole("status")).toContainText("Story 更新完成");
   await expect(page.getByTestId("script-episodes")).toContainText("双人冲突");
   await expect(page.getByTestId("script-episodes")).not.toContainText("咖啡厅");
+});
+
+test("Story proposal: a brief generates an audited draft and reject-all keeps Story empty", async ({
+  page,
+}) => {
+  const state = await installStoryMock(page);
+  await page.goto(`/projects/${PROJECT_ID}/script`);
+  await expect(page.getByTestId("script-empty")).toBeVisible();
+  await page.getByLabel("故事方向").fill("雨夜车站的克制告别");
+  await page.getByTestId("story-proposal-generate").click();
+
+  await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
+  await expect(page.getByLabel("剧本文本")).toHaveValue(DRAFT);
+  await expect(page.getByTestId("story-generation-evidence")).toContainText("upstream/story-e2e");
+  await expect(page.getByTestId("story-generation-evidence")).toContainText("77777777");
+  expect(state.generationBody()).toEqual({
+    request_key: expect.stringMatching(/^story-generation:[0-9a-f-]{36}$/),
+    brief: "雨夜车站的克制告别",
+    filename: "story-draft.md",
+  });
+
+  await page.getByTestId("story-proposal-reject-all").click();
+  await expect(page.getByRole("status")).toContainText("拒绝 3");
+  await expect(page.getByTestId("script-empty")).toBeVisible();
+  await expect(page.getByTestId("script-episodes")).toHaveCount(0);
 });
