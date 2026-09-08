@@ -123,3 +123,11 @@ one real configured remote task and the cross-provider Golden.
 - First immutable candidate `9c94ab3` exposed the missing generated CSRF header/
   cookie schema on the cancellation route. The generated client is updated, not
   the consistency gate weakened; final candidate images/gates will be rebound.
+
+- Repeated exact-source checks exposed a pre-existing test isolation assumption:
+  the global restart resolver can correctly enqueue more than one eligible row
+  in the shared isolated quality database. The PG restart assertion now proves
+  its own run is scheduled exactly once and every returned id is unique, instead
+  of asserting that the entire database contains only its fixture. No runtime
+  condition or expectation of per-run idempotency was relaxed; other durable
+  test rows and evidence are retained.
