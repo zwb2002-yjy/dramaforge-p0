@@ -125,11 +125,64 @@ def sanitized(value):
     return value
 
 
+def apply_editing_operations(
+    timeline: dict,
+    operations: list[dict],
+    *,
+    selected_indices: list[int] | None = None,
+) -> dict:
+    """Apply the same bounded typed Editing operations as the browser draft.
+
+    The returned value is still only a draft.  The caller must explicitly PATCH
+    the EditSession Timeline before it becomes a saved canonical version.
+    """
+    draft = json.loads(json.dumps(timeline))
+    clips = draft.get("clips")
+    if not isinstance(clips, list):
+        raise RuntimeError("Editing suggestion target Timeline has no clips")
+    indices = selected_indices if selected_indices is not None else list(range(len(operations)))
+    if not indices:
+        raise RuntimeError("Editing suggestion adoption must select at least one operation")
+
+    for index in indices:
+        if index < 0 or index >= len(operations):
+            raise RuntimeError("Editing suggestion operation index is invalid")
+        operation = operations[index]
+        kind = operation.get("operation")
+        if kind == "reorder_clips":
+            ordered_ids = operation.get("clip_ids")
+            if not isinstance(ordered_ids, list):
+                raise RuntimeError("Editing reorder operation has no clip_ids")
+            by_id = {str(clip.get("id")): clip for clip in clips if clip.get("id") is not None}
+            reordered = [by_id.get(str(clip_id)) for clip_id in ordered_ids]
+            if any(clip is None for clip in reordered) or len(reordered) != len(clips):
+                raise RuntimeError("Editing reorder operation does not match the saved Timeline")
+            clips = [{**clip, "order": order} for order, clip in enumerate(reordered, start=1)]
+            draft["clips"] = clips
+            continue
+        if kind not in {"set_clip_duration", "set_clip_subtitle"}:
+            raise RuntimeError(f"Unsupported Editing suggestion operation: {kind}")
+        target = str(operation.get("clip_id") or "")
+        matched = False
+        for clip in clips:
+            if target not in {str(clip.get("id") or ""), str(clip.get("shot_id") or "")}:
+                continue
+            matched = True
+            if kind == "set_clip_duration":
+                clip["duration_seconds"] = operation["duration_seconds"]
+            else:
+                clip["subtitle"] = operation["subtitle"]
+        if not matched:
+            raise RuntimeError("Editing suggestion target is not in the saved Timeline")
+    return draft
+
+
 class Acceptance:
-    def __init__(self, client, state_path: Path, *, real: bool):
+    def __init__(self, client, state_path: Path, *, real: bool, evidence_dir: Path | None = None):
         self.client = client
         self.path = state_path
         self.real = real
+        self.evidence_dir = evidence_dir
         self.state = (
             json.loads(state_path.read_text())
             if state_path.exists()
@@ -210,6 +263,59 @@ class Acceptance:
             code = result.get("details", {}).get("code", result.get("code", "unknown"))
             raise RuntimeError(f"Step {name} failed: HTTP {response.status_code}, {code}")
         return result
+
+    def expect_error_once(self, name, method, path, payload, *, expected_statuses):
+        """Persist and execute one fail-closed HTTP probe without replaying unknown I/O."""
+        previous = self.state["steps"].get(name)
+        if previous is not None:
+            if previous["status"] == "succeeded":
+                return previous["response"]
+            raise RuntimeError(
+                f"Step {name} has {previous['status']} outcome; inspect it, do not replay"
+            )
+        body = payload() if callable(payload) else payload
+        entry = {
+            "method": method,
+            "path": path,
+            "request": sanitized(body),
+            "request_hash": hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest(),
+            "paid_command": False,
+            "status": "started",
+        }
+        self.state["steps"][name] = entry
+        self.save()
+        try:
+            response = self.client.request(method, path, json=body, headers=self.headers)
+        except Exception as error:
+            entry.update(status="unknown", error_class=type(error).__name__)
+            self.save()
+            raise RuntimeError(f"Unknown outcome for {name}; no automatic replay") from None
+        try:
+            result = response.json()
+        except ValueError:
+            result = {"error": "non-JSON response"}
+        accepted = response.status_code in set(expected_statuses)
+        entry.update(
+            status="succeeded" if accepted else "failed",
+            http_status=response.status_code,
+            response=sanitized(result),
+        )
+        self.save()
+        if not accepted:
+            raise RuntimeError(
+                f"Negative probe {name} returned HTTP {response.status_code}; "
+                f"expected {sorted(expected_statuses)}"
+            )
+        return result
+
+    @staticmethod
+    def remote_media_operations(snapshot):
+        return [
+            operation
+            for operation in snapshot.get("provider_operations", [])
+            if operation.get("actual_provider") not in {"local", "local_ffmpeg", "local_tts"}
+            and operation.get("operation_kind") in {"image.generate", "video.generate"}
+        ]
 
     def login(self):
         response = self.client.post(
@@ -507,6 +613,7 @@ class Acceptance:
                 label + ":edit", "POST", f"/projects/{pid}/edit-sessions", {"name": "R7 saved cut"}
             )
             eid = edit["id"]
+            advice = None
             if label == "free_assist":
                 advice = self.once(
                     label + ":editing-text",
@@ -526,7 +633,7 @@ class Acceptance:
 
             # Save explicit timeline edits. Advice application is a separate
             # auditable user step; never silently translate an arbitrary plan.
-            def edited(edit=edit, label=label):
+            def edited(edit=edit, label=label, advice=advice):
                 timeline = json.loads(json.dumps(edit["timeline"]))
                 clips = list(reversed(timeline["clips"]))
                 for index, clip in enumerate(clips):
@@ -538,6 +645,12 @@ class Acceptance:
                         transition={"kind": "cut"},
                     )
                 timeline["clips"] = clips
+                if advice is not None:
+                    operations = advice["suggestion"]["plan"]["operations"]
+                    timeline = apply_editing_operations(timeline, operations)
+                    timeline.setdefault("metadata", {})["director_suggestion_applied"] = advice[
+                        "suggestion"
+                    ]["base_session_version"]
                 return {"timeline": timeline}
 
             saved = self.once(
@@ -546,6 +659,33 @@ class Acceptance:
                 f"/projects/{pid}/edit-sessions/{eid}/timeline",
                 edited,
             )
+            if advice is not None:
+                saved_timeline = saved["timeline"]
+                expected = apply_editing_operations(
+                    {
+                        **edit["timeline"],
+                        "clips": [
+                            {
+                                **clip,
+                                "order": index + 1,
+                                "source_in_seconds": 0.1,
+                                "duration_seconds": 4.8,
+                                "subtitle": f"{label} · 选择向前 {index + 1}",
+                                "transition": {"kind": "cut"},
+                            }
+                            for index, clip in enumerate(reversed(edit["timeline"]["clips"]))
+                        ],
+                    },
+                    advice["suggestion"]["plan"]["operations"],
+                )
+                if saved_timeline["clips"] != expected["clips"]:
+                    raise RuntimeError("Saved Timeline does not contain the adopted Editing advice")
+                if saved_timeline.get("metadata", {}).get("director_suggestion_applied") != advice[
+                    "suggestion"
+                ]["base_session_version"]:
+                    raise RuntimeError("Saved Timeline is missing Editing adoption provenance")
+                self.state["assertions"]["editing_advice_apply"] = "PASS"
+                self.save()
             prepared = self.once(
                 label + ":tail",
                 "POST",
@@ -575,15 +715,533 @@ class Acceptance:
             )
             self.save()
 
+    def review_submit(self):
+        project = self.state["projects"]["template_auto"]
+        project_id = project["id"]
+        shot = self.shots(project_id)[0]
+        shot_id = shot["id"]
+        if not shot.get("formal_video_artifact_id"):
+            raise RuntimeError("Review acceptance requires a Formal video")
+        before = self.read(f"/projects/{project_id}/snapshot")
+        annotation = self.once(
+            "review:annotation",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/annotations",
+            {
+                "artifact_id": shot["formal_video_artifact_id"],
+                "target_kind": "video_time",
+                "time_start": 1.0,
+                "time_end": 2.0,
+                "note": "人物停顿略短；保留原正式视频，先生成一个修复候选再决定。",
+                "severity": "warning",
+            },
+        )
+        plan = self.read(f"/projects/{project_id}/shots/{shot_id}/repair-plan")
+        if plan.get("annotation_count", 0) < 1 or "rerun_video" not in plan.get(
+            "repair_options", []
+        ):
+            raise RuntimeError("Review annotation did not produce the expected repair plan")
+        repair = self.once(
+            "review:repair-submit",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/repair",
+            {
+                "repair_option": "rerun_video",
+                "idempotency_key": f"r7:{self.state['run_key']}:repair-video",
+            },
+            paid=True,
+        )
+        self.state["review_repair"] = {
+            "project_id": project_id,
+            "shot_id": shot_id,
+            "annotation_id": annotation["id"],
+            "repair_plan": sanitized(plan),
+            "repair_run_id": repair["node_run_id"],
+            "formal_video_before": shot["formal_video_artifact_id"],
+            "remote_media_operation_count_before": len(self.remote_media_operations(before)),
+        }
+        self.save()
+
+    def review_collect(self):
+        evidence = self.state.get("review_repair")
+        if not isinstance(evidence, dict):
+            raise RuntimeError("Run review-submit before review-collect")
+        project_id = evidence["project_id"]
+        run = self.wait_run(project_id, evidence["repair_run_id"])
+        after = self.read(f"/projects/{project_id}/snapshot")
+        shot = self.shot(project_id, evidence["shot_id"])
+        operations = [
+            operation
+            for operation in after.get("provider_operations", [])
+            if operation.get("node_run_id") == evidence["repair_run_id"]
+        ]
+        if len(operations) != 1 or operations[0].get("status") != "succeeded":
+            raise RuntimeError("Repair must have exactly one successful Provider operation")
+        if shot.get("formal_video_artifact_id") != evidence["formal_video_before"]:
+            raise RuntimeError("Repair candidate changed Formal video before explicit confirmation")
+        evidence.update(
+            repair_run=sanitized(run),
+            repair_operation=sanitized(operations[0]),
+            formal_video_after=shot.get("formal_video_artifact_id"),
+            remote_media_operation_count_after=len(self.remote_media_operations(after)),
+        )
+        self.state["assertions"]["review_repair"] = "PASS"
+        self.save()
+
+    def regressions(self):
+        template_id = self.state["projects"]["template_auto"]["id"]
+        free_id = self.state["projects"]["free_assist"]["id"]
+        template_basic = self.shots(template_id)[0]
+        free_basic = self.shots(free_id)[0]
+        template_shot = self.shot(template_id, template_basic["id"])
+        free_shot = self.shot(free_id, free_basic["id"])
+
+        remote_before_negative = {
+            project_id: len(
+                self.remote_media_operations(self.read(f"/projects/{project_id}/snapshot"))
+            )
+            for project_id in (template_id, free_id)
+        }
+        self.expect_error_once(
+            "negative:cross-project-formal",
+            "POST",
+            f"/projects/{template_id}/shots/{template_shot['id']}/formal-keyframe",
+            {
+                "artifact_id": free_shot["formal_keyframe_artifact_id"],
+                "expected_shot_version": template_shot["version"],
+            },
+            expected_statuses={404, 422},
+        )
+        self.expect_error_once(
+            "negative:stale-shot-save",
+            "PATCH",
+            f"/projects/{template_id}/shots/{template_shot['id']}/design",
+            {
+                "expected_version": 1,
+                "image_prompt": template_shot.get("image_prompt")
+                or template_shot["visual_description"],
+                "video_prompt": template_shot.get("video_prompt")
+                or template_shot["visual_description"],
+            },
+            expected_statuses={409},
+        )
+        csrf = self.headers.pop("X-CSRF-Token")
+        try:
+            self.expect_error_once(
+                "negative:csrf",
+                "POST",
+                f"/projects/{template_id}/shots/{template_shot['id']}/annotations",
+                {"target_kind": "shot", "note": "must not persist without CSRF"},
+                expected_statuses={403},
+            )
+        finally:
+            self.headers["X-CSRF-Token"] = csrf
+        self.expect_error_once(
+            "negative:binding-mismatch",
+            "POST",
+            f"/projects/{template_id}/shots/{template_shot['id']}/execution-plan",
+            {
+                "stage": "image_keyframe",
+                "prompt": template_shot.get("image_prompt") or template_shot["visual_description"],
+                "expected_shot_version": template_shot["version"],
+                "mode_id": "text_to_image",
+                "requested_binding_id": self.state["bindings"]["video"]["id"],
+                "references": [],
+                "semantic_intent": {},
+                "accept_approximations": False,
+            },
+            expected_statuses={409, 422},
+        )
+        remote_after_negative = {
+            project_id: len(
+                self.remote_media_operations(self.read(f"/projects/{project_id}/snapshot"))
+            )
+            for project_id in (template_id, free_id)
+        }
+        if remote_after_negative != remote_before_negative:
+            raise RuntimeError("Negative probes created a remote media Provider operation")
+        self.state["assertions"]["negative_boundaries"] = "PASS"
+
+        manual = self.once(
+            "manual:project",
+            "POST",
+            "/projects",
+            {
+                "workspace_id": WORKSPACE,
+                "name": f"R7 manual regression {self.state['run_key']}",
+                "aspect_ratio": "9:16",
+                "start_type": "FREE",
+                "director_autonomy": "MANUAL",
+            },
+        )
+        imported = self.once(
+            "manual:import",
+            "POST",
+            f"/projects/{manual['id']}/scripts/import",
+            {"filename": "manual-regression.md", "text": FREE_SCRIPT},
+        )
+        manual_snapshot = self.read(f"/projects/{manual['id']}/snapshot")
+        manual_turns = self.read(f"/projects/{manual['id']}/director/turns?limit=100")
+        if (
+            manual_snapshot.get("node_runs")
+            or manual_snapshot.get("provider_operations")
+            or manual_turns
+        ):
+            raise RuntimeError("MANUAL create/import unexpectedly started Director or Runtime work")
+        switched = self.once(
+            "manual:switch-assist",
+            "PATCH",
+            f"/projects/{manual['id']}/creative-profile",
+            {
+                "expected_version": manual["creative_profile"]["version"],
+                "director_autonomy": "ASSIST",
+            },
+        )
+        final_manual = self.once(
+            "manual:switch-back",
+            "PATCH",
+            f"/projects/{manual['id']}/creative-profile",
+            {
+                "expected_version": switched["version"],
+                "director_autonomy": "MANUAL",
+            },
+        )
+        final_snapshot = self.read(f"/projects/{manual['id']}/snapshot")
+        if (
+            final_manual["project_id"] != manual["id"]
+            or final_snapshot.get("node_runs")
+            or final_snapshot.get("provider_operations")
+        ):
+            raise RuntimeError("Autonomy switching changed Project/Runtime identity")
+        self.state["manual_regression"] = {
+            "project_id": manual["id"],
+            "shot_count": len(imported["shot_ids"]),
+            "final_autonomy": final_manual["director_autonomy"],
+            "node_run_count": 0,
+            "provider_operation_count": 0,
+        }
+        self.state["assertions"]["manual_regression"] = "PASS"
+        self.save()
+
+    def delivery(self):
+        remote_before = {}
+        for label in ("template_auto", "free_assist"):
+            project_id = self.state["projects"][label]["id"]
+            remote_before[label] = len(
+                self.remote_media_operations(self.read(f"/projects/{project_id}/snapshot"))
+            )
+
+        free_edit = self.state["steps"]["free_assist:timeline-save"]["response"]
+        free_id = self.state["projects"]["free_assist"]["id"]
+
+        def rerender_timeline():
+            timeline = json.loads(json.dumps(free_edit["timeline"]))
+            timeline["clips"][0]["subtitle"] = (
+                str(timeline["clips"][0].get("subtitle") or "") + " · 复核版"
+            )
+            timeline.setdefault("metadata", {})["r7_editing_only_rerender"] = self.state["run_key"]
+            return {"timeline": timeline}
+
+        saved = self.once(
+            "free_assist:rerender-save",
+            "PATCH",
+            f"/projects/{free_id}/edit-sessions/{free_edit['id']}/timeline",
+            rerender_timeline,
+        )
+        prepared = self.once(
+            "free_assist:rerender-tail",
+            "POST",
+            f"/projects/{free_id}/final-film/prepare",
+            {
+                "edit_session_id": saved["id"],
+                "expected_timeline_version": saved["version"],
+                "mode": "prepare",
+            },
+        )
+        for run_id in prepared["node_run_ids"]:
+            self.wait_run(free_id, run_id)
+        rerender = self.once(
+            "free_assist:rerender-film",
+            "POST",
+            f"/projects/{free_id}/final-film/render",
+            {
+                "edit_session_id": saved["id"],
+                "expected_timeline_version": saved["version"],
+                "name": "R7 editing-only rerender",
+            },
+            command_key=f"r7:{self.state['run_key']}:free_assist:rerender",
+        )
+        self.wait_run(free_id, rerender["node_run_id"])
+        self.state["free_assist:rerender_job"] = self.read(
+            f"/projects/{free_id}/final-film/runs/{rerender['node_run_id']}"
+        )
+
+        deliveries = {}
+        for label in ("template_auto", "free_assist"):
+            project_id = self.state["projects"][label]["id"]
+            job = (
+                self.state["free_assist:rerender_job"]
+                if label == "free_assist"
+                else self.state["template_auto:final_job"]
+            )
+            result = job.get("result")
+            if job.get("status") not in {
+                "completed",
+                "cached",
+                "completed_after_cancel",
+            } or not isinstance(result, dict):
+                raise RuntimeError(f"{label} Final Film is not complete")
+            probe_assertions = (result.get("ffprobe") or {}).get("assertions")
+            if not isinstance(probe_assertions, dict) or not all(probe_assertions.values()):
+                raise RuntimeError(f"{label} Final Film ffprobe assertions failed")
+            duration = float(result.get("duration_seconds") or 0)
+            if not 15 <= duration <= 30:
+                raise RuntimeError(f"{label} Final Film is outside 15–30 seconds")
+            film_response = self.client.get(
+                f"/projects/{project_id}/artifacts/{result['artifact_id']}/content",
+                headers=self.headers,
+            )
+            subtitle_response = self.client.get(
+                f"/projects/{project_id}/artifacts/{result['subtitle_artifact_id']}/content",
+                headers=self.headers,
+            )
+            if film_response.is_error or subtitle_response.is_error:
+                raise RuntimeError(f"{label} Final Film or SRT download failed")
+            film_hash = hashlib.sha256(film_response.content).hexdigest()
+            subtitle_hash = hashlib.sha256(subtitle_response.content).hexdigest()
+            if (
+                film_hash != result["content_hash"]
+                or subtitle_hash != result["subtitle_content_hash"]
+            ):
+                raise RuntimeError(f"{label} downloaded delivery hash mismatch")
+            subtitle_text = subtitle_response.content.decode("utf-8-sig")
+            if "-->" not in subtitle_text or not subtitle_text.strip():
+                raise RuntimeError(f"{label} independent SRT is empty or invalid")
+            deliveries[label] = {
+                "project_id": project_id,
+                "node_run_id": job["node_run_id"],
+                "artifact_id": result["artifact_id"],
+                "subtitle_artifact_id": result["subtitle_artifact_id"],
+                "timeline_version": result["timeline_version"],
+                "duration_seconds": result["duration_seconds"],
+                "film_sha256": film_hash,
+                "film_byte_size": len(film_response.content),
+                "subtitle_sha256": subtitle_hash,
+                "subtitle_byte_size": len(subtitle_response.content),
+                "subtitle_cue_count": result["subtitle_cue_count"],
+                "formal_reference_count": len(result["formal_references"]),
+                "ffprobe": sanitized(result["ffprobe"]),
+            }
+            if self.evidence_dir is not None:
+                self.evidence_dir.mkdir(parents=True, exist_ok=True)
+                film_path = self.evidence_dir / f"{label}-final-film.mp4"
+                subtitle_path = self.evidence_dir / f"{label}-final-film.srt"
+                film_path.write_bytes(film_response.content)
+                subtitle_path.write_bytes(subtitle_response.content)
+                deliveries[label]["film_file"] = film_path.name
+                deliveries[label]["subtitle_file"] = subtitle_path.name
+        remote_after = {
+            label: len(
+                self.remote_media_operations(
+                    self.read(f"/projects/{self.state['projects'][label]['id']}/snapshot")
+                )
+            )
+            for label in ("template_auto", "free_assist")
+        }
+        if remote_before != remote_after:
+            raise RuntimeError("Editing-only rerender created a remote image/video operation")
+        self.state["deliveries"] = deliveries
+        self.state["editing_only_rerender"] = {
+            "remote_media_operations_before": remote_before,
+            "remote_media_operations_after": remote_after,
+            "delta": 0,
+        }
+        self.state["assertions"]["editing_only_rerender"] = "PASS"
+        self.state["assertions"]["final_mp4_srt_download"] = "PASS"
+        self.save()
+
+    def import_external_proof(self, kind, path):
+        proof = json.loads(path.read_text(encoding="utf-8"))
+        if proof.get("candidate_sha") != self.state.get("candidate_sha"):
+            raise RuntimeError(f"{kind} proof belongs to another candidate")
+        if kind == "recovery":
+            expected_run = (self.state.get("review_repair") or {}).get("repair_run_id")
+            required = {
+                "repair_run_id": expected_run,
+                "provider_operation_count_before_restart": 1,
+                "provider_operation_count_after_completion": 1,
+                "additional_create_count": 0,
+                "worker_stopped": True,
+                "worker_restarted": True,
+                "final_status": "completed",
+            }
+            if any(proof.get(key) != value for key, value in required.items()):
+                raise RuntimeError("Recovery proof does not establish one-task restart recovery")
+            if not proof.get("remote_id_hash_before") or proof.get(
+                "remote_id_hash_before"
+            ) != proof.get("remote_id_hash_after"):
+                raise RuntimeError("Recovery proof does not preserve the remote task identity")
+            self.state["assertions"]["real_remote_recovery"] = "PASS"
+        elif kind == "browser":
+            expected = {
+                label: self.state["projects"][label]["id"]
+                for label in ("template_auto", "free_assist")
+            }
+            assertions = proof.get("assertions")
+            if (
+                proof.get("entry_port") != 8080
+                or proof.get("project_ids") != expected
+                or not isinstance(assertions, dict)
+                or not assertions
+                or not all(value is True for value in assertions.values())
+                or proof.get("console_error_count") != 0
+            ):
+                raise RuntimeError("Browser proof is incomplete or is not from the formal entry")
+            self.state["assertions"]["browser_interaction"] = "PASS"
+        elif kind == "runtime":
+            services = proof.get("services")
+            if (
+                proof.get("entry_port") != 8080
+                or proof.get("migration_head") != "20260908_0060"
+                or not isinstance(services, dict)
+                or set(services)
+                != {"api", "dispatcher", "worker_default", "worker_heavy", "frontend"}
+                or any(
+                    row.get("source_commit") != self.state.get("candidate_sha")
+                    or row.get("healthy") is not True
+                    for row in services.values()
+                )
+            ):
+                raise RuntimeError(
+                    "Formal runtime proof does not bind every service to the candidate"
+                )
+            self.state["assertions"]["final_8080_identity"] = "PASS"
+        else:
+            raise RuntimeError(f"Unknown external proof kind: {kind}")
+        self.state.setdefault("external_proofs", {})[kind] = sanitized(proof)
+        self.save()
+
     def collect(self):
-        for label, project in self.state["projects"].items():
+        for label in ("template_auto", "free_assist"):
+            project = self.state["projects"][label]
             pid = project["id"]
             self.state[label + ":snapshot"] = sanitized(self.read(f"/projects/{pid}/snapshot"))
             self.state[label + ":director_turns"] = sanitized(
                 self.read(f"/projects/{pid}/director/turns?limit=100")
             )
-        # These additional required acceptance paths are intentionally not
-        # declared passed just because primary production completed.
+        if self.state["projects"]["template_auto"]["id"] == self.state["projects"][
+            "free_assist"
+        ]["id"]:
+            raise RuntimeError("Dual-path acceptance reused one Project identity")
+        text_turn_ids = {
+            self.state["steps"]["template:story"]["response"]["director_evidence"]["turn_id"],
+            self.state["steps"]["template:shot-text"]["response"]["director_evidence"]["turn_id"],
+            self.state["steps"]["free:shot-text"]["response"]["director_evidence"]["turn_id"],
+            self.state["steps"]["free_assist:editing-text"]["response"]["director_evidence"][
+                "turn_id"
+            ],
+        }
+        all_turns = [
+            turn
+            for label in ("template_auto", "free_assist")
+            for turn in self.state[label + ":director_turns"]
+        ]
+        selected_turns = [turn for turn in all_turns if turn.get("id") in text_turn_ids]
+        if len(selected_turns) != 4 or any(
+            turn.get("transport_status") != "succeeded"
+            or not turn.get("context_hash")
+            or not turn.get("output_hash")
+            or not turn.get("model_resolution")
+            for turn in selected_turns
+        ):
+            raise RuntimeError("Story/Shot/Editing text turns lack durable model/hash lineage")
+        self.state["assertions"]["text_turn_lineage"] = "PASS"
+
+        provider_identities = {}
+        media_execution_freeze = {}
+        for label in ("template_auto", "free_assist"):
+            snapshot = self.state[label + ":snapshot"]
+            remote = self.remote_media_operations(snapshot)
+            expected = len(self.shots(self.state["projects"][label]["id"])) * 2
+            if len(remote) < expected or any(
+                operation.get("status") != "succeeded"
+                or operation.get("actual_provider") != "agnes"
+                or operation.get("actual_model")
+                not in {"agnes-image-2.1-flash", "agnes-video-v2.0"}
+                or not operation.get("model_binding_id")
+                or not operation.get("connection_id")
+                or not operation.get("credential_revision_id")
+                for operation in remote
+            ):
+                raise RuntimeError(f"{label} remote Provider identities are incomplete")
+            provider_identities[label] = [
+                {
+                    "node_run_id": operation.get("node_run_id"),
+                    "actual_provider": operation.get("actual_provider"),
+                    "actual_model": operation.get("actual_model"),
+                    "model_binding_id": operation.get("model_binding_id"),
+                    "connection_id": operation.get("connection_id"),
+                    "credential_revision_id": operation.get("credential_revision_id"),
+                    "provider_cost": operation.get("provider_cost"),
+                    "cost_status": (
+                        "reported"
+                        if (operation.get("response_summary") or {}).get("provider_reported_cost")
+                        is not None
+                        else "unknown"
+                    ),
+                    "currency": operation.get("currency"),
+                }
+                for operation in remote
+            ]
+            dispatch_steps = [
+                step
+                for name, step in self.state["steps"].items()
+                if name.startswith(label + ":") and name.endswith(":dispatch")
+            ]
+            dispatch_run_ids = {
+                step["response"]["node_run_id"]
+                for step in dispatch_steps
+                if step.get("status") == "succeeded"
+            }
+            frozen_runs = [
+                run for run in snapshot.get("node_runs", []) if run.get("id") in dispatch_run_ids
+            ]
+            if len(frozen_runs) != expected or any(
+                (run.get("input_snapshot") or {}).get("source_commit")
+                != self.state.get("candidate_sha")
+                or not (run.get("input_snapshot") or {}).get("model_binding_id")
+                or not ((run.get("input_snapshot") or {}).get("execution_identity") or {}).get(
+                    "credential_revision_id"
+                )
+                or run.get("status") not in {"completed", "cached", "completed_after_cancel"}
+                for run in frozen_runs
+            ):
+                raise RuntimeError(f"{label} media NodeRuns are not frozen to the candidate")
+            media_execution_freeze[label] = [
+                {
+                    "node_run_id": run.get("id"),
+                    "node_key": run.get("node_key"),
+                    "source_commit": (run.get("input_snapshot") or {}).get("source_commit"),
+                    "model_binding_id": (run.get("input_snapshot") or {}).get(
+                        "model_binding_id"
+                    ),
+                    "connection_revision_id": (
+                        (run.get("input_snapshot") or {}).get("execution_identity") or {}
+                    ).get("connection_revision_id"),
+                    "credential_revision_id": (
+                        (run.get("input_snapshot") or {}).get("execution_identity") or {}
+                    ).get("credential_revision_id"),
+                    "input_hash": run.get("input_hash"),
+                    "result_artifact_id": run.get("result_artifact_id"),
+                    "status": run.get("status"),
+                }
+                for run in frozen_runs
+            ]
+        self.state["provider_identities"] = provider_identities
+        self.state["media_execution_freeze"] = media_execution_freeze
+        self.state["assertions"]["provider_identity_no_fallback"] = "PASS"
+        self.state["assertions"]["distinct_projects_shared_runtime"] = "PASS"
+
         for gate in (
             "editing_advice_apply",
             "review_repair",
@@ -592,9 +1250,32 @@ class Acceptance:
             "browser_interaction",
             "final_8080_identity",
             "final_mp4_srt_download",
+            "editing_only_rerender",
+            "negative_boundaries",
         ):
             self.state["assertions"].setdefault(gate, "NOT_VERIFIED")
-        self.state["complete"] = False
+        required = {
+            "preflight",
+            "story_and_user_decisions",
+            "template_auto:formal_media",
+            "free_assist:formal_media",
+            "editing_advice_apply",
+            "review_repair",
+            "manual_regression",
+            "real_remote_recovery",
+            "browser_interaction",
+            "final_8080_identity",
+            "final_mp4_srt_download",
+            "editing_only_rerender",
+            "negative_boundaries",
+            "text_turn_lineage",
+            "provider_identity_no_fallback",
+            "distinct_projects_shared_runtime",
+        }
+        self.state["complete"] = all(
+            self.state["assertions"].get(gate) == "PASS" for gate in required
+        )
+        self.state["required_assertions"] = sorted(required)
         self.save()
 
 
@@ -604,14 +1285,28 @@ def main():
     parser.add_argument("--base-url", default="http://127.0.0.1:8088/api/v1")
     parser.add_argument(
         "--phase",
-        choices=["preflight", "story", "media", "editing", "collect"],
+        choices=[
+            "preflight",
+            "story",
+            "media",
+            "editing",
+            "review-submit",
+            "review-collect",
+            "regressions",
+            "delivery",
+            "collect",
+        ],
         default="preflight",
     )
     parser.add_argument("--real", action="store_true")
     parser.add_argument("--candidate", help="Exact runtime source SHA required for paid phases")
+    parser.add_argument("--recovery-proof", type=Path)
+    parser.add_argument("--browser-proof", type=Path)
+    parser.add_argument("--runtime-proof", type=Path)
+    parser.add_argument("--evidence-dir", type=Path)
     args = parser.parse_args()
     with httpx.Client(base_url=args.base_url, timeout=600, trust_env=False) as client:
-        run = Acceptance(client, args.state, real=args.real)
+        run = Acceptance(client, args.state, real=args.real, evidence_dir=args.evidence_dir)
         run.login()
         if args.real:
             if not args.candidate or not re.fullmatch(r"[0-9a-f]{40}", args.candidate):
@@ -629,14 +1324,21 @@ def main():
                 )
             run.state["candidate_sha"] = args.candidate
             run.save()
-        getattr(run, args.phase)()
+        for kind, proof_path in (
+            ("recovery", args.recovery_proof),
+            ("browser", args.browser_proof),
+            ("runtime", args.runtime_proof),
+        ):
+            if proof_path is not None:
+                run.import_external_proof(kind, proof_path)
+        getattr(run, args.phase.replace("-", "_"))()
         print(
             json.dumps(
                 {
                     "phase": args.phase,
                     "steps": len(run.state["steps"]),
                     "assertions": run.state["assertions"],
-                    "goal_complete": False,
+                    "goal_complete": run.state.get("complete", False),
                 },
                 ensure_ascii=False,
             )

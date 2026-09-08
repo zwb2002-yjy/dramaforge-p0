@@ -52,6 +52,8 @@ flush queues, or cancel their tasks merely to obtain a clean candidate.
 - `scripts/prove_v1_current_head_golden.py` or a bounded R7 acceptance driver
 - `scripts/prepare_v1_acceptance_runtime.py` if reusable safe setup is needed
 - focused tests for evidence filtering/idempotent checkpoint replay
+- `frontend/playwright.r7.config.ts` and `frontend/tests/live/` for the formal
+  non-mock 8080 browser proof (excluded from the ordinary mock E2E suite)
 - bounded product fixes only after documenting a discovered failed acceptance
   path and its source authority in this contract (not a broad runtime rewrite)
 - sanitized `docs/reviews/evidence/v1-r7-current/` and candidate report
@@ -109,3 +111,31 @@ flush queues, or cancel their tasks merely to obtain a clean candidate.
   artifacts, not relabeled. Real acceptance will use separately created 9:16
   projects/checkpoints; no model or aspect fallback is performed after a paid
   request. The original two empty projects produced zero Provider/NodeRun rows.
+
+## Acceptance-driven follow-up progress
+
+- The portrait preflight completed 72 checkpointed API steps on `fe203c1`: a
+  real Template Story call, real Template/Free Shot calls, five and four distinct
+  Shot image/video chains, and explicit Formal decisions. All paid steps have a
+  durable successful receipt; none is replayed after the later source change.
+- Final Film preparation exposed a duplicate local TTS Artifact hash. The
+  bounded audio-only reuse fix is committed at `0e45207`; the preserved failed
+  run has `WORKER_ERROR`, while its retry on the updated isolated stack is
+  `cached` and the dependent composite/continuity runs complete with zero new
+  image/video operation. The original failed rows remain in history.
+- The Template preflight now has a playable 24.027-second MP4 and independent
+  SRT. The Free preflight has a real Editing text turn and a playable
+  19.239-second MP4/SRT. These mixed-source bug-finding results are deliberately
+  not relabeled as final same-candidate evidence.
+- The first Editing driver requested a real suggestion but then overwrote the
+  draft with its own fixture values. The driver now applies the returned typed
+  operations to a local draft first, records adoption metadata, and only then
+  performs the explicit Timeline save. Focused no-network tests cover adoption,
+  fail-closed targets, redaction, opt-in and unknown/replay behavior.
+- The driver now has bounded review-submit/review-collect, MANUAL and negative
+  regressions, editing-only rerender, delivery download/hash and external
+  recovery/browser/runtime proof imports. The live Playwright proof targets the
+  real gateway and projects with no API mocks. Final proof still requires a new
+  clean candidate, one Review Repair remote task interrupted after durable
+  submit and recovered after Worker restart, both current-candidate films, and
+  formal 8080 identity/browser evidence.
