@@ -93,7 +93,70 @@ async def test_partial_apply_only_executes_accepted(session: AsyncSession) -> No
     assert shot.video_prompt == "video"  # rejected NOT applied
     await session.refresh(accept_item)
     await session.refresh(reject_item)
+    decided_version = shot.version
+    replay = await ProposalService(session, actor=user).partial_apply(
+        project=project, proposal_id=proposal.id,
+        apply_input=PartialApplyInput(decisions=[
+            ProposalDecision(item_id=accept_item.id, decision="accepted"),
+            ProposalDecision(item_id=reject_item.id, decision="rejected"),
+        ]),
+    )
+    await session.refresh(shot)
+    assert replay.accepted == [accept_item.id] and replay.rejected == [reject_item.id]
+    assert shot.version == decided_version
+    conflict = await ProposalService(session, actor=user).partial_apply(
+        project=project, proposal_id=proposal.id,
+        apply_input=PartialApplyInput(decisions=[
+            ProposalDecision(item_id=accept_item.id, decision="rejected"),
+        ]),
+    )
+    assert conflict.failed and accept_item.status == "accepted"
+
     assert accept_item.status == "accepted"
     assert reject_item.status == "rejected"
     assert result.accepted == [accept_item.id]
     assert result.rejected == [reject_item.id]
+
+
+@pytest.mark.asyncio
+async def test_proposal_rejection_notifies_turn_before_any_background_scan(session):
+    from app.director.turn_models import DirectorTurn
+    from app.director.turn_service import DirectorTurnService
+    from app.shared.errors import ConflictError, ValidationAppError
+
+    project, shot, user = await _seed(session)
+    proposal = DirectorProposal(project_id=project.id, thread_id=uuid4(), scope_type="shot",
+                                scope_entity_id=shot.id, created_by=user.id, status="pending")
+    session.add(proposal)
+    await session.flush()
+    item = DirectorProposalItem(proposal_id=proposal.id, project_id=project.id,
+                                command="shot.update_video_prompt",
+                                payload={"shot_id": str(shot.id), "video_prompt": "not accepted"},
+                                expected_target_version=shot.version, status="pending")
+    turn = DirectorTurn(project_id=project.id, workspace_id=project.workspace_id, actor_id=user.id,
+                        scope_type="shot", scope_entity_id=shot.id, request_key="proposal:reject",
+                        context_hash="f" * 64, status="awaiting_user", proposal_id=proposal.id,
+                        step_count=1, request_summary={"max_steps": 4})
+    session.add_all([item, turn])
+    await session.flush()
+    service = ProposalService(session, actor=user)
+    await service.partial_apply(
+        project=project, proposal_id=proposal.id,
+        apply_input=PartialApplyInput(decisions=[
+            ProposalDecision(item_id=item.id, decision="rejected"),
+        ]),
+    )
+    assert turn.status == "completed" and turn.wait_reason == "proposal_rejected"
+    with pytest.raises(ConflictError) as rejected:
+        await DirectorTurnService(session).assert_context_not_rejected(
+            project_id=project.id, context_hash=turn.context_hash,
+        )
+    assert rejected.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
+    with pytest.raises(ValidationAppError) as duplicate:
+        await service.partial_apply(project=project, proposal_id=proposal.id,
+            apply_input=PartialApplyInput(decisions=[
+                ProposalDecision(item_id=item.id, decision="accepted"),
+                ProposalDecision(item_id=item.id, decision="rejected"),
+            ]))
+    assert duplicate.value.details["code"] == "PROPOSAL_DUPLICATE_DECISION"
+    assert shot.video_prompt == "video" and shot.version == 1

@@ -92,3 +92,15 @@ def test_patch_profile_stale_version_fails_closed(client: TestClient) -> None:
     )
     assert stale.status_code == 409
     assert stale.json()["code"] == "CONFLICT"
+
+
+def test_same_mode_update_does_not_renew_authorization_version(client: TestClient) -> None:
+    project_id, csrf = _register_and_create_project(client)
+    for _ in range(2):
+        response = client.patch(
+            f"/api/v1/projects/{project_id}/creative-profile",
+            headers={CSRF_HEADER: csrf},
+            json={"expected_version": 1, "director_autonomy": "ASSIST"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["version"] == 1

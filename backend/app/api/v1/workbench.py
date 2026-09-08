@@ -6,14 +6,18 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
-from pydantic import BaseModel, Field, JsonValue
+from fastapi import APIRouter, Depends, Header, Query
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1.schemas.workbench import ShotWorkbenchRead
 from app.assets.models import Shot
 from app.assets.schemas import ShotDirectorState
+from app.director.business_checkpoints import DirectorBusinessCheckpoints
+from app.director.turn_models import DirectorTurn
+from app.execution.models import NodeRun
 from app.production.execution_plan import WorkbenchExecutionPlan
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
 from app.production.models import GraphVersion
@@ -23,8 +27,9 @@ from app.production.trace import ExecutionTraceRead, build_execution_trace
 from app.production.workbench_execution import (
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
+    workbench_request_hash,
 )
-from app.shared.errors import ValidationAppError
+from app.shared.errors import NotFoundError, ValidationAppError
 from app.workbench.scene_service import ShotWorkbenchService
 from app.workbench.shot_service import ShotDesignService
 from app.workbench.workspace_state_service import WorkspaceStateService
@@ -145,6 +150,8 @@ async def get_shot_workbench(
 
 
 class ExecutionPlanBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     stage: Literal["image_keyframe", "video"]
     prompt: str = Field(min_length=1, max_length=20000)
     semantic_intent: dict[str, JsonValue] = Field(default_factory=dict)
@@ -167,6 +174,7 @@ class ExecutionBody(ExecutionPlanBody):
 
 
 class ExecutionRead(BaseModel):
+    director_turn_id: UUID | None = None
     node_run_id: UUID
     graph_id: UUID
     graph_version_id: UUID
@@ -220,6 +228,45 @@ async def create_execution_plan(
     )
 
 
+async def _execution_read(session: SessionDep, run: NodeRun) -> ExecutionRead:
+    version = await session.get(GraphVersion, run.graph_version_id)
+    if version is None:
+        raise NotFoundError("Execution graph version not found")
+    turn_id = await session.scalar(select(DirectorTurn.id).where(
+        DirectorTurn.project_id == run.project_id,
+        DirectorTurn.request_key == f"workbench:{run.id}",
+    ))
+    fingerprint = (run.input_snapshot or {}).get("plan_fingerprint")
+    if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+        raise ValidationAppError(
+            "Execution receipt has no valid frozen plan fingerprint",
+            details={"code": "EXECUTION_RECEIPT_INVALID"},
+        )
+    return ExecutionRead(
+        node_run_id=run.id, graph_id=version.graph_id, graph_version_id=run.graph_version_id,
+        status=run.status,
+        plan_fingerprint=fingerprint,
+        director_turn_id=turn_id,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/shots/{shot_id}/executions/receipt", response_model=ExecutionRead,
+)
+async def get_execution_receipt(
+    project_id: UUID, shot_id: UUID, user: CurrentUser, session: SessionDep,
+    stage: Literal["image_keyframe", "video"],
+    idempotency_key: str = Query(min_length=1, max_length=2000),
+) -> ExecutionRead:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    run = await WorkbenchExecutionService(session, user_id=user.id).find_command_receipt(
+        project_id=project_id, shot_id=shot_id, stage=stage, command_key=idempotency_key,
+    )
+    if run is None:
+        raise NotFoundError("Execution command has no committed receipt")
+    return await _execution_read(session, run)
+
+
 @router.post(
     "/projects/{project_id}/shots/{shot_id}/executions",
     response_model=ExecutionRead,
@@ -231,13 +278,32 @@ async def create_execution(
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=2000,
+    ),
 ) -> ExecutionRead:
     """Dispatch one shot execution. The server re-validates the plan
     fingerprint / expected shot version / accepted approximations before
     creating the queued NodeRun (03 §37)."""
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
+    identity = workbench_request_hash(body.model_dump(mode="json"))
+    receipt = await service.find_command_receipt(
+        project_id=project_id, shot_id=shot_id, stage=body.stage,
+        command_key=idempotency_key, plan_fingerprint=body.plan_fingerprint,
+        expected_request_hash=identity,
+    )
+    if receipt is not None:
+        return await _execution_read(session, receipt)
+    await service.lock_command_scope(project_id=project_id)
+    # A second request may have waited for the first command's transaction.
+    receipt = await service.find_command_receipt(
+        project_id=project_id, shot_id=shot_id, stage=body.stage,
+        command_key=idempotency_key, plan_fingerprint=body.plan_fingerprint,
+        expected_request_hash=identity,
+    )
+    if receipt is not None:
+        return await _execution_read(session, receipt)
     # 1) Lock the canonical Shot for the duration of validation + queueing so a
     # concurrent design save cannot cross the fingerprint/dispatch boundary.
     shot = await session.get(Shot, shot_id, with_for_update=True)
@@ -270,17 +336,12 @@ async def create_execution(
         execution_input=_execution_input(project_id, shot_id, body),
         idempotency_key_override=idempotency_key,
         prepared_plan=rebuilt,
+        request_hash=identity,
     )
+    await DirectorBusinessCheckpoints(session).track_execution(project=project, actor=user, run=run)
+    response = await _execution_read(session, run)
     await session.commit()
-    graph_version = await session.get(GraphVersion, run.graph_version_id)
-    graph_id = graph_version.graph_id if graph_version is not None else run.graph_version_id
-    return ExecutionRead(
-        node_run_id=run.id,
-        graph_id=graph_id,
-        graph_version_id=run.graph_version_id,
-        status=run.status,
-        plan_fingerprint=rebuilt.plan_fingerprint or "",
-    )
+    return response
 
 
 class FormalKeyframeBody(BaseModel):
@@ -307,13 +368,16 @@ async def set_shot_formal_keyframe(
     _csrf: CsrfDep,
 ) -> FormalKeyframeRead:
     """Mark one keyframe artifact as the shot's formal keyframe (03 §38)."""
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     shot = await set_formal_keyframe(
         session,
         project_id=project_id,
         shot_id=shot_id,
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
+    )
+    await DirectorBusinessCheckpoints(session).reconcile_business_fact(
+        project=project, shot_id=shot_id,
     )
     await session.commit()
     assert shot.formal_keyframe_artifact_id is not None
@@ -348,13 +412,16 @@ async def set_shot_formal_video(
     _csrf: CsrfDep,
 ) -> FormalVideoRead:
     """Mark one video artifact as the shot's formal video (03 §39)."""
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     shot = await set_formal_video(
         session,
         project_id=project_id,
         shot_id=shot_id,
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
+    )
+    await DirectorBusinessCheckpoints(session).reconcile_business_fact(
+        project=project, shot_id=shot_id,
     )
     await session.commit()
     assert shot.formal_video_artifact_id is not None

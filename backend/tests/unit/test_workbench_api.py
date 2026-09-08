@@ -432,3 +432,113 @@ def test_execution_rejects_binding_change_after_preview(api: tuple[TestClient, A
     assert execute_response.status_code == 422
     assert "unavailable" in execute_response.json()["detail"]
     assert _run(factory, _count_workbench_runs(factory)) == 0
+
+
+def _start_command(api, *, autonomy="AUTO", key="receipt:one"):
+    client, factory = api
+    workspace_id = _register(client)
+    binding_id = _seed_sync(factory, workspace_id)
+    project_id = _project_id(client)
+    shot_id = _seed_shot_with_formal_keyframe(factory, project_id)
+    profile = client.get(f"/api/v1/projects/{project_id}").json()["creative_profile"]
+    mode = client.patch(
+        f"/api/v1/projects/{project_id}/creative-profile", headers={CSRF_HEADER: _csrf(client)},
+        json={"expected_version": profile["version"], "director_autonomy": autonomy},
+    )
+    assert mode.status_code == 200, mode.text
+    path = f"/api/v1/projects/{project_id}/shots/{shot_id}"
+    preview = client.post(f"{path}/execution-plan", headers={CSRF_HEADER: _csrf(client)},
+                          json=_plan_body(binding_id))
+    assert preview.status_code == 200, preview.text
+    body = {**_plan_body(binding_id), "plan_fingerprint": preview.json()["plan_fingerprint"]}
+    response = client.post(f"{path}/executions",
+                           headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": key}, json=body)
+    assert response.status_code == 200, response.text
+    return project_id, shot_id, binding_id, body, response.json()
+
+
+def test_lost_execution_response_replays_before_resolution_or_shot_version_checks(api, monkeypatch):
+    from app.production.workbench_execution import WorkbenchExecutionService
+
+    client, factory = api
+    project_id, shot_id, binding_id, body, receipt = _start_command(api)
+    path = f"/api/v1/projects/{project_id}/shots/{shot_id}"
+    before = _run(factory, _count_workbench_runs(factory))
+    _set_binding_enabled(factory, binding_id, enabled=False)
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Receipt replay cannot build a new plan")
+
+    monkeypatch.setattr(WorkbenchExecutionService, "build_plan", forbidden)
+    read = client.get(f"{path}/executions/receipt",
+                      params={"stage": "video", "idempotency_key": "receipt:one"})
+    assert read.status_code == 200 and read.json() == receipt
+    replay = client.post(f"{path}/executions", json=body,
+                         headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": "receipt:one"})
+    assert replay.status_code == 200 and replay.json() == receipt
+    assert receipt["director_turn_id"] is not None
+    changed = client.post(f"{path}/executions", json={**body, "prompt": "changed request"},
+                          headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": "receipt:one"})
+    assert changed.status_code == 409, changed.text
+    assert _run(factory, _count_workbench_runs(factory)) == before
+    cross = client.get(f"/api/v1/projects/{uuid4()}/shots/{shot_id}/executions/receipt",
+                       params={"stage": "video", "idempotency_key": "receipt:one"})
+    assert cross.status_code in {403, 404}
+
+
+@pytest.mark.parametrize("autonomy,expected", [("AUTO", "open_editing"),
+                                               ("ASSIST", "review_saved_design")])
+def test_actual_command_worker_and_formal_api_reach_next_checkpoint(
+    api, monkeypatch, autonomy, expected,
+):
+    from app.execution.models import Artifact, NodeRun, ProviderOperation
+    from app.workers import jobs
+    from sqlalchemy import func, select
+
+    client, factory = api
+    project_id, shot_id, _binding, _body, receipt = _start_command(api, autonomy=autonomy)
+    monkeypatch.setattr(jobs, "get_session_factory", lambda: factory)
+    first_scan = _run(factory, jobs.reconcile_waiting_director_turns({}))
+    assert first_scan["reconciled"] == 1
+    count = _run(factory, _count_workbench_runs(factory))
+
+    async def finish():
+        async with factory() as session:
+            run = await session.get(NodeRun, UUID(receipt["node_run_id"]))
+            artifact = Artifact(project_id=UUID(project_id), artifact_type="video",
+                                storage_state="available", object_key=f"obj/{uuid4().hex}",
+                                content_hash="e" * 64, mime_type="video/mp4", byte_size=1,
+                                produced_by_run_id=run.id)
+            session.add(artifact)
+            await session.flush()
+            run.status = "completed"
+            run.result_artifact_id = artifact.id
+            await session.commit()
+            return str(artifact.id)
+
+    artifact_id = _run(factory, finish())
+    assert _run(factory, jobs.reconcile_waiting_director_turns({}))["reconciled"] == 1
+    selected = client.post(f"/api/v1/projects/{project_id}/shots/{shot_id}/formal-video",
+                           headers={CSRF_HEADER: _csrf(client)},
+                           json={"artifact_id": artifact_id, "expected_shot_version": 2})
+    assert selected.status_code == 200, selected.text
+    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{receipt['director_turn_id']}")
+    assert turn.status_code == 200, turn.text
+    state = turn.json()
+    assert state["status"] == "completed" and state["step_count"] == 4
+    action = state["response_summary"]["coordination"]["current_action"]
+    assert action["action"] == expected and action["requires_confirmation"]
+    assert action["shot_version"] == 3
+    assert _run(factory, _count_workbench_runs(factory)) == count
+
+    async def operations():
+        async with factory() as session:
+            return await session.scalar(select(func.count()).select_from(ProviderOperation))
+
+    assert _run(factory, operations()) == 0
+
+
+def test_manual_command_keeps_production_available_without_proactive_followup(api):
+    _project, _shot, _binding, _body, receipt = _start_command(api, autonomy="MANUAL")
+    assert receipt["status"] == "queued"
+    assert receipt["director_turn_id"] is None

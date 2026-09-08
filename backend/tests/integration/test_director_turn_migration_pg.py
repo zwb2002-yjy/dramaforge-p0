@@ -99,7 +99,7 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
         ids = {key: uuid.uuid4() for key in ("user", "workspace", "project", "scope")}
         with engine.begin() as connection:
             head = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head == "20260908_0058"
+            assert head == "20260908_0059"
             columns = {
                 row[0]
                 for row in connection.execute(
@@ -152,6 +152,17 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
                 )
             ).scalar_one()
             assert waiting_function is not None
+            security = connection.execute(text(
+                "SELECT p.prosecdef, r.rolname, "
+                "NOT EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, "
+                "acldefault('f', p.proowner))) a WHERE a.grantee = 0 "
+                "AND a.privilege_type = 'EXECUTE') AS no_public "
+                "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner "
+                "WHERE p.oid = "
+                "'app.reconcilable_director_turn_contexts(integer,uuid)'::regprocedure"
+            )).one()
+            assert security.prosecdef and security.no_public
+            assert security.rolname == "dramaforge_worker_resolver"
             connection.execute(
                 text(
                     "INSERT INTO users (id,email,display_name,password_hash) "

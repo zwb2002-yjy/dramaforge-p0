@@ -562,7 +562,7 @@ async def list_reconcilable_director_turn_rls_scopes(
             or_(
                 DirectorTurn.status == "awaiting_execution",
                 (DirectorTurn.status == "awaiting_user")
-                & DirectorTurn.proposal_id.is_not(None),
+                & or_(DirectorTurn.proposal_id.is_not(None), DirectorTurn.node_run_ids != []),
             )
         )
         .where(

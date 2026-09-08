@@ -19,10 +19,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, ProjectCreativeProfile
+from app.assets.models import Shot
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import TERMINAL_TURN_STATUSES, DirectorTurnService
 from app.execution.models import NodeRun
+from app.production.models import GraphVersion, ProductionGraph
 from app.shared.errors import ConflictError, ValidationAppError
 
 _RUN_ACTIVE = frozenset({"queued", "running", "cancel_requested"})
@@ -41,6 +43,9 @@ class DirectorNextAction(StrEnum):
     REVIEW_STALE_PROPOSAL = "review_stale_proposal"
     REVIEW_SUGGESTION = "review_suggestion"
     MANUAL_NO_ADVANCE = "manual_no_advance"
+    PREVIEW_NEXT_STAGE = "preview_next_stage"
+    OPEN_EDITING = "open_editing"
+    REVIEW_SAVED_DESIGN = "review_saved_design"
     COMPLETED = "completed"
 
 
@@ -57,6 +62,7 @@ class DirectorNextActionRead(BaseModel):
     turn_status: str
     turn_revision: int
     step_count: int
+    shot_version: int | None = None
     node_run_ids: list[UUID] = Field(default_factory=list)
     accepted_item_ids: list[UUID] = Field(default_factory=list)
     rejected_item_ids: list[UUID] = Field(default_factory=list)
@@ -70,6 +76,7 @@ class _Decision:
     node_run_ids: list[UUID]
     accepted_item_ids: list[UUID]
     rejected_item_ids: list[UUID]
+    shot_version: int | None = None
 
 
 def _canonical_hash(value: object) -> str:
@@ -194,6 +201,7 @@ class DirectorNextActionService:
             turn_status=target_status,
             turn_revision=turn.revision + 1,
             step_count=turn.step_count + 1,
+            shot_version=decision.shot_version,
             node_run_ids=decision.node_run_ids,
             accepted_item_ids=decision.accepted_item_ids,
             rejected_item_ids=decision.rejected_item_ids,
@@ -246,7 +254,18 @@ class DirectorNextActionService:
         execution_checkpoint = stored is not None and bool(stored.node_run_ids)
         if turn.status == "awaiting_execution" or (turn.node_run_ids and execution_checkpoint):
             runs = await self._load_runs(project_id=project.id, turn=turn)
+            shot = await self._session.scalar(
+                select(Shot).where(Shot.id == turn.scope_entity_id, Shot.project_id == project.id)
+                .execution_options(populate_existing=True)
+            )
+            if shot is None:
+                raise ValidationAppError(
+                    "Director execution Shot is missing", details={"code": "DIRECTOR_SHOT_MISSING"},
+                )
             facts: dict[str, object] = {
+                "shot_version": shot.version,
+                "formal_keyframe": str(shot.formal_keyframe_artifact_id),
+                "formal_video": str(shot.formal_video_artifact_id),
                 "kind": "execution",
                 "autonomy": autonomy,
                 "runs": [
@@ -301,6 +320,28 @@ class DirectorNextActionService:
                     "Completed Director execution link has no result Artifact",
                     details={"code": "DIRECTOR_EXECUTION_RESULT_MISSING"},
                 )
+            stages = {str((run.input_snapshot or {}).get("stage", "")) for run in runs}
+            stage = next(iter(stages)) if len(stages) == 1 else ""
+            formal_id = (
+                shot.formal_keyframe_artifact_id if stage == "image_keyframe"
+                else shot.formal_video_artifact_id if stage == "video" else None
+            )
+            if formal_id is not None and any(run.result_artifact_id == formal_id for run in runs):
+                action = (
+                    DirectorNextAction.PREVIEW_NEXT_STAGE
+                    if autonomy == "AUTO" and stage == "image_keyframe"
+                    else DirectorNextAction.OPEN_EDITING if autonomy == "AUTO"
+                    else DirectorNextAction.REVIEW_SAVED_DESIGN if autonomy == "ASSIST"
+                    else DirectorNextAction.MANUAL_NO_ADVANCE
+                )
+                return (
+                    self._decision(
+                        action, confirmation=autonomy != "MANUAL",
+                        reason="Formal selection is saved; the next action remains explicit.",
+                        node_run_ids=ids, shot_version=shot.version,
+                    ),
+                    "completed", "formal_selected", facts,
+                )
             action = (
                 DirectorNextAction.CONFIRM_FORMAL_CANDIDATE
                 if autonomy == "AUTO"
@@ -316,6 +357,7 @@ class DirectorNextActionService:
                         "Production completed. Formal selection remains an explicit user gate."
                     ),
                     node_run_ids=ids,
+                    shot_version=shot.version,
                 ),
                 "awaiting_user",
                 "formal_confirmation" if autonomy == "AUTO" else "production_review",
@@ -470,9 +512,14 @@ class DirectorNextActionService:
         rows = list(
             (
                 await self._session.execute(
-                    select(NodeRun).where(
-                        NodeRun.id.in_(ids),
-                        NodeRun.project_id == project_id,
+                    select(NodeRun)
+                    .join(GraphVersion, GraphVersion.id == NodeRun.graph_version_id)
+                    .join(ProductionGraph, ProductionGraph.id == GraphVersion.graph_id)
+                    .where(
+                        NodeRun.id.in_(ids), NodeRun.project_id == project_id,
+                        ProductionGraph.project_id == project_id,
+                        ProductionGraph.scope_type == "shot",
+                        ProductionGraph.scope_entity_id == turn.scope_entity_id,
                     )
                 )
             )
@@ -502,6 +549,7 @@ class DirectorNextActionService:
         node_run_ids: list[UUID] | None = None,
         accepted_item_ids: list[UUID] | None = None,
         rejected_item_ids: list[UUID] | None = None,
+        shot_version: int | None = None,
     ) -> _Decision:
         return _Decision(
             action=action,
@@ -510,6 +558,7 @@ class DirectorNextActionService:
             node_run_ids=node_run_ids or [],
             accepted_item_ids=accepted_item_ids or [],
             rejected_item_ids=rejected_item_ids or [],
+            shot_version=shot_version,
         )
 
     @staticmethod

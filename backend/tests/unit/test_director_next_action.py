@@ -505,3 +505,70 @@ async def test_detached_decision_endpoint_cannot_bypass_canonical_proposal_items
     assert unsupported.value.details["code"] == "DIRECTOR_DECISION_UNSUPPORTED"
     assert items[0].status == "pending"
     assert turn.status == "awaiting_user"
+
+
+@pytest.mark.asyncio
+async def test_formal_keyframe_checkpoint_offers_preview_only_and_is_versioned(session):
+    project, _user, shot, run, turn = await _seed(session, autonomy="AUTO")
+    artifact = Artifact(project_id=project.id, artifact_type="image", storage_state="available",
+                        object_key=f"obj/{uuid4().hex}", content_hash="f" * 64,
+                        mime_type="image/png", byte_size=1)
+    session.add(artifact)
+    await session.flush()
+    run.status = "completed"
+    run.result_artifact_id = artifact.id
+    run.input_snapshot = {"shot_id": str(shot.id), "stage": "image_keyframe"}
+    shot.formal_keyframe_artifact_id = artifact.id
+    shot.version += 1
+    await session.flush()
+    service = DirectorNextActionService(session)
+    result = await service.reconcile(project=project, turn_id=turn.id)
+    assert result.action is DirectorNextAction.PREVIEW_NEXT_STAGE
+    assert result.requires_confirmation and result.shot_version == shot.version
+    assert turn.status == "completed"
+    assert await service.reconcile(project=project, turn_id=turn.id) == result
+    assert len((await session.execute(select(NodeRun))).scalars().all()) == 1
+    assert (await session.execute(select(ProviderOperation))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_cross_shot_node_run_link_is_rejected_even_inside_one_project(session):
+    project, _user, shot, _run, turn = await _seed(session)
+    other = Shot(project_id=project.id, scene_id=shot.scene_id, shot_number=2, version=1,
+                 visual_description="Other Shot")
+    session.add(other)
+    await session.flush()
+    turn.scope_entity_id = other.id
+    await session.flush()
+    with pytest.raises(ValidationAppError) as invalid:
+        await DirectorNextActionService(session).reconcile(project=project, turn_id=turn.id)
+    assert invalid.value.details["code"] == "DIRECTOR_NODE_RUN_LINK_MISSING"
+    assert turn.step_count == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_director_does_not_roll_back_valid_formal_selection(session):
+    from app.director.business_checkpoints import DirectorBusinessCheckpoints
+    from app.production.formal_selection import set_formal_keyframe
+
+    project, _user, shot, run, turn = await _seed(session, autonomy="AUTO")
+    artifact = Artifact(project_id=project.id, artifact_type="image", storage_state="available",
+                        object_key=f"obj/{uuid4().hex}", content_hash="e" * 64,
+                        mime_type="image/png", byte_size=1, produced_by_run_id=run.id)
+    session.add(artifact)
+    await session.flush()
+    run.status = "completed"
+    run.result_artifact_id = artifact.id
+    run.input_snapshot = {"shot_id": str(shot.id), "stage": "image_keyframe"}
+    turn.deadline = datetime.now(UTC) - timedelta(seconds=1)
+    await session.flush()
+    await set_formal_keyframe(session, project_id=project.id, shot_id=shot.id,
+                              artifact_id=artifact.id, expected_shot_version=shot.version)
+    await DirectorBusinessCheckpoints(session).reconcile_business_fact(
+        project=project, shot_id=shot.id,
+    )
+    await session.commit()
+    await session.refresh(shot)
+    assert shot.formal_keyframe_artifact_id == artifact.id
+    assert shot.version == 2
+    assert turn.status == "failed" and turn.wait_reason == "deadline_exceeded"

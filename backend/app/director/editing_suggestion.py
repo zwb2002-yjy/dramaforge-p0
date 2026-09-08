@@ -35,6 +35,7 @@ from app.director.assistant_models import DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
 from app.director.turn_models import DirectorTurn
+from app.director.turn_service import DirectorTurnService
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.editing.proposal_plan import (
@@ -401,9 +402,16 @@ class EditingDirectorSuggestionService:
         session_id: UUID,
         actor: User,
         request: EditingDirectorSuggestionRequest,
+        proactive: bool = False,
     ) -> EditingDirectorSuggestionResult:
         project = await ProjectService(self._session).get_project_for_owner(
             project_id=project_id, actor=actor
+        )
+        autonomy_version = (
+            await DirectorTurnService(self._session).require_proactive_authorization(
+                project_id=project.id,
+            )
+            if proactive else None
         )
         adapter = EditingAdapter(self._session)
         edit_session = await adapter.load_timeline(
@@ -452,6 +460,7 @@ class EditingDirectorSuggestionService:
                         "never request media regeneration."
                     ),
                     input_versions={
+                        **({"creative_profile": autonomy_version} if proactive else {}),
                         "project": project.version,
                         "edit_session": edit_session.version,
                     },
@@ -706,6 +715,7 @@ class EditingDirectorSuggestionService:
             project_id=project_id,
             session_id=session_id,
             actor=actor,
+            proactive=True,
             request=EditingDirectorSuggestionRequest(
                 expected_session_version=request.expected_session_version,
                 user_instruction="主动分析当前时间线节奏与转场，不要求用户输入",

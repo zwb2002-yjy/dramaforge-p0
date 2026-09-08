@@ -70,6 +70,11 @@ async def _seed(session: AsyncSession) -> tuple[User, Project, Scene, Shot, Shot
     )
     session.add(project)
     await session.flush()
+    from app.access.models import ProjectCreativeProfile
+
+    session.add(ProjectCreativeProfile(project_id=project.id, start_type="FREE",
+                                       director_autonomy="ASSIST"))
+    await session.flush()
     episode = Episode(project_id=project.id, episode_number=1, title="E1", synopsis="")
     session.add(episode)
     await session.flush()
@@ -561,3 +566,36 @@ async def test_rejected_context_new_request_key_never_calls_text_provider(sessio
         request=_request(scene, shot, key="rejection:changed", instruction="Changed goal"),
     )
     assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_manual_blocks_proactive_text_but_preserves_explicit_user_requests(session):
+    from app.access.models import ProjectCreativeProfile
+
+    user, project, scene, shot, _other = await _seed(session)
+    profile = await session.scalar(select(ProjectCreativeProfile).where(
+        ProjectCreativeProfile.project_id == project.id))
+    profile.director_autonomy = "MANUAL"
+    await session.commit()
+    calls = []
+
+    async def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
+        })
+
+    bridge = DirectorTextTransport(session, registry=_registry(handler))
+    with pytest.raises(ValidationAppError) as disabled:
+        await DirectorRecommendationService(session, text_transport=bridge).recommend(
+            project_id=project.id, actor=user,
+            request=DirectorRecommendationRequest(scene_id=scene.id, shot_id=shot.id,
+                expected_shot_version=shot.version, request_key="manual:proactive"),
+        )
+    assert disabled.value.details["code"] == "DIRECTOR_PROACTIVE_DISABLED"
+    assert calls == []
+    assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 0
+    await ShotDirectorSuggestionService(session, text_transport=bridge).suggest(
+        project_id=project.id, actor=user, request=_request(scene, shot, key="manual:explicit"),
+    )
+    assert len(calls) == 1

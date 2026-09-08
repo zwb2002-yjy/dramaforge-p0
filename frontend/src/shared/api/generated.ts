@@ -408,6 +408,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/executions/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Execution Receipt */
+        get: operations["get_execution_receipt_api_v1_projects__project_id__shots__shot_id__executions_receipt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/executions": {
         parameters: {
             query?: never;
@@ -3029,7 +3046,7 @@ export interface components {
          * DirectorNextAction
          * @enum {string}
          */
-        DirectorNextAction: "wait_for_execution" | "review_execution_failure" | "confirm_formal_candidate" | "review_production_result" | "review_proposal" | "review_accepted_changes" | "proposal_rejected" | "review_stale_proposal" | "review_suggestion" | "manual_no_advance" | "completed";
+        DirectorNextAction: "wait_for_execution" | "review_execution_failure" | "confirm_formal_candidate" | "review_production_result" | "review_proposal" | "review_accepted_changes" | "proposal_rejected" | "review_stale_proposal" | "review_suggestion" | "manual_no_advance" | "preview_next_stage" | "open_editing" | "review_saved_design" | "completed";
         /** DirectorNextActionRead */
         DirectorNextActionRead: {
             /**
@@ -3054,6 +3071,8 @@ export interface components {
             turn_revision: number;
             /** Step Count */
             step_count: number;
+            /** Shot Version */
+            shot_version?: number | null;
             /** Node Run Ids */
             node_run_ids?: string[];
             /** Accepted Item Ids */
@@ -3652,6 +3671,8 @@ export interface components {
         };
         /** ExecutionRead */
         ExecutionRead: {
+            /** Director Turn Id */
+            director_turn_id?: string | null;
             /**
              * Node Run Id
              * Format: uuid
@@ -7548,6 +7569,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionPlanRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_execution_receipt_api_v1_projects__project_id__shots__shot_id__executions_receipt_get: {
+        parameters: {
+            query: {
+                stage: "image_keyframe" | "video";
+                idempotency_key: string;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionRead"];
                 };
             };
             /** @description Validation Error */

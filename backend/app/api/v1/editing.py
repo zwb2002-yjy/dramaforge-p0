@@ -30,6 +30,7 @@ from app.director.editing_suggestion import (
     EditingProactiveSuggestionRequest,
 )
 from app.director.text_transport import DirectorInvocationEvidence
+from app.director.turn_service import DirectorTurnService
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.editing.timeline_builder import build_edit_session_for_project
@@ -267,6 +268,10 @@ async def save_edit_timeline(
         project_id=project_id,
         session_id=row.id,
         timeline=dict(body.timeline.model_dump(mode="json")),
+    )
+    await DirectorTurnService(session).mark_scope_stale(
+        project_id=project_id, scope_type="edit_session", scope_entity_id=saved.id,
+        reason=f"User saved EditSession version {saved.version}.",
     )
     await session.commit()
     return _edit_session_read(saved)

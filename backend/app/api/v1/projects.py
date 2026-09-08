@@ -226,6 +226,8 @@ async def update_project_creative_profile(
                 "actual_version": profile.version,
             },
         )
+    if profile.director_autonomy == body.director_autonomy:
+        return _profile_read(profile)
     if profile.director_autonomy != body.director_autonomy:
         await DirectorTurnService(session).mark_project_stale(
             project_id=project_id,

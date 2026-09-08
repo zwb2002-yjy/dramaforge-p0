@@ -69,6 +69,11 @@ async def _seed(session: AsyncSession) -> tuple[Project, User, EditSession]:
     )
     session.add(project)
     await session.flush()
+    from app.access.models import ProjectCreativeProfile
+
+    session.add(ProjectCreativeProfile(project_id=project.id, start_type="FREE",
+                                       director_autonomy="ASSIST"))
+    await session.flush()
     edit_session = EditSession(
         project_id=project.id,
         name="Director Cut",

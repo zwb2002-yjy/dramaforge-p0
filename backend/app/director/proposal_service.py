@@ -14,12 +14,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
+from app.director.business_checkpoints import DirectorBusinessCheckpoints
 from app.director.proposal_commands import ProposalCommandError, ProposalCommandRegistry
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.shared.errors import ValidationAppError
 
 
 class ProposalDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     item_id: UUID
     decision: str = Field(pattern="^(accepted|rejected)$")
 
@@ -52,7 +55,7 @@ class ProposalService:
             select(DirectorProposal).where(
                 DirectorProposal.id == proposal_id,
                 DirectorProposal.project_id == project.id,
-            )
+            ).with_for_update().execution_options(populate_existing=True)
         )
         if proposal is None:
             raise ValidationAppError(
@@ -62,13 +65,20 @@ class ProposalService:
             await self._session.execute(
                 select(DirectorProposalItem).where(
                     DirectorProposalItem.proposal_id == proposal.id
-                )
+                ).execution_options(populate_existing=True)
             )
         ).scalars().all()
         by_id = {item.id: item for item in items}
 
+        requested_ids = [decision.item_id for decision in apply_input.decisions]
+        if len(requested_ids) != len(set(requested_ids)):
+            raise ValidationAppError(
+                "Each proposal item must have one decision",
+                details={"code": "PROPOSAL_DUPLICATE_DECISION"},
+            )
         registry = ProposalCommandRegistry(self._session, actor_id=self._actor.id)
         result = PartialApplyResult()
+        changed = False
         for decision in apply_input.decisions:
             item = by_id.get(decision.item_id)
             if item is None:
@@ -76,6 +86,15 @@ class ProposalService:
                     {"item_id": str(decision.item_id), "error": "unknown item"}
                 )
                 continue
+            if item.status != "pending":
+                if item.status == decision.decision:
+                    decided = result.accepted if item.status == "accepted" else result.rejected
+                    decided.append(item.id)
+                else:
+                    message = "item is stale" if item.status == "stale" else "item already decided"
+                    result.failed.append({"item_id": str(item.id), "error": message})
+                continue
+            changed = True
             if decision.decision == "rejected":
                 item.status = "rejected"
                 item.decided_at = datetime.now(UTC)
@@ -101,9 +120,14 @@ class ProposalService:
             item.decided_at = datetime.now(UTC)
             result.accepted.append(item.id)
 
-        proposal.status = "applied" if result.accepted else "decided"
-        proposal.decided_at = datetime.now(UTC)
-        await self._session.flush()
+        if changed:
+            has_accepted = any(item.status == "accepted" for item in items)
+            proposal.status = "applied" if has_accepted else "decided"
+            proposal.decided_at = datetime.now(UTC)
+            await self._session.flush()
+        await DirectorBusinessCheckpoints(self._session).reconcile_business_fact(
+            project=project, proposal_id=proposal.id,
+        )
         return result
 
     async def mark_proposals_stale_for_shot(

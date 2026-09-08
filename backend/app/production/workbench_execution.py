@@ -37,7 +37,7 @@ from app.production.execution_plan import (
     WorkbenchExecutionPlan,
 )
 from app.production.formal_selection import require_formal_keyframe
-from app.production.models import ProductionGraph, ShotReferenceBinding
+from app.production.models import GraphVersion, ProductionGraph, ShotReferenceBinding
 from app.production.reference_intents import (
     ShotReferenceIntent,
     compile_references,
@@ -50,7 +50,7 @@ from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderConnectionRevision
 from app.shared.enums import GraphStatus
-from app.shared.errors import ValidationAppError
+from app.shared.errors import ConflictError, ValidationAppError
 
 PlanStage = Literal["image_keyframe", "video"]
 
@@ -71,6 +71,12 @@ _STAGE_CONTRACT: Final[dict[PlanStage, tuple[ModelSlot, Capability, str, str]]] 
 
 _PURE_UPSTREAM_NODE_TYPES = frozenset({"prompt", "prompt_compose"})
 _NODE_RUN_IDEMPOTENCY_MAX_LENGTH: Final[int] = 160
+
+
+def workbench_request_hash(payload: Mapping[str, object]) -> str:
+    """Fingerprint the validated command body, before mutable model resolution."""
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _workbench_idempotency_key(
@@ -744,6 +750,55 @@ class WorkbenchExecutionService:
             raise WorkbenchExecutionError(f"workbench plan has capability gaps: {reasons}")
         return plan
 
+    async def lock_command_scope(self, *, project_id: UUID) -> None:
+        # Command keys are unique per project, including accidental reuse on
+        # different Shots. Serialize the short DB-only queueing transaction.
+        await self._session.execute(
+            select(Project.id).where(Project.id == project_id).with_for_update()
+        )
+
+    async def find_command_receipt(
+        self, *, project_id: UUID, shot_id: UUID, stage: PlanStage,
+        command_key: str | None, plan_fingerprint: str | None = None,
+        expected_request_hash: str | None = None,
+    ) -> NodeRun | None:
+        """Read a committed frozen receipt; never resolve or submit a model."""
+        if command_key is not None and not command_key.strip():
+            raise ValidationAppError("Idempotency-Key must not be blank")
+        if command_key is None and not plan_fingerprint:
+            return None
+        key = _workbench_idempotency_key(
+            stage=stage, override=command_key, plan_fingerprint=plan_fingerprint or "",
+        )
+        run = await self._session.scalar(select(NodeRun).where(
+            NodeRun.project_id == project_id, NodeRun.idempotency_key == key,
+        ))
+        if run is None:
+            return None
+        snapshot = run.input_snapshot or {}
+        graph_shot = await self._session.scalar(
+            select(ProductionGraph.scope_entity_id)
+            .join(GraphVersion, GraphVersion.graph_id == ProductionGraph.id)
+            .where(GraphVersion.id == run.graph_version_id,
+                   ProductionGraph.project_id == project_id, ProductionGraph.scope_type == "shot")
+        )
+        if (graph_shot != shot_id or snapshot.get("shot_id") != str(shot_id)
+                or snapshot.get("stage") != stage):
+            raise ConflictError(
+                "Execution command key belongs to a different Shot or stage",
+                details={"code": "EXECUTION_COMMAND_SCOPE_CONFLICT"},
+            )
+        if expected_request_hash is not None and (
+            snapshot.get("workbench_request_hash") != expected_request_hash
+            or (plan_fingerprint is not None
+                and snapshot.get("plan_fingerprint") != plan_fingerprint)
+        ):
+            raise ConflictError(
+                "Execution command key was already used with a different request",
+                details={"code": "EXECUTION_COMMAND_REUSED", "node_run_id": str(run.id)},
+            )
+        return run
+
     async def create_and_dispatch(
         self,
         *,
@@ -751,6 +806,7 @@ class WorkbenchExecutionService:
         execution_input: WorkbenchExecutionInput,
         idempotency_key_override: str | None = None,
         prepared_plan: WorkbenchExecutionPlan | None = None,
+        request_hash: str | None = None,
     ) -> NodeRun:
         """Resolve the shot graph, create a queued NodeRun and persist the
         frozen plan snapshot for the worker.
@@ -758,10 +814,27 @@ class WorkbenchExecutionService:
         The NodeRun ``status="queued"`` is the dispatch: the worker claims and
         executes it. No direct Provider HTTP, no legacy budget / agent gate.
         """
+        identity = request_hash or workbench_request_hash(execution_input.model_dump(mode="json"))
+        await self.lock_command_scope(project_id=project.id)
+        existing = await self.find_command_receipt(
+            project_id=project.id, shot_id=execution_input.shot_id, stage=execution_input.stage,
+            command_key=idempotency_key_override,
+            plan_fingerprint=prepared_plan.plan_fingerprint if prepared_plan else None,
+            expected_request_hash=identity,
+        )
+        if existing is not None:
+            return existing
         plan = prepared_plan or await self.build_plan(
             project=project,
             execution_input=execution_input,
         )
+        existing = await self.find_command_receipt(
+            project_id=project.id, shot_id=execution_input.shot_id, stage=execution_input.stage,
+            command_key=idempotency_key_override, plan_fingerprint=plan.plan_fingerprint,
+            expected_request_hash=identity,
+        )
+        if existing is not None:
+            return existing
         if (
             plan.plan_fingerprint is None
             or plan.project_id != project.id
@@ -806,6 +879,14 @@ class WorkbenchExecutionService:
                 published_by=self._user_id,
             )
         node = materialized.nodes[node_key]
+        await self._session.execute(
+            select(GraphNode.id).where(GraphNode.id == node.id).with_for_update()
+        )
+        previous_run = await self._session.scalar(
+            select(NodeRun).where(NodeRun.graph_node_id == node.id)
+            .order_by(NodeRun.attempt_no.desc()).limit(1)
+        )
+        attempt_no = (previous_run.attempt_no if previous_run is not None else 0) + 1
         await _ensure_pure_chain_upstreams(
             self._session,
             project_id=project.id,
@@ -825,6 +906,7 @@ class WorkbenchExecutionService:
 
         snapshot: dict[str, object] = {
             "workbench_plan": plan.model_dump(mode="json"),
+            "workbench_request_hash": identity,
             # Keep the compiled selection visible at the NodeRun boundary as
             # well as inside the typed plan.  The Worker consumes this frozen
             # list; it must never re-resolve mutable Asset/Binding state.
@@ -880,6 +962,8 @@ class WorkbenchExecutionService:
             project_id=project.id,
             graph_version_id=version.id,
             graph_node_id=node.id,
+            attempt_no=attempt_no,
+            parent_run_id=previous_run.id if previous_run is not None else None,
             idempotency_key=_workbench_idempotency_key(
                 stage=plan.stage,
                 override=idempotency_key_override,

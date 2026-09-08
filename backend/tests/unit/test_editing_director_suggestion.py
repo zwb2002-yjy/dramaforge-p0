@@ -76,6 +76,11 @@ async def _seed(
     )
     session.add(project)
     await session.flush()
+    from app.access.models import ProjectCreativeProfile
+
+    session.add(ProjectCreativeProfile(project_id=project.id, start_type="FREE",
+                                       director_autonomy="ASSIST"))
+    await session.flush()
     episode = Episode(project_id=project.id, episode_number=1, title="E1", synopsis="")
     session.add(episode)
     await session.flush()
@@ -777,4 +782,28 @@ async def test_repair_routing_stale_version_fails_closed(session: AsyncSession) 
                 user_instruction="需要补拍",
             ),
         )
+    assert await _proposal_counts(session, project.id) == before
+
+
+@pytest.mark.asyncio
+async def test_manual_mode_rejects_proactive_editing_before_transport(session):
+    from app.access.models import ProjectCreativeProfile
+    from app.director.editing_suggestion import EditingProactiveSuggestionRequest
+    from sqlalchemy import select
+
+    project, edit_session, user, *_ = await _seed(session)
+    profile = await session.scalar(select(ProjectCreativeProfile).where(
+        ProjectCreativeProfile.project_id == project.id))
+    profile.director_autonomy = "MANUAL"
+    await session.flush()
+    before = await _proposal_counts(session, project.id)
+    with pytest.raises(ValidationAppError) as disabled:
+        await EditingDirectorSuggestionService(
+            session, transport=DeterministicEditingDirectorSuggestionTransport(),
+        ).suggest_proactive(
+            project_id=project.id, session_id=edit_session.id, actor=user,
+            request=EditingProactiveSuggestionRequest(expected_session_version=edit_session.version,
+                                                       request_key="manual:editing"),
+        )
+    assert disabled.value.details["code"] == "DIRECTOR_PROACTIVE_DISABLED"
     assert await _proposal_counts(session, project.id) == before

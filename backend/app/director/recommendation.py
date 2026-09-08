@@ -21,6 +21,7 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Episode, Scene, Shot
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
+from app.director.turn_service import DirectorTurnService
 from app.providers.model_profiles.slots import ModelSlot
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -216,6 +217,9 @@ class DirectorRecommendationService:
         project = await ProjectService(self._session).get_project_for_owner(
             project_id=project_id, actor=actor
         )
+        autonomy_version = await DirectorTurnService(self._session).require_proactive_authorization(
+            project_id=project.id,
+        )
         scene = await self._session.scalar(
             select(Scene)
             .join(Episode, Episode.id == Scene.episode_id)
@@ -274,6 +278,7 @@ class DirectorRecommendationService:
                         "update_director_state with a design field and JSON value."
                     ),
                     input_versions={
+                        "creative_profile": autonomy_version,
                         "project": project.version,
                         "scene": scene.version,
                         "shot": shot.version,

@@ -313,6 +313,22 @@ def test_editing_http_lifecycle_preserves_formal_facts(
     assert loaded.status_code == 200, loaded.text
     assert loaded.json()["timeline"] == created_body["timeline"]
 
+    async def seed_turn():
+        from app.access.models import Project, Workspace
+        from app.director.turn_models import DirectorTurn
+
+        async with factory() as db:
+            project = await db.get(Project, UUID(project_id))
+            workspace = await db.get(Workspace, project.workspace_id)
+            turn = DirectorTurn(project_id=project.id, workspace_id=workspace.id,
+                actor_id=workspace.owner_user_id, scope_type="edit_session",
+                scope_entity_id=UUID(session_id), request_key="manual-edit:turn",
+                context_hash="f" * 64, status="awaiting_user", step_count=1)
+            db.add(turn)
+            await db.commit()
+            return str(turn.id)
+
+    turn_id = _run(factory, seed_turn())
     edited_timeline = {
         "clips": [{**created_body["timeline"]["clips"][0], "duration_seconds": 1.25}],
         "metadata": {"edited": True, "notes": "manual trim"},
@@ -325,6 +341,10 @@ def test_editing_http_lifecycle_preserves_formal_facts(
     assert saved.status_code == 200, saved.text
     assert saved.json()["timeline"] == edited_timeline
     assert saved.json()["production_lineage"] == created_body["production_lineage"]
+    stale_turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}")
+    assert stale_turn.status_code == 200, stale_turn.text
+    assert stale_turn.json()["status"] == "stale"
+    assert stale_turn.json()["wait_reason"] == "context_changed"
 
     reopened = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}")
     assert reopened.status_code == 200, reopened.text

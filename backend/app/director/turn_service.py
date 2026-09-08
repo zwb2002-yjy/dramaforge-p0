@@ -16,7 +16,8 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import Project, User
+from app.access.models import Project, ProjectCreativeProfile, User
+from app.director.proposal_models import DirectorProposalItem
 from app.director.turn_models import DirectorTurn
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -337,15 +338,39 @@ class DirectorTurnService:
             },
         )
 
+    async def require_proactive_authorization(self, *, project_id: UUID) -> int:
+        """Serialize authorization with mode changes until the turn is durable.
+
+        The text bridge commits submission intent before external I/O. A mode
+        change then sees this registered turn and can invalidate its result;
+        no transaction lock is held while waiting on the Provider.
+        """
+        profile = await self._session.scalar(
+            select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project_id)
+            .with_for_update().execution_options(populate_existing=True)
+        )
+        if profile is None or profile.director_autonomy not in {"AUTO", "ASSIST"}:
+            raise ValidationAppError(
+                "Proactive Director analysis is disabled; explicit user requests remain available",
+                details={"code": "DIRECTOR_PROACTIVE_DISABLED", "manual_ok": True},
+            )
+        return profile.version
+
     async def assert_context_not_rejected(self, *, project_id: UUID, context_hash: str) -> None:
         rejected = await self._session.scalar(
             select(DirectorTurn.id).where(
                 DirectorTurn.project_id == project_id,
                 DirectorTurn.context_hash == context_hash,
-                DirectorTurn.status == "completed",
                 or_(
                     DirectorTurn.response_summary["user_decision"]["decision"].as_string()
                     == "reject",
+                    DirectorTurn.response_summary["user_decision"]["rejected_operation_indices"][0]
+                    .as_integer().is_not(None),
+                    select(DirectorProposalItem.id).where(
+                        DirectorProposalItem.proposal_id == DirectorTurn.proposal_id,
+                        DirectorProposalItem.project_id == project_id,
+                        DirectorProposalItem.status == "rejected",
+                    ).exists(),
                     DirectorTurn.wait_reason == "proposal_rejected",
                 ),
             ).limit(1)
@@ -444,7 +469,7 @@ class DirectorTurnService:
             if (turn.response_summary or {}).get("user_decision") == audit:
                 return turn
             raise
-        if decision == "reject":
+        if audit["rejected_operation_indices"] or decision == "reject":
             # Close already-in-flight sibling requests for the same business
             # context. Their paid transport, if submitted, is not cancelled.
             await self._session.execute(

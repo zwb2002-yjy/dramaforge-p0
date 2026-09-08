@@ -257,6 +257,22 @@ async def test_only_one_postgres_worker_claims_and_restart_recovery_is_fail_stop
         engine = create_async_engine(_async_url(dbname))
         factory = async_sessionmaker(engine, expire_on_commit=False)
 
+        from app.assets.models import Episode, Scene, Shot
+
+        async with factory() as session:
+            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
+                                  project_id=ids["project"])
+            episode = Episode(project_id=ids["project"], episode_number=1, title="E1", synopsis="")
+            session.add(episode)
+            await session.flush()
+            scene = Scene(episode_id=episode.id, scene_number=1, location_name="Studio",
+                          time_of_day="day", synopsis="")
+            session.add(scene)
+            await session.flush()
+            session.add(Shot(id=ids["scope"], project_id=ids["project"], scene_id=scene.id,
+                             shot_number=1, version=1, visual_description="Saved Shot"))
+            await session.commit()
+
         async def claim() -> str:
             async with factory() as session:
                 await set_rls_context(
@@ -373,7 +389,7 @@ async def test_only_one_postgres_worker_claims_and_restart_recovery_is_fail_stop
         repeated_scan = await jobs.reconcile_waiting_director_turns(
             {"job_id": "closed-browser-repeat"}
         )
-        assert repeated_scan == {"reconciled": 0, "unchanged": 0, "failed": 0}
+        assert repeated_scan == {"reconciled": 0, "unchanged": 1, "failed": 0}
         async with factory() as session:
             await set_rls_context(
                 session,

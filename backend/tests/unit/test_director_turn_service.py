@@ -343,6 +343,11 @@ async def test_detached_partial_decision_is_durable_and_never_applies_design(ses
     audit = turn.response_summary["user_decision"]
     assert audit["accepted_operation_indices"] == [1]
     assert audit["rejected_operation_indices"] == [0]
+    with pytest.raises(ConflictError) as refused_subset:
+        await service.assert_context_not_rejected(
+            project_id=project.id, context_hash=turn.context_hash,
+        )
+    assert refused_subset.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
     assert turn.wait_reason == "design_save"
     from app.director.next_action import DirectorNextActionService
 

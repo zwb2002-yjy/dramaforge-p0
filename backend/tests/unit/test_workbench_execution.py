@@ -61,7 +61,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
         model_id="agnes-video-v2.0",
-        model_revision="v1",
+        model_revision=f"test-{uuid4().hex[:8]}",
         display_name="Agnes Video",
         media_kind="video",
         lifecycle="active",
@@ -73,13 +73,21 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     )
     session.add(entry)
     await session.flush()
+    from app.security.models import EncryptedProviderCredential
+
+    credential = EncryptedProviderCredential(
+        workspace_id=workspace.id, provider="agnes", revision_no=1,
+        ciphertext="isolated-test-ciphertext", key_version="test",
+    )
+    session.add(credential)
+    await session.flush()
     connection = ProviderConnection(
         workspace_id=workspace.id,
         provider_type="agnes",
         display_name="Agnes",
         base_url="https://api.agnes-ai.cn",
         protocol_profile="agnes_cn_v1",
-        credential_id=uuid4(),
+        credential_id=credential.id,
         credential_revision=1,
         enabled=True,
         verification_status="verified",
@@ -733,7 +741,7 @@ async def _seed_video_shot(
         graph_node_id=node.id,
         idempotency_key=f"video-kf:{_uuid4().hex}",
         input_hash="a" * 64,
-        status="completed",
+        status="running",
         input_snapshot={},
         created_by=user.id,
     )
@@ -742,7 +750,7 @@ async def _seed_video_shot(
     artifact = Artifact(
         project_id=project.id,
         artifact_type="image",
-        storage_state="stored",
+        storage_state="available",
         object_key=f"obj/{_uuid4().hex}",
         content_hash="b" * 64,
         mime_type="image/png",
@@ -750,6 +758,9 @@ async def _seed_video_shot(
         produced_by_run_id=run.id,
     )
     session.add(artifact)
+    await session.flush()
+    run.result_artifact_id = artifact.id
+    run.status = "completed"
     await session.flush()
     await set_formal_keyframe(
         session,
@@ -912,3 +923,44 @@ async def test_frozen_effective_creative_content_enters_plan_and_run(
     )
     assert "later edit: green wardrobe" not in resumed[0].prompt
     assert "later_dolly_in" not in resumed[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_command_replay_is_frozen_and_new_keys_allocate_attempts(session, monkeypatch):
+    from app.shared.errors import ConflictError
+
+    project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    command = _input(project_id=project.id, shot_id=shot.id,
+                     requested_binding_id=binding.id, expected_shot_version=shot.version)
+    first = await service.create_and_dispatch(
+        project=project, execution_input=command, idempotency_key_override="command:one",
+    )
+    await session.commit()
+    first_id, first_hash = first.id, first.input_hash
+    second = await service.create_and_dispatch(
+        project=project, execution_input=command, idempotency_key_override="command:two",
+    )
+    assert second.attempt_no == first.attempt_no + 1
+    assert second.parent_run_id == first.id
+    await session.commit()
+
+    async def no_resolution(**kwargs):
+        raise AssertionError("A committed receipt must never re-resolve the model")
+
+    monkeypatch.setattr(service, "build_plan", no_resolution)
+    binding.enabled = False
+    shot.version += 1
+    await session.commit()
+    replay = await service.create_and_dispatch(
+        project=project, execution_input=command, idempotency_key_override="command:one",
+    )
+    assert replay.id == first_id and replay.input_hash == first_hash
+    with pytest.raises(ConflictError) as conflict:
+        await service.create_and_dispatch(
+            project=project, execution_input=command.model_copy(update={"prompt": "changed"}),
+            idempotency_key_override="command:one",
+        )
+    assert conflict.value.details["code"] == "EXECUTION_COMMAND_REUSED"
+    assert list((await session.execute(select(ProviderOperation))).scalars()) == []
