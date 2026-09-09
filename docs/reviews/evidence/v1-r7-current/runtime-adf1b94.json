@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "candidate_sha": "adf1b9434f59f7dfacf5819d04a77997244e783e",
+  "entry_port": 8080,
+  "host_bind_address": "127.0.0.2",
+  "migration_head": "20260908_0060",
+  "services": {
+    "api": {"source_commit": "adf1b9434f59f7dfacf5819d04a77997244e783e", "image_id": "sha256:18c0dfb988a1fdfda84306e0b7d4c931df31e871c2c8b4d39d16036903b4872f", "healthy": true},
+    "dispatcher": {"source_commit": "adf1b9434f59f7dfacf5819d04a77997244e783e", "image_id": "sha256:18c0dfb988a1fdfda84306e0b7d4c931df31e871c2c8b4d39d16036903b4872f", "healthy": true},
+    "worker_default": {"source_commit": "adf1b9434f59f7dfacf5819d04a77997244e783e", "image_id": "sha256:18c0dfb988a1fdfda84306e0b7d4c931df31e871c2c8b4d39d16036903b4872f", "healthy": true},
+    "worker_heavy": {"source_commit": "adf1b9434f59f7dfacf5819d04a77997244e783e", "image_id": "sha256:18c0dfb988a1fdfda84306e0b7d4c931df31e871c2c8b4d39d16036903b4872f", "healthy": true},
+    "frontend": {"source_commit": "adf1b9434f59f7dfacf5819d04a77997244e783e", "image_id": "sha256:10e25c9161eab134b0a88dde3b5da067d28e5e476712c38517cfdb7d5ca23a90", "healthy": true}
+  },
+  "existing_host_entry_preserved": {
+    "address": "127.0.0.1",
+    "port": 8080,
+    "status": "ok",
+    "source_commit": "worktree-acceptance-20260906-32216450fd43"
+  }
+}
+

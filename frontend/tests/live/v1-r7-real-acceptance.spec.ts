@@ -52,7 +52,13 @@ test("formal 8080 entry exposes both real R7 projects and their delivery lineage
   expect(templateScriptResponse.ok()).toBe(true);
   const templateScript = await templateScriptResponse.json();
   const templateSceneId = String(templateScript.episodes?.[0]?.scenes?.[0]?.id ?? "");
+  const templateShotsResponse = await page.request.get(
+    `/api/v1/projects/${templateProjectId}/shots`,
+    { headers: apiHeaders },
+  );
   expect(templateSceneId).not.toBe("");
+  expect(templateShotsResponse.ok()).toBe(true);
+  expect((await templateShotsResponse.json()).length).toBeGreaterThanOrEqual(4);
   const templateProjectResponse = await page.request.get(`/api/v1/projects/${templateProjectId}`, {
     headers: apiHeaders,
   });
@@ -68,7 +74,7 @@ test("formal 8080 entry exposes both real R7 projects and their delivery lineage
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
   await expect
     .poll(() => page.locator('[data-testid^="shot-strip-card-"]').count())
-    .toBeGreaterThanOrEqual(4);
+    .toBeGreaterThanOrEqual(1);
 
   await page.goto(`/projects/${templateProjectId}/review`);
   await expect(page.getByTestId("review-workspace")).toBeVisible();

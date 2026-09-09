@@ -301,3 +301,15 @@ def test_local_editing_recovery_rejects_unrelated_failure_before_http(tmp_path):
 
         with pytest.raises(RuntimeError, match="not the known concurrent Artifact race"):
             run.recover_local_editing()
+
+
+def test_remote_media_operations_include_canonical_keyframe_kind():
+    operations = [
+        {"actual_provider": "agnes", "operation_kind": "keyframe.generate"},
+        {"actual_provider": "agnes", "operation_kind": "video.generate"},
+        {"actual_provider": "local_tts", "operation_kind": "voice.generate"},
+    ]
+
+    assert driver.Acceptance.remote_media_operations({"provider_operations": operations}) == (
+        operations[:2]
+    )

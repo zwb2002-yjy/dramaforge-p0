@@ -319,7 +319,8 @@ class Acceptance:
             operation
             for operation in snapshot.get("provider_operations", [])
             if operation.get("actual_provider") not in {"local", "local_ffmpeg", "local_tts"}
-            and operation.get("operation_kind") in {"image.generate", "video.generate"}
+            and operation.get("operation_kind")
+            in {"image.generate", "keyframe.generate", "video.generate"}
         ]
 
     def login(self):
@@ -950,7 +951,8 @@ class Acceptance:
             or "uq_artifacts_project_hash_type" not in str(failed.get("error_summary") or "")
         ):
             raise RuntimeError("Persisted failure is not the known concurrent Artifact race")
-        project_id = str(failed.get("input_snapshot", {}).get("project_id") or "")
+        input_snapshot = failed.get("input_snapshot", {})
+        project_id = str(input_snapshot.get("project_id") or "")
         label = next(
             (
                 name
@@ -959,6 +961,20 @@ class Acceptance:
             ),
             None,
         )
+        if label is None and input_snapshot.get("shot_id"):
+            failed_shot_id = str(input_snapshot["shot_id"])
+            label = next(
+                (
+                    name
+                    for name, project in self.state["projects"].items()
+                    if any(
+                        shot["id"] == failed_shot_id for shot in self.shots(project["id"])
+                    )
+                ),
+                None,
+            )
+            if label is not None:
+                project_id = self.state["projects"][label]["id"]
         if label is None:
             raise RuntimeError("Failed local Editing run is not owned by an acceptance project")
         saved_step = self.state["steps"].get(label + ":timeline-save")
@@ -1026,8 +1042,8 @@ class Acceptance:
     def review_submit(self):
         project = self.state["projects"]["template_auto"]
         project_id = project["id"]
-        shot = self.shots(project_id)[0]
-        shot_id = shot["id"]
+        shot_id = self.shots(project_id)[0]["id"]
+        shot = self.shot(project_id, shot_id)
         if not shot.get("formal_video_artifact_id"):
             raise RuntimeError("Review acceptance requires a Formal video")
         before = self.read(f"/projects/{project_id}/snapshot")
@@ -1044,7 +1060,12 @@ class Acceptance:
                 "severity": "warning",
             },
         )
-        plan = self.read(f"/projects/{project_id}/shots/{shot_id}/repair-plan")
+        plan = self.once(
+            "review:repair-plan",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/repair-plan",
+            {},
+        )
         if plan.get("annotation_count", 0) < 1 or "rerun_video" not in plan.get(
             "repair_options", []
         ):
@@ -1481,6 +1502,7 @@ class Acceptance:
             self.state[label + ":director_turns"] = sanitized(
                 self.read(f"/projects/{pid}/director/turns?limit=100")
             )
+        self.save()
         if self.state["projects"]["template_auto"]["id"] == self.state["projects"][
             "free_assist"
         ]["id"]:

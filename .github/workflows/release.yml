@@ -358,12 +358,12 @@ jobs:
             SHA256SUMS
             LICENSE
             NOTICE
-      - name: Upload current-head Golden and Final Film evidence
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && contains(github.event.head_commit.message, '[release-candidate]') }}
+      - name: Upload current R7 Golden and Final Film evidence
+        if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/dev' && contains(github.event.head_commit.message, '[release-candidate]')) }}
         uses: actions/upload-artifact@v7
         with:
-          name: v1-current-head-golden-${{ github.sha }}
-          path: docs/reviews/evidence/v1-current-head
+          name: v1-r7-current-golden-${{ github.sha }}
+          path: docs/reviews/evidence/v1-r7-current
           if-no-files-found: error
       - name: Attest backend image provenance
         uses: actions/attest-build-provenance@v4

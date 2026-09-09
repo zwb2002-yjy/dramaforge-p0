@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "candidate_sha": "adf1b9434f59f7dfacf5819d04a77997244e783e",
+  "entry_port": 8080,
+  "project_ids": {
+    "template_auto": "9b99a11f-6b78-42a0-a4e9-13cc04579729",
+    "free_assist": "fdf7080e-bb23-462c-b63f-132997ef2971"
+  },
+  "edit_session_ids": {
+    "template_auto": "db642ddb-72a6-4237-b279-4c04a8f0a40d",
+    "free_assist": "d376145d-e7c8-4259-87d1-cec8bcec6b06"
+  },
+  "assertions": {
+    "template_production_dom": true,
+    "template_auto_identity": true,
+    "template_scene_and_multiple_shots": true,
+    "review_annotation_visible": true,
+    "template_final_film_playback_and_downloads": true,
+    "free_production_dom": true,
+    "free_assist_identity": true,
+    "free_saved_timeline": true,
+    "free_final_film_downloads": true,
+    "api_network_clean": true
+  },
+  "console_error_count": 0,
+  "page_error_count": 0,
+  "failed_api_response_count": 0
+}
+
