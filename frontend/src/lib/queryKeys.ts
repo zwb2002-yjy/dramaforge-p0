@@ -84,6 +84,8 @@ export const queryKeys = {
   director: {
     board: (projectId: string, shotId: string | null | undefined) =>
       ["director-board", projectId, shotId] as const,
+    turns: (projectId: string, scopeType: string, scopeEntityId: string | null | undefined) =>
+      ["director-turns", projectId, scopeType, scopeEntityId] as const,
   },
 
   review: {

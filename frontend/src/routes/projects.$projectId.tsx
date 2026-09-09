@@ -1,14 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, Navigate, Outlet, createRoute, useRouterState } from "@tanstack/react-router";
+import { Navigate, Outlet, createRoute, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
-import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProjectWorkspaceShell } from "../components/workstation/ProjectWorkspaceShell";
-import { CreativeAutonomySwitcher } from "../features/project/CreativeAutonomySwitcher";
 import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
-import { ApiError, fetchProject, getSelectedWorkspaceId, type ProjectRead } from "../lib/api";
-import { rootRoute } from "./__root";
+import { ApiError, fetchProject, type ProjectRead } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
+import { rootRoute } from "./__root";
 
 export const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -23,7 +21,7 @@ function EvidenceInspector({ project }: { project: ProjectRead | undefined }) {
       <section>
         <span className="director-stage-kicker">当前状态</span>
         <h3>{project.stage}</h3>
-        <p>项目、场景、镜头与生产证据来自同一 canonical 数据源。</p>
+        <p>项目、场景、镜头与制作证据来自同一事实源。</p>
       </section>
       <dl>
         <dt>画幅</dt>
@@ -34,65 +32,8 @@ function EvidenceInspector({ project }: { project: ProjectRead | undefined }) {
         <dd>{project.target_platform}</dd>
       </dl>
       <section>
-        <h4>执行边界</h4>
-        <p className="muted">
-          专业工作台共享 Workflow、Production Graph、NodeRun 和 Artifact；模型供应商负责价格与结算。
-        </p>
-      </section>
-    </div>
-  );
-}
-
-function ProjectOverview({ project }: { project: ProjectRead | undefined }) {
-  const { projectId } = projectRoute.useParams();
-  const { lastView } = useProjectWorkspaceState(projectId);
-  const restoreTarget = lastView ?? "scenes";
-  return (
-    <div data-testid="project-panel" className="qc-project-overview">
-      <header className="qc-page-heading">
-        <p>项目总览</p>
-        <h1>{project?.name ?? "短剧项目"}</h1>
-        <span>从场景和镜头到完整交付，画布、版本和媒体证据保留在同一个项目中。</span>
-      </header>
-      <section className="qc-overview-band">
-        <div>
-          <small>当前阶段</small>
-          <strong>专业制作</strong>
-          <p>{project?.stage ?? "正在恢复项目事实"}</p>
-        </div>
-        <div>
-          <small>继续上次查看</small>
-          <p>{lastView ? `回到 ${lastView} 视图` : "首次进入项目，默认进入场景总览。"}</p>
-        </div>
-        <Link
-          className="qc-overview-primary"
-          to={`/projects/$projectId/${restoreTarget}`}
-          params={{ projectId }}
-        >
-          {lastView ? "继续上次查看" : "进入场景总览"}
-        </Link>
-      </section>
-      <section className="qc-overview-grid">
-        <article>
-          <span className="director-stage-kicker">导演助手</span>
-          <h2>受控导演建议</h2>
-          <p>历史导演流程事实继续保留，但新的创作入口统一在专业工作台。</p>
-          <Link to="/projects/$projectId/production" params={{ projectId }}>
-            进入专业工作台
-          </Link>
-        </article>
-        <article>
-          <span className="director-stage-kicker">专业模式</span>
-          <h2>逐镜生产证据</h2>
-          <p>展开 Production Graph、NodeRun、ProviderOperation、Artifact 和局部修复范围。</p>
-          <Link to="/projects/$projectId/production" params={{ projectId }}>
-            进入专业生产
-          </Link>
-        </article>
-      </section>
-      <section id="model-settings" className="qc-settings-band">
-        {project && <CreativeAutonomySwitcher project={project} />}
-        <ModelProfileSettings projectId={projectId} workspaceId={getSelectedWorkspaceId()} />
+        <h4>事实边界</h4>
+        <p className="muted">创作工作台共享同一套项目、制作和产物事实。</p>
       </section>
     </div>
   );
@@ -100,11 +41,10 @@ function ProjectOverview({ project }: { project: ProjectRead | undefined }) {
 
 function ProjectLayout() {
   const { projectId } = projectRoute.useParams();
-  const location = useRouterState({ select: (state) => state.location });
-  const pathname = location.pathname;
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const view = workspaceViewFromPath(pathname);
   const atRoot = view === null;
-  const ws = useProjectWorkspaceState(projectId);
+  const workspaceState = useProjectWorkspaceState(projectId);
   const project = useQuery({
     queryKey: queryKeys.project.detail(projectId),
     queryFn: async () => {
@@ -115,33 +55,32 @@ function ProjectLayout() {
         throw error;
       }
     },
-    enabled: projectId !== "demo" && atRoot,
+    enabled: projectId !== "demo",
+    retry: false,
   });
 
-  // Remember the current professional view so the next visit restores it.
   const lastRemembered = useRef<string | null>(null);
   useEffect(() => {
     if (view && lastRemembered.current !== view) {
       lastRemembered.current = view;
-      ws.rememberLastView(view);
+      workspaceState.rememberLastView(view);
     }
-  }, [view, ws]);
+  }, [view, workspaceState]);
+
+  if (atRoot && !workspaceState.isLoading) {
+    const restoreTarget = workspaceState.lastView ?? "scenes";
+    return <Navigate to={`/projects/$projectId/${restoreTarget}`} params={{ projectId }} replace />;
+  }
 
   const projectRead = project.data ?? undefined;
-
-  // Project root restores the last professional view unless the user explicitly
-  // requested an anchor (e.g. model settings via #model-settings).
-  if (atRoot && ws.lastView && !location.hash) {
-    return <Navigate to={`/projects/$projectId/${ws.lastView}`} params={{ projectId }} replace />;
-  }
+  const activeView = view ?? "overview";
 
   return (
     <ProjectWorkspaceShell
       projectId={projectId}
       projectName={projectRead?.name ?? (projectId === "demo" ? "演示项目" : "短剧项目")}
-      activeView={view ?? "overview"}
+      activeView={activeView}
       inspector={view === "scenes" ? undefined : <EvidenceInspector project={projectRead} />}
-      modeLabel={view === "production" ? "专业模式" : (view ?? "项目总览")}
     >
       {project.isError && (
         <div className="flash err">
@@ -149,7 +88,7 @@ function ProjectLayout() {
           {project.error instanceof Error ? project.error.message : "未知错误"}
         </div>
       )}
-      {atRoot ? <ProjectOverview project={projectRead} /> : <Outlet />}
+      {atRoot ? <p className="muted">正在恢复上次创作位置…</p> : <Outlet />}
     </ProjectWorkspaceShell>
   );
 }

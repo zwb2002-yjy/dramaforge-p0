@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "candidate_sha": "adf1b9434f59f7dfacf5819d04a77997244e783e",
+  "repair_run_id": "9d9e91cf-a5db-49b5-8952-af4f2f571ceb",
+  "provider_operation_count_before_restart": 1,
+  "provider_operation_count_after_completion": 1,
+  "additional_create_count": 0,
+  "remote_id_hash_before": "0bb3c48d0d6ca0216d8561dc86d3a4f344dfec8df3f001763b24f636e1426902",
+  "remote_id_hash_after": "0bb3c48d0d6ca0216d8561dc86d3a4f344dfec8df3f001763b24f636e1426902",
+  "worker_stopped": true,
+  "worker_restarted": true,
+  "worker_image_id": "sha256:18c0dfb988a1fdfda84306e0b7d4c931df31e871c2c8b4d39d16036903b4872f",
+  "run_status_before_stop": "running",
+  "provider_status_before_stop": "submitted",
+  "final_status": "completed",
+  "final_provider_status": "succeeded"
+}
+

@@ -22,7 +22,9 @@ from app.director.proposal_service import (
     PartialApplyResult,
     ProposalService,
 )
+from app.director.story_generation import StoryGenerationRequest, StoryGenerationService
 from app.director.story_proposal import create_story_proposal
+from app.director.text_transport import DirectorInvocationEvidence
 from app.shared.db import set_rls_context
 from app.shared.errors import NotFoundError
 
@@ -58,6 +60,12 @@ class StoryProposalRead(BaseModel):
     operations: list[StoryOperationRead]
 
 
+class GeneratedStoryProposalRead(BaseModel):
+    proposal: StoryProposalRead
+    draft_text: str
+    director_evidence: DirectorInvocationEvidence
+
+
 def _operation_read(item: DirectorProposalItem) -> StoryOperationRead:
     payload = dict(item.payload or {})
     return StoryOperationRead(
@@ -89,16 +97,12 @@ async def _proposal_read(
         .scalars()
         .all()
     )
-    items.sort(
-        key=lambda item: int(str((item.payload or {}).get("sort_order") or 0))
-    )
+    items.sort(key=lambda item: int(str((item.payload or {}).get("sort_order") or 0)))
     return StoryProposalRead(
         id=proposal.id,
         project_id=project_id,
         status=proposal.status,
-        summary=(
-            "Story authoring proposal: script draft → typed Canonical Story diff"
-        ),
+        summary=("Story authoring proposal: script draft → typed Canonical Story diff"),
         created_at=proposal.created_at,
         operations=[_operation_read(item) for item in items],
     )
@@ -116,9 +120,7 @@ async def create_project_story_proposal(
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> StoryProposalRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     result = await create_story_proposal(
         session,
         project_id=project.id,
@@ -140,6 +142,38 @@ async def create_project_story_proposal(
     return await _proposal_read(session, project_id=project.id, proposal=result.proposal)
 
 
+@router.post(
+    "/projects/{project_id}/story/proposals/generate",
+    response_model=GeneratedStoryProposalRead,
+    status_code=201,
+)
+async def generate_project_story_proposal(
+    project_id: UUID,
+    body: StoryGenerationRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> GeneratedStoryProposalRead:
+    """Generate one script draft and persist only its reviewable typed proposal."""
+
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    result = await StoryGenerationService(session).generate_proposal(
+        project=project,
+        actor=user,
+        request=body,
+    )
+    proposal = await _proposal_read(
+        session,
+        project_id=project.id,
+        proposal=result.proposal.proposal,
+    )
+    return GeneratedStoryProposalRead(
+        proposal=proposal,
+        draft_text=result.draft_text,
+        director_evidence=result.evidence,
+    )
+
+
 @router.get(
     "/projects/{project_id}/story/proposals",
     response_model=list[StoryProposalRead],
@@ -149,9 +183,7 @@ async def list_project_story_proposals(
     user: CurrentUser,
     session: SessionDep,
 ) -> list[StoryProposalRead]:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     proposals = list(
         (
             await session.execute(
@@ -182,9 +214,7 @@ async def get_project_story_proposal(
     user: CurrentUser,
     session: SessionDep,
 ) -> StoryProposalRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     proposal = await session.scalar(
         select(DirectorProposal).where(
             DirectorProposal.id == proposal_id,
@@ -209,9 +239,7 @@ async def apply_project_story_proposal(
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> PartialApplyResult:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     proposal = await session.scalar(
         select(DirectorProposal).where(
             DirectorProposal.id == proposal_id,
@@ -235,12 +263,8 @@ async def apply_project_story_proposal(
             .all()
         )
         return PartialApplyResult(
-            accepted=[
-                item.id for item in items if item.status == "accepted"
-            ],
-            rejected=[
-                item.id for item in items if item.status == "rejected"
-            ],
+            accepted=[item.id for item in items if item.status == "accepted"],
+            rejected=[item.id for item in items if item.status == "rejected"],
             failed=[],
         )
 

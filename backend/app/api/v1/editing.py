@@ -14,6 +14,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from sqlalchemy import select
 
 from app.access.models import User
 from app.access.projects import ProjectService
@@ -29,10 +30,14 @@ from app.director.editing_suggestion import (
     EditingDirectorSuggestionService,
     EditingProactiveSuggestionRequest,
 )
+from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.proposal_service import PartialApplyInput, ProposalDecision, ProposalService
+from app.director.text_transport import DirectorInvocationEvidence
+from app.director.turn_service import DirectorTurnService
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.editing.timeline_builder import build_edit_session_for_project
-from app.shared.errors import ValidationAppError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["editing"], dependencies=[Depends(require_selected_workspace)])
 
@@ -111,6 +116,7 @@ class EditingDirectorSuggestionRead(BaseModel):
     proposal_id: UUID
     item_id: UUID
     suggestion: EditingDirectorSuggestionCandidate
+    director_evidence: DirectorInvocationEvidence | None = None
 
 
 def _normalize_key(key: object) -> str:
@@ -266,6 +272,12 @@ async def save_edit_timeline(
         session_id=row.id,
         timeline=dict(body.timeline.model_dump(mode="json")),
     )
+    await DirectorTurnService(session).mark_scope_stale(
+        project_id=project_id,
+        scope_type="edit_session",
+        scope_entity_id=saved.id,
+        reason=f"User saved EditSession version {saved.version}.",
+    )
     await session.commit()
     return _edit_session_read(saved)
 
@@ -282,7 +294,7 @@ async def create_editing_director_suggestion(
     session: SessionDep,
     _: CsrfDep,
 ) -> EditingDirectorSuggestionRead:
-    """Generate one deterministic proposal-only suggestion for an EditSession.
+    """Generate one audited proposal-only suggestion for an EditSession.
 
     Route identifiers are the only target identity accepted here.  The service
     performs ownership, project/session scoping, both stale gates and strict
@@ -300,7 +312,99 @@ async def create_editing_director_suggestion(
         proposal_id=result.proposal_id,
         item_id=result.item_id,
         suggestion=result.candidate,
+        director_evidence=result.director_evidence,
     )
+
+
+class EditingSuggestionRejectBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_session_version: int = Field(ge=1)
+
+
+class EditingSuggestionRejectRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_id: UUID
+    status: str
+    rejected_item_ids: list[UUID]
+
+
+@router.post(
+    "/projects/{project_id}/edit-sessions/{session_id}/director-suggestions/{proposal_id}/reject",
+    response_model=EditingSuggestionRejectRead,
+)
+async def reject_editing_suggestion(
+    project_id: UUID,
+    session_id: UUID,
+    proposal_id: UUID,
+    body: EditingSuggestionRejectBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> EditingSuggestionRejectRead:
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    edit = await session.scalar(
+        select(EditSession)
+        .where(
+            EditSession.id == session_id,
+            EditSession.project_id == project_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    proposal = await session.scalar(
+        select(DirectorProposal)
+        .where(
+            DirectorProposal.id == proposal_id,
+            DirectorProposal.project_id == project_id,
+            DirectorProposal.scope_type == "edit_session",
+            DirectorProposal.scope_entity_id == session_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if edit is None or proposal is None:
+        raise NotFoundError("Editing suggestion not found in this session")
+    items = list(
+        (
+            await session.execute(
+                select(DirectorProposalItem)
+                .where(
+                    DirectorProposalItem.proposal_id == proposal.id,
+                    DirectorProposalItem.project_id == project_id,
+                )
+                .execution_options(populate_existing=True)
+            )
+        ).scalars()
+    )
+    if not items or any(
+        item.command != "edit_session.apply_timeline_plan"
+        or str((item.payload or {}).get("edit_session_id")) != str(session_id)
+        for item in items
+    ):
+        raise ValidationAppError("Editing suggestion contains an invalid command scope")
+    if not all(item.status == "rejected" for item in items):
+        if edit.version != body.expected_session_version or any(
+            item.expected_target_version != body.expected_session_version for item in items
+        ):
+            raise ConflictError(
+                "Editing suggestion is stale", details={"code": "EDITING_SUGGESTION_STALE"}
+            )
+        if any(item.status != "pending" for item in items):
+            raise ConflictError("Editing suggestion already has another decision")
+        await ProposalService(session, actor=user).partial_apply(
+            project=project,
+            proposal_id=proposal.id,
+            apply_input=PartialApplyInput(
+                decisions=[ProposalDecision(item_id=item.id, decision="rejected") for item in items]
+            ),
+        )
+    result = EditingSuggestionRejectRead(
+        proposal_id=proposal.id, status="rejected", rejected_item_ids=[item.id for item in items]
+    )
+    await session.commit()
+    return result
 
 
 @router.post(
@@ -325,6 +429,7 @@ async def create_editing_proactive_suggestion(
         proposal_id=result.proposal_id,
         item_id=result.item_id,
         suggestion=result.candidate,
+        director_evidence=result.director_evidence,
     )
 
 

@@ -56,6 +56,17 @@ class ProviderTaskPendingError(AppError):
         )
 
 
+class ProviderTaskCancelledError(AppError):
+    """Remote Provider confirmed cancellation; the NodeRun is terminal."""
+
+    def __init__(self, message: str = "Provider task was cancelled") -> None:
+        super().__init__(
+            code="PROVIDER_TASK_CANCELLED",
+            message=message,
+            status_code=409,
+        )
+
+
 class ProviderRateLimitedError(AppError):
     """Provider returned 429; the worker should retry after Retry-After."""
 

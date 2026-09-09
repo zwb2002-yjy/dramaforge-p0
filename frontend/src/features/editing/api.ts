@@ -84,7 +84,10 @@ export function exportEditSession(projectId: string, sessionId: string): Promise
 export async function requestEditingDirectorSuggestion(
   projectId: string,
   sessionId: string,
-  input: Pick<EditingDirectorSuggestionRequest, "expected_session_version" | "user_instruction">,
+  input: Pick<
+    EditingDirectorSuggestionRequest,
+    "expected_session_version" | "user_instruction" | "request_key"
+  >,
 ): Promise<EditingDirectorSuggestionRead> {
   const userInstruction = input.user_instruction.trim();
   if (!userInstruction) {
@@ -97,6 +100,7 @@ export async function requestEditingDirectorSuggestion(
     {
       expected_session_version: input.expected_session_version,
       user_instruction: userInstruction,
+      request_key: input.request_key,
     },
     csrf,
   );
@@ -109,12 +113,13 @@ export async function requestProactiveEditingDirectorSuggestion(
   projectId: string,
   sessionId: string,
   expected_session_version: number,
+  request_key: string,
 ): Promise<EditingDirectorSuggestionRead> {
   const csrf = await fetchCsrf();
   return apiSend<EditingDirectorSuggestionRead>(
     "POST",
     editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/director-proactive-suggestion`),
-    { expected_session_version },
+    { expected_session_version, request_key },
     csrf,
   );
 }
@@ -187,4 +192,26 @@ export function fetchFinalFilmStatus(
   return apiGet<FinalFilmJobRead>(
     `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/runs/${encodeURIComponent(nodeRunId)}`,
   );
+}
+
+/** Persist an explicit rejection without changing the timeline or production. */
+export async function rejectEditingDirectorSuggestion(
+  projectId: string,
+  sessionId: string,
+  proposalId: string,
+  expectedSessionVersion: number,
+): Promise<void> {
+  const csrf = await fetchCsrf();
+  const result = await apiSend<{ proposal_id: string; status: string }>(
+    "POST",
+    editSessionPath(
+      projectId,
+      `/${encodeURIComponent(sessionId)}/director-suggestions/${encodeURIComponent(proposalId)}/reject`,
+    ),
+    { expected_session_version: expectedSessionVersion },
+    csrf,
+  );
+  if (result.proposal_id !== proposalId || result.status !== "rejected") {
+    throw new Error("剪辑建议拒绝回执无效，预览已保留。");
+  }
 }

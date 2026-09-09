@@ -148,3 +148,73 @@ def test_compiler_does_not_create_provider_or_graph() -> None:
     assert {"story_guidance", "visual_bible_patch", "provenance"} <= fields
     assert "provider_request" not in fields
     assert "graph" not in fields
+
+
+def test_effective_values_follow_all_four_priority_layers_and_explain_defaults() -> None:
+    style = _style("cinematic_realism_v1").model_copy(
+        update={"production_design": "black suit on the lead"}
+    )
+    shot_language = SHOT_LANGUAGE_PACKS[1].model_copy(
+        update={"camera_motion": "dolly_in"}
+    )
+    result = CreativeCapabilityCompiler().compile(
+        user_intent={
+            "production_design": "white suit on the lead",
+            "camera_motion": "static_no_push",
+        },
+        accepted_proposal={
+            "production_design": "red suit proposal",
+            "camera_motion": "slow_push proposal",
+        },
+        project_context={
+            "production_design": "navy suit project override",
+            "camera_motion": "tripod project override",
+        },
+        style=style,
+        shot_language=shot_language,
+    )
+    assert result.effective_values["production_design"] == "white suit on the lead"
+    assert result.effective_values["camera_motion"] == "static_no_push"
+    assert result.value_sources["production_design"] == "user_confirmed"
+    assert result.value_sources["camera_motion"] == "user_confirmed"
+    overridden = {row["path"]: row for row in result.overridden_defaults}
+    assert overridden["production_design"]["default_value"] == "black suit on the lead"
+    assert overridden["production_design"]["effective_source"] == "user_confirmed"
+    assert overridden["camera_motion"]["default_value"] == "dolly_in"
+    assert result.shot_director_intent_patch is not None
+    assert result.shot_director_intent_patch.camera_motion is None
+
+
+def test_selected_skill_and_shot_language_compile_real_semantics_not_only_identity() -> None:
+    skill = next(item for item in BASELINE_SKILLS if item.skill_key == "emotional-performance-v1")
+    shot_language = SHOT_LANGUAGE_PACKS[0]
+    result = CreativeCapabilityCompiler().compile(
+        skill_stack=[skill],
+        shot_language=shot_language,
+    )
+    assert result.skill_guidance[0]["strategy"] == skill.strategy
+    assert result.skill_guidance[0]["outputs"]
+    assert skill.quality_hints[0] in result.quality_hints
+    assert result.shot_director_intent_patch is not None
+    assert result.shot_director_intent_patch.camera_motion == shot_language.camera_motion
+    assert result.shot_director_intent_patch.reaction_rule == shot_language.reaction_strategy
+
+
+def test_nested_saved_shot_values_override_alias_defaults_while_blank_fields_do_not() -> None:
+    shot_language = SHOT_LANGUAGE_PACKS[1].model_copy(update={"camera_motion": "dolly_in"})
+    explicit = CreativeCapabilityCompiler().compile(
+        user_intent={
+            "framing": {"shot_size": "", "angle": ""},
+            "camera": {"movement": "static_no_push", "focal_length_mm": 50},
+            "continuity_constraints": [],
+        },
+        shot_language=shot_language,
+    )
+    assert explicit.effective_values["camera_motion"] == "static_no_push"
+    assert explicit.value_sources["camera_motion"] == "user_confirmed"
+    assert explicit.shot_director_intent_patch is not None
+    assert explicit.shot_director_intent_patch.camera_motion is None
+    assert explicit.shot_director_intent_patch.lens_intent is None
+    # Blank/default form fields do not suppress actual pack guidance.
+    assert explicit.shot_director_intent_patch.shot_size == shot_language.preferred_shot_sizes[0]
+    assert explicit.shot_director_intent_patch.continuity == shot_language.continuity_rules

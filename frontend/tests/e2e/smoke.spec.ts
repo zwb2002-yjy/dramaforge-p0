@@ -24,8 +24,13 @@ test("Visual 2.0 project lobby loads without page errors", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(String(err)));
   await page.goto("/");
-  await expect(page.getByTestId("project-lobby-shell")).toBeVisible();
-  await expect(page.getByTestId("workstation-shell")).toHaveCount(0);
+  await expect(page.getByTestId("workstation-shell")).toBeVisible();
+  await expect(page.getByTestId("workstation-shell")).toHaveAttribute(
+    "data-primary-section",
+    "projects",
+  );
+  await expect(page.getByRole("navigation", { name: "一级导航" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "二级导航" })).toBeVisible();
   await expect(page.getByTestId("home-panel")).toBeVisible();
   expect(errors).toEqual([]);
 });

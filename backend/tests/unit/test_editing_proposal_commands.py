@@ -295,7 +295,7 @@ async def test_manual_save_bumps_edit_session_version_once(session: AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_valid_reorder_and_duration_plan_bumps_once_and_preserves_facts(
+async def test_valid_reorder_duration_and_subtitle_plan_bumps_once_and_preserves_facts(
     session: AsyncSession,
 ) -> None:
     project, edit_session, user, shot, asset, graph, run, operation = await _seed(session)
@@ -324,6 +324,11 @@ async def test_valid_reorder_and_duration_plan_bumps_once_and_preserves_facts(
             _plan(
                 {"operation": "reorder_clips", "clip_ids": ["clip-b", "clip-a"]},
                 {"operation": "set_clip_duration", "clip_id": "clip-b", "duration_seconds": 1.25},
+                {
+                    "operation": "set_clip_subtitle",
+                    "clip_id": "clip-b",
+                    "subtitle": "新的字幕\n第二行",
+                },
             ),
         ),
         expected_target_version=2,
@@ -334,6 +339,7 @@ async def test_valid_reorder_and_duration_plan_bumps_once_and_preserves_facts(
     assert [clip["id"] for clip in clips] == ["clip-b", "clip-a"]
     assert [clip["order"] for clip in clips] == [1, 2]
     assert clips[0]["duration_seconds"] == 1.25
+    assert clips[0]["subtitle"] == "新的字幕\n第二行"
     assert clips[0]["audio_id"] == "audio-b"
     assert clips[0]["custom"] == {"keep": False}
     assert edit_session.production_lineage == lineage_before

@@ -129,6 +129,7 @@ export async function freezeCreativeCapabilities(
     scene_id?: string;
     shot_id?: string;
     user_intent?: Record<string, unknown>;
+    accepted_proposal?: Record<string, unknown>;
   },
 ): Promise<{ creative_capabilities: CreativeProvenanceRead; target: string }> {
   const csrf = await fetchCsrf();

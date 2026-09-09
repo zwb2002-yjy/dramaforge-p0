@@ -175,3 +175,20 @@ async def test_resolve_media_bytes_bounds_encoded_data_before_decode(
             prompt="ignored",
             artifact_uri=f"data:image/png;base64,{oversized}",
         )
+
+
+@pytest.mark.asyncio
+async def test_download_rejects_truncated_content_length() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "image/png", "Content-Length": "100"},
+            content=b"\x89PNG\r\n\x1a\n",
+        )
+
+    with pytest.raises(ValidationAppError, match="Content-Length"):
+        await _download_provider_media(
+            kind="keyframe",
+            artifact_uri="https://93.184.216.34/result.png",
+            transport=httpx.MockTransport(handler),
+        )

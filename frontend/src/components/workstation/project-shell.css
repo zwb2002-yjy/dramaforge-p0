@@ -126,6 +126,12 @@
   min-width: 0;
 }
 
+.qc-project-shell {
+  min-width: 0;
+  min-height: 100vh;
+  background: var(--df-surface-0);
+}
+
 .qc-project-bar {
   height: 54px;
   display: flex;
@@ -1426,6 +1432,48 @@
   display: grid;
   gap: var(--df-space-4);
   min-width: 0;
+}
+
+.qc-scene-sync {
+  margin: 0;
+  color: var(--df-text-muted);
+  font-size: var(--df-text-sm);
+}
+
+.qc-unsaved-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: var(--df-space-4);
+  background: rgb(7 11 18 / 58%);
+}
+
+.qc-unsaved-dialog {
+  width: min(30rem, 100%);
+  padding: var(--df-space-5);
+  border: 1px solid var(--df-border-strong);
+  border-radius: var(--df-radius-lg);
+  background: var(--df-surface-raised);
+  box-shadow: var(--df-shadow-lg);
+}
+
+.qc-unsaved-dialog h2 {
+  margin: var(--df-space-2) 0;
+  font-size: var(--df-text-lg);
+}
+
+.qc-unsaved-dialog p {
+  margin: 0;
+  color: var(--df-text-muted);
+}
+
+.qc-unsaved-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--df-space-3);
+  margin-top: var(--df-space-5);
 }
 
 .qc-scene-header {

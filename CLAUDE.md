@@ -1,22 +1,10 @@
 # DramaForge 开发入口
 
-本文件只为编码 Agent 导航；产品、技术、模型供应和阶段顺序由 Owner 指定的七方案决定。
+遵守 [AGENTS.md](AGENTS.md) 的项目权威、图像与证据边界。不要在每次问答或小改动前自动读取完整 Goal 文档。
 
-开始任何改动前依次读取：
+- **只读问题或审计：** 读取回答问题所需的文件和权威章节，不启动实施/账本/全量 Gate。
+- **实际修改：** 按 [agent.md](agent.md) 定位当前 Task Contract 与相关来源；行为变更遵守[七方案执行集及 Owner amendments](docs/plans/professional-program-v2/README.md)的 Task-specific source order。
+- **已授权连续 Goal：** 按同一执行入口恢复并推进，直到该 Goal 的完整完成条件或真实外部边界，不在首版或单个 Task 后无故等待。
+- **合同、Git、Provider、验证或交接：** 按需读 [AGENT_EXECUTION_PROTOCOL.md](AGENT_EXECUTION_PROTOCOL.md) 的相应章节，保留 Canonical/Proposal、Execution identity 和 Owner 合并边界。
 
-1. [`AGENTS.md`](AGENTS.md)；
-2. [`DramaForge总开发文档.md`](DramaForge总开发文档.md)；
-3. [`docs/plans/professional-program-v2/README.md`](docs/plans/professional-program-v2/README.md)；
-4. 当前 Task Contract 与其规定的七方案原文；
-5. 当前代码、迁移、测试、运行时和可验证证据。
-
-## 不可破坏的实现边界
-
-- Scene / Shot / Canvas / Asset / Experiment 是创作事实；Agent 只能产生 typed proposal，不能直接修改正式事实或直接调用 Provider；
-- ProductionGraph / NodeRun / ProviderOperation / Artifact 是执行事实；不得新建平行 Generation、AIJob、Runtime 或成本真相；
-- ModelManifest 是模型能力事实；ProductionModelProfile 只表达偏好；Professional 真实媒体执行必须消费冻结的 `ExecutionModelResolution`；
-- 选择 X 不得静默运行 Y；不支持或未声明的 input slot 必须 fail-closed，且不得产生 Provider 请求；
-- Connection、Credential、Catalog、Binding、Manifest、mode 和 references 的执行身份必须可追溯、可恢复且不会被后续配置改写；
-- 不伪造 Provider、质量、成本、用户或发布证据；未经 Owner 单次明确授权，禁止付费 Provider 调用。
-
-旧总纲、旧 `docs/current/`、旧 P0 规划与历史 Gate Board 只保留在 Git 历史或历史材料中，不能作为开发依据。
+付费调用只使用当前 Goal/Task 已明确给出的授权；已授权范围内无需逐次确认，读到旧授权不向新任务授予权限。旧总纲、checkpoint 和 Release Board 不决定新范围。

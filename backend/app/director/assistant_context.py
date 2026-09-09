@@ -64,7 +64,7 @@ class AssistantContextBuilder:
 
         scope_type = thread.scope_type
         scope_entity_id = thread.scope_entity_id
-        if scope_type in ("scene", "shot"):
+        if scope_type == "scene":
             scene = await self._session.get(Scene, scope_entity_id)
             if scene is not None:
                 episode = await self._session.get(Episode, scene.episode_id)
@@ -79,12 +79,22 @@ class AssistantContextBuilder:
             shot = await self._session.get(Shot, scope_entity_id)
             if shot is not None and shot.project_id == project.id:
                 ctx.shot = await self._shot_facts(project, shot)
+                scene = await self._session.get(Scene, shot.scene_id)
+                if scene is not None:
+                    episode = await self._session.get(Episode, scene.episode_id)
+                    if episode is not None and episode.project_id == project.id:
+                        ctx.scene = {
+                            "id": str(scene.id),
+                            "episode_id": str(scene.episode_id),
+                            "scene_number": scene.scene_number,
+                            "location_name": scene.location_name,
+                        }
 
         # Current model capability: effective project profile bindings.
         try:
-            profile = await ProductionModelProfileService(
-                self._session
-            ).get_effective_for_project(project=project)
+            profile = await ProductionModelProfileService(self._session).get_effective_for_project(
+                project=project
+            )
             if profile is not None:
                 ctx.model_capability = {
                     "profile_id": str(profile.id),
@@ -105,13 +115,17 @@ class AssistantContextBuilder:
         # Current experiments for the shot scope.
         if scope_type == "shot":
             rows = (
-                await self._session.execute(
-                    select(ShotExperiment).where(
-                        ShotExperiment.project_id == project.id,
-                        ShotExperiment.shot_id == scope_entity_id,
+                (
+                    await self._session.execute(
+                        select(ShotExperiment).where(
+                            ShotExperiment.project_id == project.id,
+                            ShotExperiment.shot_id == scope_entity_id,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             ctx.experiments = [
                 {
                     "shot_experiment_id": str(row.id),
@@ -123,14 +137,18 @@ class AssistantContextBuilder:
 
         # Open annotations for the shot.
         annotations = (
-            await self._session.execute(
-                select(ReviewAnnotation).where(
-                    ReviewAnnotation.project_id == project.id,
-                    ReviewAnnotation.shot_id == scope_entity_id,
-                    ReviewAnnotation.status == "open",
+            (
+                await self._session.execute(
+                    select(ReviewAnnotation).where(
+                        ReviewAnnotation.project_id == project.id,
+                        ReviewAnnotation.shot_id == scope_entity_id,
+                        ReviewAnnotation.status == "open",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         ctx.open_annotations = [
             {
                 "id": str(row.id),
@@ -143,15 +161,19 @@ class AssistantContextBuilder:
         ]
 
         messages = (
-            await self._session.execute(
-                select(DirectorMessage)
-                .where(DirectorMessage.thread_id == thread.id)
-                .order_by(
-                    DirectorMessage.created_at.asc(),
-                    DirectorMessage.id.asc(),
+            (
+                await self._session.execute(
+                    select(DirectorMessage)
+                    .where(DirectorMessage.thread_id == thread.id)
+                    .order_by(
+                        DirectorMessage.created_at.asc(),
+                        DirectorMessage.id.asc(),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         ctx.recent_messages = [
             {"role": message.role, "content": message.content}
             for message in messages[-recent_limit:]
@@ -214,15 +236,19 @@ class AssistantContextBuilder:
                     "mime_type": artifact.mime_type,
                 }
         references = (
-            await self._session.execute(
-                select(ShotReferenceBinding)
-                .where(
-                    ShotReferenceBinding.project_id == project.id,
-                    ShotReferenceBinding.shot_id == shot.id,
+            (
+                await self._session.execute(
+                    select(ShotReferenceBinding)
+                    .where(
+                        ShotReferenceBinding.project_id == project.id,
+                        ShotReferenceBinding.shot_id == shot.id,
+                    )
+                    .order_by(ShotReferenceBinding.sort_order)
                 )
-                .order_by(ShotReferenceBinding.sort_order)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return {
             "id": str(shot.id),
             "shot_number": shot.shot_number,

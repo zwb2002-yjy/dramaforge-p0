@@ -22,6 +22,7 @@ type DirectorSidebarProps = {
   shot: ShotLite | null;
   references: ShotExecutionReference[];
   referencesReady: boolean;
+  trace?: unknown[];
   onReferencesChange: (references: ShotExecutionReference[]) => void;
   onResolutionStateChange: (state: ReferenceResolutionState) => void;
   onWorkspaceRefresh?: () => void | Promise<void>;
@@ -35,6 +36,8 @@ type DirectorSidebarProps = {
   /** Shared draft state lives in SceneWorkspace so a sheet close keeps it. */
   designDirty?: boolean;
   onDesignDirtyChange?: (dirty: boolean) => void;
+  designDraft?: ShotDesignDraft;
+  onDesignDraftChange?: (draft: ShotDesignDraft) => void;
   suggestionDraft?: ShotDesignDraft | null;
   onApplySuggestionDraft?: (draft: ShotDesignDraft | null) => void;
   onDesignSaved?: () => void | Promise<void>;
@@ -78,6 +81,7 @@ export function DirectorSidebar({
   shot,
   references,
   referencesReady,
+  trace = [],
   onReferencesChange,
   onResolutionStateChange,
   onWorkspaceRefresh,
@@ -86,6 +90,8 @@ export function DirectorSidebar({
   onClose,
   designDirty,
   onDesignDirtyChange,
+  designDraft,
+  onDesignDraftChange,
   suggestionDraft,
   onApplySuggestionDraft,
   onDesignSaved,
@@ -166,6 +172,8 @@ export function DirectorSidebar({
             projectId={projectId}
             shot={shot}
             focus={designFocus}
+            draft={designDraft}
+            onDraftChange={onDesignDraftChange}
             applyDraft={draft}
             onSaved={handleSaved}
             onDirtyChange={reportDirty}
@@ -214,6 +222,7 @@ export function DirectorSidebar({
           references={references}
           referencesReady={referencesReady}
           dirty={dirty}
+          trace={trace}
           onExecuted={onWorkspaceRefresh}
         />
       ) : (

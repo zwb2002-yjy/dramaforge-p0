@@ -313,6 +313,29 @@ def test_editing_http_lifecycle_preserves_formal_facts(
     assert loaded.status_code == 200, loaded.text
     assert loaded.json()["timeline"] == created_body["timeline"]
 
+    async def seed_turn():
+        from app.access.models import Project, Workspace
+        from app.director.turn_models import DirectorTurn
+
+        async with factory() as db:
+            project = await db.get(Project, UUID(project_id))
+            workspace = await db.get(Workspace, project.workspace_id)
+            turn = DirectorTurn(
+                project_id=project.id,
+                workspace_id=workspace.id,
+                actor_id=workspace.owner_user_id,
+                scope_type="edit_session",
+                scope_entity_id=UUID(session_id),
+                request_key="manual-edit:turn",
+                context_hash="f" * 64,
+                status="awaiting_user",
+                step_count=1,
+            )
+            db.add(turn)
+            await db.commit()
+            return str(turn.id)
+
+    turn_id = _run(factory, seed_turn())
     edited_timeline = {
         "clips": [{**created_body["timeline"]["clips"][0], "duration_seconds": 1.25}],
         "metadata": {"edited": True, "notes": "manual trim"},
@@ -325,6 +348,10 @@ def test_editing_http_lifecycle_preserves_formal_facts(
     assert saved.status_code == 200, saved.text
     assert saved.json()["timeline"] == edited_timeline
     assert saved.json()["production_lineage"] == created_body["production_lineage"]
+    stale_turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}")
+    assert stale_turn.status_code == 200, stale_turn.text
+    assert stale_turn.json()["status"] == "stale"
+    assert stale_turn.json()["wait_reason"] == "context_changed"
 
     reopened = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}")
     assert reopened.status_code == 200, reopened.text
@@ -388,6 +415,7 @@ def test_editing_http_rejects_lineage_and_missing_csrf(
 
 def test_editing_director_suggestion_http_returns_exact_persisted_identity(
     api: tuple[TestClient, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, factory = api
     _register(client)
@@ -401,10 +429,26 @@ def test_editing_director_suggestion_http_returns_exact_persisted_identity(
     )
     assert created.status_code == 201, created.text
     session_id = created.json()["id"]
+    from app.director.editing_suggestion import (
+        DeterministicEditingDirectorSuggestionTransport,
+        EditingDirectorSuggestionService,
+    )
+
+    monkeypatch.setattr(
+        "app.api.v1.editing.EditingDirectorSuggestionService",
+        lambda session: EditingDirectorSuggestionService(
+            session,
+            transport=DeterministicEditingDirectorSuggestionTransport(),
+        ),
+    )
 
     response = client.post(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 1, "user_instruction": "放慢节奏"},
+        json={
+            "expected_session_version": 1,
+            "user_instruction": "放慢节奏",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert response.status_code == 200, response.text
@@ -439,6 +483,85 @@ def test_editing_director_suggestion_http_returns_exact_persisted_identity(
         "plan": suggestion["plan"],
     }
 
+    async def seed_turn():
+        from app.access.models import Project, Workspace
+        from app.director.turn_models import DirectorTurn
+
+        async with factory() as session:
+            project = await session.get(Project, UUID(project_id))
+            workspace = await session.get(Workspace, project.workspace_id)
+            turn = DirectorTurn(
+                project_id=project.id,
+                workspace_id=workspace.id,
+                actor_id=workspace.owner_user_id,
+                scope_type="edit_session",
+                scope_entity_id=UUID(session_id),
+                request_key="editing:reject",
+                context_hash="d" * 64,
+                proposal_id=proposal_id,
+                status="awaiting_user",
+                step_count=1,
+                request_summary={"max_steps": 4},
+            )
+            session.add(turn)
+            await session.commit()
+            return turn.id
+
+    turn_id = _run(factory, seed_turn())
+    reject_url = (
+        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}"
+        f"/director-suggestions/{proposal_id}/reject"
+    )
+    assert client.post(reject_url, json={"expected_session_version": 1}).status_code == 403
+    assert (
+        client.post(
+            reject_url, json={"expected_session_version": 9}, headers={CSRF_HEADER: _csrf(client)}
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            reject_url.replace(session_id, str(uuid4())),
+            json={"expected_session_version": 1},
+            headers={CSRF_HEADER: _csrf(client)},
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            reject_url,
+            json={"expected_session_version": 1, "execute": True},
+            headers={CSRF_HEADER: _csrf(client)},
+        ).status_code
+        == 422
+    )
+    rejected = client.post(
+        reject_url, json={"expected_session_version": 1}, headers={CSRF_HEADER: _csrf(client)}
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
+    assert rejected.json()["rejected_item_ids"] == [str(item_id)]
+    replay = client.post(
+        reject_url, json={"expected_session_version": 1}, headers={CSRF_HEADER: _csrf(client)}
+    )
+    assert replay.json() == rejected.json()
+    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
+    assert turn["status"] == "completed" and turn["wait_reason"] == "proposal_rejected"
+
+    async def refused_context():
+        from app.director.turn_service import DirectorTurnService
+        from app.shared.errors import ConflictError
+
+        async with factory() as session:
+            with pytest.raises(ConflictError) as refused:
+                await DirectorTurnService(session).assert_context_not_rejected(
+                    project_id=UUID(project_id),
+                    context_hash="d" * 64,
+                )
+            assert refused.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
+
+    _run(factory, refused_context())
+
     reopened = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}")
     assert reopened.status_code == 200, reopened.text
     assert reopened.json()["version"] == 1
@@ -463,7 +586,11 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
 
     missing_csrf = client.post(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 1, "user_instruction": "要求"},
+        json={
+            "expected_session_version": 1,
+            "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
     )
     assert missing_csrf.status_code == 403, missing_csrf.text
 
@@ -472,6 +599,7 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
         json={
             "expected_session_version": 1,
             "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
             "timeline": {},
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -480,7 +608,11 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
 
     stale = client.post(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 2, "user_instruction": "要求"},
+        json={
+            "expected_session_version": 2,
+            "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert stale.status_code == 409, stale.text
@@ -488,7 +620,11 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
 
     foreign = client.post(
         f"/api/v1/projects/{other_project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 1, "user_instruction": "要求"},
+        json={
+            "expected_session_version": 1,
+            "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert foreign.status_code == 404, foreign.text
@@ -507,7 +643,11 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
     client.headers["X-Workspace-Id"] = other_workspace_id
     non_owner = client.post(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
-        json={"expected_session_version": 1, "user_instruction": "要求"},
+        json={
+            "expected_session_version": 1,
+            "user_instruction": "要求",
+            "request_key": f"editing-suggestion:{uuid4()}",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     # The selected-workspace dependency may hide the foreign project as 404;

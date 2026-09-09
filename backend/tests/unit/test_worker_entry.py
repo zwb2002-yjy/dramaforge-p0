@@ -12,8 +12,12 @@ from app.access.models import Project, Workspace
 from app.config import clear_settings_cache
 from app.execution.models import NodeRun
 from app.shared.db import NodeRunRlsScope
-from app.shared.errors import ValidationAppError
-from app.workers.jobs import execute_node_run
+from app.shared.errors import (
+    ProviderRateLimitedError,
+    ProviderTaskCancelledError,
+    ValidationAppError,
+)
+from app.workers.jobs import _worker_failure_code, execute_node_run
 from app.workers.main import describe_worker, main
 from arq import Retry
 
@@ -48,6 +52,19 @@ def test_main_unknown_kind() -> None:
 
 def test_main_default_ok() -> None:
     assert main(["default"]) == 0
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "PROVIDER_MEDIA_INVALID",
+        "PROVIDER_MEDIA_MISSING",
+        "UPSTREAM_ARTIFACT_MISSING",
+        "UPSTREAM_TERMINAL_FAILURE",
+    ],
+)
+def test_worker_preserves_typed_runtime_failure_code(code: str) -> None:
+    assert _worker_failure_code(ValidationAppError(f"{code}: evidence")) == code
 
 
 class _FakeSession:
@@ -232,3 +249,107 @@ async def test_worker_retries_composite_while_source_media_is_pending(
     assert first.rollbacks == 1
     assert first.commits == 0
     assert run.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_worker_honors_provider_retry_after_and_requeues_same_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = NodeRun(
+        id=uuid4(), project_id=uuid4(), graph_version_id=uuid4(), graph_node_id=uuid4(),
+        idempotency_key=f"worker:{uuid4()}", input_hash="a" * 64, status="queued",
+        input_snapshot={}, created_by=uuid4(),
+    )
+    project, workspace = _worker_scope(run)
+    first = _FakeSession(run, project=project, workspace=workspace)
+    fallback = _FakeSession(run, project=project, workspace=workspace)
+    sessions = iter([first, fallback])
+
+    def factory() -> _SessionContext:
+        return _SessionContext(next(sessions))
+
+    async def resolve_scope(*args: object, **kwargs: object) -> NodeRunRlsScope:
+        _ = args, kwargs
+        return NodeRunRlsScope(
+            user_id=workspace.owner_user_id,
+            workspace_id=workspace.id,
+            project_id=run.project_id,
+        )
+
+    async def ready(*args: object, **kwargs: object) -> SimpleNamespace:
+        _ = args, kwargs
+        return SimpleNamespace(action="ready")
+
+    async def claim(*args: object, **kwargs: object) -> NodeRun:
+        _ = args, kwargs
+        run.status = "running"
+        return run
+
+    async def rate_limited(*args: object, **kwargs: object) -> object:
+        _ = args, kwargs
+        raise ProviderRateLimitedError(retry_after_seconds=17)
+
+    monkeypatch.setattr("app.workers.jobs.get_session_factory", lambda: factory)
+    monkeypatch.setattr("app.workers.jobs.set_node_run_rls_context", resolve_scope)
+    monkeypatch.setattr("app.execution.runtime_invariants.evaluate_required_dependencies", ready)
+    monkeypatch.setattr("app.execution.product_path.claim_media_node_run", claim)
+    monkeypatch.setattr("app.execution.product_path.execute_media_node_run", rate_limited)
+
+    with pytest.raises(Retry) as retry:
+        await execute_node_run({}, str(run.id))
+
+    assert retry.value.defer_score == 17_000
+    assert first.rollbacks == 1
+    assert fallback.commits == 1
+    assert run.status == "queued"
+    assert run.id == first.run.id == fallback.run.id
+
+
+@pytest.mark.asyncio
+async def test_worker_reports_confirmed_provider_cancellation_without_failure_rewrite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = NodeRun(
+        id=uuid4(), project_id=uuid4(), graph_version_id=uuid4(), graph_node_id=uuid4(),
+        idempotency_key=f"worker:{uuid4()}", input_hash="a" * 64, status="queued",
+        input_snapshot={}, created_by=uuid4(),
+    )
+    project, workspace = _worker_scope(run)
+    first = _FakeSession(run, project=project, workspace=workspace)
+
+    async def resolve_scope(*args: object, **kwargs: object) -> NodeRunRlsScope:
+        _ = args, kwargs
+        return NodeRunRlsScope(
+            user_id=workspace.owner_user_id,
+            workspace_id=workspace.id,
+            project_id=run.project_id,
+        )
+
+    async def ready(*args: object, **kwargs: object) -> SimpleNamespace:
+        _ = args, kwargs
+        return SimpleNamespace(action="ready")
+
+    async def claim(*args: object, **kwargs: object) -> NodeRun:
+        _ = args, kwargs
+        run.status = "running"
+        return run
+
+    async def cancelled(*args: object, **kwargs: object) -> object:
+        _ = args, kwargs
+        run.status = "cancelled"
+        raise ProviderTaskCancelledError()
+
+    def factory() -> _SessionContext:
+        return _SessionContext(first)
+
+    monkeypatch.setattr("app.workers.jobs.get_session_factory", lambda: factory)
+    monkeypatch.setattr("app.workers.jobs.set_node_run_rls_context", resolve_scope)
+    monkeypatch.setattr("app.execution.runtime_invariants.evaluate_required_dependencies", ready)
+    monkeypatch.setattr("app.execution.product_path.claim_media_node_run", claim)
+    monkeypatch.setattr("app.execution.product_path.execute_media_node_run", cancelled)
+
+    result = await execute_node_run({}, str(run.id))
+
+    assert result == {"status": "cancelled", "node_run_id": str(run.id)}
+    assert run.status == "cancelled"
+    assert run.error_code is None

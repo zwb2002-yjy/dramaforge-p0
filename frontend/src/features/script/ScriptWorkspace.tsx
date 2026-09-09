@@ -6,10 +6,12 @@ import {
   applyStoryProposal,
   createStoryProposal,
   fetchScriptWorkspace,
+  generateStoryProposal,
   type ScriptWorkspaceRead,
   type StoryProposalOperation,
   type StoryProposalRead,
 } from "./api";
+import type { DirectorInvocationEvidence } from "../director/suggestion-types";
 
 type ScriptWorkspaceProps = {
   projectId: string;
@@ -41,6 +43,9 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applyMessage, setApplyMessage] = useState<string | null>(null);
+  const [generationEvidence, setGenerationEvidence] = useState<DirectorInvocationEvidence | null>(
+    null,
+  );
 
   const workspace = useQuery({
     queryKey: queryKeys.script.workspace(projectId),
@@ -69,6 +74,28 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
       setSelected(Object.fromEntries(proposal.operations.map((operation) => [operation.id, true])));
       setBrief("");
       setDraftText("");
+      setGenerationEvidence(null);
+    },
+    onError: (error: Error) => setFormError(error.message),
+  });
+
+  const generateMut = useMutation({
+    mutationFn: async () => {
+      setFormError(null);
+      setApplyMessage(null);
+      return generateStoryProposal(projectId, {
+        request_key: `story-generation:${globalThis.crypto.randomUUID()}`,
+        brief: brief.trim(),
+        filename: filename.trim() || "generated-story.md",
+      });
+    },
+    onSuccess: (result) => {
+      setDraftText(result.draft_text);
+      setActiveProposal(result.proposal);
+      setSelected(
+        Object.fromEntries(result.proposal.operations.map((operation) => [operation.id, true])),
+      );
+      setGenerationEvidence(result.director_evidence);
     },
     onError: (error: Error) => setFormError(error.message),
   });
@@ -186,6 +213,7 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
               onChange={(event) => setBrief(event.target.value)}
               rows={3}
               placeholder="例如：双人冲突反转短剧"
+              disabled={createMut.isPending || generateMut.isPending}
             />
           </label>
           <label>
@@ -194,6 +222,7 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
               aria-label="剧本文件名"
               value={filename}
               onChange={(event) => setFilename(event.target.value)}
+              disabled={createMut.isPending || generateMut.isPending}
             />
           </label>
           <label>
@@ -206,18 +235,35 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
               placeholder={
                 "# Episode 1 — Title\n## Scene 1 — Location / day\nsynopsis\n### Shot 1 — medium\nVisual: ...\nDialogue: ..."
               }
-              disabled={createMut.isPending}
+              disabled={createMut.isPending || generateMut.isPending}
             />
           </label>
           <button
             type="submit"
             className="primary"
             data-testid="story-proposal-create"
-            disabled={createMut.isPending || !draftText.trim()}
+            disabled={createMut.isPending || generateMut.isPending || !draftText.trim()}
           >
             {createMut.isPending ? "生成中…" : "创建 Story 提案"}
           </button>
+          <button
+            type="button"
+            data-testid="story-proposal-generate"
+            disabled={generateMut.isPending || createMut.isPending || !brief.trim()}
+            onClick={() => generateMut.mutate()}
+          >
+            {generateMut.isPending ? "模型正在写剧本…" : "用 Brief 生成剧本提案"}
+          </button>
         </form>
+        {generationEvidence && (
+          <p className="muted" data-testid="story-generation-evidence">
+            模型 {generationEvidence.actual_model ?? generationEvidence.model_id} · 调用
+            {generationEvidence.turn_id.slice(0, 8)} ·
+            {generationEvidence.cost_status === "reported"
+              ? ` ${generationEvidence.reported_cost} ${generationEvidence.currency}`
+              : " 费用未返回"}
+          </p>
+        )}
         {formError && (
           <div className="flash err" role="alert">
             {formError}

@@ -56,23 +56,25 @@ class RepairService:
         if shot is None or shot.project_id != project.id:
             raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
         annotations = (
-            await self._session.execute(
-                select(ReviewAnnotation).where(
-                    ReviewAnnotation.project_id == project.id,
-                    ReviewAnnotation.shot_id == shot_id,
-                    ReviewAnnotation.status == "open",
+            (
+                await self._session.execute(
+                    select(ReviewAnnotation).where(
+                        ReviewAnnotation.project_id == project.id,
+                        ReviewAnnotation.shot_id == shot_id,
+                        ReviewAnnotation.status == "open",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         has_video_range = any(
             annotation.time_start is not None or annotation.time_end is not None
             for annotation in annotations
         )
         has_region = any(
-            annotation.x is not None
-            or annotation.width is not None
-            for annotation in annotations
+            annotation.x is not None or annotation.width is not None for annotation in annotations
         )
         has_keyframe = shot.formal_keyframe_artifact_id is not None
 
@@ -128,9 +130,10 @@ class RepairService:
                     project_id=project.id,
                     shot_id=shot_id,
                     stage="video",
-                    prompt=shot.video_prompt or "rerun video",
+                    prompt=(shot.video_prompt or shot.visual_description).strip(),
                     semantic_intent={"intent": "shot_video", "repair": repair_option},
                     mode_id="explicit_binding",
+                    expected_shot_version=shot.version,
                 ),
                 idempotency_key_override=f"repair:{idempotency_key}",
             )
@@ -141,9 +144,10 @@ class RepairService:
                 project_id=project.id,
                 shot_id=shot_id,
                 stage="image_keyframe",
-                prompt=shot.image_prompt or "regenerate keyframe",
+                prompt=(shot.image_prompt or shot.visual_description).strip(),
                 semantic_intent={"intent": "shot_keyframe", "repair": repair_option},
                 mode_id="explicit_binding",
+                expected_shot_version=shot.version,
             ),
             idempotency_key_override=f"repair:{idempotency_key}",
         )

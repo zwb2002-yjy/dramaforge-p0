@@ -519,7 +519,12 @@ async def test_worker_restart_requeues_resumable_unified_run_pg(
         assert observed_op.provider_operation_id == remote_id
         assert observed_op.attempt_no == 1
         assert observed_op.status == "submitted"
-    enqueue.assert_awaited_once_with(run.id)
+    # The resolver scans all recoverable rows in this isolated quality database,
+    # including durable rows left by other matrix cases. Prove this run is
+    # enqueued exactly once, and no resolved run is scheduled twice in one scan.
+    scheduled = [call.args[0] for call in enqueue.await_args_list]
+    assert scheduled.count(run.id) == 1
+    assert len(scheduled) == len(set(scheduled))
     await factory_engine.dispose()
 
 

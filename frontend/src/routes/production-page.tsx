@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import { ProductionMonitor } from "../features/production/ProductionMonitor";
@@ -169,6 +170,14 @@ export function ProductionPage({ projectId }: { projectId: string }) {
 
   return (
     <div data-testid="production-mode">
+      <nav className="qc-local-tabs" aria-label="制作视图">
+        <Link to="/projects/$projectId/production" params={{ projectId }} aria-current="page">
+          生产概览
+        </Link>
+        <Link to="/projects/$projectId/review" params={{ projectId }}>
+          待审内容
+        </Link>
+      </nav>
       <div className="page-title-row">
         <div>
           <h2 style={{ margin: 0 }}>跨场景生产监控</h2>

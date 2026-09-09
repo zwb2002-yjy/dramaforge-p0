@@ -15,8 +15,10 @@ import {
 } from "../shots/shotCandidates";
 import type { ShotExecutionReference, ShotLite } from "../shots/api";
 import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
+import { hasActiveSceneRuns, SCENE_ACTIVE_REFETCH_MS } from "../production/sceneRunState";
 import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
+import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 
 type SceneWorkspaceProps = {
   projectId: string;
@@ -24,6 +26,7 @@ type SceneWorkspaceProps = {
   initialShotId?: string;
   openDirector?: boolean;
   onOpenEditing?: () => void;
+  onDirtyStateChange?: (dirty: boolean) => void;
 };
 
 type ShotReferenceContext = {
@@ -35,6 +38,15 @@ const EMPTY_REFERENCE_CONTEXT: ShotReferenceContext = { references: [], ready: f
 
 function sameReferences(left: ShotExecutionReference[], right: ShotExecutionReference[]): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function draftFromShot(shot: ShotLite): ShotDesignDraft {
+  return {
+    image_prompt: shot.image_prompt,
+    video_prompt: shot.video_prompt,
+    director_state: { ...shot.director_state },
+    director_state_text: JSON.stringify(shot.director_state ?? {}, null, 2),
+  };
 }
 
 /**
@@ -54,6 +66,7 @@ export function SceneWorkspace({
   initialShotId,
   openDirector = false,
   onOpenEditing,
+  onDirtyStateChange,
 }: SceneWorkspaceProps) {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(initialShotId ?? null);
   const [previewCandidate, setPreviewCandidate] = useState<ShotCandidate | null>(null);
@@ -67,11 +80,17 @@ export function SceneWorkspace({
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Shared design draft lives here so closing the Context Sheet keeps it.
   const [designDirty, setDesignDirty] = useState(false);
+  const [designDrafts, setDesignDrafts] = useState<Record<string, ShotDesignDraft>>({});
   const [suggestionDraft, setSuggestionDraft] = useState<ShotDesignDraft | null>(null);
+  const [pendingShotId, setPendingShotId] = useState<string | null>(null);
   const workspace = useQuery({
     queryKey: queryKeys.scene.workspace(projectId, sceneId),
     queryFn: () => fetchSceneWorkspace(projectId, sceneId),
     enabled: Boolean(projectId) && Boolean(sceneId) && projectId !== "demo",
+    refetchInterval: (query) =>
+      hasActiveSceneRuns(query.state.data?.trace as Record<string, unknown[]> | undefined)
+        ? SCENE_ACTIVE_REFETCH_MS
+        : false,
   });
 
   useEffect(() => {
@@ -83,8 +102,14 @@ export function SceneWorkspace({
     setStripExpanded(false);
     setDetailsOpen(false);
     setDesignDirty(false);
+    setDesignDrafts({});
     setSuggestionDraft(null);
+    setPendingShotId(null);
   }, [projectId, sceneId, initialShotId, openDirector]);
+
+  useEffect(() => {
+    onDirtyStateChange?.(designDirty);
+  }, [designDirty, onDirtyStateChange]);
 
   const data = workspace.data as SceneWorkspaceRead | undefined;
   const shots = data?.shots ?? [];
@@ -127,10 +152,18 @@ export function SceneWorkspace({
     setSuggestionDraft(null);
   }, [selectedShotKey]);
 
-  const selectShot = useCallback((shotId: string) => {
-    setSelectedShotId(shotId);
-    setPreviewCandidate(null);
-  }, []);
+  const selectShot = useCallback(
+    (shotId: string) => {
+      if (shotId === selectedShotKey) return;
+      if (designDirty) {
+        setPendingShotId(shotId);
+        return;
+      }
+      setSelectedShotId(shotId);
+      setPreviewCandidate(null);
+    },
+    [designDirty, selectedShotKey],
+  );
 
   const selectTool = useCallback((tool: ContextTool) => {
     // Context Sheet and Details are mutually exclusive. Takes stays independent
@@ -156,9 +189,39 @@ export function SceneWorkspace({
   }, [workspace]);
 
   const handleDesignSaved = useCallback(async () => {
+    if (selectedShotKey !== null) {
+      setDesignDrafts((current) => {
+        const next = { ...current };
+        delete next[selectedShotKey];
+        return next;
+      });
+    }
+    setDesignDirty(false);
     setSuggestionDraft(null);
     await workspace.refetch();
-  }, [workspace]);
+  }, [selectedShotKey, workspace]);
+
+  const updateDesignDraft = useCallback(
+    (draft: ShotDesignDraft) => {
+      if (selectedShotKey === null) return;
+      setDesignDrafts((current) => ({ ...current, [selectedShotKey]: draft }));
+    },
+    [selectedShotKey],
+  );
+
+  const updateDesignDirty = useCallback(
+    (dirty: boolean) => {
+      setDesignDirty(dirty);
+      if (dirty || selectedShotKey === null) return;
+      setDesignDrafts((current) => {
+        if (!(selectedShotKey in current)) return current;
+        const next = { ...current };
+        delete next[selectedShotKey];
+        return next;
+      });
+    },
+    [selectedShotKey],
+  );
 
   const updateSelectedReferences = useCallback(
     (references: ShotExecutionReference[]) => {
@@ -203,6 +266,7 @@ export function SceneWorkspace({
   const candidates = selected ? (data?.candidates?.[selected.id] ?? []) : [];
   const candidateCount = parseShotCandidates(candidates).filter(isConfirmableShotCandidate).length;
   const trace = selected ? (data?.trace?.[selected.id] ?? []) : [];
+  const designDraft = selected ? (designDrafts[selected.id] ?? draftFromShot(selected)) : undefined;
 
   return (
     <div className="qc-scene-workspace" data-testid="scene-workspace">
@@ -238,7 +302,16 @@ export function SceneWorkspace({
         <p role="alert">目标镜头不在此场景，请重新选择镜头。</p>
       )}
       {workspace.isError && (
-        <div className="flash err">无法读取场景工作区：{String(workspace.error)}</div>
+        <div className="flash err" data-testid="scene-sync-error">
+          {data
+            ? `连接中断，状态待同步：${String(workspace.error)}`
+            : `无法读取场景工作区：${String(workspace.error)}`}
+        </div>
+      )}
+      {data && hasActiveSceneRuns(data.trace as Record<string, unknown[]>) && (
+        <p className="qc-scene-sync" data-testid="scene-active-sync" role="status">
+          生产进行中，页面将自动同步服务端状态。
+        </p>
       )}
       {workspace.isLoading && !data && (
         <p className="qc-scene-loading" data-testid="scene-workspace-loading">
@@ -292,6 +365,7 @@ export function SceneWorkspace({
             shot={selected}
             references={selectedReferences}
             referencesReady={selectedReferencesReady}
+            trace={trace}
             onReferencesChange={updateSelectedReferences}
             onResolutionStateChange={updateReferenceResolutionState}
             onWorkspaceRefresh={handleExecuted}
@@ -299,7 +373,9 @@ export function SceneWorkspace({
             requestedTool={activeTool}
             onClose={() => setActiveTool(null)}
             designDirty={designDirty}
-            onDesignDirtyChange={setDesignDirty}
+            onDesignDirtyChange={updateDesignDirty}
+            designDraft={designDraft}
+            onDesignDraftChange={updateDesignDraft}
             suggestionDraft={suggestionDraft}
             onApplySuggestionDraft={setSuggestionDraft}
             onDesignSaved={handleDesignSaved}
@@ -312,6 +388,31 @@ export function SceneWorkspace({
           />
         </div>
       </div>
+      {pendingShotId !== null && (
+        <UnsavedChangesDialog
+          title="切换镜头前先处理当前草稿"
+          detail="当前镜头有未保存的设计。返回保存可继续编辑；放弃后才会切换，草稿不会带到下一个镜头。"
+          discardLabel="放弃并切换"
+          onReturnToSave={() => {
+            setPendingShotId(null);
+            setActiveTool("director");
+          }}
+          onDiscard={() => {
+            if (selectedShotKey !== null) {
+              setDesignDrafts((current) => {
+                const next = { ...current };
+                delete next[selectedShotKey];
+                return next;
+              });
+            }
+            setDesignDirty(false);
+            setSuggestionDraft(null);
+            setSelectedShotId(pendingShotId);
+            setPreviewCandidate(null);
+            setPendingShotId(null);
+          }}
+        />
+      )}
     </div>
   );
 }

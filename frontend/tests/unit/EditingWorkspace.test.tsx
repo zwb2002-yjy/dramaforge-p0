@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EditingWorkspace } from "../../src/features/editing/EditingWorkspace";
+import { queryKeys } from "../../src/lib/queryKeys";
 import type { OpenCutManifestRead } from "../../src/lib/api";
 
 const PROJECT_ID = "project-1";
@@ -180,7 +181,7 @@ function persistedSession(
   };
 }
 
-function editingSuggestion(version = 1) {
+function editingSuggestion(version = 1, withSubtitle = false) {
   return {
     proposal_id: "proposal-1",
     item_id: "proposal-item-1",
@@ -190,6 +191,15 @@ function editingSuggestion(version = 1) {
         operations: [
           { operation: "reorder_clips", clip_ids: ["clip-2", "clip-1"] },
           { operation: "set_clip_duration", clip_id: "clip-1", duration_seconds: 2.5 },
+          ...(withSubtitle
+            ? [
+                {
+                  operation: "set_clip_subtitle",
+                  clip_id: "clip-1",
+                  subtitle: "停一下。\n再回答。",
+                },
+              ]
+            : []),
         ],
       },
       rationale: "让开场更快进入冲突。",
@@ -197,6 +207,22 @@ function editingSuggestion(version = 1) {
       cost: "需要重新确认停顿。",
       risk: "对白衔接可能更紧。",
       impact: "仅影响当前 EditSession 时间线。",
+    },
+    director_evidence: {
+      turn_id: "88888888-8888-4888-8888-888888888888",
+      request_key: "editing-suggestion:test",
+      context_hash: "a".repeat(64),
+      output_hash: "b".repeat(64),
+      slot: "planning.storyboard",
+      model_id: "litellm/script-quality",
+      model_binding_ref: "production-model-profile:test@3:planning.storyboard",
+      actual_model: "upstream/editor-v1",
+      transport_status: "succeeded",
+      token_usage: { total_tokens: 60 },
+      reported_cost: "0.004",
+      cost_status: "reported",
+      currency: "USD",
+      schema_repair_count: 0,
     },
   };
 }
@@ -537,6 +563,10 @@ describe("EditingWorkspace", () => {
     expect(screen.getByTestId("editing-suggestion-proposal-id")).toHaveTextContent("proposal-1");
     expect(screen.getByTestId("editing-suggestion-item-id")).toHaveTextContent("proposal-item-1");
     expect(screen.getByTestId("editing-suggestion-base-version")).toHaveTextContent("v1");
+    expect(screen.getByTestId("editing-suggestion-model-evidence")).toHaveTextContent(
+      "upstream/editor-v1",
+    );
+    expect(screen.getByTestId("editing-suggestion-model-evidence")).toHaveTextContent("88888888");
     expect(screen.getAllByTestId("editing-suggestion-operation")).toHaveLength(2);
     expect(screen.getByTestId("editing-suggestion-operations")).toHaveTextContent("reorder_clips");
     expect(screen.getByTestId("editing-suggestion-operations")).toHaveTextContent(
@@ -561,6 +591,7 @@ describe("EditingWorkspace", () => {
     expect(request?.body).toEqual({
       expected_session_version: 1,
       user_instruction: "让开场更快进入冲突",
+      request_key: expect.stringMatching(/^editing-suggestion:[0-9a-f-]{36}$/),
     });
     expect(request?.body).not.toHaveProperty("project_id");
     expect(request?.body).not.toHaveProperty("session_id");
@@ -614,6 +645,49 @@ describe("EditingWorkspace", () => {
     expect(patchBody).not.toHaveProperty("production_lineage");
   });
 
+  it("applies a subtitle suggestion only to the draft and persists it without media generation", async () => {
+    let patchBody: Record<string, unknown> | undefined;
+    const calls: string[] = [];
+    mockEditingFetch((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push(`${method} ${url}`);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`) && method === "GET") {
+        return json(persistedSession());
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-subtitle" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion(1, true));
+      if (url.endsWith("/timeline") && method === "PATCH") {
+        patchBody = init?.body
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : undefined;
+        const timeline = (patchBody?.timeline ?? {}) as Record<string, unknown>;
+        return json(persistedSession(timeline, 2));
+      }
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "把第一段字幕拆成两个节拍" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    await screen.findByTestId("editing-suggestion-preview");
+    expect(screen.getAllByTestId("editing-suggestion-operation")).toHaveLength(3);
+    expect(screen.getByTestId("editing-suggestion-operations")).toHaveTextContent(
+      "set_clip_subtitle",
+    );
+    fireEvent.click(screen.getByTestId("editing-suggestion-apply-all"));
+    expect(screen.getByTestId("clip-subtitle-1")).toHaveValue("停一下。\n再回答。");
+    expect(screen.getByTestId("edit-session-dirty")).toBeInTheDocument();
+    expect(calls.some((call) => /executions|generations|repair/.test(call))).toBe(false);
+    fireEvent.click(screen.getByTestId("save-edit-timeline"));
+    await waitFor(() => expect(patchBody).toBeDefined());
+    const timeline = patchBody?.timeline as { clips: Array<Record<string, unknown>> };
+    expect(timeline.clips[1].subtitle).toBe("停一下。\n再回答。");
+    expect(calls.some((call) => /executions|generations|repair/.test(call))).toBe(false);
+  });
+
   it("partially applies only selected operations and rejects the rest", async () => {
     let patchBody: Record<string, unknown> | undefined;
     mockEditingFetch((input, init) => {
@@ -659,6 +733,8 @@ describe("EditingWorkspace", () => {
       if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-reject" });
       if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      if (url.endsWith("/reject"))
+        return json({ proposal_id: editingSuggestion().proposal_id, status: "rejected" });
       return json({});
     });
 
@@ -671,10 +747,76 @@ describe("EditingWorkspace", () => {
     await screen.findByTestId("editing-suggestion-preview");
     fireEvent.click(screen.getByTestId("editing-suggestion-reject"));
 
-    expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument(),
+    );
     expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
-    expect(screen.getByText("已拒绝当前剪辑建议预览。")).toBeInTheDocument();
+    expect(
+      screen.getByText("已持久拒绝当前剪辑建议，刷新后不会重新提交该分支。"),
+    ).toBeInTheDocument();
+    expect(calls.some((url) => url.endsWith("/reject"))).toBe(true);
     expect(calls.some((url) => url.endsWith("/timeline"))).toBe(false);
+  });
+
+  it("retains the editing preview when durable rejection fails", async () => {
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-reject" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      if (url.endsWith("/reject")) return json({ detail: "rejection unavailable" }, 503);
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "调整节奏" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    await screen.findByTestId("editing-suggestion-preview");
+    fireEvent.click(screen.getByTestId("editing-suggestion-reject"));
+    expect(await screen.findByTestId("editing-suggestion-error")).toHaveTextContent(
+      "rejection unavailable",
+    );
+    expect(screen.getByTestId("editing-suggestion-preview")).toBeInTheDocument();
+    expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
+  });
+
+  it("ignores a late rejection acknowledgement after the session version changes", async () => {
+    let resolveReject!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveReject = resolve;
+    });
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-reject" });
+      if (url.endsWith("/director-suggestion")) return json(editingSuggestion());
+      if (url.endsWith("/reject")) return pending;
+      return json({});
+    });
+    const client = renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByTestId("editing-director-suggestion-instruction"), {
+      target: { value: "调整节奏" },
+    });
+    fireEvent.click(screen.getByTestId("request-editing-director-suggestion"));
+    await screen.findByTestId("editing-suggestion-preview");
+    fireEvent.click(screen.getByTestId("editing-suggestion-reject"));
+    await waitFor(() => expect(screen.getByTestId("editing-suggestion-reject")).toBeDisabled());
+    expect(screen.getByTestId("editing-suggestion-apply-all")).toBeDisabled();
+    client.setQueryData(
+      queryKeys.editing.session(PROJECT_ID, SESSION_ID),
+      persistedSession(DEFAULT_SESSION_TIMELINE, 2),
+    );
+    await screen.findByTestId("editing-suggestion-stale");
+    resolveReject(await json({ proposal_id: editingSuggestion().proposal_id, status: "rejected" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("editing-suggestion-preview")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText("已持久拒绝当前剪辑建议，刷新后不会重新提交该分支。"),
+    ).not.toBeInTheDocument();
   });
 
   it("exports Final Film from the persisted EditSession timeline with idempotency", async () => {
@@ -705,7 +847,13 @@ describe("EditingWorkspace", () => {
           node_run_id: "node-run-final-1",
           attempt_no: 1,
           status: "completed",
-          result: finalFilmRead(),
+          result: {
+            ...finalFilmRead(),
+            subtitle_artifact_id: "subtitle-final-1",
+            subtitle_content_hash: "b".repeat(64),
+            subtitle_byte_size: 100,
+            subtitle_cue_count: 2,
+          },
         });
       }
       return json({});
@@ -727,6 +875,11 @@ describe("EditingWorkspace", () => {
       `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-final-1/content`,
     );
     expect(screen.getByTestId("final-film-download")).toHaveAttribute("download");
+    expect(screen.getByTestId("final-film-subtitle-download")).toHaveAttribute(
+      "href",
+      `/api/v1/projects/${PROJECT_ID}/artifacts/subtitle-final-1/content`,
+    );
+    expect(screen.getByTestId("final-film-subtitle-download")).toHaveTextContent("2 条");
     expect(invalidation).toHaveBeenCalledWith({
       queryKey: ["edit-final-films", PROJECT_ID, SESSION_ID, 1],
     });
@@ -773,7 +926,10 @@ describe("EditingWorkspace", () => {
     expect(request?.url).toBe(
       `/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}/director-proactive-suggestion`,
     );
-    expect(request?.body).toEqual({ expected_session_version: 1 });
+    expect(request?.body).toEqual({
+      expected_session_version: 1,
+      request_key: expect.stringMatching(/^editing-proactive:[0-9a-f-]{36}$/),
+    });
     expect(request?.body).not.toHaveProperty("user_instruction");
     expect(calls.some((call) => call.url.endsWith("/director-suggestion"))).toBe(false);
   });

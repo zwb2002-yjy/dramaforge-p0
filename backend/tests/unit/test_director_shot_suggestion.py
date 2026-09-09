@@ -10,6 +10,7 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene, Shot
 from app.director.suggestion import (
+    DeterministicShotDirectorSuggestionTransport,
     ShotDirectorSuggestionContext,
     ShotDirectorSuggestionRequest,
     ShotDirectorSuggestionService,
@@ -100,13 +101,16 @@ def _request(
         shot_id=shot.id,
         expected_shot_version=shot.version if version is None else version,
         user_instruction="让情绪更克制，镜头缓慢推进",
+        request_key=f"shot-suggestion:{uuid4()}",
     )
 
 
 @pytest.mark.asyncio
 async def test_suggestion_reads_server_truth_and_does_not_mutate(session: AsyncSession) -> None:
     user, project, scene, shot = await _seed(session)
-    result = await ShotDirectorSuggestionService(session).suggest(
+    result = await ShotDirectorSuggestionService(
+        session, transport=DeterministicShotDirectorSuggestionTransport()
+    ).suggest(
         project_id=project.id,
         actor=user,
         request=_request(scene, shot),
@@ -275,7 +279,9 @@ async def test_existing_design_extensions_are_preserved_in_valid_suggestion(
     session: AsyncSession,
 ) -> None:
     user, project, scene, shot = await _seed(session)
-    result = await ShotDirectorSuggestionService(session).suggest(
+    result = await ShotDirectorSuggestionService(
+        session, transport=DeterministicShotDirectorSuggestionTransport()
+    ).suggest(
         project_id=project.id,
         actor=user,
         request=_request(scene, shot),
@@ -298,6 +304,7 @@ def test_request_rejects_canonical_design_fields() -> None:
                 "shot_id": str(uuid4()),
                 "expected_shot_version": 1,
                 "user_instruction": "要求",
+                "request_key": f"shot-suggestion:{uuid4()}",
                 "image_prompt": "客户端不得上传 canonical prompt",
             }
         )

@@ -47,3 +47,28 @@ export const LazyDesignPreviewPage = lazyRouteComponent(
   () => import("./design-preview-page"),
   "DesignPreviewPage",
 );
+
+export const LazyAccountSettingsPage = lazyRouteComponent(
+  () => import("./settings-page"),
+  "AccountSettingsPage",
+);
+
+export const LazyWorkspaceSettingsPage = lazyRouteComponent(
+  () => import("./settings-page"),
+  "WorkspaceSettingsPage",
+);
+
+export const LazyModelConnectionSettingsPage = lazyRouteComponent(
+  () => import("./settings-page"),
+  "ModelConnectionSettingsPage",
+);
+
+export const LazyDefaultPreferencesSettingsPage = lazyRouteComponent(
+  () => import("./settings-page"),
+  "DefaultPreferencesSettingsPage",
+);
+
+export const LazyProjectSettingsPage = lazyRouteComponent(
+  () => import("./settings-page"),
+  "ProjectSettingsPage",
+);

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "previous_candidate": "b22dde32fad3bb3fde39658f8a1682bc56109984",
+  "candidate_sha": "adf1b9434f59f7dfacf5819d04a77997244e783e",
+  "changed_paths": [
+    "backend/app/execution/artifact_lineage.py",
+    "backend/tests/integration/test_artifact_lineage_pg.py",
+    "backend/tests/unit/test_r7_acceptance_driver.py",
+    "frontend/tests/live/v1-r7-real-acceptance.spec.ts",
+    "scripts/prove_v1_r7_acceptance.py"
+  ],
+  "provider_submission_diff_empty": true,
+  "change_scope": "SAVEPOINT recovery for a concurrent Artifact identity insert; Provider request compilation, submission, polling, model binding, credential selection, and media prompts are unchanged.",
+  "full_quality_gate": "PASS",
+  "quality_counts": {
+    "backend_unit": 1008,
+    "postgresql_and_ffmpeg_integration": 45,
+    "frontend_unit": 152,
+    "frontend_e2e": 19,
+    "litellm_integration": 5
+  },
+  "concurrent_artifact_pg_regression": "PASS",
+  "migration_head": "20260908_0060",
+  "backend_image_id": "sha256:18c0dfb988a1fdfda84306e0b7d4c931df31e871c2c8b4d39d16036903b4872f",
+  "frontend_image_id": "sha256:10e25c9161eab134b0a88dde3b5da067d28e5e476712c38517cfdb7d5ca23a90"
+}
+

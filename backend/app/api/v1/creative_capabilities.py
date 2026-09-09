@@ -9,12 +9,16 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Episode, Scene, Shot
+from app.director.creative_capabilities.composer import (
+    CreativeSkillComposer,
+    ResolutionStatus,
+)
 from app.director.creative_capabilities.contracts import CreativeSkillSpec
 from app.director.creative_capabilities.creative_compiler import (
     CreativeCapabilityCompiler,
@@ -22,6 +26,7 @@ from app.director.creative_capabilities.creative_compiler import (
 from app.director.creative_capabilities.freeze import (
     freeze_scene_capabilities,
     freeze_shot_capabilities,
+    serialize_compiled_creative_intent,
 )
 from app.director.creative_capabilities.packs_library import (
     GENRE_PROFILES,
@@ -47,6 +52,8 @@ class CapabilityCatalogBody(BaseModel):
 class FreezeCreativeBody(BaseModel):
     """User-explicit creative capability selection to freeze."""
 
+    model_config = ConfigDict(extra="forbid")
+
     genre_key: str | None = None
     style_key: str | None = None
     shot_language_key: str | None = None
@@ -56,6 +63,7 @@ class FreezeCreativeBody(BaseModel):
     scene_id: UUID | None = None
     shot_id: UUID | None = None
     user_intent: dict[str, object] = Field(default_factory=dict)
+    accepted_proposal: dict[str, object] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_exactly_one_target(self) -> FreezeCreativeBody:
@@ -94,9 +102,7 @@ def _frozen(state: dict[str, object] | None) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
 
 
-async def _scene_in_project(
-    session: SessionDep, *, scene_id: UUID, project_id: UUID
-) -> Scene:
+async def _scene_in_project(session: SessionDep, *, scene_id: UUID, project_id: UUID) -> Scene:
     scene = await session.get(Scene, scene_id)
     if scene is None:
         raise ValidationAppError("scene not found", details={"code": "SCENE_NOT_FOUND"})
@@ -155,7 +161,9 @@ async def freeze_creative_capabilities(
     _csrf: CsrfDep,
 ) -> CreativeStateResponse:
     """Freeze a user-explicit capability selection (never auto-applied)."""
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=_user)
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=_user
+    )
 
     genre = next((g for g in GENRE_PROFILES if g.genre_key == body.genre_key), None)
     style = next((s for s in STYLE_PACKS if s.style_key == body.style_key), None)
@@ -163,34 +171,105 @@ async def freeze_creative_capabilities(
         (p for p in SHOT_LANGUAGE_PACKS if p.pack_key == body.shot_language_key), None
     )
     quality = next((q for q in QUALITY_POLICIES if q.policy_key == body.quality_policy_key), None)
-    skills = [
-        spec for spec in _skill_catalog() if spec.skill_key in body.skill_keys
-    ]
+    for requested, resolved, kind in (
+        (body.genre_key, genre, "genre"),
+        (body.style_key, style, "style"),
+        (body.shot_language_key, shot_language, "shot_language"),
+        (body.quality_policy_key, quality, "quality_policy"),
+    ):
+        if requested is not None and resolved is None:
+            raise ValidationAppError(
+                f"unknown creative {kind}: {requested}",
+                details={"code": "CREATIVE_CAPABILITY_UNAVAILABLE", "kind": kind},
+            )
+    skill_catalog = {spec.skill_key: spec for spec in _skill_catalog()}
+    if len(body.skill_keys) != len(set(body.skill_keys)):
+        raise ValidationAppError(
+            "skill_keys must be unique",
+            details={"code": "CREATIVE_SKILL_SELECTION_INVALID"},
+        )
+    missing_skills = [key for key in body.skill_keys if key not in skill_catalog]
+    if missing_skills:
+        raise ValidationAppError(
+            f"unknown creative skill: {missing_skills[0]}",
+            details={
+                "code": "CREATIVE_CAPABILITY_UNAVAILABLE",
+                "kind": "skill",
+                "skill_key": missing_skills[0],
+            },
+        )
+    composition = CreativeSkillComposer().compose(
+        skills=[skill_catalog[key] for key in body.skill_keys]
+    )
+    if composition.status is ResolutionStatus.CONFLICT:
+        raise ValidationAppError(
+            "selected creative skills conflict",
+            details={
+                "code": "CREATIVE_SKILL_CONFLICT",
+                "conflicts": composition.conflicts,
+            },
+        )
+
+    saved_user_intent: dict[str, object] = {}
+    if body.scene_id is not None:
+        scene = await _scene_in_project(
+            session,
+            scene_id=body.scene_id,
+            project_id=project_id,
+        )
+        saved_user_intent = dict(scene.design_state or {})
+    elif body.shot_id is not None:
+        shot = await session.get(Shot, body.shot_id)
+        if shot is None or shot.project_id != project_id:
+            raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
+        saved_user_intent = dict(shot.director_state or {})
+        saved_user_intent.update(
+            {
+                "image_prompt": shot.image_prompt,
+                "video_prompt": shot.video_prompt,
+            }
+        )
+    saved_user_intent.pop("creative_capabilities", None)
+    confirmed_user_intent = {**saved_user_intent, **body.user_intent}
 
     compiler = CreativeCapabilityCompiler()
     intent = compiler.compile(
-        user_intent=body.user_intent,
+        user_intent=confirmed_user_intent,
+        accepted_proposal=body.accepted_proposal,
+        project_context=dict(project.style_bible or {}),
         genre=genre,
         style=style,
-        skill_stack=skills,
+        skill_stack=composition.stack,
         shot_language=shot_language,
         quality_policy=quality,
     )
 
     if body.scene_id is not None:
         await freeze_scene_capabilities(
-            session, project_id=project_id, scene_id=body.scene_id,
-            intent=intent, actor_id=_user.id,
+            session,
+            project_id=project_id,
+            scene_id=body.scene_id,
+            intent=intent,
+            actor_id=_user.id,
         )
         await session.commit()
-        return CreativeStateResponse(creative_capabilities=intent.provenance, target="scene")
+        return CreativeStateResponse(
+            creative_capabilities=serialize_compiled_creative_intent(intent),
+            target="scene",
+        )
     if body.shot_id is not None:
         await freeze_shot_capabilities(
-            session, project_id=project_id, shot_id=body.shot_id,
-            intent=intent, actor_id=_user.id,
+            session,
+            project_id=project_id,
+            shot_id=body.shot_id,
+            intent=intent,
+            actor_id=_user.id,
         )
         await session.commit()
-        return CreativeStateResponse(creative_capabilities=intent.provenance, target="shot")
+        return CreativeStateResponse(
+            creative_capabilities=serialize_compiled_creative_intent(intent),
+            target="shot",
+        )
     raise ValidationAppError("freeze requires a scene_id or shot_id target")
 
 

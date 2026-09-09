@@ -1,0 +1,1314 @@
+{
+  "schema_version": 1,
+  "proof": "dramaforge-v1-current-head-golden",
+  "started_at_utc": "2026-09-03T03:03:35.185124+00:00",
+  "source_commit": "720bde475369c13111db643524126c13e9cd4557",
+  "dirty": false,
+  "paid_provider_calls": 6,
+  "provider_raw_cost_fields": [],
+  "steps": {
+    "shots": [
+      {
+        "shot_id": "0ff53c20-5240-4962-9e43-41227db756d7",
+        "order": 1,
+        "keyframe_run_id": "4af0bc30-d7f1-4f94-ab52-76a16a781a8e",
+        "keyframe_artifact_id": "42e76a3b-ac94-47ed-845e-8494fd89bb9b",
+        "formal_keyframe_version": 3,
+        "video_run_id": "5a2f7ef9-8bf2-4b89-b5c6-f0f9421258fb",
+        "video_artifact_id": "cf442111-fbcb-49bc-aec0-0ef2a73f3426",
+        "formal_video_version": 4
+      },
+      {
+        "shot_id": "91723e43-39cd-43f2-a687-dbb7cf8cddfc",
+        "order": 2,
+        "keyframe_run_id": "4f22f6a4-992e-47fc-9a75-abd45b011bc3",
+        "keyframe_artifact_id": "04906cd5-8ae7-4fb9-95b2-41b6e59747e1",
+        "formal_keyframe_version": 3,
+        "video_run_id": "ac144812-5df8-440b-a831-facf4793d247",
+        "video_artifact_id": "d3bbc74a-fdde-464e-bbcb-8bea093954ab",
+        "formal_video_version": 4
+      },
+      {
+        "shot_id": "64de83e7-14db-47aa-b953-4f3120643de9",
+        "order": 3,
+        "keyframe_run_id": "8938cf8b-1214-48d6-895c-c7babf928efe",
+        "keyframe_artifact_id": "1d483d4c-a64f-4c46-a483-9217cd760014",
+        "formal_keyframe_version": 3,
+        "video_run_id": "41f38108-460f-4a6c-b4bf-e0c32f89a59c",
+        "video_artifact_id": "057c7de8-7460-4d30-9cd3-82f4056610c5",
+        "formal_video_version": 4
+      }
+    ]
+  },
+  "primary_project": {
+    "project_id": "6484eb25-13af-41e8-9e17-df743db57684",
+    "profile": {
+      "id": "2020dfff-99cf-4ca8-a7a6-7c807b8a071b",
+      "project_id": "6484eb25-13af-41e8-9e17-df743db57684",
+      "start_type": "FREE",
+      "created_from_template_key": null,
+      "template_version": null,
+      "template_contract_hash": null,
+      "director_autonomy": "ASSIST",
+      "selected_genre": null,
+      "selected_style_ids": [],
+      "selected_skill_ids": [],
+      "selected_shot_language": null,
+      "asset_slot_requirements": {
+        "optional": [],
+        "required": []
+      },
+      "strategy_snapshot": {
+        "review": "user_review",
+        "source": "free",
+        "editing": "user_timeline",
+        "generation": "keyframe_then_video",
+        "shot_planning": "user_directed"
+      },
+      "version": 1
+    },
+    "full_real_chain": true
+  },
+  "peer_project": {
+    "project_id": "5c65b75f-532c-4b3b-b25c-9c0a4e247f5e",
+    "profile": {
+      "id": "ab15449f-67f4-46b5-afde-cce9fbabd75e",
+      "project_id": "5c65b75f-532c-4b3b-b25c-9c0a4e247f5e",
+      "start_type": "TEMPLATE",
+      "created_from_template_key": "single_monologue_v1",
+      "template_version": "1",
+      "template_contract_hash": "615987215ba951dd402ef73a014e0355d5696008463d8ade9ba0e6ddfbca3964",
+      "director_autonomy": "AUTO",
+      "selected_genre": "short_drama_romance_v1",
+      "selected_style_ids": [
+        "cinematic_realism_v1"
+      ],
+      "selected_skill_ids": [
+        "emotional-performance-v1",
+        "montage-direction-v1",
+        "character-consistency-v1"
+      ],
+      "selected_shot_language": "subjective_tension_v1",
+      "asset_slot_requirements": {
+        "optional": [],
+        "required": [
+          "protagonist",
+          "location"
+        ]
+      },
+      "strategy_snapshot": {
+        "key": "single_monologue_v1",
+        "name": "单人情绪独白",
+        "version": "1",
+        "category": "short_drama",
+        "strategies": {
+          "review": "emotion_and_continuity",
+          "editing": "breathing_beats",
+          "generation": "keyframe_then_video",
+          "shot_planning": "subjective_beats"
+        },
+        "description": "聚焦单一角色的内心情绪与主观镜头语言。",
+        "recommended_genre": "short_drama_romance_v1",
+        "optional_asset_slots": [],
+        "required_asset_slots": [
+          "protagonist",
+          "location"
+        ],
+        "recommended_skill_ids": [
+          "emotional-performance-v1",
+          "montage-direction-v1",
+          "character-consistency-v1"
+        ],
+        "recommended_style_ids": [
+          "cinematic_realism_v1"
+        ],
+        "recommended_shot_language": "subjective_tension_v1"
+      },
+      "version": 1
+    },
+    "full_real_chain": false
+  },
+  "provider": {
+    "connection_id": "be635b80-72f2-4beb-85d1-fad4e488627d",
+    "connection_verification_status": "verified",
+    "bindings": {
+      "keyframe": {
+        "id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+        "model_id": "agnes-image-2.1-flash",
+        "purpose": "keyframe",
+        "account_verified": true,
+        "quality_gated": false,
+        "catalog_entry_id": "54968d1a-b018-4e3c-8de6-a8484a0f2dc4",
+        "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c"
+      },
+      "video": {
+        "id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+        "model_id": "agnes-video-v2.0",
+        "purpose": "video",
+        "account_verified": true,
+        "quality_gated": false,
+        "catalog_entry_id": "e5227118-9774-4d97-91f3-903d0203b355",
+        "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025"
+      }
+    }
+  },
+  "primary_shots": [
+    "0ff53c20-5240-4962-9e43-41227db756d7",
+    "91723e43-39cd-43f2-a687-dbb7cf8cddfc",
+    "64de83e7-14db-47aa-b953-4f3120643de9"
+  ],
+  "peer_shots": [
+    "28cc928e-bdb5-49a2-86b2-c143ab965920",
+    "0416bd9f-ab16-484e-8c62-5e5fc5acfe56",
+    "822fa20c-b23e-40b8-8e71-79dd4776cc13"
+  ],
+  "artifacts": [
+    {
+      "id": "057c7de8-7460-4d30-9cd3-82f4056610c5",
+      "content_hash": "b1a915a408c8e92b3815b3fb41fc51a7013ad7655484a9bee9ab38451fe2044e",
+      "mime_type": "video/mp4",
+      "byte_size": 1172759,
+      "width": 704,
+      "height": 1280,
+      "duration_seconds": "5.042",
+      "produced_by_run_id": "41f38108-460f-4a6c-b4bf-e0c32f89a59c"
+    },
+    {
+      "id": "1d483d4c-a64f-4c46-a483-9217cd760014",
+      "content_hash": "3c552f7d815e73614ec4b777633dae15bec4d5342087c384b5fa95147e7af29a",
+      "mime_type": "image/png",
+      "byte_size": 1284190,
+      "width": 736,
+      "height": 1312,
+      "duration_seconds": null,
+      "produced_by_run_id": "8938cf8b-1214-48d6-895c-c7babf928efe"
+    },
+    {
+      "id": "bda09954-8c55-4584-962b-1959be43304a",
+      "content_hash": "0407eef1b565ec187e5094160eb62341651b447117f337389a218a9fed8aaff4",
+      "mime_type": "application/json",
+      "byte_size": 140,
+      "width": null,
+      "height": null,
+      "duration_seconds": null,
+      "produced_by_run_id": "2d80d502-e139-4237-8da4-2a4421d94595"
+    },
+    {
+      "id": "d3bbc74a-fdde-464e-bbcb-8bea093954ab",
+      "content_hash": "b655ad3a1031b5854398fe0fa4e923e13e5542b95dffa378d96fe4a71e92b6e7",
+      "mime_type": "video/mp4",
+      "byte_size": 1412344,
+      "width": 704,
+      "height": 1280,
+      "duration_seconds": "5.042",
+      "produced_by_run_id": "ac144812-5df8-440b-a831-facf4793d247"
+    },
+    {
+      "id": "04906cd5-8ae7-4fb9-95b2-41b6e59747e1",
+      "content_hash": "866655a9e4c79a3de6a971867db07b30f832d3c26a0b3e66ed26793a46849492",
+      "mime_type": "image/png",
+      "byte_size": 1283145,
+      "width": 736,
+      "height": 1312,
+      "duration_seconds": null,
+      "produced_by_run_id": "4f22f6a4-992e-47fc-9a75-abd45b011bc3"
+    },
+    {
+      "id": "b1392bc7-4542-484b-ad4c-f6255ef49f58",
+      "content_hash": "ebb50ed686893aa3c7a36d7c039fefd2b8b094ead8ece5cf3366e60968c16dd6",
+      "mime_type": "application/json",
+      "byte_size": 138,
+      "width": null,
+      "height": null,
+      "duration_seconds": null,
+      "produced_by_run_id": "e7d141c2-9fc1-4445-b9a0-4dcdc6e75788"
+    },
+    {
+      "id": "cf442111-fbcb-49bc-aec0-0ef2a73f3426",
+      "content_hash": "a03314230649b0b8675eb9babe6e48e05741751496688c8cb3f299360a66126b",
+      "mime_type": "video/mp4",
+      "byte_size": 786159,
+      "width": 704,
+      "height": 1280,
+      "duration_seconds": "5.042",
+      "produced_by_run_id": "5a2f7ef9-8bf2-4b89-b5c6-f0f9421258fb"
+    },
+    {
+      "id": "42e76a3b-ac94-47ed-845e-8494fd89bb9b",
+      "content_hash": "8cba0956393f1415f547c296a9340a257830823a7c485d7ccbaa71a932bb75e3",
+      "mime_type": "image/png",
+      "byte_size": 1217430,
+      "width": 736,
+      "height": 1312,
+      "duration_seconds": null,
+      "produced_by_run_id": "4af0bc30-d7f1-4f94-ab52-76a16a781a8e"
+    },
+    {
+      "id": "764bc03f-8942-43b4-94a1-79897a821904",
+      "content_hash": "1e8f29d4a6f683243a955f053f3a255bbdc5ef1a06f5bc041a49dad2d8f28ed2",
+      "mime_type": "application/json",
+      "byte_size": 168,
+      "width": null,
+      "height": null,
+      "duration_seconds": null,
+      "produced_by_run_id": "f9cccc0a-ad6f-4f99-95c6-7ea829c52ff1"
+    }
+  ],
+  "provider_operations": [
+    {
+      "id": "30c8acac-a69b-438e-961d-769a31771340",
+      "node_run_id": "41f38108-460f-4a6c-b4bf-e0c32f89a59c",
+      "operation_kind": "video.generate",
+      "actual_provider": "agnes",
+      "actual_model": "agnes-video-v2.0",
+      "provider_request_id": "video_bGl0ZWxsbTpjdXN0b21fbGxtX3Byb3ZpZGVyOm9wZW5haTttb2RlbF9pZDphZ25lcy12aWRlby12Mi4wO3ZpZGVvX2lkOnZpZGVvX2ZjYzRiNzhlMDlhMzRhMjY4ZmE0ZTY3N2Q0YTRiYTVk",
+      "protocol_profile": "agnes_cn_v1",
+      "status": "succeeded",
+      "request_fingerprint": "b5babb8f6b3708880b8c443956a23f16c64a0b4ece2095a6fa092fafb4486b3a",
+      "request_summary": {
+        "kind": "video",
+        "execution_path": "unified-v1",
+        "compiled_request": {
+          "model": "agnes-video-v2.0",
+          "operation": "video.i2v",
+          "frame_rate": 24,
+          "num_frames": 121,
+          "aspect_ratio": "9:16",
+          "native_audio": false,
+          "duration_seconds": 5,
+          "reference_artifact_ids": [
+            "1d483d4c-a64f-4c46-a483-9217cd760014"
+          ],
+          "reference_fingerprints": [
+            "3c552f7d815e73614ec4b777633dae15bec4d5342087c384b5fa95147e7af29a"
+          ],
+          "request_schema_version": "2026-08-10"
+        },
+        "effective_request": {
+          "model_id": "agnes-video-v2.0",
+          "operation": "video.generate",
+          "common_options": {
+            "frame_rate": 24,
+            "num_frames": 121,
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          },
+          "prompt_fingerprint": "7bfba74ef4fa2e039f0572f1dc3040b0b36bde30901b8dc5f48603262e3c04f1",
+          "reference_artifact_ids": [
+            "1d483d4c-a64f-4c46-a483-9217cd760014"
+          ],
+          "reference_fingerprints": [
+            "3c552f7d815e73614ec4b777633dae15bec4d5342087c384b5fa95147e7af29a"
+          ]
+        },
+        "translation_report": {
+          "warnings": [],
+          "dropped_options": [],
+          "transformations": [],
+          "effective_options": {
+            "frame_rate": 24,
+            "num_frames": 121,
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          },
+          "requested_options": {
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          }
+        },
+        "reference_artifact_ids": [
+          "1d483d4c-a64f-4c46-a483-9217cd760014"
+        ],
+        "reference_fingerprints": [
+          "3c552f7d815e73614ec4b777633dae15bec4d5342087c384b5fa95147e7af29a"
+        ],
+        "frozen_model_binding_id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+        "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025"
+      },
+      "response_summary": {
+        "create_status": "created",
+        "final_status": "succeeded",
+        "poll_count": 22,
+        "query_kind": "video_id",
+        "provider_reported_cost": null,
+        "cost_status": "not_reported"
+      },
+      "model_binding_id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+      "catalog_entry_id": "e5227118-9774-4d97-91f3-903d0203b355",
+      "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025",
+      "execution_path_version": "unified-v1",
+      "provider_cost": null,
+      "currency": "USD",
+      "submitted_at": "2026-09-03T03:06:58.157296+00:00",
+      "completed_at": "2026-09-03T03:08:50.101516+00:00"
+    },
+    {
+      "id": "a58baea7-b1c1-4c99-bafa-d664f84df42e",
+      "node_run_id": "8938cf8b-1214-48d6-895c-c7babf928efe",
+      "operation_kind": "keyframe.generate",
+      "actual_provider": "agnes",
+      "actual_model": "agnes-image-2.1-flash",
+      "provider_request_id": "agnes-image-6d12dc30-e5cb-458d-9b11-600a1649f64e",
+      "protocol_profile": "agnes_cn_v1",
+      "status": "succeeded",
+      "request_fingerprint": "26d4594c1ab70202d66477a3682bc3a52cf7ee285867f5426c92c5aec46982be",
+      "request_summary": {
+        "kind": "keyframe",
+        "execution_path": "unified-v1",
+        "compiled_request": {
+          "size": "1K",
+          "model": "agnes-image-2.1-flash",
+          "operation": "image.t2i",
+          "aspect_ratio": "9:16",
+          "reference_artifact_ids": [],
+          "reference_fingerprints": [],
+          "request_schema_version": "2026-08-19",
+          "effective_common_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "translation_transformations": [
+            {
+              "field": "size",
+              "reason": "frozen_manifest_native_size_tier",
+              "to_value": "1K",
+              "from_value": null
+            }
+          ]
+        },
+        "effective_request": {
+          "model_id": "agnes-image-2.1-flash",
+          "operation": "image.generate",
+          "common_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "prompt_fingerprint": "7bfba74ef4fa2e039f0572f1dc3040b0b36bde30901b8dc5f48603262e3c04f1",
+          "reference_artifact_ids": [],
+          "reference_fingerprints": []
+        },
+        "translation_report": {
+          "warnings": [],
+          "dropped_options": [],
+          "transformations": [
+            {
+              "field": "size",
+              "reason": "frozen_manifest_native_size_tier",
+              "to_value": "1K",
+              "from_value": null
+            }
+          ],
+          "effective_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "requested_options": {
+            "size": null,
+            "aspect_ratio": "9:16"
+          }
+        },
+        "reference_artifact_ids": [],
+        "reference_fingerprints": [],
+        "frozen_model_binding_id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+        "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c"
+      },
+      "response_summary": {
+        "create_status": "created",
+        "final_status": "succeeded",
+        "poll_count": 0,
+        "query_kind": null,
+        "provider_reported_cost": null,
+        "cost_status": "not_reported"
+      },
+      "model_binding_id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+      "catalog_entry_id": "54968d1a-b018-4e3c-8de6-a8484a0f2dc4",
+      "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c",
+      "execution_path_version": "unified-v1",
+      "provider_cost": null,
+      "currency": "USD",
+      "submitted_at": "2026-09-03T03:06:49.183036+00:00",
+      "completed_at": "2026-09-03T03:06:55.987594+00:00"
+    },
+    {
+      "id": "12753db1-0cea-40a5-8598-1999cfbd0cad",
+      "node_run_id": "ac144812-5df8-440b-a831-facf4793d247",
+      "operation_kind": "video.generate",
+      "actual_provider": "agnes",
+      "actual_model": "agnes-video-v2.0",
+      "provider_request_id": "video_bGl0ZWxsbTpjdXN0b21fbGxtX3Byb3ZpZGVyOm9wZW5haTttb2RlbF9pZDphZ25lcy12aWRlby12Mi4wO3ZpZGVvX2lkOnZpZGVvX2UyZThhOTEwOWI4MTRkZTNiMDE1YWMxNGIwNWM3NGNm",
+      "protocol_profile": "agnes_cn_v1",
+      "status": "succeeded",
+      "request_fingerprint": "2888b1bfc0389d9b60651531438f2e3dcb8ea4d2bffaf12169a2e1a9982ae2df",
+      "request_summary": {
+        "kind": "video",
+        "execution_path": "unified-v1",
+        "compiled_request": {
+          "model": "agnes-video-v2.0",
+          "operation": "video.i2v",
+          "frame_rate": 24,
+          "num_frames": 121,
+          "aspect_ratio": "9:16",
+          "native_audio": false,
+          "duration_seconds": 5,
+          "reference_artifact_ids": [
+            "04906cd5-8ae7-4fb9-95b2-41b6e59747e1"
+          ],
+          "reference_fingerprints": [
+            "866655a9e4c79a3de6a971867db07b30f832d3c26a0b3e66ed26793a46849492"
+          ],
+          "request_schema_version": "2026-08-10"
+        },
+        "effective_request": {
+          "model_id": "agnes-video-v2.0",
+          "operation": "video.generate",
+          "common_options": {
+            "frame_rate": 24,
+            "num_frames": 121,
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          },
+          "prompt_fingerprint": "4801f014aadd14ffb0e271b0b54a69c4dc95192d1aca6f35563e094bcb7701da",
+          "reference_artifact_ids": [
+            "04906cd5-8ae7-4fb9-95b2-41b6e59747e1"
+          ],
+          "reference_fingerprints": [
+            "866655a9e4c79a3de6a971867db07b30f832d3c26a0b3e66ed26793a46849492"
+          ]
+        },
+        "translation_report": {
+          "warnings": [],
+          "dropped_options": [],
+          "transformations": [],
+          "effective_options": {
+            "frame_rate": 24,
+            "num_frames": 121,
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          },
+          "requested_options": {
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          }
+        },
+        "reference_artifact_ids": [
+          "04906cd5-8ae7-4fb9-95b2-41b6e59747e1"
+        ],
+        "reference_fingerprints": [
+          "866655a9e4c79a3de6a971867db07b30f832d3c26a0b3e66ed26793a46849492"
+        ],
+        "frozen_model_binding_id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+        "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025"
+      },
+      "response_summary": {
+        "create_status": "created",
+        "final_status": "succeeded",
+        "poll_count": 16,
+        "query_kind": "video_id",
+        "provider_reported_cost": null,
+        "cost_status": "not_reported"
+      },
+      "model_binding_id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+      "catalog_entry_id": "e5227118-9774-4d97-91f3-903d0203b355",
+      "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025",
+      "execution_path_version": "unified-v1",
+      "provider_cost": null,
+      "currency": "USD",
+      "submitted_at": "2026-09-03T03:05:24.384969+00:00",
+      "completed_at": "2026-09-03T03:06:44.860425+00:00"
+    },
+    {
+      "id": "61aea532-5b94-4041-9ce6-bb557ac4c6ca",
+      "node_run_id": "4f22f6a4-992e-47fc-9a75-abd45b011bc3",
+      "operation_kind": "keyframe.generate",
+      "actual_provider": "agnes",
+      "actual_model": "agnes-image-2.1-flash",
+      "provider_request_id": "agnes-image-73129918-dc6f-4b89-9f4d-11a3bae26c23",
+      "protocol_profile": "agnes_cn_v1",
+      "status": "succeeded",
+      "request_fingerprint": "431a5d98e49bf8b6f77abcc4c6d8acf1883e5b2cd2fcf20facf3eee469258afe",
+      "request_summary": {
+        "kind": "keyframe",
+        "execution_path": "unified-v1",
+        "compiled_request": {
+          "size": "1K",
+          "model": "agnes-image-2.1-flash",
+          "operation": "image.t2i",
+          "aspect_ratio": "9:16",
+          "reference_artifact_ids": [],
+          "reference_fingerprints": [],
+          "request_schema_version": "2026-08-19",
+          "effective_common_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "translation_transformations": [
+            {
+              "field": "size",
+              "reason": "frozen_manifest_native_size_tier",
+              "to_value": "1K",
+              "from_value": null
+            }
+          ]
+        },
+        "effective_request": {
+          "model_id": "agnes-image-2.1-flash",
+          "operation": "image.generate",
+          "common_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "prompt_fingerprint": "4801f014aadd14ffb0e271b0b54a69c4dc95192d1aca6f35563e094bcb7701da",
+          "reference_artifact_ids": [],
+          "reference_fingerprints": []
+        },
+        "translation_report": {
+          "warnings": [],
+          "dropped_options": [],
+          "transformations": [
+            {
+              "field": "size",
+              "reason": "frozen_manifest_native_size_tier",
+              "to_value": "1K",
+              "from_value": null
+            }
+          ],
+          "effective_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "requested_options": {
+            "size": null,
+            "aspect_ratio": "9:16"
+          }
+        },
+        "reference_artifact_ids": [],
+        "reference_fingerprints": [],
+        "frozen_model_binding_id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+        "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c"
+      },
+      "response_summary": {
+        "create_status": "created",
+        "final_status": "succeeded",
+        "poll_count": 0,
+        "query_kind": null,
+        "provider_reported_cost": null,
+        "cost_status": "not_reported"
+      },
+      "model_binding_id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+      "catalog_entry_id": "54968d1a-b018-4e3c-8de6-a8484a0f2dc4",
+      "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c",
+      "execution_path_version": "unified-v1",
+      "provider_cost": null,
+      "currency": "USD",
+      "submitted_at": "2026-09-03T03:05:15.378624+00:00",
+      "completed_at": "2026-09-03T03:05:21.122362+00:00"
+    },
+    {
+      "id": "9e64354d-99a3-47e0-a5de-2cd0bc6af048",
+      "node_run_id": "5a2f7ef9-8bf2-4b89-b5c6-f0f9421258fb",
+      "operation_kind": "video.generate",
+      "actual_provider": "agnes",
+      "actual_model": "agnes-video-v2.0",
+      "provider_request_id": "video_bGl0ZWxsbTpjdXN0b21fbGxtX3Byb3ZpZGVyOm9wZW5haTttb2RlbF9pZDphZ25lcy12aWRlby12Mi4wO3ZpZGVvX2lkOnZpZGVvXzkxOWU0NjE2NzcwMjQ5NjliM2JkOWRmZTcyOGNjODQ1",
+      "protocol_profile": "agnes_cn_v1",
+      "status": "succeeded",
+      "request_fingerprint": "64c0fcc87f6354ef50c643ee54716fb8ae0a4f29a17490566e90197d02f95702",
+      "request_summary": {
+        "kind": "video",
+        "execution_path": "unified-v1",
+        "compiled_request": {
+          "model": "agnes-video-v2.0",
+          "operation": "video.i2v",
+          "frame_rate": 24,
+          "num_frames": 121,
+          "aspect_ratio": "9:16",
+          "native_audio": false,
+          "duration_seconds": 5,
+          "reference_artifact_ids": [
+            "42e76a3b-ac94-47ed-845e-8494fd89bb9b"
+          ],
+          "reference_fingerprints": [
+            "8cba0956393f1415f547c296a9340a257830823a7c485d7ccbaa71a932bb75e3"
+          ],
+          "request_schema_version": "2026-08-10"
+        },
+        "effective_request": {
+          "model_id": "agnes-video-v2.0",
+          "operation": "video.generate",
+          "common_options": {
+            "frame_rate": 24,
+            "num_frames": 121,
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          },
+          "prompt_fingerprint": "24a66dde5854a078720dbeb45ae6e1ba97966bb4eb273e97159f7d7f0de98564",
+          "reference_artifact_ids": [
+            "42e76a3b-ac94-47ed-845e-8494fd89bb9b"
+          ],
+          "reference_fingerprints": [
+            "8cba0956393f1415f547c296a9340a257830823a7c485d7ccbaa71a932bb75e3"
+          ]
+        },
+        "translation_report": {
+          "warnings": [],
+          "dropped_options": [],
+          "transformations": [],
+          "effective_options": {
+            "frame_rate": 24,
+            "num_frames": 121,
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          },
+          "requested_options": {
+            "aspect_ratio": "9:16",
+            "generate_audio": false,
+            "duration_seconds": 5
+          }
+        },
+        "reference_artifact_ids": [
+          "42e76a3b-ac94-47ed-845e-8494fd89bb9b"
+        ],
+        "reference_fingerprints": [
+          "8cba0956393f1415f547c296a9340a257830823a7c485d7ccbaa71a932bb75e3"
+        ],
+        "frozen_model_binding_id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+        "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025"
+      },
+      "response_summary": {
+        "create_status": "created",
+        "final_status": "succeeded",
+        "poll_count": 16,
+        "query_kind": "video_id",
+        "provider_reported_cost": null,
+        "cost_status": "not_reported"
+      },
+      "model_binding_id": "dc2c713e-311a-48ab-9b9c-91ee040af483",
+      "catalog_entry_id": "e5227118-9774-4d97-91f3-903d0203b355",
+      "capability_manifest_hash": "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025",
+      "execution_path_version": "unified-v1",
+      "provider_cost": null,
+      "currency": "USD",
+      "submitted_at": "2026-09-03T03:03:48.500773+00:00",
+      "completed_at": "2026-09-03T03:05:09.081554+00:00"
+    },
+    {
+      "id": "cf62771c-3f98-4e30-a63c-6247d4870eeb",
+      "node_run_id": "4af0bc30-d7f1-4f94-ab52-76a16a781a8e",
+      "operation_kind": "keyframe.generate",
+      "actual_provider": "agnes",
+      "actual_model": "agnes-image-2.1-flash",
+      "provider_request_id": "agnes-image-24bb9ed3-aa3a-40c3-95d2-bb85b314a962",
+      "protocol_profile": "agnes_cn_v1",
+      "status": "succeeded",
+      "request_fingerprint": "5fd97017db0fa0fe949fa826804cf1fec7a27f0689a57b2b19518634bc948b61",
+      "request_summary": {
+        "kind": "keyframe",
+        "execution_path": "unified-v1",
+        "compiled_request": {
+          "size": "1K",
+          "model": "agnes-image-2.1-flash",
+          "operation": "image.t2i",
+          "aspect_ratio": "9:16",
+          "reference_artifact_ids": [],
+          "reference_fingerprints": [],
+          "request_schema_version": "2026-08-19",
+          "effective_common_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "translation_transformations": [
+            {
+              "field": "size",
+              "reason": "frozen_manifest_native_size_tier",
+              "to_value": "1K",
+              "from_value": null
+            }
+          ]
+        },
+        "effective_request": {
+          "model_id": "agnes-image-2.1-flash",
+          "operation": "image.generate",
+          "common_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "prompt_fingerprint": "24a66dde5854a078720dbeb45ae6e1ba97966bb4eb273e97159f7d7f0de98564",
+          "reference_artifact_ids": [],
+          "reference_fingerprints": []
+        },
+        "translation_report": {
+          "warnings": [],
+          "dropped_options": [],
+          "transformations": [
+            {
+              "field": "size",
+              "reason": "frozen_manifest_native_size_tier",
+              "to_value": "1K",
+              "from_value": null
+            }
+          ],
+          "effective_options": {
+            "size": "1K",
+            "aspect_ratio": "9:16"
+          },
+          "requested_options": {
+            "size": null,
+            "aspect_ratio": "9:16"
+          }
+        },
+        "reference_artifact_ids": [],
+        "reference_fingerprints": [],
+        "frozen_model_binding_id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+        "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c"
+      },
+      "response_summary": {
+        "create_status": "created",
+        "final_status": "succeeded",
+        "poll_count": 0,
+        "query_kind": null,
+        "provider_reported_cost": null,
+        "cost_status": "not_reported"
+      },
+      "model_binding_id": "4374b6d7-bc4a-40c6-a913-1c35123e14e2",
+      "catalog_entry_id": "54968d1a-b018-4e3c-8de6-a8484a0f2dc4",
+      "capability_manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c",
+      "execution_path_version": "unified-v1",
+      "provider_cost": null,
+      "currency": "USD",
+      "submitted_at": "2026-09-03T03:03:39.490219+00:00",
+      "completed_at": "2026-09-03T03:03:46.278896+00:00"
+    }
+  ],
+  "opencut": {
+    "schema_version": "opencut-manifest-v2",
+    "adapter": "dramaforge-opencut-adapter-v1",
+    "timeline": {
+      "duration_seconds": "15.000",
+      "frame_rate": 24,
+      "timebase": "1/24",
+      "aspect_ratio": "9:16"
+    },
+    "track_kinds": [
+      "video",
+      "audio",
+      "subtitle"
+    ],
+    "shot_count": 3,
+    "video_clip_count": 3
+  },
+  "final_film": {
+    "project_id": "6484eb25-13af-41e8-9e17-df743db57684",
+    "edit_session_id": "293c0523-cb03-40a6-a072-8f2328943c1a",
+    "session_version": 1,
+    "timeline_clip_count": 3,
+    "timeline_clips": [
+      {
+        "id": "859921dc-e226-4261-8f28-d3342dce8138",
+        "order": 1,
+        "shot_id": "0ff53c20-5240-4962-9e43-41227db756d7",
+        "audio_id": null,
+        "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+        "subtitle": "",
+        "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+        "transition": null,
+        "artifact_id": "cf442111-fbcb-49bc-aec0-0ef2a73f3426",
+        "shot_number": 1,
+        "scene_number": 1,
+        "episode_number": 1,
+        "duration_seconds": 5.042
+      },
+      {
+        "id": "5289112d-66c5-48b4-a5f7-8fd653f7770c",
+        "order": 2,
+        "shot_id": "91723e43-39cd-43f2-a687-dbb7cf8cddfc",
+        "audio_id": null,
+        "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+        "subtitle": "",
+        "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+        "transition": null,
+        "artifact_id": "d3bbc74a-fdde-464e-bbcb-8bea093954ab",
+        "shot_number": 2,
+        "scene_number": 1,
+        "episode_number": 1,
+        "duration_seconds": 5.042
+      },
+      {
+        "id": "15770fa5-24d9-43bb-a246-1dfb6b0da6b6",
+        "order": 3,
+        "shot_id": "64de83e7-14db-47aa-b953-4f3120643de9",
+        "audio_id": null,
+        "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+        "subtitle": "",
+        "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+        "transition": null,
+        "artifact_id": "057c7de8-7460-4d30-9cd3-82f4056610c5",
+        "shot_number": 3,
+        "scene_number": 1,
+        "episode_number": 1,
+        "duration_seconds": 5.042
+      }
+    ],
+    "production_lineage": {
+      "clips": [
+        {
+          "order": 1,
+          "shot_id": "0ff53c20-5240-4962-9e43-41227db756d7",
+          "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+          "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+          "artifact_id": "cf442111-fbcb-49bc-aec0-0ef2a73f3426"
+        },
+        {
+          "order": 2,
+          "shot_id": "91723e43-39cd-43f2-a687-dbb7cf8cddfc",
+          "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+          "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+          "artifact_id": "d3bbc74a-fdde-464e-bbcb-8bea093954ab"
+        },
+        {
+          "order": 3,
+          "shot_id": "64de83e7-14db-47aa-b953-4f3120643de9",
+          "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+          "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+          "artifact_id": "057c7de8-7460-4d30-9cd3-82f4056610c5"
+        }
+      ],
+      "lineage_readonly": true
+    },
+    "export": {
+      "session_id": "293c0523-cb03-40a6-a072-8f2328943c1a",
+      "format": "dramaforge-edit-v1",
+      "clip_count": 3,
+      "duration_seconds": 15.126,
+      "clips": [
+        {
+          "id": "859921dc-e226-4261-8f28-d3342dce8138",
+          "order": 1,
+          "shot_id": "0ff53c20-5240-4962-9e43-41227db756d7",
+          "audio_id": null,
+          "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+          "subtitle": "",
+          "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+          "transition": null,
+          "artifact_id": "cf442111-fbcb-49bc-aec0-0ef2a73f3426",
+          "shot_number": 1,
+          "scene_number": 1,
+          "episode_number": 1,
+          "duration_seconds": 5.042
+        },
+        {
+          "id": "5289112d-66c5-48b4-a5f7-8fd653f7770c",
+          "order": 2,
+          "shot_id": "91723e43-39cd-43f2-a687-dbb7cf8cddfc",
+          "audio_id": null,
+          "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+          "subtitle": "",
+          "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+          "transition": null,
+          "artifact_id": "d3bbc74a-fdde-464e-bbcb-8bea093954ab",
+          "shot_number": 2,
+          "scene_number": 1,
+          "episode_number": 1,
+          "duration_seconds": 5.042
+        },
+        {
+          "id": "15770fa5-24d9-43bb-a246-1dfb6b0da6b6",
+          "order": 3,
+          "shot_id": "64de83e7-14db-47aa-b953-4f3120643de9",
+          "audio_id": null,
+          "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+          "subtitle": "",
+          "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+          "transition": null,
+          "artifact_id": "057c7de8-7460-4d30-9cd3-82f4056610c5",
+          "shot_number": 3,
+          "scene_number": 1,
+          "episode_number": 1,
+          "duration_seconds": 5.042
+        }
+      ],
+      "production_lineage": {
+        "clips": [
+          {
+            "order": 1,
+            "shot_id": "0ff53c20-5240-4962-9e43-41227db756d7",
+            "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+            "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+            "artifact_id": "cf442111-fbcb-49bc-aec0-0ef2a73f3426"
+          },
+          {
+            "order": 2,
+            "shot_id": "91723e43-39cd-43f2-a687-dbb7cf8cddfc",
+            "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+            "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+            "artifact_id": "d3bbc74a-fdde-464e-bbcb-8bea093954ab"
+          },
+          {
+            "order": 3,
+            "shot_id": "64de83e7-14db-47aa-b953-4f3120643de9",
+            "scene_id": "87ba574a-f183-4b22-b354-d930362e27bc",
+            "episode_id": "65939b17-ccd6-404f-9a42-d2ecf398a08b",
+            "artifact_id": "057c7de8-7460-4d30-9cd3-82f4056610c5"
+          }
+        ],
+        "lineage_readonly": true
+      }
+    }
+  },
+  "final_film_prepare": {
+    "node_run_ids": [
+      "b1acb198-1d79-495d-bf85-71d308880230",
+      "c2087d5e-8a30-41d1-b5c0-c1e8351176cb",
+      "2888d0f6-5a3b-4aa9-b776-3361ab7a1d8a",
+      "27f4b603-344f-44a8-ac85-98d664b0bef8",
+      "1572bd05-fb3a-4c5c-90fe-00cdda66db64",
+      "6331ca55-a5bf-4c74-bb9f-4d1240cc9e05",
+      "06fe7233-eadf-48d8-9572-6a14393027e1",
+      "dfef7902-f952-44a1-b962-e334e3d6ac40",
+      "7d5c086b-6bdf-4fcf-8077-e0a447c28bcf",
+      "b7e75439-733c-4552-90a6-66b4138b775f",
+      "ab8a54ed-7df8-4aad-b4dd-e1b980f738e0",
+      "2444a76f-0d16-43d2-9fd4-205494c3d294",
+      "af9aee30-7a15-42b0-b68a-49da7570b632",
+      "ad2a955c-c4a8-4adc-89fc-f5c174a9c4f1",
+      "b294206a-b8aa-4115-9b38-5d485de2ff9f"
+    ],
+    "shot_ids": [
+      "0ff53c20-5240-4962-9e43-41227db756d7",
+      "91723e43-39cd-43f2-a687-dbb7cf8cddfc",
+      "64de83e7-14db-47aa-b953-4f3120643de9"
+    ],
+    "status": "queued"
+  },
+  "final_film_tail": {
+    "runs": [
+      {
+        "id": "c2087d5e-8a30-41d1-b5c0-c1e8351176cb",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "voice",
+        "result_artifact_id": "3fb79ed0-e663-4fa7-968e-095db11597f6",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "d8e36bb76e94ce0b34aa61e7276a61e466ad2f93fdc7fffa954b281298b87343",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {
+          "slot": "audio.tts",
+          "error": "no available model for capability: audio.tts",
+          "source": "none",
+          "model_id": null,
+          "capability": "audio.tts"
+        },
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "d8e36bb76e94ce0b34aa61e7276a61e466ad2f93fdc7fffa954b281298b87343"
+      },
+      {
+        "id": "27f4b603-344f-44a8-ac85-98d664b0bef8",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "composite",
+        "result_artifact_id": "88e38b78-ab24-40bf-8f5a-67d38f147d58",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "71df20a86bd882b2f45ffc34a08112e3758b1ba9e39c6f5c69ebb075791e93d6",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "71df20a86bd882b2f45ffc34a08112e3758b1ba9e39c6f5c69ebb075791e93d6"
+      },
+      {
+        "id": "1572bd05-fb3a-4c5c-90fe-00cdda66db64",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "continuity_review",
+        "result_artifact_id": "c4adb272-724a-465c-bcfd-a3da46cd64c7",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "ed167217cd263dfe7b1f8de1161cc1c48999e198d810a7ffd5a75403ad391c10",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "ed167217cd263dfe7b1f8de1161cc1c48999e198d810a7ffd5a75403ad391c10"
+      },
+      {
+        "id": "b7e75439-733c-4552-90a6-66b4138b775f",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "continuity_review",
+        "result_artifact_id": "a90f1d2f-adb8-4f73-9737-f71643b51e0d",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "4e19380b4ac036cceb41e1c7834a6ac975be284cbf8ca33a5dc472318f2e5d58",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "4e19380b4ac036cceb41e1c7834a6ac975be284cbf8ca33a5dc472318f2e5d58"
+      },
+      {
+        "id": "af9aee30-7a15-42b0-b68a-49da7570b632",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "subtitle",
+        "result_artifact_id": "a9755f2c-2fea-41ef-892c-eda7d630aaf8",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "8ecc888c31cec88b5b10947fca2b6c410ec3955241fbac02149cc7969a1fbbc4",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "8ecc888c31cec88b5b10947fca2b6c410ec3955241fbac02149cc7969a1fbbc4"
+      },
+      {
+        "id": "2888d0f6-5a3b-4aa9-b776-3361ab7a1d8a",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "subtitle",
+        "result_artifact_id": "9246a8a6-dc0e-4686-9dec-726221a680ae",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "83a5d9bd0d46905586d2eb2c3f6caf9fac21fc161b6b1293fa3e15b71c61c433",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "83a5d9bd0d46905586d2eb2c3f6caf9fac21fc161b6b1293fa3e15b71c61c433"
+      },
+      {
+        "id": "dfef7902-f952-44a1-b962-e334e3d6ac40",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "subtitle",
+        "result_artifact_id": "063ea77c-ef8c-438c-a722-08f7e7ec5539",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "322a95623df06f4b34679ec75b720eeef612d0187ade69fba33505c1cef7ebed",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "322a95623df06f4b34679ec75b720eeef612d0187ade69fba33505c1cef7ebed"
+      },
+      {
+        "id": "06fe7233-eadf-48d8-9572-6a14393027e1",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "voice",
+        "result_artifact_id": "88afcc72-794c-46bb-8522-7f1057d63efb",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "f13cea685f73af1617bd9be30bd0cd94b9f48aeb77d5aaaec1854e02680cdc39",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {
+          "slot": "audio.tts",
+          "error": "no available model for capability: audio.tts",
+          "source": "none",
+          "model_id": null,
+          "capability": "audio.tts"
+        },
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "f13cea685f73af1617bd9be30bd0cd94b9f48aeb77d5aaaec1854e02680cdc39"
+      },
+      {
+        "id": "7d5c086b-6bdf-4fcf-8077-e0a447c28bcf",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "composite",
+        "result_artifact_id": "f8842384-0350-4697-8419-ccdced491dd8",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "89b1da4fa01035b682c0c1c8ec755f1415675a36901f584c0fe649f0b03e16d5",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "89b1da4fa01035b682c0c1c8ec755f1415675a36901f584c0fe649f0b03e16d5"
+      },
+      {
+        "id": "6331ca55-a5bf-4c74-bb9f-4d1240cc9e05",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "video_drift_review",
+        "result_artifact_id": "eb81ba70-d54d-4df4-afb3-a527c76942d8",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "6ccc813c2a7a5bb1829d57111782ab16de6d2d8cedc45fcdd0be8537d6136d1a",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "6ccc813c2a7a5bb1829d57111782ab16de6d2d8cedc45fcdd0be8537d6136d1a"
+      },
+      {
+        "id": "b1acb198-1d79-495d-bf85-71d308880230",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "video_drift_review",
+        "result_artifact_id": "9dc452fd-3374-42ee-b10c-9225b07fdfc6",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "75ad7c92af4b0d5a9dd8fd8ad132af482ab26739da17e41e48879bb0f60dcfc0",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "75ad7c92af4b0d5a9dd8fd8ad132af482ab26739da17e41e48879bb0f60dcfc0"
+      },
+      {
+        "id": "2444a76f-0d16-43d2-9fd4-205494c3d294",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "voice",
+        "result_artifact_id": "6f73a29b-4155-498c-90d6-5ce47f70d87a",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "c6f3f4ffad821a356701c1a56c62e687329653aa058f38155a0366d403ba1a88",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {
+          "slot": "audio.tts",
+          "error": "no available model for capability: audio.tts",
+          "source": "none",
+          "model_id": null,
+          "capability": "audio.tts"
+        },
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "c6f3f4ffad821a356701c1a56c62e687329653aa058f38155a0366d403ba1a88"
+      },
+      {
+        "id": "ad2a955c-c4a8-4adc-89fc-f5c174a9c4f1",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "composite",
+        "result_artifact_id": "e5cd4ea5-cc76-48a8-87ca-246cc3dc0cd8",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "cf5464aebe07d41ae6fc391231575b569a6c1fd3fd42a98d63d8246c1901f9b8",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "cf5464aebe07d41ae6fc391231575b569a6c1fd3fd42a98d63d8246c1901f9b8"
+      },
+      {
+        "id": "b294206a-b8aa-4115-9b38-5d485de2ff9f",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "continuity_review",
+        "result_artifact_id": "f0b5027b-448c-4f60-a46e-6ae36f74ec62",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "f266d3c27b6a233083d812010eebe1ef89536b993d3e93a8f3827f91a00f8400",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "f266d3c27b6a233083d812010eebe1ef89536b993d3e93a8f3827f91a00f8400"
+      },
+      {
+        "id": "ab8a54ed-7df8-4aad-b4dd-e1b980f738e0",
+        "attempt_no": 1,
+        "status": "completed",
+        "node_key": "video_drift_review",
+        "result_artifact_id": "1d741e61-b88f-4a51-b85d-7c68d2673ac1",
+        "error_code": null,
+        "error_summary": null,
+        "input_hash": "a33028bea2a69d6213a6533eb9a77e8eb5222152b489f5d42a2acc5a222c2f24",
+        "duration_seconds": "5.000",
+        "execution_branch": "formal",
+        "model_binding_id": null,
+        "model_profile": {},
+        "canonical_artifact_id": null,
+        "connection_revision_id": null,
+        "credential_revision_id": null,
+        "execution_model_resolution": null,
+        "request_fingerprint": "a33028bea2a69d6213a6533eb9a77e8eb5222152b489f5d42a2acc5a222c2f24"
+      }
+    ]
+  },
+  "final_film_artifact": {
+    "project_id": "6484eb25-13af-41e8-9e17-df743db57684",
+    "export_id": "c8c9a2b4-6462-4267-ae10-84736d368cc5",
+    "artifact_id": "3f312cc3-34cf-4d22-877b-7f50c1a9c0c5",
+    "format": "dramaforge-final-film-v1",
+    "status": "completed",
+    "duration_seconds": "15.233",
+    "shot_count": 3,
+    "composite_artifact_ids": [
+      "88e38b78-ab24-40bf-8f5a-67d38f147d58",
+      "f8842384-0350-4697-8419-ccdced491dd8",
+      "e5cd4ea5-cc76-48a8-87ca-246cc3dc0cd8"
+    ],
+    "source_commit": "720bde475369c13111db643524126c13e9cd4557"
+  },
+  "finished_at_utc": "2026-09-03T03:09:05.841253+00:00",
+  "ok": true
+}

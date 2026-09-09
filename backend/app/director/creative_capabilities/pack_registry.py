@@ -8,11 +8,8 @@ and deterministic; it never touches a Provider or falls back to another pack.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Generic, TypeVar
 
 from pydantic import BaseModel
-
-T = TypeVar("T", bound=BaseModel)
 
 
 class _Versioned:
@@ -25,7 +22,7 @@ class _Versioned:
         raise NotImplementedError
 
 
-class PackRegistry(Generic[T]):
+class PackRegistry[T: BaseModel]:
     """Register/get/all by a pack's key attribute, keeping the highest version."""
 
     def __init__(self, *, key_field: str) -> None:

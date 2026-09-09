@@ -76,6 +76,28 @@ const PROPOSAL = {
 
 const EMPTY = { document: null, episodes: [] };
 
+const GENERATED = {
+  proposal: PROPOSAL,
+  draft_text:
+    "# Episode 1 — AI Draft\n## Scene 1 — Station / night\nRain.\n### Shot 1 — medium\nVisual: Lin waits\nDialogue: Do not wait.\nCamera: static\n",
+  director_evidence: {
+    turn_id: "44444444-4444-4444-8444-444444444444",
+    request_key: "story-generation:test",
+    context_hash: "a".repeat(64),
+    output_hash: "b".repeat(64),
+    slot: "planning.script",
+    model_id: "litellm/script-quality",
+    model_binding_ref: "production-model-profile:test@2:planning.script",
+    actual_model: "upstream/story-v1",
+    transport_status: "succeeded",
+    token_usage: { total_tokens: 100 },
+    reported_cost: "0.006",
+    cost_status: "reported",
+    currency: "USD",
+    schema_repair_count: 0,
+  },
+};
+
 function json(body: unknown, status = 200): Promise<Response> {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
@@ -148,6 +170,39 @@ describe("ScriptWorkspace proposal-first UI", () => {
     expect(screen.getAllByTestId(/story-operation-/)).toHaveLength(3);
     expect(screen.getByText(/Episode 1/)).toBeInTheDocument();
     expect(screen.getByText(/pending/)).toBeInTheDocument();
+  });
+
+  it("uses a brief to generate a model-backed draft and the same typed proposal preview", async () => {
+    let generationBody: Record<string, unknown> | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/script")) return json(EMPTY);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf" });
+      if (url.endsWith("/story/proposals/generate") && init?.method === "POST") {
+        generationBody = init.body
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : undefined;
+        return json(GENERATED, 201);
+      }
+      return json({});
+    });
+    renderWorkspace();
+    await screen.findByTestId("story-proposal-composer");
+    expect(screen.getByTestId("story-proposal-generate")).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("故事方向"), {
+      target: { value: "雨夜车站的克制告别" },
+    });
+    fireEvent.click(screen.getByTestId("story-proposal-generate"));
+    expect(await screen.findByTestId("story-proposal-preview")).toBeInTheDocument();
+    expect(screen.getByLabelText("剧本文本")).toHaveValue(GENERATED.draft_text);
+    expect(screen.getByTestId("story-generation-evidence")).toHaveTextContent("upstream/story-v1");
+    expect(screen.getByTestId("story-generation-evidence")).toHaveTextContent("44444444");
+    expect(generationBody).toEqual({
+      request_key: expect.stringMatching(/^story-generation:[0-9a-f-]{36}$/),
+      brief: "雨夜车站的克制告别",
+      filename: "story-draft.md",
+    });
+    expect(screen.getAllByTestId(/story-operation-/)).toHaveLength(3);
   });
 
   it("applies only the selected operations", async () => {

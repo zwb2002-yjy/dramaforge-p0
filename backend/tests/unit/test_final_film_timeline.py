@@ -185,7 +185,7 @@ async def _seed_renderable_final_film(
             attempt_no=1,
             idempotency_key=f"formal-composite-{index}-{uuid4()}",
             input_hash="c" * 64,
-            status="completed",
+            status="running",
             input_snapshot={
                 "shot_id": str(shot.id),
                 "node_key": "composite",
@@ -228,6 +228,7 @@ async def _seed_renderable_final_film(
         session.add(composite_artifact)
         await session.flush()
         composite_run.result_artifact_id = composite_artifact.id
+        composite_run.status = "completed"
         shot.formal_video_artifact_id = video_artifact.id
         shot.formal_composite_artifact_id = composite_artifact.id
         formal_videos.append(video_artifact)
@@ -616,3 +617,141 @@ async def test_history_uses_frozen_timeline_and_survives_unavailable_media(
     )
     assert unavailable[0].result is None
     assert unavailable[0].error_code == "FINAL_FILM_ARTIFACT_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_subtitle_export_is_frozen_and_rerender_never_creates_media(session, monkeypatch):
+    from app.production.final_film import get_final_film_status
+
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, shots, _videos = await _seed_renderable_final_film(session, shot_count=2)
+    original = [dict(clip) for clip in edit.timeline["clips"]]
+    original[0]["subtitle"] = "修改后的字幕\nSecond line"
+    original[0]["duration_seconds"] = 2
+    original[0]["source_in_seconds"] = 1
+    original[1]["subtitle_enabled"] = False
+    original[1]["subtitle"] = "DO NOT DISPLAY"
+    original[1]["duration_seconds"] = 2
+    original[1]["transition"] = {"kind": "crossfade", "duration_seconds": 0.5}
+    edit.timeline = {"clips": original, "metadata": {}}
+    await session.commit()
+    before_media = list(
+        (
+            await session.execute(
+                select(ProviderOperation).where(
+                    ProviderOperation.operation_kind != "final_film.compose"
+                )
+            )
+        ).scalars()
+    )
+
+    async def render(key):
+        queued = await queue_final_film_render(
+            session,
+            project_id=project.id,
+            edit_session_id=edit.id,
+            expected_timeline_version=edit.version,
+            actor_id=user.id,
+            idempotency_key=key,
+            name="Frozen subtitle",
+        )
+        run = await session.get(NodeRun, queued.node_run_id)
+        run.status = "running"
+        await session.commit()
+        node = await session.get(GraphNode, run.graph_node_id)
+        await execute_final_film_node_run(session, run=run, node=node, obj_store=get_object_store())
+        return await get_final_film_status(session, project_id=project.id, node_run_id=run.id)
+
+    first = await render("subtitle:first")
+    assert first.result.subtitle_artifact_id is not None
+    assert first.result.subtitle_cue_count == 1
+    assert first.result.duration_seconds == Decimal("3.500")
+    assert len(first.result.composite_artifact_ids) == 2
+    subtitle = await session.get(Artifact, first.result.subtitle_artifact_id)
+    assert subtitle.produced_by_run_id == first.node_run_id
+    assert subtitle.content_hash == first.result.subtitle_content_hash
+    data = await get_object_store().get_bytes(object_key=subtitle.object_key)
+    assert "修改后的字幕\nSecond line" in data.decode("utf-8")
+    assert b"DO NOT DISPLAY" not in data
+    items = list(
+        (
+            await session.execute(
+                select(ExportItem).where(ExportItem.export_id == first.result.export_id)
+            )
+        ).scalars()
+    )
+    assert len([item for item in items if item.role == "final_subtitle"]) == 1
+    original[0]["subtitle"] = ""
+    edit.timeline = {"clips": original, "metadata": {}}
+    edit.version += 1
+    shots[0].dialogue = "MUST NOT REAPPEAR"
+    await session.commit()
+    second = await render("subtitle:second")
+    assert second.result.subtitle_artifact_id is None and second.result.subtitle_cue_count == 0
+    assert second.result.timeline_version == 2 and first.result.timeline_version == 1
+    assert second.result.artifact_id != first.result.artifact_id
+    operations = list(
+        (
+            await session.execute(
+                select(ProviderOperation).where(
+                    ProviderOperation.operation_kind != "final_film.compose"
+                )
+            )
+        ).scalars()
+    )
+    assert [item.id for item in operations] == [item.id for item in before_media]
+    assert all(
+        shot.formal_video_artifact_id == video.id
+        for shot, video in zip(shots, _videos, strict=True)
+    )
+
+
+@pytest.mark.asyncio
+async def test_subtitle_store_failure_does_not_publish_half_an_export(session, monkeypatch):
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session)
+    clips = [dict(clip) for clip in edit.timeline["clips"]]
+    clips[0]["subtitle"] = "A real subtitle"
+    edit.timeline = {"clips": clips, "metadata": {}}
+    await session.commit()
+    queued = await queue_final_film_render(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+        idempotency_key="fail-srt",
+        name="Final",
+    )
+    run = await session.get(NodeRun, queued.node_run_id)
+    run.status = "running"
+    await session.commit()
+    node = await session.get(GraphNode, run.graph_node_id)
+    store = get_object_store()
+    original = store.put_bytes
+
+    async def fail_srt(**kwargs):
+        if kwargs["object_key"].endswith(".srt"):
+            raise OSError("isolated subtitle write failure")
+        return await original(**kwargs)
+
+    monkeypatch.setattr(store, "put_bytes", fail_srt)
+    with pytest.raises(OSError, match="subtitle write failure"):
+        await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
+    assert run.status == "failed"
+    assert (
+        list(
+            (
+                await session.execute(select(Artifact).where(Artifact.produced_by_run_id == run.id))
+            ).scalars()
+        )
+        == []
+    )
+    assert (
+        list(
+            (
+                await session.execute(select(Export).where(Export.project_id == run.project_id))
+            ).scalars()
+        )
+        == []
+    )

@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import (
+    CsrfDep,
     CurrentUser,
     SelectedWorkspace,
     SessionDep,
@@ -298,14 +299,16 @@ async def cancel_generation(
     operation_id: UUID,
     user: CurrentUser,
     session: SessionDep,
+    _: CsrfDep,
 ) -> GenerationOperationRead:
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=user
     )
     service = GenerationService(session, CapabilityRouter(registry=_registry()))
     run = await service.cancel_generation(project=project, operation_id=operation_id)
+    response = await _read_operation(session, run)
     await session.commit()
-    return await _read_operation(session, run)
+    return response
 
 
 async def _read_operation(session: Any, run: Any) -> GenerationOperationRead:

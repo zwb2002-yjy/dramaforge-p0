@@ -10,6 +10,7 @@ import pytest
 from app.access.models import User, Workspace
 from app.assets.models import Episode, Scene, Shot
 from app.director.recommendation import (
+    DeterministicDirectorRecommendationTransport,
     DirectorRecommendationRequest,
     DirectorRecommendationService,
 )
@@ -54,6 +55,11 @@ async def _seed(session: AsyncSession) -> tuple[User, Scene, Shot]:
     )
     session.add(project)
     await session.flush()
+    from app.access.models import ProjectCreativeProfile
+
+    session.add(ProjectCreativeProfile(project_id=project.id, start_type="FREE",
+                                       director_autonomy="ASSIST"))
+    await session.flush()
     episode = Episode(project_id=project.id, episode_number=1, title="E", synopsis="")
     session.add(episode)
     await session.flush()
@@ -91,6 +97,7 @@ def _request(scene: Scene, shot: Shot, *, version: int | None = None):
         scene_id=scene.id,
         shot_id=shot.id,
         expected_shot_version=shot.version if version is None else version,
+        request_key=f"shot-recommendation:{uuid4()}",
     )
 
 
@@ -99,7 +106,9 @@ async def test_recommendation_without_instruction_reads_server_facts(
     session: AsyncSession,
 ) -> None:
     user, scene, shot = await _seed(session)
-    result = await DirectorRecommendationService(session).recommend(
+    result = await DirectorRecommendationService(
+        session, transport=DeterministicDirectorRecommendationTransport()
+    ).recommend(
         project_id=shot.project_id,
         actor=user,
         request=_request(scene, shot),
@@ -176,6 +185,7 @@ def test_request_does_not_accept_user_instruction() -> None:
                 "scene_id": str(uuid4()),
                 "shot_id": str(uuid4()),
                 "expected_shot_version": 1,
+                "request_key": f"shot-recommendation:{uuid4()}",
                 "user_instruction": "客户端不能上传指令",
             }
         )

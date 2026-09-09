@@ -65,8 +65,8 @@ export type CreativeCapabilitiesPanelProps = {
 /** CC10 functional UI: Genre / Style / Shot Language / Quality Policy / Skills.
  *
  * A user-explicit selection is frozen via POST; nothing is applied silently.
- * Read-only exposure of the frozen provenance follows the same "never hidden
- * skill, never override" boundary. No Provider call is made here.
+ * Read-only exposure includes both provenance and the compiled effective
+ * intent that production will consume. No Provider call is made here.
  */
 export function CreativeCapabilitiesPanel({
   projectId,
@@ -109,7 +109,7 @@ export function CreativeCapabilitiesPanel({
         scene_id: shotId ? undefined : (sceneId ?? undefined),
       }),
     onSuccess: () => {
-      setMsg("已冻结创意能力与 provenance。");
+      setMsg("已冻结有效创作意图与来源说明。");
       void qc.invalidateQueries({ queryKey: queryKeys.production.provenance(projectId, targetId) });
     },
     onError: (e: Error) => setMsg(`冻结失败：${e.message}`),
@@ -216,7 +216,7 @@ export function CreativeCapabilitiesPanel({
 
       {prov && Object.keys(prov).length > 0 && (
         <div className="creative-provenance" data-testid="creative-provenance">
-          <small>当前冻结 provenance</small>
+          <small>当前冻结的有效创作意图与来源说明</small>
           <pre>{JSON.stringify(prov, null, 2)}</pre>
         </div>
       )}

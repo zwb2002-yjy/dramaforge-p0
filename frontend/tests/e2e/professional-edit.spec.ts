@@ -147,9 +147,13 @@ test("professional edit: formal manifest → persisted session → proposal-only
   await expect(preview).toHaveAttribute("data-proposal-id", EDITING_PROPOSAL_ID);
   await expect(preview).toHaveAttribute("data-item-id", EDITING_PROPOSAL_ITEM_ID);
   await expect(page.getByTestId("editing-suggestion-base-version")).toHaveText("v2");
+  await expect(page.getByTestId("editing-suggestion-model-evidence")).toContainText(
+    "upstream/editor-e2e",
+  );
+  await expect(page.getByTestId("editing-suggestion-model-evidence")).toContainText("99999999");
   await expect(page.getByTestId("editing-suggestion-pending-status")).toHaveText("pending");
   await expect(preview).toContainText("待审核建议预览，不是已应用的时间线事件");
-  await expect(page.getByTestId("editing-suggestion-operation")).toHaveCount(2);
+  await expect(page.getByTestId("editing-suggestion-operation")).toHaveCount(3);
   await expect(page.getByTestId("editing-suggestion-operation").nth(0)).toHaveAttribute(
     "data-operation",
     "reorder_clips",
@@ -164,6 +168,11 @@ test("professional edit: formal manifest → persisted session → proposal-only
   await expect(page.getByTestId("editing-suggestion-operation").nth(1)).toContainText(
     "片段 edit-clip-2 · 时长 4s",
   );
+  await expect(page.getByTestId("editing-suggestion-operation").nth(2)).toHaveAttribute(
+    "data-operation",
+    "set_clip_subtitle",
+  );
+  await expect(page.getByTestId("editing-suggestion-operation").nth(2)).toContainText("停一下。");
   await expect(page.getByTestId("editing-suggestion-rationale")).toContainText(
     "让开场更快进入冲突",
   );
@@ -191,6 +200,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
     body: {
       expected_session_version: state.editing.session.version,
       user_instruction: "让开场更快进入冲突",
+      request_key: expect.stringMatching(/^editing-suggestion:[0-9a-f-]{36}$/),
     },
   });
   expect(suggestionRequests[0].body).not.toHaveProperty("project_id");

@@ -6,14 +6,19 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
-from pydantic import BaseModel, Field, JsonValue
+from fastapi import APIRouter, Depends, Header, Query
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1.schemas.workbench import ShotWorkbenchRead
 from app.assets.models import Shot
 from app.assets.schemas import ShotDirectorState
+from app.director.business_checkpoints import DirectorBusinessCheckpoints
+from app.director.turn_models import DirectorTurn
+from app.execution.models import NodeRun
+from app.production.execution_plan import WorkbenchExecutionPlan
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
 from app.production.models import GraphVersion
 from app.production.reference_intents import ShotReferenceIntent
@@ -22,8 +27,9 @@ from app.production.trace import ExecutionTraceRead, build_execution_trace
 from app.production.workbench_execution import (
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
+    workbench_request_hash,
 )
-from app.shared.errors import ValidationAppError
+from app.shared.errors import NotFoundError, ValidationAppError
 from app.workbench.scene_service import ShotWorkbenchService
 from app.workbench.shot_service import ShotDesignService
 from app.workbench.workspace_state_service import WorkspaceStateService
@@ -144,6 +150,8 @@ async def get_shot_workbench(
 
 
 class ExecutionPlanBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     stage: Literal["image_keyframe", "video"]
     prompt: str = Field(min_length=1, max_length=20000)
     semantic_intent: dict[str, JsonValue] = Field(default_factory=dict)
@@ -152,11 +160,11 @@ class ExecutionPlanBody(BaseModel):
     requested_binding_id: UUID | None = None
     accept_approximations: bool = False
     references: list[ShotReferenceIntent] = Field(default_factory=list)
-    expected_shot_version: int | None = None
+    expected_shot_version: int = Field(ge=1)
 
 
 class ExecutionPlanRead(BaseModel):
-    plan: dict[str, JsonValue]
+    plan: WorkbenchExecutionPlan
     plan_fingerprint: str
 
 
@@ -166,6 +174,7 @@ class ExecutionBody(ExecutionPlanBody):
 
 
 class ExecutionRead(BaseModel):
+    director_turn_id: UUID | None = None
     node_run_id: UUID
     graph_id: UUID
     graph_version_id: UUID
@@ -206,18 +215,56 @@ async def create_execution_plan(
     _csrf: CsrfDep,
 ) -> ExecutionPlanRead:
     """Preview a frozen execution plan. Never calls a Provider."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
     plan = await service.build_plan(
         project=project,
         execution_input=_execution_input(project_id, shot_id, body),
+        allow_unaccepted_approximations=True,
     )
     return ExecutionPlanRead(
-        plan=plan.model_dump(mode="json"),
+        plan=plan,
         plan_fingerprint=plan.plan_fingerprint or "",
     )
+
+
+async def _execution_read(session: SessionDep, run: NodeRun) -> ExecutionRead:
+    version = await session.get(GraphVersion, run.graph_version_id)
+    if version is None:
+        raise NotFoundError("Execution graph version not found")
+    turn_id = await session.scalar(select(DirectorTurn.id).where(
+        DirectorTurn.project_id == run.project_id,
+        DirectorTurn.request_key == f"workbench:{run.id}",
+    ))
+    fingerprint = (run.input_snapshot or {}).get("plan_fingerprint")
+    if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+        raise ValidationAppError(
+            "Execution receipt has no valid frozen plan fingerprint",
+            details={"code": "EXECUTION_RECEIPT_INVALID"},
+        )
+    return ExecutionRead(
+        node_run_id=run.id, graph_id=version.graph_id, graph_version_id=run.graph_version_id,
+        status=run.status,
+        plan_fingerprint=fingerprint,
+        director_turn_id=turn_id,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/shots/{shot_id}/executions/receipt", response_model=ExecutionRead,
+)
+async def get_execution_receipt(
+    project_id: UUID, shot_id: UUID, user: CurrentUser, session: SessionDep,
+    stage: Literal["image_keyframe", "video"],
+    idempotency_key: str = Query(min_length=1, max_length=2000),
+) -> ExecutionRead:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    run = await WorkbenchExecutionService(session, user_id=user.id).find_command_receipt(
+        project_id=project_id, shot_id=shot_id, stage=stage, command_key=idempotency_key,
+    )
+    if run is None:
+        raise NotFoundError("Execution command has no committed receipt")
+    return await _execution_read(session, run)
 
 
 @router.post(
@@ -231,16 +278,44 @@ async def create_execution(
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=2000,
+    ),
 ) -> ExecutionRead:
     """Dispatch one shot execution. The server re-validates the plan
     fingerprint / expected shot version / accepted approximations before
     creating the queued NodeRun (03 §37)."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
-    # 1) Rebuild the plan from the submitted inputs and re-validate fingerprint.
+    identity = workbench_request_hash(body.model_dump(mode="json"))
+    receipt = await service.find_command_receipt(
+        project_id=project_id, shot_id=shot_id, stage=body.stage,
+        command_key=idempotency_key, plan_fingerprint=body.plan_fingerprint,
+        expected_request_hash=identity,
+    )
+    if receipt is not None:
+        return await _execution_read(session, receipt)
+    await service.lock_command_scope(project_id=project_id)
+    # A second request may have waited for the first command's transaction.
+    receipt = await service.find_command_receipt(
+        project_id=project_id, shot_id=shot_id, stage=body.stage,
+        command_key=idempotency_key, plan_fingerprint=body.plan_fingerprint,
+        expected_request_hash=identity,
+    )
+    if receipt is not None:
+        return await _execution_read(session, receipt)
+    # 1) Lock the canonical Shot for the duration of validation + queueing so a
+    # concurrent design save cannot cross the fingerprint/dispatch boundary.
+    shot = await session.get(Shot, shot_id, with_for_update=True)
+    if shot is None or shot.project_id != project_id:
+        raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
+    if shot.version != body.expected_shot_version:
+        raise ValidationAppError(
+            "shot changed since plan preview",
+            details={"code": "SHOT_VERSION_MISMATCH"},
+        )
+    # 2) Rebuild once from current facts and re-validate the fingerprint. This
+    # exact in-memory plan is handed to queueing below; it is not re-resolved.
     rebuilt = await service.build_plan(
         project=project,
         execution_input=_execution_input(project_id, shot_id, body),
@@ -250,33 +325,23 @@ async def create_execution(
             "plan fingerprint mismatch: inputs changed since preview",
             details={"code": "PLAN_FINGERPRINT_MISMATCH"},
         )
-    # 2) Optimistic shot version check.
-    if body.expected_shot_version is not None:
-        shot = await session.get(Shot, shot_id)
-        if shot is None or shot.project_id != project_id:
-            raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
-        if shot.version != body.expected_shot_version:
-            raise ValidationAppError(
-                "shot changed since plan preview",
-                details={"code": "SHOT_VERSION_MISMATCH"},
-            )
-    # 3) Dispatch (queued NodeRun); Idempotency-Key dedupes retries.
+    if sorted(body.accepted_approximations) != sorted(rebuilt.accepted_approximations):
+        raise ValidationAppError(
+            "accepted approximation set does not match the rebuilt plan",
+            details={"code": "ACCEPTED_APPROXIMATIONS_MISMATCH"},
+        )
+    # 3) Dispatch the same validated plan; Idempotency-Key dedupes retries.
     run = await service.create_and_dispatch(
         project=project,
         execution_input=_execution_input(project_id, shot_id, body),
         idempotency_key_override=idempotency_key,
+        prepared_plan=rebuilt,
+        request_hash=identity,
     )
+    await DirectorBusinessCheckpoints(session).track_execution(project=project, actor=user, run=run)
+    response = await _execution_read(session, run)
     await session.commit()
-    graph_version = await session.get(GraphVersion, run.graph_version_id)
-    graph_id = graph_version.graph_id if graph_version is not None else run.graph_version_id
-    return ExecutionRead(
-        node_run_id=run.id,
-        graph_id=graph_id,
-        graph_version_id=run.graph_version_id,
-        status=run.status,
-        plan_fingerprint=rebuilt.plan_fingerprint or "",
-    )
-
+    return response
 
 
 class FormalKeyframeBody(BaseModel):
@@ -303,13 +368,16 @@ async def set_shot_formal_keyframe(
     _csrf: CsrfDep,
 ) -> FormalKeyframeRead:
     """Mark one keyframe artifact as the shot's formal keyframe (03 §38)."""
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     shot = await set_formal_keyframe(
         session,
         project_id=project_id,
         shot_id=shot_id,
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
+    )
+    await DirectorBusinessCheckpoints(session).reconcile_business_fact(
+        project=project, shot_id=shot_id,
     )
     await session.commit()
     assert shot.formal_keyframe_artifact_id is not None
@@ -318,7 +386,6 @@ async def set_shot_formal_keyframe(
         formal_keyframe_artifact_id=shot.formal_keyframe_artifact_id,
         version=shot.version,
     )
-
 
 
 class FormalVideoBody(BaseModel):
@@ -345,13 +412,16 @@ async def set_shot_formal_video(
     _csrf: CsrfDep,
 ) -> FormalVideoRead:
     """Mark one video artifact as the shot's formal video (03 §39)."""
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     shot = await set_formal_video(
         session,
         project_id=project_id,
         shot_id=shot_id,
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
+    )
+    await DirectorBusinessCheckpoints(session).reconcile_business_fact(
+        project=project, shot_id=shot_id,
     )
     await session.commit()
     assert shot.formal_video_artifact_id is not None
@@ -360,7 +430,6 @@ async def set_shot_formal_video(
         formal_video_artifact_id=shot.formal_video_artifact_id,
         version=shot.version,
     )
-
 
 
 @router.get(
@@ -380,7 +449,6 @@ async def get_execution_trace(
         project_id=project_id,
         run_id=run_id,
     )
-
 
 
 class RepairExecuteBody(BaseModel):
@@ -405,9 +473,7 @@ async def get_repair_plan(
     session: SessionDep,
 ) -> RepairPlanRead:
     """Compute a repair plan from open annotations (03 §57)."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     return await RepairService(session).build_repair_plan(
         project=project,
         shot_id=shot_id,
@@ -427,9 +493,7 @@ async def execute_repair(
     _csrf: CsrfDep,
 ) -> RepairExecuteRead:
     """Execute a V1 repair rerun with an Idempotency-Key (03 §58)."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     run = await RepairService(session).execute_repair(
         project=project,
         user=user,

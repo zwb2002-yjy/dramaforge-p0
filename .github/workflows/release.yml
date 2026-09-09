@@ -25,7 +25,7 @@ jobs:
       version: ${{ steps.identity.outputs.version }}
       migration_head: ${{ steps.migration-head.outputs.migration_head }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Bind tag to repository version
         id: identity
         shell: bash
@@ -104,9 +104,9 @@ jobs:
       DRAMAFORGE_VERSION: ${{ needs.verify-release-source.outputs.version }}
       DRAMAFORGE_SOURCE_COMMIT: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Validate Compose topology
         run: docker compose config --quiet
       - name: Select immutable image identity
@@ -347,7 +347,7 @@ jobs:
           dramaforge-offline-linux-amd64-v*.tar.gz
           LICENSE NOTICE
           > SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-candidate-${{ steps.image.outputs.tag }}
           path: |
@@ -358,28 +358,28 @@ jobs:
             SHA256SUMS
             LICENSE
             NOTICE
-      - name: Upload current-head Golden and Final Film evidence
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && contains(github.event.head_commit.message, '[release-candidate]') }}
-        uses: actions/upload-artifact@v4
+      - name: Upload current R7 Golden and Final Film evidence
+        if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/dev' && contains(github.event.head_commit.message, '[release-candidate]')) }}
+        uses: actions/upload-artifact@v7
         with:
-          name: v1-current-head-golden-${{ github.sha }}
-          path: docs/reviews/evidence/v1-current-head
+          name: v1-r7-current-golden-${{ github.sha }}
+          path: docs/reviews/evidence/v1-r7-current
           if-no-files-found: error
       - name: Attest backend image provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-name: ${{ steps.image.outputs.backend }}
           subject-digest: ${{ steps.backend-push.outputs.digest }}
           push-to-registry: true
       - name: Attest frontend image provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-name: ${{ steps.image.outputs.frontend }}
           subject-digest: ${{ steps.frontend-push.outputs.digest }}
           push-to-registry: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           generate_release_notes: true

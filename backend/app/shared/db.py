@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import or_, select, text
@@ -48,6 +49,15 @@ class OutboxEventRlsScope:
     project_id: UUID | None
 
 
+@dataclass(frozen=True)
+class DirectorTurnRlsScope:
+    """Ownership context reconstructed for one recoverable Director turn."""
+
+    user_id: UUID
+    workspace_id: UUID
+    project_id: UUID
+
+
 def get_engine(settings: Settings | None = None) -> AsyncEngine:
     """Create or return the process-wide async engine."""
     global _engine, _session_factory
@@ -88,6 +98,7 @@ async def set_rls_context(
     dialect = bind.dialect.name if bind is not None else ""
     if dialect != "postgresql":
         return
+
     # SET LOCAL does not support bind params for GUC in all drivers — quote carefully.
     async def _set(key: str, value: UUID | None) -> None:
         if value is None:
@@ -327,25 +338,32 @@ async def list_resumable_provider_node_run_rls_scopes(
             for row in result.mappings().all()
         ]
 
+    from datetime import UTC, datetime, timedelta
+
     from app.execution.models import NodeRun, ProviderOperation
 
     stmt = (
         select(NodeRun.id)
         .join(ProviderOperation, ProviderOperation.node_run_id == NodeRun.id)
         .where(
-            NodeRun.status == "running",
+            NodeRun.status.in_({"running", "cancel_requested"}),
             ProviderOperation.execution_path_version == "unified-v1",
-            ProviderOperation.status.in_({"submitted", "running", "timed_out"}),
-            ProviderOperation.provider_operation_id.is_not(None),
+            or_(
+                ProviderOperation.status.in_(
+                    {"submitted", "running", "timed_out", "cancel_requested"}
+                )
+                & ProviderOperation.provider_operation_id.is_not(None),
+                (ProviderOperation.status == "submission_started")
+                & ProviderOperation.provider_operation_id.is_(None)
+                & (ProviderOperation.created_at < datetime.now(UTC) - timedelta(minutes=30)),
+            ),
         )
         .distinct()
         .order_by(NodeRun.id)
         .limit(limit)
     )
     if source_commit is not None:
-        stmt = stmt.where(
-            NodeRun.input_snapshot["source_commit"].as_string() == source_commit
-        )
+        stmt = stmt.where(NodeRun.input_snapshot["source_commit"].as_string() == source_commit)
     scopes: list[tuple[UUID, NodeRunRlsScope]] = []
     for node_run_id in (await session.execute(stmt)).scalars().all():
         scope = await resolve_node_run_rls_scope(session, node_run_id=node_run_id)
@@ -431,6 +449,152 @@ async def list_pending_outbox_event_rls_scopes(
                 user_id=workspace.owner_user_id,
                 workspace_id=workspace.id,
                 project_id=project.id,
+            )
+        )
+    return scopes
+
+
+async def list_recoverable_director_turn_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    stale_before: datetime | None = None,
+) -> list[tuple[UUID, DirectorTurnRlsScope]]:
+    """Find stale interrupted/expired turns without trusting queue payloads."""
+
+    cutoff = stale_before or datetime.now(UTC) - timedelta(minutes=15)
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT turn_id, owner_user_id, workspace_id, project_id
+                FROM app.recoverable_director_turn_contexts(:limit, :stale_before)
+                """
+            ),
+            {"limit": limit, "stale_before": cutoff},
+        )
+        return [
+            (
+                row["turn_id"],
+                DirectorTurnRlsScope(
+                    user_id=row["owner_user_id"],
+                    workspace_id=row["workspace_id"],
+                    project_id=row["project_id"],
+                ),
+            )
+            for row in result.mappings().all()
+        ]
+
+    from app.access.models import Project, Workspace
+    from app.director.turn_models import DirectorTurn
+
+    rows = await session.execute(
+        select(DirectorTurn.id, DirectorTurn.project_id)
+        .where(
+            DirectorTurn.status.in_({"queued", "thinking", "awaiting_user", "awaiting_execution"}),
+            or_(
+                DirectorTurn.deadline <= datetime.now(UTC),
+                (
+                    (DirectorTurn.status == "thinking")
+                    & (DirectorTurn.transport_status == "submission_started")
+                    & (DirectorTurn.updated_at < cutoff)
+                ),
+            ),
+        )
+        .order_by(DirectorTurn.updated_at, DirectorTurn.id)
+        .limit(limit)
+    )
+    scopes: list[tuple[UUID, DirectorTurnRlsScope]] = []
+    for turn_id, project_id in rows.tuples().all():
+        project = await session.get(Project, project_id)
+        if project is None:
+            continue
+        workspace = await session.get(Workspace, project.workspace_id)
+        if workspace is None:
+            continue
+        scopes.append(
+            (
+                turn_id,
+                DirectorTurnRlsScope(
+                    user_id=workspace.owner_user_id,
+                    workspace_id=workspace.id,
+                    project_id=project.id,
+                ),
+            )
+        )
+    return scopes
+
+
+async def list_reconcilable_director_turn_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    after_turn_id: UUID | None = None,
+) -> list[tuple[UUID, DirectorTurnRlsScope]]:
+    """Find turns whose current Proposal/NodeRun facts may advance a checkpoint."""
+
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        result = await session.execute(
+            text(
+                """
+                SELECT turn_id, owner_user_id, workspace_id, project_id
+                FROM app.reconcilable_director_turn_contexts(:limit, :after_turn_id)
+                """
+            ),
+            {"limit": limit, "after_turn_id": after_turn_id},
+        )
+        return [
+            (
+                row["turn_id"],
+                DirectorTurnRlsScope(
+                    user_id=row["owner_user_id"],
+                    workspace_id=row["workspace_id"],
+                    project_id=row["project_id"],
+                ),
+            )
+            for row in result.mappings().all()
+        ]
+
+    from app.access.models import Project, Workspace
+    from app.director.turn_models import DirectorTurn
+
+    rows = await session.execute(
+        select(DirectorTurn.id, DirectorTurn.project_id)
+        .where(
+            or_(
+                DirectorTurn.status == "awaiting_execution",
+                (DirectorTurn.status == "awaiting_user")
+                & or_(DirectorTurn.proposal_id.is_not(None), DirectorTurn.node_run_ids != []),
+            )
+        )
+        .where(
+            DirectorTurn.id > after_turn_id
+            if after_turn_id is not None
+            else DirectorTurn.id.is_not(None)
+        )
+        .order_by(DirectorTurn.id)
+        .limit(limit)
+    )
+    scopes: list[tuple[UUID, DirectorTurnRlsScope]] = []
+    for turn_id, project_id in rows.tuples().all():
+        project = await session.get(Project, project_id)
+        if project is None:
+            continue
+        workspace = await session.get(Workspace, project.workspace_id)
+        if workspace is None:
+            continue
+        scopes.append(
+            (
+                turn_id,
+                DirectorTurnRlsScope(
+                    user_id=workspace.owner_user_id,
+                    workspace_id=workspace.id,
+                    project_id=project.id,
+                ),
             )
         )
     return scopes
