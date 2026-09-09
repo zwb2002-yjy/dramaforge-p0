@@ -1,7 +1,7 @@
 # V1 G7D — Dual-path real Golden + Final Film Artifact
 
 **Task:** `v1-g7d-dual-path-final-film-20260903`
-**Status:** IN PROGRESS（验收复核重新打开；由 G7E 收口）
+**Status:** COMPLETE（最终验收由 R7 同候选收口）
 
 ## Required by Owner review
 
@@ -39,5 +39,22 @@ workflow for `[release-candidate]` pushes.
 - concurrent Final Film requests share one queued Worker NodeRun, Export, and
   Artifact; failed retries use the next `attempt_no` and same external key.
 
-The final gate remains blocked until CI, Security, and Release Candidate all
-report this evidence on the final pushed HEAD.
+## Final acceptance closure — 2026-09-09
+
+The old `94b5c2d` review-follow-up is superseded by the final R7 evidence under
+`docs/reviews/evidence/v1-r7-current/`. Runtime candidate `adf1b94` and
+evidence/release candidate `3677430` prove the required dual-path result:
+
+- Template+AUTO has five Formal shots and a 24.027-second 704×1280 H.264/AAC
+  Final Film with dialogue, burned Timeline subtitles and an independent SRT;
+- Free+ASSIST has four Formal shots and a 19.239-second 704×1280 H.264/AAC
+  Final Film with dialogue, burned Timeline subtitles and an independent SRT;
+- both paths preserve Formal Shot, voice/subtitle/composite, NodeRun, Artifact,
+  Export and frozen EditSession lineage in the same canonical runtime;
+- negative boundaries, frozen execution identity, local/remote recovery,
+  request idempotency and editing-only zero-media rerender all pass;
+- CI `34305028424`, Security `34305028341` and Release `34305028423` pass on
+  `3677430`, and both films are present in uploaded artifact `10086615067`.
+
+All three Owner-review requirements are satisfied. Owner merge remains the G8
+boundary and is not part of this completed implementation contract.

@@ -1,7 +1,7 @@
 # V1 G7E — Timeline Final Film async render and evidence closure
 
 **Task:** `v1-g7e-final-film-async-timeline-20260903`
-**Status:** IN PROGRESS
+**Status:** COMPLETE（最终验收由 R7 同候选收口）
 
 ## Review-driven scope
 
@@ -35,6 +35,17 @@
 
 ## Gate
 
-The task remains blocked until focused tests, full Docker quality gates, a
-real dual-path Golden, accessible Golden/MP4 evidence, and same-HEAD GitHub
-CI/Security/Release checks all pass.
+All required gates now pass. Clean runtime candidate `adf1b94` passed focused
+and full Docker quality gates, including real PostgreSQL/FFmpeg tests. Its R7
+dual-path Golden and browser proof are committed under
+`docs/reviews/evidence/v1-r7-current/`; both playable MP4s and matching SRTs are
+available there and in GitHub artifact `10086615067`. Evidence/release commit
+`3677430` changes no application, migration, frontend source or dependency
+input after `adf1b94` and passed CI `34305028424`, Security `34305028341` and
+Release `34305028423`.
+
+The final evidence verifies frozen Timeline order/trim/duration/subtitle edits,
+Worker-only Final Film execution, Export/Artifact idempotency, retry lineage,
+dirty-draft UI protection, playable/downloadable delivery, and zero remote media
+operations for editing-only rerender. The task is complete; only the Owner-only
+G8 merge boundary remains.

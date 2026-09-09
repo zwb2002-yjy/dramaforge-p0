@@ -345,3 +345,112 @@ The Release Candidate workflow uploads this evidence directory as a separate
 downloadable artifact for `[release-candidate]` pushes. The final verdict
 remains blocked until that workflow, CI, Security, and Release Candidate Gate
 are green on the final pushed HEAD.
+
+---
+
+## Final V1 completion candidate — 2026-09-09
+
+This section supersedes every earlier candidate verdict in this historical
+report. The current Goal state is `GOAL_READY_FOR_OWNER_MERGE`.
+
+### Source, runtime and evidence identity
+
+- Frozen runtime candidate:
+  `adf1b9434f59f7dfacf5819d04a77997244e783e`.
+- Frozen evidence/release candidate:
+  `3677430a75bb92a588a5304508eaff02a278bf03`.
+- Migration head: `20260908_0060`.
+- The diff from `adf1b94` to `3677430` contains acceptance tooling/tests,
+  redacted evidence and the Release workflow evidence-upload correction. It
+  changes no backend application, migration, frontend source or dependency
+  input. The final contract/report commit is documentation-only and likewise
+  does not replace the frozen runtime/release identity.
+- Final local acceptance services (API, Dispatcher, both Workers and frontend)
+  all reported OCI revision `adf1b94`. The formal isolated entry
+  `127.0.0.2:8080` was healthy, while the pre-existing
+  `127.0.0.1:8080` user stack remained independently healthy and untouched.
+
+### Exact candidate quality and security
+
+| Gate | Result |
+|---|---|
+| Directory / canonical surface | PASS |
+| Ruff / MyPy | PASS / 243 source files |
+| Backend unit | 1008 passed |
+| PostgreSQL + real FFmpeg integration | 45 passed, including 12-way concurrent Artifact identity recovery |
+| Migration / drift / OpenAPI | PASS / `20260908_0060` |
+| Frontend API / format / lint / type / build | PASS |
+| Frontend unit | 152 passed |
+| Playwright E2E | 19 passed |
+| Pinned LiteLLM integration | 5 passed |
+| Formal non-mock browser acceptance | 1 passed; zero failed API responses, page errors or console errors |
+| Evidence-head CI | run [34305028424](https://github.com/zwb2002-yjy/dramaforge-p0/actions/runs/34305028424), PASS |
+| Evidence-head Security | run [34305028341](https://github.com/zwb2002-yjy/dramaforge-p0/actions/runs/34305028341), PASS |
+
+### Real Provider Golden and delivery
+
+- Template+AUTO project `9b99a11f-6b78-42a0-a4e9-13cc04579729` has five
+  Formal shots and a 24.027-second 704×1280 H.264/AAC Final Film with dialogue,
+  burned Timeline subtitles and an independent five-cue SRT.
+- Free+ASSIST project `fdf7080e-bb23-462c-b63f-132997ef2971` has four Formal
+  shots and a 19.239-second 704×1280 H.264/AAC Final Film with dialogue, burned
+  Timeline subtitles and an independent SRT.
+- Four real `litellm/script-quality` Story/Shot/Editing turns persisted their
+  context/output hashes. Eighteen Formal Agnes operations succeeded (nine image,
+  nine video), plus one successful Repair video operation. No silent fallback
+  occurred.
+- Provider-reported costs were absent and are recorded as unknown, never free.
+  Six transport-indeterminate submissions remain non-replayable. The one Free
+  replacement used an explicit materially different prompt, request hash and
+  idempotency-key hash.
+- The real Repair operation was interrupted after durable remote identity and
+  resume-token persistence. The same heavy Worker image recovered the same task
+  with one ProviderOperation, unchanged redacted remote-id hash and zero extra
+  create. Editing-only rerender created zero remote media operations.
+
+Committed evidence:
+
+- [`evidence/v1-r7-current/golden-adf1b94.json`](evidence/v1-r7-current/golden-adf1b94.json)
+- [`evidence/v1-r7-current/runtime-adf1b94.json`](evidence/v1-r7-current/runtime-adf1b94.json)
+- [`evidence/v1-r7-current/recovery-adf1b94.json`](evidence/v1-r7-current/recovery-adf1b94.json)
+- [`evidence/v1-r7-current/browser-adf1b94.json`](evidence/v1-r7-current/browser-adf1b94.json)
+- [`evidence/v1-r7-current/candidate-equivalence-adf1b94.json`](evidence/v1-r7-current/candidate-equivalence-adf1b94.json)
+- [`evidence/v1-r7-current/SHA256SUMS`](evidence/v1-r7-current/SHA256SUMS), both
+  reviewable MP4s and both independent SRTs.
+
+### Release Candidate Gate
+
+Release run
+[34305028423](https://github.com/zwb2002-yjy/dramaforge-p0/actions/runs/34305028423)
+passed exact-source verification, the full container quality gate, migration
+resolution, exact image build, Compose smoke, source/image SBOMs, release
+manifest, online/offline bundles, checksums and both uploads.
+
+- Release backend image ID:
+  `sha256:9ba7dce2fc65c0c1768796a7212e504f8ae19399dbd9133800bdb1ca6a05205f`.
+- Release frontend image ID:
+  `sha256:4b8d77a56b4841d6d4fe6c48b862606d5e54ddd386624f4ca3f87d4f399642b2`.
+- Release bundle
+  [`release-candidate-sha-3677430a75bb`](https://github.com/zwb2002-yjy/dramaforge-p0/actions/runs/34305028423/artifacts/10086614647):
+  artifact ID `10086614647`, 1,101,669,773 bytes, upload digest
+  `sha256:9b0610e8e4fdb35a2a4f1a92f6797ad61d2d9d0fdb8596e263f65e9b98a423f3`.
+- Golden/Final Film bundle
+  [`v1-r7-current-golden-3677430a75bb92a588a5304508eaff02a278bf03`](https://github.com/zwb2002-yjy/dramaforge-p0/actions/runs/34305028423/artifacts/10086615067):
+  artifact ID `10086615067`, 8,368,303 bytes, upload digest
+  `sha256:81cb73c5c817a9d2f2671b34a92696525ee9da7ff96af235d9bfea2a9fdbc88c`.
+- The candidate was not a tag. Registry publish, provenance attestation and
+  GitHub Release creation were skipped as required; no production release was
+  created.
+
+### Final verdict and Owner boundary
+
+All V1 implementation requirements and technical/product Gate items 1–20 are
+satisfied, and item 21 is satisfied by the independently reviewable
+[`dev → main` PR #66](https://github.com/zwb2002-yjy/dramaforge-p0/pull/66).
+The root lifecycle ledger remains unresolved because preserved user/untracked
+inputs prevent legitimate clean registration; no false lifecycle event is
+written, and this does not alter the isolated clean candidate or GitHub proof.
+
+**Overall verdict: `GOAL_READY_FOR_OWNER_MERGE`.** The only remaining action is
+Owner review/approval/merge of PR #66. The Agent must not approve or merge it;
+`GOAL_DONE` is reserved for the post-merge identity/evidence recheck.

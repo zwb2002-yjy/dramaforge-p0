@@ -2,8 +2,9 @@
 
 **Task:** `v1-r7-dual-path-real-acceptance-20260908`\
 **Parent:** G7A / G7B / G7D / R7\
-**Status:** IN PROGRESS\
-**Baseline:** `dev@8d2be51` (runtime implementation verified at `af4a0d8`)
+**Status:** COMPLETE\
+**Baseline:** runtime candidate `adf1b9434f59f7dfacf5819d04a77997244e783e`;
+evidence candidate `3677430a75bb92a588a5304508eaff02a278bf03`
 
 ## Authority, authorization, and current evidence
 
@@ -139,3 +140,51 @@ flush queues, or cancel their tasks merely to obtain a clean candidate.
   clean candidate, one Review Repair remote task interrupted after durable
   submit and recovered after Worker restart, both current-candidate films, and
   formal 8080 identity/browser evidence.
+
+## Final completion evidence — 2026-09-09
+
+- The final isolated runtime uses exact OCI revision
+  `adf1b9434f59f7dfacf5819d04a77997244e783e` for API, Dispatcher, both Workers
+  and frontend at migration `20260908_0060`. The formal entry is
+  `127.0.0.2:8080`; the pre-existing `127.0.0.1:8080` stack remained healthy and
+  untouched.
+- Template+AUTO project `9b99a11f-6b78-42a0-a4e9-13cc04579729` has five
+  Formal shots. Free+ASSIST project `fdf7080e-bb23-462c-b63f-132997ef2971`
+  has four Formal shots. They share the canonical Project/Shot, NodeRun,
+  ProviderOperation, Artifact and Editing runtime.
+- Four real `litellm/script-quality` Story/Shot/Editing turns succeeded with
+  persisted context/output hashes and explicit accept/reject/save decisions.
+  Eighteen Formal Agnes operations succeeded: nine
+  `agnes-image-2.1-flash` and nine `agnes-video-v2.0`, with no fallback.
+- Provider-reported cost was absent, so successful and indeterminate external
+  operations remain `cost_status=unknown`. Five abandoned Template submissions
+  and one Free video submission with unknown transport outcome are preserved as
+  `replay_allowed=false`. The Free shot was completed only after a materially
+  different explicit prompt revision with a different request hash and
+  idempotency-key hash.
+- Acceptance exposed a concurrent identical-Artifact insert race in local TTS.
+  `8347459` adds SAVEPOINT recovery and a real PostgreSQL 12-way concurrency
+  regression. The exact `adf1b94` clean-source gate passed 1008 backend unit,
+  45 PostgreSQL/FFmpeg integration, 152 frontend unit, 19 Playwright E2E and
+  five LiteLLM integration tests, plus Ruff, MyPy, migrations, drift, API
+  generation, formatting, lint, typecheck and build.
+- A real Agnes Repair video was stopped after one ProviderOperation had a
+  durable remote identity and resume token. The same heavy-worker image resumed
+  it to success; the operation count stayed one, additional create count stayed
+  zero, and the redacted remote-id hash was unchanged. The original Formal video
+  remained selected until explicit user action.
+- Template delivery is a 24.027-second 704×1280 H.264/AAC MP4 with five SRT
+  cues; Free delivery is a 19.239-second 704×1280 H.264/AAC MP4 with an
+  independent SRT. Both pass burned-subtitle, dialogue-audio, Timeline-edit and
+  content-hash assertions. Editing-only rerender changed only the saved Timeline
+  and added zero remote media operations.
+- The formal non-mock browser proof traversed Production, Scene, Review and
+  Editing for both projects, played/downloaded the real results, and recorded
+  zero failed API responses, page errors and console errors at entry port 8080.
+- The redacted evidence set is committed under
+  `docs/reviews/evidence/v1-r7-current/`. Evidence-only commit `3677430` changes
+  no backend application, migration, frontend source or dependency input after
+  `adf1b94`; it publishes the frozen evidence and acceptance tooling for R8.
+
+All seven Required verification items are satisfied. R8 release checks and the
+Owner-only merge remain separate from this completed R7 contract.
