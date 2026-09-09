@@ -53,21 +53,22 @@ test("formal 8080 entry exposes both real R7 projects and their delivery lineage
   const templateScript = await templateScriptResponse.json();
   const templateSceneId = String(templateScript.episodes?.[0]?.scenes?.[0]?.id ?? "");
   expect(templateSceneId).not.toBe("");
+  const templateProjectResponse = await page.request.get(`/api/v1/projects/${templateProjectId}`, {
+    headers: apiHeaders,
+  });
+  expect(templateProjectResponse.ok()).toBe(true);
+  expect((await templateProjectResponse.json()).creative_profile.director_autonomy).toBe("AUTO");
 
   await page.goto(`/projects/${templateProjectId}/production`);
   await expect(page.getByTestId("project-workspace-shell")).toBeVisible();
   await expect(page.getByTestId("production-monitor")).toBeVisible();
   await expect(page.getByTestId("stat-shots")).toHaveText(/[4-9]|[1-9][0-9]+/);
-  await expect(page.getByTestId("creative-autonomy-switcher")).toHaveAttribute(
-    "data-autonomy",
-    "AUTO",
-  );
 
   await page.goto(`/projects/${templateProjectId}/scenes/${templateSceneId}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
-  expect(await page.getByTestId("shot-strip").getByRole("button").count()).toBeGreaterThanOrEqual(
-    4,
-  );
+  await expect
+    .poll(() => page.locator('[data-testid^="shot-strip-card-"]').count())
+    .toBeGreaterThanOrEqual(4);
 
   await page.goto(`/projects/${templateProjectId}/review`);
   await expect(page.getByTestId("review-workspace")).toBeVisible();
@@ -92,10 +93,11 @@ test("formal 8080 entry exposes both real R7 projects and their delivery lineage
   await page.goto(`/projects/${freeProjectId}/production`);
   await expect(page.getByTestId("production-monitor")).toBeVisible();
   await expect(page.getByTestId("stat-shots")).toHaveText(/[4-9]|[1-9][0-9]+/);
-  await expect(page.getByTestId("creative-autonomy-switcher")).toHaveAttribute(
-    "data-autonomy",
-    "ASSIST",
-  );
+  const freeProjectResponse = await page.request.get(`/api/v1/projects/${freeProjectId}`, {
+    headers: apiHeaders,
+  });
+  expect(freeProjectResponse.ok()).toBe(true);
+  expect((await freeProjectResponse.json()).creative_profile.director_autonomy).toBe("ASSIST");
   await page.goto(
     `/projects/${freeProjectId}/edit?sessionId=${encodeURIComponent(freeEditSessionId)}`,
   );

@@ -41,9 +41,9 @@ SECRET_KEYS = {
     "raw_response",
 }
 BRIEF = (
-    "请创作一部约25秒、五个叙事镜头的写实短片《末班车之前》。只有一位成年虚构女性主角，"
-    "在雨后的公交站捡到一张旧车票，犹豫、回忆、微笑，然后决定向前走。单一地点夜晚，"
-    "服装始终是米色风衣，不要推镜，固定摄影机，通过景别和动作推进情绪。"
+    "请创作一部约25秒、五个叙事镜头的写实短片《渡口天亮》。只有一位成年虚构男性主角，"
+    "在清晨渡口发现一台旧录音机，倾听、迟疑、释然，然后把它留在长椅上转身登船。"
+    "服装始终是深蓝夹克，不要推镜，固定摄影机，通过景别和动作推进情绪。"
     "五个镜头是这次创作要求，不是产品默认镜头数。每句中文对白不超过六个字，"
     "另给一个可以删除的收尾镜头。视觉描述用清晰英文，真人电影质感，不要动画或字幕文字入画。"
 )
@@ -87,6 +87,11 @@ FREE_SCRIPT = (
         ]
     )
     + "\n"
+)
+FREE_UNKNOWN_VIDEO_REVISION = (
+    "live-action medium close shot of the same fictional woman with short black hair "
+    "and beige cardigan folding the old letter closed, placing both hands on the "
+    "wooden table, then looking toward the dawn window, static camera, no push-in"
 )
 
 
@@ -528,6 +533,74 @@ class Acceptance:
         self.state["assertions"]["story_and_user_decisions"] = "PASS"
         self.save()
 
+    def replace_template(self):
+        """Abandon an unreconciled Template project without replaying its writes."""
+        old_project = self.state["projects"]["template_auto"]
+        unresolved = [
+            item
+            for item in self.state.get("unreconciled_media_submissions", [])
+            if item.get("project_id") == old_project["id"]
+        ]
+        if not unresolved or any(item.get("replay_allowed") is not False for item in unresolved):
+            raise RuntimeError("Template replacement requires preserved non-replayable submissions")
+        old_snapshot = self.read(f"/projects/{old_project['id']}/snapshot")
+        if any(
+            operation.get("status") == "succeeded"
+            for operation in self.remote_media_operations(old_snapshot)
+        ):
+            raise RuntimeError("Do not replace a Template project with successful remote media")
+        owned_step_names = [
+            name
+            for name in self.state["steps"]
+            if name in {"project:template_auto"}
+            or name.startswith("binding:template_auto:")
+            or name.startswith("template:")
+            or name.startswith("template_auto:")
+        ]
+        self.state.setdefault("abandoned_projects", []).append(
+            {
+                "project": old_project,
+                "reason": "unreconciled_provider_submissions_no_remote_identity",
+                "replay_allowed": False,
+                "unreconciled_submissions": unresolved,
+                "steps": {name: self.state["steps"][name] for name in owned_step_names},
+            }
+        )
+        for name in owned_step_names:
+            del self.state["steps"][name]
+        self.state["unreconciled_media_submissions"] = [
+            item
+            for item in self.state.get("unreconciled_media_submissions", [])
+            if item.get("project_id") != old_project["id"]
+        ]
+        replacement = self.once(
+            "replacement:template-project",
+            "POST",
+            "/projects",
+            {
+                "workspace_id": WORKSPACE,
+                "name": f"R7 replacement template_auto {self.state['run_key']}",
+                "aspect_ratio": "9:16",
+                "start_type": "TEMPLATE",
+                "director_autonomy": "AUTO",
+                "template_key": "single_monologue_v1",
+                "template_version": "1",
+            },
+        )
+        for purpose in ("keyframe", "video"):
+            self.once(
+                f"replacement:template-binding:{purpose}",
+                "PUT",
+                f"/projects/{replacement['id']}/provider-bindings/{purpose}",
+                {"model_binding_id": self.state["bindings"][purpose]["id"]},
+            )
+        self.state["projects"]["template_auto"] = replacement
+        self.state["assertions"].pop("story_and_user_decisions", None)
+        self.state["assertions"].pop("template_auto:formal_media", None)
+        self.state.get("formal_shot_ids", {}).pop("template_auto", None)
+        self.state.pop("failed_run", None)
+        self.save()
+
     def wait_run(self, project, run_id):
         deadline = time.monotonic() + 1800
         while time.monotonic() < deadline:
@@ -547,6 +620,7 @@ class Acceptance:
             pid = project["id"]
             for original in self.shots(pid):
                 sid = original["id"]
+                skip_shot = False
                 for stage, formal, purpose in (
                     ("image_keyframe", "keyframe", "keyframe"),
                     ("video", "video", "video"),
@@ -593,7 +667,34 @@ class Acceptance:
                         paid=True,
                         command_key=key,
                     )
-                    run = self.wait_run(pid, receipt["node_run_id"])
+                    try:
+                        run = self.wait_run(pid, receipt["node_run_id"])
+                    except RuntimeError:
+                        failed = self.state.get("failed_run")
+                        if (
+                            isinstance(failed, dict)
+                            and failed.get("id") == receipt["node_run_id"]
+                            and failed.get("error_code") == "PROVIDER_SUBMISSION_UNKNOWN"
+                        ):
+                            unresolved = self.state.setdefault("unreconciled_media_submissions", [])
+                            if not any(
+                                item.get("node_run_id") == failed["id"] for item in unresolved
+                            ):
+                                unresolved.append(
+                                    {
+                                        "project_id": pid,
+                                        "shot_id": sid,
+                                        "stage": stage,
+                                        "node_run_id": failed["id"],
+                                        "status": "unknown_submission",
+                                        "cost_status": "unknown",
+                                        "replay_allowed": False,
+                                    }
+                                )
+                                self.save()
+                            skip_shot = True
+                            break
+                        raise
                     self.once(
                         prefix + ":formal",
                         "POST",
@@ -603,11 +704,135 @@ class Acceptance:
                             "expected_shot_version": self.shot(pid, sid)["version"],
                         },
                     )
+                if skip_shot:
+                    continue
+            formal_shots = [
+                shot
+                for basic in self.shots(pid)
+                if (shot := self.shot(pid, basic["id"])).get("formal_keyframe_artifact_id")
+                and shot.get("formal_video_artifact_id")
+            ]
+            if len(formal_shots) < 4:
+                raise RuntimeError(f"{label} has fewer than four complete Formal media shots")
+            self.state.setdefault("formal_shot_ids", {})[label] = [
+                shot["id"] for shot in formal_shots
+            ]
             self.state["assertions"][label + ":formal_media"] = "PASS"
             self.save()
 
+    def revise_unknown_free(self):
+        """Replace one indeterminate Free-path video intent without replaying it.
+
+        A transport timeout after submission is permanently retained as unknown.
+        This phase records an explicit user design revision with a materially new
+        prompt and a distinct idempotency key, then generates only that revision.
+        """
+        project_id = self.state["projects"]["free_assist"]["id"]
+        unresolved = [
+            item
+            for item in self.state.get("unreconciled_media_submissions", [])
+            if item.get("project_id") == project_id
+        ]
+        if len(unresolved) != 1 or unresolved[0].get("stage") != "video":
+            raise RuntimeError("Expected exactly one unreconciled Free video submission")
+        unknown = unresolved[0]
+        if unknown.get("replay_allowed") is not False or unknown.get("cost_status") != "unknown":
+            raise RuntimeError("Unknown submission must remain non-replayable with unknown cost")
+        shot_id = unknown["shot_id"]
+        shot = self.shot(project_id, shot_id)
+        if shot.get("formal_video_artifact_id"):
+            raise RuntimeError("Unknown-submission shot already has a Formal video")
+
+        original_prefix = f"free_assist:{shot_id}:video"
+        original_dispatch = self.state["steps"].get(original_prefix + ":dispatch")
+        if not isinstance(original_dispatch, dict):
+            raise RuntimeError("Unknown submission is missing its durable original receipt")
+        original_prompt = original_dispatch.get("request", {}).get("prompt")
+        if not original_prompt or original_prompt == FREE_UNKNOWN_VIDEO_REVISION:
+            raise RuntimeError(
+                "Replacement intent must be materially distinct from the unknown one"
+            )
+
+        revised = self.once(
+            f"free-revision:{shot_id}:design",
+            "PATCH",
+            f"/projects/{project_id}/shots/{shot_id}/design",
+            {
+                "expected_version": shot["version"],
+                "image_prompt": shot.get("image_prompt") or shot["visual_description"],
+                "video_prompt": FREE_UNKNOWN_VIDEO_REVISION,
+            },
+        )
+        preview = self.once(
+            f"free-revision:{shot_id}:video:preview",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/execution-plan",
+            {
+                "stage": "video",
+                "prompt": FREE_UNKNOWN_VIDEO_REVISION,
+                "expected_shot_version": revised["version"],
+                "mode_id": "first_frame",
+                "requested_binding_id": self.state["bindings"]["video"]["id"],
+                "references": [],
+                "semantic_intent": {},
+                "accept_approximations": False,
+            },
+        )
+        if any(gap["severity"] == "fatal" for gap in preview["plan"]["capability_gaps"]):
+            raise RuntimeError("Revised Free video preview is unsupported")
+        preview_request = self.state["steps"][
+            f"free-revision:{shot_id}:video:preview"
+        ]["request"]
+        replacement_key = f"r7:{self.state['run_key']}:{shot_id}:video-revision-1"
+        receipt = self.once(
+            f"free-revision:{shot_id}:video:dispatch",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/executions",
+            {
+                **preview_request,
+                "plan_fingerprint": preview["plan_fingerprint"],
+                "accepted_approximations": [],
+            },
+            paid=True,
+            command_key=replacement_key,
+        )
+        run = self.wait_run(project_id, receipt["node_run_id"])
+        formal = self.once(
+            f"free-revision:{shot_id}:video:formal",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/formal-video",
+            lambda: {
+                "artifact_id": run["result_artifact_id"],
+                "expected_shot_version": self.shot(project_id, shot_id)["version"],
+            },
+        )
+        replacement_dispatch = self.state["steps"][
+            f"free-revision:{shot_id}:video:dispatch"
+        ]
+        if replacement_dispatch["request_hash"] == original_dispatch["request_hash"]:
+            raise RuntimeError("Revised request unexpectedly matches the unknown submission")
+        self.state["unknown_submission_replacement"] = {
+            "project_id": project_id,
+            "shot_id": shot_id,
+            "original_node_run_id": unknown["node_run_id"],
+            "original_request_hash": original_dispatch["request_hash"],
+            "original_cost_status": "unknown",
+            "original_replay_allowed": False,
+            "replacement_node_run_id": receipt["node_run_id"],
+            "replacement_request_hash": replacement_dispatch["request_hash"],
+            "replacement_command_key_hash": hashlib.sha256(
+                replacement_key.encode()
+            ).hexdigest(),
+            "formal_video_artifact_id": formal["formal_video_artifact_id"],
+        }
+        self.state.pop("failed_run", None)
+        self.state["assertions"]["unknown_submission_not_replayed"] = "PASS"
+        self.save()
+
     def editing(self):
         for label, project in self.state["projects"].items():
+            if self.state.get(label + ":final_job"):
+                continue
             pid = project["id"]
             edit = self.once(
                 label + ":edit", "POST", f"/projects/{pid}/edit-sessions", {"name": "R7 saved cut"}
@@ -714,6 +939,89 @@ class Acceptance:
                 f"/projects/{pid}/final-film/runs/{job['node_run_id']}"
             )
             self.save()
+
+    def recover_local_editing(self):
+        failed = self.state.get("failed_run")
+        if not isinstance(failed, dict):
+            raise RuntimeError("Local Editing recovery requires a persisted failed NodeRun")
+        if (
+            failed.get("node_key") != "voice"
+            or failed.get("error_code") != "WORKER_ERROR"
+            or "uq_artifacts_project_hash_type" not in str(failed.get("error_summary") or "")
+        ):
+            raise RuntimeError("Persisted failure is not the known concurrent Artifact race")
+        project_id = str(failed.get("input_snapshot", {}).get("project_id") or "")
+        label = next(
+            (
+                name
+                for name, project in self.state["projects"].items()
+                if project["id"] == project_id
+            ),
+            None,
+        )
+        if label is None:
+            raise RuntimeError("Failed local Editing run is not owned by an acceptance project")
+        saved_step = self.state["steps"].get(label + ":timeline-save")
+        if not isinstance(saved_step, dict) or saved_step.get("status") != "succeeded":
+            raise RuntimeError("Local Editing recovery requires the prior saved Timeline")
+        old_snapshot = self.read(f"/projects/{project_id}/snapshot")
+        remote_before = len(self.remote_media_operations(old_snapshot))
+        prefix = f"local-recovery:{label}"
+        edit = self.once(
+            prefix + ":edit",
+            "POST",
+            f"/projects/{project_id}/edit-sessions",
+            {"name": "R7 recovered saved cut"},
+        )
+        saved = self.once(
+            prefix + ":timeline-save",
+            "PATCH",
+            f"/projects/{project_id}/edit-sessions/{edit['id']}/timeline",
+            {"timeline": saved_step["response"]["timeline"]},
+        )
+        prepared = self.once(
+            prefix + ":tail",
+            "POST",
+            f"/projects/{project_id}/final-film/prepare",
+            {
+                "edit_session_id": edit["id"],
+                "expected_timeline_version": saved["version"],
+                "mode": "prepare",
+            },
+        )
+        for run_id in prepared["node_run_ids"]:
+            self.wait_run(project_id, run_id)
+        job = self.once(
+            prefix + ":render",
+            "POST",
+            f"/projects/{project_id}/final-film/render",
+            {
+                "edit_session_id": edit["id"],
+                "expected_timeline_version": saved["version"],
+                "name": "R7 recovered final film",
+            },
+            command_key=f"r7:{self.state['run_key']}:{label}:film-recovery-1",
+        )
+        self.wait_run(project_id, job["node_run_id"])
+        final_job = self.read(f"/projects/{project_id}/final-film/runs/{job['node_run_id']}")
+        remote_after = len(
+            self.remote_media_operations(self.read(f"/projects/{project_id}/snapshot"))
+        )
+        if remote_after != remote_before:
+            raise RuntimeError("Local Editing recovery unexpectedly generated remote media")
+        self.state["local_artifact_race_failure"] = sanitized(failed)
+        self.state["local_artifact_race_recovery"] = {
+            "project_id": project_id,
+            "failed_node_run_id": failed["id"],
+            "replacement_edit_session_id": edit["id"],
+            "replacement_render_run_id": job["node_run_id"],
+            "remote_media_operation_count_before": remote_before,
+            "remote_media_operation_count_after": remote_after,
+        }
+        self.state[label + ":final_job"] = final_job
+        self.state["assertions"]["local_artifact_race_recovery"] = "PASS"
+        self.state.pop("failed_run", None)
+        self.save()
 
     def review_submit(self):
         project = self.state["projects"]["template_auto"]
@@ -1121,6 +1429,50 @@ class Acceptance:
         self.state.setdefault("external_proofs", {})[kind] = sanitized(proof)
         self.save()
 
+    def promote_candidate(self, candidate_sha, proof_path):
+        if proof_path is None:
+            raise RuntimeError("Candidate promotion requires a source-equivalence proof")
+        proof = json.loads(proof_path.read_text(encoding="utf-8"))
+        previous = self.state.get("candidate_sha")
+        allowed_paths = {
+            "backend/app/execution/artifact_lineage.py",
+            "backend/tests/integration/test_artifact_lineage_pg.py",
+            "backend/tests/unit/test_r7_acceptance_driver.py",
+            "frontend/tests/live/v1-r7-real-acceptance.spec.ts",
+            "scripts/prove_v1_r7_acceptance.py",
+        }
+        changed_paths = set(proof.get("changed_paths") or [])
+        if (
+            not previous
+            or proof.get("previous_candidate") != previous
+            or proof.get("candidate_sha") != candidate_sha
+            or not changed_paths
+            or not changed_paths <= allowed_paths
+            or "backend/app/execution/artifact_lineage.py" not in changed_paths
+            or proof.get("provider_submission_diff_empty") is not True
+            or proof.get("full_quality_gate") != "PASS"
+            or proof.get("concurrent_artifact_pg_regression") != "PASS"
+        ):
+            raise RuntimeError("Candidate source-equivalence proof is incomplete")
+        if self.state["assertions"].get("template_auto:formal_media") != "PASS" or self.state[
+            "assertions"
+        ].get("free_assist:formal_media") != "PASS":
+            raise RuntimeError("Candidate promotion requires completed dual-path media evidence")
+        self.state.setdefault("candidate_history", []).append(
+            {
+                "candidate_sha": previous,
+                "preserved_media_assertions": {
+                    label: self.state["assertions"].get(label + ":formal_media")
+                    for label in ("template_auto", "free_assist")
+                },
+                "reason": "acceptance_discovered_artifact_identity_concurrency_fix",
+            }
+        )
+        self.state["candidate_sha"] = candidate_sha
+        self.state["candidate_equivalence"] = sanitized(proof)
+        self.state["assertions"]["candidate_source_equivalence"] = "PASS"
+        self.save()
+
     def collect(self):
         for label in ("template_auto", "free_assist"):
             project = self.state["projects"][label]
@@ -1159,10 +1511,42 @@ class Acceptance:
 
         provider_identities = {}
         media_execution_freeze = {}
+        allowed_source_commits = {self.state.get("candidate_sha")}
+        equivalence = self.state.get("candidate_equivalence")
+        if (
+            self.state["assertions"].get("candidate_source_equivalence") == "PASS"
+            and isinstance(equivalence, dict)
+        ):
+            allowed_source_commits.add(equivalence.get("previous_candidate"))
         for label in ("template_auto", "free_assist"):
             snapshot = self.state[label + ":snapshot"]
-            remote = self.remote_media_operations(snapshot)
-            expected = len(self.shots(self.state["projects"][label]["id"])) * 2
+            expected = len(self.state["formal_shot_ids"][label]) * 2
+            dispatch_steps = [
+                step
+                for name, step in self.state["steps"].items()
+                if name.endswith(":dispatch")
+                and (
+                    name.startswith(label + ":")
+                    or (label == "free_assist" and name.startswith("free-revision:"))
+                )
+            ]
+            dispatch_run_ids = {
+                step["response"]["node_run_id"]
+                for step in dispatch_steps
+                if step.get("status") == "succeeded"
+            }
+            frozen_runs = [
+                run
+                for run in snapshot.get("node_runs", [])
+                if run.get("id") in dispatch_run_ids
+                and run.get("status") in {"completed", "cached", "completed_after_cancel"}
+            ]
+            successful_run_ids = {run["id"] for run in frozen_runs}
+            remote = [
+                operation
+                for operation in self.remote_media_operations(snapshot)
+                if operation.get("node_run_id") in successful_run_ids
+            ]
             if len(remote) < expected or any(
                 operation.get("status") != "succeeded"
                 or operation.get("actual_provider") != "agnes"
@@ -1193,22 +1577,9 @@ class Acceptance:
                 }
                 for operation in remote
             ]
-            dispatch_steps = [
-                step
-                for name, step in self.state["steps"].items()
-                if name.startswith(label + ":") and name.endswith(":dispatch")
-            ]
-            dispatch_run_ids = {
-                step["response"]["node_run_id"]
-                for step in dispatch_steps
-                if step.get("status") == "succeeded"
-            }
-            frozen_runs = [
-                run for run in snapshot.get("node_runs", []) if run.get("id") in dispatch_run_ids
-            ]
             if len(frozen_runs) != expected or any(
                 (run.get("input_snapshot") or {}).get("source_commit")
-                != self.state.get("candidate_sha")
+                not in allowed_source_commits
                 or not (run.get("input_snapshot") or {}).get("model_binding_id")
                 or not ((run.get("input_snapshot") or {}).get("execution_identity") or {}).get(
                     "credential_revision_id"
@@ -1272,6 +1643,12 @@ class Acceptance:
             "provider_identity_no_fallback",
             "distinct_projects_shared_runtime",
         }
+        if self.state.get("candidate_history"):
+            required.add("candidate_source_equivalence")
+        if self.state.get("local_artifact_race_failure"):
+            required.add("local_artifact_race_recovery")
+        if self.state.get("unreconciled_media_submissions"):
+            required.add("unknown_submission_not_replayed")
         self.state["complete"] = all(
             self.state["assertions"].get(gate) == "PASS" for gate in required
         )
@@ -1289,7 +1666,11 @@ def main():
             "preflight",
             "story",
             "media",
+            "revise-unknown-free",
+            "replace-template",
             "editing",
+            "recover-local-editing",
+            "promote-candidate",
             "review-submit",
             "review-collect",
             "regressions",
@@ -1300,6 +1681,7 @@ def main():
     )
     parser.add_argument("--real", action="store_true")
     parser.add_argument("--candidate", help="Exact runtime source SHA required for paid phases")
+    parser.add_argument("--candidate-equivalence-proof", type=Path)
     parser.add_argument("--recovery-proof", type=Path)
     parser.add_argument("--browser-proof", type=Path)
     parser.add_argument("--runtime-proof", type=Path)
@@ -1308,6 +1690,8 @@ def main():
     with httpx.Client(base_url=args.base_url, timeout=600, trust_env=False) as client:
         run = Acceptance(client, args.state, real=args.real, evidence_dir=args.evidence_dir)
         run.login()
+        if args.phase == "promote-candidate" and not args.real:
+            raise RuntimeError("Candidate promotion requires exact runtime verification")
         if args.real:
             if not args.candidate or not re.fullmatch(r"[0-9a-f]{40}", args.candidate):
                 raise RuntimeError("Paid acceptance requires an exact --candidate SHA")
@@ -1319,11 +1703,16 @@ def main():
                 raise RuntimeError("Runtime identity/environment does not match the paid candidate")
             prior = run.state.get("candidate_sha")
             if prior and prior != args.candidate:
-                raise RuntimeError(
-                    "Candidate changed; preserve prior evidence and do not relabel it"
-                )
-            run.state["candidate_sha"] = args.candidate
-            run.save()
+                if args.phase != "promote-candidate":
+                    raise RuntimeError(
+                        "Candidate changed; preserve prior evidence and do not relabel it"
+                    )
+                run.promote_candidate(args.candidate, args.candidate_equivalence_proof)
+            else:
+                if args.phase == "promote-candidate":
+                    raise RuntimeError("Candidate promotion target already matches the checkpoint")
+                run.state["candidate_sha"] = args.candidate
+                run.save()
         for kind, proof_path in (
             ("recovery", args.recovery_proof),
             ("browser", args.browser_proof),
@@ -1331,7 +1720,8 @@ def main():
         ):
             if proof_path is not None:
                 run.import_external_proof(kind, proof_path)
-        getattr(run, args.phase.replace("-", "_"))()
+        if args.phase != "promote-candidate":
+            getattr(run, args.phase.replace("-", "_"))()
         print(
             json.dumps(
                 {
