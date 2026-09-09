@@ -187,7 +187,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish multi-platform backend image
         id: backend-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           context: backend
@@ -203,7 +203,7 @@ jobs:
           sbom: true
       - name: Publish multi-platform frontend image
         id: frontend-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           context: frontend
