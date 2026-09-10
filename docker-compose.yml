@@ -120,6 +120,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -218,6 +219,8 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}
       POSTGRES_APP_USER: ${POSTGRES_APP_USER:-dramaforge_app}
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}
+      DIRECTOR_CHECKPOINT_USER: ${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}
+      DIRECTOR_CHECKPOINT_PASSWORD: ${DIRECTOR_CHECKPOINT_PASSWORD:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -225,8 +228,9 @@ services:
       - sh
       - -ec
       - |
-        psql --set=ON_ERROR_STOP=1 --set=app_user="$$POSTGRES_APP_USER" --set=app_password="$$POSTGRES_APP_PASSWORD" <<'SQL'
+        psql --set=ON_ERROR_STOP=1 --set=app_user="$$POSTGRES_APP_USER" --set=app_password="$$POSTGRES_APP_PASSWORD" --set=checkpoint_user="$$DIRECTOR_CHECKPOINT_USER" --set=checkpoint_password="$$DIRECTOR_CHECKPOINT_PASSWORD" <<'SQL'
         SELECT format('ALTER ROLE %I LOGIN NOINHERIT NOBYPASSRLS PASSWORD %L', :'app_user', :'app_password') \gexec
+        SELECT format('ALTER ROLE %I LOGIN NOINHERIT NOBYPASSRLS PASSWORD %L', :'checkpoint_user', :'checkpoint_password') WHERE :'checkpoint_password' <> '' \gexec
         SQL
     security_opt:
       - no-new-privileges:true
@@ -366,6 +370,37 @@ services:
         "-c",
         "python -m app.workers.main default && arq app.workers.default.WorkerSettings",
       ]
+    restart: unless-stopped
+
+  worker-director:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
+      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:-disabled}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      REDIS_URL: redis://redis:6379/0
+      DIRECTOR_QUEUE_NAME: ${DIRECTOR_QUEUE_NAME:-dramaforge:director}
+      SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
+      AGNES_ENABLED: "false"
+      TEXT_LLM_ENABLED: "false"
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["arq", "app.workers.director.WorkerSettings"]
+    healthcheck:
+      test: ["CMD", "arq", "app.workers.director.WorkerSettings", "--check"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   worker-heavy:

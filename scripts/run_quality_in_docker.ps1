@@ -11,26 +11,29 @@ try {
     docker compose -f docker-compose.quality.yml build backend-quality frontend-quality
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    # Start PostgreSQL independently.  Waiting for its health state avoids the
-    # Windows Compose wait/abort behavior that can keep a completed dependency
-    # process attached after backend-quality exits.
-    docker compose -f docker-compose.quality.yml up -d postgres-quality
+    # Start the stateful test dependencies independently. Waiting for their
+    # health state avoids the Windows Compose wait/abort behavior that can keep
+    # a completed dependency process attached after backend-quality exits.
+    docker compose -f docker-compose.quality.yml up -d postgres-quality redis-quality
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $postgresContainer = (docker compose -f docker-compose.quality.yml ps -q postgres-quality).Trim()
-    if ([string]::IsNullOrWhiteSpace($postgresContainer)) {
-        throw "postgres-quality container was not created"
-    }
-    $healthy = $false
-    for ($attempt = 0; $attempt -lt 45; $attempt++) {
-        $health = (docker inspect --format '{{.State.Health.Status}}' $postgresContainer 2>$null).Trim()
-        if ($health -eq "healthy") {
-            $healthy = $true
-            break
+
+    foreach ($service in @("postgres-quality", "redis-quality")) {
+        $dependencyContainer = (docker compose -f docker-compose.quality.yml ps -q $service).Trim()
+        if ([string]::IsNullOrWhiteSpace($dependencyContainer)) {
+            throw "$service container was not created"
         }
-        Start-Sleep -Seconds 1
-    }
-    if (-not $healthy) {
-        throw "postgres-quality did not become healthy"
+        $healthy = $false
+        for ($attempt = 0; $attempt -lt 45; $attempt++) {
+            $health = (docker inspect --format '{{.State.Health.Status}}' $dependencyContainer 2>$null).Trim()
+            if ($health -eq "healthy") {
+                $healthy = $true
+                break
+            }
+            Start-Sleep -Seconds 1
+        }
+        if (-not $healthy) {
+            throw "$service did not become healthy"
+        }
     }
 
     # Backend publishes the OpenAPI contract into the shared contract directory.
