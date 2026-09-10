@@ -26,12 +26,18 @@ const WAIT_LABEL: Record<string, string> = {
   director_worker: "等待导演 Worker",
   director_analysis: "正在分析当前事实",
   proposal_decision: "等待采纳或拒绝建议",
+  runtime_decision_pending: "决定已保存，等待导演恢复",
+  proposal_applied: "已按你的选择完成建议处理",
+  proposal_rejected: "已按你的选择拒绝建议",
+  confirm_candidate: "生产完成，等待确认正式候选",
+  production_fact: "等待生产事实同步",
   design_save: "建议已采纳，等待显式保存设计",
   formal_confirmation: "生产完成，等待确认正式候选",
   production_review: "生产完成，等待审阅",
   execution_in_progress: "生产仍在进行",
   execution_failed: "生产失败，等待处理",
   formal_selected: "正式候选已确认",
+  candidate_rejected: "候选未设为正式版本",
   accepted_changes_review: "等待复核已采纳变更",
   user_stopped: "已停止新的导演动作",
   autonomy_changed: "导演模式已变化",
@@ -131,7 +137,7 @@ export function DirectorTurnStatus({
             ) : null}
             <dt>有界进度</dt>
             <dd>
-              {latest.step_count} 步 · revision {latest.revision}
+              {latest.step_count} 步 · revision {latest.runtime_revision ?? latest.revision}
             </dd>
           </dl>
           {latest.last_error ? <p role="alert">{latest.last_error}</p> : null}
@@ -144,7 +150,7 @@ export function DirectorTurnStatus({
                 disabled={busyTurnId === latest.id}
                 onClick={() => onResume(latest)}
               >
-                重新读取事实
+                刷新服务器状态
               </button>
             ) : null}
             {ACTIVE.has(latest.status) ? (

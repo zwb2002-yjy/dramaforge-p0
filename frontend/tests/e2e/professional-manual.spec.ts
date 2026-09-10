@@ -8,6 +8,41 @@ import {
   installProfessionalMock,
 } from "./professional-mocks";
 
+test("AUTO delegates one frozen Shot plan to the Director runtime", async ({ page }) => {
+  const state = await installProfessionalMock(page);
+  state.directorAutonomy = "AUTO";
+  await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
+  await page.getByTestId("context-dock-generate").click();
+
+  await page.getByTestId("delegate-keyframe-to-director").click();
+
+  await expect(page.getByTestId("director-tab-shot")).toHaveAttribute("aria-selected", "true");
+  const delegation = state.editing.requests.find(
+    (request) =>
+      request.method === "POST" &&
+      request.path ===
+        `/api/v1/projects/${PROJECT_ID}/director/runtime/shots/${SHOT_ID}/executions`,
+  );
+  expect(delegation?.body).toMatchObject({
+    decision_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    max_steps: 6,
+    execution: {
+      stage: "image_keyframe",
+      expected_shot_version: 1,
+      plan_fingerprint: "a".repeat(64),
+      accepted_approximations: [],
+    },
+  });
+  expect(state.candidates).toHaveLength(0);
+  expect(
+    state.editing.requests.some(
+      (request) =>
+        request.method === "POST" &&
+        request.path === `/api/v1/projects/${PROJECT_ID}/shots/${SHOT_ID}/executions`,
+    ),
+  ).toBe(false);
+});
+
 test("manual professional production: Scene Workbench design → candidate preview → formal", async ({
   page,
 }) => {

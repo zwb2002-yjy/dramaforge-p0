@@ -129,6 +129,10 @@ function directorTurn(
     },
     transport_record_id: "provider-request-1",
     transport_status: "succeeded",
+    engine_version: null,
+    state_schema_version: null,
+    runtime_execution_id: null,
+    runtime_revision: null,
     request_summary: { task, max_steps: 4 },
     response_summary: { actual_model: "upstream/director-v1" },
     token_usage: { total_tokens: 42 },
@@ -184,6 +188,48 @@ function renderPanel(onApplyDraft = vi.fn(), dirty = false): ReturnType<typeof r
 afterEach(() => vi.restoreAllMocks());
 
 describe("ShotDirectorSuggestionPanel", () => {
+  it("stops a runtime-bound turn before its first checkpoint", async () => {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
+    const turn = directorTurn(
+      "shot_director_suggestion",
+      {},
+      {
+        status: "queued",
+        wait_reason: "director_worker",
+        engine_version: "langgraph:1.2.11:director-runtime-state-v1",
+        state_schema_version: "director-runtime-state-v1",
+        runtime_execution_id: "44444444-4444-4444-8444-444444444444",
+        runtime_revision: null,
+      },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined;
+      calls.push({ url, method, body });
+      if (url.endsWith("/auth/csrf")) return Promise.resolve(json({ csrf_token: "csrf" }));
+      if (url.includes("/director/turns?")) return Promise.resolve(json([turn]));
+      if (url.endsWith(`/runtime/turns/${turn.id}/stop`)) {
+        return Promise.resolve(json({ ...turn, status: "cancelled", wait_reason: "user_stopped" }));
+      }
+      return Promise.resolve(json({}));
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByTestId("stop-director-turn"));
+    await waitFor(() => {
+      const stop = calls.find((call) => call.url.endsWith(`/runtime/turns/${turn.id}/stop`));
+      expect(stop?.method).toBe("POST");
+      expect(stop?.body).toEqual({
+        request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        expected_runtime_revision: null,
+        expected_turn_revision: turn.revision,
+      });
+    });
+  });
+
   it("generates a proactive recommendation without instruction and partially applies selected operations", async () => {
     const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
     const turn = directorTurn("shot_director_recommendation", recommendationOutput());
@@ -251,7 +297,12 @@ describe("ShotDirectorSuggestionPanel", () => {
 
   it("requests the selected shot, renders old/new diff, and applies only to draft", async () => {
     const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
-    const turn = directorTurn("shot_director_suggestion", suggestionOutput());
+    const turn = directorTurn("shot_director_suggestion", suggestionOutput(), {
+      engine_version: "langgraph:1.2.11:director-runtime-state-v1",
+      state_schema_version: "director-runtime-state-v1",
+      runtime_execution_id: "44444444-4444-4444-8444-444444444444",
+      runtime_revision: 2,
+    });
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -316,8 +367,12 @@ describe("ShotDirectorSuggestionPanel", () => {
     expect(calls.some((call) => call.url.endsWith("/execution-plan"))).toBe(false);
     expect(screen.getByTestId("apply-shot-director-suggestion")).toBeDisabled();
     expect(screen.getByTestId("discard-shot-director-suggestion")).toBeDisabled();
-    expect(calls.find((call) => call.url.endsWith("/decision"))?.body).toEqual({
+    const decision = calls.find((call) => call.url.endsWith("/decision"));
+    expect(decision?.url).toContain(`/director/runtime/turns/${turn.id}/decision`);
+    expect(decision?.body).toEqual({
       expected_revision: 3,
+      expected_runtime_revision: 2,
+      signal_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       decision: "accept",
       accepted_operation_indices: [0],
     });

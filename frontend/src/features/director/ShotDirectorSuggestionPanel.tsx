@@ -2,12 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import {
+  decideDirectorRuntimeTurn,
   decideDirectorTurn,
   getDirectorTurn,
   listDirectorTurns,
   recommendShotDesign,
+  refreshDirectorRuntimeTurn,
   resumeDirectorTurn,
   stopDirectorTurn,
+  stopDirectorRuntimeTurn,
   suggestShotDesign,
 } from "./api";
 import { DirectorTurnStatus } from "./DirectorTurnStatus";
@@ -319,11 +322,16 @@ export function ShotDirectorSuggestionPanel({
     if (["stale", "cancelled", "failed"].includes(current.status)) {
       throw new Error(`该导演轮次已${current.status}，不能再应用。`);
     }
-    return decideDirectorTurn(projectId, turnId, {
-      expected_revision: current.revision,
-      decision,
-      accepted_operation_indices: acceptedOperationIndices,
-    });
+    return current.runtime_execution_id
+      ? decideDirectorRuntimeTurn(projectId, current, {
+          decision,
+          accepted_operation_indices: acceptedOperationIndices,
+        })
+      : decideDirectorTurn(projectId, turnId, {
+          expected_revision: current.revision,
+          decision,
+          accepted_operation_indices: acceptedOperationIndices,
+        });
   }
 
   const proposalDecision = useMutation({
@@ -399,14 +407,22 @@ export function ShotDirectorSuggestionPanel({
       action: "stop" | "resume";
     }): Promise<void> => {
       if (action === "stop") {
-        await stopDirectorTurn(projectId, turn.id, turn.revision);
+        if (turn.runtime_execution_id) {
+          await stopDirectorRuntimeTurn(projectId, turn);
+        } else {
+          await stopDirectorTurn(projectId, turn.id, turn.revision);
+        }
       } else {
-        await resumeDirectorTurn(
-          projectId,
-          turn.id,
-          turn.revision,
-          `ui-resume:${turn.id}:${globalThis.crypto.randomUUID()}`,
-        );
+        if (turn.runtime_execution_id) {
+          await refreshDirectorRuntimeTurn(projectId, turn);
+        } else {
+          await resumeDirectorTurn(
+            projectId,
+            turn.id,
+            turn.revision,
+            `ui-resume:${turn.id}:${globalThis.crypto.randomUUID()}`,
+          );
+        }
       }
     },
     onSuccess: () => void refreshTurns(),

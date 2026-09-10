@@ -77,6 +77,7 @@ export type ProfessionalMockState = {
   imagePrompt: string;
   videoPrompt: string;
   directorState: Record<string, unknown>;
+  directorAutonomy: "AUTO" | "ASSIST" | "MANUAL";
   editing: EditingMockState;
 };
 
@@ -423,6 +424,7 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     imagePrompt: "close up",
     videoPrompt: "locked",
     directorState: {},
+    directorAutonomy: "ASSIST",
     editing: {
       session: initialEditingSession(),
       created: false,
@@ -466,7 +468,7 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           created_from_template_key: null,
           template_version: null,
           template_contract_hash: null,
-          director_autonomy: "ASSIST",
+          director_autonomy: state.directorAutonomy,
           selected_genre: null,
           selected_style_ids: [],
           selected_skill_ids: [],
@@ -577,6 +579,29 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         plan_fingerprint: "a".repeat(64),
       });
     }
+    if (
+      path.includes("/director/runtime/shots/") &&
+      path.endsWith("/executions") &&
+      method === "POST"
+    ) {
+      if (state.directorAutonomy !== "AUTO") {
+        return json(
+          route,
+          {
+            code: "CONFLICT",
+            detail: "One-shot Director execution requires AUTO mode",
+            details: { code: "DIRECTOR_AUTO_REQUIRED", manual_ok: true },
+          },
+          409,
+        );
+      }
+      return json(route, {
+        id: "99999999-9999-4999-8999-999999999999",
+        project_id: PROJECT_ID,
+        status: "queued",
+      });
+    }
+    if (path.includes("/director/turns") && method === "GET") return json(route, []);
     if (path.endsWith("/executions") && method === "POST") {
       if (body.expected_shot_version !== state.shotVersion) {
         return json(
