@@ -1,6 +1,13 @@
 # V1-D8-CANDIDATE-ACCEPTANCE-20260910
 
-Status: IN_PROGRESS, local candidate evidence only.
+Status: LOCALLY ACCEPTED ON A FROZEN CANDIDATE. The D0–D8 implementation is
+committed as `3c728a3`, the runtime images were rebuilt from that exact commit,
+the full quality Gate is green, and both real product chains completed on that
+revision. Release remains unauthorized: nothing is pushed, merged or deployed.
+
+Owner authorization for the paid run: “测到满意” (run until satisfied), applied
+under the Owner implementation §12.1 rule to reuse existing configured facts and
+produce only the minimum necessary new calls.
 
 Authority: Owner implementation §12, Owner design §§8–11, the D0–D7 contracts,
 and the Professional R6/R7 delivery contracts. Old candidate evidence remains
@@ -80,27 +87,65 @@ Acceptance state:
 
 | Path | State | Evidence/remaining gate |
 |---|---|---|
-| MANUAL, Director stopped | LOCAL PASS | Empty project through playable MP4/SRT, zero Director rows and zero source regeneration on rerender |
-| Free + ASSIST | LOCAL CONTROLLED PASS | Real typed Story/Shot/Editing proposals and partial decisions are product-accessible; the manual production controls complete independently; the server rejects a new AUTO delegation grant; candidate-bound real text/media run was not repeated in this local no-paid run |
-| Template + AUTO | LOCAL CONTROLLED PASS | Product UI/API freezes the exact plan, persists a one-shot grant and accepted decision, then an independent Director worker creates exactly one canonical NodeRun and waits on production facts; retry reuses the Turn/wakeup; candidate-bound real text/media run was not repeated in this local no-paid run |
-| Source/image/runtime identity | DIRTY-TREE VERIFIED, NOT COMMITTED | A corrected 796-file manifest now matches both freshly built quality images byte-for-byte after a full Gate pass; the earlier claimed digests were stale and are withdrawn. Requires a reviewed commit and a rebuild from that commit |
-| Release/Owner merge | NOT AUTHORIZED | No commit, push, PR, merge or deploy was performed |
+| MANUAL, Director stopped | REAL PASS | Empty project through playable MP4/SRT, zero Director rows and zero source regeneration on rerender |
+| Free + ASSIST | REAL PASS ON EXACT COMMIT | Real Story/Shot/Editing proposals with partial accept/reject, then manual execution to a 19.239 s MP4 plus independent SRT on candidate `3c728a3` |
+| Template + AUTO | REAL PASS ON EXACT COMMIT | Real proposal, canonical decision, bounded AUTO delegation, independent director worker, exactly one NodeRun per authorization, to a 19.239 s MP4 plus independent SRT on candidate `3c728a3` |
+| Source/image/runtime identity | CANDIDATE FROZEN AND REBUILT | Commit `3c728a3` frozen; runtime images rebuilt from that commit and verified to report it; the earlier claimed digests stay withdrawn |
+| Release/Owner merge | NOT AUTHORIZED | No push, PR, merge or deploy was performed |
 
 Completion-criterion audit against Owner design §12:
 
 | Criterion | Current evidence | Local result |
 |---|---|---|
 | Production independent of Director | Empty MANUAL project reaches the canonical Final Film worker with zero Turn/control/wakeup rows | PASS |
-| One production kernel | Manual and delegated commands both enter `ProductionCommands` and the same NodeRun/Outbox/Arq/ProviderOperation/Artifact chain | PASS |
+| One production kernel | Manual and delegated commands both enter `ProductionCommands` and the same NodeRun/Outbox/Arq/ProviderOperation/Artifact chain; the real run produced 8 remote media operations per path | PASS |
 | Recoverable Director | PostgreSQL checkpoints survive connection/process replacement; Inbox/wakeup and committed signals resume once | PASS |
-| Replayable side effects | Stable authorization/receipt plus invocation unknown-submission rules prevent a second model/media create | PASS |
+| Replayable side effects | Stable authorization/receipt plus invocation unknown-submission rules prevent a second model/media create; the editing-only rerender added 0 remote media operations | PASS |
 | Fresh context Gate | Shot/profile versions, revoke races, MANUAL changes, fencing and RLS reject stale/cross-scope actions | PASS |
-| One domain truth | SDK state stores flow position/receipts only; Proposal, Formal, NodeRun, Artifact and Export remain canonical records | PASS |
+| One domain truth | SDK state stores flow position/receipts only; Proposal, Formal, NodeRun, Artifact and Export remain canonical records; the canonical Proposal decision alone advanced the bound turn | PASS |
 | Replaceable engine boundary | Application contracts contain no LangGraph/private SDK types; engine routing is immutable per Turn | PASS |
-| Product behavior | AUTO delegation, ASSIST decisions, independent manual controls, Review/Repair/Editing and MP4/SRT paths pass controlled regression | PASS |
-| Trustworthy current candidate | The corrected 796-file manifest matches both quality images byte-for-byte after a full Gate pass, but the source is still uncommitted and the real text/media run is absent | NOT COMPLETE |
+| Product behavior | AUTO delegation, ASSIST decisions, independent manual controls, Review/Repair/Editing and MP4/SRT paths pass controlled regression plus the real candidate run | PASS |
+| Trustworthy current candidate | Exact commit `3c728a3`, images rebuilt from it, full Gate green, and both real chains delivered on the same revision | PASS |
 
-The candidate cannot be marked COMPLETE from this dirty working tree. Final D8
-completion requires the prepared changes to be reviewed and committed, then the
-AUTO/ASSIST real-provider acceptance to run against that exact source/image.
-Those calls can incur cost and were not made during this local implementation.
+Candidate-bound real acceptance (2026-09-10, later run):
+
+- Runtime identity: commit
+  `3c728a356c4c49bb52110b7cceaaa9ca87c6884e`, reported by `/health`
+  `source_commit` and embedded as the `org.opencontainers.image.revision`
+  label. Backend image
+  `sha256:d9a6b840047b40d1db5cfd05758bcbfdcb91cc260f5c6201f605164260c540d6`,
+  frontend image
+  `sha256:5683252478063820c23cf04f439d9e6e1fa0ca5a0d18efc977321388a5111141`.
+- The run used an isolated Compose project with its own volumes. Provider and
+  model configuration was copied from the retained acceptance copy of the
+  authorized workspace after verifying the target was empty; the production
+  database was neither started nor migrated, and no production data was
+  modified. MiniMax and Volcengine remain unconfigured and are recorded as
+  NOT VERIFIED rather than substituted.
+- Harness `scripts/prove_v1_d8_acceptance.py`, state and evidence in
+  `tmp/v1-d8-acceptance-20260910/`. Every paid step is persisted before its
+  request and is never replayed.
+- Media generation was bounded to the four shots each path needs for a valid
+  cut, per the Owner instruction to produce the minimum necessary new calls.
+  The canonical script keeps its full shot count; only acceptance media is
+  trimmed.
+- Director runtime facts: 18 turns, 10 bound to
+  `langgraph:1.2.11:director-runtime-state-v1`; every AUTO authorization
+  produced exactly one canonical NodeRun and then waited on production facts.
+  A proposal-bound turn is decided through the canonical Proposal API, which
+  alone resumed the bound engine to `completed`; the runtime decision endpoint
+  correctly refused it with `DIRECTOR_PROPOSAL_DECISION_REQUIRED`. Detached
+  Shot suggestion turns were decided through the versioned runtime endpoint and
+  created zero NodeRuns.
+- Deliveries: template cut 19.239 s, MP4 SHA-256
+  `5a14cb93b2a2d52c0dda03bfa456dd9910a8cfaa0feebb99a1984daa26b7f67b` with a
+  4-cue SRT; Free cut 19.239 s, MP4 SHA-256
+  `942b026c88d7d104015c50cd8685eb351cbd9a8f1e35f9a5d7d1f966df2a68d9` with a
+  3-cue SRT. ffprobe confirmed H.264 video, AAC audio, MP4 container, burned
+  subtitles, dialogue audio, applied timeline edits and matching duration for
+  both. Both downloaded files hashed to the recorded artifact hashes.
+- Editing-only change: remote image/video ProviderOperation counts were 8
+  before and 8 after the rerender, so subtitle/timeline edits created no new
+  billable media generation.
+- Remaining boundary: the candidate is not pushed, merged or deployed, and no
+  release image is published from it.
