@@ -14,6 +14,7 @@ from app.access.models import Project, ProjectCreativeProfile
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1 import workbench as _workbench
+from app.director.runtime.control import DirectorRuntimeControlService
 from app.director.turn_service import DirectorTurnService
 from app.shared.db import set_rls_context
 from app.shared.enums import ProjectStage
@@ -232,6 +233,9 @@ async def update_project_creative_profile(
         await DirectorTurnService(session).mark_project_stale(
             project_id=project_id,
             reason=f"User changed Director autonomy to {body.director_autonomy}.",
+        )
+        await DirectorRuntimeControlService(session).mark_project_stale(
+            project_id=project_id,
         )
     profile.director_autonomy = body.director_autonomy
     profile.version = (profile.version or 1) + 1

@@ -293,20 +293,33 @@ async def test_stop_and_read_preserve_links_and_do_not_cancel_media(session: Asy
     assert same.revision == stopped.revision
 
 
-def test_default_worker_registers_director_restart_recovery() -> None:
-    from app.workers.default import WorkerSettings
+@pytest.mark.asyncio
+async def test_independent_worker_runs_director_restart_recovery(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from app.workers import director
+    from app.workers.default import WorkerSettings as ProductionWorker
     from app.workers.jobs import (
         JOB_FUNCTIONS,
         reconcile_waiting_director_turns,
         recover_interrupted_director_turns,
     )
 
-    assert recover_interrupted_director_turns in JOB_FUNCTIONS
-    assert reconcile_waiting_director_turns in JOB_FUNCTIONS
-    assert WorkerSettings.on_startup is recover_interrupted_director_turns
-    assert [job.coroutine for job in WorkerSettings.cron_jobs] == [
-        reconcile_waiting_director_turns
+    assert recover_interrupted_director_turns not in JOB_FUNCTIONS
+    assert reconcile_waiting_director_turns not in JOB_FUNCTIONS
+    assert not getattr(ProductionWorker, "on_startup", None)
+    assert not getattr(ProductionWorker, "cron_jobs", [])
+    assert recover_interrupted_director_turns in director.WorkerSettings.functions
+    assert reconcile_waiting_director_turns in director.WorkerSettings.functions
+    assert reconcile_waiting_director_turns in [
+        job.coroutine for job in director.WorkerSettings.cron_jobs
     ]
+    recovery = AsyncMock()
+    monkeypatch.setattr(director, "recover_interrupted_director_turns", recovery)
+    ctx = {"redis": object()}
+    await director.WorkerSettings.on_startup(ctx)
+    recovery.assert_awaited_once_with(ctx)
+    assert isinstance(ctx["director_consumer"], director.DirectorEventConsumer)
 
 
 async def _decision_turn(session: AsyncSession):

@@ -58,6 +58,14 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://dramaforge:dramaforge@localhost:5432/dramaforge",
         description="SQLAlchemy async DSN using asyncpg",
     )
+    director_runtime_engine: Literal["legacy", "langgraph"] = Field(
+        default="legacy",
+        description="Engine assigned only to newly started Director turns",
+    )
+    director_checkpoint_database_url: str = Field(
+        default="",
+        description="Dedicated psycopg DSN for the private Director checkpoint schema",
+    )
     byok_rotation_database_url: str = Field(
         default="",
         description=(

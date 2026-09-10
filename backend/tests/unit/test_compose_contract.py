@@ -26,6 +26,7 @@ def test_compose_defines_required_boot0_services() -> None:
         "dispatcher",
         "worker-default",
         "worker-heavy",
+        "worker-director",
         "frontend",
         "database-bootstrap",
         "maintenance",
@@ -76,7 +77,7 @@ def test_compose_defines_required_boot0_services() -> None:
     )
     assert services["frontend"]["read_only"] is True
     assert services["frontend"]["cap_drop"] == ["ALL"]
-    for name in ("api", "dispatcher", "worker-default", "worker-heavy"):
+    for name in ("api", "dispatcher", "worker-default", "worker-heavy", "worker-director"):
         condition = services[name]["depends_on"]["database-bootstrap"]["condition"]
         assert condition == "service_completed_successfully"
         assert services[name]["security_opt"] == ["no-new-privileges:true"]
@@ -110,6 +111,29 @@ def test_release_compose_never_builds_on_the_user_machine() -> None:
     for name, service in services.items():
         assert "image" in service, f"release service has no pinned image input: {name}"
         assert ":latest" not in service["image"]
+
+
+def test_director_worker_has_independent_queue_and_no_api_dependency() -> None:
+    from app.workers.default import WorkerSettings as ProductionWorker
+    from app.workers.director import WorkerSettings as DirectorWorker
+
+    services = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    director = services["worker-director"]
+    assert director["command"] == ["arq", "app.workers.director.WorkerSettings"]
+    assert "DIRECTOR_QUEUE_NAME" in director["environment"]
+    assert "DIRECTOR_RUNTIME_ENGINE" in director["environment"]
+    checkpoint_dsn = director["environment"]["DIRECTOR_CHECKPOINT_DATABASE_URL"]
+    assert "DIRECTOR_CHECKPOINT_USER" in checkpoint_dsn
+    assert "DIRECTOR_CHECKPOINT_PASSWORD" in checkpoint_dsn
+    assert "POSTGRES_APP_PASSWORD" not in checkpoint_dsn
+    assert "worker-director" not in services["api"]["depends_on"]
+    assert "worker-director" not in services["worker-default"]["depends_on"]
+    assert DirectorWorker.queue_name != ProductionWorker.queue_name
+    assert not any("director" in function.__name__ for function in ProductionWorker.functions)
+    assert not getattr(ProductionWorker, "on_startup", None)
+    assert "build" in yaml.safe_load(BUILD_COMPOSE.read_text(encoding="utf-8"))[
+        "services"
+    ]["worker-director"]
 
 
 def test_source_build_is_explicit_and_offline_mode_never_pulls() -> None:
@@ -227,6 +251,7 @@ def test_compose_requires_unique_runtime_secrets_and_disables_public_registratio
     assert bootstrap["environment"]["POSTGRES_APP_PASSWORD"].startswith(
         "${POSTGRES_APP_PASSWORD:?"
     )
+    assert "DIRECTOR_CHECKPOINT_PASSWORD" in bootstrap["environment"]
     for name in ("api", "dispatcher", "worker-default", "worker-heavy"):
         dsn = services[name]["environment"]["DATABASE_URL"]
         assert "POSTGRES_APP_USER" in dsn
