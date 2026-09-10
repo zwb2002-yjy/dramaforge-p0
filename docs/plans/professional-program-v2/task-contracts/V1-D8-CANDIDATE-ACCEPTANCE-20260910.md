@@ -149,3 +149,10 @@ Candidate-bound real acceptance (2026-09-10, later run):
   billable media generation.
 - Remaining boundary: the candidate is not pushed, merged or deployed, and no
   release image is published from it.
+- Ledger obstruction (unchanged from D0): `.agent-control/control.ps1` still
+  refuses both `STARTED` and `COMPLETED` because the repository root dev
+  worktree is not clean. The only untracked files are the six Owner inputs D0
+  requires be preserved unmodified and excluded from this task's commits, and
+  this task has no authority to delete or commit them. The formal lifecycle
+  entry therefore remains unwritten and is reported as an obstruction rather
+  than worked around.
