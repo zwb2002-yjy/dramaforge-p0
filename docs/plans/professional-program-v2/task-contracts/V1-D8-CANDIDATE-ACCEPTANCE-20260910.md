@@ -91,7 +91,7 @@ Acceptance state:
 | Free + ASSIST | REAL PASS ON EXACT COMMIT | Real Story/Shot/Editing proposals with partial accept/reject, then manual execution to a 19.239 s MP4 plus independent SRT on candidate `3c728a3` |
 | Template + AUTO | REAL PASS ON EXACT COMMIT | Real proposal, canonical decision, bounded AUTO delegation, independent director worker, exactly one NodeRun per authorization, to a 19.239 s MP4 plus independent SRT on candidate `3c728a3` |
 | Source/image/runtime identity | CANDIDATE FROZEN AND REBUILT | Commit `3c728a3` frozen; runtime images rebuilt from that commit and verified to report it; the earlier claimed digests stay withdrawn |
-| Release/Owner merge | NOT AUTHORIZED | No push, PR, merge or deploy was performed |
+| Release/Owner merge | AWAITING OWNER | `dev` pushed to `origin/dev` and release PR #79 (`dev -> main`) opened; CI `policy` and `container-gates` plus Security are green on the pushed head. The agent did not approve or merge its own changes |
 
 Completion-criterion audit against Owner design §12:
 
@@ -147,8 +147,14 @@ Candidate-bound real acceptance (2026-09-10, later run):
 - Editing-only change: remote image/video ProviderOperation counts were 8
   before and 8 after the rerender, so subtitle/timeline edits created no new
   billable media generation.
-- Remaining boundary: the candidate is not pushed, merged or deployed, and no
-  release image is published from it.
+- Remaining boundary: the candidate is pushed to `dev` and proposed for merge as
+  PR #79, but it is not merged or deployed and no release image is published.
+  Merging is the Owner's decision; the agent does not self-approve or self-merge.
+- Two working-tree edits under `backend/app/director/runtime/domain_tools.py`
+  and `backend/tests/integration/test_director_runtime_flow_pg.py` appeared
+  after the candidate was frozen, were not authored by this task and are not
+  covered by its verification. They are excluded from the candidate and from
+  PR #79 and are left untouched.
 - Ledger obstruction (unchanged from D0): `.agent-control/control.ps1` still
   refuses both `STARTED` and `COMPLETED` because the repository root dev
   worktree is not clean. The only untracked files are the six Owner inputs D0
