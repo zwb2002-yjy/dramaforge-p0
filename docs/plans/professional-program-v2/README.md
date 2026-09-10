@@ -49,6 +49,33 @@
 
 ## Owner amendments
 
+### 2026-09-09 — Independent director runtime (D0–D8)
+
+The Owner explicitly authorized implementation of the two V1.1 revisions and
+the complete director-off manual path in the current conversation. Preserved
+sources (their original dated filenames contain the September 9 revision):
+
+- [Owner design](v1-goal/director-runtime-20260909/owner-design.md)
+- [Owner implementation](v1-goal/director-runtime-20260909/owner-implementation.md)
+- [D0 baseline contract](task-contracts/V1-D0-RUNTIME-BASELINE-20260909.md)
+- [D1 runtime contracts](task-contracts/V1-D1-RUNTIME-CONTRACTS-20260909.md)
+- [D2 event boundary](task-contracts/V1-D2-DIRECTOR-EVENT-BOUNDARY-20260909.md)
+- [D3 invocation journal](task-contracts/V1-D3-DIRECTOR-INVOCATIONS-20260910.md)
+- [D4 LangGraph validation](task-contracts/V1-D4-LANGGRAPH-VALIDATION-20260910.md)
+- [D5 engine migration](task-contracts/V1-D5-DIRECTOR-ENGINE-MIGRATION-20260910.md)
+- [D6 tools, decisions and UI](task-contracts/V1-D6-DIRECTOR-TOOLS-DECISIONS-UI-20260910.md)
+- [D7 failure matrix](task-contracts/V1-D7-CROSS-RUNTIME-FAILURE-MATRIX-20260910.md)
+- [D8 candidate acceptance](task-contracts/V1-D8-CANDIDATE-ACCEPTANCE-20260910.md)
+
+These refine the existing V1 with an independent director orchestration runtime
+and one shared production runtime. Python LangGraph is the validation target;
+enabling it depends on the specified hard gates. Existing R0–R8 evidence remains
+historical evidence, not proof of D0–D8 completion. In addition to template AUTO
+and free ASSIST acceptance, MANUAL must complete the entire path from an empty
+project to MP4/SRT with the director service stopped. Explicit Apply/Save/Formal/
+Export gates, model identity, isolation and canonical facts remain authoritative.
+This amendment does not authorize production deployment or Owner-only merging.
+
 ### 2026-09-07 — V1 current-state completion revision
 
 The Owner supplied a current-code-based revision and authorized implementation
