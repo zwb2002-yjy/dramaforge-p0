@@ -1,6 +1,6 @@
 # V1-D7-CROSS-RUNTIME-FAILURE-MATRIX-20260910
 
-Status: IN_PROGRESS, local implementation and verification only.
+Status: BASE IMPLEMENTATION MERGED; POST-MERGE CORRECTION VERIFIED LOCALLY.
 
 Authority: Owner implementation §11, Owner design §§6–10, D1–D6 contracts and
 the current Professional production/runtime facts. This contract adds evidence
@@ -77,7 +77,40 @@ Verification summary:
   manifest matches both quality images byte-for-byte; full detail is in
   `tmp/v1-d8-identity-20260910/`.
 
-Acceptance is locally satisfied for the controlled matrix. Formal contract
-completion still requires a reviewed source commit and D8 candidate-bound
-evidence. This working tree is dirty by design and no commit/merge was
-authorized, so status remains `IN_PROGRESS`.
+Post-merge correction (2026-09-11):
+
+- PR #79 merged the D0-D8 base into `main` as merge commit `986cd5e`. A direct
+  audit of the retained acceptance database then contradicted the broad F10/F13
+  conclusion above: all eight media-bound runtime Turns remained at
+  `awaiting_execution / production_fact`, despite their canonical NodeRuns being
+  terminal. Twenty-three earlier runtime wakeups had dead-lettered.
+- The first root cause was an invalid projection from the richer
+  `ExecutionTrackingFact` into the strict `ExecutionFact`; four tracking-only
+  fields were passed to a schema with `extra="forbid"`. The second was event
+  ordering: a `formal_selected` notice could be delivered while the graph still
+  expected `production_fact`, poisoning that historical checkpoint.
+- Correction commit `4e61d6f` explicitly projects the six production fact
+  fields, filters event wakeups by the Turn's current checkpoint, and adds a
+  durable low-rate reconciler. The reconciler reads existing canonical
+  `NodeRun`/Formal/EventLog facts and enqueues a revision-fenced signal; it never
+  creates or resubmits a production command.
+- The expanded PostgreSQL test delivers Formal before terminal execution,
+  proves that the early notice cannot enter the wrong checkpoint, resumes from
+  the terminal fact, then recovers the already-committed Formal fact. The Turn
+  ends at `candidate_confirmed` and the NodeRun count remains exactly two in the
+  fixture (one seeded upstream keyframe plus the single authorized video run).
+- A disposable clone of the real acceptance database recovered six clean
+  historical Turns without adding a ProviderOperation (27 before and after).
+  Two already-poisoned historical checkpoints remain intentionally unrepaired;
+  the new event gate prevents that state for new Turns. The retained original
+  acceptance database was not mutated.
+- The complete Docker quality Gate on the correction source passed: directory
+  and canonical checks, Ruff, mypy (278 files), 1,041 backend unit tests,
+  Alembic through 0066 plus `alembic check`, 74 PostgreSQL integration tests,
+  generated API equivalence, frontend formatting/lint/type checks, 155 frontend
+  tests, build, 20 Playwright tests and 5 isolated LiteLLM proxy tests. Full log:
+  `tmp/v1-d8-runtime-hotfix-quality-20260911.stdout.log`.
+
+F10 and F13 are therefore PASS for the correction source, while their original
+2026-09-10 evidence is preserved above as an incomplete test claim rather than
+rewritten as proof for candidate `3c728a3`.

@@ -66,6 +66,7 @@ sources (their original dated filenames contain the September 9 revision):
 - [D6 tools, decisions and UI](task-contracts/V1-D6-DIRECTOR-TOOLS-DECISIONS-UI-20260910.md)
 - [D7 failure matrix](task-contracts/V1-D7-CROSS-RUNTIME-FAILURE-MATRIX-20260910.md)
 - [D8 candidate acceptance](task-contracts/V1-D8-CANDIDATE-ACCEPTANCE-20260910.md)
+- [D8 terminal fact reconciliation](task-contracts/V1-D8-RUNTIME-TERMINAL-RECONCILIATION-20260911.md)
 
 These refine the existing V1 with an independent director orchestration runtime
 and one shared production runtime. Python LangGraph is the validation target;
