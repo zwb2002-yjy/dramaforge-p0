@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Episode, Scene, Shot
+from app.config import get_settings
+from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
 from app.director.turn_service import DirectorTurnService
 from app.providers.model_profiles.slots import ModelSlot
@@ -358,6 +360,15 @@ class DirectorRecommendationService:
                     },
                 )
             await self._text_transport.mark_awaiting_user(text_result.turn)
+            await DirectorRuntimeStartService(
+                self._session, settings=get_settings(),
+            ).accept_existing_detached_turn(
+                project=project,
+                actor=actor,
+                turn=text_result.turn,
+                created=text_result.turn_created,
+            )
+            await self._session.commit()
         return DirectorRecommendation(
             **recommendation.model_dump(),
             director_evidence=text_result.evidence if text_result is not None else None,

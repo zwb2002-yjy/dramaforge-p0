@@ -9,11 +9,15 @@ def load_all_models() -> None:
     from app.assets import models as assets_models
     from app.delivery import models as delivery_models
     from app.director import assistant_models as director_assistant_models
+    from app.director import inbox_models as director_inbox_models
+    from app.director import invocation_models as director_invocation_models
     from app.director import proposal_models as director_proposal_models
     from app.director import turn_models as director_turn_models
+    from app.director.runtime import models as director_runtime_models
     from app.editing import models as editing_models
     from app.events import models as event_models
     from app.execution import models as execution_models
+    from app.production import command_models
     from app.production import models as production_models
     from app.providers import catalog_models as provider_catalog_models
     from app.providers import models as provider_models
@@ -25,12 +29,16 @@ def load_all_models() -> None:
         assets_models,
         delivery_models,
         director_assistant_models,
+        director_inbox_models,
+        director_invocation_models,
         director_proposal_models,
+        director_runtime_models,
         director_turn_models,
         editing_models,
         event_models,
         execution_models,
         production_models,
+        command_models,
         provider_catalog_models,
         provider_models,
         provider_profile_models,

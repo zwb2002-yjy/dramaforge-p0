@@ -224,6 +224,10 @@ export function DirectorSidebar({
           dirty={dirty}
           trace={trace}
           onExecuted={onWorkspaceRefresh}
+          onDirectorDelegated={() => {
+            setActiveTab("shot");
+            setTabOverride(true);
+          }}
         />
       ) : (
         <p className="muted">选择一个镜头开始受控生产。</p>

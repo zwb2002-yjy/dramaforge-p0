@@ -11,6 +11,7 @@ export type ShotExecutionRead = components["schemas"]["ExecutionRead"];
 export type ShotExecutionPlanRead = components["schemas"]["ExecutionPlanRead"];
 export type FormalKeyframeRead = components["schemas"]["FormalKeyframeRead"];
 export type FormalVideoRead = components["schemas"]["FormalVideoRead"];
+export type DirectorDelegationRead = components["schemas"]["DirectorTurnRead"];
 
 export type ShotExecutionInput = Omit<
   components["schemas"]["ExecutionPlanBody"],
@@ -144,6 +145,35 @@ export async function dispatchShotExecution(
     },
     csrf,
     { "Idempotency-Key": prepared.idempotencyKey },
+  );
+}
+
+export async function delegateShotExecutionToDirector(
+  projectId: string,
+  shotId: string,
+  prepared: Pick<PreparedShotExecution, "input" | "preview"> & { decisionId: string },
+): Promise<DirectorDelegationRead> {
+  const csrf = await fetchCsrf();
+  const frozenInput = freezeExecutionInput(prepared.input);
+  const acceptedApproximations = Array.isArray(prepared.preview.plan.accepted_approximations)
+    ? prepared.preview.plan.accepted_approximations.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+  return apiSend<DirectorDelegationRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/director/runtime/shots/${shotId}/executions`,
+    {
+      decision_id: prepared.decisionId,
+      authorization_expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      max_steps: 6,
+      execution: {
+        ...frozenInput,
+        plan_fingerprint: prepared.preview.plan_fingerprint,
+        accepted_approximations: acceptedApproximations,
+      },
+    },
+    csrf,
   );
 }
 

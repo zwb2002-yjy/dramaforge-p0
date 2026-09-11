@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, ProjectCreativeProfile, User
+from app.contracts.production_facts import ExecutionTrackingFact
 from app.director.next_action import DirectorNextActionService
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
-from app.execution.models import NodeRun
+from app.production.application.facts import ProductionFacts
 from app.shared.errors import ConflictError, ValidationAppError
+
+
+class ExecutionIdentity(Protocol):
+    @property
+    def id(self) -> UUID: ...
 
 
 class DirectorBusinessCheckpoints:
@@ -22,9 +29,15 @@ class DirectorBusinessCheckpoints:
         self._turns = DirectorTurnService(session)
 
     async def track_execution(
-        self, *, project: Project, actor: User, run: NodeRun,
+        self, *, project: Project, actor: User, run: ExecutionIdentity,
     ) -> DirectorTurn | None:
-        """Join the already-authorized command transaction; never dispatch one."""
+        """Legacy adapter; callers migrate to the independent event worker."""
+        fact = await ProductionFacts(self._session).tracking(project_id=project.id, run_id=run.id)
+        return await self.track_fact(project=project, actor=actor, run=fact)
+
+    async def track_fact(
+        self, *, project: Project, actor: User, run: ExecutionTrackingFact,
+    ) -> DirectorTurn | None:
         profile = await self._session.scalar(
             select(ProjectCreativeProfile)
             .where(ProjectCreativeProfile.project_id == project.id)
@@ -32,20 +45,16 @@ class DirectorBusinessCheckpoints:
         )
         if profile is None or profile.director_autonomy not in {"AUTO", "ASSIST"}:
             return None
-        snapshot = run.input_snapshot or {}
-        if run.project_id != project.id or not snapshot.get("shot_id"):
-            raise ValidationAppError("Execution checkpoint has no owned Shot identity")
-        shot_id = UUID(str(snapshot["shot_id"]))
-        plan = snapshot.get("workbench_plan")
-        if not isinstance(plan, dict):
-            raise ValidationAppError("Execution checkpoint has no frozen plan")
+        if run.project_id != project.id:
+            raise ValidationAppError("Execution checkpoint is outside the project")
+        shot_id = run.shot_id
         turn, created = await self._turns.create_or_get(
             project=project, actor=actor, scope_type="shot", scope_entity_id=shot_id,
             request_key=f"workbench:{run.id}",
             context_snapshot={"node_run_id": str(run.id), "input_hash": run.input_hash},
-            input_versions={"shot": plan.get("expected_shot_version"),
+            input_versions={"shot": run.shot_version,
                             "creative_profile": profile.version},
-            intent_snapshot={"goal": "review_production", "stage": snapshot.get("stage")},
+            intent_snapshot={"goal": "review_production", "stage": run.stage},
             max_steps=4,
         )
         if not created:
@@ -53,15 +62,15 @@ class DirectorBusinessCheckpoints:
         await self._turns.claim(
             project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
         )
-        resolution = snapshot.get("execution_model_resolution")
+        resolution = run.model_resolution
         return await self._turns.compare_and_set(
             turn=turn, expected_statuses=("thinking",), target_status="awaiting_execution",
             updates={
                 "wait_reason": "execution_in_progress",
                 "request_summary": {"task": "workbench_followup", "max_steps": 4,
-                                    "stage": snapshot.get("stage")},
+                                    "stage": run.stage},
                 "model_resolution": dict(resolution) if isinstance(resolution, dict) else {},
-                "dispatched_command_key": run.idempotency_key,
+                "dispatched_command_key": run.command_key,
                 "node_run_ids": [str(run.id)],
             },
         )
@@ -74,6 +83,7 @@ class DirectorBusinessCheckpoints:
         statement = select(DirectorTurn.id).where(
             DirectorTurn.project_id == project.id,
             DirectorTurn.status.in_(("awaiting_execution", "awaiting_user")),
+            DirectorTurn.runtime_execution_id.is_(None),
         )
         if shot_id is not None:
             statement = statement.where(

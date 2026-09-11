@@ -42,6 +42,9 @@ def api() -> Iterator[tuple[TestClient, Any]]:
             loop.close()
 
     async def _prepare() -> None:
+        from app.shared.model_registry import load_all_models
+
+        load_all_models()
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
@@ -476,7 +479,7 @@ def test_lost_execution_response_replays_before_resolution_or_shot_version_check
     replay = client.post(f"{path}/executions", json=body,
                          headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": "receipt:one"})
     assert replay.status_code == 200 and replay.json() == receipt
-    assert receipt["director_turn_id"] is not None
+    assert receipt["director_turn_id"] is None
     changed = client.post(f"{path}/executions", json={**body, "prompt": "changed request"},
                           headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": "receipt:one"})
     assert changed.status_code == 409, changed.text
@@ -497,9 +500,12 @@ def test_actual_command_worker_and_formal_api_reach_next_checkpoint(
 
     client, factory = api
     project_id, shot_id, _binding, _body, receipt = _start_command(api, autonomy=autonomy)
+    assert receipt["director_turn_id"] is None
+    turn_id = _run(factory, _deliver_production_notices(factory, project_id))
+    assert turn_id is not None
     monkeypatch.setattr(jobs, "get_session_factory", lambda: factory)
     first_scan = _run(factory, jobs.reconcile_waiting_director_turns({}))
-    assert first_scan["reconciled"] == 1
+    assert first_scan["unchanged"] == 1
     count = _run(factory, _count_workbench_runs(factory))
 
     async def finish():
@@ -522,7 +528,8 @@ def test_actual_command_worker_and_formal_api_reach_next_checkpoint(
                            headers={CSRF_HEADER: _csrf(client)},
                            json={"artifact_id": artifact_id, "expected_shot_version": 2})
     assert selected.status_code == 200, selected.text
-    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{receipt['director_turn_id']}")
+    _run(factory, _deliver_production_notices(factory, project_id))
+    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}")
     assert turn.status_code == 200, turn.text
     state = turn.json()
     assert state["status"] == "completed" and state["step_count"] == 4
@@ -542,3 +549,44 @@ def test_manual_command_keeps_production_available_without_proactive_followup(ap
     _project, _shot, _binding, _body, receipt = _start_command(api, autonomy="MANUAL")
     assert receipt["status"] == "queued"
     assert receipt["director_turn_id"] is None
+
+
+@pytest.mark.parametrize("autonomy", ["AUTO", "ASSIST", "MANUAL"])
+def test_production_acceptance_never_enters_director_when_director_is_broken(
+    api, monkeypatch, autonomy,
+):
+    from app.director.business_checkpoints import DirectorBusinessCheckpoints
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("Director unavailable")
+
+    monkeypatch.setattr(DirectorBusinessCheckpoints, "__init__", unavailable)
+    _project, _shot, _binding, _body, receipt = _start_command(api, autonomy=autonomy)
+    assert receipt["status"] == "queued" and receipt["director_turn_id"] is None
+
+
+async def _deliver_production_notices(factory, project_id):
+    """Separate test transactions emulate delivery; real Redis/PG tests cover transport."""
+    from app.director.inbox import receive_production_event
+    from app.director.turn_models import DirectorTurn
+    from app.director.wakeup import apply_director_wakeup
+    from app.events.models import OutboxEvent
+    from sqlalchemy import select
+
+    async with factory() as session:
+        ids = list((await session.scalars(select(OutboxEvent.event_id).where(
+            OutboxEvent.project_id == UUID(project_id), OutboxEvent.topic == "production.facts.v1",
+        ))).all())
+    for event_id in ids:
+        async with factory() as session:
+            inbox_id = await receive_production_event(
+                session, project_id=UUID(project_id), event_id=event_id,
+            )
+            await session.commit()
+        async with factory() as session:
+            await apply_director_wakeup(session, inbox_id=inbox_id)
+            await session.commit()
+    async with factory() as session:
+        return await session.scalar(select(DirectorTurn.id).where(
+            DirectorTurn.project_id == UUID(project_id),
+        ))

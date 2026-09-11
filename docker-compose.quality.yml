@@ -11,6 +11,14 @@ services:
       timeout: 3s
       retries: 20
 
+  redis-quality:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   backend-quality:
     image: dramaforge-backend-quality:local
     build:
@@ -18,6 +26,8 @@ services:
       dockerfile: backend/Dockerfile.quality
     depends_on:
       postgres-quality:
+        condition: service_healthy
+      redis-quality:
         condition: service_healthy
     environment:
       APP_ENV: test
@@ -31,6 +41,7 @@ services:
       TEST_PG_PORT: "5432"
       TEST_PG_USER: dramaforge
       TEST_PG_PASSWORD: quality-postgres-password
+      TEST_DIRECTOR_REDIS_URL: redis://redis-quality:6379/0
       PUBLIC_REGISTRATION_ENABLED: "true"
     volumes:
       - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract

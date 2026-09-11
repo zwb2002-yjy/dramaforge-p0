@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from app.api.v1.editing import EditingSuggestionRejectBody, reject_editing_suggestion
 from app.director.assistant_models import DirectorThread
+from app.director.inbox import receive_production_event
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.turn_models import DirectorTurn
+from app.director.wakeup import process_director_wakeup
 from app.editing.models import EditSession
+from app.events.models import OutboxEvent
 from app.execution.models import NodeRun, ProviderOperation
 from app.shared.db import set_rls_context
 from sqlalchemy import func, select, text
@@ -79,6 +82,25 @@ async def test_editing_rejection_survives_restart_and_replays_without_mutation(p
     )
     assert result.status == "rejected"
     factory = async_sessionmaker(db.bind, expire_on_commit=False)
+    async with factory() as before_delivery:
+        await before_delivery.execute(text("SET LOCAL ROLE dramaforge_app"))
+        await set_rls_context(
+            before_delivery, user_id=user.id, workspace_id=workspace_id, project_id=project_id
+        )
+        persisted = await before_delivery.get(DirectorTurn, turn.id)
+        assert persisted is not None and persisted.status == "awaiting_user"
+        notice = await before_delivery.scalar(
+            select(OutboxEvent)
+            .where(OutboxEvent.topic == "production.facts.v1")
+            .order_by(OutboxEvent.created_at.desc(), OutboxEvent.event_id.desc())
+        )
+        assert notice is not None
+        inbox_id = await receive_production_event(
+            before_delivery, project_id=project_id, event_id=notice.event_id,
+        )
+        await before_delivery.commit()
+
+    assert await process_director_wakeup(factory, inbox_id=inbox_id)
     async with factory() as reader:
         await reader.execute(text("SET LOCAL ROLE dramaforge_app"))
         await set_rls_context(

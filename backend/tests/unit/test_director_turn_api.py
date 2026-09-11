@@ -266,11 +266,195 @@ def test_user_rejection_api_is_scoped_strict_and_persists_across_requests(api):
     assert read.json()["response_summary"]["user_decision"]["decision"] == "reject"
 
 
+def test_legacy_decision_endpoint_rejects_runtime_bound_turn(api):
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _project(client, workspace_id, "Runtime-bound decision")
+    turn = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+
+    async def bind_runtime():
+        async with factory() as session:
+            row = await session.get(DirectorTurn, turn.id)
+            assert row is not None
+            row.request_summary = {"task": "shot_director_suggestion", "max_steps": 4}
+            row.output_snapshot = {"suggested_director_state": {}}
+            row.node_run_ids = []
+            row.dispatched_command_key = None
+            row.engine_version = "langgraph:test:director-runtime-state-v1"
+            row.state_schema_version = "director-runtime-state-v1"
+            row.runtime_execution_id = uuid4()
+            row.runtime_revision = 2
+            await session.commit()
+
+    _run(bind_runtime())
+    response = client.post(
+        f"/api/v1/projects/{project_id}/director/turns/{turn.id}/decision",
+        headers={CSRF_HEADER: _csrf(client)},
+        json={"expected_revision": turn.revision, "decision": "reject"},
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["details"]["code"] == "DIRECTOR_RUNTIME_ENDPOINT_REQUIRED"
+
+
+def test_runtime_stop_is_accepted_before_first_checkpoint(api):
+    from app.director.runtime.langgraph_adapter import ENGINE_VERSION, STATE_SCHEMA_VERSION
+    from app.director.runtime.models import DirectorRuntimeControl, DirectorRuntimeWakeup
+    from sqlalchemy import select
+
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _project(client, workspace_id, "Pre-checkpoint runtime stop")
+    turn = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+    execution_id = uuid4()
+
+    async def bind_runtime():
+        async with factory() as session:
+            row = await session.get(DirectorTurn, turn.id)
+            assert row is not None
+            row.status = "queued"
+            row.wait_reason = None
+            row.engine_version = ENGINE_VERSION
+            row.state_schema_version = STATE_SCHEMA_VERSION
+            row.runtime_execution_id = execution_id
+            row.runtime_revision = None
+            session.add(DirectorRuntimeControl(
+                runtime_execution_id=execution_id,
+                project_id=row.project_id,
+                turn_id=row.id,
+                engine_version=ENGINE_VERSION,
+                state_schema_version=STATE_SCHEMA_VERSION,
+                status="active",
+            ))
+            await session.commit()
+
+    _run(bind_runtime())
+    request_id = uuid4()
+    url = f"/api/v1/projects/{project_id}/director/runtime/turns/{turn.id}/stop"
+    response = client.post(
+        url,
+        headers={CSRF_HEADER: _csrf(client)},
+        json={
+            "request_id": str(request_id),
+            "expected_runtime_revision": None,
+            "expected_turn_revision": turn.revision,
+        },
+    )
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "cancelled"
+    assert response.json()["runtime_revision"] is None
+
+    async def assert_stop_journal():
+        async with factory() as session:
+            control = await session.get(DirectorRuntimeControl, execution_id)
+            assert control is not None
+            assert control.status == "stopped"
+            wakeup = await session.scalar(select(DirectorRuntimeWakeup).where(
+                DirectorRuntimeWakeup.runtime_execution_id == execution_id,
+                DirectorRuntimeWakeup.kind == "stop",
+            ))
+            assert wakeup is not None
+            assert wakeup.payload["request_id"] == str(request_id)
+            assert wakeup.payload["expected_revision"] == 1
+
+    _run(assert_stop_journal())
+
+
+def test_runtime_detached_decision_persists_fact_and_wakeup(api):
+    from app.director.runtime.langgraph_adapter import ENGINE_VERSION, STATE_SCHEMA_VERSION
+    from app.director.runtime.models import DirectorRuntimeControl, DirectorRuntimeWakeup
+    from sqlalchemy import select
+
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _project(client, workspace_id, "Runtime detached decision")
+    turn = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+    execution_id = uuid4()
+
+    async def bind_runtime():
+        async with factory() as session:
+            row = await session.get(DirectorTurn, turn.id)
+            assert row is not None
+            row.request_summary = {"task": "shot_director_suggestion", "max_steps": 4}
+            row.output_snapshot = {
+                "base_shot_version": 3,
+                "suggested_director_state": {},
+            }
+            row.node_run_ids = []
+            row.dispatched_command_key = None
+            row.engine_version = ENGINE_VERSION
+            row.state_schema_version = STATE_SCHEMA_VERSION
+            row.runtime_execution_id = execution_id
+            row.runtime_revision = 2
+            session.add(DirectorRuntimeControl(
+                runtime_execution_id=execution_id,
+                project_id=row.project_id,
+                turn_id=row.id,
+                engine_version=ENGINE_VERSION,
+                state_schema_version=STATE_SCHEMA_VERSION,
+                status="waiting",
+            ))
+            await session.commit()
+
+    _run(bind_runtime())
+    signal_id = uuid4()
+    response = client.post(
+        f"/api/v1/projects/{project_id}/director/runtime/turns/{turn.id}/decision",
+        headers={CSRF_HEADER: _csrf(client)},
+        json={
+            "expected_revision": turn.revision,
+            "expected_runtime_revision": 2,
+            "signal_id": str(signal_id),
+            "decision": "reject",
+            "accepted_operation_indices": [],
+        },
+    )
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "awaiting_user"
+    assert response.json()["wait_reason"] == "runtime_decision_pending"
+
+    async def read_wakeup():
+        async with factory() as session:
+            wakeup = await session.scalar(select(DirectorRuntimeWakeup).where(
+                DirectorRuntimeWakeup.runtime_execution_id == execution_id,
+                DirectorRuntimeWakeup.kind == "resume",
+            ))
+            assert wakeup is not None
+            assert wakeup.payload["signal_id"] == str(signal_id)
+            assert wakeup.payload["reference_id"] == str(turn.id)
+
+    _run(read_wakeup())
+
+
 def test_autonomy_change_invalidates_coordination_but_preserves_submitted_links(api):
+    from app.director.runtime.langgraph_adapter import ENGINE_VERSION, STATE_SCHEMA_VERSION
+    from app.director.runtime.models import DirectorRuntimeControl
+
     client, factory = api
     workspace_id = _register(client)
     project_id = _project(client, workspace_id, "Autonomy intervention")
     active = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+    bound = _seed_turn(factory, workspace_id=workspace_id, project_id=project_id)
+    execution_id = uuid4()
+
+    async def bind_runtime():
+        async with factory() as session:
+            row = await session.get(DirectorTurn, bound.id)
+            assert row is not None
+            row.engine_version = ENGINE_VERSION
+            row.state_schema_version = STATE_SCHEMA_VERSION
+            row.runtime_execution_id = execution_id
+            row.runtime_revision = 2
+            session.add(DirectorRuntimeControl(
+                runtime_execution_id=execution_id,
+                project_id=row.project_id,
+                turn_id=row.id,
+                engine_version=ENGINE_VERSION,
+                state_schema_version=STATE_SCHEMA_VERSION,
+                status="waiting",
+            ))
+            await session.commit()
+
+    _run(bind_runtime())
     profile = client.get(f"/api/v1/projects/{project_id}").json()["creative_profile"]
     response = client.patch(
         f"/api/v1/projects/{project_id}/creative-profile",
@@ -283,3 +467,16 @@ def test_autonomy_change_invalidates_coordination_but_preserves_submitted_links(
     assert read["wait_reason"] == "autonomy_changed"
     assert read["node_run_ids"] == active.node_run_ids
     assert read["dispatched_command_key"] == active.dispatched_command_key
+    bound_read = client.get(
+        f"/api/v1/projects/{project_id}/director/turns/{bound.id}"
+    ).json()
+    assert bound_read["status"] == "stale"
+
+    async def assert_control_stale():
+        async with factory() as session:
+            control = await session.get(DirectorRuntimeControl, execution_id)
+            assert control is not None
+            assert control.status == "stale"
+            assert control.lease_owner is None
+
+    _run(assert_control_stale())

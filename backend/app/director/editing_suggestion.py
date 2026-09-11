@@ -31,8 +31,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
+from app.config import get_settings
 from app.director.assistant_models import DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
@@ -651,6 +653,16 @@ class EditingDirectorSuggestionService:
                 text_result.turn,
                 proposal_id=proposal.id,
             )
+            await DirectorRuntimeStartService(
+                self._session, settings=get_settings(),
+            ).accept_existing_new_turn(
+                project=project,
+                actor=actor,
+                turn=text_result.turn,
+                proposal_id=proposal.id,
+                created=text_result.turn_created,
+            )
+            await self._session.commit()
         else:
             await self._session.commit()
         return self._result(
