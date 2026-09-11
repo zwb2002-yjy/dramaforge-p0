@@ -212,7 +212,14 @@ class DirectorDomainRuntimeTools:
                 project_id=self._scope.project_id,
                 run_id=run_id,
             )
-            return ExecutionFact.model_validate(tracking.model_dump())
+            return ExecutionFact(
+                id=tracking.id,
+                project_id=tracking.project_id,
+                shot_id=tracking.shot_id,
+                status=tracking.status,
+                stage=tracking.stage,
+                result_artifact_id=tracking.result_artifact_id,
+            )
 
     async def _turn(self, session: AsyncSession) -> DirectorTurn:
         turn = await session.scalar(select(DirectorTurn).where(
