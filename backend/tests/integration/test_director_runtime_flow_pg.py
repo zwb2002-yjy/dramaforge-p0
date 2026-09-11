@@ -3,13 +3,14 @@
 import asyncio
 import os
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
 from app.access.models import ProjectCreativeProfile
 from app.config import Settings
 from app.contracts.director_runtime import ResumeSignal, RuntimeScope, StopRequest
+from app.contracts.domain_events import ExecutionChanged, FormalSelected
 from app.contracts.production_commands import ExecutionBody
 from app.director.assistant_models import DirectorThread
 from app.director.inbox import receive_production_event
@@ -23,7 +24,8 @@ from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.director.wakeup import apply_director_wakeup
 from app.events.models import EventLog
-from app.execution.models import NodeRun
+from app.execution.models import Artifact, NodeRun
+from app.production.application.events import append_production_notice
 from app.production.command_models import ProductionCommandAuthorization
 from app.production.workbench_execution import WorkbenchExecutionService
 from app.shared.db import set_rls_context
@@ -628,6 +630,166 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
             assert len(runs) == 2  # seeded keyframe plus the one accepted video run
             assert grant is not None and grant.status == "accepted"
             assert str(grant.node_run_id) == str(submitted.node_run_ids[0])
+
+            submitted_run_id = UUID(str(submitted.node_run_ids[0]))
+            submitted_run = await session.get(NodeRun, submitted_run_id)
+            assert submitted_run is not None
+            artifact = Artifact(
+                project_id=project.id,
+                artifact_type="video",
+                storage_state="available",
+                object_key=f"test/{uuid4().hex}.mp4",
+                content_hash="f" * 64,
+                mime_type="video/mp4",
+                byte_size=1,
+            )
+            session.add(artifact)
+            await session.flush()
+            submitted_run.result_artifact_id = artifact.id
+            submitted_run.status = "completed"
+            terminal_event_id = await append_production_notice(
+                session,
+                project_id=project.id,
+                actor_id=actor.id,
+                notice=ExecutionChanged(
+                    shot_id=shot.id,
+                    node_run_id=submitted_run_id,
+                ),
+            )
+            current_shot = await session.get(type(shot), shot.id)
+            assert current_shot is not None
+            current_shot.formal_video_artifact_id = artifact.id
+            current_shot.version += 1
+            formal_event_id = await append_production_notice(
+                session,
+                project_id=project.id,
+                actor_id=actor.id,
+                notice=FormalSelected(
+                    shot_id=shot.id,
+                    shot_version=current_shot.version,
+                    artifact_id=artifact.id,
+                    stage="video",
+                ),
+            )
+            await session.commit()
+
+        # Deliver Formal first. It stays canonical but must not enter a graph
+        # that is still interrupted on the production-fact checkpoint.
+        async with factory() as session:
+            await set_rls_context(
+                session,
+                user_id=actor.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+            )
+            formal_inbox_id = await receive_production_event(
+                session,
+                project_id=project.id,
+                event_id=formal_event_id,
+            )
+            await session.commit()
+        async with factory() as session:
+            await set_rls_context(
+                session,
+                user_id=actor.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+            )
+            assert await apply_director_wakeup(session, inbox_id=formal_inbox_id)
+            assert await session.scalar(
+                select(func.count()).select_from(DirectorRuntimeWakeup).where(
+                    DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
+                    DirectorRuntimeWakeup.kind == "resume",
+                )
+            ) == 0
+            await session.commit()
+
+        async with factory() as session:
+            await set_rls_context(
+                session,
+                user_id=actor.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+            )
+            inbox_id = await receive_production_event(
+                session,
+                project_id=project.id,
+                event_id=terminal_event_id,
+            )
+            await session.commit()
+        async with factory() as session:
+            await set_rls_context(
+                session,
+                user_id=actor.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+            )
+            assert await apply_director_wakeup(session, inbox_id=inbox_id)
+            terminal_wakeup = await session.scalar(
+                select(DirectorRuntimeWakeup).where(
+                    DirectorRuntimeWakeup.runtime_execution_id
+                    == turn.runtime_execution_id,
+                    DirectorRuntimeWakeup.kind == "resume",
+                )
+            )
+            assert terminal_wakeup is not None
+            await session.commit()
+
+        assert await director.execute_director_runtime_wakeup(
+            {}, str(terminal_wakeup.id),
+        )
+        async with factory() as session:
+            await set_rls_context(
+                session,
+                user_id=actor.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+            )
+            waiting_confirmation = await DirectorTurnService(session).get(
+                project_id=project.id, turn_id=turn.id,
+            )
+            assert waiting_confirmation.status == "awaiting_user"
+            assert waiting_confirmation.wait_reason == "confirm_candidate"
+            assert await session.scalar(select(func.count()).select_from(NodeRun)) == 2
+
+        # Reconciliation now observes the already committed Formal fact and
+        # schedules the next signal without replaying production.
+        from app.workers import jobs
+
+        monkeypatch.setattr(jobs, "get_session_factory", lambda: factory)
+        reconciliation = await jobs.reconcile_waiting_director_turns({})
+        assert reconciliation["reconciled"] >= 1
+        async with factory() as session:
+            await set_rls_context(
+                session,
+                user_id=actor.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+            )
+            formal_wakeup = await session.scalar(
+                select(DirectorRuntimeWakeup).where(
+                    DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
+                    DirectorRuntimeWakeup.kind == "resume",
+                    DirectorRuntimeWakeup.completed_at.is_(None),
+                    DirectorRuntimeWakeup.dead_letter_at.is_(None),
+                )
+            )
+            assert formal_wakeup is not None
+            await session.commit()
+        assert await director.execute_director_runtime_wakeup({}, str(formal_wakeup.id))
+        async with factory() as session:
+            await set_rls_context(
+                session,
+                user_id=actor.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+            )
+            completed = await DirectorTurnService(session).get(
+                project_id=project.id, turn_id=turn.id,
+            )
+            assert completed.status == "completed"
+            assert completed.wait_reason == "candidate_confirmed"
+            assert await session.scalar(select(func.count()).select_from(NodeRun)) == 2
 
         async with admin_factory() as session:
             profile = await session.scalar(select(ProjectCreativeProfile).where(

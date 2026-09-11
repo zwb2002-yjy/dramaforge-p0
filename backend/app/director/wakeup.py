@@ -136,14 +136,20 @@ async def _enqueue_runtime_event(
         DirectorTurn.project_id == event.project_id,
         DirectorTurn.runtime_execution_id.is_not(None),
         DirectorTurn.runtime_revision.is_not(None),
-        DirectorTurn.status.in_(("awaiting_user", "awaiting_execution")),
     )
     if isinstance(payload, ProposalDecided):
-        statement = statement.where(DirectorTurn.proposal_id == payload.proposal_id)
+        statement = statement.where(
+            DirectorTurn.proposal_id == payload.proposal_id,
+            DirectorTurn.status == "awaiting_user",
+        )
+    elif isinstance(payload, ExecutionChanged):
+        statement = statement.where(DirectorTurn.status == "awaiting_execution")
     else:
         statement = statement.where(
             DirectorTurn.scope_type == "shot",
             DirectorTurn.scope_entity_id == payload.shot_id,
+            DirectorTurn.status == "awaiting_user",
+            DirectorTurn.wait_reason == "confirm_candidate",
         )
     turns = list((await session.scalars(statement.order_by(DirectorTurn.id))).all())
     queue = DirectorRuntimeWakeupService(session)
@@ -152,6 +158,18 @@ async def _enqueue_runtime_event(
             str(item) for item in turn.node_run_ids
         }:
             continue
+        if isinstance(payload, FormalSelected):
+            if len(turn.node_run_ids or []) != 1:
+                continue
+            tracking = await ProductionFacts(session).tracking(
+                project_id=turn.project_id,
+                run_id=UUID(str(turn.node_run_ids[0])),
+            )
+            if (
+                tracking.result_artifact_id != payload.artifact_id
+                or tracking.stage != payload.stage
+            ):
+                continue
         assert turn.runtime_execution_id is not None
         assert turn.runtime_revision is not None
         signal = ResumeSignal(

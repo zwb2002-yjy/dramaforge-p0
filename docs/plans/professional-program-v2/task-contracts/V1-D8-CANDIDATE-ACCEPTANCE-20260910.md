@@ -1,9 +1,11 @@
 # V1-D8-CANDIDATE-ACCEPTANCE-20260910
 
-Status: LOCALLY ACCEPTED ON A FROZEN CANDIDATE. The D0–D8 implementation is
-committed as `3c728a3`, the runtime images were rebuilt from that exact commit,
-the full quality Gate is green, and both real product chains completed on that
-revision. Release remains unauthorized: nothing is pushed, merged or deployed.
+Status: BASE CANDIDATE MERGED; TERMINAL-RUNTIME CORRECTION VERIFIED LOCALLY.
+PR #79 merged the D0-D8 base into `main` as `986cd5e`. The playable deliveries
+remain valid, but a post-merge database audit found that candidate `3c728a3` did
+not advance eight media-bound Director Turns past their production checkpoint.
+Correction commit `4e61d6f` fixes that boundary and has passed the complete local
+Gate; it still requires review and integration before the final source is done.
 
 Owner authorization for the paid run: “测到满意” (run until satisfied), applied
 under the Owner implementation §12.1 rule to reuse existing configured facts and
@@ -88,10 +90,10 @@ Acceptance state:
 | Path | State | Evidence/remaining gate |
 |---|---|---|
 | MANUAL, Director stopped | REAL PASS | Empty project through playable MP4/SRT, zero Director rows and zero source regeneration on rerender |
-| Free + ASSIST | REAL PASS ON EXACT COMMIT | Real Story/Shot/Editing proposals with partial accept/reject, then manual execution to a 19.239 s MP4 plus independent SRT on candidate `3c728a3` |
-| Template + AUTO | REAL PASS ON EXACT COMMIT | Real proposal, canonical decision, bounded AUTO delegation, independent director worker, exactly one NodeRun per authorization, to a 19.239 s MP4 plus independent SRT on candidate `3c728a3` |
+| Free + ASSIST | DELIVERY PASS; RUNTIME CORRECTION PENDING INTEGRATION | Real Story/Shot/Editing decisions and a 19.239 s MP4/SRT remain valid. The retained DB exposed incomplete terminal-fact continuation on `3c728a3`; `4e61d6f` fixes and tests it without media resubmission |
+| Template + AUTO | DELIVERY PASS; RUNTIME CORRECTION PENDING INTEGRATION | Exactly one NodeRun was created per authorization and the 19.239 s MP4/SRT remains valid. The bound Turn continuation is corrected by `4e61d6f` |
 | Source/image/runtime identity | CANDIDATE FROZEN AND REBUILT | Commit `3c728a3` frozen; runtime images rebuilt from that commit and verified to report it; the earlier claimed digests stay withdrawn |
-| Release/Owner merge | AWAITING OWNER | `dev` pushed to `origin/dev` and release PR #79 (`dev -> main`) opened; CI `policy` and `container-gates` plus Security are green on the pushed head. The agent did not approve or merge its own changes |
+| Release/Owner merge | BASE MERGED; FOLLOW-UP REQUIRED | PR #79 was merged by the Owner account at 2026-09-11 07:54:04Z (`986cd5e`). The terminal-runtime correction is a later bounded commit and needs its own review/integration |
 
 Completion-criterion audit against Owner design §12:
 
@@ -99,13 +101,13 @@ Completion-criterion audit against Owner design §12:
 |---|---|---|
 | Production independent of Director | Empty MANUAL project reaches the canonical Final Film worker with zero Turn/control/wakeup rows | PASS |
 | One production kernel | Manual and delegated commands both enter `ProductionCommands` and the same NodeRun/Outbox/Arq/ProviderOperation/Artifact chain; the real run produced 8 remote media operations per path | PASS |
-| Recoverable Director | PostgreSQL checkpoints survive connection/process replacement; Inbox/wakeup and committed signals resume once | PASS |
+| Recoverable Director | `3c728a3` rejected the terminal fact projection and allowed Formal to reach the wrong checkpoint; `4e61d6f` adds typed projection, stage gating and canonical-fact reconciliation | CORRECTED LOCALLY; FOLLOW-UP INTEGRATION REQUIRED |
 | Replayable side effects | Stable authorization/receipt plus invocation unknown-submission rules prevent a second model/media create; the editing-only rerender added 0 remote media operations | PASS |
 | Fresh context Gate | Shot/profile versions, revoke races, MANUAL changes, fencing and RLS reject stale/cross-scope actions | PASS |
 | One domain truth | SDK state stores flow position/receipts only; Proposal, Formal, NodeRun, Artifact and Export remain canonical records; the canonical Proposal decision alone advanced the bound turn | PASS |
 | Replaceable engine boundary | Application contracts contain no LangGraph/private SDK types; engine routing is immutable per Turn | PASS |
 | Product behavior | AUTO delegation, ASSIST decisions, independent manual controls, Review/Repair/Editing and MP4/SRT paths pass controlled regression plus the real candidate run | PASS |
-| Trustworthy current candidate | Exact commit `3c728a3`, images rebuilt from it, full Gate green, and both real chains delivered on the same revision | PASS |
+| Trustworthy current candidate | The exact candidate delivered both films, but its retained DB disproved full runtime convergence. The correction source has a new full Gate and preserves the real artifacts | BASE CLAIM CORRECTED |
 
 Candidate-bound real acceptance (2026-09-10, later run):
 
@@ -147,18 +149,28 @@ Candidate-bound real acceptance (2026-09-10, later run):
 - Editing-only change: remote image/video ProviderOperation counts were 8
   before and 8 after the rerender, so subtitle/timeline edits created no new
   billable media generation.
-- Remaining boundary: the candidate is pushed to `dev` and proposed for merge as
-  PR #79, but it is not merged or deployed and no release image is published.
-  Merging is the Owner's decision; the agent does not self-approve or self-merge.
-- Two working-tree edits under `backend/app/director/runtime/domain_tools.py`
-  and `backend/tests/integration/test_director_runtime_flow_pg.py` appeared
-  after the candidate was frozen, were not authored by this task and are not
-  covered by its verification. They are excluded from the candidate and from
-  PR #79 and are left untouched.
-- Ledger obstruction (unchanged from D0): `.agent-control/control.ps1` still
-  refuses both `STARTED` and `COMPLETED` because the repository root dev
-  worktree is not clean. The only untracked files are the six Owner inputs D0
-  requires be preserved unmodified and excluded from this task's commits, and
-  this task has no authority to delete or commit them. The formal lifecycle
-  entry therefore remains unwritten and is reported as an obstruction rather
-  than worked around.
+- DeepSeek was actually exercised through LiteLLM six times as
+  `anthropic/deepseek-v4-flash`: four invocations completed with valid structured
+  output and two were truthfully rejected as `INVALID_DIRECTOR_TEXT_OUTPUT`.
+  All six proxy requests returned; no unknown submission remains and no retry is
+  needed for this acceptance.
+- The retained database had 27 successful ProviderOperations and 67 terminal
+  NodeRuns (66 completed, one cached). It also had eight bound Turns still at
+  `awaiting_execution / production_fact`. This is the evidence that triggered
+  correction `4e61d6f`; the real MP4/SRT artifacts and hashes above are unchanged.
+- The correction projects only fields allowed by `ExecutionFact`, refuses
+  out-of-order Formal notices until `confirm_candidate`, and uses the existing
+  low-rate worker to enqueue any missed terminal/Formal fact with deterministic
+  dedupe and revision fencing. The focused real PostgreSQL flow reaches
+  `candidate_confirmed` without creating another NodeRun.
+- PR #79 is merged. No production deployment or release image publication was
+  performed. The later correction requires a follow-up review before the final
+  merged source can be called complete.
+- The six Owner inputs remain byte-for-byte at their original paths. They are
+  listed only in this repository's local `.git/info/exclude`, which is the
+  correct Git mechanism for local inputs that must never be committed. Their
+  sizes and hashes are recorded in
+  `tmp/v1-d8-owner-input-local-exclude-20260911.json`. With the inputs preserved
+  and excluded, the unchanged guardrail accepted a real `STARTED` event for
+  `v1-d8-runtime-terminal-reconciliation-20260911`; no lifecycle status was
+  forged or backdated.
