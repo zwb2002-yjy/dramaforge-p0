@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `v2-project-page-ux-cleanup-20260912`
 - **Goal:** User-requested Computer Use review and cleanup of redundant Project-page UI.
 - **Boundary:** Frontend-only presentation and interaction changes for the Project Lobby and shared Project workspace shell.
@@ -48,4 +48,19 @@
 
 ## Completion Evidence
 
-- Record the exact commands/results and Computer Use observations here after implementation.
+- Implementation commit: `8be4962` (`fix(frontend): streamline project pages`).
+- `npm run lint`: PASS.
+- `npm run typecheck`: PASS.
+- `npm run format:check`: PASS.
+- `npm run build`: PASS (1,791 modules transformed; production chunks and gzip assets emitted).
+- `npm run test -- --reporter=dot`: PASS — 28 files / 156 tests.
+- `npm run test -- --reporter=dot --maxWorkers=1`: PASS — deterministic full-suite confirmation, 28 files / 156 tests.
+- `npm run test:e2e`: PASS — 21 Chromium tests, including the new Lobby-clutter and Project-inspector regressions.
+- `git diff --check`: PASS.
+- Formal entry: `/gateway-health` and `/health` both returned HTTP 200; API reported database and LiteLLM up.
+- Rebuilt frontend image: `dramaforge-frontend@sha256:b3c2cb6dec8c755add41b8bc2727a9e8ca3a31df77f0d72aab8b66ad3fbd592e`; recreated `dramaforge-frontend-1` was healthy on `127.0.0.1:8080`.
+- Computer Use on the rebuilt formal entry verified:
+  - the Edit workspace no longer renders “项目证据”, “同一事实源”, “事实边界”, or “已连接项目事实”;
+  - the Lobby no longer renders the `PROJECTS` eyebrow, healthy-service badge, architecture explanation, card-explanation note, or empty continuation placeholder;
+  - a real 68-Project workspace initially renders 12 cards, and activating “显示更多项目（剩余 56 个）” expands it to 24 while preserving every Project record.
+- No Project, Workspace, user, Provider, runtime, or artifact data was deleted or mutated by this Task.
