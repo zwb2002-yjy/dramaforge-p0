@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** COMPLETE
 - **Task id:** `v2-navigation-transition-ux-20260912`
 - **Goal:** User-requested follow-up Computer Use review and repair of page navigation and switching behavior.
 - **Boundary:** Frontend global navigation transitions and mobile L2 drawer behavior only.
@@ -45,4 +45,22 @@
 
 ## Completion Evidence
 
-- Record exact commits, commands, runtime image, and Computer Use observations after implementation.
+- Contract commit: `3244d05` (`docs(task): bound navigation transition UX`).
+- Navigation implementation landed in `b360353` (`fix(frontend): remove internal identifiers from the UI and unblock L1 navigation`); the Computer Use follow-up corrected the mobile backdrop hit area in `9db3afb` (`fix(frontend): align mobile navigation backdrop`).
+- Focused verification:
+  - `npx vitest run tests/unit/WorkstationShell.test.tsx tests/unit/NavigationTransitions.test.tsx --reporter=dot` — 2 files / 21 tests passed.
+  - `npx playwright test tests/e2e/navigation-ia.spec.ts --reporter=line` — 3/3 passed, including mobile route-close, Escape, backdrop geometry/click, Settings stability, and no horizontal overflow.
+- Frontend gates:
+  - `npm run lint`, `npm run typecheck`, `npm run format:check`, and `npm run build` passed.
+  - `npm run test -- --reporter=dot --maxWorkers=1` — 29 files / 162 tests passed. The unconstrained parallel run hit existing 1-second mount timeouts in navigation tests under local CPU contention; deterministic single-worker execution passed the complete suite without assertion failures.
+  - `npm run test:e2e` / `npx playwright test --reporter=dot` started all 21 tests and `.last-run.json` recorded `status: passed` with no failed tests.
+  - `git diff --check` passed.
+- Formal runtime:
+  - Source commit: `9db3afb`.
+  - `docker compose -f docker-compose.yml -f docker-compose.build.yml build frontend` and `up -d --no-deps frontend` completed.
+  - `dramaforge-frontend:local` image id/digest: `sha256:cd647c3c4cfa55a9d9643cf846cac974a97f61cecf33096e879d02833f7745a3`.
+  - `http://127.0.0.1:8080/healthz` and the requested Project edit route both returned HTTP 200; the frontend container reported healthy.
+- Computer Use / browser observations at 390×844 on the formal 8080 runtime:
+  - Creative L2 opened at x=56..252 while the outside-close backdrop occupied only x=252..390; clicking the labelled backdrop closed L2 immediately.
+  - Selecting a different Creative page updated the route and exposed the destination with L2 closed; Escape also closed the drawer.
+  - Permanent Settings navigated to `/settings/account`; selecting Current Project Settings navigated to `/settings/projects/42cddcd9-5451-4c95-b6b5-502e3dcbec43` and automatically closed L2.
