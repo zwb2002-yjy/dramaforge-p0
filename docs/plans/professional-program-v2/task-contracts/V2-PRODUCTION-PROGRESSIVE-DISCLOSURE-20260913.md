@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** IN PROGRESS
+- **State:** IMPLEMENTED / VERIFIED; lifecycle superseded by `v2-production-progressive-disclosure-r2-20260913`
 - **Task id:** `v2-production-progressive-disclosure-20260913`
 - **Goal:** Continue the user-requested Computer Use UX optimization by restoring a clear Production overview hierarchy and reducing narrow-screen content overload without removing capabilities.
 - **Boundary:** Production-page presentation, responsive disclosure, and directly related frontend tests only.
@@ -55,4 +55,10 @@
 
 ## Completion Evidence
 
-- Record exact commits, test commands, runtime image, after screenshot, and browser observations after implementation.
+- Implementation commits: `fe8574d` and `e536bb5`.
+- Frontend lint, typecheck, format, 162 unit tests, production build, 22 E2E tests, and `git diff --check` passed.
+- Formal frontend runtime image: `sha256:32fbbb88c3700044723b4ff82784e028ee7ebe1a26e99e1c68d2f0606399bdef`; `http://127.0.0.1:8080/healthz` returned 200.
+- Current-run browser evidence: `tmp/ux-audit-20260913/06-production-mobile-final-top.png`, `07-production-mobile-final-table.png`, and `08-production-mobile-workflow-expanded.png`.
+- At `390×844`, the document is `1,648px` high when tools are collapsed (down from roughly `6,697px`); one `h1` is present, the monitor precedes the disclosures, all three disclosures are closed, the first two status cards share a row, and document width equals client width.
+- The `254px` labelled table region exposes a `600px` table, is focusable, reaches its `346px` maximum horizontal offset, and keeps the first scene-workspace action fully within the viewport at the right edge.
+- The original ledger lifecycle was truthfully marked `FAILED` because the responsive table fix added `ProductionMonitor.tsx` after STARTED and owned paths are immutable. The replacement contract records the complete ownership boundary and formal closeout; no ledger history was rewritten.
