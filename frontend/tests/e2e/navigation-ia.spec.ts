@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installProfessionalMock, PROJECT_ID } from "./professional-mocks";
+import { installProfessionalMock, PROJECT_ID, SHOT_ID } from "./professional-mocks";
 
 test("Project Lobby removes empty and internal explanation clutter", async ({ page }) => {
   await installProfessionalMock(page);
@@ -194,4 +194,100 @@ test("mobile Production prioritizes the cross-scene overview and progressively d
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
+});
+
+test("mobile Review keeps the keyframe and normalized annotation surface inside the workspace", async ({
+  page,
+}) => {
+  const state = await installProfessionalMock(page);
+  state.formalKeyframeArtifactId = "artifact-review-keyframe";
+  state.annotations.push({
+    id: "annotation-review-region",
+    project_id: PROJECT_ID,
+    shot_id: SHOT_ID,
+    artifact_id: state.formalKeyframeArtifactId,
+    target_kind: "image_region",
+    note: "检查人物位置",
+    x: "0.1",
+    y: "0.2",
+    width: "0.3",
+    height: "0.4",
+    time_start: null,
+    time_end: null,
+    created_at: "2026-09-13T00:00:00Z",
+  });
+  await page.route(`**/shots/${SHOT_ID}/workbench`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        shot: {
+          id: SHOT_ID,
+          formal_keyframe_artifact_id: state.formalKeyframeArtifactId,
+          formal_video_artifact_id: null,
+          duration_seconds: "5",
+        },
+      }),
+    });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByRole("link", { name: "待审内容" }).click();
+
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/review`);
+  await expect(page.getByRole("heading", { level: 1, name: "镜头审片与批注" })).toBeVisible();
+  const canvas = page.getByTestId("media-review-canvas");
+  const image = page.getByRole("img", { name: "review target" });
+  const region = page.getByTestId("review-region");
+  await expect(canvas).toBeVisible();
+  await expect(region).toHaveCount(1);
+  await image.evaluate((element) => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="736" height="1312"><rect width="736" height="1312" fill="#1d2530"/></svg>';
+    (element as HTMLImageElement).src = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  });
+  await expect
+    .poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))
+    .toBe(736);
+
+  const geometry = await page.evaluate(() => {
+    const main = document.querySelector("main")!;
+    const canvasElement = document.querySelector<HTMLElement>(
+      '[data-testid="media-review-canvas"]',
+    )!;
+    const imageElement = document.querySelector<HTMLImageElement>('img[alt="review target"]')!;
+    const regionElement = document.querySelector<HTMLElement>('[data-testid="review-region"]')!;
+    const canvasBox = canvasElement.getBoundingClientRect();
+    const imageBox = imageElement.getBoundingClientRect();
+    const regionBox = regionElement.getBoundingClientRect();
+    return {
+      mainFits: main.scrollWidth <= main.clientWidth,
+      pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      canvas: { x: canvasBox.x, y: canvasBox.y, width: canvasBox.width, right: canvasBox.right },
+      image: {
+        x: imageBox.x,
+        y: imageBox.y,
+        width: imageBox.width,
+        height: imageBox.height,
+        right: imageBox.right,
+      },
+      region: {
+        x: regionBox.x,
+        y: regionBox.y,
+        width: regionBox.width,
+        height: regionBox.height,
+      },
+      contentRight: main.getBoundingClientRect().right,
+    };
+  });
+  expect(geometry.mainFits).toBe(true);
+  expect(geometry.pageFits).toBe(true);
+  expect(geometry.canvas.width).toBeLessThan(736);
+  expect(geometry.canvas.right).toBeLessThanOrEqual(geometry.contentRight);
+  expect(geometry.image.width).toBeCloseTo(geometry.canvas.width, 1);
+  expect(geometry.image.right).toBeLessThanOrEqual(geometry.contentRight);
+  expect(geometry.image.width / geometry.image.height).toBeCloseTo(736 / 1312, 2);
+  expect((geometry.region.x - geometry.canvas.x) / geometry.canvas.width).toBeCloseTo(0.1, 2);
+  expect((geometry.region.y - geometry.canvas.y) / geometry.image.height).toBeCloseTo(0.2, 2);
+  expect(geometry.region.width / geometry.canvas.width).toBeCloseTo(0.3, 2);
+  expect(geometry.region.height / geometry.image.height).toBeCloseTo(0.4, 2);
 });

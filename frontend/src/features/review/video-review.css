@@ -38,6 +38,30 @@
   border-radius: 4px;
 }
 
+.media-review-canvas {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.media-review-image {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+.media-review-region {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--df-focus-ring);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 .qc-project-page[data-testid="review-workspace"] {
   grid-template-columns: minmax(0, 1fr);
 }
