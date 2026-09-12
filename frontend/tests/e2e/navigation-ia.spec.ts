@@ -111,7 +111,14 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
   await expect(page.getByRole("button", { name: "展开二级导航" })).toBeVisible();
 
   await page.getByRole("button", { name: "展开二级导航" }).click();
-  await page.getByRole("button", { name: "关闭二级导航" }).click();
+  const drawer = page.getByRole("complementary", { name: "二级导航" });
+  const drawerBox = await drawer.boundingBox();
+  const scrim = page.getByRole("button", { name: "关闭二级导航" });
+  const scrimBox = await scrim.boundingBox();
+  expect(drawerBox).not.toBeNull();
+  expect(scrimBox).not.toBeNull();
+  expect(scrimBox!.x).toBeGreaterThanOrEqual(drawerBox!.x + drawerBox!.width);
+  await scrim.click();
   await expect(page.getByRole("button", { name: "展开二级导航" })).toBeVisible();
 
   await page.getByRole("link", { name: "设置" }).click();

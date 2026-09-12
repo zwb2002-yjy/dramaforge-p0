@@ -429,7 +429,7 @@
 
   .df-context-scrim {
     position: fixed;
-    inset: 0 0 0 var(--df-primary-nav-width);
+    inset: 0 0 0 calc(var(--df-primary-nav-width) + var(--df-context-nav-width));
     z-index: var(--df-z-dropdown);
     display: block;
     min-width: 0;
