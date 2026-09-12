@@ -25,6 +25,10 @@
   z-index: var(--df-z-sticky);
 }
 
+.df-context-scrim {
+  display: none;
+}
+
 .df-primary-sidebar {
   display: flex;
   flex-direction: column;
@@ -234,14 +238,6 @@
   color: var(--df-text-secondary);
 }
 
-.df-page-eyebrow {
-  color: var(--df-brass) !important;
-  font-size: var(--df-text-xs);
-  font-weight: var(--df-weight-semibold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .df-lobby-section,
 .df-settings-section {
   margin-top: var(--df-space-6);
@@ -429,6 +425,19 @@
     transition:
       transform var(--df-duration-base) var(--df-ease),
       visibility var(--df-duration-base) var(--df-ease);
+  }
+
+  .df-context-scrim {
+    position: fixed;
+    inset: 0 0 0 var(--df-primary-nav-width);
+    z-index: var(--df-z-dropdown);
+    display: block;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: rgb(0 0 0 / 48%);
   }
 
   .secondary-open .df-context-sidebar {

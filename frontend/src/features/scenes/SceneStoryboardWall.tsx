@@ -53,9 +53,8 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   return (
     <div data-testid="scene-storyboard-wall" className="qc-scene-wall">
       <header className="qc-page-heading">
-        <p>场景</p>
-        <h1>场景总览 / 故事板墙</h1>
-        <span>项目首页是视觉故事板墙：场景代表画面、名称、镜头数与少量状态。</span>
+        <h1>场景总览</h1>
+        <span>每个场景一张代表画面；拖动卡片可调整顺序。</span>
       </header>
 
       {scenes.isError && <div className="flash err">无法读取场景：{String(scenes.error)}</div>}
@@ -86,8 +85,12 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
                 {scene.formal_keyframe_count} 关键帧 · {scene.formal_video_count} 视频
               </span>
               {scene.risk_count > 0 && <span className="qc-risk">⚠ {scene.risk_count} 风险</span>}
-              <button type="button" onClick={() => copy.mutate(scene.id)}>
-                复制
+              <button
+                type="button"
+                onClick={() => copy.mutate(scene.id)}
+                title={`复制「${scene.location_name}」为新的场景草稿`}
+              >
+                复制场景
               </button>
             </footer>
           </li>

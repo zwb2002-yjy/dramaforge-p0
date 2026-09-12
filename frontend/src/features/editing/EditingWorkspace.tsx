@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { EditingSessionPicker } from "./EditingSessionPicker";
 import { queryKeys } from "../../lib/queryKeys";
+import { nodeRunStatusLabel } from "../../lib/runLabels";
 import {
   artifactContentUrl,
   fetchOpenCutManifest,
@@ -137,6 +138,19 @@ function isSessionVersion(value: unknown): value is number {
 const FINAL_FILM_TERMINAL_SUCCESS = new Set(["completed", "cached", "completed_after_cancel"]);
 const FINAL_FILM_TERMINAL_FAILURE = new Set(["failed", "blocked", "cancelled"]);
 
+const EDIT_SESSION_STATUS_LABEL: Record<string, string> = {
+  draft: "草稿",
+  active: "编辑中",
+  archived: "已归档",
+};
+
+const STORAGE_STATE_LABEL: Record<string, string> = {
+  available: "可用",
+  missing: "缺失",
+  deleted: "已删除",
+  pending: "处理中",
+};
+
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
@@ -149,12 +163,12 @@ async function waitForPreparedTail(projectId: string, nodeRunIds: string[]): Pro
     const runs = new Map(snapshot.node_runs.map((run) => [run.id, run]));
     const selected = nodeRunIds.map((id) => runs.get(id));
     if (selected.some((run) => run?.status && FINAL_FILM_TERMINAL_FAILURE.has(run.status))) {
-      throw new Error("Final Film 尾链有任务失败，请先处理生产错误。");
+      throw new Error("成片尾链有任务失败，请先处理生产错误。");
     }
     if (selected.every((run) => run && FINAL_FILM_TERMINAL_SUCCESS.has(run.status))) return;
     await wait(1200);
   }
-  throw new Error("Final Film 尾链等待超时，请到生产监控查看任务状态。");
+  throw new Error("等待成片尾链超时，请到制作页查看任务状态。");
 }
 
 async function waitForFinalFilmJob(
@@ -166,13 +180,13 @@ async function waitForFinalFilmJob(
   let current = initial;
   while (Date.now() < deadline) {
     if (FINAL_FILM_TERMINAL_FAILURE.has(current.status)) {
-      throw new Error(current.error_summary || "Final Film Worker 执行失败。");
+      throw new Error(current.error_summary || "成片渲染失败。");
     }
     if (current.result && FINAL_FILM_TERMINAL_SUCCESS.has(current.status)) return current.result;
     await wait(1200);
     current = await fetchFinalFilmStatus(projectId, initial.node_run_id);
   }
-  throw new Error("Final Film 渲染等待超时，请到生产监控查看任务状态。");
+  throw new Error("等待成片渲染超时，请到制作页查看任务状态。");
 }
 
 function timelineForSave(
@@ -337,14 +351,14 @@ export function EditingWorkspace({
 
   const save = useMutation({
     mutationFn: () => {
-      if (!sessionId || !draft) throw new Error("没有可保存的 EditSession 草稿");
+      if (!sessionId || !draft) throw new Error("没有可保存的剪辑会话草稿");
       return saveEditTimeline(projectId, sessionId, timelineForSave(draft));
     },
     onSuccess: (saved) => {
       const next = editableTimeline(saved);
       setDraft(next);
       setBaseline(next);
-      setFeedback("时间线已保存（服务器响应已成为新的 clean baseline）");
+      setFeedback("时间线已保存。");
       setExported(null);
       setSuggestionPreview(null);
       setSuggestionPreviewContext(null);
@@ -362,7 +376,7 @@ export function EditingWorkspace({
 
   const exportMutation = useMutation({
     mutationFn: () => {
-      if (!sessionId) throw new Error("请先创建或选择 EditSession");
+      if (!sessionId) throw new Error("请先创建或选择剪辑会话");
       return exportEditSession(projectId, sessionId);
     },
     onSuccess: (result) => {
@@ -376,11 +390,11 @@ export function EditingWorkspace({
 
   async function runFinalFilmExport() {
     if (dirty) {
-      setFinalFilmError("时间线有未保存修改，请先保存后再导出 Final Film。");
+      setFinalFilmError("时间线有未保存修改，请先保存后再导出成片。");
       return;
     }
     if (!sessionId || !isSessionVersion(currentSessionVersion)) {
-      setFinalFilmError("请先创建并加载 EditSession 后再导出 Final Film。");
+      setFinalFilmError("请先创建并加载剪辑会话后再导出成片。");
       return;
     }
     const idempotencyKey = `final-${projectId}-${sessionId}-${currentSessionVersion}`;
@@ -408,7 +422,7 @@ export function EditingWorkspace({
       const result = await waitForFinalFilmJob(projectId, queued);
       if (isCurrent()) setFinalFilm(result);
     } catch (error: unknown) {
-      if (isCurrent()) setFinalFilmError(`Final Film 导出失败：${errorMessage(error)}`);
+      if (isCurrent()) setFinalFilmError(`成片导出失败：${errorMessage(error)}`);
     } finally {
       if (isCurrent()) setFinalFilmPending(null);
       void queryClient.invalidateQueries({ queryKey: historyKey });
@@ -785,24 +799,21 @@ export function EditingWorkspace({
         />
 
         <header className="qc-page-heading">
-          <p>剪辑</p>
-          <h1>持久化 EditSession</h1>
-          <span>
-            当前会话来自服务器；编辑层只保存时间线，不会反向修改 Shot 或 Production Graph。
-          </span>
+          <h1>剪辑会话</h1>
+          <span>编辑层只保存时间线，不会反向修改镜头或生产事实。</span>
           <p className="callout" data-testid="editing-session-read-only">
-            production lineage 只读 · 不渲染媒体、不调用 Provider。
+            生产血缘只读 · 不渲染媒体、不调用模型。
           </p>
         </header>
 
         {persistedSession.isLoading && (
           <p className="muted" data-testid="editing-session-loading">
-            正在读取 EditSession…
+            正在读取剪辑会话…
           </p>
         )}
         {persistedSession.isError && (
           <div className="flash err" data-testid="editing-session-error">
-            无法读取 EditSession：{errorMessage(persistedSession.error)}
+            无法读取剪辑会话，请刷新页面重试。
           </div>
         )}
 
@@ -811,10 +822,13 @@ export function EditingWorkspace({
             <section className="editing-session-facts" data-testid="edit-session-facts">
               <h2>{persistedSession.data.name}</h2>
               <dl>
-                <dt>Session ID</dt>
+                <dt>会话编号</dt>
                 <dd>{persistedSession.data.id}</dd>
                 <dt>状态</dt>
-                <dd>{persistedSession.data.status}</dd>
+                <dd>
+                  {EDIT_SESSION_STATUS_LABEL[persistedSession.data.status] ??
+                    persistedSession.data.status}
+                </dd>
                 <dt>版本</dt>
                 <dd data-testid="edit-session-version">
                   {isSessionVersion(persistedSession.data.version)
@@ -824,7 +838,7 @@ export function EditingWorkspace({
                 <dt>镜头数量</dt>
                 <dd>{draft.clips.length}</dd>
               </dl>
-              <h3>Production lineage（只读）</h3>
+              <h3>生产血缘（只读）</h3>
               <pre data-testid="edit-session-lineage">
                 {formatJson(persistedSession.data.production_lineage)}
               </pre>
@@ -1035,7 +1049,6 @@ export function EditingWorkspace({
                                 片段 {operation.clip_id} · 字幕 {operation.subtitle || "（关闭）"}
                               </span>
                             )}
-                            <pre>{formatJson(operation)}</pre>
                           </li>
                         ))}
                       </ol>
@@ -1283,7 +1296,7 @@ export function EditingWorkspace({
                   onClick={() => exportMutation.mutate()}
                   disabled={exportMutation.isPending}
                 >
-                  {exportMutation.isPending ? "读取导出…" : "导出时间线"}
+                  {exportMutation.isPending ? "正在导出…" : "导出时间线"}
                 </button>
                 <button
                   type="button"
@@ -1292,36 +1305,34 @@ export function EditingWorkspace({
                   disabled={dirty || finalFilmPending !== null || save.isPending}
                 >
                   {finalFilmPending === "prepare"
-                    ? "准备尾链…"
+                    ? "准备素材…"
                     : finalFilmPending === "tail"
-                      ? "等待尾链完成…"
+                      ? "等待成片任务…"
                       : finalFilmPending === "render"
-                        ? "渲染 Final Film…"
-                        : "导出 Final Film Artifact"}
+                        ? "正在生成成片…"
+                        : "导出成片 MP4"}
                 </button>
               </div>
               {dirty && (
                 <p className="editing-final-film-dirty-gate" data-testid="final-film-dirty-gate">
-                  时间线有未保存修改；保存后才能导出 Final Film，避免导出旧的服务器版本。
+                  时间线有未保存修改；保存后才能导出成片，避免导出旧的服务器版本。
                 </p>
               )}
             </section>
 
             <section aria-label="历史成片与导出状态">
-              <h2>历史成片与导出状态</h2>
-              <p>读取已有生产结果，不会重新导出。历史版本不会冒充当前时间线。</p>
+              <h2>成片历史</h2>
+              <p>这些是已经生成的成片；查看不会重新生成。</p>
               <button type="button" onClick={() => void filmHistory.refetch()}>
                 刷新成片历史
               </button>
               {filmHistory.isLoading && <p role="status">正在读取成片历史…</p>}
-              {filmHistory.isError && (
-                <p role="alert">无法读取成片历史：{String(filmHistory.error)}</p>
-              )}
+              {filmHistory.isError && <p role="alert">无法读取成片历史，请稍后重试。</p>}
               {filmHistory.data?.length === 0 && <p>此会话还没有成片导出记录。</p>}
               <ul>
                 {(filmHistory.data ?? []).map((job) => (
                   <li key={job.node_run_id}>
-                    Timeline v{job.timeline_version} · {job.status}
+                    时间线 v{job.timeline_version} · {nodeRunStatusLabel(job.status)}
                     {job.error_summary && <p role="status">{job.error_summary}</p>}
                     {job.result && (
                       <button
@@ -1341,29 +1352,32 @@ export function EditingWorkspace({
 
             {displayedFilm && (
               <section className="final-film-result" data-testid="final-film-result">
-                <h2>Final Film Artifact</h2>
+                <h2>成片</h2>
                 <p>
                   {displayedFilm.timeline_version === currentSessionVersion
                     ? "当前时间线版本的已完成成片"
-                    : `历史成片 · Timeline v${displayedFilm.timeline_version}（当前 v${currentSessionVersion}）`}
+                    : `历史成片 · 时间线 v${displayedFilm.timeline_version}（当前 v${currentSessionVersion}）`}
                 </p>
                 <dl>
-                  <dt>EditSession</dt>
+                  <dt>剪辑会话</dt>
                   <dd>{displayedFilm.edit_session_id}</dd>
-                  <dt>Timeline version</dt>
+                  <dt>时间线版本</dt>
                   <dd>{displayedFilm.timeline_version}</dd>
-                  <dt>Artifact</dt>
+                  <dt>素材编号</dt>
                   <dd>{displayedFilm.artifact_id}</dd>
-                  <dt>duration_seconds</dt>
+                  <dt>时长（秒）</dt>
                   <dd>{displayedFilm.duration_seconds}</dd>
-                  <dt>mime_type</dt>
+                  <dt>格式</dt>
                   <dd>{displayedFilm.mime_type}</dd>
-                  <dt>byte_size</dt>
+                  <dt>文件大小（字节）</dt>
                   <dd>{displayedFilm.byte_size}</dd>
-                  <dt>content_hash</dt>
+                  <dt>内容校验值</dt>
                   <dd>{displayedFilm.content_hash}</dd>
-                  <dt>storage_state</dt>
-                  <dd>{displayedFilm.storage_state}</dd>
+                  <dt>存储状态</dt>
+                  <dd>
+                    {STORAGE_STATE_LABEL[displayedFilm.storage_state] ??
+                      displayedFilm.storage_state}
+                  </dd>
                   <dt>可播放性断言</dt>
                   <dd>
                     {displayedFilm.ffprobe?.assertions &&
@@ -1385,7 +1399,7 @@ export function EditingWorkspace({
                   href={artifactContentUrl(projectId, displayedFilm.artifact_id)}
                   download={`dramaforge-final-film-${displayedFilm.content_hash.slice(0, 12)}.mp4`}
                 >
-                  下载 Final Film MP4
+                  下载成片 MP4
                 </a>
                 {displayedFilm.subtitle_artifact_id ? (
                   <a
@@ -1410,11 +1424,11 @@ export function EditingWorkspace({
               <section className="editing-session-export" data-testid="edit-session-export">
                 <h2>导出结果</h2>
                 <dl>
-                  <dt>format</dt>
+                  <dt>格式</dt>
                   <dd>{exported.format}</dd>
-                  <dt>clip_count</dt>
+                  <dt>片段数</dt>
                   <dd>{exported.clip_count}</dd>
-                  <dt>duration_seconds</dt>
+                  <dt>时长（秒）</dt>
                   <dd>{exported.duration_seconds}</dd>
                 </dl>
               </section>
@@ -1438,11 +1452,10 @@ export function EditingWorkspace({
       <EditingSessionPicker projectId={projectId} onSelect={onSessionSelected} />
 
       <header className="qc-page-heading">
-        <p>剪辑</p>
-        <h1>OpenCut 剪辑交接</h1>
-        <span>未选择持久化 EditSession；下面仅是正式生产 manifest 预览。</span>
+        <h1>剪辑交接</h1>
+        <span>还没有可编辑的剪辑会话；下面是正式时间线的只读预览。</span>
         <p className="callout" data-testid="editing-read-only">
-          只读交接预览 · 仅展示已确认的正式视频，不会触发生成或写回生产事实。
+          只读预览 · 仅展示已确认的正式视频，不会触发生成或写回生产事实。
         </p>
       </header>
       {manifest.isLoading && (
@@ -1469,7 +1482,7 @@ export function EditingWorkspace({
             create.isPending || manifest.isLoading || projectId === "demo" || !manifest.data
           }
         >
-          {create.isPending ? "正在创建 EditSession…" : "创建可编辑 EditSession"}
+          {create.isPending ? "正在创建剪辑会话…" : "创建可编辑剪辑会话"}
         </button>
       )}
       {manifest.data && !manifest.isError && (
@@ -1505,12 +1518,11 @@ export function EditingWorkspace({
                 {clips.map(({ track, clip }) => (
                   <li key={clip.id} data-testid="editing-clip">
                     <strong>{track}</strong> · {clip.timeline_start_seconds}s–
-                    {clip.timeline_end_seconds}s · 项目 {manifest.data.project_id} · 场景{" "}
-                    {clip.scene_id} · 镜头 {clip.shot_id}
+                    {clip.timeline_end_seconds}s · 场景 {clip.scene_id} · 镜头 {clip.shot_id}
                     <br />
                     <small>
-                      正式 Artifact {clip.artifact_id ?? "未知"}
-                      {clip.source_url ? ` · 存储 ${clip.source_url}` : ""}
+                      正式素材 {clip.artifact_id ?? "未知"}
+                      {clip.source_url ? " · 已交付" : ""}
                     </small>
                   </li>
                 ))}

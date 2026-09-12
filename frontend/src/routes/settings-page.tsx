@@ -24,12 +24,23 @@ function SettingsHeader({ title, description }: { title: string; description: st
   return (
     <header className="df-page-header">
       <div>
-        <p className="df-page-eyebrow">Settings</p>
         <h1>{title}</h1>
         <p>{description}</p>
       </div>
     </header>
   );
+}
+
+const ENVIRONMENT_LABELS: Record<string, string> = {
+  development: "开发环境",
+  test: "测试环境",
+  staging: "预发布环境",
+  production: "生产环境",
+};
+
+function environmentLabel(env: string | undefined): string {
+  if (!env) return "—";
+  return ENVIRONMENT_LABELS[env] ?? env;
 }
 
 function useSettingsWorkspace() {
@@ -125,16 +136,24 @@ export function AccountSettingsPage() {
         </section>
         <section className="df-settings-card">
           <h2>实例状态</h2>
-          <p className={serviceReady ? "status-ok" : "status-bad"}>
-            {serviceReady ? "服务就绪" : "服务未就绪"}
-          </p>
-          {health.data && (
-            <dl>
-              <dt>环境</dt>
-              <dd>{health.data.env}</dd>
-              <dt>版本</dt>
-              <dd>{health.data.version}</dd>
-            </dl>
+          {health.isLoading ? (
+            <p className="muted" role="status">
+              正在读取实例状态…
+            </p>
+          ) : (
+            <>
+              <p className={serviceReady ? "status-ok" : "status-bad"}>
+                {serviceReady ? "服务就绪" : "服务未就绪"}
+              </p>
+              {health.data && (
+                <dl>
+                  <dt>环境</dt>
+                  <dd>{environmentLabel(health.data.env)}</dd>
+                  <dt>版本</dt>
+                  <dd>{health.data.version}</dd>
+                </dl>
+              )}
+            </>
           )}
         </section>
       </div>
@@ -199,48 +218,61 @@ export function WorkspaceSettingsPage() {
             onChange={(event) => setWorkspaceName(event.target.value)}
             placeholder="新空间名"
           />
-          <button type="submit" disabled={!workspaceName.trim() || createMutation.isPending}>
+          <button
+            type="submit"
+            disabled={!workspaceName.trim() || createMutation.isPending}
+            title={workspaceName.trim() ? undefined : "请先填写新空间名"}
+          >
             创建空间
           </button>
         </form>
         <div className="workspace-list" role="list" aria-label="我的空间">
-          {(workspaces.data ?? []).map((workspace) => (
-            <div
-              className={
-                workspace.id === selectedWorkspaceId ? "workspace-row selected" : "workspace-row"
-              }
-              key={workspace.id}
-              role="listitem"
-            >
-              <button
-                className="workspace-select"
-                type="button"
-                onClick={() => selectWorkspace(workspace.id)}
+          {(workspaces.data ?? []).map((workspace) => {
+            const hasProjects = Boolean(
+              projects.data?.some((project) => project.workspace_id === workspace.id),
+            );
+            const isSelected = workspace.id === selectedWorkspaceId;
+            // Only the active, empty workspace can be deleted; the disabled
+            // action states the reason instead of failing silently.
+            const deleteDisabledReason = hasProjects
+              ? "该空间仍有项目，请先移动或删除其中的项目。"
+              : isSelected
+                ? ""
+                : "请先切换到该空间，再删除它。";
+            return (
+              <div
+                className={isSelected ? "workspace-row selected" : "workspace-row"}
+                key={workspace.id}
+                role="listitem"
               >
-                {workspace.name}
-              </button>
-              <div className="workspace-actions">
                 <button
-                  className="ghost"
+                  className="workspace-select"
                   type="button"
-                  onClick={() => renameMutation.mutate(workspace)}
+                  onClick={() => selectWorkspace(workspace.id)}
                 >
-                  重命名
+                  {workspace.name}
                 </button>
-                <button
-                  className="ghost danger"
-                  type="button"
-                  onClick={() => deleteMutation.mutate(workspace)}
-                  disabled={
-                    workspace.id !== selectedWorkspaceId ||
-                    Boolean(projects.data?.some((project) => project.workspace_id === workspace.id))
-                  }
-                >
-                  删除
-                </button>
+                <div className="workspace-actions">
+                  <button
+                    className="ghost"
+                    type="button"
+                    onClick={() => renameMutation.mutate(workspace)}
+                  >
+                    重命名
+                  </button>
+                  <button
+                    className="ghost danger"
+                    type="button"
+                    onClick={() => deleteMutation.mutate(workspace)}
+                    disabled={Boolean(deleteDisabledReason)}
+                    title={deleteDisabledReason || undefined}
+                  >
+                    删除
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {!workspaces.isLoading && !workspaces.data?.length && (
             <p className="muted">还没有工作空间，请先创建一个。</p>
           )}
@@ -282,8 +314,8 @@ export function DefaultPreferencesSettingsPage() {
   return (
     <main className="df-page df-settings-page" data-testid="default-settings-page">
       <SettingsHeader
-        title="默认创作偏好"
-        description="这些是新建项目表单的初始选择，每个项目创建时都可以调整。"
+        title="默认创作偏好（只读）"
+        description="新建项目表单以这些值作为初始选择，每个项目创建时都能改。"
       />
       <section className="df-settings-card">
         <dl>
@@ -295,7 +327,7 @@ export function DefaultPreferencesSettingsPage() {
           <dd>9:16 竖屏</dd>
         </dl>
         <p className="muted">
-          当前版本不持久化实例级默认值；创建起点和导演参与度不会生成不同工作台或运行路径。
+          当前版本不保存实例级自定义值，因此这些初始值只在新建项目时出现，不会生成不同的工作台或制作路径。
         </p>
       </section>
     </main>

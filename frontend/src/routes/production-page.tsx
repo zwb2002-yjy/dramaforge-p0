@@ -43,6 +43,24 @@ const NODES = [
   "continuity_review",
 ] as const;
 
+const RUN_STATUS_LABEL: Record<string, string> = {
+  queued: "已排队",
+  running: "执行中",
+  leased: "执行中",
+  completed: "已完成",
+  cached: "已复用",
+  completed_after_cancel: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+  cancel_requested: "取消中",
+  timed_out: "超时",
+  skipped: "已跳过",
+};
+
+function nodeRunStatusLabel(status: string): string {
+  return RUN_STATUS_LABEL[status] ?? status;
+}
+
 function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, string> {
   const map: Record<string, string> = {};
   const completed = runs.filter((run) =>
@@ -91,6 +109,7 @@ function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, str
 export function ProductionPage({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgTone, setMsgTone] = useState<"ok" | "err">("ok");
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
 
   const snapshot = useQuery({
@@ -158,12 +177,14 @@ export function ProductionPage({ projectId }: { projectId: string }) {
   ) {
     if (!shotId) return;
     setMsg(null);
+    setMsgTone("ok");
     try {
       const r = await fn();
-      setMsg(`${label}: ${r.status} — ${r.message}`);
+      setMsg(`${label}：${nodeRunStatusLabel(r.status)} — ${r.message}`);
       await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
       await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
     } catch (e) {
+      setMsgTone("err");
       setMsg(e instanceof Error ? e.message : String(e));
     }
   }
@@ -181,17 +202,22 @@ export function ProductionPage({ projectId }: { projectId: string }) {
       <div className="page-title-row">
         <div>
           <h2 style={{ margin: 0 }}>跨场景生产监控</h2>
-          <p className="muted" style={{ margin: "0.25rem 0 0" }}>
-            场景、镜头、资产、生产链、审片与交付共享同一 Project 事实源；实际制作在场景工作区完成
-          </p>
         </div>
       </div>
 
       <div className="callout">
-        此处监控 Project 生产全貌（NodeRun / Artifact / 正式结果 /
-        实验）。剧本导入与旧分镜主工作区已迁移到场景工作区；媒体生成、修复和导出仍受用户确认、Provider
-        能力和质量门控制。
+        这里汇总全部场景的生产进度；单个镜头的实际制作在场景工作区完成，付费生成、修复与导出都需要你确认。
       </div>
+
+      {msg && (
+        <div
+          className={`flash ${msgTone}`}
+          data-testid="production-msg"
+          role={msgTone === "err" ? "alert" : "status"}
+        >
+          {msg}
+        </div>
+      )}
 
       <WorkflowNavigator projectId={projectId} />
 
@@ -356,19 +382,13 @@ export function ProductionPage({ projectId }: { projectId: string }) {
         }}
       />
 
-      <div className="pipeline-rail" aria-label="shot-p0-v1">
+      <div className="pipeline-rail" aria-label="镜头生产链">
         {NODES.map((n) => (
           <span key={n} className={`pipeline-node ${nodeRailClass[n] ?? ""}`}>
             {zhNode(n)}
           </span>
         ))}
       </div>
-
-      {msg && (
-        <div className="flash ok" data-testid="production-msg">
-          {msg}
-        </div>
-      )}
     </div>
   );
 }

@@ -126,7 +126,7 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
   return (
     <div className="workflow-navigator" data-testid="workflow-navigator">
       <div className="workflow-navigator-header">
-        <span>Workflow Navigator</span>
+        <span>镜头工作流</span>
         <small>
           {data
             ? `${data.total_shots} 镜头 · 正式 ${data.formal_shots} · 阻塞 ${data.blocked_scenes} 场景`
@@ -165,7 +165,7 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
         ))}
       </div>
       <div className="workflow-nav-footer">
-        <small>未声明的多角色镜头不会静默降级；UNSUPPORTED 时 Provider POST=0</small>
+        <small>未声明多角色的镜头会标记为不可双人，不会自动降级执行。</small>
       </div>
     </div>
   );

@@ -111,6 +111,19 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   }, [primary]);
 
   useEffect(() => {
+    if (window.innerWidth < 720) setSecondaryOpen(false);
+  }, [location.href]);
+
+  useEffect(() => {
+    if (!secondaryOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSecondaryOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [secondaryOpen]);
+
+  useEffect(() => {
     if (projectId && projectId !== "demo") {
       window.sessionStorage.setItem(LAST_PROJECT_STORAGE_KEY, projectId);
     }
@@ -139,9 +152,14 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
       data-primary-section={primary}
     >
       <aside className="df-primary-sidebar">
-        <a href="/" className="df-primary-brand" aria-label="DramaForge 项目大厅">
+        <Link
+          to="/"
+          search={{ create: false }}
+          className="df-primary-brand"
+          aria-label="DramaForge 项目大厅"
+        >
           <Aperture size={23} aria-hidden="true" />
-        </a>
+        </Link>
         <nav aria-label="一级导航">
           <PrimaryLink active={primary === "projects"} label="项目" to="/" icon={FolderKanban} />
           {rememberedProjectId ? (
@@ -171,27 +189,15 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 <Menu size={19} aria-hidden="true" />
               )}
             </button>
-            {navigationProjectId ? (
-              <a
-                href={`/settings/projects/${navigationProjectId}`}
-                className={primary === "settings" ? "active" : undefined}
-                aria-current={primary === "settings" ? "page" : undefined}
-                aria-label="设置"
-              >
-                <Settings size={20} aria-hidden="true" />
-                <span>设置</span>
-              </a>
-            ) : (
-              <Link
-                to="/settings/account"
-                className={primary === "settings" ? "active" : undefined}
-                aria-current={primary === "settings" ? "page" : undefined}
-                aria-label="设置"
-              >
-                <Settings size={20} aria-hidden="true" />
-                <span>设置</span>
-              </Link>
-            )}
+            <Link
+              to="/settings/account"
+              className={primary === "settings" ? "active" : undefined}
+              aria-current={primary === "settings" ? "page" : undefined}
+              aria-label="设置"
+            >
+              <Settings size={20} aria-hidden="true" />
+              <span>设置</span>
+            </Link>
             <span className="df-owner-mark" aria-label="Owner 账号">
               创
             </span>
@@ -208,17 +214,21 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
             </header>
             <nav aria-label="项目导航">
               <ContextLink active={!location.hash} label="全部项目" to="/" />
-              <a
-                href="/#recent-projects"
+              <Link
+                to="/"
+                search={{ create: false }}
+                hash="recent-projects"
                 className={location.hash === "#recent-projects" ? "active" : undefined}
               >
                 最近打开
-              </a>
-              <a href="/#project-filters">空间筛选</a>
+              </Link>
+              <Link to="/" search={{ create: false }} hash="project-filters">
+                空间筛选
+              </Link>
             </nav>
-            <a className="df-context-primary-action" href="/?create=1">
+            <Link className="df-context-primary-action" to="/" search={{ create: true }}>
               新建项目
-            </a>
+            </Link>
           </>
         )}
 
@@ -298,19 +308,29 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 icon={SlidersHorizontal}
               />
               {navigationProjectId && (
-                <a
-                  href={`/settings/projects/${navigationProjectId}`}
+                <Link
+                  to="/settings/projects/$projectId"
+                  params={{ projectId: navigationProjectId }}
                   className={pathname.startsWith("/settings/projects/") ? "active" : undefined}
                   aria-current={pathname.startsWith("/settings/projects/") ? "page" : undefined}
                 >
                   <Clapperboard size={17} aria-hidden="true" />
                   <span>当前项目设置</span>
-                </a>
+                </Link>
               )}
             </nav>
           </>
         )}
       </aside>
+
+      {secondaryOpen && (
+        <button
+          type="button"
+          className="df-context-scrim"
+          onClick={() => setSecondaryOpen(false)}
+          aria-label="关闭二级导航"
+        />
+      )}
 
       <div className="df-shell-content">{children}</div>
     </div>

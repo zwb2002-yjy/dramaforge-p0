@@ -2005,6 +2005,22 @@ code {
   color: var(--muted);
   font-size: 0.62rem;
 }
+.creative-provenance-summary {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--df-text-secondary);
+}
+.creative-provenance-raw {
+  margin-top: 0.4rem;
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+.creative-provenance-raw > summary {
+  cursor: pointer;
+}
 .creative-provenance pre {
   margin: 0.35rem 0 0;
   font-size: 0.6rem;

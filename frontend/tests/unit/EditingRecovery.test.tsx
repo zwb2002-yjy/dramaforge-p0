@@ -105,7 +105,7 @@ describe("Editing recovery", () => {
     const view = mount("cut-1");
     const player = await screen.findByTestId("final-film-player");
     expect(player).toHaveAttribute("src", "/api/v1/projects/p1/artifacts/film-1/content");
-    expect(await screen.findByText(/历史成片 · Timeline v1（当前 v2）/)).toBeInTheDocument();
+    expect(await screen.findByText(/历史成片 · 时间线 v1（当前 v2）/)).toBeInTheDocument();
     expect(screen.getByTestId("final-film-download")).toHaveAttribute(
       "href",
       "/api/v1/projects/p1/artifacts/film-1/content",

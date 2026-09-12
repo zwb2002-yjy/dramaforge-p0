@@ -99,8 +99,11 @@ test("creative capabilities panel reads and freezes effective intent with proven
 
   await expect(page.getByTestId("creative-capabilities-panel")).toBeVisible();
 
-  // The frozen effective content and its sources are exposed (read-only).
+  // The frozen effective content and its sources are exposed (read-only). The
+  // panel shows readable labels; the exact frozen payload stays in a collapsed
+  // read-only block with its raw values.
   await expect(page.getByTestId("creative-provenance")).toBeVisible();
+  await expect(page.getByTestId("creative-provenance-summary")).toContainText("短剧悬疑");
   await expect(page.getByTestId("creative-provenance")).toContainText("short_drama_suspense_v1");
   await expect(page.getByTestId("creative-provenance")).toContainText("effective_intent");
   await expect(page.getByTestId("creative-provenance")).toContainText(
@@ -108,8 +111,8 @@ test("creative capabilities panel reads and freezes effective intent with proven
   );
 
   // User selects a genre + style and freezes an explicit selection.
-  await page.getByLabel("Genre").selectOption("short_drama_suspense_v1");
-  await page.getByLabel("Style").selectOption("film_noir_v1");
+  await page.getByLabel("创作类型").selectOption("short_drama_suspense_v1");
+  await page.getByLabel("风格").selectOption("film_noir_v1");
   await page.getByRole("button", { name: "冻结创意能力" }).click();
   await expect(page.getByText("已冻结有效创作意图与来源说明。")).toBeVisible();
   expect(freezeBody).toMatchObject({ shot_id: SHOT_ID });

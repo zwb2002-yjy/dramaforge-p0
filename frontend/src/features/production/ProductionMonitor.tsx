@@ -7,6 +7,7 @@
  * large storyboard workspace were removed from this surface.
  */
 import type { ProjectSnapshot } from "../../lib/api";
+import { shotTypeLabel } from "../../lib/shotLabels";
 import type { SceneSummary } from "../scenes/api";
 import { latestEffectiveNodeRuns } from "./effectiveRuns";
 
@@ -101,7 +102,7 @@ export function ProductionMonitor({
             <thead>
               <tr>
                 <th>场景</th>
-                <th>Shot</th>
+                <th>镜头</th>
                 <th>正式关键帧</th>
                 <th>正式视频</th>
                 <th>风险</th>
@@ -144,7 +145,7 @@ export function ProductionMonitor({
               href={`/projects/${projectId}/scenes/${shot.scene_id}`}
             >
               <span className="num">S{shot.shot_number || shot.sort_order}</span>
-              {shot.shot_type}
+              {shotTypeLabel(shot.shot_type)}
             </a>
           ))}
         </div>

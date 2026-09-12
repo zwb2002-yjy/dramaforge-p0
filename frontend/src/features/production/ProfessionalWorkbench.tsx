@@ -12,7 +12,48 @@ import type {
   ShotCanvasUpdateResponse,
   ShotRead,
 } from "../../lib/api";
+import { assetKindLabel, assetStatusLabel } from "../../lib/assetLabels";
+import { shotTypeLabel } from "../../lib/shotLabels";
 import { latestEffectiveNodeRuns } from "./effectiveRuns";
+
+const EXPERIMENT_STATUS_LABEL: Record<string, string> = {
+  proposed: "待选择",
+  running: "运行中",
+  accepted: "已采用",
+  rejected: "已拒绝",
+  kept: "已保留",
+};
+
+const NODE_RUN_STATUS_LABEL: Record<string, string> = {
+  queued: "已排队",
+  running: "执行中",
+  completed: "已完成",
+  cached: "已复用",
+  failed: "失败",
+  cancelled: "已取消",
+  cancel_requested: "取消中",
+  timed_out: "超时",
+  approved: "已通过",
+  rejected: "已拒绝",
+  skipped: "已跳过",
+};
+
+function nodeRunStatusLabel(status: string): string {
+  return NODE_RUN_STATUS_LABEL[status] ?? status;
+}
+
+const ANNOTATION_SEVERITY_LABEL: Record<string, string> = {
+  note: "提示",
+  warning: "警告",
+  blocker: "阻断",
+};
+
+const ANNOTATION_TARGET_LABEL: Record<string, string> = {
+  shot: "整镜头",
+  image_point: "图片点",
+  image_region: "图片区域",
+  video_time: "视频时间点",
+};
 
 type CanvasSaveResult = ShotRead | ShotCanvasUpdateResponse | void;
 
@@ -273,9 +314,8 @@ export function ProfessionalWorkbench({
     >
       <header className="professional-workbench-header">
         <div>
-          <span className="director-stage-kicker">专业工作台 · Canvas is source of truth</span>
           <h2>场景与镜头</h2>
-          <p className="muted">正式画布决定执行；导演助手只能提出可审阅的变更。</p>
+          <p className="muted">画布上的正式版本决定执行；导演助手只能提出可审阅的变更。</p>
         </div>
         <div className="professional-toolbar">
           <div className="workbench-tabs" role="tablist" aria-label="工作台视图">
@@ -338,7 +378,7 @@ export function ProfessionalWorkbench({
                   >
                     <span className="shot-index">{String(shot.shot_number).padStart(2, "0")}</span>
                     <span className="shot-list-copy">
-                      <strong>{shot.shot_type || "镜头"}</strong>
+                      <strong>{shotTypeLabel(shot.shot_type)}</strong>
                       <small>{shot.dialogue || "无对白"}</small>
                     </span>
                     <span
@@ -375,10 +415,10 @@ export function ProfessionalWorkbench({
                           key={asset.id}
                           className={asset.status === "archived" ? "archived" : ""}
                         >
-                          <span>{asset.kind}</span>
+                          <span>{assetKindLabel(asset.kind)}</span>
                           <strong>{asset.name}</strong>
                           <small>
-                            v{asset.version} · {asset.status}
+                            v{asset.version} · {assetStatusLabel(asset.status)}
                           </small>
                           <p>{asset.description || "暂无描述"}</p>
                           <small>
@@ -479,7 +519,7 @@ export function ProfessionalWorkbench({
                       {activeTab === "canvas" ? "镜头大幕布" : "审片批注预览"}
                     </div>
                     <span>
-                      {selectedShot.shot_type || "镜头"} · {selectedShot.shot_number}
+                      {shotTypeLabel(selectedShot.shot_type)} · {selectedShot.shot_number}
                     </span>
                   </div>
                 )}
@@ -583,7 +623,8 @@ export function ProfessionalWorkbench({
                       {annotations.map((item) => (
                         <article key={item.id}>
                           <span>
-                            {item.severity} · {item.target_kind}
+                            {ANNOTATION_SEVERITY_LABEL[item.severity] ?? item.severity} ·{" "}
+                            {ANNOTATION_TARGET_LABEL[item.target_kind] ?? item.target_kind}
                           </span>
                           <strong>
                             {item.target_kind === "image_point" ||
@@ -594,7 +635,7 @@ export function ProfessionalWorkbench({
                           </strong>
                           <p>{item.note}</p>
                           <small>
-                            {item.status}
+                            {nodeRunStatusLabel(item.status)}
                             {item.width ? ` · 区域 ${item.width}×${item.height}` : ""}
                           </small>
                         </article>
@@ -740,8 +781,8 @@ export function ProfessionalWorkbench({
                     <strong>v{selectedShot.version}</strong>
                   </div>
                   <div>
-                    <small>事实源</small>
-                    <strong>Canvas Revision · {revisions.length}</strong>
+                    <small>画布版本</small>
+                    <strong>{revisions.length} 个版本</strong>
                   </div>
                 </div>
               </div>
@@ -843,7 +884,6 @@ export function ProfessionalWorkbench({
       <section className="panel experiment-branch-panel" data-testid="experiment-branches">
         <div className="panel-header">
           <div>
-            <span className="director-stage-kicker">Formal / Experiment</span>
             <h3>正式线与实验线</h3>
           </div>
           <strong>{experiments.length} 个实验</strong>
@@ -865,10 +905,11 @@ export function ProfessionalWorkbench({
                     <div>
                       <strong>{item.name}</strong>
                       <small>
-                        {item.selected_model ?? "未选模型"} · {item.status} · 候选{" "}
+                        {item.selected_model ?? "未选模型"} ·{" "}
+                        {EXPERIMENT_STATUS_LABEL[item.status] ?? item.status} · 候选{" "}
                         {candidates.length}
                       </small>
-                      {runStates.length > 0 && <small>执行证据：{runStates.length} 个 Run</small>}
+                      {runStates.length > 0 && <small>执行证据：{runStates.length} 次运行</small>}
                     </div>
                     <div className="suggestion-actions">
                       <button
@@ -979,14 +1020,14 @@ export function ProfessionalWorkbench({
             </div>
           </section>
           <section>
-            <h4>OpenCut</h4>
+            <h4>剪辑交接</h4>
             <p className="muted">
-              正式线镜头 {openCutManifest?.shots?.length ?? 0} 个 ·{" "}
-              {openCutManifest?.tracks?.length ?? 0} 条轨道 ·{" "}
-              {openCutManifest?.schema_version ?? "等待清单"}
+              正式镜头 {openCutManifest?.shots?.length ?? 0} 个 ·{" "}
+              {openCutManifest?.tracks?.length ?? 0} 条轨道
+              {openCutManifest ? "" : " · 等待时间线清单"}
             </p>
             <small className="muted">
-              视频、音频、字幕轨道均携带 Artifact 与 Provider 血缘，可由剪辑适配层导入。
+              视频、音频与字幕轨道都带素材与生成来源，可直接导入剪辑适配层。
             </small>
           </section>
         </div>

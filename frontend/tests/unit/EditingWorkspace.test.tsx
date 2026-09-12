@@ -297,13 +297,10 @@ describe("EditingWorkspace", () => {
 
     renderWorkspace();
 
-    expect(await screen.findByText(/正式 Artifact artifact-formal/)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`项目 ${PROJECT_ID}`))).toBeInTheDocument();
+    expect(await screen.findByText(/正式素材 artifact-formal/)).toBeInTheDocument();
     expect(screen.getByText(new RegExp(`场景 ${SCENE_ID}`))).toBeInTheDocument();
     expect(screen.getByText(new RegExp(`镜头 ${SHOT_ID}`))).toBeInTheDocument();
-    expect(
-      screen.getByText(/存储 \/api\/v1\/projects\/project-1\/artifacts\/artifact-formal/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/已交付/)).toBeInTheDocument();
     expect(calls).toEqual([{ method: "GET", url: "/api/v1/projects/project-1/opencut-manifest" }]);
     expect(screen.getByTestId("editing-read-only")).toHaveTextContent("只读");
     expect(screen.getByTestId("create-edit-session")).toBeEnabled();
@@ -454,7 +451,7 @@ describe("EditingWorkspace", () => {
     });
     expect(patch?.body).not.toHaveProperty("production_lineage");
     expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
-    expect(screen.getByText(/服务器响应已成为新的 clean baseline/)).toBeInTheDocument();
+    expect(screen.getByText(/时间线已保存/)).toBeInTheDocument();
   });
 
   it("reopens the exact session from the server instead of merging a fresh manifest", async () => {
@@ -634,9 +631,7 @@ describe("EditingWorkspace", () => {
     expect(await screen.findByTestId("edit-session-dirty")).toBeInTheDocument();
     expect(screen.getByTestId("save-edit-timeline")).toBeEnabled();
     fireEvent.click(screen.getByTestId("save-edit-timeline"));
-    expect(
-      await screen.findByText(/已保存（服务器响应已成为新的 clean baseline）/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/时间线已保存。/)).toBeInTheDocument();
     expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument();
 
     const clips = (patchBody?.timeline as { clips: Array<Record<string, unknown>> })?.clips;
@@ -717,7 +712,7 @@ describe("EditingWorkspace", () => {
     fireEvent.click(screen.getByTestId("editing-suggestion-apply-selected"));
     expect(await screen.findByTestId("edit-session-dirty")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("save-edit-timeline"));
-    await screen.findByText(/已保存（服务器响应已成为新的 clean baseline）/);
+    await screen.findByText(/时间线已保存。/);
 
     const clips = (patchBody?.timeline as { clips: Array<Record<string, unknown>> })?.clips;
     expect(clips?.map((clip) => clip.id)).toEqual(["clip-1", "clip-2"]);

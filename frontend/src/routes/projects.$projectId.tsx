@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Navigate, Outlet, createRoute, useRouterState } from "@tanstack/react-router";
+import { Outlet, createRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { ProjectWorkspaceShell } from "../components/workstation/ProjectWorkspaceShell";
@@ -16,6 +16,7 @@ export const projectRoute = createRoute({
 
 function ProjectLayout() {
   const { projectId } = projectRoute.useParams();
+  const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const view = workspaceViewFromPath(pathname);
   const atRoot = view === null;
@@ -42,10 +43,25 @@ function ProjectLayout() {
     }
   }, [view, workspaceState]);
 
-  if (atRoot && !workspaceState.isLoading) {
+  // Restore the last view with an imperative replace instead of rendering a
+  // <Navigate> element, and require that the router's current pathname is still
+  // the project root. During a navigation away (for example the permanent
+  // Settings entry) the router reports the next route at the parent path while
+  // the old view is still committing; restoring there would outrun the user's
+  // own navigation and replace it.
+  const currentPathname = useRouterState({ select: (state) => state.location.pathname });
+  const atProjectRoot = currentPathname === `/projects/${projectId}`;
+  const restoreRequested = useRef(false);
+  useEffect(() => {
+    if (!atProjectRoot || workspaceState.isLoading || restoreRequested.current) return;
+    restoreRequested.current = true;
     const restoreTarget = workspaceState.lastView ?? "scenes";
-    return <Navigate to={`/projects/$projectId/${restoreTarget}`} params={{ projectId }} replace />;
-  }
+    void navigate({
+      to: `/projects/$projectId/${restoreTarget}`,
+      params: { projectId },
+      replace: true,
+    });
+  }, [atProjectRoot, workspaceState.isLoading, workspaceState.lastView, navigate, projectId]);
 
   const projectRead = project.data ?? undefined;
   const activeView = view ?? "overview";

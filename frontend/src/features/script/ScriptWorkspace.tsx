@@ -17,6 +17,13 @@ type ScriptWorkspaceProps = {
   projectId: string;
 };
 
+const PROPOSAL_STATUS_LABEL: Record<string, string> = {
+  pending: "待确认",
+  applied: "已采用",
+  rejected: "已拒绝",
+  stale: "已过期",
+};
+
 const COMMAND_LABELS: Record<string, string> = {
   "story.set_script_document": "剧本原文",
   "story.upsert_episode": "Episode",
@@ -126,7 +133,6 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
     return (
       <div data-testid="project-script-page" className="qc-project-page">
         <header className="qc-page-heading">
-          <p>剧本</p>
           <h1>剧本工作区</h1>
           <span>演示项目不读取真实剧本数据。</span>
         </header>
@@ -152,13 +158,14 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
   return (
     <div data-testid="project-script-page" className="qc-project-page">
       <header className="qc-page-heading">
-        <p>剧本</p>
         <h1>剧本工作区</h1>
-        <span>Proposal-first：先预览结构差异，再采用到 Canonical Story。</span>
+        <span>修改先形成提案预览，确认后才成为正式剧本。</span>
       </header>
 
       {workspace.isError && (
-        <div className="flash err">无法读取剧本：{String(workspace.error)}</div>
+        <div className="flash err" role="alert">
+          无法读取剧本，请稍后重试或返回项目大厅。
+        </div>
       )}
 
       {data?.document ? (
@@ -191,14 +198,13 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
         </>
       ) : (
         <p className="muted" data-testid="script-empty">
-          当前还没有 Canonical Story。创建并采用第一个 Story 提案后，这里会显示 Episode / Scene /
-          Shot 结构。
+          当前还没有正式剧本。创建并采用第一个剧本提案后，这里会显示集 / 场景 / 镜头结构。
         </p>
       )}
 
       <section className="qc-settings-band" data-testid="story-proposal-composer">
-        <h2>Story 导演提案</h2>
-        <p className="muted">输入故事方向与 Markdown 草稿，生成可预览的 Canonical Story 差异。</p>
+        <h2>剧本提案</h2>
+        <p className="muted">填写故事方向，或直接粘贴 Markdown 剧本草稿。</p>
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -233,7 +239,7 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
               onChange={(event) => setDraftText(event.target.value)}
               rows={12}
               placeholder={
-                "# Episode 1 — Title\n## Scene 1 — Location / day\nsynopsis\n### Shot 1 — medium\nVisual: ...\nDialogue: ..."
+                "# 第 1 集 — 标题\n## 场景 1 — 地点 / 日间\n本场梗概\n### 镜头 1 — 中景\n画面: ...\n对白: ..."
               }
               disabled={createMut.isPending || generateMut.isPending}
             />
@@ -244,7 +250,7 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
             data-testid="story-proposal-create"
             disabled={createMut.isPending || generateMut.isPending || !draftText.trim()}
           >
-            {createMut.isPending ? "生成中…" : "创建 Story 提案"}
+            {createMut.isPending ? "生成中…" : "创建剧本提案"}
           </button>
           <button
             type="button"
@@ -252,13 +258,12 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
             disabled={generateMut.isPending || createMut.isPending || !brief.trim()}
             onClick={() => generateMut.mutate()}
           >
-            {generateMut.isPending ? "模型正在写剧本…" : "用 Brief 生成剧本提案"}
+            {generateMut.isPending ? "模型正在写剧本…" : "用故事方向生成剧本"}
           </button>
         </form>
         {generationEvidence && (
           <p className="muted" data-testid="story-generation-evidence">
-            模型 {generationEvidence.actual_model ?? generationEvidence.model_id} · 调用
-            {generationEvidence.turn_id.slice(0, 8)} ·
+            模型 {generationEvidence.actual_model ?? generationEvidence.model_id} ·
             {generationEvidence.cost_status === "reported"
               ? ` ${generationEvidence.reported_cost} ${generationEvidence.currency}`
               : " 费用未返回"}
@@ -274,11 +279,13 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
       {activeProposal && (
         <section className="qc-settings-band" data-testid="story-proposal-preview">
           <header>
-            <h3>提案差异预览</h3>
-            <span className="muted">状态：{activeProposal.status}</span>
+            <h3>提案预览</h3>
+            <span className="muted">
+              状态：{PROPOSAL_STATUS_LABEL[activeProposal.status] ?? activeProposal.status}
+            </span>
           </header>
           {proposalOperations.length === 0 ? (
-            <p className="muted">草稿与当前 Canonical Story 没有差异。</p>
+            <p className="muted">草稿与当前正式剧本没有差异。</p>
           ) : (
             <div className="qc-proposal-operation-list">
               {proposalOperations.map((operation) => (
@@ -299,8 +306,6 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
                     aria-label={`采用 ${operationLabel(operation)}`}
                   />
                   <strong>{operationLabel(operation)}</strong>
-                  <span className={`story-op-${operation.action}`}>{operation.action}</span>
-                  <code>{operation.command}</code>
                   <small>{operation.rationale || operation.key}</small>
                 </label>
               ))}

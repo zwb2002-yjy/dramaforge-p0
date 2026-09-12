@@ -89,7 +89,7 @@ describe("SceneStoryboardWall", () => {
       </QueryClientProvider>,
     );
     await screen.findAllByTestId("scene-card");
-    fireEvent.click(screen.getAllByRole("button", { name: "复制" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "复制场景" })[0]);
     await waitFor(() => {
       expect(calls.some((call) => call.method === "POST" && call.url.includes("/copy"))).toBe(true);
     });

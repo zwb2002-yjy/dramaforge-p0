@@ -1220,6 +1220,28 @@
       gap: var(--df-space-4);
     }
 
+    /* The monitor is one column of panels; without an explicit shrinkable
+       track its column is floored by the widest panel content (the cross-scene
+       table), which pushed the table action past the clipped shell. */
+    .production-monitor {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .production-monitor > .panel {
+      min-width: 0;
+      overflow-x: auto;
+    }
+
+    .monitor-table th,
+    .monitor-table td {
+      padding: var(--df-space-2) var(--df-space-1);
+      white-space: normal;
+    }
+
+    .monitor-table a.df-btn {
+      padding-inline: var(--df-space-2);
+    }
+
     .qc-asset-grid {
       grid-template-columns: 1fr;
     }

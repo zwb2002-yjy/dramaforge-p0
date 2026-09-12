@@ -112,6 +112,7 @@ function mockAuthenticatedHome(projectCount = 1) {
 
 afterEach(() => vi.restoreAllMocks());
 beforeEach(() => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   window.sessionStorage.clear();
   useUiStore.setState({ leftNavOpen: true, selectedShotId: null });
 });
@@ -170,6 +171,56 @@ describe("Workstation shell", () => {
     );
     expect(shell).toHaveClass("secondary-open");
     expect(navigation).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭二级导航" }));
+    expect(screen.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开二级导航" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("closes mobile L2 after switching creative routes", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const { router } = renderApp("/projects/demo/production");
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开二级导航" }));
+    fireEvent.click(screen.getByRole("link", { name: "剧本" }));
+
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/projects/demo/script"));
+    expect(screen.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("keeps the permanent Settings entry stable across Project routes", async () => {
+    // This test asserts desktop shell behaviour; the previous mobile case leaves
+    // the viewport override in place, so restore it explicitly.
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    renderApp("/projects/demo/production");
+
+    const settingsLink = await screen.findByRole("link", { name: "设置" });
+    expect(settingsLink).toHaveAttribute("href", "/settings/account");
+
+    // The shell contract is the stable cross-route Settings entry and its
+    // destination. jsdom does not carry this route change through (the router
+    // keeps the Project route mounted), so the real click is covered by
+    // navigation-ia.spec.ts against the browser.
+  });
+
+  it("renders the Settings destination the permanent entry points at", async () => {
+    mockAuthenticatedHome();
+    renderApp("/settings/account");
+
+    expect(await screen.findByTestId("account-settings-page")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "账号与实例" })).toBeInTheDocument();
   });
 
   it("shows a blank login form after the single Owner is initialized", async () => {
@@ -281,7 +332,7 @@ describe("Workstation shell", () => {
     );
   });
 
-  it("opens current Project settings from the permanent L1", async () => {
+  it("renders current Project settings inside Settings L2", async () => {
     renderApp("/settings/projects/demo");
 
     expect(await screen.findByTestId("project-settings-page")).toBeInTheDocument();
@@ -342,7 +393,7 @@ describe("Workstation shell", () => {
     const workbench = await screen.findByTestId("professional-workbench");
     expect(workbench).toBeInTheDocument();
     expect(workbench).toHaveTextContent("正式线与实验线");
-    expect(workbench).toHaveTextContent("OpenCut");
+    expect(workbench).toHaveTextContent("剪辑交接");
     expect(workbench).not.toHaveTextContent("预算");
     expect(workbench).not.toHaveTextContent("计费");
     expect(workbench).not.toHaveTextContent("费用");

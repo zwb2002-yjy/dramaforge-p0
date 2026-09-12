@@ -46,11 +46,21 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 
+  await page.evaluate(() => {
+    (window as typeof window & { __dfNavigationMarker?: string }).__dfNavigationMarker = "alive";
+  });
   await page.getByRole("link", { name: "设置" }).click();
-  await expect(page).toHaveURL(`/settings/projects/${PROJECT_ID}`);
+  await expect(page).toHaveURL("/settings/account");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as typeof window & { __dfNavigationMarker?: string }).__dfNavigationMarker,
+      ),
+    )
+    .toBe("alive");
   await page.waitForTimeout(100);
   expect(pageErrors).toEqual([]);
-  await expect(page.getByTestId("project-settings-page")).toBeVisible();
+  await expect(page.getByTestId("account-settings-page")).toBeVisible();
   await expect(page.getByTestId("workstation-shell")).toHaveAttribute(
     "data-primary-section",
     "settings",
@@ -61,6 +71,16 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
   await expect(page.getByRole("navigation", { name: "设置导航" })).toContainText(
     /账号与实例.*工作空间管理.*模型连接.*默认创作偏好.*当前项目设置/s,
   );
+  await page.getByRole("link", { name: "当前项目设置" }).click();
+  await expect(page).toHaveURL(`/settings/projects/${PROJECT_ID}`);
+  await expect(page.getByTestId("project-settings-page")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as typeof window & { __dfNavigationMarker?: string }).__dfNavigationMarker,
+      ),
+    )
+    .toBe("alive");
 });
 
 test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow", async ({
@@ -78,11 +98,29 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 
-  await page.getByRole("button", { name: "收起二级导航" }).click();
+  await page.getByRole("link", { name: "剧本" }).click();
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/script`);
   await expect(page.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
     "aria-expanded",
     "false",
   );
+  await expect(page.getByRole("complementary", { name: "二级导航" })).not.toBeVisible();
+
+  await page.getByRole("button", { name: "展开二级导航" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "展开二级导航" })).toBeVisible();
+
+  await page.getByRole("button", { name: "展开二级导航" }).click();
+  await page.getByRole("button", { name: "关闭二级导航" }).click();
+  await expect(page.getByRole("button", { name: "展开二级导航" })).toBeVisible();
+
+  await page.getByRole("link", { name: "设置" }).click();
+  await expect(page).toHaveURL("/settings/account");
+  await page.getByRole("button", { name: "展开二级导航" }).click();
+  await page.getByRole("link", { name: "当前项目设置" }).click();
+  await expect(page).toHaveURL(`/settings/projects/${PROJECT_ID}`);
+  await expect(page.getByRole("button", { name: "展开二级导航" })).toBeVisible();
+
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);

@@ -39,9 +39,8 @@ export function CreativeAutonomySwitcher({ project }: CreativeAutonomySwitcherPr
       queryClient.setQueryData<ProjectRead>(["project", project.id], (current) =>
         current ? { ...current, creative_profile: updated } : current,
       );
-      setMessage(
-        `导演参与度已切换为 ${updated.director_autonomy}（Profile v${updated.version}）。`,
-      );
+      const next = AUTONOMY_OPTIONS.find((option) => option.value === updated.director_autonomy);
+      setMessage(`导演参与度已切换为${next ? next.label : updated.director_autonomy}。`);
     },
     onError: (error: unknown) => {
       setMessage(`切换失败：${errorMessage(error)}`);
@@ -60,10 +59,9 @@ export function CreativeAutonomySwitcher({ project }: CreativeAutonomySwitcherPr
       data-profile-version={profile.version}
     >
       <header>
-        <p className="director-stage-kicker">导演参与度</p>
-        <h3>项目级 DirectorAutonomy</h3>
+        <h3>导演参与度</h3>
         <p className="muted">
-          只改变导演行为策略与建议密度；不会迁移项目，也不改变 Scene/Shot 或 Runtime 执行身份。
+          只改变导演行为策略与建议密度；不会迁移项目，也不改变场景、镜头或运行身份。
         </p>
       </header>
       <div className="creative-autonomy-controls">
