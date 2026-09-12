@@ -132,3 +132,51 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 });
+
+test("mobile Production prioritizes the cross-scene overview and progressively discloses tools", async ({
+  page,
+}) => {
+  await installProfessionalMock(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/projects/${PROJECT_ID}/production`);
+
+  await expect(page.getByRole("heading", { level: 1, name: "跨场景生产监控" })).toBeVisible();
+  const monitor = page.getByTestId("production-monitor");
+  const workflowDisclosure = page.getByTestId("production-workflow-disclosure");
+  const capabilitiesDisclosure = page.getByTestId("production-capabilities-disclosure");
+  const workbenchDisclosure = page.getByTestId("production-workbench-disclosure");
+  await expect(monitor).toBeVisible();
+  await expect(workflowDisclosure).not.toHaveAttribute("open", "");
+  await expect(capabilitiesDisclosure).not.toHaveAttribute("open", "");
+  await expect(workbenchDisclosure).not.toHaveAttribute("open", "");
+  await expect(page.getByTestId("workflow-navigator")).not.toBeVisible();
+  await expect(page.getByTestId("professional-workbench")).not.toBeVisible();
+
+  const monitorBox = await monitor.boundingBox();
+  const workflowBox = await workflowDisclosure.boundingBox();
+  expect(monitorBox).not.toBeNull();
+  expect(workflowBox).not.toBeNull();
+  expect(monitorBox!.y).toBeLessThan(workflowBox!.y);
+
+  const firstStat = await page
+    .getByTestId("monitor-stats")
+    .locator(".status-card")
+    .nth(0)
+    .boundingBox();
+  const secondStat = await page
+    .getByTestId("monitor-stats")
+    .locator(".status-card")
+    .nth(1)
+    .boundingBox();
+  expect(firstStat).not.toBeNull();
+  expect(secondStat).not.toBeNull();
+  expect(secondStat!.y).toBe(firstStat!.y);
+  expect(secondStat!.x).toBeGreaterThan(firstStat!.x);
+
+  await workflowDisclosure.locator("summary").click();
+  await expect(workflowDisclosure).toHaveAttribute("open", "");
+  await expect(page.getByTestId("workflow-navigator")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true);
+});
