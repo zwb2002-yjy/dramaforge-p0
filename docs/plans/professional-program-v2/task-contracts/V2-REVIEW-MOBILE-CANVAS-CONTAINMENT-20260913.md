@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** READY / NOT STARTED
+- **State:** COMPLETE
 - **Task id:** `v2-review-mobile-canvas-containment-20260913`
 - **Goal:** Continue the user-requested Computer Use UX optimization by making the Review keyframe fully visible and annotatable inside narrow project workspaces.
 - **Boundary:** Review image-canvas presentation and directly related frontend regression tests only.
@@ -47,4 +47,13 @@
 
 ## Completion Evidence
 
-- Pending implementation.
+- Implementation commit: `e721f96` (`fix(frontend): contain review canvas on mobile`).
+- `MediaReviewCanvas` now uses module-owned semantic classes for the containing block, image, and region overlay; no undefined utility class is required.
+- Unit coverage preserves normalized point/region callbacks and asserts the semantic canvas/image/region hooks.
+- Mobile E2E starts from Production, navigates to Review, loads a `736×1312` fixture, and proves responsive containment, preserved aspect ratio, normalized region geometry, and zero page/main overflow.
+- Full frontend verification passed: lint, typecheck, format check, 29 unit files / 162 tests, production build, 23 E2E tests, and `git diff --check`.
+- Formal runtime: `dramaforge-frontend-1` healthy; `/healthz` returned 200; image `sha256:c70c58b45cb974a14c09a4643b148cd6c78feccfa777099548bc2da892881619`.
+- Current real-project browser at `390×844`: canvas and image are both `296×527.640625px` from a `736×1312` source; image right edge is `368px` inside the `384px` document; main `scrollWidth=clientWidth=328`; rendered ratio `0.5609879` matches natural ratio `0.5609756`.
+- The responsive image reduces the current Review document from `2,826px` before to `2,036px` after, and Review → Production navigation returns to the production monitor successfully.
+- Screenshot: `tmp/ux-audit-20260913/09-review-mobile-final-canvas.png`, `390×844`, `330,175` bytes, SHA-256 `7659ee7a9e437736c91bef2d62ea71f517d37b7b0cb4c1de9afac9e9f658a28e` (retained as automated evidence; not passed to `view_image` because it exceeds the repository's 200 KiB inspection limit).
+- No annotation API, persisted data, video behavior, paid operation, Provider call, project mutation, or deletion changed.
