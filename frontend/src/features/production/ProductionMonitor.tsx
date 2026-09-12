@@ -98,41 +98,51 @@ export function ProductionMonitor({
         {scenes.length === 0 ? (
           <p className="muted">尚无场景。请在场景工作区创建场景与镜头。</p>
         ) : (
-          <table className="monitor-table" data-testid="monitor-scene-table">
-            <thead>
-              <tr>
-                <th>场景</th>
-                <th>镜头</th>
-                <th>正式关键帧</th>
-                <th>正式视频</th>
-                <th>风险</th>
-                <th>进入</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scenes.map((scene) => (
-                <tr key={scene.id} data-testid={`monitor-scene-${scene.id}`}>
-                  <td>
-                    <strong>
-                      {scene.episode_number}.{scene.scene_number} · {scene.location_name}
-                    </strong>
-                    <span className="muted">{scene.time_of_day}</span>
-                  </td>
-                  <td>{scene.shot_count}</td>
-                  <td>{scene.formal_keyframe_count ?? 0}</td>
-                  <td>{scene.formal_video_count ?? 0}</td>
-                  <td className={scene.risk_count ? "status-bad" : undefined}>
-                    {scene.risk_count ?? 0}
-                  </td>
-                  <td>
-                    <a className="df-btn ghost" href={`/projects/${projectId}/scenes/${scene.id}`}>
-                      场景工作区
-                    </a>
-                  </td>
+          <div
+            className="monitor-table-scroll"
+            role="region"
+            aria-label="跨场景状态表格"
+            tabIndex={0}
+          >
+            <table className="monitor-table" data-testid="monitor-scene-table">
+              <thead>
+                <tr>
+                  <th>场景</th>
+                  <th>镜头</th>
+                  <th>正式关键帧</th>
+                  <th>正式视频</th>
+                  <th>风险</th>
+                  <th>进入</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {scenes.map((scene) => (
+                  <tr key={scene.id} data-testid={`monitor-scene-${scene.id}`}>
+                    <td>
+                      <strong>
+                        {scene.episode_number}.{scene.scene_number} · {scene.location_name}
+                      </strong>
+                      <span className="muted">{scene.time_of_day}</span>
+                    </td>
+                    <td>{scene.shot_count}</td>
+                    <td>{scene.formal_keyframe_count ?? 0}</td>
+                    <td>{scene.formal_video_count ?? 0}</td>
+                    <td className={scene.risk_count ? "status-bad" : undefined}>
+                      {scene.risk_count ?? 0}
+                    </td>
+                    <td>
+                      <a
+                        className="df-btn ghost"
+                        href={`/projects/${projectId}/scenes/${scene.id}`}
+                      >
+                        场景工作区
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

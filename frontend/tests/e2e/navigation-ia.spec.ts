@@ -173,6 +173,21 @@ test("mobile Production prioritizes the cross-scene overview and progressively d
   expect(secondStat!.y).toBe(firstStat!.y);
   expect(secondStat!.x).toBeGreaterThan(firstStat!.x);
 
+  const tableScroll = page.getByRole("region", { name: "跨场景状态表格" });
+  const tableOverflow = await tableScroll.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(tableOverflow.scrollWidth).toBeGreaterThan(tableOverflow.clientWidth);
+  await tableScroll.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth;
+  });
+  const sceneWorkspaceLink = page.getByRole("link", { name: "场景工作区" }).first();
+  const sceneWorkspaceBox = await sceneWorkspaceLink.boundingBox();
+  expect(sceneWorkspaceBox).not.toBeNull();
+  expect(sceneWorkspaceBox!.x).toBeGreaterThanOrEqual(0);
+  expect(sceneWorkspaceBox!.x + sceneWorkspaceBox!.width).toBeLessThanOrEqual(390);
+
   await workflowDisclosure.locator("summary").click();
   await expect(workflowDisclosure).toHaveAttribute("open", "");
   await expect(page.getByTestId("workflow-navigator")).toBeVisible();

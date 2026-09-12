@@ -20,6 +20,7 @@
 - At `1440×900`, the page is roughly `4,723px` high and the first viewport is dominated by the shot-level workflow list, so the actual cross-scene status summary is not visible.
 - The page begins with an `h2` and has no `h1`.
 - The full Professional Workbench and a second pipeline rail are rendered inline after the cross-scene monitor, recreating the second-workbench effect the product authority explicitly rejects.
+- The first after-build mobile screenshot exposed the six-column cross-scene table compressing Chinese headings into one-character-wide stacks; the table needs a contained, keyboard-focusable horizontal reading region rather than destructive column squeezing.
 - Evidence: `tmp/ux-audit-20260913/03-production-mobile-top.png` and `04-production-desktop-top.png`.
 
 ## Outcome
@@ -29,10 +30,12 @@
 - Disclosures default closed at `<=720px` and open on wider screens; users can toggle each independently, and viewport changes re-apply the responsive default.
 - The selected-shot pipeline rail lives with the Professional Workbench rather than appearing as an unexplained duplicate at page level.
 - Mobile status cards use a compact two-column grid and retain no page-level horizontal overflow.
+- The cross-scene table keeps readable column widths inside its own labelled, keyboard-focusable horizontal scroll region; the page itself still does not overflow.
 
 ## Owned Paths
 
 - `frontend/src/routes/production-page.tsx`
+- `frontend/src/features/production/ProductionMonitor.tsx`
 - `frontend/src/components/workstation/project-shell-visual.css`
 - `frontend/tests/e2e/navigation-ia.spec.ts`
 - this Task Contract

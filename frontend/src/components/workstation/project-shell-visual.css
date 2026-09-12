@@ -934,6 +934,17 @@
     font-size: var(--df-text-sm);
   }
 
+  .monitor-table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
+  .monitor-table-scroll:focus-visible {
+    outline: 2px solid var(--df-focus-ring);
+    outline-offset: 2px;
+  }
+
   .monitor-table {
     width: 100%;
     border-collapse: collapse;
@@ -1299,7 +1310,7 @@
 
     .production-monitor > .panel {
       min-width: 0;
-      overflow-x: auto;
+      overflow: hidden;
     }
 
     .monitor-table th,
@@ -1325,9 +1336,18 @@
     }
 
     .monitor-table {
-      display: block;
-      overflow-x: auto;
-      white-space: nowrap;
+      min-width: 600px;
+      table-layout: auto;
+    }
+
+    .monitor-table th:first-child,
+    .monitor-table td:first-child {
+      min-width: 170px;
+    }
+
+    .monitor-table th:last-child,
+    .monitor-table td:last-child {
+      min-width: 104px;
     }
   }
 }
