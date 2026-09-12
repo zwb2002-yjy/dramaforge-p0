@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeTree } from "../../src/routeTree.gen";
@@ -50,7 +50,7 @@ function mockHomeAuth(ownerInitialized: boolean) {
   });
 }
 
-function mockAuthenticatedHome() {
+function mockAuthenticatedHome(projectCount = 1) {
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = String(input);
     if (url.endsWith("/health")) return json({ status: "ok", db: "up" });
@@ -64,15 +64,15 @@ function mockAuthenticatedHome() {
       return json([{ id: "workspace-1", name: "个人创作空间" }]);
     }
     if (url.includes("/api/v1/workspaces/workspace-1/projects")) {
-      return json([
-        {
-          id: "project-1",
+      return json(
+        Array.from({ length: projectCount }, (_, index) => ({
+          id: `project-${index + 1}`,
           workspace_id: "workspace-1",
-          name: "乌镇宣传片",
+          name: index === 0 ? "乌镇宣传片" : `项目 ${index + 1}`,
           stage: "planning",
           aspect_ratio: "16:9",
-        },
-      ]);
+        })),
+      );
     }
     if (url.endsWith("/api/v1/projects/project-1/workspace-state")) {
       return json({ state: {} });
@@ -132,11 +132,14 @@ describe("Workstation shell", () => {
     expect(screen.queryByTestId("workspace-settings-page")).not.toBeInTheDocument();
   });
 
-  it("keeps project evidence inside the single global shell", async () => {
+  it("keeps project pages focused on the active workspace", async () => {
     renderApp("/projects/project-1/production");
 
-    expect(await screen.findByTestId("project-evidence-inspector")).toBeInTheDocument();
-    expect(screen.getByTestId("project-workspace-shell")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("project-workspace-shell", {}, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("project-evidence-inspector")).not.toBeInTheDocument();
+    expect(screen.queryByText("已连接项目事实")).not.toBeInTheDocument();
     expect(screen.getByTestId("workstation-shell")).toHaveAttribute(
       "data-primary-section",
       "creation",
@@ -217,6 +220,20 @@ describe("Workstation shell", () => {
     expect(screen.queryByTestId("provider-config")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("新空间名")).not.toBeInTheDocument();
     expect(screen.queryByTestId("model-profile-settings")).not.toBeInTheDocument();
+  });
+
+  it("omits an empty continuation card and progressively reveals long project lists", async () => {
+    mockAuthenticatedHome(14);
+    renderApp("/");
+
+    const projectList = await screen.findByRole("list", { name: "项目列表" });
+    expect(screen.queryByRole("heading", { name: "继续创作" })).not.toBeInTheDocument();
+    expect(within(projectList).getAllByRole("button")).toHaveLength(12);
+
+    fireEvent.click(screen.getByRole("button", { name: "显示更多项目（剩余 2 个）" }));
+
+    expect(within(projectList).getAllByRole("button")).toHaveLength(14);
+    expect(screen.queryByRole("button", { name: /显示更多项目/ })).not.toBeInTheDocument();
   });
 
   it("opens the production route for a project", async () => {

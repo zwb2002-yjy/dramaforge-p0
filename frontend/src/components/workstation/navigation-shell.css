@@ -332,6 +332,12 @@
   width: 52px;
 }
 
+.df-project-more {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--df-space-5);
+}
+
 .df-create-panel {
   margin-bottom: var(--df-space-6);
 }

@@ -2,6 +2,21 @@ import { expect, test } from "@playwright/test";
 
 import { installProfessionalMock, PROJECT_ID } from "./professional-mocks";
 
+test("Project Lobby removes empty and internal explanation clutter", async ({ page }) => {
+  await installProfessionalMock(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "项目大厅" })).toBeVisible();
+  await expect(page.getByText("PROJECTS", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("服务就绪", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "继续创作" })).toHaveCount(0);
+  await expect(page.getByText("项目卡片只呈现作品选择所需的信息。")).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true);
+});
+
 test("permanent L1 owns Project, Creation and Settings while L2 follows context", async ({
   page,
 }) => {
@@ -25,6 +40,8 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
   await expect(creationNavigation).not.toContainText("审片");
   await expect(creationNavigation).not.toContainText("专业");
   await expect(page.getByRole("link", { name: "制作" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
+  await expect(page.getByText("已连接项目事实")).toHaveCount(0);
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);

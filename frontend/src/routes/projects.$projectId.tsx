@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 import { ProjectWorkspaceShell } from "../components/workstation/ProjectWorkspaceShell";
 import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
-import { ApiError, fetchProject, type ProjectRead } from "../lib/api";
+import { ApiError, fetchProject } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
 import { rootRoute } from "./__root";
 
@@ -13,31 +13,6 @@ export const projectRoute = createRoute({
   path: "/projects/$projectId",
   component: ProjectLayout,
 });
-
-function EvidenceInspector({ project }: { project: ProjectRead | undefined }) {
-  if (!project) return <p className="muted">正在读取项目与工作区事实。</p>;
-  return (
-    <div className="qc-project-inspector-summary">
-      <section>
-        <span className="director-stage-kicker">当前状态</span>
-        <h3>{project.stage}</h3>
-        <p>项目、场景、镜头与制作证据来自同一事实源。</p>
-      </section>
-      <dl>
-        <dt>画幅</dt>
-        <dd>{project.aspect_ratio}</dd>
-        <dt>项目版本</dt>
-        <dd>{project.version}</dd>
-        <dt>目标平台</dt>
-        <dd>{project.target_platform}</dd>
-      </dl>
-      <section>
-        <h4>事实边界</h4>
-        <p className="muted">创作工作台共享同一套项目、制作和产物事实。</p>
-      </section>
-    </div>
-  );
-}
 
 function ProjectLayout() {
   const { projectId } = projectRoute.useParams();
@@ -80,7 +55,6 @@ function ProjectLayout() {
       projectId={projectId}
       projectName={projectRead?.name ?? (projectId === "demo" ? "演示项目" : "短剧项目")}
       activeView={activeView}
-      inspector={view === "scenes" ? undefined : <EvidenceInspector project={projectRead} />}
     >
       {project.isError && (
         <div className="flash err">
