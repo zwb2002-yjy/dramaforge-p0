@@ -212,7 +212,7 @@
   padding: var(--df-space-6) 0 var(--df-space-4);
 }
 
-.qc-page-heading > p,
+.qc-page-heading > p:not(.callout),
 .qc-section-heading p,
 .qc-constraints > p,
 .qc-director-kicker {
@@ -220,6 +220,15 @@
   font-size: var(--df-text-xs);
   font-weight: var(--df-weight-semibold);
   text-transform: uppercase;
+}
+
+/* A callout inside the page heading keeps its own surface treatment. */
+.qc-page-heading > .callout {
+  margin: var(--df-space-2) 0 0;
+  max-width: 620px;
+  font-size: var(--df-text-sm);
+  font-weight: var(--df-weight-regular);
+  text-transform: none;
 }
 
 .qc-page-heading h1 {

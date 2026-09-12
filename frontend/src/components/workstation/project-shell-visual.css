@@ -137,7 +137,7 @@
     padding: var(--df-space-3) 0 var(--df-space-5);
   }
 
-  .qc-page-heading > p,
+  .qc-page-heading > p:not(.callout),
   .qc-section-heading p,
   .qc-constraints > p,
   .qc-director-kicker,
