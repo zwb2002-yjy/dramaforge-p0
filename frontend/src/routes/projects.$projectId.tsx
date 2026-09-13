@@ -51,10 +51,8 @@ function ProjectLayout() {
   // own navigation and replace it.
   const currentPathname = useRouterState({ select: (state) => state.location.pathname });
   const atProjectRoot = currentPathname === `/projects/${projectId}`;
-  const restoreRequested = useRef(false);
   useEffect(() => {
-    if (!atProjectRoot || workspaceState.isLoading || restoreRequested.current) return;
-    restoreRequested.current = true;
+    if (!atProjectRoot || workspaceState.isLoading) return;
     const restoreTarget = workspaceState.lastView ?? "scenes";
     void navigate({
       to: `/projects/$projectId/${restoreTarget}`,

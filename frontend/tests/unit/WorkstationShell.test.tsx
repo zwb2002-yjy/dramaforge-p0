@@ -147,6 +147,17 @@ describe("Workstation shell", () => {
     );
   });
 
+  it("keeps repeated clicks on the active Creation entry in the current workspace", async () => {
+    const { router } = renderApp("/projects/demo/production");
+    await screen.findByTestId("production-mode");
+
+    const creationLink = screen.getByRole("link", { name: "创作" });
+    expect(fireEvent.click(creationLink)).toBe(false);
+    expect(fireEvent.click(creationLink)).toBe(false);
+    expect(router.state.location.pathname).toBe("/projects/demo/production");
+    expect(screen.queryByText("正在恢复上次创作位置…")).not.toBeInTheDocument();
+  });
+
   it("gives Scene Workbench one right operation panel without the outer evidence inspector", async () => {
     renderApp("/projects/demo/scenes/scene-1");
 

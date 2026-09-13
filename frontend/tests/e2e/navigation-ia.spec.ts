@@ -28,11 +28,14 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
 
   const primaryNavigation = page.getByRole("navigation", { name: "一级导航" });
   await expect(primaryNavigation.getByRole("link", { name: "项目" })).toBeVisible();
-  await expect(primaryNavigation.getByRole("link", { name: "创作" })).toHaveAttribute(
-    "aria-current",
-    "page",
-  );
+  const creationEntry = primaryNavigation.getByRole("link", { name: "创作" });
+  await expect(creationEntry).toHaveAttribute("aria-current", "page");
   await expect(primaryNavigation.getByRole("link", { name: "设置" })).toBeVisible();
+
+  await creationEntry.dblclick();
+  await page.waitForTimeout(100);
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/production`);
+  await expect(page.getByText("正在恢复上次创作位置…")).toHaveCount(0);
 
   const creationNavigation = page.getByRole("navigation", { name: "创作导航" });
   await expect(creationNavigation.getByRole("link")).toHaveCount(5);

@@ -65,6 +65,9 @@ function PrimaryLink({
       className={active ? "active" : undefined}
       aria-current={active ? "page" : undefined}
       aria-label={label}
+      onClick={(event) => {
+        if (active) event.preventDefault();
+      }}
     >
       <Icon size={20} aria-hidden="true" />
       <span>{label}</span>

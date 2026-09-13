@@ -75,3 +75,21 @@ it("still restores the last Project view when entering the project root", async 
     expect(router.state.location.pathname).toBe("/projects/project-1/production"),
   );
 });
+
+it("restores again when the Project root is re-entered without remounting its layout", async () => {
+  mockFetch();
+  const router = renderAt("/projects/project-1");
+  await vi.waitFor(() =>
+    expect(router.state.location.pathname).toBe("/projects/project-1/production"),
+  );
+
+  await router.navigate({
+    to: "/projects/$projectId",
+    params: { projectId: "project-1" },
+  });
+
+  await vi.waitFor(() =>
+    expect(router.state.location.pathname).toBe("/projects/project-1/production"),
+  );
+  expect(screen.queryByText("正在恢复上次创作位置…")).not.toBeInTheDocument();
+});
