@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** READY
+- **State:** COMPLETE
 - **Task id:** `v2-scene-navigation-continuity-20260913`
 - **Goal:** Continue the user-requested Computer Use UX sweep by making Scene navigation truthful during loading, human-readable across workspaces, and less redundant on Production.
 - **Boundary:** Frontend presentation and navigation affordances only. No Scene / Shot facts, API, persistence, production runtime, or paid operation changes.
@@ -60,4 +60,12 @@
 
 ## Completion Evidence
 
-- Pending implementation.
+- Implementation commit: `fc4fa62 fix(frontend): streamline scene navigation`.
+- Scene overview now renders `正在读取场景…` while the scene query is pending and renders the empty state only after a successful empty result. Unit coverage resolves a controlled pending request and verifies both states.
+- `timeOfDayLabel` humanizes the persisted scene-time vocabulary while preserving unknown/user-authored values; the storyboard wall, Scene Workspace, Production monitor, Workflow Navigator, and Script Workspace all consume the same label boundary.
+- Production scene names now link directly to their existing Scene Workspace URLs. The separate action column and duplicate shot-chip strip are absent; summary counts and destination routes are unchanged.
+- Focused verification: typecheck passed; SceneStoryboardWall and ProductionMonitor unit tests passed (6 tests); navigation IA E2E passed (5 tests).
+- Required regression: lint passed; format check passed; production build passed; the full unit suite passed in deterministic single-worker mode (29 files / 163 tests); the full Playwright suite passed (23 tests); `git diff --check` passed. The default parallel unit run exposed the pre-existing NavigationTransitions one-second mount timeout, while that file passed in isolation and the complete deterministic suite passed.
+- Formal runtime: frontend rebuilt and restarted as `sha256:1428a96062b3728391bcb08a9e086a0aef922566f6255eb6bf73527c1701732a`; `dramaforge-frontend-1` reached `healthy`; `/healthz` returned 200.
+- In-app browser verification on the original project tab: the first Scene-overview state visibly contained `正在读取场景…` and no false empty message; the resolved state contained all ten scenes with Chinese times from `拂晓` through `蓝调时刻`; Production contained ten scene-name links, five table columns, no `进入` column and no duplicate shot strip; clicking the first scene name landed on the correct Scene Workspace, whose context displayed `1.1 · 拂晓`.
+- No project mutation, data deletion, paid operation, Provider call, upload, or external transmission occurred.
