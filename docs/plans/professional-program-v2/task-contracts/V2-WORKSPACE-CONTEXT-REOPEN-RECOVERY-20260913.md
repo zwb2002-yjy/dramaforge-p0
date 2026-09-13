@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State:** READY
+- **State:** COMPLETE
 - **Task id:** `v2-workspace-context-reopen-recovery-20260913`
 - **Goal:** Keep an authenticated Project readable after the last browser page is closed and
   reopened, instead of failing every Project API with `workspace context required`.
@@ -86,4 +86,32 @@
 
 ## Completion Evidence
 
-- Pending implementation.
+- Root cause confirmed: the formal Compose services never stopped. API, dispatcher,
+  production Workers, director Worker, frontend, PostgreSQL, Redis, MinIO, and LiteLLM
+  remained healthy. The selected Workspace and recent Project existed only in
+  tab-lifetime `sessionStorage`, so closing the final browser page removed the header
+  source while the authenticated cookie remained valid.
+- Implementation commit: `b1c7401 fix(frontend): recover workspace context after reopen`.
+  Navigation preferences now retain a per-tab value with a durable browser fallback;
+  an explicit clear removes both tiers. A direct Project route validates the remembered
+  Workspace, safely tries the Owner's other Workspaces when it is missing/stale, writes
+  the resolved context before mounting child business queries, and keeps every API call
+  explicitly Workspace-scoped.
+- Failure UX is bounded: unresolved/deleted/inaccessible Projects show
+  `无法恢复项目工作区` with a Lobby route. Backend `require_selected_workspace`, RLS,
+  ownership, cookies, Project facts, and server-backed `last_view` were not changed.
+- Verification passed: lint, format check, typecheck, production build, focused Vitest
+  (navigation persistence / shell / transitions), deterministic full Vitest
+  (30 files / 169 tests), focused navigation Playwright (6 tests), full Playwright
+  (24 tests), and `git diff --check`. Existing router/mock warning noise remained
+  non-failing and unchanged.
+- Formal runtime frontend image:
+  `sha256:6dcc2d52f4d3da07b3ce84b483eb5aace3989604acf299e91f101c6d35fac90f`;
+  frontend container reached healthy and `http://127.0.0.1:8080/healthz` returned 200.
+- Computer Use on the original failing in-app `/script` tab visibly transitioned from
+  `正在恢复项目工作区…` to project `乌镇·枕水新生｜30秒字幕版 20260908`, its formal
+  script, and ten Scene summaries, with no `workspace context required`. A separately
+  opened fresh in-app page at the same direct URL also loaded the full Project facts.
+- Computer Use verified Settings → `创作` restored the server-backed `/script` last view;
+  browser warning/error logs were empty. The original Project tab was retained for the
+  user and no user tab, Project data, Provider state, or external system was modified.
