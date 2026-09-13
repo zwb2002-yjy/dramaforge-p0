@@ -1,9 +1,9 @@
-# Task: V2 — Creation Entry Restore Race
+# Task: V2 — Creation Entry Restore Race R2
 
 ## Status
 
-- **State:** SUPERSEDED BEFORE IMPLEMENTATION
-- **Task id:** `v2-creation-entry-restore-race-20260913`
+- **State:** READY
+- **Task id:** `v2-creation-entry-restore-race-r2-20260913`
 - **Goal:** Fix the user-reported double-click on the permanent `创作` entry that strands the Project root on `正在恢复上次创作位置…`.
 - **Boundary:** Frontend L1 click semantics and Project-root last-view restoration only.
 
@@ -12,6 +12,7 @@
 - `navigation-ia/DramaForge_统一导航与项目大厅信息架构设计方案.md` §4–5, §7: permanent L1, Creative L2, existing-Project last-view restoration, and Scene fallback.
 - `navigation-ia/DramaForge_统一导航与项目大厅执行方案.md` NAV-1 and NAV-5: one target-resolution rule, valid last view restore, invalid/missing fallback to `/scenes`.
 - `V2-NAVIGATION-TRANSITION-UX-20260912.md`: internal navigation must preserve the live document and must not outrun the user's selected destination.
+- `V2-CREATION-ENTRY-RESTORE-RACE-20260913.md`: preserved diagnosis and supersession reason; no implementation occurred under its malformed ledger ownership.
 
 ## Current Evidence / Drift
 
@@ -55,4 +56,4 @@
 
 ## Completion Evidence
 
-- No implementation was attempted under this contract. The STARTED ledger command used a double-quoted PowerShell `OwnedPaths` value, so `$projectId` was expanded and the immutable ledger recorded the nonexistent `frontend/src/routes/projects..tsx` path. This contract is superseded by `V2-CREATION-ENTRY-RESTORE-RACE-R2-20260913.md`, which records the literal route filename correctly.
+- Pending implementation.
