@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeTree } from "../../src/routeTree.gen";
 import { useUiStore } from "../../src/stores/uiStore";
+import { getSelectedWorkspaceId, setSelectedWorkspaceId } from "../../src/lib/api";
 
 function renderApp(initialPath = "/") {
   const history = createMemoryHistory({ initialEntries: [initialPath] });
@@ -114,6 +115,7 @@ afterEach(() => vi.restoreAllMocks());
 beforeEach(() => {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   window.sessionStorage.clear();
+  window.localStorage.clear();
   useUiStore.setState({ leftNavOpen: true, selectedShotId: null });
 });
 
@@ -134,6 +136,7 @@ describe("Workstation shell", () => {
   });
 
   it("keeps project pages focused on the active workspace", async () => {
+    mockAuthenticatedHome();
     renderApp("/projects/project-1/production");
 
     expect(
@@ -146,6 +149,68 @@ describe("Workstation shell", () => {
       "creation",
     );
   });
+
+  it.each([null, "workspace-stale"])(
+    "resolves the owning Workspace before mounting a direct Project route (remembered: %s)",
+    async (rememberedWorkspaceId) => {
+      if (rememberedWorkspaceId) setSelectedWorkspaceId(rememberedWorkspaceId);
+      const projectHeaders: Array<string | null> = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const url = String(input);
+        const headers = new Headers(init?.headers);
+        if (url.endsWith("/api/v1/workspaces")) {
+          return json([
+            { id: "workspace-stale", name: "旧空间" },
+            { id: "workspace-2", name: "当前空间" },
+          ]);
+        }
+        if (url.endsWith("/api/v1/projects/project-2")) {
+          const workspaceId = headers.get("X-Workspace-Id");
+          projectHeaders.push(workspaceId);
+          if (workspaceId !== "workspace-2") {
+            return Promise.resolve(
+              new Response(JSON.stringify({ code: "NOT_FOUND", detail: "project not found" }), {
+                status: 404,
+                headers: { "Content-Type": "application/json" },
+              }),
+            );
+          }
+          return json({
+            id: "project-2",
+            workspace_id: "workspace-2",
+            name: "重新打开的项目",
+            stage: "planning",
+            aspect_ratio: "16:9",
+            target_platform: "web",
+            provider_dispatch_frozen: false,
+            version: 1,
+            creative_profile: { id: "profile-2", version: 1 },
+          });
+        }
+        if (url.endsWith("/api/v1/projects/project-2/workspace-state")) {
+          expect(headers.get("X-Workspace-Id")).toBe("workspace-2");
+          return json({ state: {} });
+        }
+        if (url.endsWith("/api/v1/projects/project-2/script")) {
+          expect(headers.get("X-Workspace-Id")).toBe("workspace-2");
+          return json({ project_id: "project-2", episodes: [] });
+        }
+        return json({});
+      });
+
+      renderApp("/projects/project-2/script");
+
+      expect(await screen.findByRole("heading", { name: "剧本工作区" })).toBeInTheDocument();
+      expect(screen.getAllByText("重新打开的项目")).toHaveLength(2);
+      expect(projectHeaders.slice(0, 2)).toEqual(["workspace-stale", "workspace-2"]);
+      expect(projectHeaders.slice(1).every((workspaceId) => workspaceId === "workspace-2")).toBe(
+        true,
+      );
+      expect(getSelectedWorkspaceId()).toBe("workspace-2");
+      expect(window.localStorage.getItem("dramaforge.selected-workspace-id")).toBe("workspace-2");
+      expect(screen.queryByText(/workspace context required/)).not.toBeInTheDocument();
+    },
+  );
 
   it("keeps repeated clicks on the active Creation entry in the current workspace", async () => {
     const { router } = renderApp("/projects/demo/production");
@@ -354,6 +419,7 @@ describe("Workstation shell", () => {
   });
 
   it("keeps the project id when entering the read-only edit hand-off", async () => {
+    setSelectedWorkspaceId("workspace-1");
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       if (String(input).includes("/opencut-manifest")) {
         return json({
@@ -384,6 +450,7 @@ describe("Workstation shell", () => {
   });
 
   it("shows the professional facts without reviving the legacy Director budget surface", async () => {
+    setSelectedWorkspaceId("workspace-1");
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/health")) return json({ status: "ok", db: "up" });

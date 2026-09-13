@@ -17,6 +17,7 @@ import {
   setSelectedWorkspaceId as persistSelectedWorkspaceId,
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
+import { getRememberedProjectId } from "../lib/navigationPreferences";
 import { rootRoute } from "./__root";
 
 export const indexRoute = createRoute({
@@ -190,7 +191,7 @@ function HomePage() {
   useEffect(() => {
     setVisibleProjectLimit(PROJECT_PAGE_SIZE);
   }, [projectFilter, selectedWorkspaceId]);
-  const rememberedProjectId = window.sessionStorage.getItem("dramaforge.last-project-id");
+  const rememberedProjectId = getRememberedProjectId();
   const recentProject =
     (projects.data ?? []).find((project) => project.id === rememberedProjectId) ?? null;
   const queryError =

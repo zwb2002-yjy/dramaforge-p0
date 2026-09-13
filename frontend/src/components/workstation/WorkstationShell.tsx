@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   Aperture,
@@ -17,7 +17,12 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { fetchProject } from "../../lib/api";
+import {
+  getSelectedWorkspaceId,
+  resolveProjectWorkspace,
+  setSelectedWorkspaceId,
+} from "../../lib/api";
+import { getRememberedProjectId, setRememberedProjectId } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
 import "./navigation-shell.css";
 
@@ -26,8 +31,6 @@ type WorkstationShellProps = {
 };
 
 type PrimarySection = "projects" | "creation" | "settings";
-
-const LAST_PROJECT_STORAGE_KEY = "dramaforge.last-project-id";
 
 function projectIdFromPath(pathname: string): string | null {
   return (
@@ -99,6 +102,7 @@ function ContextLink({
 }
 
 export function WorkstationShell({ children }: WorkstationShellProps) {
+  const queryClient = useQueryClient();
   const location = useRouterState({ select: (state) => state.location });
   const pathname = location.pathname;
   const primary = primarySectionFromPath(pathname);
@@ -126,27 +130,56 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [secondaryOpen]);
 
-  useEffect(() => {
-    if (projectId && projectId !== "demo") {
-      window.sessionStorage.setItem(LAST_PROJECT_STORAGE_KEY, projectId);
-    }
-  }, [projectId]);
-
-  const rememberedProjectId =
-    projectId ?? window.sessionStorage.getItem(LAST_PROJECT_STORAGE_KEY) ?? null;
-  const navigationProjectId = projectId ?? (primary === "settings" ? rememberedProjectId : null);
-  const project = useQuery({
-    queryKey: queryKeys.project.detail(navigationProjectId ?? "none"),
-    queryFn: () => fetchProject(navigationProjectId!),
-    enabled: Boolean(navigationProjectId && navigationProjectId !== "demo"),
+  const projectContext = useQuery({
+    queryKey: queryKeys.project.workspaceContext(projectId ?? "none"),
+    queryFn: async () => {
+      const resolved = await resolveProjectWorkspace(projectId!, getSelectedWorkspaceId());
+      // Establish the header source before child Project routes mount and start
+      // their own business queries.
+      setSelectedWorkspaceId(resolved.workspaceId);
+      setRememberedProjectId(projectId!);
+      queryClient.setQueryData(queryKeys.project.detail(projectId!), resolved.project);
+      return resolved;
+    },
+    enabled: Boolean(projectId && projectId !== "demo"),
     retry: false,
+    staleTime: 60_000,
   });
+
+  const rememberedProjectId = projectId ?? getRememberedProjectId();
+  const navigationProjectId = projectId ?? (primary === "settings" ? rememberedProjectId : null);
   const projectName =
     navigationProjectId === "demo"
       ? "演示项目"
-      : (project.data?.name ?? (navigationProjectId ? "当前项目" : null));
+      : (projectContext.data?.project.name ?? (navigationProjectId ? "当前项目" : null));
   const creationTarget = rememberedProjectId ? `/projects/${rememberedProjectId}` : "/";
   const creationView = creationViewFromPath(pathname);
+  const needsProjectContext = Boolean(projectId && projectId !== "demo");
+  const projectContent = needsProjectContext ? (
+    projectContext.isPending ? (
+      <main className="df-page">
+        <p className="muted">正在恢复项目工作区…</p>
+      </main>
+    ) : projectContext.isError ? (
+      <main className="df-page">
+        <section className="panel">
+          <h1>无法恢复项目工作区</h1>
+          <p className="flash err">
+            {projectContext.error instanceof Error
+              ? projectContext.error.message
+              : "项目可能已被删除，或当前账号已无权访问。"}
+          </p>
+          <Link to="/" search={{ create: false }}>
+            返回项目大厅
+          </Link>
+        </section>
+      </main>
+    ) : (
+      children
+    )
+  ) : (
+    children
+  );
 
   return (
     <div
@@ -335,7 +368,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
         />
       )}
 
-      <div className="df-shell-content">{children}</div>
+      <div className="df-shell-content">{projectContent}</div>
     </div>
   );
 }

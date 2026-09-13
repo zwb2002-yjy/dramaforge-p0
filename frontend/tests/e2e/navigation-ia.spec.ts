@@ -86,6 +86,21 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
     .toBe("alive");
 });
 
+test("Project navigation survives losing tab-scoped context", async ({ page }) => {
+  await installProfessionalMock(page);
+  await page.goto(`/projects/${PROJECT_ID}/script`);
+  await expect(page.getByRole("heading", { name: "剧本工作区" })).toBeVisible();
+
+  await page.evaluate(() => sessionStorage.clear());
+  await page.getByRole("link", { name: "设置" }).click();
+  await expect(page).toHaveURL("/settings/account");
+  await page.getByRole("link", { name: "创作" }).click();
+
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/scenes`);
+  await expect(page.getByRole("heading", { name: "场景总览" })).toBeVisible();
+  await expect(page.getByText(/workspace context required/)).toHaveCount(0);
+});
+
 test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow", async ({
   page,
 }) => {
