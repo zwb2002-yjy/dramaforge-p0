@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { queryKeys } from "../../lib/queryKeys";
+import { timeOfDayLabel } from "../../lib/sceneLabels";
 import {
   fetchWorkflowOverview,
   type SceneWorkflowViewRead,
@@ -90,7 +91,7 @@ function SceneWorkflowGroup({ scene }: { scene: SceneWorkflowViewRead }) {
         </span>
       </div>
       <p className="workflow-scene-synopsis muted">
-        {scene.episode_number}.{scene.scene_number} · {scene.time_of_day} · 正式{" "}
+        {scene.episode_number}.{scene.scene_number} · {timeOfDayLabel(scene.time_of_day)} · 正式{" "}
         {status.formal_shots}/{status.total_shots}
       </p>
       <ul className="workflow-shot-list">

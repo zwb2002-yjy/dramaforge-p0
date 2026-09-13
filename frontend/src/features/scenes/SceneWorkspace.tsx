@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { DirectorSidebar } from "../director/DirectorSidebar";
 import type { ReferenceResolutionState } from "../../components/assets/AssetReferencePicker";
+import { timeOfDayLabel } from "../../lib/sceneLabels";
 import { ContextDock, type ContextTool } from "../shots/ContextDock";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotCandidateTray } from "../shots/ShotCandidateTray";
@@ -276,7 +277,7 @@ export function SceneWorkspace({
           <h1>{data?.scene.location_name ?? "场景"}</h1>
           <span>
             {data?.scene.episode_number}.{data?.scene.scene_number} ·{" "}
-            {data?.scene.time_of_day ?? "—"}
+            {timeOfDayLabel(data?.scene.time_of_day)}
           </span>
           {data?.scene.synopsis && <p>{data.scene.synopsis}</p>}
         </div>

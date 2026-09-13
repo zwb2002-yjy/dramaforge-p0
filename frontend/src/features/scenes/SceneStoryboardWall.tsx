@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
+import { timeOfDayLabel } from "../../lib/sceneLabels";
 import { copyScene, fetchScenes, reorderScene, type SceneSummary } from "./api";
 
 type SceneStoryboardWallProps = {
@@ -76,7 +77,7 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
                 {scene.location_name}
               </a>
               <span>
-                {scene.episode_number}.{scene.scene_number} · {scene.time_of_day}
+                {scene.episode_number}.{scene.scene_number} · {timeOfDayLabel(scene.time_of_day)}
               </span>
             </header>
             <footer>
@@ -96,7 +97,14 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
           </li>
         ))}
       </ul>
-      {rows.length === 0 && <p className="muted">暂无场景。导入剧本后会在这里生成故事板墙。</p>}
+      {scenes.isPending && (
+        <p className="muted" role="status" data-testid="scene-wall-loading">
+          正在读取场景…
+        </p>
+      )}
+      {!scenes.isPending && !scenes.isError && rows.length === 0 && (
+        <p className="muted">暂无场景。导入剧本后会在这里生成故事板墙。</p>
+      )}
     </div>
   );
 }

@@ -179,14 +179,13 @@ test("mobile Production prioritizes the cross-scene overview and progressively d
     scrollWidth: element.scrollWidth,
   }));
   expect(tableOverflow.scrollWidth).toBeGreaterThan(tableOverflow.clientWidth);
-  await tableScroll.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth;
-  });
-  const sceneWorkspaceLink = page.getByRole("link", { name: "场景工作区" }).first();
+  const sceneWorkspaceLink = page.getByRole("link", { name: /雨夜街口/ }).first();
   const sceneWorkspaceBox = await sceneWorkspaceLink.boundingBox();
   expect(sceneWorkspaceBox).not.toBeNull();
   expect(sceneWorkspaceBox!.x).toBeGreaterThanOrEqual(0);
   expect(sceneWorkspaceBox!.x + sceneWorkspaceBox!.width).toBeLessThanOrEqual(390);
+  await expect(page.getByRole("columnheader", { name: "进入" })).toHaveCount(0);
+  await expect(page.getByTestId("shot-timeline")).toHaveCount(0);
 
   await workflowDisclosure.locator("summary").click();
   await expect(workflowDisclosure).toHaveAttribute("open", "");

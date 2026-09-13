@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { queryKeys } from "../../lib/queryKeys";
+import { timeOfDayLabel } from "../../lib/sceneLabels";
 import {
   applyStoryProposal,
   createStoryProposal,
@@ -185,7 +186,8 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
                   {episode.scenes.map((scene) => (
                     <li key={scene.id} className="qc-script-scene">
                       <strong>
-                        {scene.scene_number}. {scene.location_name} · {scene.time_of_day}
+                        {scene.scene_number}. {scene.location_name} ·{" "}
+                        {timeOfDayLabel(scene.time_of_day)}
                       </strong>
                       <span>{scene.shot_count} 镜头</span>
                       {scene.synopsis && <p className="muted">{scene.synopsis}</p>}
