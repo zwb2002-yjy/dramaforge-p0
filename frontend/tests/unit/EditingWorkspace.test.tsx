@@ -297,10 +297,15 @@ describe("EditingWorkspace", () => {
 
     renderWorkspace();
 
-    expect(await screen.findByText(/正式素材 artifact-formal/)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`场景 ${SCENE_ID}`))).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`镜头 ${SHOT_ID}`))).toBeInTheDocument();
-    expect(screen.getByText(/已交付/)).toBeInTheDocument();
+    const clip = await screen.findByTestId("editing-clip");
+    expect(clip).toHaveTextContent("正式视频 · 0–3 秒 · 片段 1 · 镜头 #1");
+    expect(clip).toHaveTextContent("正式素材已交付");
+    expect(clip).not.toHaveTextContent(SCENE_ID);
+    expect(clip).not.toHaveTextContent(SHOT_ID);
+    expect(clip).not.toHaveTextContent("artifact-formal");
+    expect(
+      screen.getByText("当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。"),
+    ).toBeInTheDocument();
     expect(calls).toEqual([{ method: "GET", url: "/api/v1/projects/project-1/opencut-manifest" }]);
     expect(screen.getByTestId("editing-read-only")).toHaveTextContent("只读");
     expect(screen.getByTestId("create-edit-session")).toBeEnabled();
@@ -1145,16 +1150,19 @@ describe("EditingWorkspace", () => {
       requestCount += 1;
       return json(
         requestCount === 1
-          ? manifest([formalClip("artifact-before")], [shot(SHOT_ID, "artifact-before")])
+          ? manifest(
+              [{ ...formalClip("artifact-before"), source_url: null }],
+              [shot(SHOT_ID, "artifact-before")],
+            )
           : manifest([formalClip("artifact-after")], [shot(SHOT_ID, "artifact-after")]),
       );
     });
     const queryClient = renderWorkspace();
-    expect(await screen.findByText(/artifact-before/)).toBeInTheDocument();
+    expect(await screen.findByText("正式素材待交付")).toBeInTheDocument();
 
     await queryClient.refetchQueries({ queryKey: ["opencut-manifest", PROJECT_ID] });
-    await waitFor(() => expect(screen.getByText(/artifact-after/)).toBeInTheDocument());
-    expect(screen.queryByText(/artifact-before/)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("正式素材已交付")).toBeInTheDocument());
+    expect(screen.queryByText("正式素材待交付")).not.toBeInTheDocument();
     expect(requestCount).toBe(2);
   });
 });

@@ -42,6 +42,14 @@ test("professional edit: formal manifest → persisted session → proposal-only
   await expect(page.getByRole("heading", { name: "剪辑交接" })).toBeVisible();
   await expect(page.getByTestId("editing-read-only")).toBeVisible();
   await expect(page.getByRole("heading", { name: "正式时间线" })).toBeVisible();
+  await expect(
+    page.getByText("当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。"),
+  ).toBeVisible();
+  const formalPreviewClip = page.getByTestId("editing-clip").first();
+  await expect(formalPreviewClip).toContainText("正式视频 · 0–5 秒 · 片段 1 · 镜头 #1");
+  await expect(formalPreviewClip).toContainText("正式素材已交付");
+  await expect(formalPreviewClip).not.toContainText(/[0-9a-f]{8}-[0-9a-f-]{27,}/i);
+  await expect(formalPreviewClip).not.toContainText("artifact-video");
   await expect(page.getByTestId("create-edit-session")).toBeEnabled();
 
   // Creation is explicit and unique: one CSRF fetch followed by one POST.

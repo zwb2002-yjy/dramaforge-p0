@@ -76,6 +76,12 @@ function videoClips(manifest: OpenCutManifestRead | undefined) {
   return clipsByTrack(manifest).filter(({ clip }) => clip.track_kind === "video");
 }
 
+function formatTimelineSeconds(value: string): string {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return value;
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 3 }).format(parsed);
+}
+
 function isJsonObject(value: unknown): value is Record<string, JsonValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -782,6 +788,9 @@ export function EditingWorkspace({
   const clips = clipsByTrack(manifest.data);
   const formalVideoClips = videoClips(manifest.data);
   const formalShotIds = new Set(formalVideoClips.map(({ clip }) => clip.shot_id));
+  const shotNumberById = new Map(
+    (manifest.data?.shots ?? []).map((shot) => [shot.shot_id, shot.shot_number]),
+  );
   const incompleteShotCount =
     manifest.data?.shots.filter((shot) => !formalShotIds.has(shot.shot_id)).length ?? 0;
   const isEmptyProject = manifest.data?.shots.length === 0 && clips.length === 0;
@@ -1453,7 +1462,7 @@ export function EditingWorkspace({
 
       <header className="qc-page-heading">
         <h1>剪辑交接</h1>
-        <span>还没有可编辑的剪辑会话；下面是正式时间线的只读预览。</span>
+        <span>当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。</span>
         <p className="callout" data-testid="editing-read-only">
           只读预览 · 仅展示已确认的正式视频，不会触发生成或写回生产事实。
         </p>
@@ -1515,14 +1524,20 @@ export function EditingWorkspace({
               </p>
             ) : (
               <ol>
-                {clips.map(({ track, clip }) => (
+                {clips.map(({ track, clip }, index) => (
                   <li key={clip.id} data-testid="editing-clip">
-                    <strong>{track}</strong> · {clip.timeline_start_seconds}s–
-                    {clip.timeline_end_seconds}s · 场景 {clip.scene_id} · 镜头 {clip.shot_id}
+                    <strong>{track}</strong> · {formatTimelineSeconds(clip.timeline_start_seconds)}–
+                    {formatTimelineSeconds(clip.timeline_end_seconds)} 秒 · 片段 {index + 1}
+                    {shotNumberById.has(clip.shot_id)
+                      ? ` · 镜头 #${shotNumberById.get(clip.shot_id)}`
+                      : ""}
                     <br />
                     <small>
-                      正式素材 {clip.artifact_id ?? "未知"}
-                      {clip.source_url ? " · 已交付" : ""}
+                      {clip.source_url
+                        ? "正式素材已交付"
+                        : clip.artifact_id
+                          ? "正式素材待交付"
+                          : "未绑定正式素材"}
                     </small>
                   </li>
                 ))}
