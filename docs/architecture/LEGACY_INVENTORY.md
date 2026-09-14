@@ -1,7 +1,8 @@
 # LEGACY_INVENTORY
 
-Status: hard-removal completed in the current candidate
-Date: 2026-09-02
+Status: hard removal still enforced; later programs added on top
+Date: 2026-09-14
+Base: dev 63935b9
 Contract: docs/plans/professional-program-v2/task-contracts/P10-LEGACY-HARD-REMOVAL-20260902.md
 
 ## Removed from executable product
@@ -21,13 +22,15 @@ Contract: docs/plans/professional-program-v2/task-contracts/P10-LEGACY-HARD-REMO
 
 - backend/app/director/suggestion.py for non-persistent Shot suggestions;
 - backend/app/director/assistant_models.py and proposal_models.py for
-  proposal-only Assistant facts;
+  proposal-only Assistant facts, plus turn_models.py, invocation_models.py and
+  inbox_models.py for bounded Director turns and receipts;
+- backend/app/director/runtime for engine routing, checkpoints and wakeups;
 - backend/app/director/creative_capabilities and the provider-neutral workflow
   definitions used by the Workbench;
-- backend/app/production/workbench_execution.py,
-  backend/app/execution/product_path.py, and backend/app/execution/voice_path.py;
+- backend/app/workbench and backend/app/production/workbench_execution.py;
+- backend/app/execution/product_path.py and backend/app/execution/voice_path.py;
 - backend/app/assets/models.py Asset/AssetVersion/AssetVersionReference;
-- backend/app/production/repair_service.py and editing services.
+- backend/app/production/repair_service.py and the editing/Final Film services.
 
 ## Database evidence
 
@@ -36,6 +39,10 @@ columns, NodeRun budget/batch columns, and ProviderOperation AgentRun lineage.
 It also replaces the provider-operation RLS policy/function before dropping the
 old column. The migration is intentionally irreversible because the Owner
 withdrew historical compatibility and rollback requirements.
+
+Revisions 20260903_0052 through 20260910_0066 add Story, Director runtime,
+command-authorization, inbox and checkpoint facts. None of them restores a
+retired surface, and the canonical-surface scan still fails on those spellings.
 
 ## Gate
 

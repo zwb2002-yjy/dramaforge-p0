@@ -12,18 +12,18 @@ Owner 方案。产品与技术权威仍是
 
 **Owner 决策（2026-09，本轮冻结）**——以下七条由项目 Owner 直接拍板，是本文件的最高依据：
 
-| 决策项 | 结论 |
-|---|---|
-| 主交互色 verdigris | 主操作、active、progress、completed |
-| 注意色 brass | 注意、导演介入、人工确认、proposal |
-| 面层级 | C：容器减层，交互对象分级 |
-| Radius | 按控件类型固定（control / container / chip） |
-| Typography | Workbench 收敛到 11 / 12 / 13 / 14 主刻度 |
-| Shadow | flat / raised / overlay 三档 |
-| Breakpoint | 优先 640 / 900 / 1100 |
-| Resonance | 独立表现世界，受控例外 |
-| 全局背景色 | 本轮冻结，不改 hue |
-| 专业感来源 | 结构、密度、信息层级、动作纪律，而非装饰 |
+| 决策项             | 结论                                         |
+| ------------------ | -------------------------------------------- |
+| 主交互色 verdigris | 主操作、active、progress、completed          |
+| 注意色 brass       | 注意、导演介入、人工确认、proposal           |
+| 面层级             | C：容器减层，交互对象分级                    |
+| Radius             | 按控件类型固定（control / container / chip） |
+| Typography         | Workbench 收敛到 11 / 12 / 13 / 14 主刻度    |
+| Shadow             | flat / raised / overlay 三档                 |
+| Breakpoint         | 优先 640 / 900 / 1100                        |
+| Resonance          | 独立表现世界，受控例外                       |
+| 全局背景色         | 本轮冻结，不改 hue                           |
+| 专业感来源         | 结构、密度、信息层级、动作纪律，而非装饰     |
 
 ---
 
@@ -39,10 +39,10 @@ Owner 方案。产品与技术权威仍是
 
 ### 1.1 强调色分工（强制）
 
-| 色 | 用途 | 典型场景 |
-|---|---|---|
-| `--df-verdigris` | 主交互 / active / progress / completed | 主按钮填充、焦点环、选中态、进行中与已完成状态 |
-| `--df-brass` | 注意 / 导演介入 / 人工确认 / proposal | 导演建议与 proposal、需要人工确认、风险与待处理 |
+| 色               | 用途                                   | 典型场景                                        |
+| ---------------- | -------------------------------------- | ----------------------------------------------- |
+| `--df-verdigris` | 主交互 / active / progress / completed | 主按钮填充、焦点环、选中态、进行中与已完成状态  |
+| `--df-brass`     | 注意 / 导演介入 / 人工确认 / proposal  | 导演建议与 proposal、需要人工确认、风险与待处理 |
 
 不允许把 brass 用作通用主按钮色，也不允许把 verdigris 用作"需要注意"的警示色；
 两者都不是语义状态色——失败/成功/警告仍走 `--df-danger*` / `--df-success*` / `--df-warning*`。
@@ -67,16 +67,16 @@ Owner 方案。产品与技术权威仍是
 
 ## 3. 目录与模块边界
 
-| 路径 | 职责 |
-|---|---|
-| `src/routes/` | 路由定义与页面装配（TanStack Router 文件路由约定）。 |
-| `src/features/` | 业务模块：`assets` `audit` `creation` `delivery` `director` `editing` `experiments` `model-controls` `production` `project` `projects` `resonance` `review` `scenes` `script` `shots`。 |
-| `src/components/` | 跨业务共享的组件：`ui`（设计系统原语）、`workstation`（外壳）、`provider`、`assets`、`shell`、`sse`。 |
-| `src/lib/` | 请求封装、查询键、领域标签、中文化映射等无 UI 逻辑。 |
-| `src/hooks/` `src/stores/` | 跨模块 hook 与轻量 UI store。 |
-| `src/shared/api/generated.ts` | OpenAPI 生成类型，`npm run api:generate` 产出，不手改。 |
-| `design/*.css` | 设计系统：tokens → theme → typography → components。 |
-| `src/styles/index.css` | 共享布局与工作区样式，只允许引用 Token。 |
+| 路径                          | 职责                                                                                                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/routes/`                 | 路由定义与页面装配（TanStack Router 文件路由约定）。                                                                                                                                    |
+| `src/features/`               | 业务模块：`assets` `audit` `creation` `delivery` `director` `editing` `experiments` `model-controls` `production` `project` `projects` `resonance` `review` `scenes` `script` `shots`。 |
+| `src/components/`             | 跨业务共享的组件：`ui`（设计系统原语）、`workstation`（外壳）、`provider`、`assets`、`shell`、`sse`。                                                                                   |
+| `src/lib/`                    | 请求封装、查询键、领域标签、中文化映射等无 UI 逻辑。                                                                                                                                    |
+| `src/hooks/` `src/stores/`    | 跨模块 hook 与轻量 UI store。                                                                                                                                                           |
+| `src/shared/api/generated.ts` | OpenAPI 生成类型，`npm run api:generate` 产出，不手改。                                                                                                                                 |
+| `design/*.css`                | 设计系统：tokens → theme → typography → components。                                                                                                                                    |
+| `src/styles/index.css`        | 共享布局与工作区样式，只允许引用 Token。                                                                                                                                                |
 
 规则：
 
@@ -131,12 +131,12 @@ Owner 方案。产品与技术权威仍是
 
 Radius **不按嵌套深度、也不按个人偏好**决定，只按控件类型：
 
-| 类型 | Token | 值 | 适用 |
-|---|---|---|---|
-| 控件 | `--df-radius-control` | 8px | 按钮、输入、下拉、标签页、可选行、覆盖层 |
-| 容器 | `--df-radius-container` | 10px | 面板、卡片、表格、抽屉、舞台帧 |
-| 顶层面板 | `--df-radius-container-lg` | 14px | 仅顶层工作台外壳 |
-| 圆片 | `--df-radius-chip` | 9999px | 徽标、胶囊、状态芯片、头像 |
+| 类型     | Token                      | 值     | 适用                                     |
+| -------- | -------------------------- | ------ | ---------------------------------------- |
+| 控件     | `--df-radius-control`      | 8px    | 按钮、输入、下拉、标签页、可选行、覆盖层 |
+| 容器     | `--df-radius-container`    | 10px   | 面板、卡片、表格、抽屉、舞台帧           |
+| 顶层面板 | `--df-radius-container-lg` | 14px   | 仅顶层工作台外壳                         |
+| 圆片     | `--df-radius-chip`         | 9999px | 徽标、胶囊、状态芯片、头像               |
 
 `--df-radius-sm/md/lg/xl` 是旧刻度别名（分别指向 legacy-sm / control / control / control），
 只为兼容既有声明保留；新代码一律用语义名。禁止出现 `border-radius: 6px` / `10px` 之类的
@@ -144,11 +144,11 @@ Radius **不按嵌套深度、也不按个人偏好**决定，只按控件类型
 
 ### 5.2 Shadow：三档 elevation
 
-| 档位 | Token | 用途 |
-|---|---|---|
-| flat | `--df-shadow-flat`（= none） | 结构容器；需要显式取消继承的阴影时用它 |
-| raised | `--df-surface-tier-raised-shadow` | 面板、卡片、可选中的对象 |
-| overlay | `--df-surface-tier-overlay-shadow` | 抽屉、浮层、模态、告警层 |
+| 档位    | Token                              | 用途                                   |
+| ------- | ---------------------------------- | -------------------------------------- |
+| flat    | `--df-shadow-flat`（= none）       | 结构容器；需要显式取消继承的阴影时用它 |
+| raised  | `--df-surface-tier-raised-shadow`  | 面板、卡片、可选中的对象               |
+| overlay | `--df-surface-tier-overlay-shadow` | 抽屉、浮层、模态、告警层               |
 
 配套的 `--df-surface-tier-{flat,raised,overlay}-{bg,border,shadow}` 给出该档的固定配方。
 不得手写 `box-shadow` 的投影数值；仅两种例外：品牌强调条（`inset … var(--df-brass)`）、
@@ -170,10 +170,10 @@ Workbench 正文与标签只用四档：11（技术 id、时间戳、kicker）�
 
 响应式优先只用这三个断点：
 
-| 断点 | 语义 |
-|---|---|
-| 640px | 移动：单列、控件满宽、抽屉化 |
-| 900px | 平板：主区与侧栏堆叠 |
+| 断点   | 语义                                |
+| ------ | ----------------------------------- |
+| 640px  | 移动：单列、控件满宽、抽屉化        |
+| 900px  | 平板：主区与侧栏堆叠                |
 | 1100px | 窄桌面：检查器/右侧面板折叠为覆盖层 |
 
 现状仍有 160/280/620/650/690/720/760/800/1000/1040/1080/1180/1440 等历史断点：

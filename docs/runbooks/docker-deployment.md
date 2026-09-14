@@ -117,17 +117,39 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 curl http://localhost:8080/gateway-health
 curl http://localhost:8080/health
 docker compose ps
-docker compose logs --tail 200 api dispatcher worker-default worker-heavy
+docker compose logs --tail 200 api dispatcher worker-default worker-director worker-heavy
 docker compose down
 ```
 
 `/gateway-health` checks the gateway process. `/health` is proxied to the API
 and includes its database readiness. Queue processing should additionally be
-checked from service status and worker logs.
+checked from service status and worker logs: `worker-default` consumes
+`dramaforge:default`, `worker-director` consumes `dramaforge:director`
+(Director turns, event intake and wakeup replay), and `worker-heavy` consumes
+`dramaforge:heavy`. Recoverable work is republished by the resident
+`dispatcher` and by the Director worker's startup recovery.
 
 Named volumes `postgres_data`, `minio_data`, and `litellm_db_data` contain
 persistent state. `docker compose down` preserves them; do not use `--volumes`
 unless permanent data deletion is intended and backups have been verified.
+Backup and restore-verify run through the profiled maintenance service, whose
+entrypoint is `scripts/p0_backup_restore.py`:
+
+```text
+docker compose --profile maintenance run --rm maintenance backup --out /workspace/tmp/<name>.tar
+docker compose --profile maintenance run --rm maintenance restore-verify --archive /workspace/tmp/<name>.tar --restore-database-url <dsn> --restore-bucket <bucket>
+```
+
+## Director runtime engine
+
+`DIRECTOR_RUNTIME_ENGINE` selects the engine for **newly started** Director
+turns and defaults to `legacy`. It is passed to both the API (which starts
+turns) and `worker-director` (which executes them); the `langgraph` value also
+requires `DIRECTOR_CHECKPOINT_DATABASE_URL`, which only `worker-director`
+receives, plus the private `director_runtime_checkpoints` schema created by
+migration `20260910_0066` (role `dramaforge_director_checkpoint`, provisioned by
+`database-bootstrap`). Selecting one engine never runs the other, and the manual
+production path must still complete with the director worker stopped.
 
 ## AIOS/AISphere handoff boundary
 
