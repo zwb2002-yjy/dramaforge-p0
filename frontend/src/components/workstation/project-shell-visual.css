@@ -1,4 +1,4 @@
-/* ========================================================================
+﻿/* ========================================================================
    Visual 2.1 workstation refinement
    ------------------------------------------------------------------------
    This layer consumes the existing Visual 2.0 tokens and intentionally sits
@@ -25,7 +25,7 @@
 
   .sidebar-expanded .qc-sidebar {
     width: 216px;
-    box-shadow: var(--df-shadow-lg);
+    box-shadow: var(--df-surface-tier-overlay-shadow);
   }
 
   .qc-sidebar-head {
@@ -34,14 +34,14 @@
   }
 
   .qc-sidebar-toggle {
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-control);
   }
 
   .qc-sidebar a {
     min-height: 42px;
     gap: var(--df-space-3);
     padding: var(--df-space-2) var(--df-space-3);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     font-size: var(--df-text-sm);
   }
 
@@ -76,7 +76,7 @@
     padding: 0 clamp(var(--df-space-4), 2.4vw, var(--df-space-8));
     border-bottom-color: var(--df-border-subtle);
     background: var(--df-surface-overlay);
-    box-shadow: 0 1px 0 rgb(0 0 0 / 16%);
+    box-shadow: 0 1px 0 var(--df-surface-screen);
   }
 
   .qc-project-name {
@@ -97,7 +97,7 @@
   }
 
   .qc-avatar {
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-chip);
     border-color: var(--df-border);
   }
 
@@ -143,7 +143,7 @@
   .qc-director-kicker,
   .director-stage-kicker {
     color: var(--df-brass);
-    font-size: 0.625rem;
+    font-size: var(--df-font-size-meta);
     font-weight: var(--df-weight-semibold);
     letter-spacing: 0.08em;
   }
@@ -177,20 +177,20 @@
   }
 
   .qc-director-mark {
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-chip);
   }
 
   .qc-story-card,
   .qc-scene-card,
   .qc-overview-grid article {
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
     box-shadow: none;
   }
 
   .qc-story-media,
   .qc-scene-thumb {
-    border-radius: 2px;
+    border-radius: var(--df-radius-container);
   }
 
   /* Scene Workbench: keep the stage dominant and demote nested card chrome. */
@@ -210,7 +210,7 @@
 
   .qc-scene-header-actions .qc-overview-primary {
     min-height: 36px;
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-control);
     font-size: var(--df-text-sm);
   }
 
@@ -230,9 +230,9 @@
 
   .qc-scene-stage .qc-cinematic-canvas {
     border-color: var(--df-border-strong);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-obsidian);
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 24%);
+    box-shadow: inset 0 0 0 1px var(--df-surface-screen);
   }
 
   .qc-canvas-media {
@@ -242,24 +242,24 @@
 
   .qc-canvas-state {
     color: var(--df-brass);
-    font-size: 0.625rem;
+    font-size: var(--df-font-size-meta);
     letter-spacing: 0.08em;
   }
 
   .qc-canvas-media small {
     color: var(--df-text-muted);
-    font-size: 0.625rem;
+    font-size: var(--df-font-size-meta);
   }
 
   .qc-canvas-status {
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-control);
     background: var(--df-surface-1);
   }
 
   .qc-shot-candidate-tray,
   .qc-shot-strip-panel {
     border-color: var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
   }
 
@@ -286,7 +286,7 @@
   .qc-shot-candidate-card {
     padding: var(--df-space-2);
     border-color: var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-0);
   }
 
@@ -296,12 +296,12 @@
   }
 
   .qc-shot-candidate-preview {
-    border-radius: 2px;
+    border-radius: var(--df-radius-container);
   }
 
   .qc-shot-candidate-confirm {
     min-height: 30px;
-    border-radius: 2px;
+    border-radius: var(--df-radius-container);
   }
 
   .qc-shot-strip-panel {
@@ -315,7 +315,7 @@
 
   .qc-shot-strip button {
     min-height: 72px;
-    border-radius: 2px;
+    border-radius: var(--df-radius-control);
     border-color: var(--df-border-subtle);
     background: var(--df-surface-0);
   }
@@ -332,7 +332,7 @@
   .qc-director-sidebar {
     max-height: calc(100vh - 8.5rem);
     border-color: var(--df-border);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
   }
 
@@ -348,14 +348,14 @@
 
   .qc-director-tabs {
     border-color: var(--df-border);
-    border-radius: 2px;
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-0);
   }
 
   .qc-director-tabs button {
     min-height: 34px;
     color: var(--df-text-muted);
-    border-radius: 2px;
+    border-radius: var(--df-radius-control);
   }
 
   .qc-director-tabs button.active,
@@ -382,7 +382,7 @@
   .qc-director-tab-panel .qc-shot-design-panel textarea,
   .qc-director-tab-panel .qc-reference-picker select,
   .qc-director-tab-panel .qc-reference-picker input {
-    border-radius: 2px;
+    border-radius: var(--df-radius-control);
   }
 
   @media (max-width: 1100px) {
@@ -471,7 +471,7 @@
     gap: var(--df-space-2);
     padding: var(--df-space-2) var(--df-space-3);
     border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
   }
 
@@ -479,7 +479,7 @@
     min-height: 32px;
     padding: var(--df-space-1) var(--df-space-3);
     border: 1px solid transparent;
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-control);
     background: transparent;
     color: var(--df-text-secondary);
     font-size: var(--df-text-sm);
@@ -520,9 +520,9 @@
     display: flex;
     flex-direction: column;
     border: 1px solid var(--df-border);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
-    box-shadow: var(--df-shadow-lg);
+    box-shadow: var(--df-surface-tier-overlay-shadow);
   }
 
   .qc-director-context-sheet .qc-director-sidebar-content {
@@ -537,7 +537,7 @@
     width: 100%;
     padding: var(--df-space-2) var(--df-space-4);
     border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
     color: var(--df-text-secondary);
     font-size: var(--df-text-sm);
@@ -560,7 +560,7 @@
     margin-left: auto;
     padding: var(--df-space-1) var(--df-space-3);
     border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-control);
     background: transparent;
     color: var(--df-text-muted);
     font-size: var(--df-text-xs);
@@ -593,9 +593,9 @@
     width: clamp(300px, 24vw, 340px);
     padding: var(--df-space-4);
     border: 1px solid var(--df-border);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
-    box-shadow: var(--df-shadow-lg);
+    box-shadow: var(--df-surface-tier-overlay-shadow);
     overflow: auto;
   }
 
@@ -686,7 +686,7 @@
     min-width: 0;
     overflow: hidden;
     border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
   }
 
@@ -752,7 +752,7 @@
     margin: 0;
     padding: var(--df-space-5);
     border-color: var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
     box-shadow: none;
   }
@@ -788,7 +788,7 @@
   textarea,
   select {
     border-color: var(--df-border);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-control);
     background: var(--df-surface-0);
     color: var(--df-text-primary);
     font-size: var(--df-text-sm);
@@ -816,7 +816,7 @@
 
   .qc-project-shell :where(button:not(.qc-icon-button)) {
     min-height: 36px;
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-control);
     padding: var(--df-space-2) var(--df-space-4);
     background: var(--df-surface-3);
     border-color: var(--df-border-strong);
@@ -872,7 +872,7 @@
     gap: var(--df-space-1);
     padding: var(--df-space-4);
     border-color: var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
   }
 
@@ -910,7 +910,7 @@
     margin: 0;
     padding: var(--df-space-3) var(--df-space-4);
     border-left: 2px solid var(--df-verdigris);
-    border-radius: 0 var(--df-radius-sm) var(--df-radius-sm) 0;
+    border-radius: 0 var(--df-radius-container) var(--df-radius-container) 0;
     background: var(--df-verdigris-tint);
     color: var(--df-text-secondary);
     font-size: var(--df-text-sm);
@@ -925,7 +925,7 @@
   .flash {
     margin: 0;
     padding: var(--df-space-3) var(--df-space-4);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     font-size: var(--df-text-sm);
   }
 
@@ -982,7 +982,7 @@
     gap: var(--df-space-3);
     padding: var(--df-space-4);
     border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
   }
 
@@ -1006,7 +1006,7 @@
     min-width: 0;
     padding: var(--df-space-4);
     border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
   }
 
@@ -1069,7 +1069,7 @@
     min-height: 24px;
     padding: var(--df-space-1) var(--df-space-2);
     border: 1px solid var(--df-border);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-chip);
     font-size: var(--df-text-xs);
     line-height: 1.2;
   }
@@ -1133,7 +1133,7 @@
   .director-board-workspace {
     min-width: 0;
     border-color: var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
     box-shadow: none;
   }
@@ -1155,7 +1155,7 @@
     overflow: auto;
     padding: var(--df-space-3);
     border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-0);
     color: var(--df-text-secondary);
     white-space: pre-wrap;
@@ -1218,7 +1218,7 @@
 
   .editing-session-editor li {
     border-color: var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-2);
   }
 
@@ -1229,7 +1229,7 @@
   .asset-card-workspace {
     margin: 0;
     border-color: var(--df-border-subtle);
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
     box-shadow: none;
   }
@@ -1252,7 +1252,7 @@
 
   .workbench-tabs,
   .assistant-mode-switch {
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-0);
   }
 
@@ -1262,7 +1262,7 @@
   }
 
   .canvas-preview-placeholder {
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
     background: var(--df-surface-0);
   }
 
@@ -1274,7 +1274,7 @@
   .editing-session-editor li,
   .qc-script-document,
   .qc-script-episode {
-    border-radius: var(--df-radius-sm);
+    border-radius: var(--df-radius-container);
   }
 
   @media (max-width: 1100px) {

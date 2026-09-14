@@ -1,4 +1,4 @@
-/* DramaForge — canonical product workstation shell styles.
+﻿/* DramaForge — canonical product workstation shell styles.
    Owns the qc-* classes consumed by the real shells and formal business files. */
 
 .qc-preview-shell {
@@ -31,7 +31,7 @@
 
 .sidebar-expanded .qc-sidebar {
   width: 188px;
-  box-shadow: var(--df-shadow-xl);
+  box-shadow: var(--df-surface-tier-overlay-shadow);
 }
 
 .qc-sidebar-head {
@@ -673,7 +673,7 @@
   width: 100%;
   max-height: 520px;
   display: block;
-  background: #000;
+  background: var(--df-surface-screen);
 }
 
 .director-evidence-av audio {
@@ -716,7 +716,7 @@
   aspect-ratio: 9 / 16;
   display: block;
   object-fit: contain;
-  background: #000;
+  background: var(--df-surface-screen);
 }
 
 .director-frame-evidence figcaption {
@@ -1465,7 +1465,7 @@
   border: 1px solid var(--df-border-strong);
   border-radius: var(--df-radius-lg);
   background: var(--df-surface-raised);
-  box-shadow: var(--df-shadow-lg);
+  box-shadow: var(--df-surface-tier-overlay-shadow);
 }
 
 .qc-unsaved-dialog h2 {
@@ -1655,7 +1655,7 @@
   padding: 2px var(--df-space-1);
   background: rgb(12 16 20 / 82%);
   color: var(--df-ivory);
-  font-size: 10px;
+  font-size: var(--df-font-size-meta);
 }
 
 .qc-shot-candidate-meta {
@@ -1663,7 +1663,7 @@
   gap: var(--df-space-1);
   min-width: 0;
   color: var(--df-text-muted);
-  font-size: 10px;
+  font-size: var(--df-font-size-meta);
 }
 
 .qc-shot-candidate-meta code {
@@ -1749,7 +1749,7 @@
   aspect-ratio: 16 / 10;
   background: var(--df-surface-2);
   color: var(--df-text-muted);
-  font-size: 10px;
+  font-size: var(--df-font-size-meta);
 }
 
 .qc-shot-strip-thumb img {
@@ -1770,7 +1770,7 @@
 .qc-shot-strip-copy small {
   overflow: hidden;
   color: var(--df-text-muted);
-  font-size: 10px;
+  font-size: var(--df-font-size-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1785,7 +1785,7 @@
 
 .qc-shot-strip-status em {
   color: var(--df-text-muted);
-  font-size: 10px;
+  font-size: var(--df-font-size-meta);
   font-style: normal;
   white-space: nowrap;
 }

@@ -12,6 +12,7 @@ import type {
   ShotCanvasUpdateResponse,
   ShotRead,
 } from "../../lib/api";
+import { Button } from "../../components/ui";
 import { assetKindLabel, assetStatusLabel } from "../../lib/assetLabels";
 import { shotTypeLabel } from "../../lib/shotLabels";
 import { latestEffectiveNodeRuns } from "./effectiveRuns";
@@ -427,16 +428,11 @@ export function ProfessionalWorkbench({
                               : "未分类"}
                           </small>
                           <div className="suggestion-actions">
-                            <button
-                              type="button"
-                              className="df-btn ghost"
-                              onClick={() => referenceAsset(asset)}
-                            >
+                            <Button tone="ghost" onClick={() => referenceAsset(asset)}>
                               @引用
-                            </button>
-                            <button
-                              type="button"
-                              className="df-btn ghost"
+                            </Button>
+                            <Button
+                              tone="ghost"
                               disabled={!onUpdateAsset}
                               onClick={() =>
                                 void onUpdateAsset?.(asset, {
@@ -445,7 +441,7 @@ export function ProfessionalWorkbench({
                               }
                             >
                               {asset.status === "archived" ? "恢复" : "回收站"}
-                            </button>
+                            </Button>
                           </div>
                         </article>
                       ))}
@@ -489,9 +485,8 @@ export function ProfessionalWorkbench({
                         placeholder="稳定特征、用途与限制"
                         rows={3}
                       />
-                      <button
-                        type="button"
-                        className="df-btn primary"
+                      <Button
+                        tone="primary"
                         disabled={!assetName.trim() || !onCreateAsset}
                         onClick={() =>
                           void onCreateAsset?.({
@@ -510,7 +505,7 @@ export function ProfessionalWorkbench({
                         }
                       >
                         创建资产卡
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ) : (
@@ -590,9 +585,8 @@ export function ProfessionalWorkbench({
                         />
                       </label>
                     </div>
-                    <button
-                      type="button"
-                      className="df-btn primary"
+                    <Button
+                      tone="primary"
                       disabled={!onSaveDirectorBoard}
                       onClick={() =>
                         void onSaveDirectorBoard?.({
@@ -611,7 +605,7 @@ export function ProfessionalWorkbench({
                       }
                     >
                       保存导演台版本
-                    </button>
+                    </Button>
                   </div>
                 )}
                 {activeTab === "review" && (
@@ -730,9 +724,8 @@ export function ProfessionalWorkbench({
                         onChange={(event) => setAnnotationNote(event.target.value)}
                         placeholder="指出问题和修复意图"
                       />
-                      <button
-                        type="button"
-                        className="df-btn primary"
+                      <Button
+                        tone="primary"
                         disabled={!annotationNote.trim() || !onCreateAnnotation}
                         onClick={() =>
                           void onCreateAnnotation?.({
@@ -767,7 +760,7 @@ export function ProfessionalWorkbench({
                         }
                       >
                         添加批注
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}{" "}
@@ -826,30 +819,19 @@ export function ProfessionalWorkbench({
                 <div className="canvas-editor-footer">
                   <span className="muted">手动修改不会被助手覆盖，也不会自动重跑旧结果。</span>
                   <div>
-                    <button
-                      type="button"
-                      className="df-btn ghost"
-                      onClick={() => onStart?.(selectedId)}
-                      disabled={!onStart}
-                    >
+                    <Button tone="ghost" onClick={() => onStart?.(selectedId)} disabled={!onStart}>
                       启动镜头
-                    </button>
-                    <button
-                      type="button"
-                      className="df-btn ghost"
-                      onClick={() => onRerun?.(selectedId)}
-                      disabled={!onRerun}
-                    >
+                    </Button>
+                    <Button tone="ghost" onClick={() => onRerun?.(selectedId)} disabled={!onRerun}>
                       局部重跑视频
-                    </button>
-                    <button
-                      type="button"
-                      className="df-btn primary"
+                    </Button>
+                    <Button
+                      tone="primary"
                       onClick={() => void saveCanvas()}
                       disabled={!isDirty || !onSave}
                     >
                       保存画布版本
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 {saveMessage && (
@@ -912,9 +894,8 @@ export function ProfessionalWorkbench({
                       {runStates.length > 0 && <small>执行证据：{runStates.length} 次运行</small>}
                     </div>
                     <div className="suggestion-actions">
-                      <button
-                        type="button"
-                        className="df-btn ghost"
+                      <Button
+                        tone="ghost"
                         disabled={
                           !onStartExperiment ||
                           item.status === "accepted" ||
@@ -923,10 +904,9 @@ export function ProfessionalWorkbench({
                         onClick={() => void onStartExperiment?.(item.id, targetNodeKey)}
                       >
                         运行实验
-                      </button>
-                      <button
-                        type="button"
-                        className="df-btn primary"
+                      </Button>
+                      <Button
+                        tone="primary"
                         disabled={
                           !onDecideExperiment ||
                           !firstCandidate ||
@@ -945,10 +925,9 @@ export function ProfessionalWorkbench({
                         }
                       >
                         采纳候选
-                      </button>
-                      <button
-                        type="button"
-                        className="df-btn ghost"
+                      </Button>
+                      <Button
+                        tone="ghost"
                         disabled={
                           !onDecideExperiment ||
                           item.status === "accepted" ||
@@ -957,10 +936,9 @@ export function ProfessionalWorkbench({
                         onClick={() => void onDecideExperiment?.(item.id, { decision: "kept" })}
                       >
                         保留实验
-                      </button>
-                      <button
-                        type="button"
-                        className="df-btn ghost"
+                      </Button>
+                      <Button
+                        tone="ghost"
                         disabled={
                           !onDecideExperiment ||
                           item.status === "accepted" ||
@@ -969,7 +947,7 @@ export function ProfessionalWorkbench({
                         onClick={() => void onDecideExperiment?.(item.id, { decision: "rejected" })}
                       >
                         拒绝
-                      </button>
+                      </Button>
                     </div>
                   </li>
                 );
@@ -1001,9 +979,8 @@ export function ProfessionalWorkbench({
               {experimentModelRecord && (
                 <small>动态能力：{experimentModelRecord.capabilities.join(" · ")}</small>
               )}
-              <button
-                type="button"
-                className="df-btn primary"
+              <Button
+                tone="primary"
                 disabled={!experimentName.trim() || !experimentModel.trim() || !onCreateExperiment}
                 onClick={() =>
                   void onCreateExperiment?.({
@@ -1016,7 +993,7 @@ export function ProfessionalWorkbench({
                 }
               >
                 创建实验分支
-              </button>
+              </Button>
             </div>
           </section>
           <section>

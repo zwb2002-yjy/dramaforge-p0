@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ArrowUpRight } from "lucide-react";
+import "../resonance/resonance.css";
+// Must load after resonance.css: it settles the workbench container radius on
+// this surface against the resonance world's unscoped .rs-scene-* rules.
+import "./scene-wall-surface.css";
 
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
@@ -52,10 +57,10 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   };
 
   return (
-    <div data-testid="scene-storyboard-wall" className="qc-scene-wall">
+    <div data-testid="scene-storyboard-wall" className="qc-scene-wall rs-scene-world">
       <header className="qc-page-heading">
         <h1>场景总览</h1>
-        <span>每个场景一张代表画面；拖动卡片可调整顺序。</span>
+        <span>{rows.length > 0 ? `${rows.length} 个故事发生的地方` : "故事从这里展开"}</span>
       </header>
 
       {scenes.isError && <div className="flash err">无法读取场景：{String(scenes.error)}</div>}
@@ -71,7 +76,16 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
             onDragOver={(event) => event.preventDefault()}
             onDrop={() => onDrop(index)}
           >
-            <SceneThumbnail scene={scene} projectId={projectId} />
+            <a
+              className="rs-scene-portal"
+              href={`/projects/${projectId}/scenes/${scene.id}`}
+              aria-label={`进入场景：${scene.location_name}`}
+            >
+              <SceneThumbnail scene={scene} projectId={projectId} />
+              <span className="rs-portal-enter" aria-hidden="true">
+                <ArrowUpRight size={22} />
+              </span>
+            </a>
             <header>
               <a href={`/projects/${projectId}/scenes/${scene.id}`} className="qc-scene-enter">
                 {scene.location_name}
@@ -120,7 +134,9 @@ function SceneThumbnail({ scene, projectId }: { scene: SceneSummary; projectId: 
           data-testid="scene-representative"
         />
       ) : (
-        <span className="qc-scene-placeholder">无代表图</span>
+        <span className="qc-scene-placeholder rs-scene-silhouette" aria-label="尚无代表画面">
+          <span aria-hidden="true">{String(scene.scene_number).padStart(2, "0")}</span>
+        </span>
       )}
     </div>
   );

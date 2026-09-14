@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { Button } from "../../components/ui";
 import { creativeCapabilityLabels } from "../../lib/creativeLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import { fetchCreativeProvenance, freezeCreativeCapabilities } from "./workflow-api";
@@ -208,14 +209,13 @@ export function CreativeCapabilitiesPanel({
           ))}
         </div>
 
-        <button
-          type="button"
-          className="df-btn primary"
+        <Button
+          tone="primary"
           onClick={() => freeze.mutate()}
           disabled={freeze.isPending || !targetId}
         >
           {freeze.isPending ? "冻结中…" : "冻结创意能力"}
-        </button>
+        </Button>
         {msg && (
           <div className="canvas-save-message" role="status">
             {msg}
