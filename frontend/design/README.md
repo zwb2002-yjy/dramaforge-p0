@@ -4,8 +4,8 @@
 组件复用规则、样式系统，以及新代码必须遵守的验收项。
 
 它回答的是"AI 或人写前端时不能自己发明什么"，不改变产品事实、路由、API、运行时或
-Owner 方案。产品与技术权威仍是
-[七方案执行集](../../docs/plans/professional-program-v2/README.md)。
+Owner 方案。产品与技术权威的入口是
+[docs/CURRENT.md](../../docs/CURRENT.md)。
 
 骨架方法论来自 frontend-skeleton 技能
 [`.claude/skills/frontend-skeleton/SKILL.md`](../../.claude/skills/frontend-skeleton/SKILL.md)。

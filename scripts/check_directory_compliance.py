@@ -21,7 +21,6 @@ ALLOWED_ROOT = {
     ".gitignore",
     ".env.example",
     ".dockerignore",
-    "DramaForge总开发文档.md",
     "README.md",
     "LICENSE",
     "NOTICE",
@@ -32,9 +31,6 @@ ALLOWED_ROOT = {
     "CLAUDE.md",
     "AGENTS.md",
     ".claude",
-    "agent.md",
-    "AGENT.md",
-    "AGENT_EXECUTION_PROTOCOL.md",
     "docker-compose.yml",
     "docker-compose.build.yml",
     "docker-compose.dev.yml",
@@ -80,12 +76,6 @@ LOCAL_ONLY_ROOT = {
     ".venv",
     "venv",
     ".env",  # local secrets only; never committed
-    # Owner-supplied local source copies preserved during the V1.1 task. The
-    # registered verbatim copies live under docs/plans/professional-program-v2.
-    "DramaForge_V1实施方案_20260907.md",
-    "DramaForge_导演与工作台_设计方案总结_20260909.md",
-    "DramaForge_导演与工作台_执行方案总结_20260909.md",
-    "DramaForge_综合设计与执行方案_20260907.md",
 }
 
 FORBIDDEN_TRACKED_PARTS = {
