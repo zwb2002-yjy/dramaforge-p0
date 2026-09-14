@@ -207,8 +207,8 @@ export function WorkspaceSettingsPage() {
   return (
     <main className="df-page df-settings-page" data-testid="workspace-settings-page">
       <SettingsHeader
-        title="工作空间管理"
-        description="在这里管理项目容器；项目大厅只使用工作空间作为筛选条件。"
+        title="工作空间（项目归集）"
+        description="一个工作空间可以包含多个影片项目，按客户或系列归集。具体影片请从项目大厅打开。"
       />
       <section className="df-settings-card">
         <form className="inline-form" onSubmit={submit}>
@@ -314,7 +314,7 @@ export function DefaultPreferencesSettingsPage() {
   return (
     <main className="df-page df-settings-page" data-testid="default-settings-page">
       <SettingsHeader
-        title="默认创作偏好（只读）"
+        title="新项目默认偏好（只读）"
         description="新建项目表单以这些值作为初始选择，每个项目创建时都能改。"
       />
       <section className="df-settings-card">

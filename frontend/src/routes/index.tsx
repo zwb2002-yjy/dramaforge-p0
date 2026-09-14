@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createRoute, useNavigate } from "@tanstack/react-router";
+import { Link, createRoute, useNavigate, redirect } from "@tanstack/react-router";
 import { Clapperboard, Plus, Search } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiError,
@@ -23,8 +23,24 @@ import { rootRoute } from "./__root";
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  validateSearch: (search: Record<string, unknown>) => ({
+  beforeLoad: ({ location }) => {
+    const hash = location.hash.replace(/^#/, "");
+    if (hash === "project-filters" || hash === "recent-projects") {
+      throw redirect({
+        to: "/",
+        search: { create: false, panel: hash === "project-filters" ? "workspace" : "recent" },
+        hash: "",
+        replace: true,
+      });
+    }
+  },
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { create: boolean; panel?: "workspace" | "recent" | "select" } => ({
     create: search.create === true || search.create === "1",
+    panel: (search.panel === "workspace" || search.panel === "recent" || search.panel === "select"
+      ? search.panel
+      : undefined) as "workspace" | "recent" | "select" | undefined,
   }),
   component: HomePage,
 });
@@ -48,6 +64,7 @@ const PROJECT_PAGE_SIZE = 12;
 function HomePage() {
   const navigate = useNavigate();
   const search = indexRoute.useSearch();
+  const workspaceFilter = useRef<HTMLSelectElement>(null);
   const queryClient = useQueryClient();
   const health = useQuery({
     queryKey: queryKeys.health(),
@@ -81,7 +98,9 @@ function HomePage() {
   const [startType, setStartType] = useState<"TEMPLATE" | "FREE">("FREE");
   const [templateKey, setTemplateKey] = useState<string>(V1_TEMPLATES[0].key);
   const [directorAutonomy, setDirectorAutonomy] = useState<"AUTO" | "ASSIST" | "MANUAL">("ASSIST");
-  const [createOpen, setCreateOpen] = useState(search.create);
+  const createOpen = search.create;
+  const setCreateOpen = (open: boolean) =>
+    void navigate({ to: "/", search: { ...search, create: open } });
   const [projectFilter, setProjectFilter] = useState("");
   const [visibleProjectLimit, setVisibleProjectLimit] = useState(PROJECT_PAGE_SIZE);
   const [error, setError] = useState<string | null>(null);
@@ -90,10 +109,6 @@ function HomePage() {
     persistSelectedWorkspaceId(workspaceId);
     setSelectedWorkspaceId(workspaceId);
   }, []);
-
-  useEffect(() => {
-    if (search.create) setCreateOpen(true);
-  }, [search.create]);
 
   useEffect(() => {
     if (!selectedWorkspaceId && workspaces.data?.[0]) selectWorkspace(workspaces.data[0].id);
@@ -194,6 +209,13 @@ function HomePage() {
   const rememberedProjectId = getRememberedProjectId();
   const recentProject =
     (projects.data ?? []).find((project) => project.id === rememberedProjectId) ?? null;
+  useEffect(() => {
+    if (search.panel !== "workspace") return;
+    const frame = requestAnimationFrame(() =>
+      workspaceFilter.current?.focus({ preventScroll: true }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [search.panel, workspaces.data, currentUser.data]);
   const queryError =
     workspaces.error instanceof Error
       ? workspaces.error.message
@@ -213,7 +235,7 @@ function HomePage() {
   return (
     <main className="df-page" data-testid="home-panel">
       <header className="df-page-header">
-        <h1>项目大厅</h1>
+        <h1>{search.panel === "select" ? "选择项目开始创作" : "项目大厅"}</h1>
         <div className="toolbar">
           {!apiLive && <span className="status-bad">服务未就绪</span>}
           {currentUser.data && (
@@ -385,7 +407,7 @@ function HomePage() {
             </section>
           )}
 
-          {recentProject && (
+          {recentProject && search.panel !== "workspace" && (
             <section className="df-lobby-section" id="recent-projects">
               <header>
                 <h2>继续创作</h2>
@@ -412,7 +434,14 @@ function HomePage() {
             </section>
           )}
 
-          <section className="df-lobby-section" aria-labelledby="all-projects-title">
+          {search.panel === "recent" && !recentProject && (
+            <p role="status">当前空间还没有最近打开的项目。</p>
+          )}
+          <section
+            hidden={search.panel === "recent"}
+            className="df-lobby-section"
+            aria-labelledby="all-projects-title"
+          >
             <header>
               <h2 id="all-projects-title">全部项目</h2>
             </header>
@@ -420,6 +449,7 @@ function HomePage() {
               <label>
                 <span className="sr-only">工作空间</span>
                 <select
+                  ref={workspaceFilter}
                   aria-label="工作空间筛选"
                   value={selectedWorkspaceId ?? ""}
                   onChange={(event) => selectWorkspace(event.target.value || null)}

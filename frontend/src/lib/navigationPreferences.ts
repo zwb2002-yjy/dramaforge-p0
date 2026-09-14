@@ -1,6 +1,24 @@
 const SELECTED_WORKSPACE_STORAGE_KEY = "dramaforge.selected-workspace-id";
 const LAST_PROJECT_STORAGE_KEY = "dramaforge.last-project-id";
 
+export function validateSettingsReturnTo(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.includes("\\")) return undefined;
+  if (
+    !/^(\/(?:\?[^#]*)?|\/projects\/[^/?#]+(?:\/(?:script|assets|production|review|edit|scenes)(?:\/[^/?#]+)?)?(?:\?[^#]*)?)(?:#.*)?$/.test(
+      value,
+    )
+  )
+    return undefined;
+  if (
+    value
+      .split(/[?#]/)[0]
+      .split("/")
+      .some((part) => part === "." || part === ".." || /%/i.test(part))
+  )
+    return undefined;
+  return value;
+}
+
 function readStorage(storage: Storage, key: string): string | null {
   try {
     return storage.getItem(key);
@@ -49,4 +67,20 @@ export function getRememberedProjectId(): string | null {
 
 export function setRememberedProjectId(projectId: string | null): void {
   writeNavigationPreference(LAST_PROJECT_STORAGE_KEY, projectId);
+}
+
+export function getRememberedProjectPath(projectId: string): string | null {
+  const path = readNavigationPreference(`dramaforge.project-path:${projectId}`);
+  const prefix = `/projects/${projectId}/`;
+  if (!path?.startsWith(prefix)) return null;
+  const suffix = path.slice(prefix.length);
+  return /^(script|assets|production|review|edit|scenes|scenes\/[^/?#]+)$/.test(suffix) &&
+    !suffix.includes("..")
+    ? path
+    : null;
+}
+
+export function rememberProjectPath(projectId: string, path: string): void {
+  if (!path.startsWith(`/projects/${projectId}/`)) return;
+  writeNavigationPreference(`dramaforge.project-path:${projectId}`, path);
 }

@@ -1,4 +1,5 @@
 import type { DirectorTurnRead } from "./suggestion-types";
+import { AgentPresence } from "../resonance/AgentPresence";
 
 type DirectorTurnStatusProps = {
   turns: DirectorTurnRead[];
@@ -7,6 +8,8 @@ type DirectorTurnStatusProps = {
   busyTurnId: string | null;
   onStop: (turn: DirectorTurnRead) => void;
   onResume: (turn: DirectorTurnRead) => void;
+  requestPending?: boolean;
+  requestFailed?: boolean;
 };
 
 const ACTIVE = new Set(["queued", "thinking", "awaiting_user", "awaiting_execution"]);
@@ -81,18 +84,38 @@ export function DirectorTurnStatus({
   busyTurnId,
   onStop,
   onResume,
+  requestPending = false,
+  requestFailed = false,
 }: DirectorTurnStatusProps) {
   const latest = turns[0];
   return (
     <section className="qc-director-turn-status" data-testid="director-turn-status">
-      <header>
-        <div>
-          <span className="director-stage-kicker">Persisted status</span>
-          <strong>导演轮次</strong>
-        </div>
-        {latest ? <span>#{latest.id.slice(0, 8)}</span> : null}
-      </header>
-
+      <AgentPresence
+        status={
+          syncError
+            ? "disconnected"
+            : requestPending
+              ? "requesting"
+              : requestFailed
+                ? "failed"
+                : loading && !latest
+                  ? "syncing"
+                  : (latest?.status ?? "idle")
+        }
+        label={
+          syncError
+            ? "连接中断，等待同步"
+            : requestPending
+              ? "正在等待导演回应"
+              : requestFailed
+                ? "这次未能得到回应"
+                : loading && !latest
+                  ? "正在同步"
+                  : latest
+                    ? (STATUS_LABEL[latest.status] ?? latest.status)
+                    : "导演在这里"
+        }
+      />
       {loading && !latest ? <p role="status">正在同步导演状态…</p> : null}
       {syncError ? (
         <p
@@ -103,7 +126,6 @@ export function DirectorTurnStatus({
           连接中断 / 状态待同步：{syncError}
         </p>
       ) : null}
-      {!loading && !latest && !syncError ? <p className="muted">当前镜头还没有导演轮次。</p> : null}
 
       {latest ? (
         <article
@@ -114,8 +136,6 @@ export function DirectorTurnStatus({
           <dl>
             <dt>当前理解</dt>
             <dd data-testid="director-current-understanding">{understanding(latest)}</dd>
-            <dt>状态</dt>
-            <dd>{STATUS_LABEL[latest.status] ?? latest.status}</dd>
             <dt>等待原因</dt>
             <dd data-testid="director-wait-reason">
               {WAIT_LABEL[latest.wait_reason ?? ""] ?? latest.wait_reason ?? "—"}
@@ -135,11 +155,14 @@ export function DirectorTurnStatus({
                 </dd>
               </>
             ) : null}
-            <dt>有界进度</dt>
-            <dd>
-              {latest.step_count} 步 · revision {latest.runtime_revision ?? latest.revision}
-            </dd>
           </dl>
+          <details className="rs-memory-detail">
+            <summary>本次协作记录</summary>
+            <p>
+              #{latest.id.slice(0, 8)} · {latest.step_count} 步 · revision{" "}
+              {latest.runtime_revision ?? latest.revision}
+            </p>
+          </details>
           {latest.last_error ? <p role="alert">{latest.last_error}</p> : null}
           <div className="qc-shot-director-suggestion-actions">
             {latest.status === "awaiting_user" || latest.status === "awaiting_execution" ? (
@@ -167,6 +190,21 @@ export function DirectorTurnStatus({
           </div>
         </article>
       ) : null}
+      {turns.length > 1 && (
+        <details className="rs-memory-detail">
+          <summary>此前的协作 · {turns.length - 1}</summary>
+          <ol className="rs-memory-strip" aria-label="此前的协作">
+            {turns.slice(1).map((turn) => (
+              <li key={turn.id}>
+                <span>{STATUS_LABEL[turn.status] ?? turn.status}</span>
+                <p>{understanding(turn)}</p>
+                {focusedSuggestion(turn) && <p>{focusedSuggestion(turn)}</p>}
+                <small>#{turn.id.slice(0, 8)}</small>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
     </section>
   );
 }

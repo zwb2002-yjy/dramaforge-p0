@@ -41,6 +41,7 @@ type DirectorSidebarProps = {
   suggestionDraft?: ShotDesignDraft | null;
   onApplySuggestionDraft?: (draft: ShotDesignDraft | null) => void;
   onDesignSaved?: () => void | Promise<void>;
+  intentSeed?: { text: string; revision: number } | null;
 };
 
 const TABS: Array<{ id: DirectorTab; label: string; testId: string }> = [
@@ -95,12 +96,14 @@ export function DirectorSidebar({
   suggestionDraft,
   onApplySuggestionDraft,
   onDesignSaved,
+  intentSeed,
 }: DirectorSidebarProps) {
   const requestedTab = requestedTool ? TOOL_TAB[requestedTool] : "shot";
   const [activeTab, setActiveTab] = useState<DirectorTab>(requestedTab);
   const [tabOverride, setTabOverride] = useState(false);
   const [localDirty, setLocalDirty] = useState(false);
   const [localDraft, setLocalDraft] = useState<ShotDesignDraft | null>(null);
+  const [designExpanded, setDesignExpanded] = useState(false);
   const designFocus: ShotDesignFocus =
     !tabOverride && requestedTool ? TOOL_FOCUS[requestedTool] : "all";
 
@@ -120,7 +123,8 @@ export function DirectorSidebar({
   useEffect(() => {
     setActiveTab(requestedTab);
     setTabOverride(false);
-  }, [requestedTab, requestedTool]);
+    setDesignExpanded(false);
+  }, [requestedTab, requestedTool, shot?.id]);
 
   // The panel is keyed by Shot identity, but the shell is not. Reset the
   // sibling production guard whenever selection changes so Shot A's draft can
@@ -167,17 +171,6 @@ export function DirectorSidebar({
               onResolutionStateChange={onResolutionStateChange}
             />
           ) : null}
-          <ShotDesignPanel
-            key={`design:${shot.id}`}
-            projectId={projectId}
-            shot={shot}
-            focus={designFocus}
-            draft={designDraft}
-            onDraftChange={onDesignDraftChange}
-            applyDraft={draft}
-            onSaved={handleSaved}
-            onDirtyChange={reportDirty}
-          />
           {requestedTool === "director" ? (
             <div className="qc-director-suggestion" data-testid="director-section-suggestion">
               <ShotDirectorSuggestionPanel
@@ -186,9 +179,30 @@ export function DirectorSidebar({
                 shot={shot}
                 dirty={dirty}
                 onApplyDraft={applyDraft}
+                intentSeed={intentSeed}
               />
             </div>
           ) : null}
+          <details
+            className="rs-design-detail"
+            open={requestedTool !== "director" || designExpanded || dirty || Boolean(draft)}
+            onToggle={(event) => {
+              if (requestedTool === "director") setDesignExpanded(event.currentTarget.open);
+            }}
+          >
+            <summary hidden={requestedTool !== "director"}>亲自调整这一刻</summary>
+            <ShotDesignPanel
+              key={`design:${shot.id}`}
+              projectId={projectId}
+              shot={shot}
+              focus={designFocus}
+              draft={designDraft}
+              onDraftChange={onDesignDraftChange}
+              applyDraft={draft}
+              onSaved={handleSaved}
+              onDirtyChange={reportDirty}
+            />
+          </details>
         </>
       ) : (
         <p className="muted">选择一个镜头查看设计。</p>

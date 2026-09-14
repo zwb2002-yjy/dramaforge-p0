@@ -20,6 +20,7 @@ import { hasActiveSceneRuns, SCENE_ACTIVE_REFETCH_MS } from "../production/scene
 import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
+import { ResonanceStage } from "../resonance/ResonanceStage";
 
 type SceneWorkspaceProps = {
   projectId: string;
@@ -79,6 +80,11 @@ export function SceneWorkspace({
   const [trayExpanded, setTrayExpanded] = useState(false);
   const [stripExpanded, setStripExpanded] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [intentSeed, setIntentSeed] = useState<{
+    text: string;
+    revision: number;
+    shotId: string | null;
+  } | null>(null);
   // Shared design draft lives here so closing the Context Sheet keeps it.
   const [designDirty, setDesignDirty] = useState(false);
   const [designDrafts, setDesignDrafts] = useState<Record<string, ShotDesignDraft>>({});
@@ -102,6 +108,7 @@ export function SceneWorkspace({
     setTrayExpanded(false);
     setStripExpanded(false);
     setDetailsOpen(false);
+    setIntentSeed(null);
     setDesignDirty(false);
     setDesignDrafts({});
     setSuggestionDraft(null);
@@ -322,13 +329,35 @@ export function SceneWorkspace({
 
       <div className="qc-scene-layout" data-selected-shot-id={selectedShotKey ?? undefined}>
         <div className="qc-scene-stage" data-testid="scene-stage">
-          <CinematicCanvas
+          <ResonanceStage
+            key={`${projectId}:${sceneId}:${selectedShotKey}`}
             projectId={projectId}
-            shot={selected}
-            candidates={candidates}
-            selectedCandidate={previewCandidate}
-            trace={trace}
-          />
+            shots={shots}
+            selectedShotId={selectedShotKey}
+            subjects={selectedBindingRows}
+            onOpenDirector={() => {
+              setDetailsOpen(false);
+              setActiveTool("director");
+            }}
+            onSelectShot={selectShot}
+            onIntent={(text) => {
+              setIntentSeed((current) => ({
+                text,
+                revision: (current?.revision ?? 0) + 1,
+                shotId: selectedShotKey,
+              }));
+              setDetailsOpen(false);
+              setActiveTool("director");
+            }}
+          >
+            <CinematicCanvas
+              projectId={projectId}
+              shot={selected}
+              candidates={candidates}
+              selectedCandidate={previewCandidate}
+              trace={trace}
+            />
+          </ResonanceStage>
           <ContextDock
             activeTool={activeTool}
             candidateCount={candidateCount}
@@ -372,6 +401,7 @@ export function SceneWorkspace({
             onWorkspaceRefresh={handleExecuted}
             open={activeTool !== null}
             requestedTool={activeTool}
+            intentSeed={intentSeed?.shotId === selectedShotKey ? intentSeed : null}
             onClose={() => setActiveTool(null)}
             designDirty={designDirty}
             onDesignDirtyChange={updateDesignDirty}

@@ -6,6 +6,7 @@ import { ProjectWorkspaceShell } from "../components/workstation/ProjectWorkspac
 import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
 import { ApiError, fetchProject } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
+import { getRememberedProjectPath, rememberProjectPath } from "../lib/navigationPreferences";
 import { rootRoute } from "./__root";
 
 export const projectRoute = createRoute({
@@ -37,11 +38,12 @@ function ProjectLayout() {
 
   const lastRemembered = useRef<string | null>(null);
   useEffect(() => {
-    if (view && lastRemembered.current !== view) {
-      lastRemembered.current = view;
+    if (view) rememberProjectPath(projectId, pathname);
+    if (view && lastRemembered.current !== `${projectId}:${view}`) {
+      lastRemembered.current = `${projectId}:${view}`;
       workspaceState.rememberLastView(view);
     }
-  }, [view, workspaceState]);
+  }, [view, workspaceState, projectId, pathname]);
 
   // Restore the last view with an imperative replace instead of rendering a
   // <Navigate> element, and require that the router's current pathname is still
@@ -55,8 +57,7 @@ function ProjectLayout() {
     if (!atProjectRoot || workspaceState.isLoading) return;
     const restoreTarget = workspaceState.lastView ?? "scenes";
     void navigate({
-      to: `/projects/$projectId/${restoreTarget}`,
-      params: { projectId },
+      to: getRememberedProjectPath(projectId) ?? `/projects/${projectId}/${restoreTarget}`,
       replace: true,
     });
   }, [atProjectRoot, workspaceState.isLoading, workspaceState.lastView, navigate, projectId]);

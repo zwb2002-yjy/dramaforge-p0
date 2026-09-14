@@ -236,6 +236,8 @@ describe("Workstation shell", () => {
     renderApp("/projects/demo/production");
     const shell = await screen.findByTestId("workstation-shell");
     const navigation = screen.getByRole("complementary", { name: "二级导航" });
+    expect(shell).toHaveClass("secondary-open");
+    fireEvent.click(screen.getByRole("button", { name: "收起二级导航" }));
     const toggle = screen.getByRole("button", { name: "展开二级导航" });
 
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -283,7 +285,7 @@ describe("Workstation shell", () => {
     renderApp("/projects/demo/production");
 
     const settingsLink = await screen.findByRole("link", { name: "设置" });
-    expect(settingsLink).toHaveAttribute("href", "/settings/account");
+    expect(settingsLink.getAttribute("href")).toContain("/settings/account?returnTo=");
 
     // The shell contract is the stable cross-route Settings entry and its
     // destination. jsdom does not carry this route change through (the router
@@ -402,7 +404,7 @@ describe("Workstation shell", () => {
     );
     expect(screen.getByRole("link", { name: "设置" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("navigation", { name: "设置导航" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "默认创作偏好" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "新项目默认偏好" })).toHaveAttribute(
       "aria-current",
       "page",
     );
