@@ -1,0 +1,33 @@
+/* ============================================================
+   Scene Wall — workbench surface authority
+   ============================================================
+   `SceneStoryboardWall` renders into the Project workbench surface but carries
+   the `.rs-scene-world` hook, and the resonance stylesheet styles
+   `.qc-scene-card`, `.qc-scene-thumb` and the unscoped `.rs-scene-portal` from
+   there (24px / 18px). Under the skeleton decision, radius is fixed by control
+   type, so this surface uses the container tier.
+
+   The resonance stylesheet is lazy-loaded with the Scenes route chunk, so it
+   arrives *after* the global `styles/index.css`: an override placed there loses
+   the cascade regardless of intent. This file is therefore imported by
+   `SceneStoryboardWall` right after `../resonance/resonance.css`, and the
+   doubled class raises specificity above `.rs-scene-world .qc-scene-card`
+   (0,3,0 > 0,2,0) without `!important`.
+
+   Scope: this corrects the Scene Wall working surface only. The resonance world
+   (`.rs-stage` subtree) keeps its own look. Moving the `.rs-scene-*` rules into
+   this feature is the structural follow-up; it needs visual acceptance of the
+   resonance world, not a mechanical move.
+   ============================================================ */
+
+.qc-scene-wall .qc-scene-card.qc-scene-card {
+  border-radius: var(--df-radius-container);
+}
+
+.qc-scene-wall .qc-scene-thumb.qc-scene-thumb {
+  border-radius: var(--df-radius-container);
+}
+
+.qc-scene-wall .rs-scene-portal.rs-scene-portal {
+  border-radius: var(--df-radius-container);
+}

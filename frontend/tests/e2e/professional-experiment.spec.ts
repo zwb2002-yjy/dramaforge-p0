@@ -14,10 +14,10 @@ test("experiment branch lifecycle: create, run, adopt candidate", async ({ page 
   await expect(page.getByText("Model B 转头验证")).toBeVisible();
 
   await page.getByRole("button", { name: "运行实验" }).click();
-  await expect(page.getByText(/执行证据：1 个 Run/)).toBeVisible();
+  await expect(page.getByText(/执行证据：1 次运行/)).toBeVisible();
 
   await page.getByRole("button", { name: "采纳候选" }).click();
   await expect(page.getByText(/Model B 转头验证/)).toBeVisible();
-  await expect(page.getByText(/accepted/)).toBeVisible();
+  await expect(page.getByText(/已采用/)).toBeVisible();
   expect(state.experiments[0].status).toBe("accepted");
 });

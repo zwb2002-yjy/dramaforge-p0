@@ -11,13 +11,17 @@ from app.access.projects import ProjectService
 from app.assets.models import Shot
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.proposal_service import PartialApplyInput, ProposalDecision, ProposalService
+from app.events.models import OutboxEvent
 from app.shared.base import Base
+from app.shared.model_registry import load_all_models
 from app.shared.security import hash_password
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
 @pytest.fixture
 async def session() -> AsyncGenerator[AsyncSession, None]:
+    load_all_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as connection:
@@ -55,7 +59,13 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
 
 
 @pytest.mark.asyncio
-async def test_partial_apply_only_executes_accepted(session: AsyncSession) -> None:
+async def test_partial_apply_only_executes_accepted(session: AsyncSession, monkeypatch) -> None:
+    from app.director.business_checkpoints import DirectorBusinessCheckpoints
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("Director is stopped")
+
+    monkeypatch.setattr(DirectorBusinessCheckpoints, "__init__", unavailable)
     project, shot, user = await _seed(session)
     proposal = DirectorProposal(
         project_id=project.id, thread_id=uuid4(), scope_type="shot",
@@ -116,12 +126,21 @@ async def test_partial_apply_only_executes_accepted(session: AsyncSession) -> No
     assert reject_item.status == "rejected"
     assert result.accepted == [accept_item.id]
     assert result.rejected == [reject_item.id]
+    notices = (await session.scalars(select(OutboxEvent).where(
+        OutboxEvent.topic == "production.facts.v1",
+    ))).all()
+    assert len(notices) == 1
+    assert notices[0].payload["notice"] == {
+        "kind": "proposal_decided", "proposal_id": str(proposal.id),
+    }
 
 
 @pytest.mark.asyncio
-async def test_proposal_rejection_notifies_turn_before_any_background_scan(session):
+async def test_proposal_rejection_blocks_immediately_and_notifies_turn_independently(session):
+    from app.director.inbox import receive_production_event
     from app.director.turn_models import DirectorTurn
     from app.director.turn_service import DirectorTurnService
+    from app.director.wakeup import apply_director_wakeup
     from app.shared.errors import ConflictError, ValidationAppError
 
     project, shot, user = await _seed(session)
@@ -146,12 +165,24 @@ async def test_proposal_rejection_notifies_turn_before_any_background_scan(sessi
             ProposalDecision(item_id=item.id, decision="rejected"),
         ]),
     )
-    assert turn.status == "completed" and turn.wait_reason == "proposal_rejected"
+    assert turn.status == "awaiting_user"
+    await session.commit()
     with pytest.raises(ConflictError) as rejected:
         await DirectorTurnService(session).assert_context_not_rejected(
             project_id=project.id, context_hash=turn.context_hash,
         )
     assert rejected.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
+    notice = (await session.scalars(select(OutboxEvent).where(
+        OutboxEvent.topic == "production.facts.v1",
+    ))).one()
+    inbox_id = await receive_production_event(
+        session, project_id=project.id, event_id=notice.event_id,
+    )
+    await session.commit()
+    assert await apply_director_wakeup(session, inbox_id=inbox_id)
+    await session.commit()
+    await session.refresh(turn)
+    assert turn.status == "completed" and turn.wait_reason == "proposal_rejected"
     with pytest.raises(ValidationAppError) as duplicate:
         await service.partial_apply(project=project, proposal_id=proposal.id,
             apply_input=PartialApplyInput(decisions=[

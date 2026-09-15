@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeTree } from "../../src/routeTree.gen";
 import { useUiStore } from "../../src/stores/uiStore";
+import { getSelectedWorkspaceId, setSelectedWorkspaceId } from "../../src/lib/api";
 
 function renderApp(initialPath = "/") {
   const history = createMemoryHistory({ initialEntries: [initialPath] });
@@ -50,7 +51,7 @@ function mockHomeAuth(ownerInitialized: boolean) {
   });
 }
 
-function mockAuthenticatedHome() {
+function mockAuthenticatedHome(projectCount = 1) {
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = String(input);
     if (url.endsWith("/health")) return json({ status: "ok", db: "up" });
@@ -64,15 +65,15 @@ function mockAuthenticatedHome() {
       return json([{ id: "workspace-1", name: "个人创作空间" }]);
     }
     if (url.includes("/api/v1/workspaces/workspace-1/projects")) {
-      return json([
-        {
-          id: "project-1",
+      return json(
+        Array.from({ length: projectCount }, (_, index) => ({
+          id: `project-${index + 1}`,
           workspace_id: "workspace-1",
-          name: "乌镇宣传片",
+          name: index === 0 ? "乌镇宣传片" : `项目 ${index + 1}`,
           stage: "planning",
           aspect_ratio: "16:9",
-        },
-      ]);
+        })),
+      );
     }
     if (url.endsWith("/api/v1/projects/project-1/workspace-state")) {
       return json({ state: {} });
@@ -112,7 +113,9 @@ function mockAuthenticatedHome() {
 
 afterEach(() => vi.restoreAllMocks());
 beforeEach(() => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   window.sessionStorage.clear();
+  window.localStorage.clear();
   useUiStore.setState({ leftNavOpen: true, selectedShotId: null });
 });
 
@@ -132,15 +135,92 @@ describe("Workstation shell", () => {
     expect(screen.queryByTestId("workspace-settings-page")).not.toBeInTheDocument();
   });
 
-  it("keeps project evidence inside the single global shell", async () => {
+  it("keeps project pages focused on the active workspace", async () => {
+    mockAuthenticatedHome();
     renderApp("/projects/project-1/production");
 
-    expect(await screen.findByTestId("project-evidence-inspector")).toBeInTheDocument();
-    expect(screen.getByTestId("project-workspace-shell")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("project-workspace-shell", {}, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("project-evidence-inspector")).not.toBeInTheDocument();
+    expect(screen.queryByText("已连接项目事实")).not.toBeInTheDocument();
     expect(screen.getByTestId("workstation-shell")).toHaveAttribute(
       "data-primary-section",
       "creation",
     );
+  });
+
+  it.each([null, "workspace-stale"])(
+    "resolves the owning Workspace before mounting a direct Project route (remembered: %s)",
+    async (rememberedWorkspaceId) => {
+      if (rememberedWorkspaceId) setSelectedWorkspaceId(rememberedWorkspaceId);
+      const projectHeaders: Array<string | null> = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const url = String(input);
+        const headers = new Headers(init?.headers);
+        if (url.endsWith("/api/v1/workspaces")) {
+          return json([
+            { id: "workspace-stale", name: "旧空间" },
+            { id: "workspace-2", name: "当前空间" },
+          ]);
+        }
+        if (url.endsWith("/api/v1/projects/project-2")) {
+          const workspaceId = headers.get("X-Workspace-Id");
+          projectHeaders.push(workspaceId);
+          if (workspaceId !== "workspace-2") {
+            return Promise.resolve(
+              new Response(JSON.stringify({ code: "NOT_FOUND", detail: "project not found" }), {
+                status: 404,
+                headers: { "Content-Type": "application/json" },
+              }),
+            );
+          }
+          return json({
+            id: "project-2",
+            workspace_id: "workspace-2",
+            name: "重新打开的项目",
+            stage: "planning",
+            aspect_ratio: "16:9",
+            target_platform: "web",
+            provider_dispatch_frozen: false,
+            version: 1,
+            creative_profile: { id: "profile-2", version: 1 },
+          });
+        }
+        if (url.endsWith("/api/v1/projects/project-2/workspace-state")) {
+          expect(headers.get("X-Workspace-Id")).toBe("workspace-2");
+          return json({ state: {} });
+        }
+        if (url.endsWith("/api/v1/projects/project-2/script")) {
+          expect(headers.get("X-Workspace-Id")).toBe("workspace-2");
+          return json({ project_id: "project-2", episodes: [] });
+        }
+        return json({});
+      });
+
+      renderApp("/projects/project-2/script");
+
+      expect(await screen.findByRole("heading", { name: "剧本工作区" })).toBeInTheDocument();
+      expect(screen.getAllByText("重新打开的项目")).toHaveLength(2);
+      expect(projectHeaders.slice(0, 2)).toEqual(["workspace-stale", "workspace-2"]);
+      expect(projectHeaders.slice(1).every((workspaceId) => workspaceId === "workspace-2")).toBe(
+        true,
+      );
+      expect(getSelectedWorkspaceId()).toBe("workspace-2");
+      expect(window.localStorage.getItem("dramaforge.selected-workspace-id")).toBe("workspace-2");
+      expect(screen.queryByText(/workspace context required/)).not.toBeInTheDocument();
+    },
+  );
+
+  it("keeps repeated clicks on the active Creation entry in the current workspace", async () => {
+    const { router } = renderApp("/projects/demo/production");
+    await screen.findByTestId("production-mode");
+
+    const creationLink = screen.getByRole("link", { name: "创作" });
+    expect(fireEvent.click(creationLink)).toBe(false);
+    expect(fireEvent.click(creationLink)).toBe(false);
+    expect(router.state.location.pathname).toBe("/projects/demo/production");
+    expect(screen.queryByText("正在恢复上次创作位置…")).not.toBeInTheDocument();
   });
 
   it("gives Scene Workbench one right operation panel without the outer evidence inspector", async () => {
@@ -156,6 +236,8 @@ describe("Workstation shell", () => {
     renderApp("/projects/demo/production");
     const shell = await screen.findByTestId("workstation-shell");
     const navigation = screen.getByRole("complementary", { name: "二级导航" });
+    expect(shell).toHaveClass("secondary-open");
+    fireEvent.click(screen.getByRole("button", { name: "收起二级导航" }));
     const toggle = screen.getByRole("button", { name: "展开二级导航" });
 
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -167,6 +249,56 @@ describe("Workstation shell", () => {
     );
     expect(shell).toHaveClass("secondary-open");
     expect(navigation).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭二级导航" }));
+    expect(screen.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开二级导航" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("closes mobile L2 after switching creative routes", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const { router } = renderApp("/projects/demo/production");
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开二级导航" }));
+    fireEvent.click(screen.getByRole("link", { name: "剧本" }));
+
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/projects/demo/script"));
+    expect(screen.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("keeps the permanent Settings entry stable across Project routes", async () => {
+    // This test asserts desktop shell behaviour; the previous mobile case leaves
+    // the viewport override in place, so restore it explicitly.
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    renderApp("/projects/demo/production");
+
+    const settingsLink = await screen.findByRole("link", { name: "设置" });
+    expect(settingsLink.getAttribute("href")).toContain("/settings/account?returnTo=");
+
+    // The shell contract is the stable cross-route Settings entry and its
+    // destination. jsdom does not carry this route change through (the router
+    // keeps the Project route mounted), so the real click is covered by
+    // navigation-ia.spec.ts against the browser.
+  });
+
+  it("renders the Settings destination the permanent entry points at", async () => {
+    mockAuthenticatedHome();
+    renderApp("/settings/account");
+
+    expect(await screen.findByTestId("account-settings-page")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "账号与实例" })).toBeInTheDocument();
   });
 
   it("shows a blank login form after the single Owner is initialized", async () => {
@@ -219,6 +351,20 @@ describe("Workstation shell", () => {
     expect(screen.queryByTestId("model-profile-settings")).not.toBeInTheDocument();
   });
 
+  it("omits an empty continuation card and progressively reveals long project lists", async () => {
+    mockAuthenticatedHome(14);
+    renderApp("/");
+
+    const projectList = await screen.findByRole("list", { name: "项目列表" });
+    expect(screen.queryByRole("heading", { name: "继续创作" })).not.toBeInTheDocument();
+    expect(within(projectList).getAllByRole("button")).toHaveLength(12);
+
+    fireEvent.click(screen.getByRole("button", { name: "显示更多项目（剩余 2 个）" }));
+
+    expect(within(projectList).getAllByRole("button")).toHaveLength(14);
+    expect(screen.queryByRole("button", { name: /显示更多项目/ })).not.toBeInTheDocument();
+  });
+
   it("opens the production route for a project", async () => {
     renderApp("/projects/demo/production");
     const panel = await screen.findByTestId("production-mode");
@@ -258,13 +404,13 @@ describe("Workstation shell", () => {
     );
     expect(screen.getByRole("link", { name: "设置" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("navigation", { name: "设置导航" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "默认创作偏好" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "新项目默认偏好" })).toHaveAttribute(
       "aria-current",
       "page",
     );
   });
 
-  it("opens current Project settings from the permanent L1", async () => {
+  it("renders current Project settings inside Settings L2", async () => {
     renderApp("/settings/projects/demo");
 
     expect(await screen.findByTestId("project-settings-page")).toBeInTheDocument();
@@ -275,6 +421,7 @@ describe("Workstation shell", () => {
   });
 
   it("keeps the project id when entering the read-only edit hand-off", async () => {
+    setSelectedWorkspaceId("workspace-1");
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       if (String(input).includes("/opencut-manifest")) {
         return json({
@@ -305,6 +452,7 @@ describe("Workstation shell", () => {
   });
 
   it("shows the professional facts without reviving the legacy Director budget surface", async () => {
+    setSelectedWorkspaceId("workspace-1");
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/health")) return json({ status: "ok", db: "up" });
@@ -325,7 +473,7 @@ describe("Workstation shell", () => {
     const workbench = await screen.findByTestId("professional-workbench");
     expect(workbench).toBeInTheDocument();
     expect(workbench).toHaveTextContent("正式线与实验线");
-    expect(workbench).toHaveTextContent("OpenCut");
+    expect(workbench).toHaveTextContent("剪辑交接");
     expect(workbench).not.toHaveTextContent("预算");
     expect(workbench).not.toHaveTextContent("计费");
     expect(workbench).not.toHaveTextContent("费用");

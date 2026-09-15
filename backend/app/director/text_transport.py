@@ -14,6 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
+from app.director.context_builder import DirectorContextBuilder
+from app.director.invocation_models import DirectorInvocation
+from app.director.invocations import InvocationService
+from app.director.text_model import CapabilityTextModel, TextModelPort
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
 from app.providers.capabilities import Capability
@@ -22,7 +26,6 @@ from app.providers.contracts.text import TextGenerateRequest, TextMessage
 from app.providers.model_profiles.resolver import ModelBindingResolver
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.registry import ModelRegistry
-from app.providers.router import CapabilityRouter
 from app.shared.db import set_rls_context
 from app.shared.errors import ConflictError, ValidationAppError
 
@@ -53,6 +56,7 @@ class StructuredDirectorTextResult[OutputT: BaseModel]:
     value: OutputT
     turn: DirectorTurn
     evidence: DirectorInvocationEvidence
+    turn_created: bool
 
 
 def canonical_json(value: object) -> str:
@@ -154,14 +158,15 @@ def _evidence_reported_cost(turn: DirectorTurn) -> str | None:
     return str(turn.provider_cost) if turn.provider_cost is not None else None
 
 
-class DirectorTextTransport:
-    """Resolve one profile model, dispatch at most twice, and persist the turn."""
+class DirectorTextRuntimeAdapter:
+    """Transitional bounded runtime step around the session-free text port."""
 
     def __init__(
         self,
         session: AsyncSession,
         *,
         registry: ModelRegistry | None = None,
+        text_model: TextModelPort | None = None,
     ) -> None:
         self._session = session
         self._turns = DirectorTurnService(session)
@@ -170,6 +175,7 @@ class DirectorTextTransport:
 
             registry = default_model_registry()
         self._registry = registry
+        self._text_model = text_model if text_model is not None else CapabilityTextModel(registry)
 
     async def generate_structured[OutputT: BaseModel](
         self,
@@ -187,16 +193,16 @@ class DirectorTextTransport:
         context_payload: dict[str, object],
         output_type: type[OutputT],
     ) -> StructuredDirectorTextResult[OutputT]:
-        context_snapshot = {
-            "workspace_id": str(project.workspace_id),
-            "project_id": str(project.id),
-            "scope_type": scope_type,
-            "scope_entity_id": str(scope_entity_id),
-            "slot": str(slot),
-            "input_versions": input_versions,
-            "intent": intent_snapshot,
-            "context": context_payload,
-        }
+        context_snapshot = DirectorContextBuilder.build(
+            workspace_id=project.workspace_id,
+            project_id=project.id,
+            scope_type=scope_type,
+            scope_entity_id=scope_entity_id,
+            slot=slot,
+            input_versions=input_versions,
+            intent_snapshot=intent_snapshot,
+            context_payload=context_payload,
+        ).as_json()
         turn, created = await self._turns.create_or_get(
             project=project,
             actor=actor,
@@ -210,16 +216,19 @@ class DirectorTextTransport:
         )
         context_fingerprint = turn.context_hash
         if not created:
-            return self._restore_existing(
+            restored = await self._restore_existing(
                 turn=turn,
                 context_hash=context_fingerprint,
                 output_type=output_type,
             )
-        await self._turns.claim(
-            project_id=project.id,
-            turn_id=turn.id,
-            expected_revision=turn.revision,
-        )
+            if restored is not None:
+                return restored
+        else:
+            await self._turns.claim(
+                project_id=project.id,
+                turn_id=turn.id,
+                expected_revision=turn.revision,
+            )
 
         try:
             resolved = await ModelBindingResolver(self._session, self._registry).resolve(
@@ -241,6 +250,7 @@ class DirectorTextTransport:
                 "provider_id": registered.adapter.provider_id,
                 "manifest_version": registered.manifest.manifest_version,
                 "backend": _safe_json(backend) if isinstance(backend, dict) else {},
+                "native_options": _safe_json(resolved.native_options),
             }
         except Exception as exc:  # noqa: BLE001 - persist explicit resolution failure
             await self._turns.compare_and_set(
@@ -277,7 +287,7 @@ class DirectorTextTransport:
             target_status="thinking",
             updates={
                 "model_resolution": model_resolution,
-                "transport_status": "submission_started",
+                "transport_status": "prepared",
                 "request_summary": {
                     "task": task_name,
                     "slot": str(slot),
@@ -324,6 +334,7 @@ class DirectorTextTransport:
                 actor=actor,
                 turn=turn,
                 model_id=resolved.model_id,
+                purpose="primary", output_type=output_type,
             )
             first_text = self._record_attempt(attempts, result=first, purpose="primary")
             self._require_success(first, turn=turn, attempts=attempts)
@@ -361,6 +372,7 @@ class DirectorTextTransport:
                     actor=actor,
                     turn=turn,
                     model_id=resolved.model_id,
+                    purpose="schema_repair", output_type=output_type,
                 )
                 repaired_text = self._record_attempt(
                     attempts, result=repaired, purpose="schema_repair"
@@ -408,6 +420,23 @@ class DirectorTextTransport:
                 },
             ) from exc
 
+        return await self._persist_verified_result(
+            turn=turn,
+            value=value,
+            attempts=attempts,
+            schema_repair_count=schema_repair_count,
+            turn_created=created,
+        )
+
+    async def _persist_verified_result[OutputT: BaseModel](
+        self,
+        *,
+        turn: DirectorTurn,
+        value: OutputT,
+        attempts: list[dict[str, object]],
+        schema_repair_count: int,
+        turn_created: bool,
+    ) -> StructuredDirectorTextResult[OutputT]:
         output_snapshot = value.model_dump(mode="json")
         output_fingerprint = content_hash(output_snapshot)
         provider_cost, cost_status = _reported_cost(attempts)
@@ -474,8 +503,12 @@ class DirectorTextTransport:
                 },
             ) from None
         await self._commit_and_restore_scope(turn)
-        evidence = self._evidence(turn)
-        return StructuredDirectorTextResult(value=value, turn=turn, evidence=evidence)
+        return StructuredDirectorTextResult(
+            value=value,
+            turn=turn,
+            evidence=self._evidence(turn),
+            turn_created=turn_created,
+        )
 
     async def mark_awaiting_user(
         self,
@@ -543,20 +576,105 @@ class DirectorTextTransport:
         actor: User,
         turn: DirectorTurn,
         model_id: str,
+        purpose: str,
+        output_type: type[BaseModel],
     ) -> ProviderCreateResult:
-        return await CapabilityRouter(registry=self._registry).create(
-            capability=Capability.TEXT_GENERATE,
-            request=request,
-            model_id=model_id,
-            context=ExecutionContext(
-                trace_id=str(turn.id),
-                operation_id=f"director-turn:{turn.id}",
-                project_id=str(project.id),
-                workspace_id=str(project.workspace_id),
-                user_id=str(actor.id),
-                idempotency_key=turn.request_key,
-            ),
+        journal = InvocationService(self._session)
+        invocation = await journal.prepare(
+            project_id=project.id, turn_id=turn.id,
+            invocation_key=f"text:{purpose}:1", step_key=f"text:{purpose}", attempt=1,
+            model_resolution=dict(turn.model_resolution),
+            request_snapshot=request.model_dump(mode="json"),
+            output_schema=output_type.model_json_schema(mode="validation"),
+            intent_version=content_hash(turn.intent_snapshot),
         )
+        invocation_id = invocation.id
+        started = await journal.start(project_id=project.id, invocation_id=invocation_id)
+        await self._commit_and_restore_scope(turn)
+        if not started:
+            saved = await journal.get(project_id=project.id, invocation_id=invocation_id)
+            if saved.status == "completed":
+                metadata = dict(saved.response_summary)
+                metadata["text"] = canonical_json(saved.validated_output)
+                metadata["usage"] = saved.token_usage
+                metadata["litellm_response_cost"] = (
+                    str(saved.reported_cost) if saved.reported_cost is not None else None
+                )
+                await self._commit_and_restore_scope(turn)
+                return ProviderCreateResult(status=GenerationStatus.SUCCEEDED,
+                                            provider_metadata=metadata)
+            await self._commit_and_restore_scope(turn)
+            return ProviderCreateResult(
+                status=(GenerationStatus.FAILED if saved.status == "failed"
+                        else GenerationStatus.SUBMIT_UNKNOWN),
+                provider_metadata={"error_code": saved.error_code},
+            )
+        try:
+            result = await self._text_model.generate(
+                request=request, model_id=model_id,
+                context=ExecutionContext(
+                    trace_id=str(turn.id), operation_id=f"director-invocation:{invocation_id}",
+                    project_id=str(project.id), workspace_id=str(project.workspace_id),
+                    user_id=str(actor.id), idempotency_key=f"director-invocation:{invocation_id}",
+                ),
+            )
+        except ValidationAppError as exc:
+            # Typed validation/configuration failures happen before a Provider
+            # submission and are therefore safe, known failures.
+            await journal.record_failure(
+                project_id=project.id,
+                invocation_id=invocation_id,
+                error_code=_error_code(exc),
+            )
+            await self._commit_and_restore_scope(turn)
+            raise
+        except Exception as exc:
+            # A thrown transport error cannot prove that the upstream saw no request.
+            await journal.mark_unknown(project_id=project.id, invocation_id=invocation_id)
+            await self._commit_and_restore_scope(turn)
+            raise ValidationAppError(
+                "Director text submission result is unknown; no automatic retry was made",
+                details={
+                    "code": "DIRECTOR_TEXT_CALL_UNKNOWN",
+                    "transport_error_code": _error_code(exc),
+                    "manual_ok": True,
+                    "turn_id": str(turn.id),
+                },
+            ) from exc
+        evidence: list[dict[str, object]] = []
+        text = self._record_attempt(evidence, result=result, purpose=purpose)
+        cost, cost_status = _reported_cost(evidence)
+        if result.status == GenerationStatus.SUBMIT_UNKNOWN:
+            await journal.mark_unknown(project_id=project.id, invocation_id=invocation_id)
+        elif result.status != GenerationStatus.SUCCEEDED:
+            await journal.record_failure(
+                project_id=project.id, invocation_id=invocation_id,
+                error_code=str(result.provider_metadata.get("error_code") or "MODEL_CALL_FAILED"),
+            )
+        else:
+            try:
+                value = _parse_output(text, output_type)
+            except (json.JSONDecodeError, ValidationError, TypeError, ValueError):
+                await journal.record_failure(
+                    project_id=project.id, invocation_id=invocation_id,
+                    error_code="INVALID_DIRECTOR_TEXT_OUTPUT",
+                )
+            else:
+                await journal.complete(
+                    project_id=project.id, invocation_id=invocation_id, output=value,
+                    token_usage=_aggregate_usage(evidence), reported_cost=cost,
+                )
+        invocation = await journal.get(project_id=project.id, invocation_id=invocation_id)
+        invocation.token_usage = _aggregate_usage(evidence)
+        invocation.reported_cost = cost
+        invocation.cost_status = cost_status
+        invocation.response_summary = {
+            "request_id": evidence[0]["provider_request_id"],
+            "litellm_model_name": evidence[0]["actual_model"],
+            "output_text_hash": evidence[0]["output_text_hash"],
+        }
+        await self._commit_and_restore_scope(turn)
+        return result
 
     async def _commit_and_restore_scope(self, turn: DirectorTurn) -> None:
         """Commit durable evidence, then restore transaction-local PostgreSQL RLS."""
@@ -673,13 +791,13 @@ class DirectorTextTransport:
             )
         await self._commit_and_restore_scope(turn)
 
-    def _restore_existing[OutputT: BaseModel](
+    async def _restore_existing[OutputT: BaseModel](
         self,
         *,
         turn: DirectorTurn,
         context_hash: str,
         output_type: type[OutputT],
-    ) -> StructuredDirectorTextResult[OutputT]:
+    ) -> StructuredDirectorTextResult[OutputT] | None:
         if turn.context_hash != context_hash:
             raise ConflictError(
                 "Director request key was already used for different context",
@@ -690,7 +808,21 @@ class DirectorTextTransport:
                 "Director turn is stale because its source context changed",
                 details={"code": "DIRECTOR_TURN_STALE", "turn_id": str(turn.id)},
             )
-        if turn.transport_status != "succeeded" or not turn.output_hash:
+        if turn.transport_status == "succeeded" and turn.output_hash:
+            try:
+                value = output_type.model_validate(turn.output_snapshot)
+            except ValidationError as exc:
+                raise ConflictError(
+                    "Stored Director result no longer matches its schema",
+                    details={"code": "DIRECTOR_TURN_RESULT_INVALID", "turn_id": str(turn.id)},
+                ) from exc
+            return StructuredDirectorTextResult(
+                value=value,
+                turn=turn,
+                evidence=self._evidence(turn),
+                turn_created=False,
+            )
+        if turn.status != "thinking":
             raise ConflictError(
                 "Director request already exists without a reusable completed result",
                 details={
@@ -700,18 +832,123 @@ class DirectorTextTransport:
                     "transport_status": turn.transport_status,
                 },
             )
-        try:
-            value = output_type.model_validate(turn.output_snapshot)
-        except ValidationError as exc:
-            raise ConflictError(
-                "Stored Director result no longer matches its schema",
-                details={"code": "DIRECTOR_TURN_RESULT_INVALID", "turn_id": str(turn.id)},
-            ) from exc
-        return StructuredDirectorTextResult(
-            value=value,
-            turn=turn,
-            evidence=self._evidence(turn),
+
+        journal = InvocationService(self._session)
+        invocations = await journal.list_for_turn(project_id=turn.project_id, turn_id=turn.id)
+        if not invocations and turn.transport_status == "prepared":
+            # The process stopped before the invocation reservation committed;
+            # no Provider request was authorized, so rebuilding is safe.
+            return None
+        completed = [row for row in invocations if row.status == "completed"]
+        if completed:
+            restored = completed[-1]
+            try:
+                value = output_type.model_validate(restored.validated_output)
+            except ValidationError as exc:
+                raise ConflictError(
+                    "Stored Director invocation result no longer matches its schema",
+                    details={
+                        "code": "DIRECTOR_INVOCATION_RESULT_INVALID",
+                        "turn_id": str(turn.id),
+                        "invocation_id": str(restored.id),
+                    },
+                ) from exc
+            attempts = [self._journal_attempt(row) for row in invocations]
+            return await self._persist_verified_result(
+                turn=turn,
+                value=value,
+                attempts=attempts,
+                schema_repair_count=int(restored.invocation_key.startswith("text:schema_repair:")),
+                turn_created=False,
+            )
+
+        uncertain = next(
+            (
+                row
+                for row in invocations
+                if row.status in {"submission_started", "unknown_submission"}
+            ),
+            None,
         )
+        if uncertain is not None:
+            if uncertain.status == "submission_started":
+                await journal.mark_unknown(project_id=turn.project_id, invocation_id=uncertain.id)
+            unknown_error = ValidationAppError(
+                "Director text submission result is unknown; no automatic retry was made",
+                details={
+                    "code": "DIRECTOR_TEXT_CALL_UNKNOWN",
+                    "manual_ok": True,
+                    "turn_id": str(turn.id),
+                    "invocation_id": str(uncertain.id),
+                },
+            )
+            await self._fail_turn(
+                turn=turn,
+                attempts=[self._journal_attempt(row) for row in invocations],
+                exc=unknown_error,
+                schema_repair_count=int(uncertain.invocation_key.startswith("text:schema_repair:")),
+            )
+            raise unknown_error
+
+        failed = next((row for row in reversed(invocations) if row.status == "failed"), None)
+        if failed is not None:
+            failed_error = ValidationAppError(
+                "Director text model call failed",
+                details={
+                    "code": (
+                        "INVALID_DIRECTOR_TEXT_OUTPUT"
+                        if failed.error_code == "INVALID_DIRECTOR_TEXT_OUTPUT"
+                        else "DIRECTOR_TEXT_CALL_FAILED"
+                    ),
+                    "provider_error_code": failed.error_code,
+                    "manual_ok": True,
+                    "turn_id": str(turn.id),
+                    "invocation_id": str(failed.id),
+                },
+            )
+            await self._fail_turn(
+                turn=turn,
+                attempts=[self._journal_attempt(row) for row in invocations],
+                exc=failed_error,
+                schema_repair_count=int(failed.invocation_key.startswith("text:schema_repair:")),
+            )
+            raise failed_error
+
+        raise ConflictError(
+            "Director request is prepared but has no reusable completed result",
+            details={
+                "code": "DIRECTOR_INVOCATION_PREPARED",
+                "turn_id": str(turn.id),
+                "manual_ok": True,
+            },
+        )
+
+    @staticmethod
+    def _journal_attempt(invocation: DirectorInvocation) -> dict[str, object]:
+        summary = invocation.response_summary or {}
+        return {
+            "attempt_no": invocation.attempt,
+            "purpose": (
+                "schema_repair"
+                if invocation.invocation_key.startswith("text:schema_repair:")
+                else "primary"
+            ),
+            "status": (
+                str(GenerationStatus.SUCCEEDED)
+                if invocation.status == "completed"
+                else str(GenerationStatus.SUBMIT_UNKNOWN)
+                if invocation.status in {"submission_started", "unknown_submission"}
+                else str(GenerationStatus.FAILED)
+            ),
+            "provider_request_id": summary.get("request_id"),
+            "actual_model": summary.get("litellm_model_name"),
+            "usage": dict(invocation.token_usage or {}),
+            "provider_cost": (
+                str(invocation.reported_cost) if invocation.reported_cost is not None else None
+            ),
+            "output_text_hash": summary.get("output_text_hash"),
+            "error_code": invocation.error_code,
+        }
 
     @staticmethod
     def _evidence(turn: DirectorTurn) -> DirectorInvocationEvidence:
@@ -734,8 +971,13 @@ class DirectorTextTransport:
         )
 
 
+DirectorTextTransport = DirectorTextRuntimeAdapter
+# Compatibility name retained while callers migrate to the Director runtime.
+
+
 __all__ = [
     "DirectorInvocationEvidence",
+    "DirectorTextRuntimeAdapter",
     "DirectorTextTransport",
     "StructuredDirectorTextResult",
     "canonical_json",

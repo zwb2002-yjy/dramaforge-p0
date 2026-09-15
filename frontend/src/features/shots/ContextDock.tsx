@@ -1,3 +1,14 @@
+import {
+  Aperture,
+  Camera,
+  Clapperboard,
+  Info,
+  Layers,
+  MoveUpRight,
+  Sparkles,
+  Users,
+} from "lucide-react";
+
 export type ContextTool = "character" | "camera" | "motion" | "look" | "generate" | "director";
 
 type ContextDockProps = {
@@ -24,6 +35,15 @@ const TOOLS: Array<{
   { id: "director", label: "导演", testId: "context-dock-director" },
 ];
 
+const TOOL_ICONS = {
+  character: Users,
+  camera: Camera,
+  motion: MoveUpRight,
+  look: Aperture,
+  generate: Clapperboard,
+  director: Sparkles,
+};
+
 /**
  * V2 Canvas-first Context Dock (UI-1).
  *
@@ -46,6 +66,7 @@ export function ContextDock({
     <nav className="qc-context-dock" data-testid="context-dock" aria-label="当前镜头操作">
       {TOOLS.map((tool) => {
         const active = activeTool === tool.id;
+        const Icon = TOOL_ICONS[tool.id];
         return (
           <button
             key={tool.id}
@@ -56,6 +77,7 @@ export function ContextDock({
             disabled={!hasShot}
             onClick={() => onSelectTool(tool.id)}
           >
+            <Icon size={17} aria-hidden="true" />
             {tool.label}
           </button>
         );
@@ -69,6 +91,7 @@ export function ContextDock({
         disabled={!hasShot}
         onClick={onToggleTray}
       >
+        <Layers size={17} aria-hidden="true" />
         Takes · {candidateCount}
       </button>
       <button
@@ -79,6 +102,7 @@ export function ContextDock({
         disabled={!hasShot}
         onClick={onToggleDetails}
       >
+        <Info size={17} aria-hidden="true" />
         详情
       </button>
     </nav>

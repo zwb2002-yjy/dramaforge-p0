@@ -59,6 +59,8 @@ _PATCH_FIELDS = frozenset(
         "node_run_ids",
         "schema_repair_count",
         "last_error",
+        "runtime_revision",
+        "step_count",
     }
 )
 
@@ -454,15 +456,24 @@ class DirectorTurnService:
                     details={"code": "DIRECTOR_DECISION_STALE"},
                 )
         summary["user_decision"] = audit
+        runtime_managed = turn.runtime_execution_id is not None
         try:
             turn = await self.compare_and_set(
                 turn=turn, expected_statuses=("awaiting_user",),
-                target_status="completed" if decision == "reject" else "awaiting_user",
+                target_status=(
+                    "awaiting_user"
+                    if runtime_managed
+                    else "completed" if decision == "reject" else "awaiting_user"
+                ),
                 updates={
                     "response_summary": summary,
-                    "wait_reason": "user_rejected" if decision == "reject" else "design_save",
+                    "wait_reason": (
+                        "runtime_decision_pending"
+                        if runtime_managed
+                        else "user_rejected" if decision == "reject" else "design_save"
+                    ),
                 },
-                increment_step=decision == "accept",
+                increment_step=decision == "accept" and not runtime_managed,
             )
         except ConflictError:
             await self._session.refresh(turn)

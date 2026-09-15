@@ -34,14 +34,22 @@ test("professional edit: formal manifest → persisted session → proposal-only
   // The production monitor consumes the current formal OpenCut v2 contract.
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
-  await expect(page.getByText(/正式线镜头 2 个 · 3 条轨道 · opencut-manifest-v2/)).toBeVisible();
+  await expect(page.getByText(/正式镜头 2 个 · 3 条轨道/)).toBeVisible();
 
   // No session yet: the edit page is a read-only formal manifest preview.
   await page.goto(`/projects/${PROJECT_ID}/edit`);
   await expect(page.getByTestId("editing-workspace")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "OpenCut 剪辑交接" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "剪辑交接" })).toBeVisible();
   await expect(page.getByTestId("editing-read-only")).toBeVisible();
   await expect(page.getByRole("heading", { name: "正式时间线" })).toBeVisible();
+  await expect(
+    page.getByText("当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。"),
+  ).toBeVisible();
+  const formalPreviewClip = page.getByTestId("editing-clip").first();
+  await expect(formalPreviewClip).toContainText("正式视频 · 0–5 秒 · 片段 1 · 镜头 #1");
+  await expect(formalPreviewClip).toContainText("正式素材已交付");
+  await expect(formalPreviewClip).not.toContainText(/[0-9a-f]{8}-[0-9a-f-]{27,}/i);
+  await expect(formalPreviewClip).not.toContainText("artifact-video");
   await expect(page.getByTestId("create-edit-session")).toBeEnabled();
 
   // Creation is explicit and unique: one CSRF fetch followed by one POST.
@@ -88,7 +96,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
 
   // Save only the editable timeline and let the server response become v2.
   await page.getByTestId("save-edit-timeline").click();
-  await expect(page.getByText(/服务器响应已成为新的 clean baseline/)).toBeVisible();
+  await expect(page.getByText(/时间线已保存/)).toBeVisible();
   const saveRequests = state.editing.requests.filter(
     (request) => request.path === `${EDIT_SESSION_PATH}/timeline` && request.method === "PATCH",
   );

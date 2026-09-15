@@ -92,6 +92,29 @@ export async function decideDirectorTurn(
   );
 }
 
+export async function decideDirectorRuntimeTurn(
+  projectId: string,
+  turn: DirectorTurnRead,
+  input: {
+    decision: "accept" | "reject";
+    accepted_operation_indices: number[];
+  },
+): Promise<DirectorTurnRead> {
+  if (turn.runtime_revision == null) throw new Error("导演运行时尚未到达决定检查点");
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    directorPath(projectId, `/runtime/turns/${encodeURIComponent(turn.id)}/decision`),
+    {
+      ...input,
+      signal_id: globalThis.crypto.randomUUID(),
+      expected_revision: turn.revision,
+      expected_runtime_revision: turn.runtime_revision,
+    },
+    csrf,
+  );
+}
+
 export async function stopDirectorTurn(
   projectId: string,
   turnId: string,
@@ -104,6 +127,30 @@ export async function stopDirectorTurn(
     { expected_revision: expectedRevision },
     csrf,
   );
+}
+
+export async function stopDirectorRuntimeTurn(
+  projectId: string,
+  turn: DirectorTurnRead,
+): Promise<DirectorTurnRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    directorPath(projectId, `/runtime/turns/${encodeURIComponent(turn.id)}/stop`),
+    {
+      request_id: globalThis.crypto.randomUUID(),
+      expected_runtime_revision: turn.runtime_revision,
+      expected_turn_revision: turn.revision,
+    },
+    csrf,
+  );
+}
+
+export async function refreshDirectorRuntimeTurn(
+  projectId: string,
+  turn: DirectorTurnRead,
+): Promise<DirectorTurnRead> {
+  return getDirectorTurn(projectId, turn.id);
 }
 
 export async function resumeDirectorTurn(

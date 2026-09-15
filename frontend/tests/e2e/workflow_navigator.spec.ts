@@ -273,5 +273,5 @@ test("professional page surfaces the wire-visible workflow navigator", async ({ 
   await expect(page.getByTestId("workflow-shot-4")).toContainText("可双人");
 
   // The navigator exposes the staged strategies and the caution footer.
-  await expect(page.getByText(/未声明的多角色镜头不会静默降级/)).toBeVisible();
+  await expect(page.getByText(/未声明多角色的镜头会标记为不可双人/)).toBeVisible();
 });

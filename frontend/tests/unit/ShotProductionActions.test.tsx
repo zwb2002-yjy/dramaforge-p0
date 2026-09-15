@@ -106,7 +106,11 @@ function planResponse({
   };
 }
 
-function renderActions(references: ShotExecutionReference[] = [], trace: unknown[] = []) {
+function renderActions(
+  references: ShotExecutionReference[] = [],
+  trace: unknown[] = [],
+  onDirectorDelegated?: () => void,
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -117,6 +121,7 @@ function renderActions(references: ShotExecutionReference[] = [], trace: unknown
         shot={SHOT}
         references={references}
         trace={trace}
+        onDirectorDelegated={onDirectorDelegated}
       />
     </QueryClientProvider>,
   );
@@ -124,6 +129,87 @@ function renderActions(references: ShotExecutionReference[] = [], trace: unknown
 
 describe("ShotProductionActions", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("delegates one exact frozen plan to the Director runtime", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      calls.push({ url, body });
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      if (url.includes("/director/runtime/shots/") && url.endsWith("/executions")) {
+        return json({
+          id: "99999999-9999-4999-8999-999999999999",
+          status: "queued",
+        });
+      }
+      return json({});
+    });
+    const onDirectorDelegated = vi.fn();
+    renderActions([], [], onDirectorDelegated);
+
+    fireEvent.click(screen.getByTestId("delegate-keyframe-to-director"));
+
+    await waitFor(() => expect(onDirectorDelegated).toHaveBeenCalledOnce());
+    const delegated = calls.find((call) => call.url.includes("/director/runtime/shots/"));
+    expect(delegated?.url).toBe(
+      `/api/v1/projects/${SHOT.project_id}/director/runtime/shots/${SHOT.id}/executions`,
+    );
+    expect(delegated?.body).toMatchObject({
+      decision_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      max_steps: 6,
+      execution: {
+        stage: "image_keyframe",
+        prompt: SHOT.image_prompt,
+        expected_shot_version: SHOT.version,
+        plan_fingerprint: "a".repeat(64),
+        accepted_approximations: [],
+      },
+    });
+    expect(delegated?.body.authorization_expires_at).toEqual(expect.any(String));
+    expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已授权给导演执行");
+    expect(
+      calls.some(
+        (call) =>
+          call.url.endsWith(`/shots/${SHOT.id}/executions`) &&
+          !call.url.includes("/director/runtime/"),
+      ),
+    ).toBe(false);
+  });
+
+  it("reuses the same Director decision after an uncertain response", async () => {
+    const delegationBodies: Record<string, unknown>[] = [];
+    let attempts = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      if (url.includes("/director/runtime/shots/") && url.endsWith("/executions")) {
+        delegationBodies.push(
+          init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {},
+        );
+        attempts += 1;
+        if (attempts === 1) return Promise.reject(new TypeError("response lost"));
+        return json({
+          id: "99999999-9999-4999-8999-999999999999",
+          status: "queued",
+        });
+      }
+      return json({});
+    });
+    renderActions();
+
+    fireEvent.click(screen.getByTestId("delegate-keyframe-to-director"));
+    expect(await screen.findByTestId("shot-production-error")).toHaveTextContent("response lost");
+    fireEvent.click(screen.getByTestId("delegate-keyframe-to-director"));
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已授权给导演执行"),
+    );
+
+    expect(delegationBodies).toHaveLength(2);
+    expect(delegationBodies[1]?.decision_id).toBe(delegationBodies[0]?.decision_id);
+  });
 
   it("freezes and dispatches the selected shot as an image keyframe", async () => {
     const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];

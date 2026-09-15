@@ -1,8 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ArrowUpRight } from "lucide-react";
+import "../resonance/resonance.css";
+// Must load after resonance.css: it settles the workbench container radius on
+// this surface against the resonance world's unscoped .rs-scene-* rules.
+import "./scene-wall-surface.css";
 
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
+import { timeOfDayLabel } from "../../lib/sceneLabels";
 import { copyScene, fetchScenes, reorderScene, type SceneSummary } from "./api";
 
 type SceneStoryboardWallProps = {
@@ -51,11 +57,10 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   };
 
   return (
-    <div data-testid="scene-storyboard-wall" className="qc-scene-wall">
+    <div data-testid="scene-storyboard-wall" className="qc-scene-wall rs-scene-world">
       <header className="qc-page-heading">
-        <p>场景</p>
-        <h1>场景总览 / 故事板墙</h1>
-        <span>项目首页是视觉故事板墙：场景代表画面、名称、镜头数与少量状态。</span>
+        <h1>场景总览</h1>
+        <span>{rows.length > 0 ? `${rows.length} 个故事发生的地方` : "故事从这里展开"}</span>
       </header>
 
       {scenes.isError && <div className="flash err">无法读取场景：{String(scenes.error)}</div>}
@@ -71,13 +76,22 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
             onDragOver={(event) => event.preventDefault()}
             onDrop={() => onDrop(index)}
           >
-            <SceneThumbnail scene={scene} projectId={projectId} />
+            <a
+              className="rs-scene-portal"
+              href={`/projects/${projectId}/scenes/${scene.id}`}
+              aria-label={`进入场景：${scene.location_name}`}
+            >
+              <SceneThumbnail scene={scene} projectId={projectId} />
+              <span className="rs-portal-enter" aria-hidden="true">
+                <ArrowUpRight size={22} />
+              </span>
+            </a>
             <header>
               <a href={`/projects/${projectId}/scenes/${scene.id}`} className="qc-scene-enter">
                 {scene.location_name}
               </a>
               <span>
-                {scene.episode_number}.{scene.scene_number} · {scene.time_of_day}
+                {scene.episode_number}.{scene.scene_number} · {timeOfDayLabel(scene.time_of_day)}
               </span>
             </header>
             <footer>
@@ -86,14 +100,25 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
                 {scene.formal_keyframe_count} 关键帧 · {scene.formal_video_count} 视频
               </span>
               {scene.risk_count > 0 && <span className="qc-risk">⚠ {scene.risk_count} 风险</span>}
-              <button type="button" onClick={() => copy.mutate(scene.id)}>
-                复制
+              <button
+                type="button"
+                onClick={() => copy.mutate(scene.id)}
+                title={`复制「${scene.location_name}」为新的场景草稿`}
+              >
+                复制场景
               </button>
             </footer>
           </li>
         ))}
       </ul>
-      {rows.length === 0 && <p className="muted">暂无场景。导入剧本后会在这里生成故事板墙。</p>}
+      {scenes.isPending && (
+        <p className="muted" role="status" data-testid="scene-wall-loading">
+          正在读取场景…
+        </p>
+      )}
+      {!scenes.isPending && !scenes.isError && rows.length === 0 && (
+        <p className="muted">暂无场景。导入剧本后会在这里生成故事板墙。</p>
+      )}
     </div>
   );
 }
@@ -109,7 +134,9 @@ function SceneThumbnail({ scene, projectId }: { scene: SceneSummary; projectId: 
           data-testid="scene-representative"
         />
       ) : (
-        <span className="qc-scene-placeholder">无代表图</span>
+        <span className="qc-scene-placeholder rs-scene-silhouette" aria-label="尚无代表画面">
+          <span aria-hidden="true">{String(scene.scene_number).padStart(2, "0")}</span>
+        </span>
       )}
     </div>
   );
