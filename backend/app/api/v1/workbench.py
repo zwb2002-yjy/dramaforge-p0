@@ -511,8 +511,10 @@ async def execute_repair_step(
         expected_plan_fingerprint=body.expected_plan_fingerprint,
         idempotency_key=body.idempotency_key,
     )
-    await session.commit()
+    # Read before committing: the repair tables are RLS-scoped per transaction,
+    # so a post-commit read starts a fresh scope and finds nothing.
     state = await service.read_repair(project=project, shot_id=shot_id, repair_id=request.id)
+    await session.commit()
     return RepairExecuteRead(
         node_run_id=run.id,
         status=run.status,
@@ -567,8 +569,12 @@ async def execute_repair(
             repair_id=request.id,
             idempotency_key=body.idempotency_key,
         )
-    await session.commit()
+    # Read the step state before committing. The repair tables are RLS-scoped by
+    # `app.current_project_id()`, which is set per transaction, so a read that
+    # starts a new transaction after the commit sees nothing and the whole call
+    # would fail with "repair request not found" after doing its work.
     state = await service.read_repair(project=project, shot_id=shot_id, repair_id=request.id)
+    await session.commit()
     return RepairExecuteRead(
         node_run_id=run.id,
         status=run.status,
