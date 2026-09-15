@@ -1119,6 +1119,11 @@ async def test_keyframe_dispatch_queues_the_review_that_the_formal_gate_requires
     assert review_run.status == "completed"
     evidence = await session.get(Artifact, review_run.result_artifact_id)
     assert evidence is not None, "a review run must persist an evidence artifact"
+    # The binding the gate resolves the review by. Without it the review exists
+    # but the read model cannot tell which media it judged.
+    await session.refresh(review_run)
+    assert review_run.input_snapshot["identity_evidence_policy"]
+    assert "identity_evidence_policy" in review_run.input_snapshot
 
     from app.delivery.models import HumanReviewDecision
     from app.production.review_gate import record_human_decision
