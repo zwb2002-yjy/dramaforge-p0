@@ -2,6 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { apiGet, type AssetRead } from "../../lib/api";
+import {
+  ASSET_KIND_LABEL,
+  ASSET_STATUS_LABEL,
+  assetKindLabel,
+  assetStatusLabel,
+} from "../../lib/assetLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import {
   createAssetCandidate,
@@ -28,21 +34,10 @@ const ROLE_LABEL: Record<string, string> = {
   scene_reference: "场景",
 };
 
-const ASSET_KIND_LABEL: Record<string, string> = {
-  character: "角色",
-  scene: "场景",
-  costume: "服装",
-  prop: "道具",
-  action: "动作",
-  expression: "表情",
-  audio: "音频",
-  prompt: "提示词方案",
-};
-
-const ASSET_STATUS_LABEL: Record<string, string> = {
-  active: "已启用",
-  draft: "草稿",
-  recycled: "已回收",
+const VERSION_STATUS_LABEL: Record<string, string> = {
+  candidate: "候选",
+  formal: "正式",
+  archived: "已归档",
 };
 
 type AssetCardsPanelProps = {
@@ -68,6 +63,7 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
   const [statusFilter, setStatusFilter] = useState("");
   const [nameFilter, setNameFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [feedback, setFeedback] = useState<string | null>(null);
 
   const assets = useQuery({
     queryKey: queryKeys.asset.list(projectId, kindFilter, statusFilter, nameFilter, tagFilter),
@@ -122,7 +118,6 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
   return (
     <div data-testid="asset-cards-panel" className="qc-project-page">
       <header className="qc-page-heading">
-        <p>资产</p>
         <h1>项目资产</h1>
         <span>管理版本、标签与正式提升；生成结果需显式加入资产。</span>
       </header>
@@ -144,14 +139,11 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
             onChange={(event) => setKindFilter(event.target.value)}
           >
             <option value="">全部</option>
-            <option value="character">角色</option>
-            <option value="scene">场景</option>
-            <option value="costume">服装</option>
-            <option value="prop">道具</option>
-            <option value="action">动作</option>
-            <option value="expression">表情</option>
-            <option value="audio">音频</option>
-            <option value="prompt">提示词方案</option>
+            {Object.entries(ASSET_KIND_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </select>
         </label>
         <label>
@@ -162,9 +154,11 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
             onChange={(event) => setStatusFilter(event.target.value)}
           >
             <option value="">全部</option>
-            <option value="active">active</option>
-            <option value="draft">draft</option>
-            <option value="recycled">recycled</option>
+            {Object.entries(ASSET_STATUS_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </select>
         </label>
         <label>
@@ -186,7 +180,7 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
             <header>
               <strong>{asset.name}</strong>
               <span>
-                {ASSET_KIND_LABEL[asset.kind] ?? asset.kind} · v{asset.version}
+                {assetKindLabel(asset.kind)} · v{asset.version}
               </span>
             </header>
             <p className="muted">{asset.description || "（无描述）"}</p>
@@ -194,20 +188,39 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
               <span
                 className={`qc-asset-status ${asset.status}`}
                 data-status={asset.status}
-                title={asset.status}
+                title={assetStatusLabel(asset.status)}
               >
-                {ASSET_STATUS_LABEL[asset.status] ?? asset.status}
+                {assetStatusLabel(asset.status)}
               </span>
               <TagEditor
                 options={tagOptions}
-                onSave={(names) => setTags.mutate({ assetId: asset.id, names })}
+                onSave={(names) => setTags.mutateAsync({ assetId: asset.id, names })}
               />
               {asset.status === "recycled" ? (
-                <button type="button" onClick={() => restore.mutate(asset.id)}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    restore.mutate(asset.id);
+                    setFeedback(`已恢复「${asset.name}」。`);
+                  }}
+                >
                   恢复
                 </button>
               ) : (
-                <button type="button" onClick={() => recycle.mutate(asset.id)}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        `回收「${asset.name}」？回收后资产不再出现在正式选择中，可在本页“恢复”。`,
+                      )
+                    ) {
+                      return;
+                    }
+                    recycle.mutate(asset.id);
+                    setFeedback(`已回收「${asset.name}」，可在本页恢复。`);
+                  }}
+                >
                   回收
                 </button>
               )}
@@ -224,13 +237,24 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
       {rows.length === 0 && (
         <p className="muted">暂无资产。生成结果需显式“加入资产”才会出现在这里。</p>
       )}
+      {feedback && (
+        <p className="flash ok" role="status">
+          {feedback}
+        </p>
+      )}
     </div>
   );
 }
 
-function TagEditor({ options, onSave }: { options: string[]; onSave: (names: string[]) => void }) {
+function TagEditor({
+  options,
+  onSave,
+}: {
+  options: string[];
+  onSave: (names: string[]) => Promise<unknown>;
+}) {
   const [value, setValue] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   return (
     <form
       onSubmit={(event) => {
@@ -240,10 +264,14 @@ function TagEditor({ options, onSave }: { options: string[]; onSave: (names: str
           .map((item) => item.trim())
           .filter(Boolean);
         if (names.length === 0) return;
-        onSave(names);
-        setSaved(true);
-        setTimeout(() => setSaved(false), 1500);
+        setState("saving");
         setValue("");
+        void onSave(names)
+          .then(() => {
+            setState("saved");
+            setTimeout(() => setState("idle"), 2000);
+          })
+          .catch(() => setState("error"));
       }}
     >
       <input
@@ -251,7 +279,15 @@ function TagEditor({ options, onSave }: { options: string[]; onSave: (names: str
         list="asset-tag-options"
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        placeholder={saved ? "标签已保存" : "输入标签"}
+        placeholder={
+          state === "saved"
+            ? "标签已保存"
+            : state === "error"
+              ? "标签保存失败"
+              : state === "saving"
+                ? "正在保存…"
+                : "输入标签"
+        }
       />
       <datalist id="asset-tag-options">
         {options.map((option) => (
@@ -314,7 +350,8 @@ function VersionControls({
             {rows.map((version) => (
               <li key={version.id}>
                 <span>
-                  v{version.version_number} · {version.name} · {version.status}
+                  v{version.version_number} · {version.name} ·{" "}
+                  {VERSION_STATUS_LABEL[version.status] ?? version.status}
                 </span>
                 {version.status === "candidate" && (
                   <button type="button" onClick={() => onPromote(version.id)}>

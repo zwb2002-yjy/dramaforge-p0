@@ -1,6 +1,8 @@
 # DramaForge backend
 
-FastAPI API and Arq workers for DramaForge P0.
+FastAPI API, domain services, Arq workers and Alembic migrations for DramaForge.
+The backend owns the canonical creation facts and the single production runtime;
+the Director runtime orchestrates turns without owning media.
 
 ## Container Runtime
 
@@ -38,11 +40,22 @@ diagnostics, run Uvicorn inside the API container on its existing port 8000.
 
 ## Run workers
 
-The default and heavy workers are Compose services. Inspect or restart them
-with `docker compose logs` and `docker compose restart`; do not install or run
-the worker toolchain directly on the host.
+The default, director and heavy workers are Compose services. Inspect or restart
+them with `docker compose logs` and `docker compose restart`; do not install or
+run the worker toolchain directly on the host.
+
+| Service | Queue | Role |
+|---|---|---|
+| `worker-default` | `dramaforge:default` | media, review and continuity jobs |
+| `worker-director` | `dramaforge:director` | bounded Director turns, event intake and wakeup replay; Provider calls disabled |
+| `worker-heavy` | `dramaforge:heavy` | heavy media jobs |
+| `dispatcher` | — | resident transactional-Outbox dispatcher |
+
+Each worker first runs `python -m app.workers.main <kind>` to print its
+ready line, then starts `arq app.workers.<kind>.WorkerSettings`.
 
 ## Quality
 
-The Docker quality gate runs ruff, mypy, unit tests, PostgreSQL migration and
-integration tests, and exports the OpenAPI contract before the frontend gate.
+The Docker quality gate runs directory and canonical-surface scans, ruff, mypy,
+unit tests, PostgreSQL migration and integration tests, and exports the OpenAPI
+contract before the frontend gate.

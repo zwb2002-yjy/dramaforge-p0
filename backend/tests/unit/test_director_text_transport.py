@@ -13,14 +13,18 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene, Shot
 from app.config import Settings
+from app.director.invocation_models import DirectorInvocation
 from app.director.recommendation import (
     DirectorRecommendationRequest,
     DirectorRecommendationService,
 )
 from app.director.suggestion import ShotDirectorSuggestionRequest, ShotDirectorSuggestionService
+from app.director.text_model import CapabilityTextModel
 from app.director.text_transport import DirectorTextTransport
 from app.director.turn_models import DirectorTurn
 from app.execution.models import Artifact, NodeRun
+from app.providers.contracts.common import ExecutionContext, GenerationStatus
+from app.providers.contracts.text import TextGenerateRequest
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 from app.providers.model_profiles.orm import ProductionModelProfile
@@ -33,6 +37,26 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 Handler = Callable[[httpx.Request], Awaitable[httpx.Response]]
 MODEL_ID = "litellm/controlled-storyboard"
+
+
+@pytest.mark.asyncio
+async def test_text_model_port_runs_without_business_session_and_preserves_unknown_submission():
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        assert json.loads(request.content)["model"] == "controlled-storyboard"
+        raise httpx.ReadTimeout("Response lost after sending", request=request)
+
+    port = CapabilityTextModel(_registry(handler))
+    result = await port.generate(
+        request=TextGenerateRequest(prompt="Return a structured suggestion"),
+        model_id=MODEL_ID,
+        context=ExecutionContext(trace_id="turn", operation_id="invocation:primary",
+                                 idempotency_key="invocation:primary"),
+    )
+    assert result.status == GenerationStatus.SUBMIT_UNKNOWN
+    assert len(calls) == 1
 
 
 @pytest.fixture
@@ -236,6 +260,11 @@ async def test_same_model_uses_distinct_shot_context_and_persists_exact_evidence
     assert {turn.transport_record_id for turn in turns} == {"call-1", "call-2"}
     assert all(turn.token_usage == {"prompt_tokens": 20, "completion_tokens": 10} for turn in turns)
     assert all(turn.provider_cost == Decimal("0.00420000") for turn in turns)
+    invocations = list(
+        (await session.execute(select(DirectorInvocation))).scalars()
+    )
+    assert len(invocations) == 2
+    assert {invocation.status for invocation in invocations} == {"completed"}
     assert await session.scalar(select(func.count()).select_from(NodeRun)) == 0
     assert await session.scalar(select(func.count()).select_from(Artifact)) == 0
     stored_shots = list((await session.execute(select(Shot).order_by(Shot.shot_number))).scalars())
@@ -275,6 +304,68 @@ async def test_request_key_replays_stored_result_without_second_model_call(
     assert first.director_evidence.turn_id == second.director_evidence.turn_id
     assert second.director_evidence.cost_status == "unknown"
     assert second.director_evidence.reported_cost is None
+
+
+@pytest.mark.asyncio
+async def test_completed_invocation_recovers_interrupted_turn_without_second_model_call(
+    session: AsyncSession,
+) -> None:
+    user, project, scene, shot, _other = await _seed(session)
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            headers={
+                "x-litellm-response-cost": "0.00420000",
+                "x-litellm-call-id": "durable-call",
+                "x-litellm-model-name": "upstream/director-v1",
+            },
+            json={
+                "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
+                "usage": {"total_tokens": 30},
+                "model": "controlled-storyboard",
+            },
+        )
+
+    service = ShotDirectorSuggestionService(
+        session,
+        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+    )
+    request = _request(scene, shot, key="shot-turn:journal-recovery")
+    first = await service.suggest(project_id=project.id, actor=user, request=request)
+    assert first.director_evidence is not None
+    turn_id = first.director_evidence.turn_id
+
+    await session.execute(
+        update(DirectorTurn).where(DirectorTurn.id == turn_id).values(
+            status="thinking",
+            transport_status="prepared",
+            transport_record_id=None,
+            response_summary={},
+            token_usage={},
+            provider_cost=None,
+            cost_status="unknown",
+            output_hash=None,
+            output_snapshot={},
+            wait_reason="text_model",
+            revision=DirectorTurn.revision + 1,
+        )
+    )
+    await session.commit()
+
+    recovered = await service.suggest(project_id=project.id, actor=user, request=request)
+    assert calls == 1
+    assert recovered.suggested_video_prompt == first.suggested_video_prompt
+    assert recovered.director_evidence is not None
+    assert recovered.director_evidence.turn_id == turn_id
+    assert recovered.director_evidence.reported_cost == "0.00420000"
+    restored = await session.get(DirectorTurn, turn_id)
+    assert restored is not None
+    assert restored.status == "awaiting_user"
+    assert restored.transport_record_id == "durable-call"
 
 
 @pytest.mark.asyncio
@@ -372,6 +463,20 @@ async def test_schema_repair_is_same_model_and_bounded_to_one_attempt(
     assert result.director_evidence.schema_repair_count == 1
     assert result.director_evidence.token_usage == {"total_tokens": 6}
     assert result.director_evidence.reported_cost == "0.002"
+    invocations = list(
+        (
+            await session.execute(
+                select(DirectorInvocation).where(
+                    DirectorInvocation.turn_id == result.director_evidence.turn_id
+                ).order_by(DirectorInvocation.created_at)
+            )
+        ).scalars()
+    )
+    assert [invocation.invocation_key for invocation in invocations] == [
+        "text:primary:1",
+        "text:schema_repair:1",
+    ]
+    assert [invocation.status for invocation in invocations] == ["failed", "completed"]
 
 
 @pytest.mark.asyncio

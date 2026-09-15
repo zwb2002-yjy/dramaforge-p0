@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import Project, User
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.assets.script_import import parse_script_markdown
+from app.config import get_settings
+from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.story_proposal import StoryProposalResult, create_story_proposal
 from app.director.text_transport import (
     DirectorInvocationEvidence,
@@ -249,6 +251,16 @@ class StoryGenerationService:
             text_result.turn,
             proposal_id=proposal.proposal.id,
         )
+        await DirectorRuntimeStartService(
+            self._session, settings=get_settings(),
+        ).accept_existing_new_turn(
+            project=project,
+            actor=actor,
+            turn=text_result.turn,
+            proposal_id=proposal.proposal.id,
+            created=text_result.turn_created,
+        )
+        await self._session.commit()
         return GeneratedStoryProposal(
             draft=text_result.value,
             draft_text=draft_text,

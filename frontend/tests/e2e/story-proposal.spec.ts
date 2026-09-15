@@ -208,7 +208,7 @@ test("Story proposal: a brief generates an audited draft and reject-all keeps St
   await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
   await expect(page.getByLabel("剧本文本")).toHaveValue(DRAFT);
   await expect(page.getByTestId("story-generation-evidence")).toContainText("upstream/story-e2e");
-  await expect(page.getByTestId("story-generation-evidence")).toContainText("77777777");
+  await expect(page.getByTestId("story-generation-evidence")).toContainText("0.005 USD");
   expect(state.generationBody()).toEqual({
     request_key: expect.stringMatching(/^story-generation:[0-9a-f-]{36}$/),
     brief: "雨夜车站的克制告别",

@@ -20,11 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, ProjectCreativeProfile
 from app.assets.models import Shot
+from app.contracts.production_facts import ExecutionFact, ProductionReadPort
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import TERMINAL_TURN_STATUSES, DirectorTurnService
-from app.execution.models import NodeRun
-from app.production.models import GraphVersion, ProductionGraph
+from app.production.application.facts import ProductionFacts
 from app.shared.errors import ConflictError, ValidationAppError
 
 _RUN_ACTIVE = frozenset({"queued", "running", "cancel_requested"})
@@ -99,9 +99,12 @@ def _coordination(turn: DirectorTurn) -> dict[str, object]:
 
 
 class DirectorNextActionService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, *, production: ProductionReadPort | None = None,
+    ) -> None:
         self._session = session
         self._turns = DirectorTurnService(session)
+        self._production = production if production is not None else ProductionFacts(session)
 
     async def reconcile(
         self,
@@ -320,7 +323,7 @@ class DirectorNextActionService:
                     "Completed Director execution link has no result Artifact",
                     details={"code": "DIRECTOR_EXECUTION_RESULT_MISSING"},
                 )
-            stages = {str((run.input_snapshot or {}).get("stage", "")) for run in runs}
+            stages = {run.stage for run in runs}
             stage = next(iter(stages)) if len(stages) == 1 else ""
             formal_id = (
                 shot.formal_keyframe_artifact_id if stage == "image_keyframe"
@@ -496,7 +499,9 @@ class DirectorNextActionService:
             facts,
         )
 
-    async def _load_runs(self, *, project_id: UUID, turn: DirectorTurn) -> list[NodeRun]:
+    async def _load_runs(
+        self, *, project_id: UUID, turn: DirectorTurn,
+    ) -> tuple[ExecutionFact, ...]:
         try:
             ids = [UUID(str(value)) for value in (turn.node_run_ids or [])]
         except (TypeError, ValueError, AttributeError) as exc:
@@ -509,30 +514,17 @@ class DirectorNextActionService:
                 "Director turn is awaiting execution without a NodeRun link",
                 details={"code": "DIRECTOR_NODE_RUN_LINK_MISSING"},
             )
-        rows = list(
-            (
-                await self._session.execute(
-                    select(NodeRun)
-                    .join(GraphVersion, GraphVersion.id == NodeRun.graph_version_id)
-                    .join(ProductionGraph, ProductionGraph.id == GraphVersion.graph_id)
-                    .where(
-                        NodeRun.id.in_(ids), NodeRun.project_id == project_id,
-                        ProductionGraph.project_id == project_id,
-                        ProductionGraph.scope_type == "shot",
-                        ProductionGraph.scope_entity_id == turn.scope_entity_id,
-                    )
-                )
+        try:
+            return await self._production.executions(
+                project_id=project_id, shot_id=turn.scope_entity_id, run_ids=tuple(ids),
             )
-            .scalars()
-            .all()
-        )
-        by_id = {row.id: row for row in rows}
-        if set(by_id) != set(ids):
+        except ValidationAppError as exc:
+            if exc.details.get("code") != "PRODUCTION_EXECUTION_LINK_MISSING":
+                raise
             raise ValidationAppError(
                 "Director turn NodeRun link is missing or belongs to another project",
                 details={"code": "DIRECTOR_NODE_RUN_LINK_MISSING"},
-            )
-        return [by_id[node_id] for node_id in ids]
+            ) from exc
 
     async def _autonomy(self, project_id: UUID) -> str:
         profile = await self._session.scalar(
