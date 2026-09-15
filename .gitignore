@@ -5,6 +5,7 @@
 .vscode/
 .playwright-mcp/
 .claude/*.lock
+.trae-html-share-packages/
 
 # Local development-agent progress and parallel worktrees
 .agent-control/PROGRESS.jsonl
