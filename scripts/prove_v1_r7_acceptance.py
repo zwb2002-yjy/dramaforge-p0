@@ -1248,13 +1248,28 @@ class Acceptance:
             "repair_options", []
         ):
             raise RuntimeError("Review annotation did not produce the expected repair plan")
+        # A staged repair's first step may be a media action only after the clip's
+        # own video_drift evidence has a human decision; `video_review` is the
+        # gate that stops the chain (REPAIR_STEP_REQUIRES_REVIEW). Make that call
+        # here, exactly as a reviewer would before asking for a repair.
+        self.record_stage_decision(
+            "review:formal-video",
+            project_id,
+            shot_id,
+            shot["formal_video_artifact_id"],
+            "video_drift",
+            "formal_video",
+        )
         repair = self.once(
             "review:repair-submit",
             "POST",
             f"/projects/{project_id}/shots/{shot_id}/repair",
             {
                 "repair_option": "rerun_video",
-                "idempotency_key": f"r7:{self.state['run_key']}:repair-video",
+                # The previous attempt created a request for this shot with this
+                # key and then stopped at the human gate; a new explicit decision
+                # makes this a new operation, so it carries a new key.
+                "idempotency_key": f"r7:{self.state['run_key']}:repair-video-2",
             },
             paid=True,
         )
