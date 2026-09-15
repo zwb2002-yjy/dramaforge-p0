@@ -1,4 +1,4 @@
-FROM node:26-alpine
+FROM node:24.21.0-alpine3.24
 
 WORKDIR /workspace
 

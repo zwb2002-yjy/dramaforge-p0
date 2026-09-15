@@ -25,6 +25,7 @@ export const queryKeys = {
 
   project: {
     detail: (projectId: string) => ["project", projectId] as const,
+    workspaceContext: (projectId: string) => ["project-workspace-context", projectId] as const,
   },
 
   scene: {

@@ -44,6 +44,8 @@ describe("CinematicCanvas", () => {
 
     expect(screen.getByTestId("shot-candidate")).toBeInTheDocument();
     expect(screen.getByTestId("shot-candidate-preview-candidate-a")).toBeInTheDocument();
+    expect(screen.getByTestId("shot-candidate")).toHaveTextContent("未确认候选");
+    expect(screen.getByTestId("shot-candidate")).not.toHaveTextContent("candidate-a");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
@@ -143,7 +145,9 @@ describe("CinematicCanvas", () => {
     );
 
     expect(screen.getByTestId("shot-execution-state")).toHaveTextContent("正在执行");
-    expect(screen.getByTestId("shot-execution-status")).toHaveTextContent("running");
+    expect(screen.getByTestId("shot-execution-status")).toHaveAttribute("data-status", "running");
+    expect(screen.getByRole("status")).toHaveTextContent("正在执行");
+    expect(screen.getByTestId("shot-execution-state")).not.toHaveTextContent("keyframe");
     expect(screen.queryByTestId("shot-placeholder")).not.toBeInTheDocument();
   });
 });

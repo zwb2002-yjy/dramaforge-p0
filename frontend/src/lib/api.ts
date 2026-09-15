@@ -1,24 +1,15 @@
 /** REST client with cookie session + CSRF for DramaForge product path. */
 
 import type { components } from "../shared/api/generated";
+import { getSelectedWorkspaceId, setSelectedWorkspaceId } from "./navigationPreferences";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
-const SELECTED_WORKSPACE_STORAGE_KEY = "dramaforge.selected-workspace-id";
 
-export function getSelectedWorkspaceId(): string | null {
-  return window.sessionStorage.getItem(SELECTED_WORKSPACE_STORAGE_KEY);
-}
+export { getSelectedWorkspaceId, setSelectedWorkspaceId };
 
-export function setSelectedWorkspaceId(workspaceId: string | null): void {
-  if (workspaceId) {
-    window.sessionStorage.setItem(SELECTED_WORKSPACE_STORAGE_KEY, workspaceId);
-  } else {
-    window.sessionStorage.removeItem(SELECTED_WORKSPACE_STORAGE_KEY);
-  }
-}
-
-function workspaceHeaders(): Record<string, string> {
-  const workspaceId = getSelectedWorkspaceId();
+function workspaceHeaders(workspaceIdOverride?: string | null): Record<string, string> {
+  const workspaceId =
+    workspaceIdOverride === undefined ? getSelectedWorkspaceId() : workspaceIdOverride;
   return workspaceId ? { "X-Workspace-Id": workspaceId } : {};
 }
 
@@ -54,10 +45,10 @@ async function parseError(response: Response): Promise<ApiError> {
   return new ApiError(detail, response.status, code);
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(path: string, workspaceIdOverride?: string | null): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
-    headers: { Accept: "application/json", ...workspaceHeaders() },
+    headers: { Accept: "application/json", ...workspaceHeaders(workspaceIdOverride) },
   });
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as T;
@@ -470,11 +461,55 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
 }
 
 export function listWorkspaceProjects(workspaceId: string): Promise<ProjectRead[]> {
-  return apiGet<ProjectRead[]>(`/api/v1/workspaces/${workspaceId}/projects`);
+  return apiGet<ProjectRead[]>(`/api/v1/workspaces/${workspaceId}/projects`, workspaceId);
 }
 
-export function fetchProject(projectId: string): Promise<ProjectRead> {
-  return apiGet<ProjectRead>(`/api/v1/projects/${projectId}`);
+export function fetchProject(projectId: string, workspaceId?: string): Promise<ProjectRead> {
+  return apiGet<ProjectRead>(`/api/v1/projects/${projectId}`, workspaceId);
+}
+
+export type ResolvedProjectWorkspace = {
+  project: ProjectRead;
+  workspaceId: string;
+};
+
+function isWorkspaceCandidateMiss(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 403 || error.status === 404);
+}
+
+export async function resolveProjectWorkspace(
+  projectId: string,
+  preferredWorkspaceId: string | null,
+): Promise<ResolvedProjectWorkspace> {
+  const triedWorkspaceIds = new Set<string>();
+
+  const tryWorkspace = async (workspaceId: string): Promise<ResolvedProjectWorkspace | null> => {
+    triedWorkspaceIds.add(workspaceId);
+    try {
+      return { project: await fetchProject(projectId, workspaceId), workspaceId };
+    } catch (error) {
+      if (isWorkspaceCandidateMiss(error)) return null;
+      throw error;
+    }
+  };
+
+  if (preferredWorkspaceId) {
+    const preferred = await tryWorkspace(preferredWorkspaceId);
+    if (preferred) return preferred;
+  }
+
+  const workspaces = await listWorkspaces();
+  for (const workspace of workspaces) {
+    if (triedWorkspaceIds.has(workspace.id)) continue;
+    const resolved = await tryWorkspace(workspace.id);
+    if (resolved) return resolved;
+  }
+
+  throw new ApiError(
+    "项目不存在，或当前账号已无权访问该项目。",
+    404,
+    "PROJECT_WORKSPACE_NOT_FOUND",
+  );
 }
 
 export async function updateProjectCreativeProfile(

@@ -1,4 +1,5 @@
 import { artifactContentUrl } from "../../lib/api";
+import { shotTypeLabel } from "../../lib/shotLabels";
 import type { ShotLite } from "./api";
 
 type ShotStripProps = {
@@ -83,7 +84,7 @@ export function ShotStrip({
                 type="button"
                 className={selected ? "active" : undefined}
                 aria-pressed={selected}
-                aria-label={`#${shot.shot_number} ${shot.shot_type} ${durationLabel(shot.duration_seconds)}`}
+                aria-label={`#${shot.shot_number} ${shotTypeLabel(shot.shot_type)} ${durationLabel(shot.duration_seconds)}`}
                 onClick={() => onSelectShot(shot.id)}
                 data-testid={`shot-strip-card-${shot.id}`}
               >
@@ -99,7 +100,7 @@ export function ShotStrip({
                 </span>
                 <span className="qc-shot-strip-copy">
                   <strong>#{shot.shot_number}</strong>
-                  <span>{shot.shot_type}</span>
+                  <span>{shotTypeLabel(shot.shot_type)}</span>
                   {expanded && <small>{durationLabel(shot.duration_seconds)}</small>}
                 </span>
                 {expanded && (

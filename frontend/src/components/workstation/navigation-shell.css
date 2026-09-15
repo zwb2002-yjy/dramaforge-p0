@@ -25,6 +25,10 @@
   z-index: var(--df-z-sticky);
 }
 
+.df-context-scrim {
+  display: none;
+}
+
 .df-primary-sidebar {
   display: flex;
   flex-direction: column;
@@ -44,7 +48,7 @@
   place-items: center;
   justify-self: center;
   border: 0;
-  border-radius: var(--df-radius-sm);
+  border-radius: var(--df-radius-control);
   background: transparent;
   color: var(--df-text-muted);
   text-decoration: none;
@@ -73,7 +77,7 @@
   position: relative;
   grid-template-rows: 22px auto;
   gap: 2px;
-  font-size: 0.625rem;
+  font-size: var(--df-font-size-meta);
 }
 
 .df-primary-disabled {
@@ -162,13 +166,19 @@
   padding: var(--df-space-4) var(--df-space-3);
 }
 
+.df-nav-scope {
+  padding: var(--df-space-3);
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+}
+
 .df-context-sidebar > nav a {
   min-height: 40px;
   display: flex;
   align-items: center;
   gap: var(--df-space-3);
   padding: var(--df-space-2) var(--df-space-3);
-  border-radius: var(--df-radius-sm);
+  border-radius: var(--df-radius-control);
   color: var(--df-text-secondary);
   font-size: var(--df-text-sm);
   text-decoration: none;
@@ -193,10 +203,10 @@
   display: block;
   margin: var(--df-space-2) var(--df-space-4);
   padding: var(--df-space-3) var(--df-space-4);
-  border: 1px solid var(--df-brass-dim);
-  border-radius: var(--df-radius-sm);
-  color: var(--df-brass);
-  background: var(--df-brass-tint);
+  border: 1px solid var(--df-verdigris-dim);
+  border-radius: var(--df-radius-control);
+  color: var(--df-text-primary);
+  background: var(--df-verdigris-tint);
   font-size: var(--df-text-sm);
   font-weight: var(--df-weight-semibold);
   text-align: center;
@@ -234,14 +244,6 @@
   color: var(--df-text-secondary);
 }
 
-.df-page-eyebrow {
-  color: var(--df-brass) !important;
-  font-size: var(--df-text-xs);
-  font-weight: var(--df-weight-semibold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .df-lobby-section,
 .df-settings-section {
   margin-top: var(--df-space-6);
@@ -265,7 +267,7 @@
   gap: var(--df-space-4);
   padding: var(--df-space-4);
   border: 1px solid var(--df-border);
-  border-radius: var(--df-radius-md);
+  border-radius: var(--df-radius-container);
   background: var(--df-surface-1);
 }
 
@@ -275,7 +277,7 @@
   display: grid;
   place-items: center;
   border: 1px solid var(--df-border-subtle);
-  border-radius: var(--df-radius-sm);
+  border-radius: var(--df-radius-container);
   color: var(--df-brass);
   background: var(--df-surface-2);
 }
@@ -317,7 +319,7 @@
   gap: var(--df-space-3);
   padding: var(--df-space-4);
   border: 1px solid var(--df-border);
-  border-radius: var(--df-radius-md);
+  border-radius: var(--df-radius-container);
   color: var(--df-text-primary);
   background: var(--df-surface-1);
   text-align: left;
@@ -330,6 +332,12 @@
 
 .df-project-card .df-project-cover {
   width: 52px;
+}
+
+.df-project-more {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--df-space-5);
 }
 
 .df-create-panel {
@@ -349,7 +357,7 @@
 .df-settings-card {
   padding: var(--df-space-5);
   border: 1px solid var(--df-border);
-  border-radius: var(--df-radius-md);
+  border-radius: var(--df-radius-container);
   background: var(--df-surface-1);
 }
 
@@ -368,7 +376,7 @@
 
 .qc-local-tabs a {
   padding: var(--df-space-2) var(--df-space-3);
-  border-radius: var(--df-radius-sm);
+  border-radius: var(--df-radius-control);
   color: var(--df-text-secondary);
   font-size: var(--df-text-sm);
   text-decoration: none;
@@ -419,10 +427,23 @@
     left: var(--df-primary-nav-width);
     width: min(var(--df-context-nav-width), calc(100vw - var(--df-primary-nav-width)));
     transform: translateX(-105%);
-    box-shadow: var(--df-shadow-xl);
+    box-shadow: var(--df-surface-tier-overlay-shadow);
     transition:
       transform var(--df-duration-base) var(--df-ease),
       visibility var(--df-duration-base) var(--df-ease);
+  }
+
+  .df-context-scrim {
+    position: fixed;
+    inset: 0 0 0 calc(var(--df-primary-nav-width) + var(--df-context-nav-width));
+    z-index: var(--df-z-dropdown);
+    display: block;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: rgb(0 0 0 / 48%);
   }
 
   .secondary-open .df-context-sidebar {
