@@ -572,12 +572,21 @@ class Acceptance:
             },
             paid=True,
         )
-        operations = generated["proposal"]["operations"]
+        # Read the proposal back before judging it. The generation response's
+        # embedded diff has been observed to arrive empty while the same proposal
+        # reads back complete, and the existing read path is what the review UI
+        # consumes, so it -- not the write response -- is the acceptance fact.
+        proposal_id = generated["proposal"]["id"]
+        read_back = self.read(
+            f"/projects/{template}/story/proposals/{proposal_id}"
+        )
+        operations = read_back.get("operations") or generated["proposal"]["operations"]
         shot_ops = [op for op in operations if op["command"] == "story.upsert_shot"]
         if len(shot_ops) < 4:
             raise RuntimeError(
                 "Generated story needs review: insufficient shots for trimmed 15–30s acceptance"
             )
+        generated = {**generated, "proposal": {**generated["proposal"], **read_back}}
         rejected = shot_ops[-1]["id"]
         applied = self.once(
             "template:story-apply",
