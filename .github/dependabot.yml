@@ -4,26 +4,44 @@ updates:
     directory: /backend
     target-branch: dev
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    # Temporarily pause version-update PRs. Security alerts remain enabled for
+    # manual triage; automated security fixes remain disabled at repository level.
+    open-pull-requests-limit: 0
+    allow:
+      - dependency-type: direct
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
   - package-ecosystem: npm
     directory: /frontend
     target-branch: dev
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 0
+    allow:
+      - dependency-type: direct
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
   - package-ecosystem: github-actions
     directory: /
     target-branch: dev
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
   - package-ecosystem: docker
     directory: /backend
     target-branch: dev
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 0
     # Python 3.14.x is the runtime baseline; 3.15 is a minor SemVer update.
     ignore:
       - dependency-name: python
@@ -34,8 +52,8 @@ updates:
     directory: /frontend
     target-branch: dev
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 0
     # Stay on Node 24 LTS; continue receiving 24.x maintenance updates.
     ignore:
       - dependency-name: node
