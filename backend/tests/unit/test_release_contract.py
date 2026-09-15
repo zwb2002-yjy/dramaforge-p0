@@ -116,10 +116,13 @@ def test_release_workflow_packages_installable_online_and_offline_bundles() -> N
     for image in (
         "postgres:15-alpine",
         "redis:7-alpine",
-        "minio/minio:RELEASE.2024-12-18T13-15-44Z",
+        "quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z",
         "ghcr.io/berriai/litellm:v1.96.0",
     ):
         assert image in workflow
+    # Docker Hub removed `minio/minio`; the offline bundle must name the registry
+    # that actually serves the pinned tag, or the release smoke test cannot pull it.
+    assert "minio/minio:RELEASE" not in workflow.replace("quay.io/minio/minio:RELEASE", "")
     assert "dramaforge-online-v*.zip" in workflow
     assert "dramaforge-offline-linux-amd64-v*.tar.gz" in workflow
 
