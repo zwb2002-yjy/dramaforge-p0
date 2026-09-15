@@ -262,6 +262,21 @@ jobs:
               --frontend-digest "${{ steps.manifest-digests.outputs.frontend }}" \
               "${published[@]}" \
               --output-file /workspace/release-manifest.json
+      - name: Reclaim runner disk before packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The bundle step saves every runtime image to one tar. On a hosted
+          # runner the gate steps before it leave tens of GB of intermediate
+          # layers and cache behind, and `docker save` then fails with
+          # "no space left on device" after the redownload of the archives is
+          # already committed. Drop only what nothing references: the tagged
+          # release images and every image the bundle needs stay.
+          df -h /
+          docker image prune -af || true
+          docker container prune -f || true
+          docker builder prune -af || true
+          df -h /
       - name: Create online and offline release bundles
         shell: bash
         env:
