@@ -7,13 +7,13 @@
 
 :root {
   /* ---- Color: Core Palette ---- */
-  --df-obsidian: #071013;
-  --df-ink: #142129;
-  --df-ink-light: #1c2c33;
-  --df-verdigris: #4f9f8c;
+  --df-obsidian: #0d111c;
+  --df-ink: #1b2232;
+  --df-ink-light: #242e41;
+  --df-verdigris: #9cc8c7;
   --df-verdigris-dim: #3d7f70;
   --df-verdigris-tint: rgba(79, 159, 140, 0.12);
-  --df-brass: #c69a57;
+  --df-brass: #e2bd88;
   --df-brass-dim: #a77c3f;
   --df-brass-tint: rgba(198, 154, 87, 0.12);
   --df-ivory: #eee7db;
@@ -38,23 +38,29 @@
   --df-selection: rgba(79, 159, 140, 0.3);
 
   /* ---- Color: Surface ---- */
-  --df-surface-0: #071013;
-  --df-surface-1: #0c171b;
-  --df-surface-2: #111e23;
-  --df-surface-3: #1a292f;
-  --df-surface-raised: #203238;
-  --df-surface-overlay: rgba(7, 16, 19, 0.94);
+  --df-surface-0: #0d111c;
+  --df-surface-1: #121925;
+  /* Secondary ink surface: first raised step above the page background.
+     Exists so container-tier elements never need a hardcoded surface value. */
+  --df-surface-1b: #151d2a;
+  --df-surface-2: #192130;
+  --df-surface-3: #222c3e;
+  --df-surface-raised: #2c374a;
+  --df-surface-overlay: rgba(13, 17, 28, 0.94);
+  /* Neutral media backdrop for 9:16 stage frames, storyboard thumbs and previews.
+     Not a surface level: it must stay darker than every --df-surface-* step. */
+  --df-surface-screen: #000000;
 
   /* ---- Color: Border ---- */
-  --df-border: #293a40;
-  --df-border-strong: #42565d;
-  --df-border-subtle: #1b2a2f;
+  --df-border: #30394a;
+  --df-border-strong: #536075;
+  --df-border-subtle: #242c3c;
 
   /* ---- Color: Text ---- */
   --df-text-primary: #eee7db;
-  --df-text-secondary: #a8ada8;
-  --df-text-muted: #747f7d;
-  --df-text-inverse: #071013;
+  --df-text-secondary: #b8bdc7;
+  --df-text-muted: #929aab;
+  --df-text-inverse: #0d111c;
 
   /* ---- Typography ---- */
   --df-font-display: Georgia, "Noto Serif SC", "Songti SC", serif;
@@ -97,18 +103,51 @@
   --df-space-10: 2.5rem; /* 40px */
   --df-space-12: 3rem; /* 48px */
 
-  /* ---- Radius ---- */
-  --df-radius-sm: 4px;
-  --df-radius-md: 8px;
-  --df-radius-lg: 8px;
-  --df-radius-xl: 8px;
-  --df-radius-full: 9999px;
+  /* ---- Radius ----
+     Radius is fixed by CONTROL TYPE, not by nesting depth and not by preference.
+     New code uses the semantic names; the legacy sm/md/lg/xl scale is kept only
+     so existing declarations keep working. */
+  --df-radius-legacy-sm: 4px;
+  --df-radius-control: 8px; /* buttons, inputs, tabs, selectable rows */
+  --df-radius-container: 10px; /* panels, cards, tables, drawers, stage frames */
+  --df-radius-container-lg: 14px; /* top-level workbench shells only */
+  --df-radius-chip: 9999px; /* pills, badges, dots, avatars */
+  --df-radius-sm: var(--df-radius-legacy-sm);
+  --df-radius-md: var(--df-radius-control);
+  --df-radius-lg: var(--df-radius-control);
+  --df-radius-xl: var(--df-radius-control);
+  --df-radius-full: var(--df-radius-chip);
 
   /* ---- Shadow ---- */
   --df-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --df-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
   --df-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
   --df-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.5);
+
+  /* ---- Surface tiers (flat / raised / overlay) ----
+     Exactly three elevation tiers. Every surface element picks one; a tier is a
+     fixed recipe, never a per-page choice. A flat element carries no shadow.
+     Use --df-shadow-flat to explicitly cancel an inherited elevation. */
+  --df-surface-tier-flat-bg: transparent;
+  --df-surface-tier-flat-border: var(--df-border);
+  --df-surface-tier-flat-shadow: none;
+  --df-surface-tier-raised-bg: var(--df-surface-1b);
+  --df-surface-tier-raised-border: var(--df-border);
+  --df-surface-tier-raised-shadow: var(--df-shadow-md);
+  --df-surface-tier-overlay-bg: var(--df-surface-2);
+  --df-surface-tier-overlay-border: var(--df-border-strong);
+  --df-surface-tier-overlay-shadow: var(--df-shadow-xl);
+  --df-shadow-flat: none;
+
+  /* ---- Type scale (Workbench main steps) ----
+     11 / 12 / 13 / 14 is the Workbench ramp. Intermediate micro sizes
+     (0.6–0.72rem) and 0.78/0.82/0.85/0.88/0.9/0.95/0.98rem are not allowed in
+     Workbench CSS: pick the nearest step. These names alias the legacy
+     --df-text-xs/sm/base/md steps so there is exactly one implementation. */
+  --df-font-size-meta: var(--df-text-xs); /* 11px — technical ids, timestamps, kickers */
+  --df-font-size-caption: var(--df-text-sm); /* 12px — secondary labels and hints */
+  --df-font-size-body: var(--df-text-base); /* 13px — default body and controls */
+  --df-font-size-body-lg: var(--df-text-md); /* 14px — emphasized body, page-level text */
 
   /* ---- Transition ---- */
   --df-ease: cubic-bezier(0.25, 0.1, 0.25, 1);

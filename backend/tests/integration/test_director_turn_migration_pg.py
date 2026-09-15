@@ -99,7 +99,7 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
         ids = {key: uuid.uuid4() for key in ("user", "workspace", "project", "scope")}
         with engine.begin() as connection:
             head = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head == "20260908_0060"
+            assert head == "20260910_0066"
             columns = {
                 row[0]
                 for row in connection.execute(

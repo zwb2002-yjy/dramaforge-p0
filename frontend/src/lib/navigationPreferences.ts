@@ -1,0 +1,86 @@
+const SELECTED_WORKSPACE_STORAGE_KEY = "dramaforge.selected-workspace-id";
+const LAST_PROJECT_STORAGE_KEY = "dramaforge.last-project-id";
+
+export function validateSettingsReturnTo(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.includes("\\")) return undefined;
+  if (
+    !/^(\/(?:\?[^#]*)?|\/projects\/[^/?#]+(?:\/(?:script|assets|production|review|edit|scenes)(?:\/[^/?#]+)?)?(?:\?[^#]*)?)(?:#.*)?$/.test(
+      value,
+    )
+  )
+    return undefined;
+  if (
+    value
+      .split(/[?#]/)[0]
+      .split("/")
+      .some((part) => part === "." || part === ".." || /%/i.test(part))
+  )
+    return undefined;
+  return value;
+}
+
+function readStorage(storage: Storage, key: string): string | null {
+  try {
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(storage: Storage, key: string, value: string | null): void {
+  try {
+    if (value) storage.setItem(key, value);
+    else storage.removeItem(key);
+  } catch {
+    // Browsers can deny persistent storage. The other storage tier may still work.
+  }
+}
+
+function readNavigationPreference(key: string): string | null {
+  if (typeof window === "undefined") return null;
+
+  const sessionValue = readStorage(window.sessionStorage, key);
+  if (sessionValue) return sessionValue;
+
+  const durableValue = readStorage(window.localStorage, key);
+  if (durableValue) writeStorage(window.sessionStorage, key, durableValue);
+  return durableValue;
+}
+
+function writeNavigationPreference(key: string, value: string | null): void {
+  if (typeof window === "undefined") return;
+  writeStorage(window.sessionStorage, key, value);
+  writeStorage(window.localStorage, key, value);
+}
+
+export function getSelectedWorkspaceId(): string | null {
+  return readNavigationPreference(SELECTED_WORKSPACE_STORAGE_KEY);
+}
+
+export function setSelectedWorkspaceId(workspaceId: string | null): void {
+  writeNavigationPreference(SELECTED_WORKSPACE_STORAGE_KEY, workspaceId);
+}
+
+export function getRememberedProjectId(): string | null {
+  return readNavigationPreference(LAST_PROJECT_STORAGE_KEY);
+}
+
+export function setRememberedProjectId(projectId: string | null): void {
+  writeNavigationPreference(LAST_PROJECT_STORAGE_KEY, projectId);
+}
+
+export function getRememberedProjectPath(projectId: string): string | null {
+  const path = readNavigationPreference(`dramaforge.project-path:${projectId}`);
+  const prefix = `/projects/${projectId}/`;
+  if (!path?.startsWith(prefix)) return null;
+  const suffix = path.slice(prefix.length);
+  return /^(script|assets|production|review|edit|scenes|scenes\/[^/?#]+)$/.test(suffix) &&
+    !suffix.includes("..")
+    ? path
+    : null;
+}
+
+export function rememberProjectPath(projectId: string, path: string): void {
+  if (!path.startsWith(`/projects/${projectId}/`)) return;
+  writeNavigationPreference(`dramaforge.project-path:${projectId}`, path);
+}

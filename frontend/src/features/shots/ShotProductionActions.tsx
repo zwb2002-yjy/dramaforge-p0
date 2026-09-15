@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { queryKeys } from "../../lib/queryKeys";
 import { activeStageStatus } from "../production/sceneRunState";
 import {
+  delegateShotExecutionToDirector,
   dispatchShotExecution,
   previewShotExecution,
   type PreparedShotExecution,
@@ -25,6 +26,7 @@ type ShotProductionActionsProps = {
   /** Newest-first server NodeRun summary for this Shot. */
   trace?: unknown[];
   onExecuted?: (result: ShotExecutionRead) => void | Promise<void>;
+  onDirectorDelegated?: () => void;
 };
 
 type ActionFeedback = {
@@ -110,8 +112,10 @@ export function ShotProductionActions({
   dirty = false,
   trace = [],
   onExecuted,
+  onDirectorDelegated,
 }: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
+  const delegationDecisionIds = useRef(new Map<string, string>());
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
   const [displayedPlan, setDisplayedPlan] = useState<ShotExecutionPlanRead | null>(null);
   const [pendingApproximation, setPendingApproximation] = useState<PreparedShotExecution | null>(
@@ -250,11 +254,53 @@ export function ShotProductionActions({
     },
   });
 
+  const delegate = useMutation({
+    mutationFn: async (stage: ShotExecutionStage) => {
+      if (dirty) throw new Error("请先保存镜头设计，再委托导演执行。");
+      const input = executionInput(stage);
+      const preview = await previewShotExecution(projectId, shot.id, input);
+      if (planDelivery(preview) !== "exact") {
+        throw new Error("当前计划需要近似适配确认，请先使用手动生成入口检查并确认。");
+      }
+      const decisionKey = `${shot.id}:${stage}:${preview.plan_fingerprint}`;
+      let decisionId = delegationDecisionIds.current.get(decisionKey);
+      if (!decisionId) {
+        decisionId = globalThis.crypto.randomUUID();
+        delegationDecisionIds.current.set(decisionKey, decisionId);
+      }
+      const turn = await delegateShotExecutionToDirector(projectId, shot.id, {
+        input,
+        preview,
+        decisionId,
+      });
+      return { stage, turn, decisionKey };
+    },
+    onMutate: () => setFeedback(null),
+    onSuccess: async ({ stage, decisionKey }) => {
+      delegationDecisionIds.current.delete(decisionKey);
+      setFeedback({ kind: "success", stage, message: "director_queued" });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.director.turns(projectId, "shot", shot.id),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.scene.workspace(projectId, shot.scene_id),
+        }),
+      ]);
+      onDirectorDelegated?.();
+    },
+    onError: (error, stage) => {
+      setFeedback({ kind: "error", stage, message: errorMessage(error) });
+    },
+  });
+
   const activeStage = produce.isPending
     ? produce.variables
-    : confirmApproximation.isPending
-      ? (pendingApproximation?.input.stage ?? null)
-      : null;
+    : delegate.isPending
+      ? delegate.variables
+      : confirmApproximation.isPending
+        ? (pendingApproximation?.input.stage ?? null)
+        : null;
   const keyframeStatus = activeStageStatus(trace, "image_keyframe");
   const videoStatus = activeStageStatus(trace, "video");
   const delivery = displayedPlan ? planDelivery(displayedPlan) : planFailure;
@@ -297,6 +343,7 @@ export function ShotProductionActions({
           onClick={() => produce.mutate("image_keyframe")}
           disabled={
             produce.isPending ||
+            delegate.isPending ||
             confirmApproximation.isPending ||
             Boolean(pendingApproximation) ||
             Boolean(keyframeStatus) ||
@@ -312,6 +359,7 @@ export function ShotProductionActions({
           onClick={() => produce.mutate("video")}
           disabled={
             produce.isPending ||
+            delegate.isPending ||
             confirmApproximation.isPending ||
             Boolean(pendingApproximation) ||
             Boolean(videoStatus) ||
@@ -320,6 +368,43 @@ export function ShotProductionActions({
           }
         >
           {buttonLabel("video", videoStatus)}
+        </button>
+      </div>
+
+      <div className="qc-shot-production-buttons">
+        <button
+          type="button"
+          className="secondary"
+          data-testid="delegate-keyframe-to-director"
+          onClick={() => delegate.mutate("image_keyframe")}
+          disabled={
+            produce.isPending ||
+            delegate.isPending ||
+            confirmApproximation.isPending ||
+            Boolean(pendingApproximation) ||
+            Boolean(keyframeStatus) ||
+            !referencesReady ||
+            dirty
+          }
+        >
+          导演执行关键帧（AUTO）
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          data-testid="delegate-video-to-director"
+          onClick={() => delegate.mutate("video")}
+          disabled={
+            produce.isPending ||
+            delegate.isPending ||
+            confirmApproximation.isPending ||
+            Boolean(pendingApproximation) ||
+            Boolean(videoStatus) ||
+            !referencesReady ||
+            dirty
+          }
+        >
+          导演执行视频（AUTO）
         </button>
       </div>
 
@@ -401,8 +486,14 @@ export function ShotProductionActions({
           data-status={feedback.message}
           role="status"
         >
-          {STAGE_LABEL[feedback.stage]}请求已提交，服务器状态：
-          {serverStatusLabel(feedback.message)}
+          {feedback.message === "director_queued" ? (
+            <>{STAGE_LABEL[feedback.stage]}已授权给导演执行；正在切换到导演状态。</>
+          ) : (
+            <>
+              {STAGE_LABEL[feedback.stage]}请求已提交，服务器状态：
+              {serverStatusLabel(feedback.message)}
+            </>
+          )}
         </p>
       )}
       {feedback?.kind === "error" && (

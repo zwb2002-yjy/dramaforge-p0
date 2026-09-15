@@ -25,3 +25,5 @@ services:
     pull_policy: never
   worker-heavy:
     pull_policy: never
+  worker-director:
+    pull_policy: never

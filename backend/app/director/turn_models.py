@@ -45,6 +45,7 @@ class DirectorTurn(Base):
 
     __tablename__ = "director_turns"
     __table_args__ = (
+        UniqueConstraint("id", "project_id", name="uq_director_turn_scope"),
         UniqueConstraint("project_id", "request_key", name="uq_director_turn_request"),
         CheckConstraint("revision > 0", name="ck_director_turn_revision_positive"),
         CheckConstraint("step_count >= 0", name="ck_director_turn_step_count_nonnegative"),
@@ -60,6 +61,16 @@ class DirectorTurn(Base):
         CheckConstraint(
             "cost_status IN ('unknown','reported')",
             name="ck_director_turn_cost_status",
+        ),
+        CheckConstraint(
+            "(engine_version IS NULL AND state_schema_version IS NULL AND "
+            "runtime_execution_id IS NULL) OR (engine_version IS NOT NULL AND "
+            "state_schema_version IS NOT NULL AND runtime_execution_id IS NOT NULL)",
+            name="ck_director_turn_engine_binding",
+        ),
+        CheckConstraint(
+            "runtime_revision IS NULL OR runtime_revision > 0",
+            name="ck_director_turn_runtime_revision",
         ),
     )
 
@@ -88,6 +99,10 @@ class DirectorTurn(Base):
     )
     transport_record_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     transport_status: Mapped[str] = mapped_column(String(32), nullable=False, default="created")
+    engine_version: Mapped[str | None] = mapped_column(String(120))
+    state_schema_version: Mapped[str | None] = mapped_column(String(120))
+    runtime_execution_id: Mapped[UUID | None] = mapped_column(unique=True)
+    runtime_revision: Mapped[int | None] = mapped_column(Integer)
     request_summary: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )

@@ -297,12 +297,14 @@ describe("EditingWorkspace", () => {
 
     renderWorkspace();
 
-    expect(await screen.findByText(/正式 Artifact artifact-formal/)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`项目 ${PROJECT_ID}`))).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`场景 ${SCENE_ID}`))).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`镜头 ${SHOT_ID}`))).toBeInTheDocument();
+    const clip = await screen.findByTestId("editing-clip");
+    expect(clip).toHaveTextContent("正式视频 · 0–3 秒 · 片段 1 · 镜头 #1");
+    expect(clip).toHaveTextContent("正式素材已交付");
+    expect(clip).not.toHaveTextContent(SCENE_ID);
+    expect(clip).not.toHaveTextContent(SHOT_ID);
+    expect(clip).not.toHaveTextContent("artifact-formal");
     expect(
-      screen.getByText(/存储 \/api\/v1\/projects\/project-1\/artifacts\/artifact-formal/),
+      screen.getByText("当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。"),
     ).toBeInTheDocument();
     expect(calls).toEqual([{ method: "GET", url: "/api/v1/projects/project-1/opencut-manifest" }]);
     expect(screen.getByTestId("editing-read-only")).toHaveTextContent("只读");
@@ -454,7 +456,7 @@ describe("EditingWorkspace", () => {
     });
     expect(patch?.body).not.toHaveProperty("production_lineage");
     expect(screen.queryByTestId("edit-session-dirty")).not.toBeInTheDocument();
-    expect(screen.getByText(/服务器响应已成为新的 clean baseline/)).toBeInTheDocument();
+    expect(screen.getByText(/时间线已保存/)).toBeInTheDocument();
   });
 
   it("reopens the exact session from the server instead of merging a fresh manifest", async () => {
@@ -634,9 +636,7 @@ describe("EditingWorkspace", () => {
     expect(await screen.findByTestId("edit-session-dirty")).toBeInTheDocument();
     expect(screen.getByTestId("save-edit-timeline")).toBeEnabled();
     fireEvent.click(screen.getByTestId("save-edit-timeline"));
-    expect(
-      await screen.findByText(/已保存（服务器响应已成为新的 clean baseline）/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/时间线已保存。/)).toBeInTheDocument();
     expect(screen.queryByTestId("editing-suggestion-preview")).not.toBeInTheDocument();
 
     const clips = (patchBody?.timeline as { clips: Array<Record<string, unknown>> })?.clips;
@@ -717,7 +717,7 @@ describe("EditingWorkspace", () => {
     fireEvent.click(screen.getByTestId("editing-suggestion-apply-selected"));
     expect(await screen.findByTestId("edit-session-dirty")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("save-edit-timeline"));
-    await screen.findByText(/已保存（服务器响应已成为新的 clean baseline）/);
+    await screen.findByText(/时间线已保存。/);
 
     const clips = (patchBody?.timeline as { clips: Array<Record<string, unknown>> })?.clips;
     expect(clips?.map((clip) => clip.id)).toEqual(["clip-1", "clip-2"]);
@@ -1150,16 +1150,19 @@ describe("EditingWorkspace", () => {
       requestCount += 1;
       return json(
         requestCount === 1
-          ? manifest([formalClip("artifact-before")], [shot(SHOT_ID, "artifact-before")])
+          ? manifest(
+              [{ ...formalClip("artifact-before"), source_url: null }],
+              [shot(SHOT_ID, "artifact-before")],
+            )
           : manifest([formalClip("artifact-after")], [shot(SHOT_ID, "artifact-after")]),
       );
     });
     const queryClient = renderWorkspace();
-    expect(await screen.findByText(/artifact-before/)).toBeInTheDocument();
+    expect(await screen.findByText("正式素材待交付")).toBeInTheDocument();
 
     await queryClient.refetchQueries({ queryKey: ["opencut-manifest", PROJECT_ID] });
-    await waitFor(() => expect(screen.getByText(/artifact-after/)).toBeInTheDocument());
-    expect(screen.queryByText(/artifact-before/)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("正式素材已交付")).toBeInTheDocument());
+    expect(screen.queryByText("正式素材待交付")).not.toBeInTheDocument();
     expect(requestCount).toBe(2);
   });
 });

@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { shotTypeLabel } from "../../lib/shotLabels";
 import { updateShotDesign } from "./api";
 import type { ShotLite } from "./api";
 
@@ -203,7 +204,7 @@ export function ShotDesignPanel({
       {showCamera ? (
         <dl className="qc-shot-design-facts" data-testid="shot-design-camera-facts">
           <dt>镜头类型</dt>
-          <dd>{shot.shot_type || "—"}</dd>
+          <dd>{shotTypeLabel(shot.shot_type)}</dd>
           <dt>机位运动</dt>
           <dd>{shot.camera_move || "—"}</dd>
         </dl>

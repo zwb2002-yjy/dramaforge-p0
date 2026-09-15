@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-from arq import cron
 from arq.connections import RedisSettings
 
 from app.config import get_settings
-from app.workers.jobs import (
-    JOB_FUNCTIONS,
-    reconcile_waiting_director_turns,
-    recover_interrupted_director_turns,
-)
+from app.workers.jobs import JOB_FUNCTIONS
 
 
 def _redis_settings() -> RedisSettings:
@@ -22,15 +17,6 @@ class WorkerSettings:
     """Arq WorkerSettings for the default queue."""
 
     functions = JOB_FUNCTIONS
-    on_startup = recover_interrupted_director_turns
-    cron_jobs = [
-        cron(
-            reconcile_waiting_director_turns,
-            second={5, 35},
-            run_at_startup=True,
-            unique=True,
-        )
-    ]
     redis_settings = _redis_settings()
     queue_name = get_settings().arq_default_queue_name
     max_jobs = 10
