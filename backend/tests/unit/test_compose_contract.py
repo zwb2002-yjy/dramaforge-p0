@@ -87,6 +87,14 @@ def test_compose_defines_required_boot0_services() -> None:
             "${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/"
             "dramaforge-backend:v0.1.0}"
         )
+    # Every service that imports app.config in production must receive the
+    # generated secrets that settings validation checks. worker-director builds
+    # full Settings at import (RedisSettings.from_dsn(get_settings())), so a
+    # missing WORKER_TOKEN makes it restart-loop on a fresh install.
+    for name in ("api", "worker-default", "worker-heavy", "worker-director"):
+        env = services[name]["environment"]
+        assert "WORKER_TOKEN" in env, f"{name} cannot validate production settings"
+        assert "SESSION_SECRET" in env, f"{name} cannot validate production settings"
     maintenance = services["maintenance"]
     assert maintenance["profiles"] == ["maintenance"]
     assert maintenance["entrypoint"] == [

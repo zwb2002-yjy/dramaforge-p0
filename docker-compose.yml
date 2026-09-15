@@ -385,6 +385,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       DIRECTOR_QUEUE_NAME: ${DIRECTOR_QUEUE_NAME:-dramaforge:director}
       SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       AGNES_ENABLED: "false"
       TEXT_LLM_ENABLED: "false"
