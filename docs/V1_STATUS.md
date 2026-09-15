@@ -2,14 +2,13 @@
 
 Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
 
-## 当前发布判定：REL-01 真实验收已跑通主管道，剩余一处 legacy 端点缺陷
+## 当前发布判定：REL-01 真实验收全链通过，等待 Owner 合并
 
-**候选**：`dev` = `9496bf2`。产品代码（`backend/app`、`backend/alembic`、
+**候选**：`dev` = `d47d388`。产品代码（`backend/app`、`backend/alembic`、
 `frontend/src`、`docker-compose.yml`）与接受真实验收的 `cd6f202` **逐树相同**
-（`git rev-parse <sha>:<path>` 比对为 SAME），`9496bf2` 之后只有测试断言与验收
-驱动器变化。
+（`git rev-parse <sha>:<path>` 比对为 SAME），其后只有测试断言与验收驱动器变化。
 
-**REL-01 真实 DS＋Agnes 验收**（Owner 授权付费、无预算上限；隔离候选栈
+**REL-01 真实 DS＋Agnes 验收：全部阶段 PASS**（Owner 授权付费、无预算上限；隔离候选栈
 `dramaf-relcand`，仅发布 `127.0.0.1:8088`，`/health.source_commit = cd6f202`）：
 
 | 阶段 | 结果 |
@@ -20,23 +19,25 @@ Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
 | `editing` | PASS（交付准入逐片通过、剪辑建议采用可审计） |
 | `regressions` | PASS（负向边界 fail closed、MANUAL 不依赖导演） |
 | `delivery` | PASS（真实 MP4/SRT 下载、哈希一致、ffprobe 全真、15–30s、改字幕重导出零新增媒体调用） |
-| `review-submit` | **未通过**：legacy `POST …/repair` 返回 404 `repair request not found` |
+| `review-submit` / `review-collect` | PASS（修复候选已派发并停在人工门；`review_repair` 断言通过） |
 
-该 404 的定位（探针已还原，仓库干净）：服务层成功、失败发生在响应读回阶段、按 ID
-计数为 0 行、同路径进程内直调成功。**根因未确定，不作为已解决记录**。分阶段修复
-端点（`POST …/repairs`、`…/repairs/{id}/steps`）可用且已由 PG 集成测试与候选上的
-manual 全链覆盖；失败发生在任何 Provider 调用之前，无未知提交、无重复计费。
+成片证据：`template_auto-final-film.mp4` 6.34 MB、`free_assist-final-film.mp4` 3.77 MB，
+各带 SRT，均在 `tmp/evidence/`。
 
-本轮同时修复并推送的产品缺陷（均由真实验收暴露，离线套件曾全绿）：
+## 本轮修复的产品缺陷（全部由真实验收暴露，离线套件此前全绿）
 
-- `4e9113f`：Formal 选择门不可能满足——图里没有审查节点，且关键帧阶段从不排队审查；
-- `fcd19a2`：审查 run 未写 `upstream_artifact_id`，门按该键解析审查；
-- `468d4a3`：审查查找在有界分页里做选择，历史一多即"查无此审查"；
-- `cd6f202`：重复导出成片撞唯一约束报 `ARTIFACT_NOT_INDEPENDENT`。
+| 提交 | 缺陷 |
+|---|---|
+| `4e9113f` | Formal 选择门**不可能满足**：冻结图里没有审查节点，且关键帧阶段从不排队审查 → 设为正式关键帧对任何项目都 422，下游视频链随之停死 |
+| `fcd19a2` | 审查 run 未写 `upstream_artifact_id`，而门正是按该键解析审查 → "审查已完成"被读成"没有审查" |
+| `468d4a3` | 审查查找在有界分页里做选择，历史一多即"查无此审查" |
+| `cd6f202` | 重复导出成片撞唯一约束报 `ARTIFACT_NOT_INDEPENDENT`（产品要求重复导出回读原结果） |
+| `cef8402` | 两个 repair 端点在 `commit()` **之后**读状态；repair 表按 `app.current_project_id()` 做 RLS 且该变量是每事务的，新事务没有作用域 → 修复已建、第一步已派发并提交，响应却是 404 `repair request not found` |
 
 **尚未完成**：`dev → main` 合并与版本 tag 属 Owner（Agent 不自批自合）；上表未列
 的 `revise-unknown-free` / `replace-template` / `recover-local-editing` 三个阶段需
-特定前置状态，本轮未构造，记录为未执行。本文件记录的是"候选可发布"，不是"已发布"。
+特定前置状态（未对账的提交、并发 Artifact 竞争失败），本轮未构造，记录为未执行。
+本文件记录的是"候选可发布"，不是"已发布"。
 
 实施记录（不入 Git）见 `tmp/v1-release-20260915/`：`REL01_RESULT_cd6f202.md`、
 `CANDIDATE_RECORD.md` 及各 DEV-0x_RECORD.md。
