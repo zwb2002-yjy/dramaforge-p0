@@ -62,7 +62,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace/frontend \
-            node:24-alpine \
+            node:24.21.0-alpine3.24 \
             sh -ec 'npm ci --ignore-scripts; npm audit --omit=dev --audit-level=high'
 
   filesystem-scan:
