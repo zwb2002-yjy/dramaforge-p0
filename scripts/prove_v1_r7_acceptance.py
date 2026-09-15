@@ -588,6 +588,23 @@ class Acceptance:
         self.state["assertions"]["preflight"] = "PASS"
         self.save()
 
+    def _repair_key(self, tag: str, project_id, shot_id) -> str:
+        """One stable operation key per explicit repair attempt, kept in the state.
+
+        A repair request that already dispatched its first step sits at its human
+        gate; reusing its key is answered with REPAIR_STEP_REQUIRES_REVIEW, which is
+        correct but is not a retry of the same operation. The key is generated once
+        and stored, so a resumed run repeats the same operation instead of starting
+        a new one.
+        """
+        slot = f"repair_key:{tag}:{project_id}:{shot_id}"
+        key = self.state.get(slot)
+        if not isinstance(key, str) or not key:
+            key = f"r7:{self.state['run_key']}:{tag}:{uuid4().hex[:8]}"
+            self.state[slot] = key
+            self.save()
+        return key
+
     def story(self):
         template = self.state["projects"]["template_auto"]["id"]
         generated = self.once(
@@ -1266,10 +1283,12 @@ class Acceptance:
             f"/projects/{project_id}/shots/{shot_id}/repair",
             {
                 "repair_option": "rerun_video",
-                # The previous attempt created a request for this shot with this
-                # key and then stopped at the human gate; a new explicit decision
-                # makes this a new operation, so it carries a new key.
-                "idempotency_key": f"r7:{self.state['run_key']}:repair-video-2",
+                # A repair request whose first step already ran is at its human
+                # gate, so re-submitting the same operation key would be answered
+                # with REPAIR_STEP_REQUIRES_REVIEW (correctly). Each explicit
+                # attempt therefore carries its own key, chosen once and kept in
+                # the state so a resume reuses it.
+                "idempotency_key": self._repair_key("review-video", project_id, shot_id),
             },
             paid=True,
         )
