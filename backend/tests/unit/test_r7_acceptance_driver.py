@@ -148,9 +148,51 @@ def test_recovery_proof_requires_same_remote_identity_and_zero_create_delta(tmp_
             encoding="utf-8",
         )
 
-        run.import_external_proof("recovery", proof)
+        run.import_external_proof(
+            "recovery", proof, entry_port=8080, migration_head=driver.repository_migration_head()
+        )
 
     assert run.state["assertions"]["real_remote_recovery"] == "PASS"
+
+
+def test_external_runtime_proof_binds_the_candidate_migration_head(tmp_path):
+    """The runtime proof must match the head this repository actually declares.
+
+    The expected head used to be a pinned revision, so every migration added after
+    it made the formal 8080 identity proof permanently unreachable.
+    """
+    head = driver.repository_migration_head()
+    assert len(head) > 0
+
+    with httpx.Client() as client:
+        run = driver.Acceptance(client, tmp_path / "state.json", real=True)
+        run.state["candidate_sha"] = "a" * 40
+        run.save()
+        services = {
+            name: {"source_commit": "a" * 40, "healthy": True}
+            for name in ("api", "dispatcher", "worker_default", "worker_heavy", "frontend")
+        }
+        proof = tmp_path / "runtime.json"
+        body = {
+            "candidate_sha": "a" * 40,
+            "entry_port": driver.ENTRY_PORT,
+            "migration_head": head,
+            "services": services,
+        }
+        proof.write_text(json.dumps(body), encoding="utf-8")
+        run.import_external_proof(
+            "runtime", proof, entry_port=driver.ENTRY_PORT, migration_head=head
+        )
+        assert run.state["assertions"]["final_8080_identity"] == "PASS"
+
+        # A proof from a different entry port or migration head is refused.
+        for field, wrong in (("entry_port", driver.ENTRY_PORT + 1), ("migration_head", "20260908_0060")):
+            stale = dict(body, **{field: wrong})
+            proof.write_text(json.dumps(stale), encoding="utf-8")
+            with pytest.raises(RuntimeError):
+                run.import_external_proof(
+                    "runtime", proof, entry_port=driver.ENTRY_PORT, migration_head=head
+                )
 
 
 def test_unknown_free_video_is_revised_with_distinct_request_and_never_replayed(tmp_path):

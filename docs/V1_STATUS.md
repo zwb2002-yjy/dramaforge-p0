@@ -8,8 +8,11 @@ Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
 `frontend/src`、`docker-compose.yml`）与接受真实验收的 `cd6f202` **逐树相同**
 （`git rev-parse <sha>:<path>` 比对为 SAME），其后只有测试断言与验收驱动器变化。
 
-**REL-01 真实 DS＋Agnes 验收：全部阶段 PASS**（Owner 授权付费、无预算上限；隔离候选栈
-`dramaf-relcand`，仅发布 `127.0.0.1:8088`，`/health.source_commit = cd6f202`）：
+**REL-01 真实 DS＋Agnes 验收：已执行的阶段全部 PASS；但整体验收**尚未闭合****
+（Owner 授权付费、无预算上限；隔离候选栈 `dramaf-relcand`，仅发布 `127.0.0.1:8088`，
+`/health.source_commit = cd6f202`）。driver 的完成判据是 16 条必需断言全部 PASS，
+而当前状态文件里只落了 10 条，缺 6 条（详见下节"整体验收未闭合"）——因此
+**"全部阶段 PASS"不等于"验收完成"**，之前本节的行文把两者混为一谈，现更正。
 
 | 阶段 | 结果 |
 |---|---|
@@ -20,6 +23,33 @@ Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
 | `regressions` | PASS（负向边界 fail closed、MANUAL 不依赖导演） |
 | `delivery` | PASS（真实 MP4/SRT 下载、哈希一致、ffprobe 全真、15–30s、改字幕重导出零新增媒体调用） |
 | `review-submit` / `review-collect` | PASS（修复候选已派发并停在人工门；`review_repair` 断言通过） |
+
+### 整体验收未闭合（本轮新发现，需 Owner 决策）
+
+driver 的 `collect` 阶段用 16 条必需断言判定 `complete`。当前状态文件
+（`%TEMP%\relcand-state.json`，`candidate_sha=cd6f202…`，400 KB）实测：
+
+| 必需断言 | 状态 |
+|---|---|
+| `preflight`、`story_and_user_decisions`、`template_auto:formal_media`、`free_assist:formal_media`、`editing_advice_apply`、`review_repair`、`manual_regression`、`final_mp4_srt_download`、`editing_only_rerender`、`negative_boundaries` | **PASS**（10 条） |
+| `real_remote_recovery`、`browser_interaction`、`final_8080_identity`、`text_turn_lineage`、`provider_identity_no_fallback`、`distinct_projects_shared_runtime` | **ABSENT（从未写入）** |
+
+`required_assertions` 字段也不存在 → `collect` 从未跑到写完成判据那一步。
+
+其中三项来自 driver 的**外部证据导入**（`--recovery-proof` / `--browser-proof` /
+`--runtime-proof`），而 runtime 证明此前**不可能通过**：driver 曾把期望的 Alembic
+head 写死为 `20260908_0060`，候选栈真实 head 是 `20260915_0069`（栈内
+`alembic heads` 与 `alembic current` 都是它），因此该断言被永久锁死。本轮已修：
+
+- `repository_migration_head()` 从 `backend/alembic/versions/` 推导唯一 head，
+  多个 head 时直接报错；
+- 入口端口改为可配置（`DRAMAFORGE_PROOF_ENTRY_PORT`，默认 8080），不再写死；
+- 新增单测（`test_r7_acceptance_driver.py`，13 passed）钉住三者一致性与拒绝行为。
+
+仍未闭合的部分需要真实外部条件：浏览器证明要求**在 8080 正式入口**跑且零 console
+error，运行时证明要求 8080 上五个服务各自 `source_commit == candidate` 且 `healthy`；
+候选栈当前在 8088，Owner 的 8080 栈不是候选构建。因此这一步需要 Owner 决定：把候选栈
+按正式入口（8080）起来做运行时/浏览器证明，或接受以"阶段级 PASS + 增量验证"发布。
 
 成片证据：`template_auto-final-film.mp4` 6.34 MB、`free_assist-final-film.mp4` 3.77 MB，
 各带 SRT，均在 `tmp/evidence/`。
