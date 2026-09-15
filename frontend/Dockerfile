@@ -1,4 +1,5 @@
-FROM node:26-alpine AS build
+# Node 24 LTS; release-line upgrades are deliberate (see Dependabot policy).
+FROM node:24-alpine AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
