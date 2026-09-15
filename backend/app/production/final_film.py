@@ -1384,6 +1384,12 @@ async def execute_final_film_node_run(
             mime_type=stored.mime_type,
             byte_size=stored.byte_size,
             produced_by_run_id=run.id,
+            # A Final Film is an assembly of an already-frozen timeline, not shot
+            # media. Rendering the same saved version twice produces the same
+            # bytes on purpose, and the product requires that re-export to return
+            # the original result instead of failing; the shot-scoped rule that
+            # forbids one NodeRun from claiming another's bytes does not apply.
+            allow_cross_run_reuse=True,
         )
         subtitle_artifact = None
         if rendered.subtitle_data:
@@ -1401,6 +1407,9 @@ async def execute_final_film_node_run(
                 mime_type=subtitle_stored.mime_type,
                 byte_size=subtitle_stored.byte_size,
                 produced_by_run_id=run.id,
+                # Same reasoning as the film bytes above: identical subtitles for
+                # an unchanged timeline are the expected outcome of a re-export.
+                allow_cross_run_reuse=True,
             )
         subtitle_delivery = {
             "subtitle_artifact_id": str(subtitle_artifact.id) if subtitle_artifact else None,
