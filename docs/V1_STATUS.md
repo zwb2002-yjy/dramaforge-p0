@@ -2,15 +2,30 @@
 
 Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
 
-## 当前发布判定：待修复与候选重新验收
+## 当前发布判定：候选已冻结并通过全部门，等待 Owner 合并
 
-2026-09-15 静态核对的代码基线为 `dev` / `5ea45d6373d840d37f34a472b3dbe4853da9f8e6`。
-当前工作区存在未提交文档；本轮没有运行正式门、真实 Provider 验收或查询远端 PR。
-[产品闭环审计](PRODUCT_CLOSURE_AUDIT.md) 报告了候选证据缺失、真实渲染验证不足、
-Review/Repair 与导演入口等阻塞，不能沿用祖先候选的“已验证待发布”作为当前结论。
+候选提交 `df546f6`（`dev`），发布 PR **#88**（`dev → main`）当前
+`mergeStateStatus = CLEAN`、`mergeable = MERGEABLE`：远端 `policy` 与
+`container-gates` 均 success（CI run 34981740717），Security workflow 全绿。
 
-发布范围与后续实施分别见 [设计](V1_RELEASE_DESIGN.md) 和
-[执行](V1_RELEASE_EXECUTION.md)。下列完成记录仅适用于其注明的历史候选。
+本机在 `df546f6` 的干净导出树上运行：
+
+- 后端 `tests/unit tests/integration`：1159 passed / 5 skipped / **0 failed**；
+- `ruff check` 与 `mypy app`：无问题；
+- 前端 `api:check`、`format:check`、`lint`、`typecheck`、233 项单测、`build`、
+  40 项浏览器 e2e：全部通过；
+- 新建数据库 `alembic upgrade head` + `alembic check`：无 pending operation。
+
+`df546f6` 之前的 `container-gates` 失败（frontend 步骤）已定位并修复：某个列表
+端点返回对象时，列表消费者直接 `.find()`，异常在 render 内抛出导致工作区整体
+卸载；现由 `apiGetList()` 在边界处 fail-closed 到 `[]`（真实 HTTP 失败仍抛错）。
+
+**尚未完成**：合并动作与最终发布判定属 Owner（Agent 不自批自合）；DS＋Agnes
+真实场景验收需要逐次正数预算与 Owner 授权，本轮未执行。因此本文件记录的是
+"候选就绪"，不是"已发布"。
+
+实施记录（不入 Git）见 `tmp/v1-release-20260915/`：`CANDIDATE_RECORD.md` 及各
+DEV-0x_RECORD.md。
 
 ## 历史 V1 主链验收记录
 
@@ -47,14 +62,15 @@ tools/decisions UI、跨 runtime 失败矩阵、候选验收与终态对账。MA
 
 ## 数据库与质量基线
 
-- Alembic 单 head：`20260910_0066`（66 个 revision）。
+- Alembic 单 head：`20260915_0069`（69 个 revision）；以候选自身 `alembic heads`
+  为准。本轮新增 0067（资产入库请求身份）、0068（人工审查决定）、0069（分阶段修复步骤）。
 - CI：`policy` + `container-gates`（backend / PostgreSQL / 迁移 / OpenAPI /
   前端 / E2E / LiteLLM 集成），Release workflow 发布版本化镜像。
 
 ## 剩余工作方向
 
-- 按发布执行文档补齐阻塞并冻结新的干净候选，重新绑定正式验收证据；
-- Owner 审阅实际发布 PR（历史记录中的 PR #66 状态未在本轮远端核实）；
+- Owner 审阅并合并发布 PR **#88**（候选 `df546f6`，检查已全绿）；Agent 不自批自合。
+- DS＋Agnes 真实场景验收：按仓库规则需要逐次正数预算与 Owner 授权。
 - 发布按 [RELEASE.md](RELEASE.md) 执行；新功能开发以本目录权威文档 + 代码
   现状为基线，不再有历史 Task Contract 序列。
 
