@@ -1,4 +1,12 @@
+import { configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+
+// Route pages are `lazyRouteComponent` chunks: a full-suite run transforms and
+// evaluates the whole route graph in every router-mounted test file, so a
+// `findBy*` that resolves in ~0.6s when a file runs alone can cross the 1s
+// default and fail non-deterministically. Raising the async utility timeout is
+// a margin for the real condition, not a substitute for waiting on it.
+configure({ asyncUtilTimeout: 5_000 });
 
 // jsdom does not implement scrollTo; TanStack Router may call it.
 Object.defineProperty(window, "scrollTo", {

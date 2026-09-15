@@ -23,26 +23,41 @@ function workspaceScopedUrl(path: string): string {
 export class ApiError extends Error {
   status: number;
   code: string;
+  /** Problem-details extras (for example expected/actual version on a conflict). */
+  details: Record<string, unknown>;
 
-  constructor(message: string, status: number, code: string) {
+  constructor(
+    message: string,
+    status: number,
+    code: string,
+    details: Record<string, unknown> = {},
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
 async function parseError(response: Response): Promise<ApiError> {
   let code = "HTTP_ERROR";
   let detail = response.statusText;
+  let details: Record<string, unknown> = {};
   try {
-    const body = (await response.json()) as { code?: string; detail?: string; title?: string };
+    const body = (await response.json()) as {
+      code?: string;
+      detail?: string;
+      title?: string;
+      details?: Record<string, unknown>;
+    };
     code = body.code ?? code;
     detail = body.detail ?? body.title ?? detail;
+    if (body.details && typeof body.details === "object") details = body.details;
   } catch {
     // ignore
   }
-  return new ApiError(detail, response.status, code);
+  return new ApiError(detail, response.status, code, details);
 }
 
 export async function apiGet<T>(path: string, workspaceIdOverride?: string | null): Promise<T> {
@@ -619,24 +634,6 @@ export type ProjectSnapshot = {
 
 export function fetchSnapshot(projectId: string): Promise<ProjectSnapshot> {
   return apiGet(`/api/v1/projects/${projectId}/snapshot`);
-}
-
-export type ScriptImportResponse = {
-  script_document_id: string;
-  episode_id: string;
-  scene_count: number;
-  shot_count: number;
-  shot_ids: string[];
-  content_hash: string;
-};
-
-export async function importScript(
-  projectId: string,
-  filename: string,
-  text: string,
-): Promise<ScriptImportResponse> {
-  const csrf = await fetchCsrf();
-  return apiSend("POST", `/api/v1/projects/${projectId}/scripts/import`, { filename, text }, csrf);
 }
 
 export type AssetRead = {

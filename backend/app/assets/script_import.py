@@ -27,6 +27,23 @@ _SHOT_RE = re.compile(
 )
 _EPISODE_RE = re.compile(r"^#\s*Episode\s+(\d+)\s*[—\-–:]\s*(.+)$", re.IGNORECASE)
 
+# First-release bound for one pasted/uploaded script. The browser converts the
+# file to text, so the same limit is enforced on both sides and stated in the UI.
+MAX_SCRIPT_TEXT_BYTES = 1024 * 1024
+IMPORT_OUTCOME_CREATED = "created"
+IMPORT_OUTCOME_REUSED = "reused"
+
+
+def script_text_size_error(text: str) -> str | None:
+    """Return a user-facing reason when ``text`` exceeds the import bound."""
+    size = len(text.encode("utf-8"))
+    if size <= MAX_SCRIPT_TEXT_BYTES:
+        return None
+    return (
+        f"剧本文本为 {size} 字节，超过上限 {MAX_SCRIPT_TEXT_BYTES} 字节（1 MiB）；"
+        "请拆分为多次导入。"
+    )
+
 
 @dataclass(frozen=True)
 class ParsedShot:
@@ -63,6 +80,10 @@ class ImportResult:
     shot_count: int
     shot_ids: list[UUID]
     content_hash: str
+    # ``created`` when this call wrote canonical rows, ``reused`` when the same
+    # content was already imported. A retry must never be reported as a new
+    # creation.
+    outcome: str = IMPORT_OUTCOME_CREATED
 
 
 def parse_script_markdown(text: str) -> ParsedScript:
@@ -81,6 +102,9 @@ def parse_script_markdown(text: str) -> ParsedScript:
     """
     if not text or not text.strip():
         raise ValidationAppError("empty script")
+    size_error = script_text_size_error(text)
+    if size_error is not None:
+        raise ValidationAppError(size_error, details={"code": "SCRIPT_TEXT_TOO_LARGE"})
     lines = text.replace("\r\n", "\n").split("\n")
     episode_number = 1
     title = "Untitled"
@@ -281,6 +305,7 @@ async def import_script(
             shot_count=len(ordered_shots),
             shot_ids=[shot.id for shot in ordered_shots],
             content_hash=content_hash,
+            outcome=IMPORT_OUTCOME_REUSED,
         )
 
     fmt = "md" if filename.lower().endswith(".md") else "txt"
@@ -418,4 +443,5 @@ async def import_script(
         shot_count=len(shot_ids),
         shot_ids=shot_ids,
         content_hash=content_hash,
+        outcome=IMPORT_OUTCOME_CREATED,
     )

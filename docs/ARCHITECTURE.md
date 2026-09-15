@@ -3,6 +3,12 @@
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
 Date: 2026-09-14 / Base: dev 070faa3 / Alembic head: 20260910_0066
 
+本文件描述**当前项目实际怎么组成**。它受架构宪法
+[CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) 约束：宪法定义目标世界观，
+本文件描述当前实现结构。两者不一致之处即
+[ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) 中记录的差距，不得在本文档内
+自行放宽。模块依赖的允许/禁止以 [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) 为准。
+
 ## 系统拓扑
 
 同仓库、同后端镜像、不同启动角色；Compose 服务：
@@ -21,6 +27,10 @@ Date: 2026-09-14 / Base: dev 070faa3 / Alembic head: 20260910_0066
 两个 runtime：
 - **Director Runtime**（编排，提案式，不拥有媒体）→ [DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)
 - **Production Runtime**（统一媒体执行）→ [PRODUCTION_RUNTIME.md](PRODUCTION_RUNTIME.md)
+
+只有这两个 Runtime；Graph / Node / NodeRun 的精确定义见
+[PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md)，术语唯一解见
+[DOMAIN_VOCABULARY.md](DOMAIN_VOCABULARY.md)。
 
 ## 代码归属矩阵
 

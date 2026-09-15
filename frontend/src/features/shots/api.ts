@@ -1,6 +1,6 @@
 /** Phase 3 feature-local API client — shot domain (shot workbench, shot design). */
 
-import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { ApiError, apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type ShotLite = components["schemas"]["ShotLiteRead"];
@@ -146,6 +146,65 @@ export async function dispatchShotExecution(
     csrf,
     { "Idempotency-Key": prepared.idempotencyKey },
   );
+}
+
+/**
+ * Deterministic command key for one production command.
+ *
+ * It is derived from the frozen plan the server already fingerprinted instead
+ * of a fresh random value, so a retry after a lost response (or a double click
+ * on the same plan) resolves to the same `NodeRun` command: the server returns
+ * its receipt instead of submitting the same media operation twice.
+ *
+ * The value carries only the Shot and the plan fingerprint because the server
+ * prefixes its own `workbench:<stage>:` and verifies the Shot/stage scope from
+ * the stored snapshot. Keeping it short keeps the stored key debuggable instead
+ * of tripping the server's long-key hashing fallback.
+ */
+export function shotExecutionIdempotencyKey(shotId: string, planFingerprint: string): string {
+  return `shot:${shotId}:${planFingerprint}`;
+}
+
+/** Read the committed receipt of one production command, if it exists. */
+export async function fetchShotExecutionReceipt(
+  projectId: string,
+  shotId: string,
+  stage: ShotExecutionStage,
+  idempotencyKey: string,
+): Promise<ShotExecutionRead | null> {
+  const query = new URLSearchParams({ stage, idempotency_key: idempotencyKey });
+  try {
+    return await apiGet<ShotExecutionRead>(
+      `/api/v1/projects/${projectId}/shots/${shotId}/executions/receipt?${query.toString()}`,
+    );
+  } catch (error) {
+    // A missing receipt is the verified "not submitted yet" answer; every other
+    // failure stays an error so it is never mistaken for a free retry.
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+/**
+ * Submit one production command, honoring an existing receipt first.
+ *
+ * A previous attempt with the same command key may have reached the server
+ * without its response arriving. Looking the receipt up keeps that click's
+ * identity instead of billing a second submission.
+ */
+export async function submitShotExecution(
+  projectId: string,
+  shotId: string,
+  prepared: PreparedShotExecution,
+): Promise<ShotExecutionRead> {
+  const existing = await fetchShotExecutionReceipt(
+    projectId,
+    shotId,
+    prepared.input.stage,
+    prepared.idempotencyKey,
+  );
+  if (existing) return existing;
+  return dispatchShotExecution(projectId, shotId, prepared);
 }
 
 export async function delegateShotExecutionToDirector(

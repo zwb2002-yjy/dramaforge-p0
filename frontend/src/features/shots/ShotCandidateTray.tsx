@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
+import { AddArtifactToAssetDialog } from "../assets/AddArtifactToAssetDialog";
 import {
   setShotFormalKeyframe,
   setShotFormalVideo,
@@ -63,9 +64,11 @@ export function ShotCandidateTray({
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(
     null,
   );
+  const [assetCandidate, setAssetCandidate] = useState<ShotCandidate | null>(null);
 
   useEffect(() => {
     setFeedback(null);
+    setAssetCandidate(null);
   }, [shot?.id]);
 
   const parsedCandidates = useMemo(
@@ -229,10 +232,34 @@ export function ShotCandidateTray({
                 >
                   {activeArtifactId === candidate.artifactId ? "确认中…" : `设为正式${label}`}
                 </button>
+                <button
+                  type="button"
+                  className="qc-shot-candidate-confirm secondary"
+                  data-testid={`shot-candidate-add-asset-${candidate.artifactId}`}
+                  onClick={() => setAssetCandidate(candidate)}
+                >
+                  加入资产
+                </button>
               </article>
             );
           })}
         </div>
+      )}
+
+      {assetCandidate && (
+        <AddArtifactToAssetDialog
+          projectId={projectId}
+          artifactId={assetCandidate.artifactId}
+          defaultName={shot.shot_number ? `镜头 ${shot.shot_number}` : "未命名资产"}
+          defaultKind="character"
+          sourceLabel={`${shotCandidateStageLabel(assetCandidate.stage)}候选`}
+          shotId={shot.id}
+          onCreated={async (asset) => {
+            setFeedback({ kind: "success", message: `已加入资产：${asset.name}` });
+            await queryClient.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
+          }}
+          onClose={() => setAssetCandidate(null)}
+        />
       )}
 
       {feedback?.kind === "success" && (

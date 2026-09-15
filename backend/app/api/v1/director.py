@@ -26,6 +26,10 @@ from app.director.recommendation import (
     DirectorRecommendationRequest,
     DirectorRecommendationService,
 )
+from app.director.runtime.capabilities import (
+    DirectorCapabilitiesRead,
+    build_director_capabilities,
+)
 from app.director.runtime.control import DirectorRuntimeControlService
 from app.director.runtime.delegation import DirectorRuntimeDelegationService
 from app.director.runtime.routing import DirectorEngineRouter
@@ -216,7 +220,7 @@ async def suggest_shot_design(
 
 
 @router.post(
-    "/projects/{project_id}/shots/{shot_id}/recommendation",
+    "/projects/{project_id}/director/shots/{shot_id}/recommendation",
     response_model=DirectorRecommendation,
 )
 async def recommend_shot_design(
@@ -259,6 +263,24 @@ async def list_director_turns(
         limit=limit,
     )
     return [DirectorTurnRead.from_model(turn) for turn in turns]
+
+
+@router.get(
+    "/projects/{project_id}/director/capabilities",
+    response_model=DirectorCapabilitiesRead,
+)
+async def read_director_capabilities(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> DirectorCapabilitiesRead:
+    """Report the effective engine and why a new runtime turn may be blocked.
+
+    A read-only surface: the runtime still re-validates on every write, so a
+    disabled button is never the only guard.
+    """
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return build_director_capabilities(get_settings())
 
 
 @router.post(

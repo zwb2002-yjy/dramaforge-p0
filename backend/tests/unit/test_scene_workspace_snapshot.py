@@ -7,12 +7,13 @@ from uuid import uuid4
 
 from app.access.models import Project, User, Workspace
 from app.assets.models import Asset, AssetVersion, Episode, Scene, Shot
-from app.execution.models import Artifact, GraphNode, NodeRun
-from app.production.models import ShotReferenceBinding
+from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
+from app.production.models import ProductionGraph, ShotReferenceBinding
 from app.production.service import GraphService
 from app.shared.base import Base
 from app.shared.enums import ProjectStage
 from app.workbench.scene_service import SceneWorkspaceService, ShotWorkbenchService
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -81,28 +82,52 @@ async def _add_node_run(
     shot_id,
     user,
     status: str = "succeeded",
+    attempt_no: int = 1,
 ) -> NodeRun:
-    graph = await GraphService(session).create_graph(
-        project_id=project_id,
-        scope_type="shot",
-        scope_entity_id=shot_id,
-        template_key="p3-test",
-        created_by=user.id,
-        definition={},
-    )
-    node = GraphNode(
-        graph_version_id=graph.current_version_id,
-        node_key="keyframe",
-        node_type="keyframe",
-        display_name="Keyframe",
-        cacheable=True,
-    )
-    session.add(node)
-    await session.flush()
+    existing_graph = (
+        await session.execute(
+            select(ProductionGraph).where(
+                ProductionGraph.project_id == project_id,
+                ProductionGraph.scope_type == "shot",
+                ProductionGraph.scope_entity_id == shot_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing_graph is None:
+        graph = await GraphService(session).create_graph(
+            project_id=project_id,
+            scope_type="shot",
+            scope_entity_id=shot_id,
+            template_key="p3-test",
+            created_by=user.id,
+            definition={},
+        )
+        current_version_id = graph.current_version_id
+    else:
+        current_version_id = existing_graph.current_version_id
+    node = (
+        await session.execute(
+            select(GraphNode).where(
+                GraphNode.graph_version_id == current_version_id,
+                GraphNode.node_key == "keyframe",
+            )
+        )
+    ).scalar_one_or_none()
+    if node is None:
+        node = GraphNode(
+            graph_version_id=current_version_id,
+            node_key="keyframe",
+            node_type="keyframe",
+            display_name="Keyframe",
+            cacheable=True,
+        )
+        session.add(node)
+        await session.flush()
     run = NodeRun(
         project_id=project_id,
-        graph_version_id=graph.current_version_id,
+        graph_version_id=current_version_id,
         graph_node_id=node.id,
+        attempt_no=attempt_no,
         idempotency_key=f"run-{uuid4().hex}",
         input_hash=uuid4().hex * 2,
         input_snapshot={"shot_id": str(shot_id), "node_key": "keyframe"},
@@ -112,6 +137,68 @@ async def _add_node_run(
     session.add(run)
     await session.flush()
     return run
+
+
+async def test_trace_marks_unknown_provider_submission_for_manual_reconciliation() -> None:
+    """A possibly-billed submission must be visible instead of inviting a retry."""
+    engine, session = await _make_env()
+    try:
+        user, project, _episode, scene, shot = await _seed(session)
+        unknown_run = await _add_node_run(
+            session, project_id=project.id, shot_id=shot.id, user=user, status="failed"
+        )
+        settled_run = await _add_node_run(
+            session,
+            project_id=project.id,
+            shot_id=shot.id,
+            user=user,
+            status="completed",
+            attempt_no=2,
+        )
+        session.add_all(
+            [
+                ProviderOperation(
+                    node_run_id=unknown_run.id,
+                    attempt_no=1,
+                    purpose="primary",
+                    operation_kind="video.generate",
+                    actual_provider="agnes",
+                    actual_model="agnes-video-v2.0",
+                    request_fingerprint=uuid4().hex * 2,
+                    status="unknown_submission",
+                ),
+                ProviderOperation(
+                    node_run_id=settled_run.id,
+                    attempt_no=1,
+                    purpose="primary",
+                    operation_kind="video.generate",
+                    actual_provider="agnes",
+                    actual_model="agnes-video-v2.0",
+                    request_fingerprint=uuid4().hex * 2,
+                    status="succeeded",
+                ),
+            ]
+        )
+        await session.flush()
+
+        workspace = await SceneWorkspaceService(session).get_workspace(
+            project_id=project.id, scene_id=scene.id, actor=user
+        )
+        rows = {str(row["node_run_id"]): row for row in workspace["trace"][str(shot.id)]}
+        assert rows[str(unknown_run.id)]["operation_outcome_unknown"] is True
+        assert rows[str(settled_run.id)]["operation_outcome_unknown"] is False
+
+        workbench = await ShotWorkbenchService(session).get_workbench(
+            project_id=project.id, shot_id=shot.id, actor=user
+        )
+        workbench_rows = {
+            str(row["node_run_id"]): row for row in workbench["trace"]
+        }
+        assert workbench_rows[str(unknown_run.id)]["operation_outcome_unknown"] is True
+        assert workbench_rows[str(settled_run.id)]["operation_outcome_unknown"] is False
+    finally:
+        await session.close()
+        await engine.dispose()  # type: ignore[union-attr]
 
 
 async def test_scene_workspace_snapshot_is_scene_scoped() -> None:

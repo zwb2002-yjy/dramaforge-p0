@@ -11,5 +11,17 @@ export const projectScriptRoute = createRoute({
 
 function ScriptPage() {
   const { projectId } = projectScriptRoute.useParams();
-  return <LazyScriptWorkspace projectId={projectId} />;
+  const navigate = projectScriptRoute.useNavigate();
+  return (
+    <LazyScriptWorkspace
+      projectId={projectId}
+      onOpenScene={(sceneId) =>
+        void navigate({
+          to: "/projects/$projectId/scenes/$sceneId",
+          params: { projectId, sceneId },
+          search: { shotId: undefined, tool: undefined },
+        })
+      }
+    />
+  );
 }

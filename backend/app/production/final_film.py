@@ -830,6 +830,43 @@ async def _job_read(
     )
 
 
+async def _assert_delivery_reviews(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    refs: list[_TimelineRef],
+) -> None:
+    """Delivery admission: every clip's exact Artifact needs a human approval.
+
+    A machine review that asked for a person, or a missing decision, blocks the
+    render here instead of producing a film the user never approved. The check
+    is about the frozen Timeline material, not about "current formal", so a
+    later Shot edit cannot silently change what was approved.
+    """
+    from app.production.review_gate import evaluate_artifact_admission
+
+    for ref in refs:
+        admission = await evaluate_artifact_admission(
+            session,
+            project_id=project_id,
+            shot_id=ref.shot_id,
+            artifact_id=ref.artifact_id,
+            stage="formal_video",
+        )
+        if admission.allowed:
+            continue
+        raise ValidationAppError(
+            "a timeline clip has not been approved by a human review decision",
+            details={
+                "code": "DELIVERY_REVIEW_REQUIRED",
+                "reason": admission.blocker or "REVIEW_DECISION_MISSING",
+                "shot_id": str(ref.shot_id),
+                "artifact_id": str(ref.artifact_id),
+                "review_kind": admission.review_kind,
+            },
+        )
+
+
 async def queue_final_film_render(
     session: AsyncSession,
     *,
@@ -853,6 +890,7 @@ async def queue_final_film_render(
         shot.id: shot
         for shot in await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
     }
+    await _assert_delivery_reviews(session, project_id=project_id, refs=refs)
     metadata = (edit_session.timeline or {}).get("metadata")
     timeline: dict[str, Any] = {
         "version": edit_session.version,

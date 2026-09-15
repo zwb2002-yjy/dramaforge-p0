@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
+from pg_support import alembic_head
 from test_director_turn_lifecycle_pg import (
     _admin_url,
     _async_url,
@@ -41,7 +42,7 @@ async def test_director_runtime_migration_round_trip() -> None:
         try:
             assert await connection.fetchval(
                 "SELECT version_num FROM alembic_version"
-            ) == "20260910_0066"
+            ) == alembic_head()
             columns = {
                 row["column_name"]
                 for row in await connection.fetch(
@@ -84,7 +85,7 @@ async def test_director_runtime_migration_round_trip() -> None:
         try:
             assert await connection.fetchval(
                 "SELECT version_num FROM alembic_version"
-            ) == "20260910_0066"
+            ) == alembic_head()
         finally:
             await connection.close()
     finally:

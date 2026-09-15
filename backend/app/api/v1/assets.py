@@ -5,21 +5,23 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.asset_card_service import AssetCardReadService
+from app.assets.from_artifact_service import (
+    AssetFromArtifactRequest,
+    AssetFromArtifactService,
+)
 from app.assets.models import (
     Asset,
     AssetVersion,
-    AssetVersionReference,
 )
 from app.assets.tag_service import AssetTagService
 from app.assets.version_service import AssetVersionService
-from app.execution.models import Artifact
 from app.shared.errors import ConflictError, NotFoundError
 
 router = APIRouter(tags=["assets"], dependencies=[Depends(require_selected_workspace)])
@@ -387,53 +389,27 @@ async def create_asset_from_artifact(
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=160
+    ),
 ) -> AssetRead:
-    """Explicitly add a generated artifact as an asset card. Nothing is automatic."""
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    artifact = (
-        await session.execute(
-            select(Artifact).where(
-                Artifact.id == body.artifact_id, Artifact.project_id == project_id
-            )
-        )
-    ).scalar_one_or_none()
-    if artifact is None:
-        raise NotFoundError("artifact not found")
-    asset = Asset(
+    """Explicitly add a generated artifact as an asset card. Nothing is automatic.
+
+    Retrying the same submission with the same ``Idempotency-Key`` returns the
+    original card instead of creating a second one.
+    """
+    asset = await AssetFromArtifactService(session).create(
         project_id=project_id,
-        kind=body.kind,
-        name=body.name,
-        description=body.description,
-        metadata_json=dict(body.metadata),
-        status="active",
-        version=1,
-    )
-    session.add(asset)
-    await session.flush()
-    version = AssetVersion(
-        project_id=project_id,
-        asset_id=asset.id,
-        version_number=1,
-        kind=body.kind,
-        name=body.name,
-        description=body.description,
-        metadata_json=dict(body.metadata),
-        status="formal",
-        created_by=user.id,
-    )
-    session.add(version)
-    await session.flush()
-    asset.current_version_id = version.id
-    session.add(
-        AssetVersionReference(
-            project_id=project_id,
-            asset_version_id=version.id,
-            artifact_id=artifact.id,
+        actor=user,
+        request=AssetFromArtifactRequest(
+            kind=body.kind,
+            name=body.name,
+            artifact_id=body.artifact_id,
+            description=body.description,
+            metadata=body.metadata,
             reference_role=body.reference_role,
-            label=body.name,
-            sort_order=0,
-            metadata_json={},
-        )
+        ),
+        request_key=idempotency_key,
     )
     await session.commit()
     return _asset_read(asset)

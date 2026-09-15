@@ -58,9 +58,65 @@ class ReviewAnnotation(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class HumanReviewDecision(Base):
+    """One human judgement about one immutable Artifact for one review kind.
+
+    This is a decision fact, not a review runtime: it never replaces the review
+    NodeRun, never copies media and never mutates the production graph. A new
+    decision appends (``supersedes_id``) instead of overwriting history, and the
+    artifact/review evidence it points at is what makes the decision applicable.
+    """
+
+    __tablename__ = "human_review_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "request_key", name="uq_human_review_decision_request"
+        ),
+        Index(
+            "ix_human_review_decisions_lookup",
+            "project_id",
+            "shot_id",
+            "artifact_id",
+            "review_kind",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    shot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
+    )
+    artifact_id: Mapped[UUID] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=False
+    )
+    review_node_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("node_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    review_artifact_id: Mapped[UUID] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=False
+    )
+    review_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    shot_version_at_decision: Mapped[int] = mapped_column(Integer, nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    request_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    supersedes_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("human_review_decisions.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Export(Base):
     __tablename__ = "exports"
-
     __table_args__ = (
         Index(
             "uq_exports_project_format_idempotency",

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 from app.shared.base import Base
-from app.shared.db_types import JSON_DOCUMENT
+from app.shared.db_types import HASH_64, JSON_DOCUMENT
 
 
 class ScriptDocument(Base):
@@ -253,6 +253,11 @@ class Asset(Base):
         ),
         nullable=True,
     )
+    # Transport-retry identity of the submission that created this card. Null for
+    # pre-existing cards and for explicit new operations; the partial unique
+    # index only constrains rows that actually carry a key.
+    creation_request_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    creation_request_hash: Mapped[str | None] = mapped_column(HASH_64, nullable=True)
 
 
 class AssetVersion(Base):
@@ -385,6 +390,14 @@ Index(
     AssetVersion.__table__.c.version_number,
 )
 Index("ix_assets_current_version_id", Asset.__table__.c.current_version_id)
+Index(
+    "uq_assets_project_creation_request",
+    Asset.__table__.c.project_id,
+    Asset.__table__.c.creation_request_key,
+    unique=True,
+    postgresql_where=Asset.__table__.c.creation_request_key.isnot(None),
+    sqlite_where=Asset.__table__.c.creation_request_key.isnot(None),
+)
 Index(
     "ix_shots_formal_keyframe_artifact_id",
     Shot.__table__.c.formal_keyframe_artifact_id,

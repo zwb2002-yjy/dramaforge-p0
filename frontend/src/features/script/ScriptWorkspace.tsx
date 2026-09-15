@@ -12,10 +12,13 @@ import {
   type StoryProposalOperation,
   type StoryProposalRead,
 } from "./api";
+import { ScriptImportPanel } from "./ScriptImportPanel";
 import type { DirectorInvocationEvidence } from "../director/suggestion-types";
 
 type ScriptWorkspaceProps = {
   projectId: string;
+  /** Leave the Script workspace for one imported Scene. */
+  onOpenScene?: (sceneId: string) => void;
 };
 
 const PROPOSAL_STATUS_LABEL: Record<string, string> = {
@@ -41,7 +44,7 @@ function operationLabel(operation: StoryProposalOperation): string {
   return `${kind}${numberPart ? ` ${numberPart}` : ""}`;
 }
 
-export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
+export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps) {
   const queryClient = useQueryClient();
   const [brief, setBrief] = useState("");
   const [filename, setFilename] = useState("story-draft.md");
@@ -203,6 +206,22 @@ export function ScriptWorkspace({ projectId }: ScriptWorkspaceProps) {
           当前还没有正式剧本。创建并采用第一个剧本提案后，这里会显示集 / 场景 / 镜头结构。
         </p>
       )}
+
+      <ScriptImportPanel
+        projectId={projectId}
+        onImported={async () => {
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.script.workspace(projectId) }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.scene.summaries(projectId) }),
+          ]);
+        }}
+        onOpenFirstShot={() => {
+          // The refreshed Script tree is the reliable way to locate the imported
+          // Shot: the first Scene of the first Episode owns the first Shot.
+          const firstScene = data?.episodes[0]?.scenes[0];
+          if (firstScene) onOpenScene?.(firstScene.id);
+        }}
+      />
 
       <section className="qc-settings-band" data-testid="story-proposal-composer">
         <h2>剧本提案</h2>

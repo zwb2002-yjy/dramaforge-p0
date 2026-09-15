@@ -112,6 +112,22 @@ class CapabilityGap(BaseModel):
     reason: str = Field(min_length=1, max_length=240)
 
 
+class PendingSuggestion(BaseModel):
+    """A value that exists in the creative profile but is not in this plan.
+
+    The project records template recommendations; execution only consumes the
+    compiled creative snapshot. Reporting the difference keeps a recommendation
+    from being read as an applied Provider control.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    key: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=160)
+    source: Literal["template_recommendation"] = "template_recommendation"
+    reason: str = Field(min_length=1, max_length=240)
+
+
 class WorkbenchExecutionPlan(BaseModel):
     """Semantic execution plan for one shot execution (P4-01).
 
@@ -146,6 +162,9 @@ class WorkbenchExecutionPlan(BaseModel):
     approximate_controls: list[ControlTranslation] = Field(default_factory=list)
     unsupported_controls: list[ControlTranslation] = Field(default_factory=list)
     capability_gaps: list[CapabilityGap] = Field(default_factory=list)
+    # Creative-profile values that are NOT in this execution. Shown as
+    # suggestions, never as Provider hard parameters.
+    pending_suggestions: list[PendingSuggestion] = Field(default_factory=list)
     semantic_request_preview: dict[str, JsonValue] = Field(default_factory=dict)
     connection_revision_id: UUID | None = None
     credential_revision_id: UUID | None = None

@@ -87,11 +87,23 @@ export const queryKeys = {
       ["director-board", projectId, shotId] as const,
     turns: (projectId: string, scopeType: string, scopeEntityId: string | null | undefined) =>
       ["director-turns", projectId, scopeType, scopeEntityId] as const,
+    capabilities: (projectId: string) => ["director-capabilities", projectId] as const,
   },
 
   review: {
     annotations: (projectId: string, shotId: string | null | undefined) =>
       ["review-annotations", projectId, shotId] as const,
+    summary: (
+      projectId: string,
+      shotId: string | null | undefined,
+      artifactId: string | null | undefined,
+      reviewKind: string,
+      stage: string,
+    ) => ["review-summary", projectId, shotId, artifactId, reviewKind, stage] as const,
+    repairPlan: (projectId: string, shotId: string | null | undefined) =>
+      ["repair-plan", projectId, shotId] as const,
+    repairs: (projectId: string, shotId: string | null | undefined) =>
+      ["repairs", projectId, shotId] as const,
   },
 
   editing: {

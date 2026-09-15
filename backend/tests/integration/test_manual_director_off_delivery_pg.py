@@ -37,7 +37,9 @@ from app.production.final_film import (
     queue_final_film_render,
 )
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
-from app.production.repair_service import RepairService
+from app.production.models import RepairStep
+from app.production.repair_service import RepairService, record_repair_adoption
+from app.production.review_gate import record_human_decision
 from app.production.service import GraphService
 from app.runtime.scheduler import NodeRunScheduler
 from app.shared.db import set_rls_context
@@ -310,6 +312,14 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                     "nodes": [
                         {"key": "keyframe", "type": "keyframe"},
                         {"key": "video", "type": "video"},
+                        # Delivery consumes a stored human decision on the Formal
+                        # video, so the MANUAL graph carries the same review node a
+                        # deployment's shot pipeline freezes.
+                        {
+                            "key": "video_drift_review",
+                            "type": "video_review",
+                            "display_name": "Video drift review",
+                        },
                         {"key": "composite", "type": "composite"},
                     ],
                     "edges": [],
@@ -467,6 +477,42 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 ProviderOperation.operation_kind.in_(("image.generate", "video.generate")),
             ))).all())
             assert len(source_operation_ids) == 2
+            # Delivery requires a stored human decision for the clip's exact
+            # Artifact, so this MANUAL path records one like the product flow.
+            # The review node comes from the frozen definition above; one NodeRun
+            # per (graph_node_id, attempt_no) is a real constraint, and the video
+            # node already carries its producing run.
+            review_run = NodeRun(
+                project_id=project.id,
+                graph_version_id=graph.current_version_id,
+                graph_node_id=by_key["video_drift_review"].id,
+                idempotency_key=f"manual-video-drift-review:{uuid4().hex}",
+                input_hash=uuid4().hex * 2,
+                input_snapshot={
+                    "shot_id": str(shot.id),
+                    "node_key": "video_drift_review",
+                    "upstream_artifact_id": str(video.id),
+                },
+                output_summary={"status": "needs_human"},
+                status="completed",
+                result_artifact_id=composite.id,
+                created_by=actor.id,
+            )
+            session.add(review_run)
+            await session.flush()
+            await record_human_decision(
+                session,
+                project_id=project.id,
+                shot_id=shot.id,
+                artifact_id=video.id,
+                review_node_run_id=review_run.id,
+                review_kind="video_drift",
+                decision="approved",
+                reason="MANUAL 路径下人工确认成片素材可用。",
+                actor_id=actor.id,
+                shot_version=shot.version,
+                request_key=f"manual-review:{uuid4().hex}",
+            )
             await session.commit()
 
             first = await _render_final(
@@ -519,6 +565,73 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 ProviderOperation.operation_kind.in_(("image.generate", "video.generate")),
             ))).all())
             assert after_source_ids == source_operation_ids
+
+            # A staged repair runs on this same project and stays resumable.
+            # The repair dispatches through the Workbench, so this workspace needs
+            # the model bindings a real deployment would have.
+            from model_infra_fixture import seed_model_infra
+
+            await seed_model_infra(session, project=project, user=actor)
+            repair_plan = await RepairService(session).build_repair_plan(
+                project=project, shot_id=shot.id,
+            )
+            assert repair_plan.suggested_option == "regenerate_keyframe_then_video"
+            repair_request = await RepairService(session).create_repair(
+                project=project,
+                user=actor,
+                shot_id=shot.id,
+                option="regenerate_keyframe_then_video",
+                plan_hash=repair_plan.plan_hash,
+                request_key=f"manual-offline:repair:{uuid4().hex}",
+            )
+            await session.commit()
+            repair_request, repair_step, repair_run = await RepairService(session).execute_step(
+                project=project,
+                user=actor,
+                shot_id=shot.id,
+                repair_id=repair_request.id,
+                idempotency_key=f"manual-offline:repair-step:{uuid4().hex}",
+            )
+            await session.commit()
+            assert repair_step.stage == "keyframe_regenerate"
+            assert repair_run.status == "queued"
+            state = await RepairService(session).read_repair(
+                project=project, shot_id=shot.id, repair_id=repair_request.id,
+            )
+            # The chain stops at the human gate; the repair is not "done".
+            assert state.next_action == "human_decision"
+
+            # The worker produces the repaired keyframe candidate.
+            repaired_bytes = image_bytes + b"\x00repaired"
+            repaired_artifact = await _store_artifact(
+                project_id=project.id,
+                object_key=f"projects/{project.id}/offline/repaired-keyframe.png",
+                data=repaired_bytes,
+                artifact_type="image",
+                mime_type="image/png",
+                produced_by_run_id=repair_run.id,
+            )
+            session.add(repaired_artifact)
+            await session.flush()
+            repair_run.result_artifact_id = repaired_artifact.id
+            repair_run.status = "completed"
+            repair_run.finished_at = datetime.now(UTC)
+            await session.commit()
+
+            # Adopting the candidate links it back to the step that produced it.
+            adopted = await record_repair_adoption(
+                session,
+                project_id=project.id,
+                shot_id=shot.id,
+                artifact_id=repaired_artifact.id,
+            )
+            await session.commit()
+            assert adopted == 1
+            refreshed_step = await session.get(RepairStep, repair_step.id)
+            assert refreshed_step is not None
+            assert refreshed_step.adopted_artifact_id == repaired_artifact.id
+            # The repair never replaced Formal by itself.
+            assert shot.formal_keyframe_artifact_id == keyframe.id
             assert shot.formal_keyframe_artifact_id == keyframe.id
             assert shot.formal_video_artifact_id == video.id
             assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 0

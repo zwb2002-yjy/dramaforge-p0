@@ -60,19 +60,13 @@ from app.shared.db import set_rls_context
 from app.shared.enums import OutboxStatus
 from app.shared.security import hash_password
 from app.storage.minio_store import reset_object_store_for_tests
-from pg_support import available
+from pg_support import available, database_url
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-_DEFAULT_URL = "postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
-
-
-def _database_url() -> str:
-    return os.environ.get("DATABASE_URL", _DEFAULT_URL)
-
 
 def _postgres_is_available() -> bool:
-    return available(_database_url())
+    return available(database_url())
 
 
 pytestmark = pytest.mark.skipif(
@@ -84,7 +78,7 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture
 async def pg_session() -> AsyncGenerator[AsyncSession, None]:
     reset_object_store_for_tests()
-    engine = create_async_engine(_database_url(), pool_pre_ping=True)
+    engine = create_async_engine(database_url(), pool_pre_ping=True)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
         try:
@@ -489,7 +483,7 @@ async def test_worker_restart_requeues_resumable_unified_run_pg(
 
     # recover_interrupted_provider_jobs opens its own session via
     # get_session_factory; route it to a fresh factory on the same PG target.
-    factory_engine = create_async_engine(_database_url(), pool_pre_ping=True)
+    factory_engine = create_async_engine(database_url(), pool_pre_ping=True)
     factory = async_sessionmaker(factory_engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(
         "app.workers.jobs.get_session_factory",
@@ -564,7 +558,7 @@ async def test_api_restart_outbox_reenqueues_pending_node_run_pg(
     pg_session.add(event)
     await pg_session.commit()
 
-    factory_engine = create_async_engine(_database_url(), pool_pre_ping=True)
+    factory_engine = create_async_engine(database_url(), pool_pre_ping=True)
     factory = async_sessionmaker(factory_engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(
         "app.workers.jobs.get_session_factory",
@@ -596,7 +590,7 @@ async def test_api_restart_outbox_reenqueues_pending_node_run_pg(
     # same resolver the restart uses rather than depending on drain ordering.
     from app.shared.db import list_queued_node_run_rls_scopes
 
-    factory_sync = create_async_engine(_database_url(), pool_pre_ping=True)
+    factory_sync = create_async_engine(database_url(), pool_pre_ping=True)
     async with async_sessionmaker(factory_sync)() as probe:
         queued = await list_queued_node_run_rls_scopes(
             probe,
@@ -716,7 +710,7 @@ async def test_old_task_never_reads_new_binding_pg(
         "get_settings",
         lambda: Settings(
             app_env="test",
-            database_url=_database_url(),
+            database_url=database_url(),
         ),
     )
     ok = await WorkerRuntime(pg_session).process_one(run.id)

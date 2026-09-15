@@ -138,6 +138,9 @@ export interface paths {
         /**
          * Create Asset From Artifact
          * @description Explicitly add a generated artifact as an asset card. Nothing is automatic.
+         *
+         *     Retrying the same submission with the same ``Idempotency-Key`` returns the
+         *     original card instead of creating a second one.
          */
         post: operations["create_asset_from_artifact_api_v1_projects__project_id__assets_from_artifact_post"];
         delete?: never;
@@ -459,6 +462,9 @@ export interface paths {
         /**
          * Set Shot Formal Keyframe
          * @description Mark one keyframe artifact as the shot's formal keyframe (03 §38).
+         *
+         *     The product entry point enforces human review admission: a candidate may
+         *     only become Formal once a stored human decision approves that exact Artifact.
          */
         post: operations["set_shot_formal_keyframe_api_v1_projects__project_id__shots__shot_id__formal_keyframe_post"];
         delete?: never;
@@ -479,6 +485,9 @@ export interface paths {
         /**
          * Set Shot Formal Video
          * @description Mark one video artifact as the shot's formal video (03 §39).
+         *
+         *     Same admission rule as the keyframe entry point: the human decision must be
+         *     about this exact Artifact.
          */
         post: operations["set_shot_formal_video_api_v1_projects__project_id__shots__shot_id__formal_video_post"];
         delete?: never;
@@ -527,6 +536,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/repairs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Repairs
+         * @description Repairs that can be resumed after reopening the page.
+         */
+        get: operations["list_repairs_api_v1_projects__project_id__shots__shot_id__repairs_get"];
+        put?: never;
+        /**
+         * Create Repair
+         * @description Persist a confirmed repair intent against the previewed plan hash.
+         */
+        post: operations["create_repair_api_v1_projects__project_id__shots__shot_id__repairs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/repairs/{repair_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Repair
+         * @description One repair with its stored steps and the next action.
+         */
+        get: operations["read_repair_api_v1_projects__project_id__shots__shot_id__repairs__repair_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/repairs/{repair_id}/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Repair Step
+         * @description Dispatch the next confirmed step; review steps are refused here.
+         */
+        post: operations["execute_repair_step_api_v1_projects__project_id__shots__shot_id__repairs__repair_id__steps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/repair": {
         parameters: {
             query?: never;
@@ -539,6 +612,10 @@ export interface paths {
         /**
          * Execute Repair
          * @description Execute a V1 repair rerun with an Idempotency-Key (03 §58).
+         *
+         *     With ``plan_hash`` this is the staged path: one repair request is created
+         *     and its first step dispatched, so the follow-up steps stay resumable. The
+         *     staged path stops before any step that needs a human review decision.
          */
         post: operations["execute_repair_api_v1_projects__project_id__shots__shot_id__repair_post"];
         delete?: never;
@@ -635,7 +712,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{project_id}/shots/{shot_id}/recommendation": {
+    "/api/v1/projects/{project_id}/director/shots/{shot_id}/recommendation": {
         parameters: {
             query?: never;
             header?: never;
@@ -645,7 +722,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Recommend Shot Design */
-        post: operations["recommend_shot_design_api_v1_projects__project_id__shots__shot_id__recommendation_post"];
+        post: operations["recommend_shot_design_api_v1_projects__project_id__director_shots__shot_id__recommendation_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -661,6 +738,29 @@ export interface paths {
         };
         /** List Director Turns */
         get: operations["list_director_turns_api_v1_projects__project_id__director_turns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Director Capabilities
+         * @description Report the effective engine and why a new runtime turn may be blocked.
+         *
+         *     A read-only surface: the runtime still re-validates on every write, so a
+         *     disabled button is never the only guard.
+         */
+        get: operations["read_director_capabilities_api_v1_projects__project_id__director_capabilities_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1145,6 +1245,46 @@ export interface paths {
         put?: never;
         /** Decide Annotation */
         post: operations["decide_annotation_api_v1_projects__project_id__shots__shot_id__annotations__annotation_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/review-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Review Summary
+         * @description Machine evidence + the current human decision + what the user may do next.
+         */
+        get: operations["read_review_summary_api_v1_projects__project_id__shots__shot_id__review_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/review-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Review Decision
+         * @description Store one human decision. A retry with the same key returns the original.
+         */
+        post: operations["create_review_decision_api_v1_projects__project_id__shots__shot_id__review_decisions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3100,6 +3240,30 @@ export interface components {
             updated_at: string;
         };
         /**
+         * DirectorCapabilitiesRead
+         * @description Secret-free description of what this deployment can actually run.
+         */
+        DirectorCapabilitiesRead: {
+            /** Effective Engine */
+            effective_engine: string;
+            /** Runtime Turns Available */
+            runtime_turns_available: boolean;
+            /** Blocker Code */
+            blocker_code?: string | null;
+            /** Blocker Message */
+            blocker_message?: string | null;
+            /**
+             * Manual Production Available
+             * @default true
+             */
+            manual_production_available: boolean;
+            /**
+             * Checkpoint Configured
+             * @default false
+             */
+            checkpoint_configured: boolean;
+        };
+        /**
          * DirectorInvocationEvidence
          * @description Safe identity returned with a proposal; no credential or raw wire data.
          */
@@ -3943,6 +4107,13 @@ export interface components {
             actual_provider?: string | null;
             /** Actual Model */
             actual_model?: string | null;
+            /** Operation Status */
+            operation_status?: string | null;
+            /**
+             * Operation Outcome Unknown
+             * @default false
+             */
+            operation_outcome_unknown: boolean;
             /** Effective Request Redacted */
             effective_request_redacted?: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -4906,6 +5077,28 @@ export interface components {
             dialogue_role: string;
         };
         /**
+         * PendingSuggestion
+         * @description A value that exists in the creative profile but is not in this plan.
+         *
+         *     The project records template recommendations; execution only consumes the
+         *     compiled creative snapshot. Reporting the difference keeps a recommendation
+         *     from being read as an applied Provider control.
+         */
+        PendingSuggestion: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Source
+             * @default template_recommendation
+             * @constant
+             */
+            source: "template_recommendation";
+            /** Reason */
+            reason: string;
+        };
+        /**
          * PlannedReference
          * @description One shot reference planned for a model execution.
          *
@@ -5414,6 +5607,18 @@ export interface components {
             /** Clip Ids */
             clip_ids: string[];
         };
+        /** RepairCreateBody */
+        RepairCreateBody: {
+            /**
+             * Repair Option
+             * @enum {string}
+             */
+            repair_option: "rerun_video" | "regenerate_keyframe_then_video";
+            /** Plan Hash */
+            plan_hash: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
         /** RepairExecuteBody */
         RepairExecuteBody: {
             /**
@@ -5423,6 +5628,8 @@ export interface components {
             repair_option: "rerun_video" | "regenerate_keyframe_then_video";
             /** Idempotency Key */
             idempotency_key: string;
+            /** Plan Hash */
+            plan_hash?: string | null;
         };
         /** RepairExecuteRead */
         RepairExecuteRead: {
@@ -5435,6 +5642,12 @@ export interface components {
             status: string;
             /** Repair Option */
             repair_option: string;
+            /** Repair Id */
+            repair_id?: string | null;
+            /** Step Ordinal */
+            step_ordinal?: number | null;
+            /** Next Action */
+            next_action?: string | null;
         };
         /**
          * RepairPlanRead
@@ -5461,6 +5674,88 @@ export interface components {
             expected_rerun_scope: string;
             /** Annotation Count */
             annotation_count: number;
+            /** Annotation Ids */
+            annotation_ids: string[];
+            /** Plan Hash */
+            plan_hash: string;
+            /** Plan Schema Version */
+            plan_schema_version: number;
+            /** Steps */
+            steps: string[];
+            /** Cost Estimate Note */
+            cost_estimate_note: string;
+        };
+        /** RepairRequestRead */
+        RepairRequestRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /**
+             * Option
+             * @enum {string}
+             */
+            option: "rerun_video" | "regenerate_keyframe_then_video";
+            /** Plan Hash */
+            plan_hash: string;
+            /** Plan Schema Version */
+            plan_schema_version: number;
+            /** Annotation Ids */
+            annotation_ids: string[];
+            /** Source Formal Artifact Id */
+            source_formal_artifact_id: string | null;
+            /** Closed Reason */
+            closed_reason: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Steps */
+            steps: components["schemas"]["RepairStepRead"][];
+            /** Next Action */
+            next_action: string;
+        };
+        /** RepairStepExecuteBody */
+        RepairStepExecuteBody: {
+            /** Expected Plan Fingerprint */
+            expected_plan_fingerprint?: string | null;
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+        };
+        /** RepairStepRead */
+        RepairStepRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Ordinal */
+            ordinal: number;
+            /** Stage */
+            stage: string;
+            /** Plan Fingerprint */
+            plan_fingerprint: string | null;
+            /** Command Key */
+            command_key: string | null;
+            /** Node Run Id */
+            node_run_id: string | null;
+            /** Node Run Status */
+            node_run_status: string | null;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Adopted Artifact Id */
+            adopted_artifact_id: string | null;
+            /** Review Decision Id */
+            review_decision_id: string | null;
+            /** Next Action */
+            next_action: string;
         };
         /**
          * RequestTransformation
@@ -5495,6 +5790,116 @@ export interface components {
             asset_id?: string | null;
             /** Asset Version Id */
             asset_version_id?: string | null;
+        };
+        /**
+         * ReviewDecisionBody
+         * @description One human judgement about one Artifact, bound to its review evidence.
+         */
+        ReviewDecisionBody: {
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /**
+             * Review Node Run Id
+             * Format: uuid
+             */
+            review_node_run_id: string;
+            /** Review Kind */
+            review_kind: string;
+            /** Decision */
+            decision: string;
+            /** Reason */
+            reason: string;
+            /** Expected Shot Version */
+            expected_shot_version?: number | null;
+        };
+        /** ReviewDecisionRead */
+        ReviewDecisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /**
+             * Review Node Run Id
+             * Format: uuid
+             */
+            review_node_run_id: string;
+            /**
+             * Review Artifact Id
+             * Format: uuid
+             */
+            review_artifact_id: string;
+            /** Review Kind */
+            review_kind: string;
+            /** Decision */
+            decision: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Actor Id
+             * Format: uuid
+             */
+            actor_id: string;
+            /** Shot Version At Decision */
+            shot_version_at_decision: number;
+            /** Supersedes Id */
+            supersedes_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ReviewSummaryRead
+         * @description What the review page needs: machine evidence, the human call, what is allowed.
+         */
+        ReviewSummaryRead: {
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /** Review Kind */
+            review_kind: string;
+            /** Node Key */
+            node_key: string;
+            /** Review Node Run Id */
+            review_node_run_id: string | null;
+            /** Review Artifact Id */
+            review_artifact_id: string | null;
+            /** Machine Status */
+            machine_status: string | null;
+            /** Decision */
+            decision: string | null;
+            /** Decision Reason */
+            decision_reason: string | null;
+            /** Applies */
+            applies: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Allowed Actions */
+            allowed_actions: string[];
+            /** Shot Version */
+            shot_version: number;
         };
         /** SceneActionRead */
         SceneActionRead: {
@@ -5712,6 +6117,8 @@ export interface components {
             shot_ids: string[];
             /** Content Hash */
             content_hash: string;
+            /** Import Outcome */
+            import_outcome: string;
         };
         /** ScriptWorkspaceRead */
         ScriptWorkspaceRead: {
@@ -6416,6 +6823,8 @@ export interface components {
             unsupported_controls?: components["schemas"]["ControlTranslation"][];
             /** Capability Gaps */
             capability_gaps?: components["schemas"]["CapabilityGap"][];
+            /** Pending Suggestions */
+            pending_suggestions?: components["schemas"]["PendingSuggestion"][];
             /** Semantic Request Preview */
             semantic_request_preview?: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -7116,6 +7525,7 @@ export interface operations {
                 workspace_id?: string | null;
             };
             header?: {
+                "Idempotency-Key"?: string | null;
                 "X-Workspace-Id"?: string | null;
                 "X-CSRF-Token"?: string | null;
             };
@@ -8059,6 +8469,172 @@ export interface operations {
             };
         };
     };
+    list_repairs_api_v1_projects__project_id__shots__shot_id__repairs_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairRequestRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_repair_api_v1_projects__project_id__shots__shot_id__repairs_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_repair_api_v1_projects__project_id__shots__shot_id__repairs__repair_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+                repair_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_repair_step_api_v1_projects__project_id__shots__shot_id__repairs__repair_id__steps_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+                repair_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairStepExecuteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairExecuteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     execute_repair_api_v1_projects__project_id__shots__shot_id__repair_post: {
         parameters: {
             query?: {
@@ -8305,7 +8881,7 @@ export interface operations {
             };
         };
     };
-    recommend_shot_design_api_v1_projects__project_id__shots__shot_id__recommendation_post: {
+    recommend_shot_design_api_v1_projects__project_id__director_shots__shot_id__recommendation_post: {
         parameters: {
             query?: {
                 workspace_id?: string | null;
@@ -8376,6 +8952,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DirectorTurnRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_director_capabilities_api_v1_projects__project_id__director_capabilities_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorCapabilitiesRead"];
                 };
             };
             /** @description Validation Error */
@@ -9589,6 +10202,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnnotationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_review_summary_api_v1_projects__project_id__shots__shot_id__review_summary_get: {
+        parameters: {
+            query: {
+                artifact_id: string;
+                review_kind?: string;
+                stage?: string;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSummaryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_review_decision_api_v1_projects__project_id__shots__shot_id__review_decisions_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewDecisionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewDecisionRead"];
                 };
             };
             /** @description Validation Error */

@@ -38,6 +38,9 @@ class ScriptImportResponse(BaseModel):
     shot_count: int
     shot_ids: list[UUID]
     content_hash: str
+    # ``created`` on first persist, ``reused`` when identical content was
+    # already imported; a retry is never reported as a new creation.
+    import_outcome: str
 
 
 class ShotRead(BaseModel):
@@ -305,6 +308,7 @@ async def import_project_script(
         shot_count=result.shot_count,
         shot_ids=result.shot_ids,
         content_hash=result.content_hash,
+        import_outcome=result.outcome,
     )
 
 

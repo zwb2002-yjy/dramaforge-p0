@@ -233,7 +233,9 @@ describe("SceneWorkspace", () => {
         true,
       );
     });
-    expect(await screen.findByText(/已保存设计/)).toBeInTheDocument();
+    // Scope to the save confirmation: the design panel also reports the saved
+    // version chip, so a text query for 已保存设计 now matches two elements.
+    expect(await screen.findByTestId("shot-design-message")).toHaveTextContent("已保存设计");
   });
 
   it("keeps a draft across sheet close and guards a Shot switch until discard", async () => {

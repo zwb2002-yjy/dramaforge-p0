@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import Project
+from app.access.models import Project, ProjectCreativeProfile
 from app.assets.models import Asset, AssetVersion, AssetVersionReference, Episode, Scene, Shot
 from app.config import get_settings
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
@@ -34,6 +34,7 @@ from app.execution.shot_pipeline import (
     shot_pipeline_definition,
 )
 from app.production.execution_plan import (
+    PendingSuggestion,
     WorkbenchExecutionPlan,
 )
 from app.production.formal_selection import require_formal_keyframe
@@ -606,6 +607,86 @@ class WorkbenchExecutionService:
         semantic.update(request_tags)
         return prompt, semantic
 
+    async def _pending_creative_suggestions(
+        self,
+        *,
+        project: Project,
+        semantic_intent: Mapping[str, object],
+    ) -> list[PendingSuggestion]:
+        """Template recommendations the creative profile records but this plan does not use.
+
+        Execution only consumes the compiled creative snapshot; the profile's
+        ``selected_*`` fields are what a template proposed at creation time.
+        Reporting the difference keeps a recommendation from being presented as
+        an applied Provider control.
+        """
+        profile = (
+            await self._session.execute(
+                select(ProjectCreativeProfile).where(
+                    ProjectCreativeProfile.project_id == project.id
+                )
+            )
+        ).scalar_one_or_none()
+        if profile is None:
+            return []
+        raw_skill_rows = semantic_intent.get("skill_guidance")
+        skill_rows: list[object] = raw_skill_rows if isinstance(raw_skill_rows, list) else []
+        compiled_skills = {
+            str(row.get("skill_key") or "")
+            for row in skill_rows
+            if isinstance(row, Mapping) and row.get("skill_key")
+        }
+        shot_language = _mapping(semantic_intent.get("shot_language"))
+        suggestions: list[PendingSuggestion] = []
+        for style_id in profile.selected_style_ids or []:
+            suggestions.append(
+                PendingSuggestion(
+                    key=f"style:{style_id}",
+                    label=str(style_id),
+                    reason=(
+                        "模板选定的风格只写入项目创作档案，本次执行未使用它；"
+                        "它不会作为 Provider 硬参数下发。"
+                    ),
+                )
+            )
+        for skill_id in profile.selected_skill_ids or []:
+            if str(skill_id) in compiled_skills:
+                continue
+            suggestions.append(
+                PendingSuggestion(
+                    key=f"skill:{skill_id}",
+                    label=str(skill_id),
+                    reason=(
+                        "该技能尚未编译进本镜头的创作快照，因此本次执行不会注入它的指导文本。"
+                    ),
+                )
+            )
+        selected_language = profile.selected_shot_language
+        if selected_language and not shot_language:
+            suggestions.append(
+                PendingSuggestion(
+                    key=f"shot_language:{selected_language}",
+                    label=str(selected_language),
+                    reason=(
+                        "模板推荐的镜头语言尚未成为本镜头的已保存设计；"
+                        "它现在只是建议，不会改变本次执行的镜头参数。"
+                    ),
+                )
+            )
+        if profile.selected_genre:
+            # The genre has no compiled consumer in this repository: it stays a
+            # profile annotation and must never be shown as an execution input.
+            suggestions.append(
+                PendingSuggestion(
+                    key=f"genre:{profile.selected_genre}",
+                    label=str(profile.selected_genre),
+                    reason=(
+                        "题材仅作为项目档案记录；它不参与执行计划，也不作为模型参数。"
+                    ),
+                )
+            )
+        return suggestions
+
     async def build_plan(
         self,
         *,
@@ -715,6 +796,10 @@ class WorkbenchExecutionService:
             mode_id=execution_input.mode_id,
             accept_approximations=execution_input.accept_approximations,
         )
+        pending_suggestions = await self._pending_creative_suggestions(
+            project=project,
+            semantic_intent=semantic_intent,
+        )
 
         plan = WorkbenchExecutionPlan(
             project_id=project.id,
@@ -728,6 +813,7 @@ class WorkbenchExecutionService:
             capability=capability,
             planned_references=compiled.planned_references,
             capability_gaps=compiled.capability_gaps,
+            pending_suggestions=pending_suggestions,
             semantic_request_preview={
                 "intent": semantic_intent,
                 "references": len(compiled.planned_references),

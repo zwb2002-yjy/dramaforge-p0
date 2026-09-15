@@ -3,7 +3,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ShotProductionActions } from "../../src/features/shots/ShotProductionActions";
-import type { ShotExecutionPlanRead, ShotExecutionReference } from "../../src/features/shots/api";
+import {
+  productionOperationScope,
+  readProductionOperation,
+  recordProductionOperation,
+} from "../../src/features/shots/productionOperationStore";
+import {
+  shotExecutionIdempotencyKey,
+  type ShotExecutionPlanRead,
+  type ShotExecutionReference,
+} from "../../src/features/shots/api";
 
 const SHOT = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -128,7 +137,10 @@ function renderActions(
 }
 
 describe("ShotProductionActions", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
 
   it("delegates one exact frozen plan to the Director runtime", async () => {
     const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -222,6 +234,9 @@ describe("ShotProductionActions", () => {
       if (url.endsWith("/execution-plan")) {
         return json(planResponse());
       }
+      if (url.includes("/executions/receipt")) {
+        return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
+      }
       if (url.endsWith("/executions")) {
         return json({
           node_run_id: "33333333-3333-4333-8333-333333333333",
@@ -311,6 +326,9 @@ describe("ShotProductionActions", () => {
       if (url.endsWith("/execution-plan")) {
         return json(planResponse({ fingerprint: "b".repeat(64) }));
       }
+      if (url.includes("/executions/receipt")) {
+        return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
+      }
       if (url.endsWith("/executions")) {
         return json({
           node_run_id: "33333333-3333-4333-8333-333333333333",
@@ -357,6 +375,9 @@ describe("ShotProductionActions", () => {
             accepted: body.accept_approximations ? ["style"] : [],
           }),
         );
+      }
+      if (url.includes("/executions/receipt")) {
+        return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
       }
       if (url.endsWith("/executions")) {
         return json({
@@ -448,6 +469,385 @@ describe("ShotProductionActions", () => {
       "unsupported",
     );
     expect(calls.filter((url) => url.endsWith("/executions"))).toHaveLength(0);
+  });
+
+  it("reuses one command key when a production submission loses its response", async () => {
+    const executions: Array<{ body: Record<string, unknown>; key: string | undefined }> = [];
+    let attempts = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      if (url.includes("/executions/receipt")) {
+        return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
+      }
+      if (url.endsWith("/executions")) {
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        executions.push({ body, key: headers["Idempotency-Key"] });
+        attempts += 1;
+        if (attempts === 1) return Promise.reject(new TypeError("response lost"));
+        return json({
+          node_run_id: "33333333-3333-4333-8333-333333333333",
+          graph_id: "44444444-4444-4444-8444-444444444444",
+          graph_version_id: "55555555-5555-4555-8555-555555555555",
+          status: "queued",
+          plan_fingerprint: "a".repeat(64),
+        });
+      }
+      return json({});
+    });
+
+    renderActions();
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    expect(await screen.findByTestId("shot-production-error")).toHaveTextContent("response lost");
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
+
+    expect(executions).toHaveLength(2);
+    expect(executions[1]?.key).toBe(executions[0]?.key);
+    expect(executions[1]?.body).toEqual(executions[0]?.body);
+    expect(executions[1]?.key).toBe(`shot:${SHOT.id}:${"a".repeat(64)}`);
+  });
+
+  it("adopts the committed receipt instead of submitting a second media operation", async () => {
+    const posted: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      if (url.includes("/executions/receipt")) {
+        return json({
+          node_run_id: "33333333-3333-4333-8333-333333333333",
+          graph_id: "44444444-4444-4444-8444-444444444444",
+          graph_version_id: "55555555-5555-4555-8555-555555555555",
+          status: "running",
+          plan_fingerprint: "a".repeat(64),
+        });
+      }
+      if (init?.method === "POST" && url.endsWith("/executions")) {
+        posted.push(url);
+        return json({});
+      }
+      return json({});
+    });
+
+    renderActions();
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
+        "data-status",
+        "running",
+      ),
+    );
+    expect(posted).toHaveLength(0);
+  });
+
+  it("gives a different frozen plan its own command identity", async () => {
+    const keys: Array<string | undefined> = [];
+    let previews = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) {
+        previews += 1;
+        return json(planResponse({ fingerprint: (previews === 1 ? "a" : "b").repeat(64) }));
+      }
+      if (url.includes("/executions/receipt")) {
+        return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
+      }
+      if (url.endsWith("/executions")) {
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        keys.push(headers["Idempotency-Key"]);
+        return json({
+          node_run_id: "33333333-3333-4333-8333-333333333333",
+          graph_id: "44444444-4444-4444-8444-444444444444",
+          graph_version_id: "55555555-5555-4555-8555-555555555555",
+          status: "queued",
+          plan_fingerprint: (previews === 1 ? "a" : "b").repeat(64),
+        });
+      }
+      return json({});
+    });
+
+    renderActions();
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    await waitFor(() => expect(keys).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    await waitFor(() => expect(keys).toHaveLength(2));
+
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("keeps the command key inside the backend idempotency column limit", () => {
+    // The server stores `workbench:<stage>:<this key>` and never rewrites a
+    // caller key that already fits, so the composed value must stay within
+    // NodeRun.idempotency_key instead of falling back to a hashed key.
+    const key = shotExecutionIdempotencyKey(SHOT.id, "a".repeat(64));
+    expect(`workbench:image_keyframe:${key}`.length).toBeLessThanOrEqual(160);
+    expect(key).toBe(`shot:${SHOT.id}:${"a".repeat(64)}`);
+  });
+
+  it("adopts the running operation after a page reload instead of resubmitting", async () => {
+    const posted: string[] = [];
+    const receiptKeys: string[] = [];
+    const key = shotExecutionIdempotencyKey(SHOT.id, "a".repeat(64));
+    recordProductionOperation(
+      productionOperationScope(null, SHOT.project_id, SHOT.id, "image_keyframe"),
+      {
+        operationKey: key,
+        planFingerprint: "a".repeat(64),
+        stage: "image_keyframe",
+        recordedAt: new Date().toISOString(),
+        nodeRunId: null,
+      },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.includes("/executions/receipt")) {
+        receiptKeys.push(
+          new URL(url, "http://localhost").searchParams.get("idempotency_key") ?? "",
+        );
+        return json({
+          node_run_id: "33333333-3333-4333-8333-333333333333",
+          graph_id: "44444444-4444-4444-8444-444444444444",
+          graph_version_id: "55555555-5555-4555-8555-555555555555",
+          status: "running",
+          plan_fingerprint: "a".repeat(64),
+        });
+      }
+      if (init?.method === "POST" && url.endsWith("/executions")) {
+        posted.push(url);
+        return json({});
+      }
+      return json({});
+    });
+
+    renderActions();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
+        "data-status",
+        "running",
+      ),
+    );
+    expect(receiptKeys).toContain(key);
+    expect(posted).toHaveLength(0);
+    // A still-running operation must stay recoverable after this reload.
+    expect(
+      readProductionOperation(
+        productionOperationScope(null, SHOT.project_id, SHOT.id, "image_keyframe"),
+      ),
+    ).not.toBeNull();
+  });
+
+  it("forgets a finished operation so a later open cannot adopt a stale receipt", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      if (url.includes("/executions/receipt")) {
+        return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
+      }
+      if (url.endsWith("/executions")) {
+        return json({
+          node_run_id: "33333333-3333-4333-8333-333333333333",
+          graph_id: "44444444-4444-4444-8444-444444444444",
+          graph_version_id: "55555555-5555-4555-8555-555555555555",
+          status: "completed",
+          plan_fingerprint: "a".repeat(64),
+        });
+      }
+      return json({});
+    });
+
+    renderActions();
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
+        "data-status",
+        "completed",
+      ),
+    );
+    expect(
+      readProductionOperation(
+        productionOperationScope(null, SHOT.project_id, SHOT.id, "image_keyframe"),
+      ),
+    ).toBeNull();
+  });
+
+  it("pauses production and asks for reconciliation when the outcome is unknown", () => {
+    renderActions(
+      [],
+      [
+        {
+          node_run_id: "run-unknown",
+          node_key: "keyframe",
+          status: "failed",
+          operation_outcome_unknown: true,
+        },
+      ],
+    );
+
+    expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
+    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("提交结果待对账");
+    expect(screen.getByTestId("delegate-keyframe-to-director")).toBeDisabled();
+    expect(screen.getByTestId("shot-production-outcome-unknown")).toHaveTextContent(
+      "按原操作键对账",
+    );
+    // The other stage is unaffected.
+    expect(screen.getByTestId("generate-video")).toBeEnabled();
+    expect(screen.queryByTestId("shot-production-running")).not.toBeInTheDocument();
+  });
+
+  it("keeps AUTO unavailable with an explanation when the runtime engine is not enabled", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/director/capabilities")) {
+        return json({
+          effective_engine: "legacy",
+          runtime_turns_available: false,
+          blocker_code: "DIRECTOR_RUNTIME_NOT_ENABLED",
+          blocker_message:
+            "当前部署的导演引擎为 legacy；自动（AUTO）导演轮次需要经过验证的 langgraph 引擎。",
+          manual_production_available: true,
+          checkpoint_configured: false,
+        });
+      }
+      return json({});
+    });
+
+    renderActions();
+
+    await waitFor(() => expect(screen.getByTestId("delegate-keyframe-to-director")).toBeDisabled());
+    expect(screen.getByTestId("delegate-video-to-director")).toBeDisabled();
+    expect(screen.getByTestId("shot-production-director-blocked")).toHaveTextContent("legacy");
+    // Manual generation stays available: MANUAL never depends on the Director.
+    expect(screen.getByTestId("generate-keyframe")).toBeEnabled();
+    expect(screen.getByTestId("generate-video")).toBeEnabled();
+  });
+
+  it("keeps the AUTO path open when the runtime reports itself available", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/director/capabilities")) {
+        return json({
+          effective_engine: "langgraph",
+          runtime_turns_available: true,
+          blocker_code: null,
+          blocker_message: null,
+          manual_production_available: true,
+          checkpoint_configured: true,
+        });
+      }
+      return json({});
+    });
+
+    renderActions();
+
+    await waitFor(() => expect(screen.getByTestId("delegate-keyframe-to-director")).toBeEnabled());
+    expect(screen.queryByTestId("shot-production-director-blocked")).not.toBeInTheDocument();
+  });
+
+  it("does not hide the manual path when the capability read itself fails", () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/director/capabilities")) {
+        return json({ code: "NOT_FOUND", detail: "missing" }, 404);
+      }
+      return json({});
+    });
+
+    renderActions();
+
+    expect(screen.getByTestId("generate-keyframe")).toBeEnabled();
+    expect(screen.queryByTestId("shot-production-director-blocked")).not.toBeInTheDocument();
+  });
+
+  it("shows template recommendations as suggestions that do not affect this execution", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) {
+        const preview = planResponse();
+        return json({
+          ...preview,
+          plan: {
+            ...preview.plan,
+            pending_suggestions: [
+              {
+                key: "style:cinematic_realism_v1",
+                label: "cinematic_realism_v1",
+                source: "template_recommendation",
+                reason: "模板选定的风格只写入项目创作档案，本次执行未使用它。",
+              },
+              {
+                key: "genre:short_drama_romance_v1",
+                label: "short_drama_romance_v1",
+                source: "template_recommendation",
+                reason: "题材仅作为项目档案记录；它不参与执行计划。",
+              },
+            ],
+          },
+        });
+      }
+      if (url.endsWith("/executions")) {
+        return json({
+          node_run_id: "33333333-3333-4333-8333-333333333333",
+          graph_id: "44444444-4444-4444-8444-444444444444",
+          graph_version_id: "55555555-5555-4555-8555-555555555555",
+          status: "queued",
+          plan_fingerprint: "a".repeat(64),
+        });
+      }
+      if (url.includes("/executions/receipt")) {
+        return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
+      }
+      return json({});
+    });
+
+    renderActions();
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+
+    const suggestions = await screen.findByTestId("shot-execution-plan-suggestions");
+    expect(suggestions).toHaveTextContent("建议（尚未生效）");
+    expect(suggestions).toHaveTextContent("不会使用它们");
+    expect(suggestions).toHaveTextContent("不作为");
+    expect(screen.getByTestId("plan-suggestion-style:cinematic_realism_v1")).toHaveTextContent(
+      "未使用",
+    );
+    expect(screen.getByTestId("plan-suggestion-genre:short_drama_romance_v1")).toHaveTextContent(
+      "不参与执行计划",
+    );
+    // Suggestions never become a capability gap or a blocking failure.
+    expect(screen.getByTestId("shot-production-status")).toBeInTheDocument();
+  });
+
+  it("does not claim suggestions when the plan has none", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      if (url.includes("/executions/receipt")) {
+        return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
+      }
+      return json({
+        node_run_id: "33333333-3333-4333-8333-333333333333",
+        graph_id: "44444444-4444-4444-8444-444444444444",
+        graph_version_id: "55555555-5555-4555-8555-555555555555",
+        status: "queued",
+        plan_fingerprint: "a".repeat(64),
+      });
+    });
+
+    renderActions();
+    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+
+    await screen.findByTestId("shot-execution-plan-preview");
+    expect(screen.queryByTestId("shot-execution-plan-suggestions")).not.toBeInTheDocument();
   });
 
   it("disables only the active server stage and ignores an older attempt", () => {
