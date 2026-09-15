@@ -1,24 +1,60 @@
 # DramaForge Codex Rules
 
-## User-Authorized Planning Documents
+## Authority and Reading Order
 
-- The current product, technical, and execution source is [`docs/plans/professional-program-v2/README.md`](docs/plans/professional-program-v2/README.md), which preserves the seven Owner-supplied plans verbatim and states their precedence.
-- Before changing product, runtime, model supply, quality, or roadmap behavior, read the Task-specific source order in that plan set and the current Task Contract under `docs/plans/professional-program-v2/task-contracts/`.
-- Code, migrations, tests, runtime state, and evidence establish current facts; the seven-plan program establishes the desired behavior and task order.
-- Historical planning, prior release boards, old checkpoints, ADRs, and legacy runbooks can explain old implementation or evidence, but cannot generate new work or override the seven-plan program.
-- Do not produce a parallel master plan. Update the seven-plan program only for an Owner-supplied revision; record implementation work in a bounded Task Contract.
+- The single documentation entry point is [`docs/CURRENT.md`](docs/CURRENT.md).
+  Each core domain has exactly one authoritative document listed there.
+- Code, migrations, tests, runtime state, and evidence establish current facts;
+  the authoritative docs describe intended behavior. When they conflict, code
+  wins and the doc must be updated.
+- Historical designs, deleted task contracts, reviews, and execution records
+  live only in Git history (`git log` / `git show`). They never justify new
+  work or override current authority.
+- For questions, audits, and non-behavioral wording changes, read only the
+  relevant files and authority needed; do not automatically launch services or
+  run full product gates.
 
-## Task Scope and Progressive Reading
+## Task Scope
 
-- For questions, audits, and non-behavioral wording changes, read only the relevant files and authority needed to answer or verify the change; do not automatically start a Goal, mutate the ledger, launch services, or run full product gates.
-- For implementation or an explicitly active Owner Goal, use [agent.md](agent.md) to choose the task path. Its Goal references are conditional, not a mandatory reading stack for every edit; the Task-specific source order above still applies to behavior changes.
-- Read [AGENT_EXECUTION_PROTOCOL.md](AGENT_EXECUTION_PROTOCOL.md) when contract lifecycle, Git, verification, or formal evidence work needs it. Complete the requested outcome and relevant fixes; an active Goal continues within its authorization, while a standalone task does not create unrelated follow-up work.
-- Skills and dependency documentation are task references, not product authority or permission for global installs, stack changes, cross-session cleanup, or rewriting intended behavior to match a regression.
+- Complete the requested outcome and relevant fixes; do not expand product
+  scope, rewrite intended behavior to make a failing test pass, or create
+  unrelated follow-up work.
+- Preserve the canonical boundaries enforced by the quality gate: single
+  creation mainchain, typed proposal / explicit Apply-Save-Formal-Export user
+  gates, unified ProductionGraph / NodeRun / ProviderOperation / Artifact,
+  Editing never rewrites production truth, ModelManifest / execution identity
+  with no silent fallback, retired surfaces stay deleted (see
+  `scripts/check_canonical_surface.py`).
+
+## Verification
+
+- Choose verification proportionate to the change (focused tests plus affected
+  regression); formal gates required by CI are not reduced.
+- Command facts come from [`frontend/package.json`](frontend/package.json),
+  [`backend/pyproject.toml`](backend/pyproject.toml), the current
+  [CI](.github/workflows/ci.yml) and the
+  [container quality config](docker-compose.quality.yml). Do not invent
+  commands or substitute host-installed dependencies for container gates.
+- Report outcomes truthfully: uncommitted work is reported as such; do not
+  fabricate formal completion, evidence, or release claims.
+
+## Git and Ownership
+
+- Routine integration happens on `dev`; `main` only advances through a
+  protected `dev -> main` PR. Only `@zwb2002-yjy` approves and merges; agents
+  never approve, merge, or record `MERGED`.
+- No force push, history rewrite, `reset --hard`, or `clean -fd`. Cleanup is
+  limited to the current task's resources.
+- Paid provider operations (probe, production, repair) require an explicit
+  positive budget and Owner authorization per operation; historical
+  authorization never extends to a new task. Never blind-retry a possibly
+  billed or `unknown_submission` call.
 
 ## Image Evidence Handling
 
 - Treat Playwright screenshots as evidence artifacts, not conversational input.
-- Do not use `view_image` for an additional visual spot-check after Playwright assertions have already established the result.
+- Do not use `view_image` for an additional visual spot-check after Playwright
+  assertions have already established the result.
 - Use Playwright DOM, accessibility, network, console, layout, and business-flow assertions as the primary verification method.
 - Before calling `view_image`, inspect the image file size and dimensions.
 - Do not call `view_image` on an image larger than 200 KiB or with a long edge over 1200 pixels.
@@ -28,7 +64,7 @@
 - Do not print base64 data, hex dumps, or binary file contents through shell commands.
 - Do not use `Get-Content` or equivalent text readers on PNG, JPEG, WebP, MP4, ZIP, or other binary files.
 - Do not pass local evidence screenshots to `view_image` when metadata or automated assertions answer the question.
-- For the existing P0 evidence screenshots under `tmp/p0-evidence/`, verify existence, dimensions, hashes, and assertion results without loading the original pixels into the conversation.
+- For evidence under `tmp/p0-evidence/`, verify existence, dimensions, hashes, and assertion results without loading the original pixels into the conversation.
 
 ## Local Path and Image Input
 

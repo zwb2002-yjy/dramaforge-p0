@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Aperture, CirclePause, TriangleAlert } from "lucide-react";
 
 import { artifactContentUrl } from "../../lib/api";
 import type { ShotLite } from "./api";
@@ -141,13 +142,11 @@ export function CinematicCanvas({
           ) : (
             <img
               src={artifactContentUrl(projectId, candidate.artifactId)}
-              alt={`#${shot.shot_number} 候选 ${candidate.artifactId}`}
+              alt={`镜头 ${shot.shot_number} 的关键帧候选`}
               data-testid={`shot-candidate-preview-${candidate.artifactId}`}
             />
           )}
-          <small>
-            未确认候选 · {candidate.status} · {candidate.artifactId}
-          </small>
+          <small>未确认候选</small>
         </div>
       ) : videoId ? (
         <div className="qc-canvas-media" data-testid="shot-formal-output">
@@ -170,12 +169,23 @@ export function CinematicCanvas({
         </div>
       ) : isActive || isFailed ? (
         <div className="qc-canvas-empty qc-canvas-status" data-testid="shot-execution-state">
-          <h3>
-            #{shot.shot_number} {stateLabel(normalizedStatus)}
-          </h3>
-          <p>{latestTrace?.nodeKey ?? "当前镜头生产链"}</p>
-          <p className="qc-canvas-hint" data-testid="shot-execution-status" role="status">
-            {latestTrace?.status}
+          <span className="rs-render-frame" data-active={isActive} aria-hidden="true">
+            {isActive ? (
+              <Aperture size={36} />
+            ) : normalizedStatus === "cancelled" || normalizedStatus === "canceled" ? (
+              <CirclePause size={36} />
+            ) : (
+              <TriangleAlert size={36} />
+            )}
+          </span>
+          <h3>镜头 {shot.shot_number}</h3>
+          <p
+            className="qc-canvas-hint"
+            data-testid="shot-execution-status"
+            data-status={normalizedStatus}
+            role="status"
+          >
+            {stateLabel(normalizedStatus)}
           </p>
         </div>
       ) : (
@@ -183,8 +193,13 @@ export function CinematicCanvas({
           <h3>#{shot.shot_number} 导演构图预览</h3>
           <p>{shot.visual_description || "尚未生成关键帧。"}</p>
           {latestTrace && (
-            <p className="qc-canvas-hint" data-testid="shot-execution-status" role="status">
-              {stateLabel(latestTrace.status)} · {latestTrace.status}
+            <p
+              className="qc-canvas-hint"
+              data-testid="shot-execution-status"
+              data-status={normalizedStatus}
+              role="status"
+            >
+              {stateLabel(normalizedStatus)}
             </p>
           )}
           <p className="qc-canvas-hint" data-testid="no-formal-result">

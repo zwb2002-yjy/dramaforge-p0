@@ -71,16 +71,16 @@ export function MediaReviewCanvas({
     <div
       ref={boxRef}
       data-testid="media-review-canvas"
-      className="relative inline-block cursor-crosshair overflow-hidden"
+      className="media-review-canvas"
       onMouseDown={onMouseDown}
       onMouseUp={onMouseUp}
     >
-      <img src={imageUrl} alt="review target" className="block max-w-full" />
+      <img src={imageUrl} alt="review target" className="media-review-image" />
       {regions.map((region, index) => (
         <div
           key={`${region.x}-${region.y}-${index}`}
           data-testid="review-region"
-          className="absolute border-2 border-amber-500"
+          className="media-review-region"
           style={{
             left: `${region.x * 100}%`,
             top: `${region.y * 100}%`,

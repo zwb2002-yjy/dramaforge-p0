@@ -45,5 +45,5 @@ test("professional workspace persists contextual design, canvas, assets, review,
   await expect(page.getByText(/动态能力/)).toContainText("video.image_to_video");
   await page.getByRole("button", { name: "创建实验分支" }).click();
   await expect(page.getByText("Model B 转头验证")).toBeVisible();
-  await expect(page.getByText(/OpenCut/)).toBeVisible();
+  await expect(page.getByText(/剪辑交接/)).toBeVisible();
 });

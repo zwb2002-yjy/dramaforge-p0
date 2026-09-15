@@ -8,6 +8,41 @@ import {
   installProfessionalMock,
 } from "./professional-mocks";
 
+test("AUTO delegates one frozen Shot plan to the Director runtime", async ({ page }) => {
+  const state = await installProfessionalMock(page);
+  state.directorAutonomy = "AUTO";
+  await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
+  await page.getByTestId("context-dock-generate").click();
+
+  await page.getByTestId("delegate-keyframe-to-director").click();
+
+  await expect(page.getByTestId("director-tab-shot")).toHaveAttribute("aria-selected", "true");
+  const delegation = state.editing.requests.find(
+    (request) =>
+      request.method === "POST" &&
+      request.path ===
+        `/api/v1/projects/${PROJECT_ID}/director/runtime/shots/${SHOT_ID}/executions`,
+  );
+  expect(delegation?.body).toMatchObject({
+    decision_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    max_steps: 6,
+    execution: {
+      stage: "image_keyframe",
+      expected_shot_version: 1,
+      plan_fingerprint: "a".repeat(64),
+      accepted_approximations: [],
+    },
+  });
+  expect(state.candidates).toHaveLength(0);
+  expect(
+    state.editing.requests.some(
+      (request) =>
+        request.method === "POST" &&
+        request.path === `/api/v1/projects/${PROJECT_ID}/shots/${SHOT_ID}/executions`,
+    ),
+  ).toBe(false);
+});
+
 test("manual professional production: Scene Workbench design → candidate preview → formal", async ({
   page,
 }) => {
@@ -160,9 +195,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   expect(state.shotVersion).toBeGreaterThanOrEqual(1);
 });
 
-test("Scene Workbench remains readable at 910px and other views retain evidence", async ({
-  page,
-}) => {
+test("Scene Workbench and other Project views stay focused at 910px", async ({ page }) => {
   await installProfessionalMock(page);
   await page.setViewportSize({ width: 910, height: 838 });
 
@@ -199,12 +232,12 @@ test("Scene Workbench remains readable at 910px and other views retain evidence"
     .toBe(true);
 
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await expect(page.getByTestId("project-evidence-inspector")).toBeVisible();
+  await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
   await expect(page.locator(".qc-project-mode")).toHaveText("制作");
-  await expect(page.locator(".qc-content-grid")).toHaveCSS("grid-template-columns", /\d+px/);
+  await expect(page.locator(".qc-content-grid")).toHaveClass(/no-inspector/);
 
   // Keep the Asset page's own data requests isolated while asserting that the
-  // shared project shell still retains its evidence inspector at narrow width.
+  // shared project shell stays focused on the active workspace at narrow width.
   await page.route(`**/api/v1/projects/${PROJECT_ID}/assets**`, async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
@@ -213,7 +246,7 @@ test("Scene Workbench remains readable at 910px and other views retain evidence"
   });
   await page.goto(`/projects/${PROJECT_ID}/assets`);
   await expect(page.getByTestId("asset-cards-panel")).toBeVisible();
-  await expect(page.getByTestId("project-evidence-inspector")).toBeVisible();
+  await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
   await expect(page.locator(".qc-project-mode")).toHaveText("资产");
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))

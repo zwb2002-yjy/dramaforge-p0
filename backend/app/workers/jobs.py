@@ -177,6 +177,10 @@ async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, i
             try:
                 service = DirectorTurnService(session)
                 before = await service.get(project_id=scope.project_id, turn_id=turn_id)
+                if before.runtime_execution_id is not None:
+                    unchanged += 1
+                    await session.rollback()
+                    continue
                 revision = before.revision
                 after = await service.recover_interrupted(
                     project_id=scope.project_id,
@@ -198,6 +202,7 @@ async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int
 
     from app.access.models import Project
     from app.director.next_action import DirectorNextActionService
+    from app.director.runtime.reconcile import DirectorRuntimeFactReconciler
     from app.director.turn_service import DirectorTurnService
     from app.shared.db import (
         list_reconcilable_director_turn_rls_scopes,
@@ -235,6 +240,14 @@ async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int
                     project_id=project.id,
                     turn_id=turn_id,
                 )
+                if turn.runtime_execution_id is not None:
+                    wakeup = await DirectorRuntimeFactReconciler(session).reconcile(turn)
+                    if wakeup is None:
+                        unchanged += 1
+                    else:
+                        reconciled += 1
+                    await session.commit()
+                    continue
                 revision = turn.revision
                 result = await DirectorNextActionService(session).reconcile(
                     project=project,
@@ -409,6 +422,4 @@ JOB_FUNCTIONS = [
     health_ping,
     execute_node_run,
     dispatch_outbox,
-    recover_interrupted_director_turns,
-    reconcile_waiting_director_turns,
 ]

@@ -13,7 +13,7 @@ import {
   type ProfileBindingInput,
   type ModelSlotRead,
 } from "../../lib/api";
-import { SIMPLE_MODE_SLOT_GROUPS, simpleModeToBindings } from "../../lib/modelProfile";
+import { SIMPLE_MODE_SLOT_GROUPS, simpleModeToBindings, slotLabel } from "../../lib/modelProfile";
 
 /**
  * Project "AI 制作模型方案" (model role configuration, spec §52/§127).
@@ -91,7 +91,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
       queryClient.setQueryData(["project-model-profile", projectId], profile);
       queryClient.invalidateQueries({ queryKey: queryKeys.model.effectiveBindings(projectId) });
       setMessage(
-        `已保存（版本 ${profile.version}）。修改只影响后续生成，运行中的镜头不会自动换模型。`,
+        `模型方案已保存（版本 ${profile.version}）。修改只影响后续生成，运行中的镜头不会自动换模型。`,
       );
       setError(null);
     },
@@ -202,7 +202,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
                     setSimple((prev) => ({ ...prev, [group]: v })),
                   )}
                   <span className="muted" style={{ fontSize: "0.75rem" }}>
-                    应用于 {slotsInGroup.join(" · ")}
+                    应用于 {slotsInGroup.map(slotLabel).join(" · ")}
                   </span>
                 </label>
               );
