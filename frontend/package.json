@@ -21,7 +21,7 @@
     "api:check": "node ../scripts/check-generated-api.mjs"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.62.8",
+    "@tanstack/react-query": "^5.102.8",
     "@tanstack/react-router": "^1.170.32",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
