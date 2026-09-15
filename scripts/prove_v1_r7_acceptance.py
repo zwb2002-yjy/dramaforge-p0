@@ -336,18 +336,29 @@ class Acceptance:
         instead of letting the selection through. The review run it binds to is
         the one the pipeline queued for this media stage and the read model
         reports, never an id invented here.
+
+        The review is queued with the media run and finishes just after it, so the
+        evidence is polled rather than demanded: a person opening the review page
+        sees the same wait.
         """
-        summary = self.read(
-            f"/projects/{project_id}/shots/{shot_id}/review-summary"
-            f"?artifact_id={artifact_id}&review_kind={review_kind}&stage={stage}"
-        )
-        if summary.get("decision") == "approved" and summary.get("applies"):
-            return sanitized(summary)
+        deadline = time.monotonic() + 180
+        summary = {}
+        while True:
+            summary = self.read(
+                f"/projects/{project_id}/shots/{shot_id}/review-summary"
+                f"?artifact_id={artifact_id}&review_kind={review_kind}&stage={stage}"
+            )
+            if summary.get("decision") == "approved" and summary.get("applies"):
+                return sanitized(summary)
+            if summary.get("review_node_run_id") or time.monotonic() >= deadline:
+                break
+            time.sleep(3)
         run_id = summary.get("review_node_run_id")
         if not run_id:
             raise RuntimeError(
-                f"{label} has no {review_kind} review evidence for artifact {artifact_id}; "
-                "the pipeline did not queue the review the gate requires"
+                f"{label} has no {review_kind} review evidence for artifact {artifact_id} "
+                f"after 180s (machine_status={summary.get('machine_status')}); "
+                "the pipeline did not produce the review the gate requires"
             )
         return sanitized(
             self.once(
