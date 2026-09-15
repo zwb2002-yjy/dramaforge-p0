@@ -11,7 +11,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column("assets", sa.Column("creation_request_key", sa.String(160), nullable=True))
-    op.add_column("assets", sa.Column("creation_request_hash", sa.String(64), nullable=True))
+    op.add_column("assets", sa.Column("creation_request_hash", sa.CHAR(64), nullable=True))
     # Partial unique index: pre-existing cards and explicit new operations carry
     # no key, so they are not constrained.
     op.create_index(

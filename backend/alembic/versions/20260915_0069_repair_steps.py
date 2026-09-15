@@ -31,7 +31,7 @@ def upgrade() -> None:
         ),
         sa.Column("option", sa.String(40), nullable=False),
         sa.Column("plan_schema_version", sa.Integer(), nullable=False, server_default="1"),
-        sa.Column("plan_hash", sa.String(64), nullable=False),
+        sa.Column("plan_hash", sa.CHAR(64), nullable=False),
         sa.Column(
             "annotation_ids",
             sa.JSON().with_variant(postgresql.JSONB(), "postgresql"),
@@ -50,9 +50,9 @@ def upgrade() -> None:
             sa.ForeignKey("artifacts.id", ondelete="SET NULL"),
             nullable=True,
         ),
-        sa.Column("input_fingerprint", sa.String(64), nullable=False),
+        sa.Column("input_fingerprint", sa.CHAR(64), nullable=False),
         sa.Column("request_key", sa.String(160), nullable=False),
-        sa.Column("request_hash", sa.String(64), nullable=False),
+        sa.Column("request_hash", sa.CHAR(64), nullable=False),
         sa.Column("closed_reason", sa.String(120), nullable=True),
         sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
@@ -84,7 +84,7 @@ def upgrade() -> None:
         ),
         sa.Column("ordinal", sa.Integer(), nullable=False),
         sa.Column("stage", sa.String(40), nullable=False),
-        sa.Column("plan_fingerprint", sa.String(64), nullable=True),
+        sa.Column("plan_fingerprint", sa.CHAR(64), nullable=True),
         sa.Column("command_key", sa.String(200), nullable=True),
         sa.Column(
             "node_run_id",
