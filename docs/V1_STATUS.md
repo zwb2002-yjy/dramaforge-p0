@@ -48,8 +48,17 @@ head 写死为 `20260908_0060`，候选栈真实 head 是 `20260915_0069`（栈�
 
 仍未闭合的部分需要真实外部条件：浏览器证明要求**在 8080 正式入口**跑且零 console
 error，运行时证明要求 8080 上五个服务各自 `source_commit == candidate` 且 `healthy`；
-候选栈当前在 8088，Owner 的 8080 栈不是候选构建。因此这一步需要 Owner 决定：把候选栈
-按正式入口（8080）起来做运行时/浏览器证明，或接受以"阶段级 PASS + 增量验证"发布。
+候选栈当前在 8088，Owner 的 8080 栈不是候选构建。
+
+**需要 Owner 决策（二选一）**：
+
+1. **按正式入口闭合**：在 8080 上用候选构建起栈，生成并导入
+   `--browser-proof` / `--runtime-proof` / `--recovery-proof`，再跑 `collect`
+   把 16 条断言补满——这需要 Owner 的 8080 栈让位（或指定另一台宿主机的 8080）。
+2. **以"阶段级 PASS + 增量验证"口径发布**：明确接受 `complete=false`，
+   把上面 6 条缺失断言记录为发布已知缺口。
+
+不选其一之前，`docs/V1_STATUS.md` 不再声称验收闭合。
 
 成片证据：`template_auto-final-film.mp4` 6.34 MB、`free_assist-final-film.mp4` 3.77 MB，
 各带 SRT，均在 `tmp/evidence/`。
