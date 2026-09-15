@@ -24,8 +24,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 ```
 
 （Linux/macOS 用 run_quality.ps1 中的等价 Docker Compose 命令。）
-该门构建 backend 质量容器（锁定 Python 3.12 依赖）与 frontend 质量容器
-（锁定 Node 22 + Chromium），执行：
+该门构建 backend 质量容器（Python 3.14.x / Debian Bookworm）与 frontend 质量容器
+（Node 24 LTS + Chromium），执行：
 
 - 目录合规与 canonical-surface 扫描、ruff、mypy；
 - backend 单测；
@@ -35,6 +35,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 - LiteLLM 集成（固定官方 Proxy 镜像 + 确定性 mock 模型，无外部 Provider 调用）。
 
 CI（`.github/workflows/ci.yml`）执行同一组 container gates。
+
+运行时基线为 Node 24.x、Python 3.14.x；Docker 标签允许系列内维护更新，
+不是不可变的补丁版本 / digest 锁定。Dependabot 的常规版本更新先进入 `dev`，
+Node 跨主版本、Python 跨次版本升级由独立任务评估。安全更新仍依 GitHub
+默认分支机制处理；本地版本选择文件位于 `frontend/.nvmrc` 和
+`backend/.python-version`。
 
 ## 零成本运行时 smoke
 
