@@ -51,6 +51,32 @@ tag 属 Owner（Agent 不自批自合）。上表未列的 `revise-unknown-free`
 | 修复二（打包契约） | 离线包此前**不可安装**：`images.tar` 与 `release.env` 被写进 `dramaforge-offline-linux-amd64-v0.1.0/` 子目录，而 `install.sh --offline` / `install.ps1 -Offline` 只在自己所在目录找它们 → 用户按 DEPLOYMENT.md 解压后必然 `images.tar is missing`。现改为**扁平包**（归档根即安装目录）并单趟写出 `images.tar.gz`（`docker save \| gzip`），峰值磁盘从 2.12 GiB 降到 1.06 GiB（本地实测：6 镜像 `images.tar` 1090.8 MiB + `tar.gz` 1082.8 MiB）。`docker load` 直接接受该压缩流（实测 6 镜像全部载入） |
 | 修复三（全新安装） | `worker-director` 是唯一没拿到 `WORKER_TOKEN` 的服务，而 `app/workers/director.py` 在导入期就构造完整 `Settings`（`RedisSettings.from_dsn(get_settings())`）→ 生产校验 `WORKER_TOKEN must be a generated production secret`，新装的栈里该 worker 持续重启。已补上该变量，并用真实离线栈复核：`docker compose up -d --wait` 退出 0，13 个容器全 healthy，director worker 正常启动 6 个函数 |
 
+### 待发布树与已验收候选的差异（发布前须知）
+
+REL-01 全套真实验收绑定在 `cd6f202` 的产品树上，而待发布的 `aa5f2fd` 与其在
+**两个产品路径**上不同（`git rev-parse <sha>:<path>` 逐树比对）：
+
+| 路径 | `cd6f202`（已验收） | `aa5f2fd`（待发布） | 差异内容 |
+|---|---|---|---|
+| `backend/alembic` | `606bbae9c0` | `606bbae9c0` | 相同 |
+| `frontend/src` | `ca2ccfb32c` | `ca2ccfb32c` | 相同 |
+| `backend/app` | `083dce26e5` | `c214f0033b` | **只差一个文件**：`api/v1/workbench.py` 的 repair 读取顺序修复（把 `read_repair` 移到 `commit()` 之前）。该端点正是 `review-submit` 阶段调用的 `POST /shots/{id}/repair`；修复本身已用真实调用复核（`HTTP 200 {next_action: human_decision}`），但**未重跑 REL-01 阶段** |
+| `docker-compose.yml` | `d24a4ab81e` | `8d384caf05` | 上表修复三：给 `worker-director` 补 `WORKER_TOKEN`（仅安装期环境变量下发，不改变运行语义） |
+
+相对于已验收的 `cd6f202`，待发布 `aa5f2fd` 的**产品差异只有三处**，各自的验证状态如下：
+
+1. `backend/app/api/v1/workbench.py`（repair 读取顺序）— 已用真实调用复核（`HTTP 200`），
+   单测与集成测试通过；**未重跑 REL-01 阶段**。
+2. `docker-compose.yml` 的 MinIO 镜像源改 `quay.io`（Docker Hub 上游删库）— 已在 Release
+   运行 `35020100821` 的 `Validate Compose topology` / `Build exact local release images` /
+   `Smoke exact Compose candidate` 三步通过，即该改动本身是真实跑过的。
+3. `docker-compose.yml` 的 `worker-director` 补 `WORKER_TOKEN` — 已用真实离线栈复核
+   （`up -d --wait` 退出 0、13 容器全 healthy），并有契约测试钉住；仅安装期下发。
+
+因此本轮**没有**在新树上重跑 REL-01 的付费阶段，也没有重跑 `review-submit` 那两个
+阶段；记录为待办而非已完成。若要严格闭合，应在新的候选 SHA 上以**新的 state 文件**
+重跑（driver 会拒绝把既有 `cd6f202` 证据改标到新 SHA）。
+
 **当前唯一阻塞（账号级，非仓库缺陷）**：CI 与 Security 的每个 job 都在 2–9 秒内失败、
 `runner_id = 0`、0 个 step、无日志；check-run annotation 原文为
 `The job was not started because recent account payments have failed or your spending
