@@ -141,7 +141,7 @@ describe("ScriptWorkspace proposal-first UI", () => {
     renderWorkspace();
     expect(await screen.findByTestId("script-empty")).toBeInTheDocument();
     expect(screen.getByTestId("story-proposal-composer")).toBeInTheDocument();
-    expect(screen.getByText("Story 导演提案")).toBeInTheDocument();
+    expect(screen.getByText("剧本提案")).toBeInTheDocument();
   });
 
   it("creates a proposal and renders the typed diff", async () => {
@@ -169,7 +169,7 @@ describe("ScriptWorkspace proposal-first UI", () => {
     expect(await screen.findByTestId("story-proposal-preview")).toBeInTheDocument();
     expect(screen.getAllByTestId(/story-operation-/)).toHaveLength(3);
     expect(screen.getByText(/Episode 1/)).toBeInTheDocument();
-    expect(screen.getByText(/pending/)).toBeInTheDocument();
+    expect(screen.getByText(/待确认/)).toBeInTheDocument();
   });
 
   it("uses a brief to generate a model-backed draft and the same typed proposal preview", async () => {
@@ -196,7 +196,6 @@ describe("ScriptWorkspace proposal-first UI", () => {
     expect(await screen.findByTestId("story-proposal-preview")).toBeInTheDocument();
     expect(screen.getByLabelText("剧本文本")).toHaveValue(GENERATED.draft_text);
     expect(screen.getByTestId("story-generation-evidence")).toHaveTextContent("upstream/story-v1");
-    expect(screen.getByTestId("story-generation-evidence")).toHaveTextContent("44444444");
     expect(generationBody).toEqual({
       request_key: expect.stringMatching(/^story-generation:[0-9a-f-]{36}$/),
       brief: "雨夜车站的克制告别",

@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { Button } from "../../components/ui";
+import { creativeCapabilityLabels } from "../../lib/creativeLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import { fetchCreativeProvenance, freezeCreativeCapabilities } from "./workflow-api";
 
@@ -92,6 +94,15 @@ export function CreativeCapabilitiesPanel({
     enabled: Boolean(projectId) && Boolean(targetId),
   });
   const prov = provenance.data?.creative_capabilities ?? {};
+  // The provenance payload is an open record; these are the parts the panel
+  // renders as readable labels before the raw record.
+  const summary = prov as {
+    genre?: { key?: string };
+    style?: { key?: string };
+    shot_language?: { key?: string };
+    quality_policy?: { key?: string };
+    skill_guidance?: Array<{ skill_key: string; strategy?: string }>;
+  };
 
   const freeze = useMutation({
     mutationFn: () =>
@@ -125,68 +136,67 @@ export function CreativeCapabilitiesPanel({
     <div className="creative-capabilities-panel" data-testid="creative-capabilities-panel">
       <header className="panel-header">
         <div>
-          <span className="director-stage-kicker">Creative Capabilities</span>
           <h3>创意能力选择</h3>
         </div>
-        <span className="fact-source-badge">user-explicit</span>
+        <span className="fact-source-badge">人工指定</span>
       </header>
 
       <div className="creative-capability-form">
         <label>
-          Genre
-          <select aria-label="Genre" value={genre} onChange={(e) => setGenre(e.target.value)}>
+          创作类型
+          <select aria-label="创作类型" value={genre} onChange={(e) => setGenre(e.target.value)}>
             <option value="">默认</option>
             {GENRES.map((g) => (
               <option key={g} value={g}>
-                {g}
+                {creativeCapabilityLabels.genre(g)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          Style
-          <select aria-label="Style" value={style} onChange={(e) => setStyle(e.target.value)}>
+          风格
+          <select aria-label="风格" value={style} onChange={(e) => setStyle(e.target.value)}>
             <option value="">默认</option>
             {STYLES.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {creativeCapabilityLabels.style(s)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          Shot Language
+          镜头语言
           <select
-            aria-label="Shot Language"
+            aria-label="镜头语言"
             value={shotLanguage}
             onChange={(e) => setShotLanguage(e.target.value)}
           >
             <option value="">默认</option>
             {SHOT_LANGUAGES.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {creativeCapabilityLabels.shotLanguage(s)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          Quality Policy
+          质量策略
           <select
-            aria-label="Quality Policy"
+            aria-label="质量策略"
             value={quality}
             onChange={(e) => setQuality(e.target.value)}
           >
             <option value="">默认</option>
             {QUALITY_POLICIES.map((q) => (
               <option key={q} value={q}>
-                {q}
+                {creativeCapabilityLabels.qualityPolicy(q)}
               </option>
             ))}
           </select>
         </label>
 
         <div className="creative-skill-list">
-          <small>Active Skills</small>
+          <small>启用的创作技能</small>
           {SKILLS.map((key) => (
             <label key={key} className="creative-skill-toggle">
               <input
@@ -194,19 +204,18 @@ export function CreativeCapabilitiesPanel({
                 checked={skills.includes(key)}
                 onChange={() => toggleSkill(key)}
               />
-              <span>{key}</span>
+              <span>{creativeCapabilityLabels.skill(key)}</span>
             </label>
           ))}
         </div>
 
-        <button
-          type="button"
-          className="df-btn primary"
+        <Button
+          tone="primary"
           onClick={() => freeze.mutate()}
           disabled={freeze.isPending || !targetId}
         >
           {freeze.isPending ? "冻结中…" : "冻结创意能力"}
-        </button>
+        </Button>
         {msg && (
           <div className="canvas-save-message" role="status">
             {msg}
@@ -216,8 +225,33 @@ export function CreativeCapabilitiesPanel({
 
       {prov && Object.keys(prov).length > 0 && (
         <div className="creative-provenance" data-testid="creative-provenance">
-          <small>当前冻结的有效创作意图与来源说明</small>
-          <pre>{JSON.stringify(prov, null, 2)}</pre>
+          <small>当前冻结的创作意图</small>
+          <ul data-testid="creative-provenance-summary" className="creative-provenance-summary">
+            {summary.genre?.key && (
+              <li>创作类型：{creativeCapabilityLabels.genre(summary.genre.key)}</li>
+            )}
+            {summary.style?.key && (
+              <li>风格：{creativeCapabilityLabels.style(summary.style.key)}</li>
+            )}
+            {summary.shot_language?.key && (
+              <li>镜头语言：{creativeCapabilityLabels.shotLanguage(summary.shot_language.key)}</li>
+            )}
+            {summary.quality_policy?.key && (
+              <li>
+                质量策略：{creativeCapabilityLabels.qualityPolicy(summary.quality_policy.key)}
+              </li>
+            )}
+            {summary.skill_guidance?.map((entry) => (
+              <li key={entry.skill_key}>
+                {creativeCapabilityLabels.skill(entry.skill_key)}
+                {entry.strategy ? `：${entry.strategy}` : ""}
+              </li>
+            ))}
+          </ul>
+          <details className="creative-provenance-raw">
+            <summary>查看冻结的原始记录</summary>
+            <pre>{JSON.stringify(prov, null, 2)}</pre>
+          </details>
         </div>
       )}
     </div>

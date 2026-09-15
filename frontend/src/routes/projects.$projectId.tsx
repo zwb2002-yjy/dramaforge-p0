@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { Navigate, Outlet, createRoute, useRouterState } from "@tanstack/react-router";
+import { Outlet, createRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { ProjectWorkspaceShell } from "../components/workstation/ProjectWorkspaceShell";
 import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
-import { ApiError, fetchProject, type ProjectRead } from "../lib/api";
+import { ApiError, fetchProject } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
+import { getRememberedProjectPath, rememberProjectPath } from "../lib/navigationPreferences";
 import { rootRoute } from "./__root";
 
 export const projectRoute = createRoute({
@@ -14,33 +15,9 @@ export const projectRoute = createRoute({
   component: ProjectLayout,
 });
 
-function EvidenceInspector({ project }: { project: ProjectRead | undefined }) {
-  if (!project) return <p className="muted">正在读取项目与工作区事实。</p>;
-  return (
-    <div className="qc-project-inspector-summary">
-      <section>
-        <span className="director-stage-kicker">当前状态</span>
-        <h3>{project.stage}</h3>
-        <p>项目、场景、镜头与制作证据来自同一事实源。</p>
-      </section>
-      <dl>
-        <dt>画幅</dt>
-        <dd>{project.aspect_ratio}</dd>
-        <dt>项目版本</dt>
-        <dd>{project.version}</dd>
-        <dt>目标平台</dt>
-        <dd>{project.target_platform}</dd>
-      </dl>
-      <section>
-        <h4>事实边界</h4>
-        <p className="muted">创作工作台共享同一套项目、制作和产物事实。</p>
-      </section>
-    </div>
-  );
-}
-
 function ProjectLayout() {
   const { projectId } = projectRoute.useParams();
+  const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const view = workspaceViewFromPath(pathname);
   const atRoot = view === null;
@@ -61,16 +38,29 @@ function ProjectLayout() {
 
   const lastRemembered = useRef<string | null>(null);
   useEffect(() => {
-    if (view && lastRemembered.current !== view) {
-      lastRemembered.current = view;
+    if (view) rememberProjectPath(projectId, pathname);
+    if (view && lastRemembered.current !== `${projectId}:${view}`) {
+      lastRemembered.current = `${projectId}:${view}`;
       workspaceState.rememberLastView(view);
     }
-  }, [view, workspaceState]);
+  }, [view, workspaceState, projectId, pathname]);
 
-  if (atRoot && !workspaceState.isLoading) {
+  // Restore the last view with an imperative replace instead of rendering a
+  // <Navigate> element, and require that the router's current pathname is still
+  // the project root. During a navigation away (for example the permanent
+  // Settings entry) the router reports the next route at the parent path while
+  // the old view is still committing; restoring there would outrun the user's
+  // own navigation and replace it.
+  const currentPathname = useRouterState({ select: (state) => state.location.pathname });
+  const atProjectRoot = currentPathname === `/projects/${projectId}`;
+  useEffect(() => {
+    if (!atProjectRoot || workspaceState.isLoading) return;
     const restoreTarget = workspaceState.lastView ?? "scenes";
-    return <Navigate to={`/projects/$projectId/${restoreTarget}`} params={{ projectId }} replace />;
-  }
+    void navigate({
+      to: getRememberedProjectPath(projectId) ?? `/projects/${projectId}/${restoreTarget}`,
+      replace: true,
+    });
+  }, [atProjectRoot, workspaceState.isLoading, workspaceState.lastView, navigate, projectId]);
 
   const projectRead = project.data ?? undefined;
   const activeView = view ?? "overview";
@@ -80,7 +70,6 @@ function ProjectLayout() {
       projectId={projectId}
       projectName={projectRead?.name ?? (projectId === "demo" ? "演示项目" : "短剧项目")}
       activeView={activeView}
-      inspector={view === "scenes" ? undefined : <EvidenceInspector project={projectRead} />}
     >
       {project.isError && (
         <div className="flash err">

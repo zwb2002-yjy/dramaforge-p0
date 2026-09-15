@@ -2,12 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import {
+  decideDirectorRuntimeTurn,
   decideDirectorTurn,
   getDirectorTurn,
   listDirectorTurns,
   recommendShotDesign,
+  refreshDirectorRuntimeTurn,
   resumeDirectorTurn,
   stopDirectorTurn,
+  stopDirectorRuntimeTurn,
   suggestShotDesign,
 } from "./api";
 import { DirectorTurnStatus } from "./DirectorTurnStatus";
@@ -26,6 +29,7 @@ type ShotDirectorSuggestionPanelProps = {
   shot: ShotLite;
   dirty: boolean;
   onApplyDraft: (draft: ShotDesignDraft) => void;
+  intentSeed?: { text: string; revision: number } | null;
 };
 
 const EMPTY_TURNS: DirectorTurnRead[] = [];
@@ -183,6 +187,7 @@ export function ShotDirectorSuggestionPanel({
   shot,
   dirty,
   onApplyDraft,
+  intentSeed,
 }: ShotDirectorSuggestionPanelProps) {
   const queryClient = useQueryClient();
   const [instruction, setInstruction] = useState("");
@@ -218,6 +223,10 @@ export function ShotDirectorSuggestionPanel({
   }, [shot.id]);
 
   useEffect(() => {
+    if (intentSeed) setInstruction(intentSeed.text);
+  }, [intentSeed, shot.id]);
+
+  useEffect(() => {
     const restorable = turns.find(
       (turn) =>
         turn.status === "awaiting_user" &&
@@ -244,6 +253,7 @@ export function ShotDirectorSuggestionPanel({
   }, [dismissedTurnIds, proposal, recommendation, turns]);
 
   const request = useMutation({
+    mutationKey: ["director-intent", projectId, shot.id],
     mutationFn: () => {
       if (dirty) {
         throw new Error("请先保存或撤销未保存的镜头设计，再请求导演建议。");
@@ -287,6 +297,7 @@ export function ShotDirectorSuggestionPanel({
   const recStale = recommendation !== null && recommendation.base_shot_version !== shot.version;
 
   const proactive = useMutation({
+    mutationKey: ["director-intent", projectId, shot.id],
     mutationFn: () => {
       if (dirty) {
         throw new Error("请先保存或撤销未保存的镜头设计，再请求导演建议。");
@@ -319,11 +330,16 @@ export function ShotDirectorSuggestionPanel({
     if (["stale", "cancelled", "failed"].includes(current.status)) {
       throw new Error(`该导演轮次已${current.status}，不能再应用。`);
     }
-    return decideDirectorTurn(projectId, turnId, {
-      expected_revision: current.revision,
-      decision,
-      accepted_operation_indices: acceptedOperationIndices,
-    });
+    return current.runtime_execution_id
+      ? decideDirectorRuntimeTurn(projectId, current, {
+          decision,
+          accepted_operation_indices: acceptedOperationIndices,
+        })
+      : decideDirectorTurn(projectId, turnId, {
+          expected_revision: current.revision,
+          decision,
+          accepted_operation_indices: acceptedOperationIndices,
+        });
   }
 
   const proposalDecision = useMutation({
@@ -399,14 +415,22 @@ export function ShotDirectorSuggestionPanel({
       action: "stop" | "resume";
     }): Promise<void> => {
       if (action === "stop") {
-        await stopDirectorTurn(projectId, turn.id, turn.revision);
+        if (turn.runtime_execution_id) {
+          await stopDirectorRuntimeTurn(projectId, turn);
+        } else {
+          await stopDirectorTurn(projectId, turn.id, turn.revision);
+        }
       } else {
-        await resumeDirectorTurn(
-          projectId,
-          turn.id,
-          turn.revision,
-          `ui-resume:${turn.id}:${globalThis.crypto.randomUUID()}`,
-        );
+        if (turn.runtime_execution_id) {
+          await refreshDirectorRuntimeTurn(projectId, turn);
+        } else {
+          await resumeDirectorTurn(
+            projectId,
+            turn.id,
+            turn.revision,
+            `ui-resume:${turn.id}:${globalThis.crypto.randomUUID()}`,
+          );
+        }
       }
     },
     onSuccess: () => void refreshTurns(),
@@ -446,6 +470,10 @@ export function ShotDirectorSuggestionPanel({
         loading={turnsQuery.isLoading}
         syncError={turnsQuery.isError ? errorMessage(turnsQuery.error) : null}
         busyTurnId={turnControl.isPending ? (turnControl.variables?.turn.id ?? null) : null}
+        requestPending={request.isPending || proactive.isPending}
+        requestFailed={
+          request.submittedAt >= proactive.submittedAt ? request.isError : proactive.isError
+        }
         onStop={(turn) => turnControl.mutate({ turn, action: "stop" })}
         onResume={(turn) => turnControl.mutate({ turn, action: "resume" })}
       />
@@ -454,7 +482,7 @@ export function ShotDirectorSuggestionPanel({
         type="button"
         data-testid="request-proactive-director-recommendation"
         onClick={() => proactive.mutate()}
-        disabled={proactive.isPending || dirty}
+        disabled={proactive.isPending || request.isPending || dirty}
       >
         {proactive.isPending ? "正在主动分析…" : "主动分析当前镜头"}
       </button>
@@ -473,7 +501,7 @@ export function ShotDirectorSuggestionPanel({
         type="button"
         data-testid="request-shot-director-suggestion"
         onClick={() => request.mutate()}
-        disabled={request.isPending || dirty || !instruction.trim()}
+        disabled={request.isPending || proactive.isPending || dirty || !instruction.trim()}
       >
         {request.isPending ? "正在生成建议…" : "生成镜头建议"}
       </button>

@@ -546,6 +546,26 @@ def test_editing_director_suggestion_http_returns_exact_persisted_identity(
     )
     assert replay.json() == rejected.json()
     turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
+    assert turn["status"] == "awaiting_user"
+
+    async def deliver_decision_notice():
+        from app.access.models import Project, User, Workspace
+        from app.director.business_checkpoints import DirectorBusinessCheckpoints
+
+        async with factory() as session:
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            workspace = await session.get(Workspace, project.workspace_id)
+            assert workspace is not None
+            actor = await session.get(User, workspace.owner_user_id)
+            assert actor is not None
+            await DirectorBusinessCheckpoints(session).reconcile_business_fact(
+                project=project, proposal_id=proposal_id,
+            )
+            await session.commit()
+
+    _run(factory, deliver_decision_notice())
+    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
     assert turn["status"] == "completed" and turn["wait_reason"] == "proposal_rejected"
 
     async def refused_context():
