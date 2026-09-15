@@ -290,6 +290,10 @@ jobs:
           set -euo pipefail
           online_dir="dramaforge-online-v${VERSION}"
           offline_dir="dramaforge-offline-linux-amd64-v${VERSION}"
+          # Both bundles are flat: every file the installers read at run time
+          # (release.env, images.tar.gz, the Compose files) must land in the
+          # directory the user extracts and invokes install.sh from.
+          rm -rf "$online_dir" "$offline_dir"
           mkdir -p "$online_dir/infra/litellm" "$offline_dir/infra/litellm"
 
           common_files=(
@@ -349,10 +353,15 @@ jobs:
             exit 1
           fi
           docker image inspect "${runtime_images[@]}" >/dev/null
-          docker save --output "$offline_dir/images.tar" "${runtime_images[@]}"
+          # Write the archive compressed in one pass. Saving an uncompressed
+          # images.tar first and then gzipping it needs room for both copies at
+          # once (~2.2 GB for this image set), and `docker load` reads the
+          # compressed stream directly.
+          docker save "${runtime_images[@]}" | gzip -c > "$offline_dir/images.tar.gz"
+          gzip -t "$offline_dir/images.tar.gz"
 
           (cd "$online_dir" && zip -q -r "../${online_dir}.zip" .)
-          tar -czf "${offline_dir}.tar.gz" "$offline_dir"
+          tar -czf "${offline_dir}.tar.gz" -C "$offline_dir" .
       - name: Create checksums
         run: >-
           sha256sum

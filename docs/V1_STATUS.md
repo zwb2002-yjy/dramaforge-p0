@@ -43,20 +43,26 @@ tag 属 Owner（Agent 不自批自合）。上表未列的 `revise-unknown-free`
 
 | 项 | 状态 |
 |---|---|
-| `dev` | `b7e66ff`（已推送；PR #90 → `main` 已开，`BLOCKED`） |
+| `dev` | `9d844d3` 起（含本节修复；PR #90 → `main` 已开，`BLOCKED`） |
 | `main` | `c12c3df`（MinIO 镜像源修复，已由 Owner 合并） |
-| tag `v0.1.0` | → `c12c3df`（已重指到修复后的 main） |
-| Release 运行 `35020100821` | `Verify release source` + 镜像构建/冒烟/多平台推送 + SBOM + manifest 全部成功；`Create online and offline release bundles` 失败：`write dramaforge-offline-linux-amd64-v0.1.0/.docker_temp_738787394: no space left on device`（托管 runner 磁盘被前置门禁的构建缓存耗尽） |
-| 修复 | `b7e66ff` 在打包前新增 `Reclaim runner disk before packaging`（`docker image/container/builder prune`，保留已打 tag 的发布镜像） |
+| tag `v0.1.0` | → `c12c3df`；**合并 PR #90 后须重指到新的 main tip**，否则 Release 跑的是不含下述修复的树 |
+| Release 运行 `35020100821` | `Verify release source` + 镜像构建/冒烟/多平台推送 + SBOM + manifest 全部成功；`Create online and offline release bundles` 失败：`write dramaforge-offline-linux-amd64-v0.1.0/.docker_temp_738787394: no space left on device` |
+| 修复一（磁盘） | 打包前新增 `Reclaim runner disk before packaging`（`docker image/container/builder prune`，保留已打 tag 的发布镜像） |
+| 修复二（打包契约） | 离线包此前**不可安装**：`images.tar` 与 `release.env` 被写进 `dramaforge-offline-linux-amd64-v0.1.0/` 子目录，而 `install.sh --offline` / `install.ps1 -Offline` 只在自己所在目录找它们 → 用户按 DEPLOYMENT.md 解压后必然 `images.tar is missing`。现改为**扁平包**（归档根即安装目录）并单趟写出 `images.tar.gz`（`docker save \| gzip`），峰值磁盘从 2.12 GiB 降到 1.06 GiB（本地实测：6 镜像 `images.tar` 1090.8 MiB + `tar.gz` 1082.8 MiB）。`docker load` 直接接受该压缩流（实测 6 镜像全部载入） |
 
-**当前唯一阻塞（账号级，非仓库缺陷）**：`dev` = `b7e66ff` 上 CI 与 Security 的每个 job
-都在 2 秒内失败、`runner_id = 0`、0 个 step、无日志；check-run annotation 原文为
+**当前唯一阻塞（账号级，非仓库缺陷）**：CI 与 Security 的每个 job 都在 2–9 秒内失败、
+`runner_id = 0`、0 个 step、无日志；check-run annotation 原文为
 `The job was not started because recent account payments have failed or your spending
 limit needs to be increased. Please check the 'Billing & plans' section in your settings`。
 托管 runner 无法分配 → CI/Security 无法变绿、Release 也无法重跑。解除需 Owner 在
 GitHub Billing 处理付款方式或把 Actions spending limit 提到 $0 以上（仓库为 private，
-免费额度耗尽后即为此状态）。解除后：重跑 CI/Security → 合并 PR #90 → 重跑 tag
-`v0.1.0` 上的 Release（`gh run rerun 35020100821`）→ 再执行 RELEASE.md 5–7 步。
+免费额度耗尽后即为此状态）。
+
+解除后按序执行：重跑 CI/Security 至全绿 → 合并 PR #90 → `git push --force origin
+<new-main>:v0.1.0` 重指 tag（仅 tag，已在记录中声明）→ 重跑 Release（直接重跑
+`35020100821`，不能用 `--failed`：bundle 失败使 checksums/artifact/attestation/GitHub
+Release 全部 skipped）→ 执行 RELEASE.md 5–7 步 → 用发布的 `install.sh --offline`
+在干净目录复核离线安装（本节修复只做过程序与结构验证，尚未对真实发布物执行）。
 
 实施记录（不入 Git）见 `tmp/v1-release-20260915/`：`REL01_RESULT_cd6f202.md`、
 `CANDIDATE_RECORD.md` 及各 DEV-0x_RECORD.md。

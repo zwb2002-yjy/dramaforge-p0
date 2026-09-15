@@ -50,7 +50,10 @@ unreadable.
 ## Complete offline install
 
 Use the architecture-specific offline release bundle, not the online bundle.
-It contains `images.tar` with the complete runtime image set. After extracting:
+It contains `images.tar.gz` with the complete runtime image set. Extract it into
+a directory and run the installer from that same directory (the archive holds the
+installer, `release.env`, the Compose files and the image archive at its top
+level):
 
 ```text
 .\install.ps1 -Offline
@@ -62,7 +65,7 @@ or:
 ./install.sh --offline
 ```
 
-The installer imports `images.tar` and layers `docker-compose.offline.yml`,
+The installer imports `images.tar.gz` and layers `docker-compose.offline.yml`,
 whose `pull_policy: never` contract covers every service. Offline installation
 means no registry access during installation. Cloud media Providers still need
 network access and user credentials; this release does not claim that the full
