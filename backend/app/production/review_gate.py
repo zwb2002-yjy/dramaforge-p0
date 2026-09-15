@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.delivery.models import HumanReviewDecision
-from app.execution.models import Artifact, NodeRun
+from app.execution.models import Artifact, GraphNode, NodeRun
 from app.shared.errors import ConflictError, ValidationAppError
 
 ReviewKind = Literal["identity", "video_drift", "continuity"]
@@ -179,34 +179,53 @@ async def _review_run_for_artifact(
     source artifact id, the decision must be about that exact Artifact. Older
     snapshots without one are still usable for this Shot, and the human decision
     still binds to the Artifact the person was looking at.
+
+    The selection is pushed down to the query. Reading a bounded page of the
+    project's newest runs and filtering in Python made the answer depend on how
+    much unrelated history the project had accumulated: a matching review fell
+    off the page and the read model reported "no review" for an artifact that had
+    one, which the Formal gate then refused.
     """
     node_key = REVIEW_NODE_KEYS[review_kind]
-    runs = (
+    run = await session.scalar(
+        select(NodeRun)
+        .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+        .where(
+            NodeRun.project_id == project_id,
+            GraphNode.node_key == node_key,
+            NodeRun.status.in_(("completed", "cached", "completed_after_cancel", "failed")),
+            NodeRun.input_snapshot["shot_id"].as_string() == str(shot_id),
+            NodeRun.input_snapshot["upstream_artifact_id"].as_string() == str(artifact_id),
+        )
+        .order_by(NodeRun.created_at.desc(), NodeRun.attempt_no.desc())
+        .limit(1)
+    )
+    if run is not None:
+        return run
+    # Older snapshots may carry the source under a different key, or none at all;
+    # those are still usable for this Shot.
+    candidates = (
         await session.execute(
             select(NodeRun)
+            .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
             .where(
                 NodeRun.project_id == project_id,
-                NodeRun.status.in_(("completed", "cached", "completed_after_cancel", "failed")),
+                GraphNode.node_key == node_key,
+                NodeRun.status.in_(
+                    ("completed", "cached", "completed_after_cancel", "failed")
+                ),
+                NodeRun.input_snapshot["shot_id"].as_string() == str(shot_id),
             )
-            .order_by(NodeRun.created_at.desc())
-            .limit(200)
+            .order_by(NodeRun.created_at.desc(), NodeRun.attempt_no.desc())
+            .limit(50)
         )
     ).scalars().all()
-    fallback: NodeRun | None = None
-    for run in runs:
-        snapshot = run.input_snapshot or {}
-        if str(snapshot.get("shot_id")) != str(shot_id):
-            continue
-        if snapshot.get("node_key") != node_key:
-            continue
+    for candidate in candidates:
+        snapshot = candidate.input_snapshot or {}
         upstream = snapshot.get("upstream_artifact_id") or snapshot.get("source_artifact_id")
-        if upstream is None:
-            if fallback is None:
-                fallback = run
-            continue
-        if str(upstream) == str(artifact_id):
-            return run
-    return fallback
+        if upstream is None or str(upstream) == str(artifact_id):
+            return candidate
+    return None
 
 
 async def evaluate_artifact_admission(

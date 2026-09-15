@@ -11,6 +11,7 @@ from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene, Shot
 from app.delivery.models import HumanReviewDecision
 from app.execution.models import Artifact, GraphNode, NodeRun
+from app.production.models import ProductionGraph
 from app.production.review_gate import (
     evaluate_artifact_admission,
     record_human_decision,
@@ -116,27 +117,48 @@ async def _review_run(
     upstream_artifact_id: UUID | None = None,
     review_artifact_id: UUID | None = None,
 ) -> NodeRun:
-    graph = await GraphService(session).create_graph(
-        project_id=project_id,
-        scope_type="shot",
-        scope_entity_id=shot_id,
-        template_key=f"review-{uuid4().hex[:8]}",
-        created_by=created_by,
-        definition={},
+    # One graph per (project, shot) scope, and one node per key inside a version,
+    # are real constraints: reuse the shot's graph and node when they exist.
+    graph = await session.scalar(
+        select(ProductionGraph).where(
+            ProductionGraph.project_id == project_id,
+            ProductionGraph.scope_type == "shot",
+            ProductionGraph.scope_entity_id == shot_id,
+        )
     )
-    node = GraphNode(
-        graph_version_id=graph.current_version_id,
-        node_key=node_key,
-        node_type=node_key,
-        display_name=node_key,
-        cacheable=False,
+    if graph is None:
+        graph = await GraphService(session).create_graph(
+            project_id=project_id,
+            scope_type="shot",
+            scope_entity_id=shot_id,
+            template_key=f"review-{uuid4().hex[:8]}",
+            created_by=created_by,
+            definition={},
+        )
+    node = await session.scalar(
+        select(GraphNode).where(
+            GraphNode.graph_version_id == graph.current_version_id,
+            GraphNode.node_key == node_key,
+        )
     )
-    session.add(node)
-    await session.flush()
+    if node is None:
+        node = GraphNode(
+            graph_version_id=graph.current_version_id,
+            node_key=node_key,
+            node_type=node_key,
+            display_name=node_key,
+            cacheable=False,
+        )
+        session.add(node)
+        await session.flush()
+    previous_attempt = await session.scalar(
+        select(func.max(NodeRun.attempt_no)).where(NodeRun.graph_node_id == node.id)
+    )
     run = NodeRun(
         project_id=project_id,
         graph_version_id=graph.current_version_id,
         graph_node_id=node.id,
+        attempt_no=int(previous_attempt or 0) + 1,
         idempotency_key=f"review-{uuid4().hex}",
         input_hash=uuid4().hex * 2,
         input_snapshot={
@@ -464,6 +486,81 @@ async def test_admission_rejects_an_unknown_stage(session: AsyncSession) -> None
             stage="whatever",
         )
     assert unknown.value.details.get("code") == "REVIEW_STAGE_UNKNOWN"
+
+
+@pytest.mark.asyncio
+async def test_admission_finds_the_review_for_this_artifact_among_many(
+    session: AsyncSession,
+) -> None:
+    """The review lookup must select in the query, not in a bounded page.
+
+    The read model previously loaded the project's newest 200 runs and filtered
+    in Python, so a project with unrelated history could lose the review that
+    belongs to the artifact and report "no review" for an approved candidate.
+    This seeds the matching review first and then a wall of newer reviews for
+    other shots, which is exactly the shape that produced the wrong answer.
+    """
+    user, project, shot = await _env(session)
+    artifact = await _artifact(session, project_id=project.id, hash_seed="d")
+    evidence = await _artifact(session, project_id=project.id, hash_seed="e")
+    matching = await _review_run(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        created_by=user.id,
+        upstream_artifact_id=artifact.id,
+        review_artifact_id=evidence.id,
+    )
+
+    other_shot = Shot(
+        project_id=project.id,
+        scene_id=shot.scene_id,
+        shot_number=9,
+        version=1,
+        visual_description="another shot",
+    )
+    session.add(other_shot)
+    await session.flush()
+    for index in range(12):
+        other = await _artifact(
+            session,
+            project_id=project.id,
+            hash_seed=f"{index + 1:x}",
+        )
+        await _review_run(
+            session,
+            project_id=project.id,
+            shot_id=other_shot.id,
+            created_by=user.id,
+            upstream_artifact_id=other.id,
+            review_artifact_id=evidence.id,
+        )
+    await session.flush()
+
+    await record_human_decision(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        artifact_id=artifact.id,
+        review_node_run_id=matching.id,
+        review_kind="identity",
+        decision="approved",
+        reason="审片通过。",
+        actor_id=user.id,
+        shot_version=shot.version,
+        request_key="review:lookup",
+    )
+    await session.flush()
+
+    admission = await evaluate_artifact_admission(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        artifact_id=artifact.id,
+        stage="formal_keyframe",
+    )
+    assert admission.allowed
+    assert admission.requirements[0].review_node_run_id == matching.id
 
 
 def test_subject_fingerprint_ignores_shot_version_but_tracks_evidence() -> None:
