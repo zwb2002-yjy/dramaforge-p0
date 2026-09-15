@@ -109,7 +109,9 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
         provider_type: selectedPlugin.provider_type,
         display_name: selectedPlugin.display_name,
         protocol_profile: selectedPlugin.protocol_profile,
-        base_url: selectedPlugin.default_base_url,
+        // Honour an address typed before the connection existed instead of
+        // silently replacing it with the plugin default.
+        base_url: baseUrl.trim() || selectedPlugin.default_base_url,
       });
     },
     onMutate: resetFeedback,
@@ -337,11 +339,12 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
           </select>
         </label>
         <label>
-          <span className="status-label">Base URL</span>
+          <span className="status-label">服务地址</span>
           <input
-            aria-label="供应商 Base URL"
+            aria-label="供应商服务地址"
             value={baseUrl || connection?.base_url || selectedPlugin?.default_base_url || ""}
             onChange={(event) => setBaseUrl(event.target.value)}
+            placeholder="留空则使用插件的默认地址"
           />
         </label>
         {connection && (

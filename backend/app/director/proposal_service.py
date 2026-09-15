@@ -14,9 +14,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
-from app.director.business_checkpoints import DirectorBusinessCheckpoints
+from app.contracts.domain_events import ProposalDecided
 from app.director.proposal_commands import ProposalCommandError, ProposalCommandRegistry
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.production.application.events import append_production_notice
 from app.shared.errors import ValidationAppError
 
 
@@ -125,9 +126,10 @@ class ProposalService:
             proposal.status = "applied" if has_accepted else "decided"
             proposal.decided_at = datetime.now(UTC)
             await self._session.flush()
-        await DirectorBusinessCheckpoints(self._session).reconcile_business_fact(
-            project=project, proposal_id=proposal.id,
-        )
+            await append_production_notice(
+                self._session, project_id=project.id, actor_id=self._actor.id,
+                notice=ProposalDecided(proposal_id=proposal.id),
+            )
         return result
 
     async def mark_proposals_stale_for_shot(

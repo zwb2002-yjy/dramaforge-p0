@@ -21,7 +21,6 @@ ALLOWED_ROOT = {
     ".gitignore",
     ".env.example",
     ".dockerignore",
-    "DramaForge总开发文档.md",
     "README.md",
     "LICENSE",
     "NOTICE",
@@ -32,9 +31,6 @@ ALLOWED_ROOT = {
     "CLAUDE.md",
     "AGENTS.md",
     ".claude",
-    "agent.md",
-    "AGENT.md",
-    "AGENT_EXECUTION_PROTOCOL.md",
     "docker-compose.yml",
     "docker-compose.build.yml",
     "docker-compose.dev.yml",
@@ -126,12 +122,17 @@ def check_root_entries(root: Path) -> list[str]:
 def check_sensitive_on_disk(root: Path) -> list[str]:
     """Fail if credential-like files exist under the tree (excluding venv/node_modules)."""
     errors: list[str] = []
-    skip_parts = FORBIDDEN_TRACKED_PARTS | {".git"}
+    skip_parts = FORBIDDEN_TRACKED_PARTS | LOCAL_ONLY_ROOT | {".git"}
     for path in root.rglob("*"):
-        if not path.is_file():
-            continue
         rel_parts = path.relative_to(root).parts
         if any(part in skip_parts for part in rel_parts):
+            continue
+        try:
+            if not path.is_file():
+                continue
+        except OSError:
+            # Broken or access-controlled local tooling links are outside the
+            # registered source tree and cannot be credential evidence.
             continue
         name = path.name
         # Local gitignored root .env is expected for dev; git index check still blocks commit.

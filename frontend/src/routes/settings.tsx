@@ -1,6 +1,7 @@
 import { Navigate, Outlet, createRoute } from "@tanstack/react-router";
 
 import { rootRoute } from "./__root";
+import { validateSettingsReturnTo } from "../lib/navigationPreferences";
 import {
   LazyAccountSettingsPage,
   LazyDefaultPreferencesSettingsPage,
@@ -12,6 +13,9 @@ import {
 export const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
+  validateSearch: (search: Record<string, unknown>): { returnTo?: string } => ({
+    returnTo: validateSettingsReturnTo(search.returnTo),
+  }),
   component: () => <Outlet />,
 });
 

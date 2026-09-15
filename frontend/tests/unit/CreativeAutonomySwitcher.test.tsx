@@ -81,7 +81,7 @@ describe("CreativeAutonomySwitcher", () => {
     fireEvent.change(select, { target: { value: "AUTO" } });
     await waitFor(() => {
       expect(screen.getByTestId("creative-autonomy-message")).toHaveTextContent(
-        "导演参与度已切换为 AUTO",
+        "导演参与度已切换为导演自动",
       );
     });
 

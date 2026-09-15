@@ -75,9 +75,36 @@ describe("SceneStoryboardWall", () => {
     const cards = await screen.findAllByTestId("scene-card");
     expect(cards).toHaveLength(2);
     expect(screen.getByText("Studio")).toBeInTheDocument();
-    expect(screen.getByText(/1.1 · day/)).toBeInTheDocument();
+    expect(screen.getByText(/1.1 · 白天/)).toBeInTheDocument();
     expect(screen.getByText("2 镜头")).toBeInTheDocument();
     expect(screen.getByText(/1 风险/)).toBeInTheDocument();
+  });
+
+  it("does not show an empty state while scenes are still loading", async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SceneStoryboardWall projectId="project-1" />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId("scene-wall-loading")).toHaveTextContent("正在读取场景");
+    expect(
+      screen.queryByText("暂无场景。导入剧本后会在这里生成故事板墙。"),
+    ).not.toBeInTheDocument();
+
+    resolveFetch?.(await json([]));
+    expect(
+      await screen.findByText("暂无场景。导入剧本后会在这里生成故事板墙。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("scene-wall-loading")).not.toBeInTheDocument();
   });
 
   it("copies a scene on demand", async () => {
@@ -89,7 +116,7 @@ describe("SceneStoryboardWall", () => {
       </QueryClientProvider>,
     );
     await screen.findAllByTestId("scene-card");
-    fireEvent.click(screen.getAllByRole("button", { name: "复制" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "复制场景" })[0]);
     await waitFor(() => {
       expect(calls.some((call) => call.method === "POST" && call.url.includes("/copy"))).toBe(true);
     });

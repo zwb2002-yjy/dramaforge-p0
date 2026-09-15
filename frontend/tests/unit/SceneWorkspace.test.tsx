@@ -121,7 +121,7 @@ describe("SceneWorkspace", () => {
     const canvas = screen.getByTestId("cinematic-canvas");
     expect(within(canvas).queryByRole("textbox")).not.toBeInTheDocument();
     expect(within(canvas).queryByRole("combobox")).not.toBeInTheDocument();
-    expect(screen.getByTestId("shot-execution-status")).toHaveTextContent("completed");
+    expect(screen.getByTestId("shot-execution-status")).toHaveAttribute("data-status", "completed");
     expect(screen.getByTestId("scene-edit-entry")).toHaveAttribute(
       "href",
       "/projects/project-1/edit",
@@ -462,7 +462,7 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("Studio");
-    expect(screen.getByTestId("shot-execution-status")).toHaveTextContent("queued");
+    expect(screen.getByTestId("shot-execution-status")).toHaveAttribute("data-status", "queued");
     await act(async () => {
       await client.refetchQueries();
     });
@@ -470,7 +470,7 @@ describe("SceneWorkspace", () => {
     await waitFor(() =>
       expect(screen.getByTestId("scene-sync-error")).toHaveTextContent("连接中断，状态待同步"),
     );
-    expect(screen.getByTestId("shot-execution-status")).toHaveTextContent("queued");
+    expect(screen.getByTestId("shot-execution-status")).toHaveAttribute("data-status", "queued");
     expect(screen.getByTestId("scene-active-sync")).toBeInTheDocument();
   });
 

@@ -112,11 +112,14 @@ describe("ProductionMonitor", () => {
     expect(screen.getByTestId("stat-experiments").textContent).toBe("3");
 
     expect(screen.getByTestId("monitor-scene-table")).toBeInTheDocument();
-    expect(screen.getByText("1.1 · 雨夜街口")).toBeInTheDocument();
-    expect(screen.getByText("1.2 · 旧公寓")).toBeInTheDocument();
-    const sceneLinks = screen.getAllByRole("link", { name: "场景工作区" });
+    expect(screen.getByText("夜晚")).toBeInTheDocument();
+    expect(screen.getByText("白天")).toBeInTheDocument();
+    const sceneLinks = screen.getAllByRole("link");
     expect(sceneLinks).toHaveLength(2);
+    expect(sceneLinks[0]).toHaveTextContent("1.1 · 雨夜街口");
     expect(sceneLinks[0].getAttribute("href")).toContain("/projects/project-1/scenes/scene-1");
+    expect(screen.queryByText("进入")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("shot-timeline")).not.toBeInTheDocument();
   });
 
   it("renders empty state when no scenes exist", () => {

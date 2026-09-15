@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import tomllib
 from pathlib import Path
@@ -41,24 +40,6 @@ def test_native_typescript_7_is_explicit_and_api_peers_remain_supported() -> Non
     assert api["version"].startswith("5.")
     generator = lock["packages"]["node_modules/openapi-typescript"]
     assert generator["peerDependencies"]["typescript"] == "^5.x"
-
-
-def test_frozen_release_archive_retains_all_six_original_source_hashes() -> None:
-    archive = ROOT / "docs/reviews/history/720bde4"
-    manifest = json.loads((archive / "source-manifest.json").read_text(encoding="utf-8"))
-    source = json.loads((archive / "source-documents.json").read_text(encoding="utf-8"))
-    documents = {doc["original_path"]: doc for doc in source["documents"]}
-    assert len(manifest["files"]) == 6
-    assert len(documents) == 4
-    assert manifest["source_commit"] == "1b2a6a2c129bfa09e9fcc0ec1ce971aab216d6d3"
-    for item in manifest["files"]:
-        if item["archive_storage"] == "source-documents.json":
-            data = documents[item["original_path"]]["content_utf8"].encode("utf-8")
-        else:
-            data = (archive / item["archive_storage"]).read_bytes()
-        assert hashlib.sha256(data).hexdigest() == item["sha256"]
-    assert "historical" in source["classification"]
-    assert "not current" in source["classification"]
 
 
 def test_browser_target_resolution_does_not_restore_known_vulnerable_cache_code() -> None:

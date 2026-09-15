@@ -7,29 +7,31 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
-from sqlalchemy import select
+from pydantic import BaseModel, Field
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1.schemas.workbench import ShotWorkbenchRead
-from app.assets.models import Shot
 from app.assets.schemas import ShotDirectorState
-from app.director.business_checkpoints import DirectorBusinessCheckpoints
-from app.director.turn_models import DirectorTurn
+from app.contracts.domain_events import FormalSelected
+from app.contracts.production_commands import ExecutionBody, ExecutionPlanBody
 from app.execution.models import NodeRun
+from app.production.application.commands import (
+    ProductionCommands,
+    execution_receipt,
+)
+from app.production.application.commands import (
+    execution_input as _execution_input,
+)
+from app.production.application.events import append_production_notice
 from app.production.execution_plan import WorkbenchExecutionPlan
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
-from app.production.models import GraphVersion
-from app.production.reference_intents import ShotReferenceIntent
 from app.production.repair_service import RepairPlanRead, RepairService
 from app.production.trace import ExecutionTraceRead, build_execution_trace
 from app.production.workbench_execution import (
-    WorkbenchExecutionInput,
     WorkbenchExecutionService,
-    workbench_request_hash,
 )
-from app.shared.errors import NotFoundError, ValidationAppError
+from app.shared.errors import NotFoundError
 from app.workbench.scene_service import ShotWorkbenchService
 from app.workbench.shot_service import ShotDesignService
 from app.workbench.workspace_state_service import WorkspaceStateService
@@ -149,28 +151,9 @@ async def get_shot_workbench(
 # ---------------------------------------------------------------------------
 
 
-class ExecutionPlanBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    stage: Literal["image_keyframe", "video"]
-    prompt: str = Field(min_length=1, max_length=20000)
-    semantic_intent: dict[str, JsonValue] = Field(default_factory=dict)
-    mode_id: str = Field(min_length=1, max_length=120)
-    requested_model_id: str | None = None
-    requested_binding_id: UUID | None = None
-    accept_approximations: bool = False
-    references: list[ShotReferenceIntent] = Field(default_factory=list)
-    expected_shot_version: int = Field(ge=1)
-
-
 class ExecutionPlanRead(BaseModel):
     plan: WorkbenchExecutionPlan
     plan_fingerprint: str
-
-
-class ExecutionBody(ExecutionPlanBody):
-    plan_fingerprint: str = Field(min_length=64, max_length=64)
-    accepted_approximations: list[str] = Field(default_factory=list)
 
 
 class ExecutionRead(BaseModel):
@@ -180,26 +163,6 @@ class ExecutionRead(BaseModel):
     graph_version_id: UUID
     status: str
     plan_fingerprint: str
-
-
-def _execution_input(
-    project_id: UUID,
-    shot_id: UUID,
-    body: ExecutionPlanBody,
-) -> WorkbenchExecutionInput:
-    return WorkbenchExecutionInput(
-        project_id=project_id,
-        shot_id=shot_id,
-        stage=body.stage,
-        prompt=body.prompt,
-        semantic_intent=body.semantic_intent,
-        mode_id=body.mode_id,
-        requested_model_id=body.requested_model_id,
-        requested_binding_id=body.requested_binding_id,
-        accept_approximations=body.accept_approximations,
-        references=body.references,
-        expected_shot_version=body.expected_shot_version,
-    )
 
 
 @router.post(
@@ -229,25 +192,8 @@ async def create_execution_plan(
 
 
 async def _execution_read(session: SessionDep, run: NodeRun) -> ExecutionRead:
-    version = await session.get(GraphVersion, run.graph_version_id)
-    if version is None:
-        raise NotFoundError("Execution graph version not found")
-    turn_id = await session.scalar(select(DirectorTurn.id).where(
-        DirectorTurn.project_id == run.project_id,
-        DirectorTurn.request_key == f"workbench:{run.id}",
-    ))
-    fingerprint = (run.input_snapshot or {}).get("plan_fingerprint")
-    if not isinstance(fingerprint, str) or len(fingerprint) != 64:
-        raise ValidationAppError(
-            "Execution receipt has no valid frozen plan fingerprint",
-            details={"code": "EXECUTION_RECEIPT_INVALID"},
-        )
-    return ExecutionRead(
-        node_run_id=run.id, graph_id=version.graph_id, graph_version_id=run.graph_version_id,
-        status=run.status,
-        plan_fingerprint=fingerprint,
-        director_turn_id=turn_id,
-    )
+    receipt = await execution_receipt(session, run)
+    return ExecutionRead(**receipt.model_dump())
 
 
 @router.get(
@@ -285,63 +231,12 @@ async def create_execution(
     """Dispatch one shot execution. The server re-validates the plan
     fingerprint / expected shot version / accepted approximations before
     creating the queued NodeRun (03 §37)."""
-    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    service = WorkbenchExecutionService(session, user_id=user.id)
-    identity = workbench_request_hash(body.model_dump(mode="json"))
-    receipt = await service.find_command_receipt(
-        project_id=project_id, shot_id=shot_id, stage=body.stage,
-        command_key=idempotency_key, plan_fingerprint=body.plan_fingerprint,
-        expected_request_hash=identity,
+    receipt = await ProductionCommands(session).submit_user_execution(
+        actor=user, project_id=project_id, shot_id=shot_id,
+        body=body, command_key=idempotency_key,
     )
-    if receipt is not None:
-        return await _execution_read(session, receipt)
-    await service.lock_command_scope(project_id=project_id)
-    # A second request may have waited for the first command's transaction.
-    receipt = await service.find_command_receipt(
-        project_id=project_id, shot_id=shot_id, stage=body.stage,
-        command_key=idempotency_key, plan_fingerprint=body.plan_fingerprint,
-        expected_request_hash=identity,
-    )
-    if receipt is not None:
-        return await _execution_read(session, receipt)
-    # 1) Lock the canonical Shot for the duration of validation + queueing so a
-    # concurrent design save cannot cross the fingerprint/dispatch boundary.
-    shot = await session.get(Shot, shot_id, with_for_update=True)
-    if shot is None or shot.project_id != project_id:
-        raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
-    if shot.version != body.expected_shot_version:
-        raise ValidationAppError(
-            "shot changed since plan preview",
-            details={"code": "SHOT_VERSION_MISMATCH"},
-        )
-    # 2) Rebuild once from current facts and re-validate the fingerprint. This
-    # exact in-memory plan is handed to queueing below; it is not re-resolved.
-    rebuilt = await service.build_plan(
-        project=project,
-        execution_input=_execution_input(project_id, shot_id, body),
-    )
-    if rebuilt.plan_fingerprint != body.plan_fingerprint:
-        raise ValidationAppError(
-            "plan fingerprint mismatch: inputs changed since preview",
-            details={"code": "PLAN_FINGERPRINT_MISMATCH"},
-        )
-    if sorted(body.accepted_approximations) != sorted(rebuilt.accepted_approximations):
-        raise ValidationAppError(
-            "accepted approximation set does not match the rebuilt plan",
-            details={"code": "ACCEPTED_APPROXIMATIONS_MISMATCH"},
-        )
-    # 3) Dispatch the same validated plan; Idempotency-Key dedupes retries.
-    run = await service.create_and_dispatch(
-        project=project,
-        execution_input=_execution_input(project_id, shot_id, body),
-        idempotency_key_override=idempotency_key,
-        prepared_plan=rebuilt,
-        request_hash=identity,
-    )
-    await DirectorBusinessCheckpoints(session).track_execution(project=project, actor=user, run=run)
-    response = await _execution_read(session, run)
     await session.commit()
-    return response
+    return ExecutionRead(**receipt.model_dump())
 
 
 class FormalKeyframeBody(BaseModel):
@@ -376,8 +271,10 @@ async def set_shot_formal_keyframe(
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
     )
-    await DirectorBusinessCheckpoints(session).reconcile_business_fact(
-        project=project, shot_id=shot_id,
+    await append_production_notice(
+        session, project_id=project.id, actor_id=user.id,
+        notice=FormalSelected(shot_id=shot_id, shot_version=shot.version,
+                              artifact_id=body.artifact_id, stage="image_keyframe"),
     )
     await session.commit()
     assert shot.formal_keyframe_artifact_id is not None
@@ -420,8 +317,10 @@ async def set_shot_formal_video(
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
     )
-    await DirectorBusinessCheckpoints(session).reconcile_business_fact(
-        project=project, shot_id=shot_id,
+    await append_production_notice(
+        session, project_id=project.id, actor_id=user.id,
+        notice=FormalSelected(shot_id=shot_id, shot_version=shot.version,
+                              artifact_id=body.artifact_id, stage="video"),
     )
     await session.commit()
     assert shot.formal_video_artifact_id is not None

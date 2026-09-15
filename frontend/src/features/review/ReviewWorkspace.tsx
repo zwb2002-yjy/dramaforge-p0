@@ -116,9 +116,8 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
         </Link>
       </nav>
       <header className="qc-page-heading">
-        <p>制作 · 待审内容</p>
         <h1>镜头审片与批注</h1>
-        <span>批注写入 ReviewAnnotation；正式产物与生产血缘保持不变。</span>
+        <span>在关键帧或时间线上标注并填写说明；批注不会改动正式产物。</span>
       </header>
 
       {shots.isError && <div className="flash err">无法读取镜头：{String(shots.error)}</div>}

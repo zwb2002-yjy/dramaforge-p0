@@ -21,6 +21,9 @@ describe("MediaReviewCanvas", () => {
     );
     expect(screen.getAllByTestId("review-region")).toHaveLength(1);
     const box = screen.getByTestId("media-review-canvas");
+    expect(box).toHaveClass("media-review-canvas");
+    expect(screen.getByRole("img", { name: "review target" })).toHaveClass("media-review-image");
+    expect(screen.getByTestId("review-region")).toHaveClass("media-review-region");
     Object.defineProperty(box, "getBoundingClientRect", {
       value: () => ({ left: 0, top: 0, width: 100, height: 100 }),
       configurable: true,
