@@ -579,6 +579,9 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         plan_fingerprint: "a".repeat(64),
       });
     }
+    if (path.endsWith("/executions/receipt") && method === "GET") {
+      return json(route, { code: "NOT_FOUND", detail: "no committed receipt" }, 404);
+    }
     if (
       path.includes("/director/runtime/shots/") &&
       path.endsWith("/executions") &&
