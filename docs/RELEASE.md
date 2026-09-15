@@ -17,6 +17,14 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
   集成；不直接作为稳定版本更新合入 `main`。
 - 只有 `@zwb2002-yjy` 批准 / 合并 PR；Agent 不自批、不自合、不记录 MERGED。
 
+### 合并提交说明检查
+
+获得本次合并授权后，合并前必须审阅最终提交的标题、正文、作者及署名 trailer。
+Squash 必须显式传入审阅过的标题和正文，不使用自动拼接的全部分支历史；
+`Co-authored-by` 仅保留身份和贡献均已核实、且本次确实需要的署名。
+多行说明通过结构化 API 参数或 `--body-file` 传入。合并后再次读取远端实际
+提交说明，确认没有无关历史、意外署名或工具生成文字，再继续合并下一项。
+
 ## Required GitHub ruleset（main）
 
 1. 合并前必须 PR；

@@ -45,6 +45,11 @@
   never approve, merge, or record `MERGED`.
 - No force push, history rewrite, `reset --hard`, or `clean -fd`. Cleanup is
   limited to the current task's resources.
+- When a merge is explicitly authorized, inspect the final commit title, body,
+  author and all attribution trailers before merging. For squash merges, provide
+  an explicit reviewed title and body; never accept automatically concatenated
+  branch history or unverified `Co-authored-by` trailers. Preserve only verified,
+  intended attribution, then inspect the resulting remote commit before proceeding.
 - Paid provider operations (probe, production, repair) require an explicit
   positive budget and Owner authorization per operation; historical
   authorization never extends to a new task. Never blind-retry a possibly
