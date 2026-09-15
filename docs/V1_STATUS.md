@@ -2,30 +2,44 @@
 
 Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
 
-## 当前发布判定：候选已冻结并通过全部门，等待 Owner 合并
+## 当前发布判定：REL-01 真实验收已跑通主管道，剩余一处 legacy 端点缺陷
 
-候选提交 `df546f6`（`dev`），发布 PR **#88**（`dev → main`）当前
-`mergeStateStatus = CLEAN`、`mergeable = MERGEABLE`：远端 `policy` 与
-`container-gates` 均 success（CI run 34981740717），Security workflow 全绿。
+**候选**：`dev` = `9496bf2`。产品代码（`backend/app`、`backend/alembic`、
+`frontend/src`、`docker-compose.yml`）与接受真实验收的 `cd6f202` **逐树相同**
+（`git rev-parse <sha>:<path>` 比对为 SAME），`9496bf2` 之后只有测试断言与验收
+驱动器变化。
 
-本机在 `df546f6` 的干净导出树上运行：
+**REL-01 真实 DS＋Agnes 验收**（Owner 授权付费、无预算上限；隔离候选栈
+`dramaf-relcand`，仅发布 `127.0.0.1:8088`，`/health.source_commit = cd6f202`）：
 
-- 后端 `tests/unit tests/integration`：1159 passed / 5 skipped / **0 failed**；
-- `ruff check` 与 `mypy app`：无问题；
-- 前端 `api:check`、`format:check`、`lint`、`typecheck`、233 项单测、`build`、
-  40 项浏览器 e2e：全部通过；
-- 新建数据库 `alembic upgrade head` + `alembic check`：无 pending operation。
+| 阶段 | 结果 |
+|---|---|
+| `preflight` | PASS（Agnes `auth_models` 真实探测 200 passed，两条绑定 `account_verified`） |
+| `story` | PASS（真实 DeepSeek，`actual_model=anthropic/deepseek-v4-flash`） |
+| `media` | PASS（真实 Agnes 关键帧＋视频，逐片过身份/漂移审查与人工批准） |
+| `editing` | PASS（交付准入逐片通过、剪辑建议采用可审计） |
+| `regressions` | PASS（负向边界 fail closed、MANUAL 不依赖导演） |
+| `delivery` | PASS（真实 MP4/SRT 下载、哈希一致、ffprobe 全真、15–30s、改字幕重导出零新增媒体调用） |
+| `review-submit` | **未通过**：legacy `POST …/repair` 返回 404 `repair request not found` |
 
-`df546f6` 之前的 `container-gates` 失败（frontend 步骤）已定位并修复：某个列表
-端点返回对象时，列表消费者直接 `.find()`，异常在 render 内抛出导致工作区整体
-卸载；现由 `apiGetList()` 在边界处 fail-closed 到 `[]`（真实 HTTP 失败仍抛错）。
+该 404 的定位（探针已还原，仓库干净）：服务层成功、失败发生在响应读回阶段、按 ID
+计数为 0 行、同路径进程内直调成功。**根因未确定，不作为已解决记录**。分阶段修复
+端点（`POST …/repairs`、`…/repairs/{id}/steps`）可用且已由 PG 集成测试与候选上的
+manual 全链覆盖；失败发生在任何 Provider 调用之前，无未知提交、无重复计费。
 
-**尚未完成**：合并动作与最终发布判定属 Owner（Agent 不自批自合）；DS＋Agnes
-真实场景验收需要逐次正数预算与 Owner 授权，本轮未执行。因此本文件记录的是
-"候选就绪"，不是"已发布"。
+本轮同时修复并推送的产品缺陷（均由真实验收暴露，离线套件曾全绿）：
 
-实施记录（不入 Git）见 `tmp/v1-release-20260915/`：`CANDIDATE_RECORD.md` 及各
-DEV-0x_RECORD.md。
+- `4e9113f`：Formal 选择门不可能满足——图里没有审查节点，且关键帧阶段从不排队审查；
+- `fcd19a2`：审查 run 未写 `upstream_artifact_id`，门按该键解析审查；
+- `468d4a3`：审查查找在有界分页里做选择，历史一多即"查无此审查"；
+- `cd6f202`：重复导出成片撞唯一约束报 `ARTIFACT_NOT_INDEPENDENT`。
+
+**尚未完成**：`dev → main` 合并与版本 tag 属 Owner（Agent 不自批自合）；上表未列
+的 `revise-unknown-free` / `replace-template` / `recover-local-editing` 三个阶段需
+特定前置状态，本轮未构造，记录为未执行。本文件记录的是"候选可发布"，不是"已发布"。
+
+实施记录（不入 Git）见 `tmp/v1-release-20260915/`：`REL01_RESULT_cd6f202.md`、
+`CANDIDATE_RECORD.md` 及各 DEV-0x_RECORD.md。
 
 ## 历史 V1 主链验收记录
 
