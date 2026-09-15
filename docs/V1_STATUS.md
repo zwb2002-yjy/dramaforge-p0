@@ -34,10 +34,29 @@ Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
 | `cd6f202` | 重复导出成片撞唯一约束报 `ARTIFACT_NOT_INDEPENDENT`（产品要求重复导出回读原结果） |
 | `cef8402` | 两个 repair 端点在 `commit()` **之后**读状态；repair 表按 `app.current_project_id()` 做 RLS 且该变量是每事务的，新事务没有作用域 → 修复已建、第一步已派发并提交，响应却是 404 `repair request not found` |
 
-**尚未完成**：`dev → main` 合并与版本 tag 属 Owner（Agent 不自批自合）；上表未列
-的 `revise-unknown-free` / `replace-template` / `recover-local-editing` 三个阶段需
-特定前置状态（未对账的提交、并发 Artifact 竞争失败），本轮未构造，记录为未执行。
-本文件记录的是"候选可发布"，不是"已发布"。
+## 发布流水线状态（2026-09-15 21:40 UTC）
+
+**尚未发布**：本文件上节记录的是"候选可发布"，不是"已发布"；`dev → main` 合并与版本
+tag 属 Owner（Agent 不自批自合）。上表未列的 `revise-unknown-free` /
+`replace-template` / `recover-local-editing` 三个阶段需特定前置状态（未对账的提交、
+并发 Artifact 竞争失败），本轮未构造，记录为未执行。
+
+| 项 | 状态 |
+|---|---|
+| `dev` | `b7e66ff`（已推送；PR #90 → `main` 已开，`BLOCKED`） |
+| `main` | `c12c3df`（MinIO 镜像源修复，已由 Owner 合并） |
+| tag `v0.1.0` | → `c12c3df`（已重指到修复后的 main） |
+| Release 运行 `35020100821` | `Verify release source` + 镜像构建/冒烟/多平台推送 + SBOM + manifest 全部成功；`Create online and offline release bundles` 失败：`write dramaforge-offline-linux-amd64-v0.1.0/.docker_temp_738787394: no space left on device`（托管 runner 磁盘被前置门禁的构建缓存耗尽） |
+| 修复 | `b7e66ff` 在打包前新增 `Reclaim runner disk before packaging`（`docker image/container/builder prune`，保留已打 tag 的发布镜像） |
+
+**当前唯一阻塞（账号级，非仓库缺陷）**：`dev` = `b7e66ff` 上 CI 与 Security 的每个 job
+都在 2 秒内失败、`runner_id = 0`、0 个 step、无日志；check-run annotation 原文为
+`The job was not started because recent account payments have failed or your spending
+limit needs to be increased. Please check the 'Billing & plans' section in your settings`。
+托管 runner 无法分配 → CI/Security 无法变绿、Release 也无法重跑。解除需 Owner 在
+GitHub Billing 处理付款方式或把 Actions spending limit 提到 $0 以上（仓库为 private，
+免费额度耗尽后即为此状态）。解除后：重跑 CI/Security → 合并 PR #90 → 重跑 tag
+`v0.1.0` 上的 Release（`gh run rerun 35020100821`）→ 再执行 RELEASE.md 5–7 步。
 
 实施记录（不入 Git）见 `tmp/v1-release-20260915/`：`REL01_RESULT_cd6f202.md`、
 `CANDIDATE_RECORD.md` 及各 DEV-0x_RECORD.md。
