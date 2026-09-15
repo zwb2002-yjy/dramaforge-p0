@@ -3,6 +3,7 @@ import "./editing-recovery.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { deliveryGateMessage } from "./deliveryGate";
 import { EditingSessionPicker } from "./EditingSessionPicker";
 import { queryKeys } from "../../lib/queryKeys";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
@@ -428,7 +429,7 @@ export function EditingWorkspace({
       const result = await waitForFinalFilmJob(projectId, queued);
       if (isCurrent()) setFinalFilm(result);
     } catch (error: unknown) {
-      if (isCurrent()) setFinalFilmError(`成片导出失败：${errorMessage(error)}`);
+      if (isCurrent()) setFinalFilmError(`成片导出失败：${deliveryGateMessage(error)}`);
     } finally {
       if (isCurrent()) setFinalFilmPending(null);
       void queryClient.invalidateQueries({ queryKey: historyKey });

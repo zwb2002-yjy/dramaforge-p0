@@ -392,10 +392,109 @@ class ShotExperiment(Base):
     )
 
 
+class RepairRequest(Base):
+    """One user-confirmed repair intent for a Shot.
+
+    It records the intent and the plan it was confirmed against; it is not a
+    scheduler, stores no media, no provider task id and no run status. Step
+    facts live in :class:`RepairStep` and execution state stays in NodeRun.
+    """
+
+    __tablename__ = "repair_requests"
+    __table_args__ = (
+        UniqueConstraint("project_id", "request_key", name="uq_repair_request_key"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    shot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    option: Mapped[str] = mapped_column(String(40), nullable=False)
+    plan_schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    plan_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
+    annotation_ids: Mapped[list[str]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    annotation_summary: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    source_formal_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
+    )
+    input_fingerprint: Mapped[str] = mapped_column(HASH_64, nullable=False)
+    request_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
+    closed_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class RepairStep(Base):
+    """One staged action of a repair request.
+
+    ``plan_fingerprint``/``command_key`` freeze what the user confirmed; the
+    adoption fields record which Artifact and human decision ended the step.
+    """
+
+    __tablename__ = "repair_steps"
+    __table_args__ = (
+        UniqueConstraint("repair_request_id", "ordinal", name="uq_repair_step_ordinal"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    repair_request_id: Mapped[UUID] = mapped_column(
+        ForeignKey("repair_requests.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    stage: Mapped[str] = mapped_column(String(40), nullable=False)
+    plan_fingerprint: Mapped[str | None] = mapped_column(HASH_64, nullable=True)
+    command_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    node_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("node_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    confirmed_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    adopted_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
+    )
+    review_decision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("human_review_decisions.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 Index(
     "idx_experiment_branches_project",
     ExperimentBranch.__table__.c.project_id,
     ExperimentBranch.__table__.c.created_at,
+)
+Index(
+    "idx_repair_requests_project_shot",
+    RepairRequest.__table__.c.project_id,
+    RepairRequest.__table__.c.shot_id,
+    RepairRequest.__table__.c.created_at,
+)
+Index(
+    "idx_repair_steps_request",
+    RepairStep.__table__.c.repair_request_id,
+    RepairStep.__table__.c.ordinal,
 )
 Index("ix_shot_reference_bindings_shot", ShotReferenceBinding.__table__.c.shot_id)
 Index("ix_shot_experiments_shot", ShotExperiment.__table__.c.shot_id)

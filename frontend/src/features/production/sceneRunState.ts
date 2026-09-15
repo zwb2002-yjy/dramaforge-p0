@@ -4,6 +4,7 @@ type TraceRow = {
   node_run_id?: unknown;
   node_key?: unknown;
   status?: unknown;
+  operation_outcome_unknown?: unknown;
 };
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "cancel_requested"]);
@@ -52,4 +53,16 @@ export function activeStageStatus(trace: unknown[], stage: ShotExecutionStage): 
   if (!row) return null;
   const status = normalizedStatus(row);
   return ACTIVE_STATUSES.has(status) ? status : null;
+}
+
+/**
+ * Whether the latest run of this stage ended with an unknown provider outcome.
+ *
+ * `unknown_submission` means the request may already have been billed, so the
+ * UI must ask the user to reconcile instead of offering a blind retry.
+ */
+export function stageOutcomeUnknown(trace: unknown[], stage: ShotExecutionStage): boolean {
+  const nodeKey = stage === "image_keyframe" ? "keyframe" : "video";
+  const row = latestEffectiveTraceRows(trace).find((candidate) => candidate.node_key === nodeKey);
+  return row?.operation_outcome_unknown === true;
 }

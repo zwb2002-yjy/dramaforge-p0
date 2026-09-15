@@ -15,6 +15,7 @@ from pathlib import Path
 
 import asyncpg
 import pytest
+from pg_support import alembic_head
 from sqlalchemy import create_engine, text
 
 BACKEND = Path(__file__).resolve().parents[2]
@@ -345,7 +346,7 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
         with engine.connect() as conn:
             assert (
                 conn.execute(text("select version_num from alembic_version")).scalar_one()
-                == "20260910_0066"
+                == alembic_head()
             )
             reupgraded = conn.execute(
                 text(

@@ -21,7 +21,12 @@ from uuid import uuid4
 import httpx
 
 REPO = Path(__file__).resolve().parents[1]
-WORKSPACE = "c00b1899-b4ac-46c7-b4c7-25a230e9ebe2"
+# The acceptance workspace. A candidate built from a fresh database owns exactly
+# one workspace, whose id is generated during bootstrap and therefore cannot be a
+# constant; the recorded default is kept for the environment that already has it.
+WORKSPACE = os.environ.get(
+    "DRAMAFORGE_PROOF_WORKSPACE", "c00b1899-b4ac-46c7-b4c7-25a230e9ebe2"
+)
 SECRET_KEYS = {
     "authorization",
     "cookie",
@@ -323,6 +328,145 @@ class Acceptance:
             in {"image.generate", "keyframe.generate", "video.generate"}
         ]
 
+    def record_stage_decision(self, label, project_id, shot_id, artifact_id, review_kind, stage):
+        """Record the human decision that admits one Formal selection.
+
+        A staging gate separates "the machine produced evidence" from "a person
+        accepted it", so the acceptance run has to make that call explicitly
+        instead of letting the selection through. The review run it binds to is
+        the one the pipeline queued for this media stage and the read model
+        reports, never an id invented here.
+
+        The review is queued with the media run and finishes just after it, so the
+        evidence is polled rather than demanded: a person opening the review page
+        sees the same wait.
+        """
+        deadline = time.monotonic() + 180
+        summary = {}
+        while True:
+            summary = self.read(
+                f"/projects/{project_id}/shots/{shot_id}/review-summary"
+                f"?artifact_id={artifact_id}&review_kind={review_kind}&stage={stage}"
+            )
+            if summary.get("decision") == "approved" and summary.get("applies"):
+                return sanitized(summary)
+            if summary.get("review_node_run_id") or time.monotonic() >= deadline:
+                break
+            time.sleep(3)
+        run_id = summary.get("review_node_run_id")
+        if not run_id:
+            raise RuntimeError(
+                f"{label} has no {review_kind} review evidence for artifact {artifact_id} "
+                f"after 180s (machine_status={summary.get('machine_status')}); "
+                "the pipeline did not produce the review the gate requires"
+            )
+        return sanitized(
+            self.once(
+                f"{label}:decision:{review_kind}:{artifact_id}",
+                "POST",
+                f"/projects/{project_id}/shots/{shot_id}/review-decisions",
+                {
+                    "artifact_id": artifact_id,
+                    "review_node_run_id": run_id,
+                    "review_kind": review_kind,
+                    "decision": "approved",
+                    "reason": f"R7 人工审片（{review_kind}）：该素材可用，批准进入下一步。",
+                },
+                command_key=f"r7:{self.state['run_key']}:decision:{review_kind}:{artifact_id}",
+            )
+        )
+
+    def record_delivery_decisions(
+        self, label, project_id, timeline, *, edit_session_id, timeline_version
+    ):
+        """Apply the delivery gate the way the product does: prepare → decide → render.
+
+        Final Film export consumes the Formal video Artifact frozen for each clip,
+        and the frozen Artifact must carry an admitted human decision. ``prepare``
+        (already run at this point) is what materializes the zero-cost
+        ``video_drift_review`` evidence, so the decision has real evidence to bind
+        to; this method records exactly that decision instead of bypassing it.
+
+        It also proves the gate blocks, but only while it should: the refusal probe
+        runs before any decision is recorded and is skipped once every clip is
+        already approved, because at that point a queued render is the correct
+        answer, not a gate failure.
+        """
+        if self.state.get(label + ":delivery_decisions"):
+            return
+        clips = timeline.get("clips")
+        if not isinstance(clips, list) or not clips:
+            raise RuntimeError(f"{label} saved Timeline has no clips to approve")
+        summaries = {
+            str(clip["artifact_id"]): self.read(
+                f"/projects/{project_id}/shots/{clip['shot_id']}/review-summary"
+                f"?artifact_id={clip['artifact_id']}&review_kind=video_drift"
+                "&stage=formal_video"
+            )
+            for clip in clips
+        }
+        unapproved = [
+            artifact_id
+            for artifact_id, summary in summaries.items()
+            if not (summary.get("decision") == "approved" and summary.get("applies"))
+        ]
+        if unapproved and not self.state.get(label + ":delivery_gate_probe"):
+            blocked = self.expect_error_once(
+                f"{label}:delivery-blocked-without-decision",
+                "POST",
+                f"/projects/{project_id}/final-film/render",
+                {
+                    "edit_session_id": edit_session_id,
+                    "expected_timeline_version": timeline_version,
+                    "name": "R7 delivery gate probe",
+                },
+                expected_statuses={422},
+            )
+            details = blocked.get("details") if isinstance(blocked, dict) else None
+            code = (details or {}).get("code") if isinstance(details, dict) else None
+            if code != "DELIVERY_REVIEW_REQUIRED":
+                raise RuntimeError(
+                    f"{label} delivery gate returned {code!r}; expected DELIVERY_REVIEW_REQUIRED"
+                )
+            self.state[label + ":delivery_gate_probe"] = sanitized(blocked)
+            self.state[label + ":delivery_gate_probe_skipped"] = False
+            self.save()
+        elif not unapproved:
+            self.state[label + ":delivery_gate_probe_skipped"] = (
+                "every frozen clip already carries an admitted decision"
+            )
+            self.save()
+        decisions = {}
+        for clip in clips:
+            shot_id = str(clip["shot_id"])
+            artifact_id = str(clip["artifact_id"])
+            summary = summaries[artifact_id]
+            if summary.get("decision") == "approved" and summary.get("applies"):
+                decisions[artifact_id] = sanitized(summary)
+                continue
+            run_id = summary.get("review_node_run_id")
+            if not run_id:
+                raise RuntimeError(
+                    f"{label} shot {shot_id} has no video_drift review evidence after prepare"
+                )
+            decision = self.once(
+                f"{label}:decision:{artifact_id}",
+                "POST",
+                f"/projects/{project_id}/shots/{shot_id}/review-decisions",
+                {
+                    "artifact_id": artifact_id,
+                    "review_node_run_id": run_id,
+                    "review_kind": "video_drift",
+                    "decision": "approved",
+                    "reason": "R7 人工审片：成片素材可用，批准进入交付。",
+                },
+                command_key=f"r7:{self.state['run_key']}:decision:{artifact_id}",
+            )
+            decisions[artifact_id] = sanitized(decision)
+        self.state[label + ":delivery_decisions"] = decisions
+        self.state["assertions"][label + ":delivery_admission"] = "PASS"
+        self.save()
+
     def login(self):
         response = self.client.post(
             "/auth/login",
@@ -444,6 +588,23 @@ class Acceptance:
         self.state["assertions"]["preflight"] = "PASS"
         self.save()
 
+    def _repair_key(self, tag: str, project_id, shot_id) -> str:
+        """One stable operation key per explicit repair attempt, kept in the state.
+
+        A repair request that already dispatched its first step sits at its human
+        gate; reusing its key is answered with REPAIR_STEP_REQUIRES_REVIEW, which is
+        correct but is not a retry of the same operation. The key is generated once
+        and stored, so a resumed run repeats the same operation instead of starting
+        a new one.
+        """
+        slot = f"repair_key:{tag}:{project_id}:{shot_id}"
+        key = self.state.get(slot)
+        if not isinstance(key, str) or not key:
+            key = f"r7:{self.state['run_key']}:{tag}:{uuid4().hex[:8]}"
+            self.state[slot] = key
+            self.save()
+        return key
+
     def story(self):
         template = self.state["projects"]["template_auto"]["id"]
         generated = self.once(
@@ -457,12 +618,21 @@ class Acceptance:
             },
             paid=True,
         )
-        operations = generated["proposal"]["operations"]
+        # Read the proposal back before judging it. The generation response's
+        # embedded diff has been observed to arrive empty while the same proposal
+        # reads back complete, and the existing read path is what the review UI
+        # consumes, so it -- not the write response -- is the acceptance fact.
+        proposal_id = generated["proposal"]["id"]
+        read_back = self.read(
+            f"/projects/{template}/story/proposals/{proposal_id}"
+        )
+        operations = read_back.get("operations") or generated["proposal"]["operations"]
         shot_ops = [op for op in operations if op["command"] == "story.upsert_shot"]
         if len(shot_ops) < 4:
             raise RuntimeError(
                 "Generated story needs review: insufficient shots for trimmed 15–30s acceptance"
             )
+        generated = {**generated, "proposal": {**generated["proposal"], **read_back}}
         rejected = shot_ops[-1]["id"]
         applied = self.once(
             "template:story-apply",
@@ -696,6 +866,17 @@ class Acceptance:
                             skip_shot = True
                             break
                         raise
+                    # Selecting the Formal version is a person's call: the
+                    # pipeline queued this stage's review with the media run, so
+                    # the decision binds to that evidence and the gate admits it.
+                    self.record_stage_decision(
+                        f"{label}:{sid}:{stage}",
+                        pid,
+                        sid,
+                        run["result_artifact_id"],
+                        "identity" if purpose == "keyframe" else "video_drift",
+                        "formal_keyframe" if purpose == "keyframe" else "formal_video",
+                    )
                     self.once(
                         prefix + ":formal",
                         "POST",
@@ -924,6 +1105,13 @@ class Acceptance:
             )
             for run_id in prepared["node_run_ids"]:
                 self.wait_run(pid, run_id)
+            self.record_delivery_decisions(
+                label,
+                pid,
+                saved["timeline"],
+                edit_session_id=eid,
+                timeline_version=saved["version"],
+            )
             job = self.once(
                 label + ":render",
                 "POST",
@@ -1007,6 +1195,13 @@ class Acceptance:
         )
         for run_id in prepared["node_run_ids"]:
             self.wait_run(project_id, run_id)
+        self.record_delivery_decisions(
+            prefix,
+            project_id,
+            saved["timeline"],
+            edit_session_id=edit["id"],
+            timeline_version=saved["version"],
+        )
         job = self.once(
             prefix + ":render",
             "POST",
@@ -1070,13 +1265,30 @@ class Acceptance:
             "repair_options", []
         ):
             raise RuntimeError("Review annotation did not produce the expected repair plan")
+        # A staged repair's first step may be a media action only after the clip's
+        # own video_drift evidence has a human decision; `video_review` is the
+        # gate that stops the chain (REPAIR_STEP_REQUIRES_REVIEW). Make that call
+        # here, exactly as a reviewer would before asking for a repair.
+        self.record_stage_decision(
+            "review:formal-video",
+            project_id,
+            shot_id,
+            shot["formal_video_artifact_id"],
+            "video_drift",
+            "formal_video",
+        )
         repair = self.once(
             "review:repair-submit",
             "POST",
             f"/projects/{project_id}/shots/{shot_id}/repair",
             {
                 "repair_option": "rerun_video",
-                "idempotency_key": f"r7:{self.state['run_key']}:repair-video",
+                # A repair request whose first step already ran is at its human
+                # gate, so re-submitting the same operation key would be answered
+                # with REPAIR_STEP_REQUIRES_REVIEW (correctly). Each explicit
+                # attempt therefore carries its own key, chosen once and kept in
+                # the state so a resume reuses it.
+                "idempotency_key": self._repair_key("review-video", project_id, shot_id),
             },
             paid=True,
         )
@@ -1289,6 +1501,13 @@ class Acceptance:
         )
         for run_id in prepared["node_run_ids"]:
             self.wait_run(free_id, run_id)
+        self.record_delivery_decisions(
+            "free_assist:rerender",
+            free_id,
+            saved["timeline"],
+            edit_session_id=saved["id"],
+            timeline_version=saved["version"],
+        )
         rerender = self.once(
             "free_assist:rerender-film",
             "POST",

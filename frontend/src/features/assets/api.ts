@@ -1,6 +1,6 @@
 /** Phase 2 feature-local API client (kept out of the shared lib/api.ts). */
 
-import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type AssetRead = components["schemas"]["AssetRead"];
@@ -9,7 +9,7 @@ export type AssetVersionRead = components["schemas"]["AssetVersionRead"];
 export type AssetCardRead = components["schemas"]["AssetCardRead"];
 
 export function fetchAssetTags(projectId: string): Promise<AssetTagRead[]> {
-  return apiGet<AssetTagRead[]>(`/api/v1/projects/${projectId}/asset-tags`);
+  return apiGetList<AssetTagRead>(`/api/v1/projects/${projectId}/asset-tags`);
 }
 
 export async function createAssetTag(projectId: string, name: string): Promise<AssetTagRead> {
@@ -87,11 +87,85 @@ export function fetchAssetCard(projectId: string, assetId: string): Promise<Asse
   return apiGet<AssetCardRead>(`/api/v1/projects/${projectId}/assets/${assetId}/card`);
 }
 
+/** Reference roles the backend accepts for each asset kind (canonical vocabulary). */
+export const ASSET_KIND_ROLES: Record<string, string[]> = {
+  character: [
+    "front_face",
+    "three_quarter",
+    "profile",
+    "half_body",
+    "full_body",
+    "expression",
+    "outfit",
+  ],
+  scene: ["layout_reference", "lighting_reference", "style_reference", "scene_reference"],
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  front_face: "正面",
+  three_quarter: "四分之三侧面",
+  profile: "侧面",
+  half_body: "半身",
+  full_body: "全身",
+  expression: "表情",
+  outfit: "服装",
+  layout_reference: "空间布局",
+  lighting_reference: "光线",
+  style_reference: "风格",
+  scene_reference: "场景参考",
+  primary: "主参考",
+};
+
+/** Chinese label for one canonical reference role. */
+export function roleLabel(role: string): string {
+  return ROLE_LABELS[role] ?? role;
+}
+
+export function rolesForAssetKind(kind: string): string[] {
+  return ASSET_KIND_ROLES[kind] ?? ["primary"];
+}
+
+/**
+ * Explicitly add a generated Artifact as an asset card.
+ *
+ * The request key makes a retried submission (lost response, double click)
+ * return the original card instead of creating a second one; a genuinely new
+ * operation must use a new key.
+ */
+export async function createAssetFromArtifact(
+  projectId: string,
+  input: {
+    kind: string;
+    name: string;
+    artifact_id: string;
+    description?: string;
+    metadata?: Record<string, unknown>;
+    reference_role: string;
+  },
+  requestKey: string,
+): Promise<AssetRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<AssetRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/assets/from-artifact`,
+    {
+      kind: input.kind,
+      name: input.name,
+      artifact_id: input.artifact_id,
+      description: input.description ?? "",
+      metadata: input.metadata ?? {},
+      reference_role: input.reference_role,
+    },
+    csrf,
+    { "Idempotency-Key": requestKey },
+  );
+}
+
 export function fetchAssetVersions(
   projectId: string,
   assetId: string,
 ): Promise<AssetVersionRead[]> {
-  return apiGet<AssetVersionRead[]>(`/api/v1/projects/${projectId}/assets/${assetId}/versions`);
+  return apiGetList<AssetVersionRead>(`/api/v1/projects/${projectId}/assets/${assetId}/versions`);
 }
 
 export type ShotBindingRead = components["schemas"]["app__api__v1__references__BindingRead"];
@@ -104,7 +178,7 @@ export type ResolvedShotReference = components["schemas"]["ResolvedReferenceRead
 };
 
 export function fetchShotReferences(projectId: string, shotId: string): Promise<ShotBindingRead[]> {
-  return apiGet<ShotBindingRead[]>(`/api/v1/projects/${projectId}/shots/${shotId}/references`);
+  return apiGetList<ShotBindingRead>(`/api/v1/projects/${projectId}/shots/${shotId}/references`);
 }
 
 export async function createShotReference(

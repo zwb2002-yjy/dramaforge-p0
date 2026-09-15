@@ -1,12 +1,18 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { queryKeys } from "../../lib/queryKeys";
-import { activeStageStatus } from "../production/sceneRunState";
+import { ApiError } from "../../lib/api";
+import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
+import { nodeRunStatusLabel } from "../../lib/runLabels";
+import { activeStageStatus, stageOutcomeUnknown } from "../production/sceneRunState";
+import { fetchDirectorCapabilities } from "../director/api";
 import {
   delegateShotExecutionToDirector,
-  dispatchShotExecution,
+  fetchShotExecutionReceipt,
   previewShotExecution,
+  shotExecutionIdempotencyKey,
+  submitShotExecution,
   type PreparedShotExecution,
   type ShotExecutionRead,
   type ShotExecutionInput,
@@ -15,6 +21,12 @@ import {
   type ShotExecutionReference,
   type ShotLite,
 } from "./api";
+import {
+  clearProductionOperation,
+  productionOperationScope,
+  readProductionOperation,
+  recordProductionOperation,
+} from "./productionOperationStore";
 
 type ShotProductionActionsProps = {
   projectId: string;
@@ -51,24 +63,39 @@ const STAGE_MODE: Record<ShotExecutionStage, string> = {
   video: "first_frame",
 };
 
-function idempotencyKey(projectId: string, shotId: string, stage: ShotExecutionStage): string {
-  const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`;
-  // NodeRun uniqueness is already scoped by Project; repeating both UUIDs in
-  // the header made the server's workbench prefix exceed VARCHAR(160).
-  void projectId;
-  void shotId;
-  return `shot-production:${stage}:${nonce}`;
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Terminal NodeRun statuses: no further receipt polling is useful. */
+const TERMINAL_EXECUTION_STATUSES = new Set([
+  "completed",
+  "cached",
+  "completed_after_cancel",
+  "failed",
+  "blocked",
+  "cancelled",
+  "timed_out",
+  "skipped",
+  "rejected",
+]);
+
+/**
+ * Clear a recorded operation when the submission provably ended.
+ *
+ * A rejection from the server (4xx) means no command was accepted; a terminal
+ * NodeRun status means the command already finished. Anything else (network
+ * failure, 5xx, timeout) leaves the record in place, because the operation may
+ * have reached the server and reopening the page is the only way to adopt it.
+ */
+function submissionProvablyEnded(error: unknown, status?: string): boolean {
+  if (status && TERMINAL_EXECUTION_STATUSES.has(status)) return true;
+  if (error instanceof ApiError && error.status >= 400 && error.status < 500) return true;
+  return false;
+}
+
 function serverStatusLabel(status: string): string {
-  if (status === "queued") return "已排队";
-  if (status === "running") return "处理中";
-  if (status === "cancel_requested") return "取消中";
-  return status;
+  return nodeRunStatusLabel(status);
 }
 
 function planDelivery(preview: ShotExecutionPlanRead): "exact" | "approximate" | "unsupported" {
@@ -116,6 +143,20 @@ export function ShotProductionActions({
 }: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
   const delegationDecisionIds = useRef(new Map<string, string>());
+  // Deployment-level engine facts. A failed read must not hide the manual path:
+  // manual generation never depends on the Director runtime.
+  const capabilities = useQuery({
+    queryKey: queryKeys.director.capabilities(projectId),
+    queryFn: () => fetchDirectorCapabilities(projectId),
+    enabled: Boolean(projectId) && projectId !== "demo",
+    retry: false,
+  });
+  const directorCapabilities = capabilities.data ?? null;
+  // Only an explicit `runtime_turns_available === false` closes the AUTO entry
+  // point. A failed, in-flight or malformed read must not disable it: the server
+  // re-validates every submission anyway, and a read model must never remove a
+  // working action.
+  const directorDelegateBlocked = directorCapabilities?.runtime_turns_available === false;
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
   const [displayedPlan, setDisplayedPlan] = useState<ShotExecutionPlanRead | null>(null);
   const [pendingApproximation, setPendingApproximation] = useState<PreparedShotExecution | null>(
@@ -129,6 +170,39 @@ export function ShotProductionActions({
     setPendingApproximation(null);
     setPlanFailure(null);
   }, [shot.id]);
+
+  /**
+   * Adopt a submission this browser already sent.
+   *
+   * A reload (or a lost response followed by reopening the page) keeps the
+   * command key in storage, so the UI asks the server for that same command's
+   * receipt: an operation that did reach the server is shown as running instead
+   * of being submitted a second time. A 404 answer only means "no committed
+   * receipt yet" and never triggers a new key.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const stages: ShotExecutionStage[] = ["image_keyframe", "video"];
+    for (const stage of stages) {
+      const scope = productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage);
+      const operation = readProductionOperation(scope);
+      if (!operation) continue;
+      void fetchShotExecutionReceipt(projectId, shot.id, stage, operation.operationKey)
+        .then((receipt) => {
+          if (cancelled || !receipt) return;
+          if (TERMINAL_EXECUTION_STATUSES.has(receipt.status)) {
+            clearProductionOperation(scope);
+          }
+          setFeedback({ kind: "success", stage, message: receipt.status });
+        })
+        .catch(() => {
+          // Recovery stays best effort; the action buttons surface real errors.
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, shot.id]);
 
   function executionInput(stage: ShotExecutionStage): ShotExecutionInput {
     const configuredPrompt =
@@ -183,10 +257,24 @@ export function ShotProductionActions({
       const prepared: PreparedShotExecution = {
         input,
         preview,
-        idempotencyKey: idempotencyKey(projectId, shot.id, stage),
+        // Derived from the frozen plan, never from a random nonce: a retry of
+        // this exact plan keeps one command identity instead of billing again.
+        idempotencyKey: shotExecutionIdempotencyKey(shot.id, preview.plan_fingerprint),
       };
       if (planDelivery(preview) === "approximate") return { stage, prepared };
-      const execution = await dispatchShotExecution(projectId, shot.id, prepared);
+      // Persist the operation identity before the request leaves the browser so
+      // a reload can still adopt this same command.
+      recordProductionOperation(
+        productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
+        {
+          operationKey: prepared.idempotencyKey,
+          planFingerprint: prepared.preview.plan_fingerprint,
+          stage,
+          recordedAt: new Date().toISOString(),
+          nodeRunId: null,
+        },
+      );
+      const execution = await submitShotExecution(projectId, shot.id, prepared);
       return { stage, prepared, execution };
     },
     onMutate: (stage) => {
@@ -202,6 +290,11 @@ export function ShotProductionActions({
         return;
       }
       setPendingApproximation(null);
+      if (submissionProvablyEnded(null, execution.status)) {
+        clearProductionOperation(
+          productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
+        );
+      }
       setFeedback({ kind: "success", stage, message: execution.status });
       await refreshAfterExecution(execution);
     },
@@ -210,6 +303,11 @@ export function ShotProductionActions({
       // guessed "no formal keyframe" state).  In particular, a video request
       // without a formal keyframe is rejected by the Workbench plan builder.
       const message = errorMessage(error);
+      if (submissionProvablyEnded(error)) {
+        clearProductionOperation(
+          productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
+        );
+      }
       setDisplayedPlan(null);
       setPendingApproximation(null);
       setPlanFailure(/unsupported|capability gap/i.test(message) ? "unsupported" : null);
@@ -227,28 +325,58 @@ export function ShotProductionActions({
       if (stablePlanIdentity(acceptedPreview) !== stablePlanIdentity(prepared.preview)) {
         throw new Error("模型、引用或创作意图在确认期间已变化，请重新生成并确认计划。");
       }
-      return {
-        prepared: {
-          ...prepared,
-          input: acceptedInput,
-          preview: acceptedPreview,
+      // The accepted plan is a different frozen plan, so it carries its own
+      // command identity; the discovery preview is never submitted.
+      const accepted: PreparedShotExecution = {
+        ...prepared,
+        input: acceptedInput,
+        preview: acceptedPreview,
+        idempotencyKey: shotExecutionIdempotencyKey(shot.id, acceptedPreview.plan_fingerprint),
+      };
+      recordProductionOperation(
+        productionOperationScope(
+          getSelectedWorkspaceId(),
+          projectId,
+          shot.id,
+          prepared.input.stage,
+        ),
+        {
+          operationKey: accepted.idempotencyKey,
+          planFingerprint: accepted.preview.plan_fingerprint,
+          stage: prepared.input.stage,
+          recordedAt: new Date().toISOString(),
+          nodeRunId: null,
         },
-        execution: await dispatchShotExecution(projectId, shot.id, {
-          ...prepared,
-          input: acceptedInput,
-          preview: acceptedPreview,
-        }),
+      );
+      return {
+        prepared: accepted,
+        execution: await submitShotExecution(projectId, shot.id, accepted),
       };
     },
     onSuccess: async ({ prepared, execution }) => {
       setDisplayedPlan(prepared.preview);
       setPendingApproximation(null);
       setPlanFailure(null);
+      if (submissionProvablyEnded(null, execution.status)) {
+        clearProductionOperation(
+          productionOperationScope(
+            getSelectedWorkspaceId(),
+            projectId,
+            shot.id,
+            prepared.input.stage,
+          ),
+        );
+      }
       setFeedback({ kind: "success", stage: prepared.input.stage, message: execution.status });
       await refreshAfterExecution(execution);
     },
     onError: (error) => {
       const stage = pendingApproximation?.input.stage ?? "image_keyframe";
+      if (submissionProvablyEnded(error)) {
+        clearProductionOperation(
+          productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
+        );
+      }
       setPendingApproximation(null);
       setFeedback({ kind: "error", stage, message: errorMessage(error) });
     },
@@ -257,6 +385,10 @@ export function ShotProductionActions({
   const delegate = useMutation({
     mutationFn: async (stage: ShotExecutionStage) => {
       if (dirty) throw new Error("请先保存镜头设计，再委托导演执行。");
+      if (directorDelegateBlocked) {
+        // The server re-validates; this only avoids offering a guaranteed 409.
+        throw new Error(directorCapabilities?.blocker_message ?? "当前部署未启用自动导演运行时。");
+      }
       const input = executionInput(stage);
       const preview = await previewShotExecution(projectId, shot.id, input);
       if (planDelivery(preview) !== "exact") {
@@ -303,12 +435,16 @@ export function ShotProductionActions({
         : null;
   const keyframeStatus = activeStageStatus(trace, "image_keyframe");
   const videoStatus = activeStageStatus(trace, "video");
+  const keyframeOutcomeUnknown = stageOutcomeUnknown(trace, "image_keyframe");
+  const videoOutcomeUnknown = stageOutcomeUnknown(trace, "video");
   const delivery = displayedPlan ? planDelivery(displayedPlan) : planFailure;
   const plannedReferences = displayedPlan?.plan.planned_references ?? [];
   const resolvedModel = displayedPlan?.plan.resolved_model?.resolved_model_id ?? "未解析";
 
   const buttonLabel = (stage: ShotExecutionStage, serverStatus: string | null) => {
     const label = STAGE_LABEL[stage];
+    if (stage === "image_keyframe" && keyframeOutcomeUnknown) return `${label}提交结果待对账`;
+    if (stage === "video" && videoOutcomeUnknown) return `${label}提交结果待对账`;
     if (activeStage === stage) return `${label}请求提交中…`;
     if (serverStatus === "queued") return `${label}已排队`;
     if (serverStatus === "cancel_requested") return `${label}取消中…`;
@@ -347,6 +483,7 @@ export function ShotProductionActions({
             confirmApproximation.isPending ||
             Boolean(pendingApproximation) ||
             Boolean(keyframeStatus) ||
+            keyframeOutcomeUnknown ||
             !referencesReady ||
             dirty
           }
@@ -363,6 +500,7 @@ export function ShotProductionActions({
             confirmApproximation.isPending ||
             Boolean(pendingApproximation) ||
             Boolean(videoStatus) ||
+            videoOutcomeUnknown ||
             !referencesReady ||
             dirty
           }
@@ -383,6 +521,8 @@ export function ShotProductionActions({
             confirmApproximation.isPending ||
             Boolean(pendingApproximation) ||
             Boolean(keyframeStatus) ||
+            keyframeOutcomeUnknown ||
+            directorDelegateBlocked ||
             !referencesReady ||
             dirty
           }
@@ -400,6 +540,8 @@ export function ShotProductionActions({
             confirmApproximation.isPending ||
             Boolean(pendingApproximation) ||
             Boolean(videoStatus) ||
+            videoOutcomeUnknown ||
+            directorDelegateBlocked ||
             !referencesReady ||
             dirty
           }
@@ -407,6 +549,16 @@ export function ShotProductionActions({
           导演执行视频（AUTO）
         </button>
       </div>
+
+      {directorDelegateBlocked && (
+        <p
+          className="qc-shot-production-hint"
+          data-testid="shot-production-director-blocked"
+          role="status"
+        >
+          {directorCapabilities?.blocker_message}
+        </p>
+      )}
 
       <p className="qc-shot-production-hint">
         视频只使用后端确认的正式关键帧；未选择时由后端拒绝，不会自动改用其他图片。
@@ -419,6 +571,16 @@ export function ShotProductionActions({
       {(keyframeStatus || videoStatus) && (
         <p className="qc-shot-production-hint" data-testid="shot-production-running" role="status">
           服务端任务仍在执行；页面会自动同步，当前阶段不会重复提交。
+        </p>
+      )}
+      {(keyframeOutcomeUnknown || videoOutcomeUnknown) && (
+        <p
+          className="qc-shot-production-hint"
+          data-testid="shot-production-outcome-unknown"
+          role="status"
+        >
+          服务端未能确认上一次提交是否已被 Provider 接受，该阶段已暂停提交。请先按原操作键对账，
+          确认结果前不要创建新的生成请求。
         </p>
       )}
       {dirty && (
@@ -450,6 +612,26 @@ export function ShotProductionActions({
                   {(gap.controls ?? []).length ? `（${(gap.controls ?? []).join("、")}）` : ""}
                 </p>
               ))}
+              {(displayedPlan.plan.pending_suggestions ?? []).length > 0 && (
+                <div
+                  className="qc-shot-production-hint"
+                  data-testid="shot-execution-plan-suggestions"
+                  role="note"
+                >
+                  <p>
+                    <strong>建议（尚未生效）：</strong>
+                    以下内容来自项目创作档案或模板推荐，本次执行不会使用它们，也不作为 Provider
+                    硬参数下发。
+                  </p>
+                  <ul>
+                    {(displayedPlan.plan.pending_suggestions ?? []).map((suggestion) => (
+                      <li key={suggestion.key} data-testid={`plan-suggestion-${suggestion.key}`}>
+                        {suggestion.label}：{suggestion.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </>
           )}
           {pendingApproximation && (

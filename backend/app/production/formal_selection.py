@@ -224,6 +224,44 @@ async def _is_keyframe_candidate(
     ) is not None
 
 
+async def require_stage_admission(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    shot_id: UUID,
+    artifact_id: UUID,
+    stage: str,
+) -> None:
+    """Fail closed when a stage has no applicable human approval for this Artifact.
+
+    Callers opt in explicitly. The product entry points (the Workbench formal
+    selection API) enforce it; migration fixtures and pre-existing data paths
+    stay ungated until they are deliberately moved onto the gate.
+    """
+    from app.production.review_gate import evaluate_artifact_admission
+
+    admission = await evaluate_artifact_admission(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=artifact_id,
+        stage=stage,
+    )
+    if admission.allowed:
+        return
+    reason = admission.blocker or "REVIEW_DECISION_MISSING"
+    raise ValidationAppError(
+        "the current artifact has not been approved by a human review decision",
+        details={
+            "code": "REVIEW_APPROVAL_REQUIRED",
+            "reason": reason,
+            "stage": stage,
+            "review_kind": admission.review_kind,
+            "artifact_id": str(artifact_id),
+        },
+    )
+
+
 async def set_formal_keyframe(
     session: AsyncSession,
     *,
@@ -231,6 +269,7 @@ async def set_formal_keyframe(
     shot_id: UUID,
     artifact_id: UUID,
     expected_shot_version: int | None = None,
+    require_review_approval: bool = False,
 ) -> Shot:
     """Validate and set ``Shot.formal_keyframe_artifact_id`` (03 §38)."""
     shot = await session.scalar(
@@ -258,6 +297,14 @@ async def set_formal_keyframe(
         raise ValidationAppError(
             "artifact is not a keyframe result of this shot",
             details={"code": "NOT_KEYFRAME_CANDIDATE"},
+        )
+    if require_review_approval:
+        await require_stage_admission(
+            session,
+            project_id=project_id,
+            shot_id=shot_id,
+            artifact_id=artifact_id,
+            stage="formal_keyframe",
         )
     shot.formal_keyframe_artifact_id = artifact_id
     shot.version = (shot.version or 1) + 1
@@ -302,6 +349,7 @@ async def set_formal_video(
     shot_id: UUID,
     artifact_id: UUID,
     expected_shot_version: int | None = None,
+    require_review_approval: bool = False,
 ) -> Shot:
     """Validate and set ``Shot.formal_video_artifact_id`` (03 §39)."""
     shot = await session.scalar(
@@ -332,6 +380,14 @@ async def set_formal_video(
         raise ValidationAppError(
             "artifact is not a video result of this shot",
             details={"code": "NOT_VIDEO_CANDIDATE"},
+        )
+    if require_review_approval:
+        await require_stage_admission(
+            session,
+            project_id=project_id,
+            shot_id=shot_id,
+            artifact_id=artifact_id,
+            stage="formal_video",
         )
     shot.formal_video_artifact_id = artifact_id
     shot.version = (shot.version or 1) + 1

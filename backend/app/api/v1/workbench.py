@@ -26,7 +26,12 @@ from app.production.application.commands import (
 from app.production.application.events import append_production_notice
 from app.production.execution_plan import WorkbenchExecutionPlan
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
-from app.production.repair_service import RepairPlanRead, RepairService
+from app.production.repair_service import (
+    RepairPlanRead,
+    RepairRequestRead,
+    RepairService,
+    record_repair_adoption,
+)
 from app.production.trace import ExecutionTraceRead, build_execution_trace
 from app.production.workbench_execution import (
     WorkbenchExecutionService,
@@ -262,7 +267,11 @@ async def set_shot_formal_keyframe(
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> FormalKeyframeRead:
-    """Mark one keyframe artifact as the shot's formal keyframe (03 §38)."""
+    """Mark one keyframe artifact as the shot's formal keyframe (03 §38).
+
+    The product entry point enforces human review admission: a candidate may
+    only become Formal once a stored human decision approves that exact Artifact.
+    """
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     shot = await set_formal_keyframe(
         session,
@@ -270,11 +279,19 @@ async def set_shot_formal_keyframe(
         shot_id=shot_id,
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
+        require_review_approval=True,
     )
     await append_production_notice(
         session, project_id=project.id, actor_id=user.id,
         notice=FormalSelected(shot_id=shot_id, shot_version=shot.version,
                               artifact_id=body.artifact_id, stage="image_keyframe"),
+    )
+    # If a repair produced this candidate, record that the user adopted it.
+    await record_repair_adoption(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=body.artifact_id,
     )
     await session.commit()
     assert shot.formal_keyframe_artifact_id is not None
@@ -308,7 +325,11 @@ async def set_shot_formal_video(
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> FormalVideoRead:
-    """Mark one video artifact as the shot's formal video (03 §39)."""
+    """Mark one video artifact as the shot's formal video (03 §39).
+
+    Same admission rule as the keyframe entry point: the human decision must be
+    about this exact Artifact.
+    """
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     shot = await set_formal_video(
         session,
@@ -316,11 +337,18 @@ async def set_shot_formal_video(
         shot_id=shot_id,
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
+        require_review_approval=True,
     )
     await append_production_notice(
         session, project_id=project.id, actor_id=user.id,
         notice=FormalSelected(shot_id=shot_id, shot_version=shot.version,
                               artifact_id=body.artifact_id, stage="video"),
+    )
+    await record_repair_adoption(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=body.artifact_id,
     )
     await session.commit()
     assert shot.formal_video_artifact_id is not None
@@ -353,12 +381,29 @@ async def get_execution_trace(
 class RepairExecuteBody(BaseModel):
     repair_option: Literal["rerun_video", "regenerate_keyframe_then_video"]
     idempotency_key: str = Field(min_length=1, max_length=160)
+    # Optional: confirm a previously previewed plan. When omitted the legacy
+    # single-shot behaviour is kept for callers that predate staged repairs.
+    plan_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class RepairExecuteRead(BaseModel):
     node_run_id: UUID
     status: str
     repair_option: str
+    repair_id: UUID | None = None
+    step_ordinal: int | None = None
+    next_action: str | None = None
+
+
+class RepairCreateBody(BaseModel):
+    repair_option: Literal["rerun_video", "regenerate_keyframe_then_video"]
+    plan_hash: str = Field(min_length=64, max_length=64)
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+
+class RepairStepExecuteBody(BaseModel):
+    expected_plan_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 @router.post(
@@ -380,6 +425,107 @@ async def get_repair_plan(
 
 
 @router.post(
+    "/projects/{project_id}/shots/{shot_id}/repairs",
+    response_model=RepairRequestRead,
+    status_code=201,
+)
+async def create_repair(
+    project_id: UUID,
+    shot_id: UUID,
+    body: RepairCreateBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> RepairRequestRead:
+    """Persist a confirmed repair intent against the previewed plan hash."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    service = RepairService(session)
+    request = await service.create_repair(
+        project=project,
+        user=user,
+        shot_id=shot_id,
+        option=body.repair_option,
+        plan_hash=body.plan_hash,
+        request_key=body.idempotency_key,
+    )
+    await session.commit()
+    return await service.read_repair(
+        project=project, shot_id=shot_id, repair_id=request.id
+    )
+
+
+@router.get(
+    "/projects/{project_id}/shots/{shot_id}/repairs",
+    response_model=list[RepairRequestRead],
+)
+async def list_repairs(
+    project_id: UUID,
+    shot_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[RepairRequestRead]:
+    """Repairs that can be resumed after reopening the page."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await RepairService(session).list_repairs(project=project, shot_id=shot_id)
+
+
+@router.get(
+    "/projects/{project_id}/shots/{shot_id}/repairs/{repair_id}",
+    response_model=RepairRequestRead,
+)
+async def read_repair(
+    project_id: UUID,
+    shot_id: UUID,
+    repair_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> RepairRequestRead:
+    """One repair with its stored steps and the next action."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await RepairService(session).read_repair(
+        project=project, shot_id=shot_id, repair_id=repair_id
+    )
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/repairs/{repair_id}/steps",
+    response_model=RepairExecuteRead,
+)
+async def execute_repair_step(
+    project_id: UUID,
+    shot_id: UUID,
+    repair_id: UUID,
+    body: RepairStepExecuteBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> RepairExecuteRead:
+    """Dispatch the next confirmed step; review steps are refused here."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    service = RepairService(session)
+    request, step, run = await service.execute_step(
+        project=project,
+        user=user,
+        shot_id=shot_id,
+        repair_id=repair_id,
+        expected_plan_fingerprint=body.expected_plan_fingerprint,
+        idempotency_key=body.idempotency_key,
+    )
+    # Read before committing: the repair tables are RLS-scoped per transaction,
+    # so a post-commit read starts a fresh scope and finds nothing.
+    state = await service.read_repair(project=project, shot_id=shot_id, repair_id=request.id)
+    await session.commit()
+    return RepairExecuteRead(
+        node_run_id=run.id,
+        status=run.status,
+        repair_option=request.option,
+        repair_id=request.id,
+        step_ordinal=step.ordinal,
+        next_action=state.next_action,
+    )
+
+
+@router.post(
     "/projects/{project_id}/shots/{shot_id}/repair",
     response_model=RepairExecuteRead,
 )
@@ -391,18 +537,49 @@ async def execute_repair(
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> RepairExecuteRead:
-    """Execute a V1 repair rerun with an Idempotency-Key (03 §58)."""
+    """Execute a V1 repair rerun with an Idempotency-Key (03 §58).
+
+    With ``plan_hash`` this is the staged path: one repair request is created
+    and its first step dispatched, so the follow-up steps stay resumable. The
+    staged path stops before any step that needs a human review decision.
+    """
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    run = await RepairService(session).execute_repair(
-        project=project,
-        user=user,
-        shot_id=shot_id,
-        repair_option=body.repair_option,
-        idempotency_key=body.idempotency_key,
-    )
+    service = RepairService(session)
+    if body.plan_hash is None:
+        request, step, run = await service.create_and_execute_first_step(
+            project=project,
+            user=user,
+            shot_id=shot_id,
+            option=body.repair_option,
+            idempotency_key=body.idempotency_key,
+        )
+    else:
+        request = await service.create_repair(
+            project=project,
+            user=user,
+            shot_id=shot_id,
+            option=body.repair_option,
+            plan_hash=body.plan_hash,
+            request_key=body.idempotency_key,
+        )
+        request, step, run = await service.execute_step(
+            project=project,
+            user=user,
+            shot_id=shot_id,
+            repair_id=request.id,
+            idempotency_key=body.idempotency_key,
+        )
+    # Read the step state before committing. The repair tables are RLS-scoped by
+    # `app.current_project_id()`, which is set per transaction, so a read that
+    # starts a new transaction after the commit sees nothing and the whole call
+    # would fail with "repair request not found" after doing its work.
+    state = await service.read_repair(project=project, shot_id=shot_id, repair_id=request.id)
     await session.commit()
     return RepairExecuteRead(
         node_run_id=run.id,
         status=run.status,
-        repair_option=body.repair_option,
+        repair_option=request.option,
+        repair_id=request.id,
+        step_ordinal=step.ordinal,
+        next_action=state.next_action,
     )

@@ -485,6 +485,12 @@ async def _bind_review_input_artifacts(
         **(run.input_snapshot or {}),
         "source_run_id": str(source.id),
         "source_attempt_no": source.attempt_no,
+        # The durable link between this review and the media it judges. The
+        # Formal-selection gate resolves a review by exactly this key, so binding
+        # the source artifact without it leaves an approved candidate looking
+        # unreviewed.
+        "upstream_artifact_id": str(artifact.id),
+        "upstream_node_run_id": str(source.id),
     }
     source_snapshot = source.input_snapshot or {}
     for field in (

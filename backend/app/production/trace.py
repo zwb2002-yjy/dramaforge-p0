@@ -36,6 +36,11 @@ class ExecutionTraceRead(BaseModel):
     approximations: list[str] = Field(default_factory=list)
     actual_provider: str | None = None
     actual_model: str | None = None
+    # ProviderOperation status of the latest attempt, including
+    # ``unknown_submission``: the UI must be able to say "submission outcome
+    # unknown, reconcile before retrying" instead of offering a blind retry.
+    operation_status: str | None = None
+    operation_outcome_unknown: bool = False
     effective_request_redacted: dict[str, JsonValue] = Field(default_factory=dict)
     artifact: dict[str, JsonValue] | None = None
 
@@ -123,6 +128,9 @@ async def build_execution_trace(
         approximations=list(plan.get("accepted_approximations") or []),
         actual_provider=operation.actual_provider if operation else None,
         actual_model=operation.actual_model if operation else None,
+        operation_status=(operation.status or None) if operation else None,
+        operation_outcome_unknown=operation is not None
+        and operation.status == "unknown_submission",
         effective_request_redacted=(
             cast(dict[str, JsonValue], operation.request_summary) if operation else {}
         ),

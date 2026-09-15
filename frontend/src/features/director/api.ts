@@ -1,4 +1,4 @@
-import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type {
   DirectorNextActionRead,
   DirectorRecommendation,
@@ -6,8 +6,63 @@ import type {
   ShotDirectorSuggestion,
 } from "./suggestion-types";
 
-const directorPath = (projectId: string, suffix: string) =>
-  `/api/v1/projects/${projectId}/director${suffix}`;
+/**
+ * Director request routes, kept in the generated OpenAPI contract's own
+ * spelling (`{project_id}` placeholders). `:projectId` is substituted at call
+ * time; `tests/unit/directorApiContract.test.ts` proves each template exists in
+ * the generated contract, so a route the backend does not serve cannot be
+ * shipped silently.
+ */
+export const DIRECTOR_ROUTE_TEMPLATES = {
+  suggestion: "/api/v1/projects/{project_id}/director/shots/{shot_id}/suggestion",
+  recommendation: "/api/v1/projects/{project_id}/director/shots/{shot_id}/recommendation",
+  turns: "/api/v1/projects/{project_id}/director/turns",
+  turn: "/api/v1/projects/{project_id}/director/turns/{turn_id}",
+  turnDecision: "/api/v1/projects/{project_id}/director/turns/{turn_id}/decision",
+  turnStop: "/api/v1/projects/{project_id}/director/turns/{turn_id}/stop",
+  turnResume: "/api/v1/projects/{project_id}/director/turns/{turn_id}/resume",
+  runtimeTurnDecision: "/api/v1/projects/{project_id}/director/runtime/turns/{turn_id}/decision",
+  runtimeTurnStop: "/api/v1/projects/{project_id}/director/runtime/turns/{turn_id}/stop",
+  runtimeTurnResume: "/api/v1/projects/{project_id}/director/runtime/turns/{turn_id}/resume",
+  capabilities: "/api/v1/projects/{project_id}/director/capabilities",
+} as const;
+
+export type DirectorRouteKey = keyof typeof DIRECTOR_ROUTE_TEMPLATES;
+
+/** Fill every `{placeholder}` with the identifier supplied for it. */
+function withIdentifiers(template: string, identifiers: Record<string, string | number>): string {
+  return template.replace(/\{([a-z_]+)\}/g, (_match, name: string) => {
+    const value = identifiers[name];
+    if (value === undefined) throw new Error(`导演路由缺少标识：${name}`);
+    return String(value);
+  });
+}
+
+/** Build one request path from a contract route template. */
+export function directorPath(
+  projectId: string,
+  route: DirectorRouteKey,
+  identifiers: Record<string, string | number> = {},
+): string {
+  return withIdentifiers(DIRECTOR_ROUTE_TEMPLATES[route], {
+    project_id: projectId,
+    ...identifiers,
+  });
+}
+
+/** Report the effective Director engine and why a new runtime turn may be blocked. */
+export type DirectorCapabilitiesRead = {
+  effective_engine: string;
+  runtime_turns_available: boolean;
+  blocker_code: string | null;
+  blocker_message: string | null;
+  manual_production_available: boolean;
+  checkpoint_configured: boolean;
+};
+
+export function fetchDirectorCapabilities(projectId: string): Promise<DirectorCapabilitiesRead> {
+  return apiGet<DirectorCapabilitiesRead>(directorPath(projectId, "capabilities"));
+}
 
 /** Request one read-only suggestion for a selected Shot. */
 export async function suggestShotDesign(
@@ -22,12 +77,7 @@ export async function suggestShotDesign(
   },
 ): Promise<ShotDirectorSuggestion> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    directorPath(projectId, `/shots/${encodeURIComponent(shotId)}/suggestion`),
-    input,
-    csrf,
-  );
+  return apiSend("POST", directorPath(projectId, "suggestion", { shot_id: shotId }), input, csrf);
 }
 
 export const requestShotDirectorSuggestion = suggestShotDesign;
@@ -46,7 +96,7 @@ export async function recommendShotDesign(
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
-    directorPath(projectId, `/shots/${encodeURIComponent(shotId)}/recommendation`),
+    directorPath(projectId, "recommendation", { shot_id: shotId }),
     input,
     csrf,
   );
@@ -63,15 +113,15 @@ export async function listDirectorTurns(
     scope_entity_id: scopeEntityId,
     limit: String(limit),
   });
-  const rows = await apiGet<DirectorTurnRead[]>(
-    `${directorPath(projectId, "/turns")}?${search.toString()}`,
+  const rows = await apiGetList<DirectorTurnRead>(
+    `${directorPath(projectId, "turns")}?${search.toString()}`,
   );
   if (!Array.isArray(rows)) throw new Error("导演轮次列表响应无效");
   return rows;
 }
 
 export function getDirectorTurn(projectId: string, turnId: string): Promise<DirectorTurnRead> {
-  return apiGet(directorPath(projectId, `/turns/${encodeURIComponent(turnId)}`));
+  return apiGet(directorPath(projectId, "turn", { turn_id: turnId }));
 }
 
 export async function decideDirectorTurn(
@@ -84,12 +134,7 @@ export async function decideDirectorTurn(
   },
 ): Promise<DirectorTurnRead> {
   const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    directorPath(projectId, `/turns/${encodeURIComponent(turnId)}/decision`),
-    input,
-    csrf,
-  );
+  return apiSend("POST", directorPath(projectId, "turnDecision", { turn_id: turnId }), input, csrf);
 }
 
 export async function decideDirectorRuntimeTurn(
@@ -104,7 +149,7 @@ export async function decideDirectorRuntimeTurn(
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
-    directorPath(projectId, `/runtime/turns/${encodeURIComponent(turn.id)}/decision`),
+    directorPath(projectId, "runtimeTurnDecision", { turn_id: turn.id }),
     {
       ...input,
       signal_id: globalThis.crypto.randomUUID(),
@@ -123,7 +168,7 @@ export async function stopDirectorTurn(
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
-    directorPath(projectId, `/turns/${encodeURIComponent(turnId)}/stop`),
+    directorPath(projectId, "turnStop", { turn_id: turnId }),
     { expected_revision: expectedRevision },
     csrf,
   );
@@ -136,7 +181,7 @@ export async function stopDirectorRuntimeTurn(
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
-    directorPath(projectId, `/runtime/turns/${encodeURIComponent(turn.id)}/stop`),
+    directorPath(projectId, "runtimeTurnStop", { turn_id: turn.id }),
     {
       request_id: globalThis.crypto.randomUUID(),
       expected_runtime_revision: turn.runtime_revision,
@@ -162,7 +207,7 @@ export async function resumeDirectorTurn(
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
-    directorPath(projectId, `/turns/${encodeURIComponent(turnId)}/resume`),
+    directorPath(projectId, "turnResume", { turn_id: turnId }),
     { expected_revision: expectedRevision, event_key: eventKey },
     csrf,
   );

@@ -6,15 +6,16 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Shot
-from app.delivery.models import ReviewAnnotation
+from app.delivery.models import HumanReviewDecision, ReviewAnnotation
 from app.execution.models import Artifact
+from app.production.review_gate import evaluate_artifact_admission, record_human_decision
 from app.shared.errors import ConflictError, NotFoundError
 
 router = APIRouter(tags=["review"], dependencies=[Depends(require_selected_workspace)])
@@ -240,3 +241,170 @@ async def decide_annotation(
     row.resolved_at = datetime.now(UTC) if body.status == "resolved" else None
     await session.commit()
     return _read(row)
+
+
+class ReviewDecisionBody(BaseModel):
+    """One human judgement about one Artifact, bound to its review evidence."""
+
+    artifact_id: UUID
+    review_node_run_id: UUID
+    review_kind: str = Field(pattern="^(identity|video_drift|continuity)$")
+    decision: str = Field(pattern="^(approved|rejected)$")
+    reason: str = Field(min_length=1, max_length=4000)
+    expected_shot_version: int | None = Field(default=None, ge=1)
+
+
+class ReviewDecisionRead(BaseModel):
+    id: UUID
+    shot_id: UUID
+    artifact_id: UUID
+    review_node_run_id: UUID
+    review_artifact_id: UUID
+    review_kind: str
+    decision: str
+    reason: str
+    actor_id: UUID
+    shot_version_at_decision: int
+    supersedes_id: UUID | None
+    created_at: datetime
+
+
+class ReviewSummaryRead(BaseModel):
+    """What the review page needs: machine evidence, the human call, what is allowed."""
+
+    shot_id: UUID
+    artifact_id: UUID
+    review_kind: str
+    node_key: str
+    review_node_run_id: UUID | None
+    review_artifact_id: UUID | None
+    machine_status: str | None
+    decision: str | None
+    decision_reason: str | None
+    applies: bool
+    blocked_reason: str | None
+    allowed_actions: list[str]
+    shot_version: int
+
+
+def _decision_read(row: HumanReviewDecision) -> ReviewDecisionRead:
+    return ReviewDecisionRead(
+        id=row.id,
+        shot_id=row.shot_id,
+        artifact_id=row.artifact_id,
+        review_node_run_id=row.review_node_run_id,
+        review_artifact_id=row.review_artifact_id,
+        review_kind=row.review_kind,
+        decision=row.decision,
+        reason=row.reason,
+        actor_id=row.actor_id,
+        shot_version_at_decision=row.shot_version_at_decision,
+        supersedes_id=row.supersedes_id,
+        created_at=row.created_at,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/shots/{shot_id}/review-summary",
+    response_model=ReviewSummaryRead,
+)
+async def read_review_summary(
+    project_id: UUID,
+    shot_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    artifact_id: UUID,
+    review_kind: str = Query(default="identity", pattern="^(identity|video_drift|continuity)$"),
+    stage: str = Query(default="formal_keyframe"),
+) -> ReviewSummaryRead:
+    """Machine evidence + the current human decision + what the user may do next."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    shot = (
+        await session.execute(
+            select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id)
+        )
+    ).scalar_one_or_none()
+    if shot is None:
+        raise NotFoundError("shot not found")
+    admission = await evaluate_artifact_admission(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=artifact_id,
+        stage=stage,
+    )
+    requirement = admission.requirements[0]
+    actions: list[str] = []
+    if requirement.decision != "approved":
+        actions.append("approve")
+    if requirement.decision != "rejected":
+        actions.append("reject")
+    if admission.allowed:
+        actions.append("set_formal")
+    return ReviewSummaryRead(
+        shot_id=shot_id,
+        artifact_id=artifact_id,
+        review_kind=requirement.review_kind,
+        node_key=requirement.node_key,
+        review_node_run_id=requirement.review_node_run_id,
+        review_artifact_id=requirement.review_artifact_id,
+        machine_status=requirement.machine_status,
+        decision=requirement.decision,
+        decision_reason=requirement.decision_reason,
+        applies=requirement.applies,
+        blocked_reason=requirement.blocked_reason,
+        allowed_actions=actions,
+        shot_version=shot.version or 1,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/review-decisions",
+    response_model=ReviewDecisionRead,
+    status_code=201,
+)
+async def create_review_decision(
+    project_id: UUID,
+    shot_id: UUID,
+    body: ReviewDecisionBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+    idempotency_key: str = Header(min_length=1, max_length=160, alias="Idempotency-Key"),
+) -> ReviewDecisionRead:
+    """Store one human decision. A retry with the same key returns the original."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    shot = (
+        await session.execute(
+            select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id)
+        )
+    ).scalar_one_or_none()
+    if shot is None:
+        raise NotFoundError("shot not found")
+    if (
+        body.expected_shot_version is not None
+        and (shot.version or 1) != body.expected_shot_version
+    ):
+        raise ConflictError(
+            "shot changed since the review page was opened",
+            details={
+                "code": "SHOT_VERSION_CONFLICT",
+                "expected_version": body.expected_shot_version,
+                "actual_version": shot.version,
+            },
+        )
+    row = await record_human_decision(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=body.artifact_id,
+        review_node_run_id=body.review_node_run_id,
+        review_kind=body.review_kind,  # type: ignore[arg-type]
+        decision=body.decision,  # type: ignore[arg-type]
+        reason=body.reason,
+        actor_id=user.id,
+        shot_version=shot.version or 1,
+        request_key=idempotency_key,
+    )
+    await session.commit()
+    return _decision_read(row)

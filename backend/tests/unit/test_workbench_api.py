@@ -292,6 +292,156 @@ def _seed_shot_with_formal_keyframe(factory: Any, project_id: str) -> str:
     return _run(factory, _seed())
 
 
+def _seed_review_run(
+    factory: Any,
+    *,
+    project_id: str,
+    shot_id: str,
+    artifact_id: str,
+    node_key: str = "video_drift_review",
+) -> str:
+    """Add one review NodeRun (with evidence) for an artifact; return its run id."""
+
+    async def _seed() -> str:
+        from app.access.models import Project, User, Workspace
+        from app.assets.models import Shot
+        from app.execution.models import Artifact, GraphNode, NodeRun
+        from app.production.models import GraphVersion, ProductionGraph
+        from sqlalchemy import select as _select
+
+        async with factory() as session:
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            workspace = await session.get(Workspace, project.workspace_id)
+            assert workspace is not None
+            owner = await session.get(User, workspace.owner_user_id)
+            assert owner is not None
+            shot = await session.get(Shot, UUID(shot_id))
+            assert shot is not None
+            # Reuse the shot's existing production graph: one graph per
+            # (project, shot) scope is a real constraint, and the canonical
+            # template already materialized the review node.
+            graph_version_id = await session.scalar(
+                _select(ProductionGraph.current_version_id).where(
+                    ProductionGraph.project_id == project.id,
+                    ProductionGraph.scope_type == "shot",
+                    ProductionGraph.scope_entity_id == shot.id,
+                )
+            )
+            node = None
+            if graph_version_id is not None:
+                node = await session.scalar(
+                    _select(GraphNode).where(
+                        GraphNode.graph_version_id == graph_version_id,
+                        GraphNode.node_key == node_key,
+                    )
+                )
+            if node is None:
+                version = await session.get(GraphVersion, graph_version_id)
+                assert version is not None
+                node = GraphNode(
+                    graph_version_id=version.id,
+                    node_key=node_key,
+                    node_type=node_key,
+                    display_name=node_key,
+                    cacheable=False,
+                )
+                session.add(node)
+                await session.flush()
+            # The dispatch path queues this review itself, so reuse the run it
+            # created: (graph_node_id, attempt_no) is a real unique constraint.
+            existing = await session.scalar(
+                _select(NodeRun)
+                .where(NodeRun.graph_node_id == node.id)
+                .order_by(NodeRun.attempt_no.desc())
+                .limit(1)
+            )
+            if existing is not None:
+                if existing.result_artifact_id is None:
+                    evidence = Artifact(
+                        project_id=project.id,
+                        artifact_type="image",
+                        storage_state="available",
+                        object_key=f"obj/{uuid4().hex}",
+                        content_hash=uuid4().hex * 2,
+                        mime_type="image/png",
+                        byte_size=1,
+                    )
+                    session.add(evidence)
+                    await session.flush()
+                    existing.result_artifact_id = evidence.id
+                    existing.status = "completed"
+                    existing.output_summary = {"status": "needs_human"}
+                    existing.input_snapshot = {
+                        **(existing.input_snapshot or {}),
+                        "shot_id": str(shot.id),
+                        "node_key": node_key,
+                        "upstream_artifact_id": str(artifact_id),
+                    }
+                    await session.commit()
+                return str(existing.id)
+            evidence = Artifact(
+                project_id=project.id,
+                artifact_type="image",
+                storage_state="available",
+                object_key=f"obj/{uuid4().hex}",
+                content_hash=uuid4().hex * 2,
+                mime_type="image/png",
+                byte_size=1,
+            )
+            session.add(evidence)
+            await session.flush()
+            run = NodeRun(
+                project_id=project.id,
+                graph_version_id=node.graph_version_id,
+                graph_node_id=node.id,
+                idempotency_key=f"review-{uuid4().hex}",
+                input_hash=uuid4().hex * 2,
+                input_snapshot={
+                    "shot_id": str(shot.id),
+                    "node_key": node_key,
+                    "upstream_artifact_id": str(artifact_id),
+                },
+                output_summary={"status": "needs_human"},
+                status="completed",
+                result_artifact_id=evidence.id,
+                created_by=owner.id,
+            )
+            session.add(run)
+            await session.commit()
+            return str(run.id)
+
+    return _run(factory, _seed())
+
+
+def _approve_via_review_api(
+    client: TestClient,
+    *,
+    project_id: str,
+    shot_id: str,
+    artifact_id: str,
+    review_node_run_id: str,
+    review_kind: str,
+    expected_shot_version: int,
+    reason: str = "人工确认画面可用。",
+) -> dict[str, Any]:
+    """Record a real human decision through the product API."""
+    review = client.post(
+        f"/api/v1/projects/{project_id}/shots/{shot_id}/review-decisions",
+        headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": f"review:{uuid4().hex}"},
+        json={
+            "artifact_id": artifact_id,
+            "review_node_run_id": review_node_run_id,
+            "review_kind": review_kind,
+            "decision": "approved",
+            "reason": reason,
+            "expected_shot_version": expected_shot_version,
+        },
+    )
+    assert review.status_code == 201, review.text
+    return review.json()
+
+
 def _project_id(client: TestClient) -> str:
     resp = client.post(
         "/api/v1/projects",
@@ -524,6 +674,29 @@ def test_actual_command_worker_and_formal_api_reach_next_checkpoint(
 
     artifact_id = _run(factory, finish())
     assert _run(factory, jobs.reconcile_waiting_director_turns({}))["reconciled"] == 1
+    # The product entry point admits a candidate only after a stored human
+    # decision about this exact artifact.
+    blocked = client.post(f"/api/v1/projects/{project_id}/shots/{shot_id}/formal-video",
+                          headers={CSRF_HEADER: _csrf(client)},
+                          json={"artifact_id": artifact_id, "expected_shot_version": 2})
+    assert blocked.status_code == 422, blocked.text
+    assert blocked.json()["details"]["code"] == "REVIEW_APPROVAL_REQUIRED"
+    review_run_id = _seed_review_run(
+        factory,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=artifact_id,
+        node_key="video_drift_review",
+    )
+    _approve_via_review_api(
+        client,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=artifact_id,
+        review_node_run_id=review_run_id,
+        review_kind="video_drift",
+        expected_shot_version=2,
+    )
     selected = client.post(f"/api/v1/projects/{project_id}/shots/{shot_id}/formal-video",
                            headers={CSRF_HEADER: _csrf(client)},
                            json={"artifact_id": artifact_id, "expected_shot_version": 2})

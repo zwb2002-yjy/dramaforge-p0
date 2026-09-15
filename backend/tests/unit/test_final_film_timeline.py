@@ -17,6 +17,7 @@ from app.production.final_film import (
     execute_final_film_node_run,
     queue_final_film_render,
 )
+from app.production.review_gate import record_human_decision
 from app.production.service import GraphService
 from app.production.timeline_renderer import TimelineRenderClip, render_timeline
 from app.runtime.scheduler import NodeRunScheduler
@@ -129,6 +130,7 @@ async def _seed_renderable_final_film(
             .all()
         )
         composite_node = next(node for node in nodes if node.node_key == "composite")
+        video_node = next(node for node in nodes if node.node_key == "video")
 
         video_stored = await store.put_bytes(
             object_key=f"projects/{project.id}/test/video-{index}.mp4",
@@ -231,6 +233,39 @@ async def _seed_renderable_final_film(
         composite_run.status = "completed"
         shot.formal_video_artifact_id = video_artifact.id
         shot.formal_composite_artifact_id = composite_artifact.id
+        # Delivery requires a stored human decision for the exact clip Artifact,
+        # so this fixture records one exactly like the product flow does.
+        review_run = NodeRun(
+            project_id=project.id,
+            graph_version_id=graph.current_version_id,
+            graph_node_id=video_node.id,
+            idempotency_key=f"video-drift-review-{uuid4().hex}",
+            input_hash=uuid4().hex * 2,
+            input_snapshot={
+                "shot_id": str(shot.id),
+                "node_key": "video_drift_review",
+                "upstream_artifact_id": str(video_artifact.id),
+            },
+            output_summary={"status": "needs_human"},
+            status="completed",
+            result_artifact_id=voice_artifact.id,
+            created_by=user.id,
+        )
+        session.add(review_run)
+        await session.flush()
+        await record_human_decision(
+            session,
+            project_id=project.id,
+            shot_id=shot.id,
+            artifact_id=video_artifact.id,
+            review_node_run_id=review_run.id,
+            review_kind="video_drift",
+            decision="approved",
+            reason="人工确认成片素材可用。",
+            actor_id=user.id,
+            shot_version=shot.version,
+            request_key=f"review-fixture-{uuid4().hex}",
+        )
         formal_videos.append(video_artifact)
         shots.append(shot)
         timeline_clips.append(
@@ -287,6 +322,96 @@ async def test_load_timeline_refs_requires_persisted_version(session: AsyncSessi
             expected_timeline_version=3,
         )
     assert exc.value.details.get("code") == "TIMELINE_VERSION_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_delivery_requires_a_human_decision_for_every_clip(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not exporting is the correct behaviour when a clip was never approved.
+
+    The review decision is removed after the fixture created it, which is what a
+    new or re-generated clip looks like to the delivery boundary.
+    """
+    from app.delivery.models import HumanReviewDecision
+
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, shots, videos = await _seed_renderable_final_film(session)
+    decision = (
+        await session.execute(
+            select(HumanReviewDecision).where(
+                HumanReviewDecision.artifact_id == videos[0].id
+            )
+        )
+    ).scalar_one()
+    await session.delete(decision)
+    await session.commit()
+
+    with pytest.raises(ValidationAppError) as blocked:
+        await queue_final_film_render(
+            session,
+            project_id=project.id,
+            edit_session_id=edit.id,
+            expected_timeline_version=1,
+            actor_id=user.id,
+            idempotency_key=None,
+            name="Unapproved delivery",
+        )
+
+    assert blocked.value.details.get("code") == "DELIVERY_REVIEW_REQUIRED"
+    assert blocked.value.details.get("artifact_id") == str(videos[0].id)
+    # Nothing was queued for a clip that was never approved.
+    runs = (
+        await session.execute(
+            select(NodeRun).where(NodeRun.project_id == project.id)
+        )
+    ).scalars().all()
+    assert not any(
+        str((run.input_snapshot or {}).get("idempotency_key") or "").startswith("auto-")
+        or (run.input_snapshot or {}).get("node_key") == "final_film"
+        for run in runs
+    )
+
+
+@pytest.mark.asyncio
+async def test_delivery_admission_is_bound_to_the_frozen_clip_artifact(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An approval for another artifact must not admit this clip."""
+    from app.production.review_gate import evaluate_artifact_admission
+
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, _user, _edit, shots, videos = await _seed_renderable_final_film(session)
+
+    approved = await evaluate_artifact_admission(
+        session,
+        project_id=project.id,
+        shot_id=shots[0].id,
+        artifact_id=videos[0].id,
+        stage="formal_video",
+    )
+    assert approved.allowed is True
+
+    other = Artifact(
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash=uuid4().hex * 2,
+        mime_type="video/mp4",
+        byte_size=1,
+    )
+    session.add(other)
+    await session.flush()
+    unapproved = await evaluate_artifact_admission(
+        session,
+        project_id=project.id,
+        shot_id=shots[0].id,
+        artifact_id=other.id,
+        stage="formal_video",
+    )
+    assert unapproved.allowed is False
+    assert unapproved.blocked_reason_codes == ["REVIEW_DECISION_MISSING"]
 
 
 @pytest.mark.asyncio

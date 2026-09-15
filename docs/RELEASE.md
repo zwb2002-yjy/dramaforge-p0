@@ -13,8 +13,11 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 - 短生命周期 `agent/<task-id>` 分支 + `.worktrees/<task-id>` 只用于并行隔离
   工作：从 `dev` 出发、PR 目标 `dev`。生产 hotfix 可从 `main` 出发、目标
   `main`，事后同步回 `dev`。
-- Dependabot 常规版本更新使用 `dependabot/* -> dev` PR，通过 CI 和安全检查后
-  集成；不直接作为稳定版本更新合入 `main`。
+- Dependabot 常规版本更新当前暂停（各 ecosystem 的
+  `open-pull-requests-limit: 0`）；安全告警保留人工分诊，自动安全修复关闭。
+  恢复常规更新时只允许直接依赖、忽略 major 更新、使用
+  `dependabot/* -> dev` PR，并在 CI 和安全检查后由 Owner 决定是否集成；不直接
+  作为稳定版本更新合入 `main`。
 - 只有 `@zwb2002-yjy` 批准 / 合并 PR；Agent 不自批、不自合、不记录 MERGED。
 
 ### 合并提交说明检查

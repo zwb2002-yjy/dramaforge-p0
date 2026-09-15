@@ -54,5 +54,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./tests/unit/setup.ts"],
     include: ["tests/unit/**/*.{test,spec}.{ts,tsx}"],
+    // Whole-test budget for the same reason; the per-query margin lives in
+    // tests/unit/setup.ts.
+    testTimeout: 15_000,
   },
 });

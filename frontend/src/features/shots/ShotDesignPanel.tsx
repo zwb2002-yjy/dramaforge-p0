@@ -1,8 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { ApiError } from "../../lib/api";
 import { shotTypeLabel } from "../../lib/shotLabels";
 import { updateShotDesign } from "./api";
+import { fetchShotWorkbench } from "./api";
 import type { ShotLite } from "./api";
 
 export type ShotDesignFocus = "character" | "camera" | "motion" | "look" | "all";
@@ -50,6 +52,44 @@ function errorMessage(error: unknown): string {
 }
 
 /**
+ * A save that the server refused because the Shot moved on.
+ *
+ * The local draft is kept: the user compares it with the server truth and
+ * decides whether to reload. Nothing is overwritten automatically.
+ */
+type SaveConflict = {
+  expectedVersion: number;
+  actualVersion: number;
+  message: string;
+};
+
+function conflictOf(error: unknown, attemptedVersion: number): SaveConflict | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null;
+  const details = error.details as { expected_version?: unknown; actual_version?: unknown } | null;
+  const actual = details?.actual_version;
+  return {
+    expectedVersion:
+      typeof details?.expected_version === "number" ? details.expected_version : attemptedVersion,
+    actualVersion: typeof actual === "number" ? actual : attemptedVersion + 1,
+    message: error.message,
+  };
+}
+
+function serverDesign(shot: {
+  image_prompt?: string | null;
+  video_prompt?: string | null;
+  director_state?: Record<string, unknown> | null;
+}): ShotDesignDraft {
+  const directorState = { ...(shot.director_state ?? {}) };
+  return {
+    image_prompt: shot.image_prompt ?? "",
+    video_prompt: shot.video_prompt ?? "",
+    director_state: directorState,
+    director_state_text: serializeDirectorState(directorState),
+  };
+}
+
+/**
  * P3 shot design panel with an explicitly controlled, server-seeded draft.
  *
  * The draft never becomes authoritative by itself: saving uses the current
@@ -79,6 +119,10 @@ export function ShotDesignPanel({
     director_state_text: serializeDirectorState(shot.director_state),
   }));
   const [message, setMessage] = useState("");
+  const [conflict, setConflict] = useState<SaveConflict | null>(null);
+  // Bumping this key re-seeds the local draft from the server read model after
+  // the user explicitly chooses to reload.
+  const [reloadKey, setReloadKey] = useState(0);
 
   const draft = controlledDraft ?? localDraft;
   const directorStateText =
@@ -119,10 +163,12 @@ export function ShotDesignPanel({
     shot.video_prompt,
     shot.director_state,
     onDraftChange,
+    reloadKey,
   ]);
 
   useEffect(() => {
     setMessage("");
+    setConflict(null);
   }, [shot.id]);
 
   useEffect(() => {
@@ -157,14 +203,38 @@ export function ShotDesignPanel({
       // Do not use the mutation response as a local fake Shot/version. The
       // SceneWorkspace refetch is the only path that can make this draft
       // clean and enable production again.
+      setConflict(null);
       await onSaved?.();
       setMessage("已保存设计（版本已递增）");
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, _variables, context) => {
       // Keep the draft untouched on a stale-version or validation failure so
       // the user can compare it with the server truth and decide whether to
       // retry. ApiError.message is the backend's real detail.
+      void context;
+      setConflict(conflictOf(error, shot.version));
       setMessage(`保存失败：${errorMessage(error)}`);
+    },
+  });
+
+  /** Explicitly adopt the server's design after a version conflict. */
+  const reloadServer = useMutation({
+    mutationFn: async () => {
+      const workbench = await fetchShotWorkbench(projectId, shot.id);
+      const freshShot = workbench.shot;
+      if (!freshShot) throw new Error("服务器未返回该镜头的当前设计");
+      setVisual(freshShot.visual_description);
+      updateDraft(serverDesign(freshShot));
+      return freshShot;
+    },
+    onSuccess: async () => {
+      setConflict(null);
+      setReloadKey((value) => value + 1);
+      await onSaved?.();
+      setMessage("已载入服务器最新设计；请检查后再保存。");
+    },
+    onError: (error: unknown) => {
+      setMessage(`载入服务器设计失败：${errorMessage(error)}`);
     },
   });
 
@@ -248,13 +318,37 @@ export function ShotDesignPanel({
       >
         保存设计
       </button>
-      {message && <p className="qc-save-message">{message}</p>}
+      {message && (
+        <p className="qc-save-message" data-testid="shot-design-message">
+          {message}
+        </p>
+      )}
+      {conflict && (
+        <div className="flash err" data-testid="shot-design-conflict" role="alert">
+          <p>
+            服务器已有更新：本地草稿基于 v{conflict.expectedVersion}，服务器当前为 v
+            {conflict.actualVersion}。草稿已保留，不会被自动覆盖。
+          </p>
+          <button
+            type="button"
+            data-testid="shot-design-reload-server"
+            disabled={reloadServer.isPending}
+            onClick={() => reloadServer.mutate()}
+          >
+            载入服务器最新设计并重新检查
+          </button>
+        </div>
+      )}
       {visual !== shot.visual_description && (
         <p className="muted">画面描述修改需在画布版本中保存才会成为正式事实。</p>
       )}
-      {dirty && (
+      {dirty ? (
         <p className="canvas-dirty" data-testid="shot-design-dirty" role="status">
           有未保存的镜头设计
+        </p>
+      ) : (
+        <p className="muted" data-testid="shot-design-saved-state" role="status">
+          已保存设计 v{shot.version}；生成执行使用已保存的服务器事实。
         </p>
       )}
     </div>

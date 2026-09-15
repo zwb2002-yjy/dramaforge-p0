@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
@@ -11,7 +12,9 @@ import {
 } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { fetchShotWorkbench } from "../shots/api";
+import { HumanReviewDecisionPanel } from "./HumanReviewDecisionPanel";
 import { MediaReviewCanvas, type NormalizedRegion } from "./MediaReviewCanvas";
+import { RepairPlanPanel } from "./RepairPlanPanel";
 import { VideoReviewTimeline, type VideoAnnotation } from "./VideoReviewTimeline";
 
 type ReviewWorkspaceProps = {
@@ -49,6 +52,7 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
   const queryClient = useQueryClient();
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [repairOpen, setRepairOpen] = useState(false);
   const shots = useQuery({
     queryKey: queryKeys.shot.review(projectId),
     queryFn: () => fetchProjectShots(projectId),
@@ -59,6 +63,7 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
   currentShot.current = shotId;
   useEffect(() => {
     setNote("");
+    setRepairOpen(false);
   }, [shotId]);
 
   const workbench = useQuery({
@@ -170,6 +175,58 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
       ) : (
         <p className="muted">尚未选择正式关键帧，当前没有可供图片批注的正式产物。</p>
       )}
+
+      <section>
+        <h2>人工判断</h2>
+        <p className="muted">
+          自动检查的结论只是证据；“人工通过”和“设为正式”是两个独立动作，前者不会自动推进正式版本。
+        </p>
+        {shot?.formal_keyframe_artifact_id ? (
+          <HumanReviewDecisionPanel
+            projectId={projectId}
+            shotId={shot.id}
+            artifactId={shot.formal_keyframe_artifact_id}
+            reviewKind="identity"
+            stage="formal_keyframe"
+            shotVersion={shot.version}
+            title="关键帧身份审查"
+          />
+        ) : (
+          <p className="muted" data-testid="review-keyframe-missing">
+            尚未选择正式关键帧，暂时没有可判断的素材。
+          </p>
+        )}
+        {shot?.formal_video_artifact_id && (
+          <HumanReviewDecisionPanel
+            projectId={projectId}
+            shotId={shot.id}
+            artifactId={shot.formal_video_artifact_id}
+            reviewKind="video_drift"
+            stage="formal_video"
+            shotVersion={shot.version}
+            title="视频漂移审查"
+          />
+        )}
+      </section>
+
+      <section>
+        <h2>修复</h2>
+        <button
+          type="button"
+          data-testid="review-open-repair"
+          onClick={() => setRepairOpen((open) => !open)}
+          disabled={!shotId}
+        >
+          {repairOpen ? "收起修复计划" : "创建修复计划"}
+        </button>
+        {repairOpen && shotId && (
+          <RepairPlanPanel
+            projectId={projectId}
+            shotId={shotId}
+            onClose={() => setRepairOpen(false)}
+          />
+        )}
+      </section>
 
       <section>
         <h2>视频时间线</h2>

@@ -168,8 +168,11 @@ describe("ScriptWorkspace proposal-first UI", () => {
     fireEvent.click(screen.getByTestId("story-proposal-create"));
     expect(await screen.findByTestId("story-proposal-preview")).toBeInTheDocument();
     expect(screen.getAllByTestId(/story-operation-/)).toHaveLength(3);
-    expect(screen.getByText(/Episode 1/)).toBeInTheDocument();
-    expect(screen.getByText(/待确认/)).toBeInTheDocument();
+    // Scope to the proposal preview: the import panel also shows an Episode
+    // example, so a page-wide text query would match two elements.
+    const preview = screen.getByTestId("story-proposal-preview");
+    expect(within(preview).getByText(/Episode 1/)).toBeInTheDocument();
+    expect(within(preview).getByText(/待确认/)).toBeInTheDocument();
   });
 
   it("uses a brief to generate a model-backed draft and the same typed proposal preview", async () => {

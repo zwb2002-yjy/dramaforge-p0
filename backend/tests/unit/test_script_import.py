@@ -25,7 +25,12 @@ from app.assets.models import (
     Shot,
     ShotChangeProposal,
 )
-from app.assets.script_import import import_script, parse_script_markdown
+from app.assets.script_import import (
+    MAX_SCRIPT_TEXT_BYTES,
+    import_script,
+    parse_script_markdown,
+    script_text_size_error,
+)
 from app.delivery import models as _dm  # noqa: F401
 from app.events import models as _em  # noqa: F401
 from app.execution import models as _xm  # noqa: F401
@@ -138,6 +143,8 @@ async def test_import_same_script_twice_is_idempotent(session: AsyncSession) -> 
     assert second.script_document_id == first.script_document_id
     assert second.episode_id == first.episode_id
     assert second.shot_ids == first.shot_ids
+    assert first.outcome == "created"
+    assert second.outcome == "reused"
     documents = (
         await session.execute(
             select(ScriptDocument).where(ScriptDocument.project_id == project.id)
@@ -183,6 +190,50 @@ async def test_get_script_workspace_empty_when_no_import(session: AsyncSession) 
     ws = await get_project_script(project.id, user, session)
     assert ws.document is None
     assert ws.episodes == []
+
+
+@pytest.mark.asyncio
+async def test_script_text_over_the_import_bound_is_rejected_before_writing(
+    session: AsyncSession,
+) -> None:
+    """The 1 MiB bound is enforced by the parser, so nothing is persisted."""
+    user, project = await _project(session)
+    oversized = "# Episode 1 — Big\n## Scene 1 — Room / day\n### Shot 1 — medium\n" + "x" * (
+        MAX_SCRIPT_TEXT_BYTES + 1
+    )
+
+    with pytest.raises(ValidationAppError) as failure:
+        await import_script(
+            session,
+            project_id=project.id,
+            actor_id=user.id,
+            filename="too-big.md",
+            text=oversized,
+            actor=user,
+        )
+
+    assert failure.value.details.get("code") == "SCRIPT_TEXT_TOO_LARGE"
+    assert "超过上限" in failure.value.message
+    documents = (
+        await session.execute(
+            select(func.count()).select_from(ScriptDocument).where(
+                ScriptDocument.project_id == project.id
+            )
+        )
+    ).scalar_one()
+    assert documents == 0
+
+
+def test_script_text_size_error_measures_utf8_bytes_not_characters() -> None:
+    assert script_text_size_error("x" * MAX_SCRIPT_TEXT_BYTES) is None
+    assert script_text_size_error("x" * (MAX_SCRIPT_TEXT_BYTES + 1)) is not None
+    # 349,525 CJK characters are 1,048,575 UTF-8 bytes: one byte under the bound.
+    nearly_full = "剧" * (MAX_SCRIPT_TEXT_BYTES // 3)
+    assert len(nearly_full.encode("utf-8")) == MAX_SCRIPT_TEXT_BYTES - 1
+    assert script_text_size_error(nearly_full) is None
+    # One more character crosses the byte bound even though the character count
+    # is nowhere near it.
+    assert script_text_size_error(nearly_full + "剧") is not None
 
 
 @pytest.mark.asyncio

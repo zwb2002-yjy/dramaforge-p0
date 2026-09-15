@@ -140,6 +140,7 @@ async def test_trace_returns_full_secret_free_trace(session: AsyncSession) -> No
     assert trace.capability == "video.image_to_video"
     assert trace.actual_provider == "agnes"
     assert trace.actual_model == "agnes-video-v2.0"
+    assert trace.operation_status == "created"  # ProviderOperation's stored default
     assert trace.effective_request_redacted["effective_request_redacted"] == {"prompt": "..."}
     assert trace.approximations == ["camera_language"]
     assert len(trace.resolved_asset_versions) == 1
@@ -173,6 +174,43 @@ async def test_trace_raises_for_unknown_run(session: AsyncSession) -> None:
             project_id=project.id,
             run_id=uuid4(),
         )
+
+
+@pytest.mark.asyncio
+async def test_trace_exposes_unknown_submission_for_manual_reconciliation(
+    session: AsyncSession,
+) -> None:
+    """The read model must let the UI say "unknown", never invite a blind retry."""
+    from sqlalchemy import select
+
+    project, run, _user = await _seed_run_with_trace(session)
+    operation = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalar_one()
+    operation.status = "unknown_submission"
+    await session.flush()
+
+    trace = await build_execution_trace(session, project_id=project.id, run_id=run.id)
+
+    assert trace.operation_status == "unknown_submission"
+
+
+@pytest.mark.asyncio
+async def test_trace_without_provider_operation_reports_no_operation_status(
+    session: AsyncSession,
+) -> None:
+    from sqlalchemy import delete
+
+    project, run, _user = await _seed_run_with_trace(session)
+    await session.execute(delete(ProviderOperation).where(ProviderOperation.node_run_id == run.id))
+    await session.flush()
+
+    trace = await build_execution_trace(session, project_id=project.id, run_id=run.id)
+
+    assert trace.operation_status is None
+    assert trace.actual_provider is None
 
 
 @pytest.mark.asyncio

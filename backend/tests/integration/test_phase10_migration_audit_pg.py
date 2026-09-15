@@ -42,19 +42,13 @@ from app.shared.db import set_rls_context
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from app.workbench.scene_service import SceneWorkspaceService, ShotWorkbenchService
-from pg_support import available
+from pg_support import available, database_url
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-_DEFAULT_URL = "postgresql+asyncpg://dramaforge:dramaforge@127.0.0.1:5432/dramaforge"
-
-
-def _database_url() -> str:
-    return os.environ.get("DATABASE_URL", _DEFAULT_URL)
-
 
 def _postgres_is_available() -> bool:
-    return available(_database_url())
+    return available(database_url())
 
 
 pytestmark = pytest.mark.skipif(
@@ -65,7 +59,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 async def pg_session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine(_database_url(), pool_pre_ping=True)
+    engine = create_async_engine(database_url(), pool_pre_ping=True)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
         try:

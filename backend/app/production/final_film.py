@@ -830,6 +830,43 @@ async def _job_read(
     )
 
 
+async def _assert_delivery_reviews(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    refs: list[_TimelineRef],
+) -> None:
+    """Delivery admission: every clip's exact Artifact needs a human approval.
+
+    A machine review that asked for a person, or a missing decision, blocks the
+    render here instead of producing a film the user never approved. The check
+    is about the frozen Timeline material, not about "current formal", so a
+    later Shot edit cannot silently change what was approved.
+    """
+    from app.production.review_gate import evaluate_artifact_admission
+
+    for ref in refs:
+        admission = await evaluate_artifact_admission(
+            session,
+            project_id=project_id,
+            shot_id=ref.shot_id,
+            artifact_id=ref.artifact_id,
+            stage="formal_video",
+        )
+        if admission.allowed:
+            continue
+        raise ValidationAppError(
+            "a timeline clip has not been approved by a human review decision",
+            details={
+                "code": "DELIVERY_REVIEW_REQUIRED",
+                "reason": admission.blocker or "REVIEW_DECISION_MISSING",
+                "shot_id": str(ref.shot_id),
+                "artifact_id": str(ref.artifact_id),
+                "review_kind": admission.review_kind,
+            },
+        )
+
+
 async def queue_final_film_render(
     session: AsyncSession,
     *,
@@ -853,6 +890,7 @@ async def queue_final_film_render(
         shot.id: shot
         for shot in await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
     }
+    await _assert_delivery_reviews(session, project_id=project_id, refs=refs)
     metadata = (edit_session.timeline or {}).get("metadata")
     timeline: dict[str, Any] = {
         "version": edit_session.version,
@@ -1346,6 +1384,12 @@ async def execute_final_film_node_run(
             mime_type=stored.mime_type,
             byte_size=stored.byte_size,
             produced_by_run_id=run.id,
+            # A Final Film is an assembly of an already-frozen timeline, not shot
+            # media. Rendering the same saved version twice produces the same
+            # bytes on purpose, and the product requires that re-export to return
+            # the original result instead of failing; the shot-scoped rule that
+            # forbids one NodeRun from claiming another's bytes does not apply.
+            allow_cross_run_reuse=True,
         )
         subtitle_artifact = None
         if rendered.subtitle_data:
@@ -1363,6 +1407,9 @@ async def execute_final_film_node_run(
                 mime_type=subtitle_stored.mime_type,
                 byte_size=subtitle_stored.byte_size,
                 produced_by_run_id=run.id,
+                # Same reasoning as the film bytes above: identical subtitles for
+                # an unchanged timeline are the expected outcome of a re-export.
+                allow_cross_run_reuse=True,
             )
         subtitle_delivery = {
             "subtitle_artifact_id": str(subtitle_artifact.id) if subtitle_artifact else None,

@@ -24,7 +24,7 @@ from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.director.wakeup import apply_director_wakeup
 from app.events.models import EventLog
-from app.execution.models import Artifact, NodeRun
+from app.execution.models import Artifact, GraphNode, NodeRun
 from app.production.application.events import append_production_notice
 from app.production.command_models import ProductionCommandAuthorization
 from app.production.workbench_execution import WorkbenchExecutionService
@@ -627,7 +627,17 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
             assert submitted.status == "awaiting_execution"
             assert submitted.dispatched_command_key == f"approved:{decision_id}"
             assert len(submitted.node_run_ids) == 1
-            assert len(runs) == 2  # seeded keyframe plus the one accepted video run
+            # The accepted video run, the seeded keyframe and the zero-cost
+            # review the dispatch queues for that stage's Formal gate.
+            by_key: dict[str, int] = {}
+            for run in runs:
+                node = await session.get(GraphNode, run.graph_node_id)
+                assert node is not None
+                by_key[node.node_key] = by_key.get(node.node_key, 0) + 1
+            assert by_key.get("keyframe") == 1
+            assert by_key.get("video") == 1
+            assert by_key.get("video_drift_review") == 1
+            assert len(runs) == sum(by_key.values())
             assert grant is not None and grant.status == "accepted"
             assert str(grant.node_run_id) == str(submitted.node_run_ids[0])
 
@@ -750,7 +760,20 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
             )
             assert waiting_confirmation.status == "awaiting_user"
             assert waiting_confirmation.wait_reason == "confirm_candidate"
-            assert await session.scalar(select(func.count()).select_from(NodeRun)) == 2
+            # One run per stage node plus the zero-cost review the media dispatch
+            # queues for that stage's Formal gate; assert the shape, not a count
+            # that silently changes when the pipeline gains a node.
+            keys = [
+                node_key
+                for node_key in (
+                    await session.scalars(
+                        select(GraphNode.node_key)
+                        .join(NodeRun, NodeRun.graph_node_id == GraphNode.id)
+                        .order_by(GraphNode.node_key)
+                    )
+                ).all()
+            ]
+            assert keys == ["keyframe", "video", "video_drift_review"]
 
         # Reconciliation now observes the already committed Formal fact and
         # schedules the next signal without replaying production.
@@ -789,7 +812,17 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
             )
             assert completed.status == "completed"
             assert completed.wait_reason == "candidate_confirmed"
-            assert await session.scalar(select(func.count()).select_from(NodeRun)) == 2
+            keys = [
+                node_key
+                for node_key in (
+                    await session.scalars(
+                        select(GraphNode.node_key)
+                        .join(NodeRun, NodeRun.graph_node_id == GraphNode.id)
+                        .order_by(GraphNode.node_key)
+                    )
+                ).all()
+            ]
+            assert keys == ["keyframe", "video", "video_drift_review"]
 
         async with admin_factory() as session:
             profile = await session.scalar(select(ProjectCreativeProfile).where(

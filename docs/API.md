@@ -2,9 +2,9 @@
 
 Status: current
 Source: backend/app/api/v1 and generated OpenAPI
-Date: 2026-09-14
-Base: dev 070faa3
-Migration head: 20260910_0066
+Date: 2026-09-15
+Base: dev 5ea45d6
+Migration head: 20260915_0069
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Contract rules
@@ -27,10 +27,10 @@ Migration head: 20260910_0066
 | Assets | assets.py | Asset, AssetVersion, AssetVersionReference, asset cards and tags |
 | References | references.py | explicit ShotReferenceBinding CRUD and `@Asset` resolution |
 | Scenes | scenes.py, workflow_overview.py | scene structure, workspace snapshot, structural commands, read-only project workflow view |
-| Workbench | workbench.py | workspace state, Shot design, execution-plan preview, execution dispatch, formal selection, trace, Review/Repair |
-| Director Assistant | director.py | proposal-only Shot suggestion, bounded Director turns, runtime start/control/resume signals |
+| Workbench | workbench.py | workspace state, Shot design, execution-plan preview, execution dispatch, formal selection, trace, staged repair (`repair-plan`, `repairs`, `repairs/{id}`, `repairs/{id}/steps`) |
+| Director Assistant | director.py | proposal-only Shot suggestion and recommendation (`/director/shots/{shot_id}/...`), bounded Director turns, runtime start/control/resume signals, read-only runtime capabilities |
 | Director board | director_board.py | per-shot 2D and rough-3D director board state |
-| Review | review.py | evidence annotations and decisions |
+| Review | review.py | evidence annotations and annotation decisions, plus the human review decision (`review-summary`, `review-decisions`) that admits an exact Artifact |
 | Production monitor | production.py | Artifact bytes/frames, project snapshot, Outbox/Arq enqueue |
 | Providers | provider_connections.py, provider_references.py, credentials.py, generations.py, model_profiles.py, model_candidates.py | model catalog, connection/credential revisions, capability probe and generation, reference delivery, model profiles and read-only candidates |
 | Experiments | experiments.py | isolated Shot experiment branches and adoption |
@@ -53,6 +53,33 @@ The following route families are not present in the current OpenAPI:
 The replacements are explicit POST /projects, Story proposals, script import,
 AssetVersion and ShotReferenceBinding, Workbench execution-plan/executions,
 Review/Repair, Artifact delivery, and EditSession export.
+
+## Admission gates on the write surface
+
+Three write paths refuse to continue until a stored fact says they may. Each is
+validated server-side; a disabled button is never the only guard.
+
+| Write path | Requirement | Refusal |
+|---|---|---|
+| `POST …/formal-keyframe`, `POST …/formal-video` | a stored human `approved` decision for that exact Artifact (`human_review_decisions`) | 422 `REVIEW_APPROVAL_REQUIRED` with `reason` (`REVIEW_AWAITING_HUMAN`, `REVIEW_DECISION_MISSING`, `REVIEW_DECISION_REJECTED`, `REVIEW_DECISION_STALE`) |
+| `POST …/final-film/render` | the same decision for every clip Artifact on the frozen Timeline | 422 `DELIVERY_REVIEW_REQUIRED` with the offending `artifact_id` and `reason` |
+| `POST …/repairs/{id}/steps` | the step being dispatched is a media step, not a human decision | 422 `REPAIR_STEP_REQUIRES_REVIEW` |
+
+Review steps are human actions: the review page records the decision, and the
+Formal selection stays a separate user action. A machine `needs_human` result is
+evidence, never an approval.
+
+## Idempotent submissions
+
+Retries must not create a second operation:
+
+| Endpoint | Key |
+|---|---|
+| `POST …/executions` | `Idempotency-Key`; the client derives it from the frozen plan fingerprint and reads `GET …/executions/receipt` before resubmitting |
+| `POST …/assets/from-artifact` | `Idempotency-Key`; same key and input returns the original card, same key with different input is 409 `ASSET_CREATION_REQUEST_REUSED` |
+| `POST …/review-decisions` | required `Idempotency-Key`; same key and input returns the original decision |
+| `POST …/repairs`, `POST …/repairs/{id}/steps` | request key and per-step command key; a retry resumes the same step |
+| `POST …/final-film/render` | `Idempotency-Key` plus a request fingerprint; reuse with a different body is rejected |
 
 ## Required checks
 

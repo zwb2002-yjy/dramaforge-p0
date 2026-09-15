@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
-import { apiGet, type AssetRead } from "../../lib/api";
+import { apiGetList, type AssetRead } from "../../lib/api";
 import {
   ASSET_KIND_LABEL,
   ASSET_STATUS_LABEL,
@@ -54,7 +54,7 @@ function fetchAssetsFiltered(
   if (filters.name) params.set("name", filters.name);
   if (filters.tags) params.set("tags", filters.tags);
   const query = params.toString();
-  return apiGet<AssetRead[]>(`/api/v1/projects/${projectId}/assets${query ? `?${query}` : ""}`);
+  return apiGetList<AssetRead>(`/api/v1/projects/${projectId}/assets${query ? `?${query}` : ""}`);
 }
 
 export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {

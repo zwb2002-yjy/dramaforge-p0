@@ -2,6 +2,13 @@
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
+本文件只回答**怎么跑**：NodeRun → Outbox → Worker → ProviderOperation → Artifact。
+
+执行计划**怎么组织**（Graph / Node / NodeRun / ProviderOperation / Artifact 的精确
+定义、Node 准入规则、条件执行、最小重算）见
+[PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md)。本文件不得重复定义那些概念。
+本文件受架构宪法 [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) 约束。
+
 统一生产 Runtime 拥有媒体执行的全部事实：NodeRun、ProviderOperation、
 Artifact。没有第二套 Generation 真相，没有预算/批次前置，没有历史路径分支。
 编排侧见 [DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
@@ -27,9 +34,12 @@ Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
 
 ## 核心概念
 
-| 概念 | 含义 |
+概念定义以 [PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md) 与
+[DOMAIN_VOCABULARY.md](DOMAIN_VOCABULARY.md) 为准；下表只说明它们在运行期的角色。
+
+| 概念 | 运行期角色 |
 |---|---|
-| ProductionGraph / GraphVersion / GraphNode / GraphEdge | 项目执行图及其版本化节点/边。 |
+| ProductionGraph / GraphVersion / GraphNode / GraphEdge | 项目执行图及其版本化节点/边。定义与准入规则见 [PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md)。 |
 | NodeRun | 一次节点执行：排队 → 运行 → 终态；每次 status 写入原子发出终端通知（迁移 20260910_0063 trigger）。 |
 | Outbox / OutboxDeadLetter | 事务性 Outbox 事件与死信（`outbox_events` / `outbox_dead_letters`）。 |
 | ProviderOperation | NodeRun 拥有的 provider 调用事实（含持久化 credential revision 身份）；只有 NodeRun 一个 owner。 |
