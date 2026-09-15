@@ -54,6 +54,7 @@ ALLOWED_ROOT = {
 
 # Local-only root names (gitignored or tooling); not product code.
 LOCAL_ONLY_ROOT = {
+    ".trae-html-share-packages",
     ".git",
     ".agents",
     ".codex",
@@ -79,6 +80,7 @@ LOCAL_ONLY_ROOT = {
 }
 
 FORBIDDEN_TRACKED_PARTS = {
+    ".trae-html-share-packages",
     "__pycache__",
     ".pytest_cache",
     ".mypy_cache",

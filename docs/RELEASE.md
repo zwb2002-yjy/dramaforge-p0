@@ -13,6 +13,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 - 短生命周期 `agent/<task-id>` 分支 + `.worktrees/<task-id>` 只用于并行隔离
   工作：从 `dev` 出发、PR 目标 `dev`。生产 hotfix 可从 `main` 出发、目标
   `main`，事后同步回 `dev`。
+- Dependabot 常规版本更新使用 `dependabot/* -> dev` PR，通过 CI 和安全检查后
+  集成；不直接作为稳定版本更新合入 `main`。
 - 只有 `@zwb2002-yjy` 批准 / 合并 PR；Agent 不自批、不自合、不记录 MERGED。
 
 ## Required GitHub ruleset（main）
