@@ -964,3 +964,189 @@ async def test_command_replay_is_frozen_and_new_keys_allocate_attempts(session, 
         )
     assert conflict.value.details["code"] == "EXECUTION_COMMAND_REUSED"
     assert list((await session.execute(select(ProviderOperation))).scalars()) == []
+
+
+async def _completed_keyframe_artifact(
+    session: AsyncSession,
+    *,
+    project: Project,
+    shot: object,
+    user: User,
+    source: object,
+):
+    """Re-home a seeded image onto a completed keyframe NodeRun of this shot.
+
+    ``set_formal_keyframe`` accepts only an artifact whose ``produced_by_run_id``
+    is a successful ``keyframe`` NodeRun inside the shot's own graph, so the
+    fixture needs that lineage before it can ask the gate anything.
+    """
+    from app.execution.models import Artifact, NodeRun, ProviderOperation  # noqa: F401
+    from app.execution.shot_pipeline import SHOT_PIPELINE_TEMPLATE_KEY, shot_pipeline_definition
+    from app.production.service import GraphService
+
+    graphs = GraphService(session)
+    graph = await graphs.create_graph(
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        template_key=SHOT_PIPELINE_TEMPLATE_KEY,
+        created_by=user.id,
+        definition=shot_pipeline_definition(shot_id=str(shot.id)),
+    )
+    assert graph.current_version_id is not None
+    materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
+    node = materialized.nodes["keyframe"]
+    run = NodeRun(
+        project_id=project.id,
+        graph_version_id=graph.current_version_id,
+        graph_node_id=node.id,
+        idempotency_key=f"gate-kf:{uuid4().hex}",
+        input_hash=hashlib.sha256(uuid4().bytes).hexdigest(),
+        status="running",
+        input_snapshot={
+            "shot_id": str(shot.id),
+            "node_key": "keyframe",
+            "stage": "image_keyframe",
+        },
+        created_by=user.id,
+    )
+    session.add(run)
+    await session.flush()
+    source.produced_by_run_id = run.id
+    run.result_artifact_id = source.id
+    run.status = "completed"
+    await session.flush()
+    from app.execution.models import Artifact as _Artifact
+
+    return await session.get(_Artifact, source.id)
+
+
+@pytest.mark.asyncio
+async def test_keyframe_dispatch_queues_the_review_that_the_formal_gate_requires(session):
+    """The Formal keyframe gate must be satisfiable through the product path.
+
+    ``set_formal_keyframe(..., require_review_approval=True)`` only admits an
+    artifact whose stored human decision points at a review NodeRun that has its
+    own evidence artifact. The graph a Workbench dispatch freezes must therefore
+    describe the review node -- ``materialize_definition`` refuses a relational
+    node the frozen definition omits -- and the review run must be queued when the
+    media run is, or the gate can never be satisfied and the whole downstream
+    chain (video requires a Formal keyframe) stops.
+
+    The second half drives the review through the Worker's own execution path and
+    then the product's own selection call, so it fails if the gate and the
+    pipeline ever drift apart again.
+    """
+    from app.execution.models import Artifact, GraphNode
+    from app.execution.product_path import execute_media_node_run
+    from app.production.formal_selection import set_formal_keyframe
+    from app.production.service import GraphService
+    from app.shared.errors import ValidationAppError
+    from app.storage.minio_store import reset_object_store_for_tests
+
+    project, video_binding, user = await _seed(session)
+    shot, keyframe_seed, binding = await _seed_image_shot(
+        session,
+        project=project,
+        user=user,
+        connection_id=video_binding.connection_id,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    command = _input(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="image_keyframe",
+        requested_binding_id=binding.id,
+        mode_id="text_to_image",
+        expected_shot_version=shot.version,
+    )
+
+    # The gate must refuse while no review exists, so the test cannot pass by
+    # accident on an ungated call. A candidate is any image the keyframe NodeRun
+    # of this shot produced, so the seeded artifact proves the gate's own answer
+    # without running media generation.
+    keyframe = await _completed_keyframe_artifact(
+        session, project=project, shot=shot, user=user, source=keyframe_seed
+    )
+    with pytest.raises(ValidationAppError) as blocked:
+        await set_formal_keyframe(
+            session,
+            project_id=project.id,
+            shot_id=shot.id,
+            artifact_id=keyframe.id,
+            expected_shot_version=shot.version,
+            require_review_approval=True,
+        )
+    assert blocked.value.details["code"] == "REVIEW_APPROVAL_REQUIRED"
+    # The gate names its own blocker: no decision yet, and (with a queued review)
+    # a machine check still awaiting the person.
+    assert blocked.value.details["reason"] in {
+        "REVIEW_DECISION_MISSING",
+        "REVIEW_AWAITING_HUMAN",
+    }
+
+    media_run = await service.create_and_dispatch(
+        project=project,
+        execution_input=command,
+        idempotency_key_override="gate:keyframe",
+    )
+    await session.commit()
+
+    # The frozen graph carries the review node the gate reads.
+    graphs = GraphService(session)
+    materialized = await graphs.materialize_definition(version_id=media_run.graph_version_id)
+    assert {"identity_review", "video_drift_review"} <= set(materialized.nodes)
+
+    review_run = await session.scalar(
+        select(NodeRun)
+        .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+        .where(
+            NodeRun.graph_version_id == media_run.graph_version_id,
+            GraphNode.node_key == "identity_review",
+        )
+    )
+    assert review_run is not None, "the keyframe dispatch must queue its review run"
+    assert review_run.status == "queued"
+    assert review_run.input_snapshot["node_key"] == "identity_review"
+    assert review_run.input_snapshot["shot_id"] == str(shot.id)
+
+    # The Worker's own execution path completes the review and stores evidence.
+    await execute_media_node_run(
+        session, node_run_id=review_run.id, store=reset_object_store_for_tests()
+    )
+    await session.commit()
+    await session.refresh(review_run)
+    assert review_run.status == "completed"
+    evidence = await session.get(Artifact, review_run.result_artifact_id)
+    assert evidence is not None, "a review run must persist an evidence artifact"
+
+    from app.delivery.models import HumanReviewDecision
+    from app.production.review_gate import record_human_decision
+
+    decision = await record_human_decision(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        artifact_id=keyframe.id,
+        review_node_run_id=review_run.id,
+        review_kind="identity",
+        decision="approved",
+        reason="审片：关键帧可用。",
+        actor_id=user.id,
+        shot_version=shot.version,
+        request_key="gate:keyframe:decision",
+    )
+    await session.commit()
+    assert isinstance(decision, HumanReviewDecision)
+
+    # The same call the product endpoint makes is now admitted.
+    updated = await set_formal_keyframe(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        artifact_id=keyframe.id,
+        expected_shot_version=shot.version,
+        require_review_approval=True,
+    )
+    await session.commit()
+    assert updated.formal_keyframe_artifact_id == keyframe.id

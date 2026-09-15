@@ -21,7 +21,12 @@ from uuid import uuid4
 import httpx
 
 REPO = Path(__file__).resolve().parents[1]
-WORKSPACE = "c00b1899-b4ac-46c7-b4c7-25a230e9ebe2"
+# The acceptance workspace. A candidate built from a fresh database owns exactly
+# one workspace, whose id is generated during bootstrap and therefore cannot be a
+# constant; the recorded default is kept for the environment that already has it.
+WORKSPACE = os.environ.get(
+    "DRAMAFORGE_PROOF_WORKSPACE", "c00b1899-b4ac-46c7-b4c7-25a230e9ebe2"
+)
 SECRET_KEYS = {
     "authorization",
     "cookie",
@@ -322,6 +327,116 @@ class Acceptance:
             and operation.get("operation_kind")
             in {"image.generate", "keyframe.generate", "video.generate"}
         ]
+
+    def record_stage_decision(self, label, project_id, shot_id, artifact_id, review_kind, stage):
+        """Record the human decision that admits one Formal selection.
+
+        A staging gate separates "the machine produced evidence" from "a person
+        accepted it", so the acceptance run has to make that call explicitly
+        instead of letting the selection through. The review run it binds to is
+        the one the pipeline queued for this media stage and the read model
+        reports, never an id invented here.
+        """
+        summary = self.read(
+            f"/projects/{project_id}/shots/{shot_id}/review-summary"
+            f"?artifact_id={artifact_id}&review_kind={review_kind}&stage={stage}"
+        )
+        if summary.get("decision") == "approved" and summary.get("applies"):
+            return sanitized(summary)
+        run_id = summary.get("review_node_run_id")
+        if not run_id:
+            raise RuntimeError(
+                f"{label} has no {review_kind} review evidence for artifact {artifact_id}; "
+                "the pipeline did not queue the review the gate requires"
+            )
+        return sanitized(
+            self.once(
+                f"{label}:decision:{review_kind}:{artifact_id}",
+                "POST",
+                f"/projects/{project_id}/shots/{shot_id}/review-decisions",
+                {
+                    "artifact_id": artifact_id,
+                    "review_node_run_id": run_id,
+                    "review_kind": review_kind,
+                    "decision": "approved",
+                    "reason": f"R7 人工审片（{review_kind}）：该素材可用，批准进入下一步。",
+                },
+                command_key=f"r7:{self.state['run_key']}:decision:{review_kind}:{artifact_id}",
+            )
+        )
+
+    def record_delivery_decisions(
+        self, label, project_id, timeline, *, edit_session_id, timeline_version
+    ):
+        """Apply the delivery gate the way the product does: prepare → decide → render.
+
+        Final Film export consumes the Formal video Artifact frozen for each clip,
+        and the frozen Artifact must carry an admitted human decision. ``prepare``
+        (already run at this point) is what materializes the zero-cost
+        ``video_drift_review`` evidence, so the decision has real evidence to bind
+        to; this method records exactly that decision instead of bypassing it.
+
+        It also proves the gate blocks: before recording anything, one render
+        attempt must fail with ``DELIVERY_REVIEW_REQUIRED``.
+        """
+        if self.state.get(label + ":delivery_decisions"):
+            return
+        clips = timeline.get("clips")
+        if not isinstance(clips, list) or not clips:
+            raise RuntimeError(f"{label} saved Timeline has no clips to approve")
+        if not self.state.get(label + ":delivery_gate_probe"):
+            blocked = self.expect_error_once(
+                f"{label}:delivery-blocked-without-decision",
+                "POST",
+                f"/projects/{project_id}/final-film/render",
+                {
+                    "edit_session_id": edit_session_id,
+                    "expected_timeline_version": timeline_version,
+                    "name": "R7 delivery gate probe",
+                },
+                expected_statuses={422},
+            )
+            details = blocked.get("details") if isinstance(blocked, dict) else None
+            code = (details or {}).get("code") if isinstance(details, dict) else None
+            if code != "DELIVERY_REVIEW_REQUIRED":
+                raise RuntimeError(
+                    f"{label} delivery gate returned {code!r}; expected DELIVERY_REVIEW_REQUIRED"
+                )
+            self.state[label + ":delivery_gate_probe"] = sanitized(blocked)
+            self.save()
+        decisions = {}
+        for clip in clips:
+            shot_id = str(clip["shot_id"])
+            artifact_id = str(clip["artifact_id"])
+            summary = self.read(
+                f"/projects/{project_id}/shots/{shot_id}/review-summary"
+                f"?artifact_id={artifact_id}&review_kind=video_drift&stage=formal_video"
+            )
+            if summary.get("decision") == "approved" and summary.get("applies"):
+                decisions[artifact_id] = sanitized(summary)
+                continue
+            run_id = summary.get("review_node_run_id")
+            if not run_id:
+                raise RuntimeError(
+                    f"{label} shot {shot_id} has no video_drift review evidence after prepare"
+                )
+            decision = self.once(
+                f"{label}:decision:{artifact_id}",
+                "POST",
+                f"/projects/{project_id}/shots/{shot_id}/review-decisions",
+                {
+                    "artifact_id": artifact_id,
+                    "review_node_run_id": run_id,
+                    "review_kind": "video_drift",
+                    "decision": "approved",
+                    "reason": "R7 人工审片：成片素材可用，批准进入交付。",
+                },
+                command_key=f"r7:{self.state['run_key']}:decision:{artifact_id}",
+            )
+            decisions[artifact_id] = sanitized(decision)
+        self.state[label + ":delivery_decisions"] = decisions
+        self.state["assertions"][label + ":delivery_admission"] = "PASS"
+        self.save()
 
     def login(self):
         response = self.client.post(
@@ -696,6 +811,17 @@ class Acceptance:
                             skip_shot = True
                             break
                         raise
+                    # Selecting the Formal version is a person's call: the
+                    # pipeline queued this stage's review with the media run, so
+                    # the decision binds to that evidence and the gate admits it.
+                    self.record_stage_decision(
+                        f"{label}:{sid}:{stage}",
+                        pid,
+                        sid,
+                        run["result_artifact_id"],
+                        "identity" if purpose == "keyframe" else "video_drift",
+                        "formal_keyframe" if purpose == "keyframe" else "formal_video",
+                    )
                     self.once(
                         prefix + ":formal",
                         "POST",
@@ -924,6 +1050,13 @@ class Acceptance:
             )
             for run_id in prepared["node_run_ids"]:
                 self.wait_run(pid, run_id)
+            self.record_delivery_decisions(
+                label,
+                pid,
+                saved["timeline"],
+                edit_session_id=eid,
+                timeline_version=saved["version"],
+            )
             job = self.once(
                 label + ":render",
                 "POST",
@@ -1007,6 +1140,13 @@ class Acceptance:
         )
         for run_id in prepared["node_run_ids"]:
             self.wait_run(project_id, run_id)
+        self.record_delivery_decisions(
+            prefix,
+            project_id,
+            saved["timeline"],
+            edit_session_id=edit["id"],
+            timeline_version=saved["version"],
+        )
         job = self.once(
             prefix + ":render",
             "POST",
@@ -1289,6 +1429,13 @@ class Acceptance:
         )
         for run_id in prepared["node_run_ids"]:
             self.wait_run(free_id, run_id)
+        self.record_delivery_decisions(
+            "free_assist:rerender",
+            free_id,
+            saved["timeline"],
+            edit_session_id=saved["id"],
+            timeline_version=saved["version"],
+        )
         rerender = self.once(
             "free_assist:rerender-film",
             "POST",

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import Project, ProjectCreativeProfile
 from app.assets.models import Asset, AssetVersion, AssetVersionReference, Episode, Scene, Shot
 from app.config import get_settings
+from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
 from app.execution.shot_pipeline import (
     SHOT_PIPELINE_TEMPLATE_KEY,
@@ -54,6 +55,17 @@ from app.shared.enums import GraphStatus
 from app.shared.errors import ConflictError, ValidationAppError
 
 PlanStage = Literal["image_keyframe", "video"]
+
+# Which zero-cost review proves a media candidate, and therefore which node must
+# exist next to the media node. Selecting a Formal keyframe or video requires a
+# stored human decision, and a decision requires the review run that produced the
+# evidence, so the graph of a shot whose media is produced here must carry the
+# review node. Without it the gate on `formal-keyframe` / `formal-video` would be
+# unsatisfiable: the user could never approve what the pipeline never reviewed.
+REVIEW_NODE_FOR_STAGE: Final[dict[PlanStage, tuple[str, str, str]]] = {
+    "image_keyframe": ("identity_review", "identity_review", "Identity review"),
+    "video": ("video_drift_review", "video_review", "Video drift review"),
+}
 
 _STAGE_CONTRACT: Final[dict[PlanStage, tuple[ModelSlot, Capability, str, str]]] = {
     "image_keyframe": (
@@ -103,6 +115,104 @@ def _chain_input_hash(payload: dict[str, object]) -> str:
         default=str,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _review_node_spec(stage: PlanStage) -> dict[str, object]:
+    """The JSON node spec for the review that proves this stage's candidate."""
+    key, node_type, display_name = REVIEW_NODE_FOR_STAGE[stage]
+    return {"key": key, "type": node_type, "display_name": display_name}
+
+
+async def _queue_stage_review_run(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    stage: PlanStage,
+    project: Project,
+    shot: Shot,
+    created_by: UUID,
+) -> NodeRun | None:
+    """Queue the zero-cost review run that admits this media candidate.
+
+    Called right after the media run is created, so the review exists from the
+    moment a candidate can be produced. It is the same graph's review node, it
+    consumes the media run as its upstream (bound at execution time from the run's
+    own artifact), and it contacts no Provider.
+
+    An existing live or finished review for this node is returned instead of a
+    second one: `prepare_formal_tail` materializes the same tail review, and two
+    runs for one node would break the (graph_node_id, attempt_no) identity.
+    """
+    review_key, _review_type, review_name = REVIEW_NODE_FOR_STAGE[stage]
+    node = await session.scalar(
+        select(GraphNode).where(
+            GraphNode.graph_version_id == run.graph_version_id,
+            GraphNode.node_key == review_key,
+        )
+    )
+    if node is None:
+        # The graph was published without the review node (a shot created before
+        # this stage gained a gate). The media run is already durable; the review
+        # is added by the next graph version instead of being invented here.
+        return None
+    # Reuse the review this shot already has, whichever entry point queued it:
+    # `prepare_formal_tail` materializes the tail review too, and a second live
+    # run for the same node would violate (graph_node_id, attempt_no).
+    existing = await session.scalar(
+        select(NodeRun)
+        .where(
+            NodeRun.graph_node_id == node.id,
+            NodeRun.status.in_(
+                ("queued", "running", "completed", "cached", "completed_after_cancel")
+            ),
+        )
+        .order_by(NodeRun.attempt_no.desc(), NodeRun.created_at.desc())
+        .limit(1)
+    )
+    if existing is not None:
+        return existing
+    latest = await session.scalar(
+        select(NodeRun)
+        .where(NodeRun.graph_node_id == node.id)
+        .order_by(NodeRun.attempt_no.desc(), NodeRun.created_at.desc())
+        .limit(1)
+    )
+    attempt_no = (latest.attempt_no if latest is not None else 0) + 1
+    source_commit = get_settings().source_commit.strip() or "development"
+    review_description = str(shot.visual_description or f"Shot {shot.shot_number}").strip()
+    snapshot: dict[str, object] = {
+        "shot_id": str(shot.id),
+        "node_key": review_key,
+        "project_id": str(project.id),
+        "stage": stage,
+        "source_commit": source_commit,
+        "prompt": f"{review_name}: {review_description}",
+        "plan": {"prompt": f"{review_name}: {review_description}"},
+        "visual_description": review_description,
+        "visual": review_description,
+        # The pure review nodes validate the frozen identity evidence policy
+        # before they run; a review run without it would fail closed.
+        "identity_evidence_policy": identity_evidence_policy_snapshot(),
+        "upstream_artifact_id": None,
+        "upstream_node_run_id": str(run.id),
+        "professional_unified": True,
+        "execution_path": "unified-v1",
+    }
+    review_run = NodeRun(
+        project_id=project.id,
+        graph_version_id=run.graph_version_id,
+        graph_node_id=node.id,
+        attempt_no=attempt_no,
+        parent_run_id=latest.id if latest is not None else None,
+        idempotency_key=f"workbench:review:{review_key}:{shot.id}:{attempt_no}",
+        input_hash=_chain_input_hash(snapshot),
+        status="queued",
+        input_snapshot=snapshot,
+        created_by=created_by,
+    )
+    session.add(review_run)
+    await session.flush()
+    return review_run
 
 
 async def _ensure_pure_chain_upstreams(
@@ -944,17 +1054,25 @@ class WorkbenchExecutionService:
             )
         )
         if graph is None:
+            # The canonical shot pipeline is the graph, not a two-node subset.
+            # Selecting a Formal keyframe or video requires a stored human
+            # decision, and a decision requires the review run that produced its
+            # evidence, so the graph has to describe the review nodes from the
+            # start: `materialize_definition` refuses a relational node the frozen
+            # definition does not name, and a graph without them could never admit
+            # a candidate.
+            definition = shot_pipeline_definition(
+                shot_id=str(execution_input.shot_id),
+                shot={"prompt": execution_input.prompt},
+                workbench_plan=plan.model_dump(mode="json"),
+            )
             graph = await graphs.create_graph(
                 project_id=project.id,
                 scope_type="shot",
                 scope_entity_id=execution_input.shot_id,
                 template_key=SHOT_PIPELINE_TEMPLATE_KEY,
                 created_by=self._user_id,
-                definition=shot_pipeline_definition(
-                    shot_id=str(execution_input.shot_id),
-                    shot={"prompt": execution_input.prompt},
-                    workbench_plan=plan.model_dump(mode="json"),
-                ),
+                definition=definition,
             )
         assert graph.current_version_id is not None
         materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
@@ -1062,6 +1180,19 @@ class WorkbenchExecutionService:
         )
         self._session.add(node_run)
         await self._session.flush()
+        # A decision can only approve evidence the pipeline actually produced, so
+        # the review that admits this stage is queued with the run that will
+        # produce the candidate.
+        shot = await self._session.get(Shot, execution_input.shot_id)
+        if shot is not None:
+            await _queue_stage_review_run(
+                self._session,
+                run=node_run,
+                stage=plan.stage,
+                project=project,
+                shot=shot,
+                created_by=self._user_id,
+            )
         return node_run
 
     async def get_recent_plan(

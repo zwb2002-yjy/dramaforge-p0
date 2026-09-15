@@ -348,6 +348,38 @@ def _seed_review_run(
                 )
                 session.add(node)
                 await session.flush()
+            # The dispatch path queues this review itself, so reuse the run it
+            # created: (graph_node_id, attempt_no) is a real unique constraint.
+            existing = await session.scalar(
+                _select(NodeRun)
+                .where(NodeRun.graph_node_id == node.id)
+                .order_by(NodeRun.attempt_no.desc())
+                .limit(1)
+            )
+            if existing is not None:
+                if existing.result_artifact_id is None:
+                    evidence = Artifact(
+                        project_id=project.id,
+                        artifact_type="image",
+                        storage_state="available",
+                        object_key=f"obj/{uuid4().hex}",
+                        content_hash=uuid4().hex * 2,
+                        mime_type="image/png",
+                        byte_size=1,
+                    )
+                    session.add(evidence)
+                    await session.flush()
+                    existing.result_artifact_id = evidence.id
+                    existing.status = "completed"
+                    existing.output_summary = {"status": "needs_human"}
+                    existing.input_snapshot = {
+                        **(existing.input_snapshot or {}),
+                        "shot_id": str(shot.id),
+                        "node_key": node_key,
+                        "upstream_artifact_id": str(artifact_id),
+                    }
+                    await session.commit()
+                return str(existing.id)
             evidence = Artifact(
                 project_id=project.id,
                 artifact_type="image",
