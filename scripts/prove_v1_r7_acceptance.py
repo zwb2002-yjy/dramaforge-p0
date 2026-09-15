@@ -387,15 +387,30 @@ class Acceptance:
         ``video_drift_review`` evidence, so the decision has real evidence to bind
         to; this method records exactly that decision instead of bypassing it.
 
-        It also proves the gate blocks: before recording anything, one render
-        attempt must fail with ``DELIVERY_REVIEW_REQUIRED``.
+        It also proves the gate blocks, but only while it should: the refusal probe
+        runs before any decision is recorded and is skipped once every clip is
+        already approved, because at that point a queued render is the correct
+        answer, not a gate failure.
         """
         if self.state.get(label + ":delivery_decisions"):
             return
         clips = timeline.get("clips")
         if not isinstance(clips, list) or not clips:
             raise RuntimeError(f"{label} saved Timeline has no clips to approve")
-        if not self.state.get(label + ":delivery_gate_probe"):
+        summaries = {
+            str(clip["artifact_id"]): self.read(
+                f"/projects/{project_id}/shots/{clip['shot_id']}/review-summary"
+                f"?artifact_id={clip['artifact_id']}&review_kind=video_drift"
+                "&stage=formal_video"
+            )
+            for clip in clips
+        }
+        unapproved = [
+            artifact_id
+            for artifact_id, summary in summaries.items()
+            if not (summary.get("decision") == "approved" and summary.get("applies"))
+        ]
+        if unapproved and not self.state.get(label + ":delivery_gate_probe"):
             blocked = self.expect_error_once(
                 f"{label}:delivery-blocked-without-decision",
                 "POST",
@@ -414,15 +429,18 @@ class Acceptance:
                     f"{label} delivery gate returned {code!r}; expected DELIVERY_REVIEW_REQUIRED"
                 )
             self.state[label + ":delivery_gate_probe"] = sanitized(blocked)
+            self.state[label + ":delivery_gate_probe_skipped"] = False
+            self.save()
+        elif not unapproved:
+            self.state[label + ":delivery_gate_probe_skipped"] = (
+                "every frozen clip already carries an admitted decision"
+            )
             self.save()
         decisions = {}
         for clip in clips:
             shot_id = str(clip["shot_id"])
             artifact_id = str(clip["artifact_id"])
-            summary = self.read(
-                f"/projects/{project_id}/shots/{shot_id}/review-summary"
-                f"?artifact_id={artifact_id}&review_kind=video_drift&stage=formal_video"
-            )
+            summary = summaries[artifact_id]
             if summary.get("decision") == "approved" and summary.get("applies"):
                 decisions[artifact_id] = sanitized(summary)
                 continue
