@@ -1,6 +1,6 @@
 /** Phase 2 feature-local API client (kept out of the shared lib/api.ts). */
 
-import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type AssetRead = components["schemas"]["AssetRead"];
@@ -9,7 +9,7 @@ export type AssetVersionRead = components["schemas"]["AssetVersionRead"];
 export type AssetCardRead = components["schemas"]["AssetCardRead"];
 
 export function fetchAssetTags(projectId: string): Promise<AssetTagRead[]> {
-  return apiGet<AssetTagRead[]>(`/api/v1/projects/${projectId}/asset-tags`);
+  return apiGetList<AssetTagRead>(`/api/v1/projects/${projectId}/asset-tags`);
 }
 
 export async function createAssetTag(projectId: string, name: string): Promise<AssetTagRead> {
@@ -165,7 +165,7 @@ export function fetchAssetVersions(
   projectId: string,
   assetId: string,
 ): Promise<AssetVersionRead[]> {
-  return apiGet<AssetVersionRead[]>(`/api/v1/projects/${projectId}/assets/${assetId}/versions`);
+  return apiGetList<AssetVersionRead>(`/api/v1/projects/${projectId}/assets/${assetId}/versions`);
 }
 
 export type ShotBindingRead = components["schemas"]["app__api__v1__references__BindingRead"];
@@ -178,7 +178,7 @@ export type ResolvedShotReference = components["schemas"]["ResolvedReferenceRead
 };
 
 export function fetchShotReferences(projectId: string, shotId: string): Promise<ShotBindingRead[]> {
-  return apiGet<ShotBindingRead[]>(`/api/v1/projects/${projectId}/shots/${shotId}/references`);
+  return apiGetList<ShotBindingRead>(`/api/v1/projects/${projectId}/shots/${shotId}/references`);
 }
 
 export async function createShotReference(

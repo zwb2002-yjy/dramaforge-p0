@@ -6,7 +6,7 @@
  * separately so a refresh can resume the same repair.
  */
 
-import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type RepairPlanRead = components["schemas"]["RepairPlanRead"];
@@ -62,7 +62,7 @@ export function fetchRepairPlan(projectId: string, shotId: string): Promise<Repa
 }
 
 export function listRepairs(projectId: string, shotId: string): Promise<RepairRequestRead[]> {
-  return apiGet<RepairRequestRead[]>(`/api/v1/projects/${projectId}/shots/${shotId}/repairs`);
+  return apiGetList<RepairRequestRead>(`/api/v1/projects/${projectId}/shots/${shotId}/repairs`);
 }
 
 export function readRepair(

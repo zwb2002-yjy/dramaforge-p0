@@ -1,6 +1,6 @@
 /** Project-scoped EditingAdapter HTTP client (P9-03A). */
 
-import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type EditSessionSummaryRead = components["schemas"]["EditSessionSummaryRead"];
@@ -22,7 +22,7 @@ const editSessionPath = (projectId: string, suffix = "") =>
   `/api/v1/projects/${projectId}/edit-sessions${suffix}`;
 
 export async function fetchEditSessions(projectId: string): Promise<EditSessionSummaryRead[]> {
-  const rows = await apiGet<EditSessionSummaryRead[]>(editSessionPath(projectId));
+  const rows = await apiGetList<EditSessionSummaryRead>(editSessionPath(projectId));
   if (!Array.isArray(rows)) throw new Error("剪辑会话列表响应无效");
   return rows;
 }
@@ -31,7 +31,7 @@ export async function fetchEditFinalFilms(
   projectId: string,
   sessionId: string,
 ): Promise<FinalFilmJobRead[]> {
-  const rows = await apiGet<FinalFilmJobRead[]>(
+  const rows = await apiGetList<FinalFilmJobRead>(
     editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/final-films`),
   );
   if (!Array.isArray(rows)) throw new Error("成片历史响应无效");

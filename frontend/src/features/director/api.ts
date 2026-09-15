@@ -1,4 +1,4 @@
-import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type {
   DirectorNextActionRead,
   DirectorRecommendation,
@@ -113,7 +113,7 @@ export async function listDirectorTurns(
     scope_entity_id: scopeEntityId,
     limit: String(limit),
   });
-  const rows = await apiGet<DirectorTurnRead[]>(
+  const rows = await apiGetList<DirectorTurnRead>(
     `${directorPath(projectId, "turns")}?${search.toString()}`,
   );
   if (!Array.isArray(rows)) throw new Error("导演轮次列表响应无效");

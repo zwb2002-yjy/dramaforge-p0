@@ -69,6 +69,23 @@ export async function apiGet<T>(path: string, workspaceIdOverride?: string | nul
   return (await response.json()) as T;
 }
 
+/**
+ * Read an endpoint that returns a JSON array, failing closed to ``[]``.
+ *
+ * A list endpoint that answers with an object (a proxy error page, a shape
+ * change, a mock that forgot the route) otherwise reaches `.find`/`.map` and
+ * throws inside render, which blanks the whole workspace instead of showing one
+ * empty list. Callers get an array or nothing; they never get a non-array they
+ * have to re-check.
+ */
+export async function apiGetList<T>(
+  path: string,
+  workspaceIdOverride?: string | null,
+): Promise<T[]> {
+  const body = await apiGet<unknown>(path, workspaceIdOverride);
+  return Array.isArray(body) ? (body as T[]) : [];
+}
+
 export async function apiSend<T>(
   method: string,
   path: string,
@@ -333,7 +350,7 @@ export type EffectiveBindingRead = {
 };
 
 export function listModelSlots(): Promise<ModelSlotRead[]> {
-  return apiGet<ModelSlotRead[]>("/api/v1/model-slots");
+  return apiGetList<ModelSlotRead>("/api/v1/model-slots");
 }
 
 export function listWorkspaceModelProfiles(workspaceId: string): Promise<ModelProfileSummary[]> {
@@ -457,7 +474,7 @@ export function fetchCurrentUser(): Promise<UserRead> {
 }
 
 export function listWorkspaces(): Promise<WorkspaceRead[]> {
-  return apiGet<WorkspaceRead[]>("/api/v1/workspaces");
+  return apiGetList<WorkspaceRead>("/api/v1/workspaces");
 }
 
 export async function createWorkspace(name: string): Promise<{ id: string; name: string }> {
@@ -476,7 +493,7 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
 }
 
 export function listWorkspaceProjects(workspaceId: string): Promise<ProjectRead[]> {
-  return apiGet<ProjectRead[]>(`/api/v1/workspaces/${workspaceId}/projects`, workspaceId);
+  return apiGetList<ProjectRead>(`/api/v1/workspaces/${workspaceId}/projects`, workspaceId);
 }
 
 export function fetchProject(projectId: string, workspaceId?: string): Promise<ProjectRead> {
@@ -874,7 +891,7 @@ export type ShotRead = {
 };
 
 export function fetchProjectShots(projectId: string): Promise<ShotRead[]> {
-  return apiGet(`/api/v1/projects/${projectId}/shots`);
+  return apiGetList<ShotRead>(`/api/v1/projects/${projectId}/shots`);
 }
 
 export type ShotCanvasUpdateResponse = {
@@ -1065,12 +1082,12 @@ export interface ModelManifestRead {
 }
 
 export async function listCapabilities(): Promise<CapabilityRead[]> {
-  return apiGet<CapabilityRead[]>("/api/v1/capabilities");
+  return apiGetList<CapabilityRead>("/api/v1/capabilities");
 }
 
 export async function listModels(capability?: string): Promise<ModelRead[]> {
   const query = capability ? `?capability=${encodeURIComponent(capability)}` : "";
-  return apiGet<ModelRead[]>(`/api/v1/models${query}`);
+  return apiGetList<ModelRead>(`/api/v1/models${query}`);
 }
 
 export async function getModelManifest(modelId: string): Promise<ModelManifestRead> {

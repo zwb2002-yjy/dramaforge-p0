@@ -6,7 +6,7 @@
  * reused from `lib/api.ts` unchanged.
  */
 
-import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type { DirectorInvocationEvidence } from "../director/suggestion-types";
 
 /** Bound shared with the backend parser (`MAX_SCRIPT_TEXT_BYTES`). */
@@ -107,7 +107,7 @@ export async function createStoryProposal(
 }
 
 export async function listStoryProposals(projectId: string): Promise<StoryProposalRead[]> {
-  return apiGet<StoryProposalRead[]>(`/api/v1/projects/${projectId}/story/proposals`);
+  return apiGetList<StoryProposalRead>(`/api/v1/projects/${projectId}/story/proposals`);
 }
 
 export async function generateStoryProposal(

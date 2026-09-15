@@ -1,6 +1,6 @@
 /** Phase 3 feature-local API client — scene domain (scene wall / scene workspace). */
 
-import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type { ShotLite } from "../shots/api";
@@ -10,7 +10,7 @@ export type SceneWorkspaceRead = components["schemas"]["SceneWorkspaceRead"];
 export type BindingLite = components["schemas"]["app__api__v1__schemas__workbench__BindingRead"];
 
 export function fetchScenes(projectId: string): Promise<SceneSummary[]> {
-  return apiGet<SceneSummary[]>(`/api/v1/projects/${projectId}/scenes`);
+  return apiGetList<SceneSummary>(`/api/v1/projects/${projectId}/scenes`);
 }
 
 export function fetchSceneWorkspace(
