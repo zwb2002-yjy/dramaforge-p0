@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 _WORKFLOW = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml"
@@ -48,6 +49,31 @@ def test_policy_checks_run_inside_a_python_container() -> None:
     assert "python:3.12-slim" in policy_job
     assert "scripts/check_directory_compliance.py" in policy_job
     assert "scripts/repo_guardrails.py policy" in policy_job
+
+
+def test_branch_flow_admits_dependency_integration_but_protects_main() -> None:
+    import yaml
+
+    workflow = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
+    step = next(
+        step for step in workflow["jobs"]["policy"]["steps"]
+        if step.get("name") == "Enforce integration branch flow"
+    )
+    for base, head, allowed in [
+        ("dev", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", True),
+        ("dev", "agent/runtime-policy", True),
+        ("dev", "unreviewed-feature", False),
+        ("main", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", False),
+        ("main", "dev", True),
+    ]:
+        result = subprocess.run(
+            ["bash", "-c", step["run"]],
+            env={"BASE_REF": base, "HEAD_REF": head},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert (result.returncode == 0) == allowed, result.stdout + result.stderr
 
 
 def test_quality_images_own_browser_and_canonical_surface_gates() -> None:
