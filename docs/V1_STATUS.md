@@ -1,188 +1,60 @@
-# V1_STATUS — 当前状态权威
+# V1_STATUS — 当前 V1 / 发布状态
 
-Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
+Status: current  
+Date: 2026-09-16  
+Branch: `dev` = `d2c7655b452714c540aaea36cf08de285e5df824`
 
-## 当前发布判定：REL-01 真实验收全链通过，等待 Owner 合并
+## 当前结论
 
-**候选**：`dev` = `d47d388`。产品代码（`backend/app`、`backend/alembic`、
-`frontend/src`、`docker-compose.yml`）与接受真实验收的 `cd6f202` **逐树相同**
-（`git rev-parse <sha>:<path>` 比对为 SAME），其后只有测试断言与验收驱动器变化。
+第一版创作主链和发布打包修复已经进入 `dev`，但**当前不能标记为正式发布完成**。
 
-**REL-01 真实 DS＋Agnes 验收：已执行的阶段全部 PASS；但整体验收**尚未闭合****
-（Owner 授权付费、无预算上限；隔离候选栈 `dramaf-relcand`，仅发布 `127.0.0.1:8088`，
-`/health.source_commit = cd6f202`）。driver 的完成判据是 16 条必需断言全部 PASS，
-而当前状态文件里只落了 10 条，缺 6 条（详见下节"整体验收未闭合"）——因此
-**"全部阶段 PASS"不等于"验收完成"**，之前本节的行文把两者混为一谈，现更正。
+当前发布 PR 为 **#90：`dev -> main`**，HEAD 为 `d2c7655b`，GitHub 返回
+`mergeable=true`；`main` 基线仍为 `c12c3dfb`。Owner 仍是唯一合并人。
 
-| 阶段 | 结果 |
-|---|---|
-| `preflight` | PASS（Agnes `auth_models` 真实探测 200 passed，两条绑定 `account_verified`） |
-| `story` | PASS（真实 DeepSeek，`actual_model=anthropic/deepseek-v4-flash`） |
-| `media` | PASS（真实 Agnes 关键帧＋视频，逐片过身份/漂移审查与人工批准） |
-| `editing` | PASS（交付准入逐片通过、剪辑建议采用可审计） |
-| `regressions` | PASS（负向边界 fail closed、MANUAL 不依赖导演） |
-| `delivery` | PASS（真实 MP4/SRT 下载、哈希一致、ffprobe 全真、15–30s、改字幕重导出零新增媒体调用） |
-| `review-submit` / `review-collect` | PASS（修复候选已派发并停在人工门；`review_repair` 断言通过） |
+## 还差什么
 
-### 整体验收未闭合（本轮新发现，需 Owner 决策）
+### 1. GitHub required checks 需要真正跑起来
 
-driver 的 `collect` 阶段用 16 条必需断言判定 `complete`。当前状态文件
-（`%TEMP%\relcand-state.json`，`candidate_sha=cd6f202…`，400 KB）实测：
+`d2c7655b` 上最新 CI 与 Security workflow 都以 failure 结束，而且所有实际 job
+都没有执行 step。当前问题发生在 hosted runner 分配/账号层，而不是某个测试命令失败。
 
-| 必需断言 | 状态 |
-|---|---|
-| `preflight`、`story_and_user_decisions`、`template_auto:formal_media`、`free_assist:formal_media`、`editing_advice_apply`、`review_repair`、`manual_regression`、`final_mp4_srt_download`、`editing_only_rerender`、`negative_boundaries` | **PASS**（10 条） |
-| `real_remote_recovery`、`browser_interaction`、`final_8080_identity`、`text_turn_lineage`、`provider_identity_no_fallback`、`distinct_projects_shared_runtime` | **ABSENT（从未写入）** |
+本地 Docker 质量门仍可用于开发验证，但不能把“本地通过”写成“GitHub required checks
+已通过”。如果改用其他 runner，需在单独变更中明确 runner 环境和发布适配边界。
 
-`required_assertions` 字段也不存在 → `collect` 从未跑到写完成判据那一步。
+### 2. REL-01 需要在正式 8080 入口闭合
 
-其中三项来自 driver 的**外部证据导入**（`--recovery-proof` / `--browser-proof` /
-`--runtime-proof`），而 runtime 证明此前**不可能通过**：driver 曾把期望的 Alembic
-head 写死为 `20260908_0060`，候选栈真实 head 是 `20260915_0069`（栈内
-`alembic heads` 与 `alembic current` 都是它），因此该断言被永久锁死。本轮已修：
+此前真实 Provider 验收在隔离候选栈完成了主要阶段，但验收 driver 没有形成最终
+`complete=true`：16 条必需断言中记录了 10 条，另外 6 条外部/跨阶段断言未导入。
 
-- `repository_migration_head()` 从 `backend/alembic/versions/` 推导唯一 head，
-  多个 head 时直接报错；
-- 入口端口改为可配置（`DRAMAFORGE_PROOF_ENTRY_PORT`，默认 8080），不再写死；
-- 新增单测（`test_r7_acceptance_driver.py`，13 passed）钉住三者一致性与拒绝行为。
+当前 `dev` 已修正两个会阻止闭合的问题：
 
-仍未闭合的部分需要真实外部条件：浏览器证明要求**在 8080 正式入口**跑且零 console
-error，运行时证明要求 8080 上五个服务各自 `source_commit == candidate` 且 `healthy`；
-候选栈当前在 8088，Owner 的 8080 栈不是候选构建。
+- migration head 从候选仓库自身推导，不再写死旧 revision；
+- 验收入口端口可配置，默认正式入口为 **8080**。
 
-**需要 Owner 决策（二选一）**：
+发布验收应以 8080 为正式入口；8088 只适合作为隔离候选/测试端口，5173 只用于前端
+开发。最终需要在同一候选 SHA 上完成浏览器、runtime、recovery 等外部证明并执行
+`collect`，直到 required assertions 全部满足。
 
-1. **按正式入口闭合**：在 8080 上用候选构建起栈，生成并导入
-   `--browser-proof` / `--runtime-proof` / `--recovery-proof`，再跑 `collect`
-   把 16 条断言补满——这需要 Owner 的 8080 栈让位（或指定另一台宿主机的 8080）。
-2. **以"阶段级 PASS + 增量验证"口径发布**：明确接受 `complete=false`，
-   把上面 6 条缺失断言记录为发布已知缺口。
+### 3. 发布物还需要最终安装验证
 
-不选其一之前，`docs/V1_STATUS.md` 不再声称验收闭合。
+Release workflow 已包含以下修复：打包前回收 runner 磁盘、离线包扁平化、
+`images.tar.gz` 单趟压缩，以及 `worker-director` 的生产必需环境变量。
 
-成片证据：`template_auto-final-film.mp4` 6.34 MB、`free_assist-final-film.mp4` 3.77 MB，
-各带 SRT，均在 `tmp/evidence/`。
+这些改动仍需在可运行的 release workflow 上重新生成正式制品，并用生成出来的
+online/offline bundle 做一次干净目录安装验证。只有源码测试通过不能替代发布物验证。
 
-## 本轮修复的产品缺陷（全部由真实验收暴露，离线套件此前全绿）
+## 发布完成条件
 
-| 提交 | 缺陷 |
-|---|---|
-| `4e9113f` | Formal 选择门**不可能满足**：冻结图里没有审查节点，且关键帧阶段从不排队审查 → 设为正式关键帧对任何项目都 422，下游视频链随之停死 |
-| `fcd19a2` | 审查 run 未写 `upstream_artifact_id`，而门正是按该键解析审查 → "审查已完成"被读成"没有审查" |
-| `468d4a3` | 审查查找在有界分页里做选择，历史一多即"查无此审查" |
-| `cd6f202` | 重复导出成片撞唯一约束报 `ARTIFACT_NOT_INDEPENDENT`（产品要求重复导出回读原结果） |
-| `cef8402` | 两个 repair 端点在 `commit()` **之后**读状态；repair 表按 `app.current_project_id()` 做 RLS 且该变量是每事务的，新事务没有作用域 → 修复已建、第一步已派发并提交，响应却是 404 `repair request not found` |
+V1 发布完成至少同时满足：
 
-## 发布流水线状态（2026-09-15 21:40 UTC）
+1. 当前候选的 CI / Security required checks 真实执行并通过；
+2. 同一候选在正式 8080 入口完成 REL-01，最终 `complete=true`；
+3. Owner 审阅并合并 `dev -> main`；
+4. Release workflow 成功生成并发布版本化制品；
+5. 对实际生成的安装包完成在线/离线安装、启动与健康检查验证。
 
-**尚未发布**：本文件上节记录的是"候选可发布"，不是"已发布"；`dev → main` 合并与版本
-tag 属 Owner（Agent 不自批自合）。上表未列的 `revise-unknown-free` /
-`replace-template` / `recover-local-editing` 三个阶段需特定前置状态（未对账的提交、
-并发 Artifact 竞争失败），本轮未构造，记录为未执行。
+## 证据和历史记录放哪里
 
-| 项 | 状态 |
-|---|---|
-| `dev` | `9d844d3` 起（含本节修复；PR #90 → `main` 已开，`BLOCKED`） |
-| `main` | `c12c3df`（MinIO 镜像源修复，已由 Owner 合并） |
-| tag `v0.1.0` | → `c12c3df`；**合并 PR #90 后须重指到新的 main tip**，否则 Release 跑的是不含下述修复的树 |
-| Release 运行 `35020100821` | `Verify release source` + 镜像构建/冒烟/多平台推送 + SBOM + manifest 全部成功；`Create online and offline release bundles` 失败：`write dramaforge-offline-linux-amd64-v0.1.0/.docker_temp_738787394: no space left on device` |
-| 修复一（磁盘） | 打包前新增 `Reclaim runner disk before packaging`（`docker image/container/builder prune`，保留已打 tag 的发布镜像） |
-| 修复二（打包契约） | 离线包此前**不可安装**：`images.tar` 与 `release.env` 被写进 `dramaforge-offline-linux-amd64-v0.1.0/` 子目录，而 `install.sh --offline` / `install.ps1 -Offline` 只在自己所在目录找它们 → 用户按 DEPLOYMENT.md 解压后必然 `images.tar is missing`。现改为**扁平包**（归档根即安装目录）并单趟写出 `images.tar.gz`（`docker save \| gzip`），峰值磁盘从 2.12 GiB 降到 1.06 GiB（本地实测：6 镜像 `images.tar` 1090.8 MiB + `tar.gz` 1082.8 MiB）。`docker load` 直接接受该压缩流（实测 6 镜像全部载入） |
-| 修复三（全新安装） | `worker-director` 是唯一没拿到 `WORKER_TOKEN` 的服务，而 `app/workers/director.py` 在导入期就构造完整 `Settings`（`RedisSettings.from_dsn(get_settings())`）→ 生产校验 `WORKER_TOKEN must be a generated production secret`，新装的栈里该 worker 持续重启。已补上该变量，并用真实离线栈复核：`docker compose up -d --wait` 退出 0，13 个容器全 healthy，director worker 正常启动 6 个函数 |
-
-### 待发布树与已验收候选的差异（发布前须知）
-
-REL-01 全套真实验收绑定在 `cd6f202` 的产品树上，而待发布的 `aa5f2fd` 与其在
-**两个产品路径**上不同（`git rev-parse <sha>:<path>` 逐树比对）：
-
-| 路径 | `cd6f202`（已验收） | `aa5f2fd`（待发布） | 差异内容 |
-|---|---|---|---|
-| `backend/alembic` | `606bbae9c0` | `606bbae9c0` | 相同 |
-| `frontend/src` | `ca2ccfb32c` | `ca2ccfb32c` | 相同 |
-| `backend/app` | `083dce26e5` | `c214f0033b` | **只差一个文件**：`api/v1/workbench.py` 的 repair 读取顺序修复（把 `read_repair` 移到 `commit()` 之前）。该端点正是 `review-submit` 阶段调用的 `POST /shots/{id}/repair`；修复本身已用真实调用复核（`HTTP 200 {next_action: human_decision}`），但**未重跑 REL-01 阶段** |
-| `docker-compose.yml` | `d24a4ab81e` | `8d384caf05` | 上表修复三：给 `worker-director` 补 `WORKER_TOKEN`（仅安装期环境变量下发，不改变运行语义） |
-
-相对于已验收的 `cd6f202`，待发布 `aa5f2fd` 的**产品差异只有三处**，各自的验证状态如下：
-
-1. `backend/app/api/v1/workbench.py`（repair 读取顺序）— 已用真实调用复核（`HTTP 200`），
-   单测与集成测试通过；**未重跑 REL-01 阶段**。
-2. `docker-compose.yml` 的 MinIO 镜像源改 `quay.io`（Docker Hub 上游删库）— 已在 Release
-   运行 `35020100821` 的 `Validate Compose topology` / `Build exact local release images` /
-   `Smoke exact Compose candidate` 三步通过，即该改动本身是真实跑过的。
-3. `docker-compose.yml` 的 `worker-director` 补 `WORKER_TOKEN` — 已用真实离线栈复核
-   （`up -d --wait` 退出 0、13 容器全 healthy），并有契约测试钉住；仅安装期下发。
-
-因此本轮**没有**在新树上重跑 REL-01 的付费阶段，也没有重跑 `review-submit` 那两个
-阶段；记录为待办而非已完成。若要严格闭合，应在新的候选 SHA 上以**新的 state 文件**
-重跑（driver 会拒绝把既有 `cd6f202` 证据改标到新 SHA）。
-
-**当前唯一阻塞（账号级，非仓库缺陷）**：CI 与 Security 的每个 job 都在 2–9 秒内失败、
-`runner_id = 0`、0 个 step、无日志；check-run annotation 原文为
-`The job was not started because recent account payments have failed or your spending
-limit needs to be increased. Please check the 'Billing & plans' section in your settings`。
-托管 runner 无法分配 → CI/Security 无法变绿、Release 也无法重跑。解除需 Owner 在
-GitHub Billing 处理付款方式或把 Actions spending limit 提到 $0 以上（仓库为 private，
-免费额度耗尽后即为此状态）。
-
-解除后按序执行：重跑 CI/Security 至全绿 → 合并 PR #90 → `git push --force origin
-<new-main>:v0.1.0` 重指 tag（仅 tag，已在记录中声明）→ 重跑 Release（直接重跑
-`35020100821`，不能用 `--failed`：bundle 失败使 checksums/artifact/attestation/GitHub
-Release 全部 skipped）→ 执行 RELEASE.md 5–7 步 → 用发布的 `install.sh --offline`
-在干净目录复核离线安装（本节修复只做过程序与结构验证，尚未对真实发布物执行）。
-
-实施记录（不入 Git）见 `tmp/v1-release-20260915/`：`REL01_RESULT_cd6f202.md`、
-`CANDIDATE_RECORD.md` 及各 DEV-0x_RECORD.md。
-
-## 历史 V1 主链验收记录
-
-V1"统一创作主链"目标（2026-09-03 起）已完成 21 项最终完成审计，全部 PASS。
-运行时候选 `adf1b94`，证据/发布候选 `3677430`，`dev → main` PR #66 待 Owner
-审阅合并。审计覆盖（摘要）：
-
-- Legacy 硬删除与 Canonical/directory 门；
-- Idea → proposal/diff/partial apply → Canonical facts；
-- Template Start / Free Start 创建同一 Project；无模板 runtime；
-- AUTO / ASSIST / MANUAL 保持执行身份；MANUAL 无导演回归通过；
-- 主动推荐（performance/action/camera/shot/rhythm/reference）与
-  whole/partial/reject 决策；
-- Manual/locked/dirty/stale 优先级；
-- Candidate/Formal/Experiment/Repair 边界；
-- 统一 NodeRun/ProviderOperation/Artifact 血缘；
-- OpenCut/Editing 为正式尾部，两路径 Final Film（H.264/AAC + SRT）真实交付；
-- 全量质量/安全/迁移/E2E 与 commit-bound 真实 Provider Golden。
-
-## 历史 Director Runtime（D0–D8）完成记录
-
-独立导演编排 runtime（Owner 2026-09-09 授权）已落地：runtime contracts、
-event boundary、invocation journal、LangGraph 验证、engine 迁移、
-tools/decisions UI、跨 runtime 失败矩阵、候选验收与终态对账。MANUAL 路径
-在导演服务停止时完成空项目 → MP4/SRT 全程。详见
-[DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
-
-## 之后已合入 dev 的工作
-
-- V2 导航 / Project Lobby / 设置返回语义（统一导航与项目大厅）；
-- Resonance UI、Canvas-first UI、Production 渐进披露、移动端 canvas 收敛；
-- 前端骨架对齐（设计 Token 采用、骨架约定落文档）；
-- 上下文导演交互与项目导航修复（当时记录的 HEAD 为 070faa3）。
-
-## 数据库与质量基线
-
-- Alembic 单 head：`20260915_0069`（69 个 revision）；以候选自身 `alembic heads`
-  为准。本轮新增 0067（资产入库请求身份）、0068（人工审查决定）、0069（分阶段修复步骤）。
-- CI：`policy` + `container-gates`（backend / PostgreSQL / 迁移 / OpenAPI /
-  前端 / E2E / LiteLLM 集成），Release workflow 发布版本化镜像。
-
-## 剩余工作方向
-
-- Owner 审阅并合并发布 PR **#88**（候选 `df546f6`，检查已全绿）；Agent 不自批自合。
-- DS＋Agnes 真实场景验收：按仓库规则需要逐次正数预算与 Owner 授权。
-- 发布按 [RELEASE.md](RELEASE.md) 执行；新功能开发以本目录权威文档 + 代码
-  现状为基线，不再有历史 Task Contract 序列。
-
-## 历史证据的获取方式
-
-已删除的 Task Contract、Review、Golden evidence 与执行记录保存在 Git 历史
-（`git log` / `git show`）中；它们不构成当前实现依据。正式验收证据按
-[DEVELOPMENT.md](DEVELOPMENT.md) 写入 `tmp/p0-evidence/<source-commit>/`
-（不入 Git）。
+当前树只保留可重复执行的验证逻辑，例如 CI、单测、E2E、release contract 和
+`scripts/prove_v1_r7_acceptance.py`。真实 Provider 调用明细、阶段报告、旧候选审计和
+一次性修复过程不再写入长期文档；需要追溯时查看 Git 历史，临时运行证据写入 `tmp/`。
