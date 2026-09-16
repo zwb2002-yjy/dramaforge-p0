@@ -186,7 +186,11 @@ def test_external_runtime_proof_binds_the_candidate_migration_head(tmp_path):
         assert run.state["assertions"]["final_8080_identity"] == "PASS"
 
         # A proof from a different entry port or migration head is refused.
-        for field, wrong in (("entry_port", driver.ENTRY_PORT + 1), ("migration_head", "20260908_0060")):
+        mismatches = (
+            ("entry_port", driver.ENTRY_PORT + 1),
+            ("migration_head", "20260908_0060"),
+        )
+        for field, wrong in mismatches:
             stale = dict(body, **{field: wrong})
             proof.write_text(json.dumps(stale), encoding="utf-8")
             with pytest.raises(RuntimeError):

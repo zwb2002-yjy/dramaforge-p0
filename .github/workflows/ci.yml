@@ -5,11 +5,11 @@ on:
     branches:
       - dev
       - main
-  push:
-    branches:
-      - dev
-      - main
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -18,8 +18,22 @@ jobs:
   policy:
     name: policy
     runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.changes.outputs.docs_only }}
+      backend: ${{ steps.changes.outputs.backend }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+      migrations: ${{ steps.changes.outputs.migrations }}
+      api_contract: ${{ steps.changes.outputs.api_contract }}
+      runtime: ${{ steps.changes.outputs.runtime }}
+      infra: ${{ steps.changes.outputs.infra }}
+      python_deps: ${{ steps.changes.outputs.python_deps }}
+      frontend_deps: ${{ steps.changes.outputs.frontend_deps }}
+      full_quality: ${{ steps.changes.outputs.full_quality }}
+      filesystem_scan: ${{ steps.changes.outputs.filesystem_scan }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Enforce integration branch flow
         if: github.event_name == 'pull_request'
         env:
@@ -45,6 +59,121 @@ jobs:
                 ;;
             esac
           fi
+
+      - name: Classify changed paths
+        id: changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            changed="$(git ls-files)"
+          else
+            changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          fi
+
+          printf '%s\n' "$changed"
+
+          docs_only=true
+          backend=false
+          frontend=false
+          migrations=false
+          api_contract=false
+          runtime=false
+          infra=false
+          python_deps=false
+          frontend_deps=false
+          full_quality=false
+          filesystem_scan=false
+
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+
+            case "$path" in
+              docs/*|*.md|LICENSE|NOTICE) ;;
+              *) docs_only=false ;;
+            esac
+
+            case "$path" in
+              backend/*|scripts/*|fixtures/*) backend=true ;;
+            esac
+
+            case "$path" in
+              frontend/*) frontend=true ;;
+            esac
+
+            case "$path" in
+              backend/alembic/*|backend/app/db/*|backend/app/models/*)
+                migrations=true
+                ;;
+            esac
+
+            case "$path" in
+              backend/app/api/*|backend/app/schemas/*|frontend/src/api/*|frontend/src/shared/api/*|scripts/_export_openapi.py|scripts/generate_openapi_types.py|scripts/generate-openapi-types.mjs|scripts/check-generated-api.mjs)
+                api_contract=true
+                ;;
+            esac
+
+            case "$path" in
+              backend/app/director/*|backend/app/production/*|backend/app/providers/*|backend/app/workers/*|backend/app/runtime/*)
+                runtime=true
+                ;;
+            esac
+
+            case "$path" in
+              .github/workflows/*|docker-compose*.yml|.dockerignore|infra/*|deploy/*|backend/Dockerfile*|frontend/Dockerfile*|scripts/run_quality*|scripts/repo_guardrails.py|scripts/check_*|scripts/release_contract.py|install.sh|install.ps1)
+                infra=true
+                ;;
+            esac
+
+            case "$path" in
+              backend/pyproject.toml|backend/uv.lock|backend/.python-version)
+                python_deps=true
+                ;;
+            esac
+
+            case "$path" in
+              frontend/package.json|frontend/package-lock.json|frontend/.nvmrc)
+                frontend_deps=true
+                ;;
+            esac
+          done <<< "$changed"
+
+          if [[ "$backend" == true && "$frontend" == true ]]; then
+            full_quality=true
+          fi
+          if [[ "$migrations" == true || "$api_contract" == true || "$runtime" == true || "$infra" == true ]]; then
+            full_quality=true
+          fi
+          if [[ "$full_quality" == true || "$python_deps" == true || "$frontend_deps" == true ]]; then
+            filesystem_scan=true
+          fi
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            docs_only=false
+            backend=true
+            frontend=true
+            migrations=true
+            api_contract=true
+            runtime=true
+            infra=true
+            python_deps=true
+            frontend_deps=true
+            full_quality=true
+            filesystem_scan=true
+          fi
+
+          for name in \
+            docs_only backend frontend migrations api_contract runtime infra \
+            python_deps frontend_deps full_quality filesystem_scan
+          do
+            printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_OUTPUT"
+          done
+
       - name: Check repository policy in a container
         run: |
           set -euo pipefail
@@ -60,8 +189,66 @@ jobs:
               python scripts/repo_guardrails.py policy --repo-root /workspace
             '
 
+  backend-fast:
+    name: backend-fast
+    needs: policy
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.base_ref == 'dev' &&
+      needs.policy.outputs.backend == 'true' &&
+      needs.policy.outputs.full_quality != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build backend quality image
+        run: docker compose -f docker-compose.quality.yml build backend-quality
+      - name: Run backend fast gates
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.quality.yml run --rm --no-deps \
+            backend-quality \
+            sh -ec '
+              set -eu
+              python3 scripts/check_canonical_surface.py
+              uv run --directory backend ruff check app tests alembic/versions
+              uv run --directory backend mypy app
+              uv run --directory backend pytest tests/unit -q
+            '
+
+  frontend-fast:
+    name: frontend-fast
+    needs: policy
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.base_ref == 'dev' &&
+      needs.policy.outputs.frontend == 'true' &&
+      needs.policy.outputs.full_quality != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build frontend quality image
+        run: docker compose -f docker-compose.quality.yml build frontend-quality
+      - name: Run frontend fast gates
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.quality.yml run --rm --no-deps \
+            frontend-quality \
+            sh -ec '
+              set -eu
+              npm run --prefix frontend format:check
+              npm run --prefix frontend lint
+              npm run --prefix frontend typecheck
+              npm run --prefix frontend test -- --run --maxWorkers=1 --minWorkers=1
+              npm run --prefix frontend build
+            '
+
   container-gates:
     name: container-gates
+    needs: policy
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.base_ref == 'main' ||
+      needs.policy.outputs.full_quality == 'true'
     runs-on: ubuntu-latest
     env:
       QUALITY_CONTRACT_DIR: ./tmp/quality-contract
@@ -92,3 +279,104 @@ jobs:
       - name: Remove quality containers and volumes
         if: always()
         run: docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
+
+  dependency-review:
+    name: dependency-review
+    needs: policy
+    if: >-
+      github.event_name == 'pull_request' &&
+      vars.DEPENDENCY_REVIEW_ENABLED == 'true' &&
+      (
+        github.base_ref == 'main' ||
+        needs.policy.outputs.python_deps == 'true' ||
+        needs.policy.outputs.frontend_deps == 'true'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+
+  secret-scan:
+    name: secret-scan
+    needs: policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: table
+          exit-code: "1"
+
+  python-dependencies:
+    name: python-dependencies
+    needs: policy
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.base_ref == 'main' ||
+      needs.policy.outputs.python_deps == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Audit locked Python dependencies in a container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/backend \
+            python:3.14-slim-bookworm \
+            sh -ec 'pip install --no-cache-dir uv pip-audit; uv export --locked --no-dev --no-emit-project --output-file /tmp/requirements-audit.txt; pip-audit --requirement /tmp/requirements-audit.txt'
+
+  frontend-dependencies:
+    name: frontend-dependencies
+    needs: policy
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.base_ref == 'main' ||
+      needs.policy.outputs.frontend_deps == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Audit locked Node dependencies in a container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/frontend \
+            node:24.21.0-alpine3.24 \
+            sh -ec 'npm ci --ignore-scripts; npm audit --omit=dev --audit-level=high'
+
+  filesystem-scan:
+    name: filesystem-scan
+    needs: policy
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.base_ref == 'main' ||
+      needs.policy.outputs.filesystem_scan == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: trivy-results.sarif
