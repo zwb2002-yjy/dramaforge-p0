@@ -150,3 +150,56 @@ async def test_sse_last_event_id_resume() -> None:
     first = await gen.__anext__()
     assert first.id == e2.id
     assert "dramaforge_sse_reconnect_total" in metrics_payload().decode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_outbox_publish_emits_a_workspace_scoped_sse_envelope(engine_factory) -> None:
+    _engine, factory = engine_factory
+    publisher = StreamPublisher()
+    hub = SseHub()
+    workspace_id = uuid4()
+    async with factory() as session:
+        dispatcher = OutboxDispatcher(session, publisher, sse_hub=hub)
+        event = OutboxEvent(
+            event_id=uuid4(),
+            topic="production.facts.v1",
+            schema_version=1,
+            payload={"project_id": str(uuid4()), "notice": {"kind": "node.completed"}},
+            status=OutboxStatus.PENDING.value,
+            attempt_count=0,
+        )
+        session.add(event)
+        await session.commit()
+        await session.refresh(event)
+
+        claimed = await dispatcher.claim_pending(worker_id="w1", limit=1)
+        await dispatcher.publish_leased(claimed[0], workspace_id=workspace_id)
+
+        published = hub.since(None)
+    assert len(published) == 1
+    assert published[0].event == "production.facts.v1"
+    assert published[0].data["workspace_id"] == str(workspace_id)
+    assert published[0].data["topic"] == "production.facts.v1"
+    assert publisher.messages[0][1]["workspace_id"] == str(workspace_id)
+
+
+def test_redis_sse_bridge_decodes_a_production_fact() -> None:
+    from app.events.sse import RedisSseBridge
+
+    hub = SseHub()
+    bridge = RedisSseBridge.__new__(RedisSseBridge)
+    bridge._hub = hub
+    bridge._publish_stream_message(
+        {
+            "event_id": str(uuid4()),
+            "schema_version": "1",
+            "workspace_id": "workspace-1",
+            "payload": '{"project_id":"project-1","notice":{"kind":"node.completed"}}',
+        }
+    )
+
+    events = hub.since(None)
+    assert len(events) == 1
+    assert events[0].event == "production.facts.v1"
+    assert events[0].data["workspace_id"] == "workspace-1"
+    assert events[0].data["project_id"] == "project-1"

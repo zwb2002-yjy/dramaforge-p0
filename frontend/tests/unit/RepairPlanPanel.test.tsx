@@ -82,9 +82,9 @@ describe("RepairPlanPanel", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("previews the plan, both options, the step list and the cost boundary", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       return json([]);
     });
     renderPanel();
@@ -100,7 +100,7 @@ describe("RepairPlanPanel", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       if (url.endsWith("/repairs") && init?.method === "POST") {
         writes.push({
           url,
@@ -127,9 +127,9 @@ describe("RepairPlanPanel", () => {
   });
 
   it("shows an in-progress repair with review required instead of 'repair complete'", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       return json([ACTIVE_REPAIR]);
     });
     renderPanel();
@@ -145,11 +145,11 @@ describe("RepairPlanPanel", () => {
 
   it("offers the next step only when the server says one may be executed", async () => {
     const calls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       if (url.includes("/steps")) {
         return json({
           node_run_id: "77777777-7777-4777-8777-777777777777",
@@ -177,7 +177,7 @@ describe("RepairPlanPanel", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       if (url.endsWith("/repairs") && init?.method === "POST") {
         return json(
           { code: "CONFLICT", detail: "repair plan changed since it was previewed" },

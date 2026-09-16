@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.events.models import OutboxDeadLetter, OutboxEvent
+from app.events.sse import SseHub, default_sse_hub
 from app.shared.enums import OutboxStatus
 from app.shared.errors import NotFoundError, ValidationAppError
 from app.shared.observability import (
@@ -39,11 +40,13 @@ class OutboxDispatcher:
         *,
         max_attempts: int = 3,
         lease_seconds: int = 30,
+        sse_hub: SseHub | None = default_sse_hub,
     ) -> None:
         self._session = session
         self._publisher = publisher or StreamPublisher()
         self._max_attempts = max_attempts
         self._lease_seconds = lease_seconds
+        self._sse_hub = sse_hub
 
     async def reclaim_expired_leases(self, *, now: datetime | None = None) -> int:
         """Return expired LEASED rows to PENDING for retry."""
@@ -129,18 +132,26 @@ class OutboxDispatcher:
         await self._session.flush()
         return row
 
-    async def publish_leased(self, event: OutboxEvent) -> None:
+    async def publish_leased(
+        self,
+        event: OutboxEvent,
+        *,
+        workspace_id: UUID | None = None,
+    ) -> None:
         if event.status == OutboxStatus.PUBLISHED.value:
             return
         if event.status != OutboxStatus.LEASED.value:
             raise ValidationAppError("only leased outbox events can be published")
+        stream_payload: dict[str, object] = {
+            "event_id": str(event.event_id),
+            "payload": event.payload,
+            "schema_version": event.schema_version,
+        }
+        if workspace_id is not None:
+            stream_payload["workspace_id"] = str(workspace_id)
         stream_id = await self._publisher.publish(
             event.topic,
-            {
-                "event_id": str(event.event_id),
-                "payload": event.payload,
-                "schema_version": event.schema_version,
-            },
+            stream_payload,
         )
         event.status = OutboxStatus.PUBLISHED.value
         event.published_at = datetime.now(UTC)
@@ -148,6 +159,18 @@ class OutboxDispatcher:
         event.leased_until = None
         event.last_error_summary = f"stream_id={stream_id}"
         OUTBOX_PUBLISHED_TOTAL.inc()
+        if self._sse_hub is not None and workspace_id is not None:
+            self._sse_hub.publish(
+                event=event.topic,
+                data={
+                    "event_id": str(event.event_id),
+                    "topic": event.topic,
+                    "schema_version": event.schema_version,
+                    "workspace_id": str(workspace_id),
+                    "project_id": str(event.project_id) if event.project_id else None,
+                    "payload": event.payload,
+                },
+            )
         await self._session.flush()
 
     async def fail_leased(self, event: OutboxEvent, *, error: str) -> OutboxDeadLetter | None:

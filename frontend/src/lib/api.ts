@@ -69,21 +69,21 @@ export async function apiGet<T>(path: string, workspaceIdOverride?: string | nul
   return (await response.json()) as T;
 }
 
-/**
- * Read an endpoint that returns a JSON array, failing closed to ``[]``.
- *
- * A list endpoint that answers with an object (a proxy error page, a shape
- * change, a mock that forgot the route) otherwise reaches `.find`/`.map` and
- * throws inside render, which blanks the whole workspace instead of showing one
- * empty list. Callers get an array or nothing; they never get a non-array they
- * have to re-check.
- */
+/** Read an endpoint that is contractually required to return a JSON array. */
 export async function apiGetList<T>(
   path: string,
   workspaceIdOverride?: string | null,
 ): Promise<T[]> {
   const body = await apiGet<unknown>(path, workspaceIdOverride);
-  return Array.isArray(body) ? (body as T[]) : [];
+  if (Array.isArray(body)) return body as T[];
+
+  const actual = body === null ? "null" : Array.isArray(body) ? "array" : typeof body;
+  throw new ApiError(
+    `接口 ${path} 返回了非数组响应（实际类型：${actual}）。`,
+    502,
+    "INVALID_RESPONSE_SHAPE",
+    { expected: "array", actual, path },
+  );
 }
 
 export async function apiSend<T>(

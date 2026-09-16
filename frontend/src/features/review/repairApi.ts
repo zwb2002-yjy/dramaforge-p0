@@ -58,7 +58,10 @@ export function repairIsWaitingForHuman(request: RepairRequestRead): boolean {
 }
 
 export function fetchRepairPlan(projectId: string, shotId: string): Promise<RepairPlanRead> {
-  return apiGet<RepairPlanRead>(`/api/v1/projects/${projectId}/shots/${shotId}/repair-plan`);
+  return apiSend<RepairPlanRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/repair-plan`,
+  );
 }
 
 export function listRepairs(projectId: string, shotId: string): Promise<RepairRequestRead[]> {
