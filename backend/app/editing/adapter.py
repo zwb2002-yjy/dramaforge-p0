@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.editing.models import EditSession
-from app.shared.errors import NotFoundError
+from app.shared.errors import ConflictError, NotFoundError
 
 
 class EditTimeline:
@@ -85,8 +85,26 @@ class EditingAdapter:
         project_id: UUID,
         session_id: UUID,
         timeline: dict[str, object],
+        expected_session_version: int,
     ) -> EditSession:
-        row = await self.load_timeline(project_id=project_id, session_id=session_id)
+        row = await self._session.scalar(
+            select(EditSession)
+            .where(
+                EditSession.id == session_id,
+                EditSession.project_id == project_id,
+            )
+            .with_for_update()
+        )
+        if row is None:
+            raise NotFoundError("edit session not found")
+        if row.version != expected_session_version:
+            raise ConflictError(
+                "edit session version conflict",
+                details={
+                    "expected_session_version": expected_session_version,
+                    "actual_session_version": row.version,
+                },
+            )
         row.timeline = dict(timeline)
         row.version += 1
         row.updated_at = datetime.now(UTC)

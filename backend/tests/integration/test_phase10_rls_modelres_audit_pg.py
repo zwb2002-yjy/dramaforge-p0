@@ -178,7 +178,7 @@ async def _seed_user_workspace_projects(session: AsyncSession, suffix: str) -> d
             name="Lin Xia",
             description="Lead",
             metadata_json={},
-            status="draft",
+            status="formal",
             created_by=user.id,
         )
     )

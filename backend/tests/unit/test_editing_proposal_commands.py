@@ -287,6 +287,7 @@ async def test_manual_save_bumps_edit_session_version_once(session: AsyncSession
         project_id=project.id,
         session_id=edit_session.id,
         timeline={"clips": list(edit_session.timeline["clips"]), "metadata": {"manual": True}},
+        expected_session_version=1,
     )
     assert saved.version == 2
     assert saved.timeline["metadata"] == {"manual": True}
@@ -303,6 +304,7 @@ async def test_valid_reorder_duration_and_subtitle_plan_bumps_once_and_preserves
         project_id=project.id,
         session_id=edit_session.id,
         timeline=dict(edit_session.timeline),
+        expected_session_version=1,
     )
     await session.refresh(edit_session)
     facts_before = await _snapshot_facts(
@@ -387,6 +389,7 @@ async def test_stale_edit_session_proposal_marks_item_stale_without_mutation(
         project_id=project.id,
         session_id=edit_session.id,
         timeline=dict(edit_session.timeline),
+        expected_session_version=1,
     )
     await session.refresh(edit_session)
     before = (

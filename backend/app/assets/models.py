@@ -7,6 +7,7 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -224,7 +225,13 @@ class ShotChangeProposal(Base):
 
 class Asset(Base):
     __tablename__ = "assets"
-    __table_args__ = (UniqueConstraint("project_id", "kind", "name", name="uq_asset_name"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "kind", "name", name="uq_asset_name"),
+        CheckConstraint(
+            "status IN ('draft','active','recycled')",
+            name="ck_assets_status",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(
@@ -266,6 +273,10 @@ class AssetVersion(Base):
     __tablename__ = "asset_versions"
     __table_args__ = (
         UniqueConstraint("asset_id", "version_number", name="uq_asset_version_number"),
+        CheckConstraint(
+            "status IN ('candidate','formal','historical','rejected')",
+            name="ck_asset_versions_status",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -282,7 +293,7 @@ class AssetVersion(Base):
     metadata_json: Mapped[dict[str, object]] = mapped_column(
         "metadata", JSON_DOCUMENT, nullable=False, default=dict
     )
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate")
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )

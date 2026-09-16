@@ -2,9 +2,9 @@
 
 Status: current
 Source: backend/app/api/v1 and generated OpenAPI
-Date: 2026-09-15
-Base: dev 5ea45d6
-Migration head: 20260915_0069
+Date: 2026-09-16
+Base: dev 6555395
+Migration head: 20260916_0070
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Contract rules
@@ -68,6 +68,21 @@ validated server-side; a disabled button is never the only guard.
 Review steps are human actions: the review page records the decision, and the
 Formal selection stays a separate user action. A machine `needs_human` result is
 evidence, never an approval.
+
+## Cross-layer consistency contracts
+
+- Asset status is `draft | active | recycled`; AssetVersion status is
+  `candidate | formal | historical | rejected`. Ordinary Asset creation makes
+  v1 Formal and stores it in `current_version_id`; `archived` is rejected.
+- Asset create/update accepts top-level `tags`. `asset_tags` and
+  `asset_tag_links` are the only tag query source; `metadata.tags` has no
+  runtime meaning.
+- `PATCH …/edit-sessions/{session_id}/timeline` requires
+  `expected_session_version`, locks the row, and returns 409 without mutation
+  when the loaded version is stale.
+- `GET …/creative-capabilities/catalog` projects Genre, Style, Shot Language,
+  Quality Policy, Skills, and staged strategies from the backend registries;
+  the same registries validate Freeze requests.
 
 ## Idempotent submissions
 

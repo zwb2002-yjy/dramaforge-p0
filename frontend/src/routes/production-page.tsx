@@ -9,6 +9,7 @@ import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
 import { fetchScenes } from "../features/scenes/api";
 import { createShotExecution } from "../features/shots/api";
+import { recycleAsset, restoreAsset } from "../features/assets/api";
 import {
   createExperiment,
   createProjectAsset,
@@ -25,7 +26,6 @@ import {
   listModels,
   saveDirectorBoard,
   startExperiment,
-  updateProjectAsset,
   updateShotCanvas,
 } from "../lib/api";
 import type { ProjectSnapshot } from "../lib/api";
@@ -318,20 +318,15 @@ export function ProductionPage({ projectId }: { projectId: string }) {
               kind: input.kind,
               name: input.name,
               description: input.description,
-              metadata: { tags: input.tags },
+              metadata: {},
               status: "active",
+              tags: input.tags,
             });
             await qc.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
           }}
           onUpdateAsset={async (asset, input) => {
-            await updateProjectAsset(projectId, asset.id, {
-              expected_version: asset.version,
-              kind: asset.kind,
-              name: asset.name,
-              description: asset.description,
-              metadata: asset.metadata,
-              status: input.status,
-            });
+            if (input.status === "recycled") await recycleAsset(projectId, asset.id);
+            else await restoreAsset(projectId, asset.id);
             await qc.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
           }}
           onCreateExperiment={async (input) => {

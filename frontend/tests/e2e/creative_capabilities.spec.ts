@@ -21,6 +21,22 @@ async function installMock(page: Page, onFreeze?: (body: Record<string, unknown>
     const method = request.method();
     if (path === "/health") return json(route, { status: "ok", db: "up" });
     if (path.endsWith("/auth/csrf")) return json(route, { csrf_token: "csrf-e2e" });
+    if (path.endsWith("/creative-capabilities/catalog") && method === "GET") {
+      const item = (key: string, display_name: string) => ({
+        key,
+        display_name,
+        description: `${display_name} description`,
+        metadata: { version: "1" },
+      });
+      return json(route, {
+        genres: [item("short_drama_suspense_v1", "短剧悬疑")],
+        styles: [item("film_noir_v1", "黑色电影")],
+        shot_languages: [item("dialogue_classic_coverage_v1", "对白经典覆盖")],
+        quality_policies: [item("dialogue_identity_quality_v1", "对白身份质量")],
+        skills: [item("emotional-performance-v1", "情绪表演")],
+        available_staged_strategies: [],
+      });
+    }
     if (path.endsWith("/creative-capabilities/provenance") && method === "GET") {
       return json(route, {
         creative_capabilities: {

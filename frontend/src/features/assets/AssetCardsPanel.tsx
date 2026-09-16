@@ -37,7 +37,8 @@ const ROLE_LABEL: Record<string, string> = {
 const VERSION_STATUS_LABEL: Record<string, string> = {
   candidate: "候选",
   formal: "正式",
-  archived: "已归档",
+  historical: "历史",
+  rejected: "已拒绝",
 };
 
 type AssetCardsPanelProps = {

@@ -86,9 +86,12 @@ class AssetTagService:
         asset = await self._get_asset(project_id=project_id, asset_id=asset_id, actor=actor)
         if not isinstance(names, list):
             raise ValidationAppError("tags must be a list of names")
-        normalized_names = [normalize_tag_name(name) for name in names]
-        tags: list[AssetTag] = []
+        unique_names: dict[str, str] = {}
         for name in names:
+            normalized = normalize_tag_name(name)
+            unique_names.setdefault(normalized, name)
+        tags: list[AssetTag] = []
+        for name in unique_names.values():
             tags.append(
                 await self.create_tag(project_id=project_id, actor=actor, name=name)
             )
@@ -96,10 +99,7 @@ class AssetTagService:
             delete(AssetTagLink).where(AssetTagLink.asset_id == asset.id)
         )
         for tag in tags:
-            if tag.normalized_name in normalized_names:
-                self._session.add(
-                    AssetTagLink(asset_id=asset.id, tag_id=tag.id)
-                )
+            self._session.add(AssetTagLink(asset_id=asset.id, tag_id=tag.id))
         await self._session.flush()
         return tags
 

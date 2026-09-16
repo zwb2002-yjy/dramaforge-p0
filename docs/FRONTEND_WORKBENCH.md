@@ -26,6 +26,12 @@ frontend/src/
 - `frontend/src/shared/api/generated.ts` 由 OpenAPI 生成，不手改
   （`npm run api:generate` / `api:check`）。
 - Candidate 预览是零写入的本地 UI 状态；Formal 确认才触发服务端写入。
+- Asset 标签由 API 的 `tags` 字段和正式 Tag 关联表提供，UI 不读取或写入
+  `metadata.tags`；回收状态统一为 `recycled`。
+- Timeline 保存提交本地基线对应的 `expected_session_version`；409 时保留本地
+  draft 并要求用户重新加载后手动合并。
+- Creative Capability 选择项与显示名全部来自后端 Catalog；前端不维护业务 key
+  或 Registry 映射副本。
 
 ## 设计系统（Visual System 2.0）
 

@@ -2743,9 +2743,12 @@ export interface components {
             };
             /**
              * Status
-             * @default draft
+             * @default active
+             * @enum {string}
              */
-            status: string;
+            status: "draft" | "active" | "recycled";
+            /** Tags */
+            tags?: string[];
         };
         /** AssetFromArtifactBody */
         AssetFromArtifactBody: {
@@ -2797,6 +2800,8 @@ export interface components {
             };
             /** Status */
             status: string;
+            /** Tags */
+            tags: string[];
             /** Version */
             version: number;
             /**
@@ -2854,9 +2859,12 @@ export interface components {
             };
             /**
              * Status
-             * @default draft
+             * @default active
+             * @enum {string}
              */
-            status: string;
+            status: "draft" | "active" | "recycled";
+            /** Tags */
+            tags?: string[];
             /** Expected Version */
             expected_version: number;
         };
@@ -3031,8 +3039,31 @@ export interface components {
          * @description The resolvable creative capability catalog (read-only).
          */
         CapabilityCatalogBody: {
+            /** Genres */
+            genres?: components["schemas"]["CapabilityCatalogItem"][];
+            /** Styles */
+            styles?: components["schemas"]["CapabilityCatalogItem"][];
+            /** Shot Languages */
+            shot_languages?: components["schemas"]["CapabilityCatalogItem"][];
+            /** Quality Policies */
+            quality_policies?: components["schemas"]["CapabilityCatalogItem"][];
+            /** Skills */
+            skills?: components["schemas"]["CapabilityCatalogItem"][];
             /** Available Staged Strategies */
             available_staged_strategies?: string[];
+        };
+        /** CapabilityCatalogItem */
+        CapabilityCatalogItem: {
+            /** Key */
+            key: string;
+            /** Display Name */
+            display_name: string;
+            /** Description */
+            description: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
         };
         /**
          * CapabilityGap
@@ -3770,6 +3801,8 @@ export interface components {
         /** EditTimelineUpdateRequest */
         EditTimelineUpdateRequest: {
             timeline: components["schemas"]["EditTimelinePayload"];
+            /** Expected Session Version */
+            expected_session_version: number;
         };
         /**
          * EditingDirectorSuggestionCandidate

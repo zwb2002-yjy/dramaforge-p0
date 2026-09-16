@@ -424,6 +424,7 @@ describe("EditingWorkspace", () => {
     const patch = calls.find((call) => call.url.endsWith("/timeline"));
     expect(patch?.method).toBe("PATCH");
     expect(patch?.body).toEqual({
+      expected_session_version: 1,
       timeline: {
         clips: [
           {
@@ -539,6 +540,34 @@ describe("EditingWorkspace", () => {
     expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
   });
 
+  it("keeps the local draft and explains how to recover from a stale save conflict", async () => {
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-stale" });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}/timeline`)) {
+        return json(
+          {
+            detail: "edit session version conflict",
+            code: "CONFLICT",
+            details: { expected_session_version: 1, actual_session_version: 2 },
+          },
+          409,
+        );
+      }
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByLabelText("镜头 1 时长"), { target: { value: "2.25" } });
+    fireEvent.click(screen.getByTestId("save-edit-timeline"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("本地未保存草稿已保留");
+    expect(screen.getByRole("alert")).toHaveTextContent("重新加载后手动合并");
+    expect(screen.getByTestId("edit-session-dirty")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
+  });
+
   it("requests a proposal with the current session version and keeps it separate from timeline save", async () => {
     const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
     mockEditingFetch((input, init) => {
@@ -642,6 +671,7 @@ describe("EditingWorkspace", () => {
     const clips = (patchBody?.timeline as { clips: Array<Record<string, unknown>> })?.clips;
     expect(clips?.map((clip) => clip.id)).toEqual(["clip-2", "clip-1"]);
     expect(clips?.[1]).toMatchObject({ id: "clip-1", duration_seconds: 2.5 });
+    expect(patchBody?.expected_session_version).toBe(1);
     expect(patchBody).not.toHaveProperty("production_lineage");
   });
 

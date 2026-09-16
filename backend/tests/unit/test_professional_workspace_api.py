@@ -62,14 +62,16 @@ def test_professional_assets_are_versioned(client: TestClient) -> None:
             "kind": "costume",
             "name": "Black coat",
             "description": "Formal line costume",
-            "metadata": {"tags": ["night", "lead"]},
+            "metadata": {"fabric": "wool"},
             "status": "active",
+            "tags": ["night", "lead"],
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert created.status_code == 201, created.text
     asset = created.json()
     assert asset["version"] == 1
+    assert asset["tags"] == ["night", "lead"]
     updated = client.patch(
         f"/api/v1/projects/{project_id}/assets/{asset['id']}",
         json={
@@ -77,15 +79,28 @@ def test_professional_assets_are_versioned(client: TestClient) -> None:
             "kind": "costume",
             "name": "Black rain coat",
             "description": "Locked official costume",
-            "metadata": {"tags": ["night", "lead", "rain"]},
+            "metadata": {"fabric": "waterproof"},
             "status": "active",
+            "tags": ["night", "lead", "rain"],
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["version"] == 2
     versions = client.get(f"/api/v1/projects/{project_id}/assets/{asset['id']}/versions")
-    assert [item["version_number"] for item in versions.json()] == [2, 1]
+    version_rows = versions.json()
+    assert [item["version_number"] for item in version_rows] == [2, 1]
+    assert [item["status"] for item in version_rows] == ["formal", "historical"]
+    card = client.get(f"/api/v1/projects/{project_id}/assets/{asset['id']}/card").json()
+    assert card["current_version_id"] == version_rows[0]["id"]
+    assert card["current_version_status"] == "formal"
+
+    archived = client.post(
+        f"/api/v1/projects/{project_id}/assets",
+        json={"kind": "prop", "name": "Legacy", "status": "archived"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert archived.status_code == 422
 
 
 def test_experiment_annotation_and_opencut_manifest(client: TestClient) -> None:

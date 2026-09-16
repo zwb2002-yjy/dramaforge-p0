@@ -73,6 +73,7 @@ export const queryKeys = {
     workflowOverview: (projectId: string) => ["workflow-overview", projectId] as const,
     provenance: (projectId: string, targetId: string | null | undefined) =>
       ["creative-provenance", projectId, targetId] as const,
+    creativeCatalog: (projectId: string) => ["creative-capability-catalog", projectId] as const,
     opencutManifest: (projectId: string) => ["opencut-manifest", projectId] as const,
     canvasRevisions: (projectId: string, shotId: string | null | undefined) =>
       ["canvas-revisions", projectId, shotId] as const,

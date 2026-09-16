@@ -33,10 +33,22 @@ def _project(client: TestClient) -> str:
     return str(created.json()["id"])
 
 
-def _asset(client: TestClient, project_id: str, name: str, kind: str = "character") -> str:
+def _asset(
+    client: TestClient,
+    project_id: str,
+    name: str,
+    kind: str = "character",
+    tags: list[str] | None = None,
+) -> str:
     created = client.post(
         f"/api/v1/projects/{project_id}/assets",
-        json={"kind": kind, "name": name, "description": "", "status": "active"},
+        json={
+            "kind": kind,
+            "name": name,
+            "description": "",
+            "status": "active",
+            "tags": tags or [],
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert created.status_code == 201, created.text
@@ -69,6 +81,54 @@ def test_tag_create_set_and_filter(client: TestClient) -> None:
 
     listed = client.get(f"/api/v1/projects/{project_id}/asset-tags")
     assert {item["normalized_name"] for item in listed.json()} == {"lead", "night", "雨夜"}
+
+
+def test_asset_create_update_and_clear_tags_use_canonical_links(client: TestClient) -> None:
+    project_id = _project(client)
+    asset_id = _asset(client, project_id, "雨夜主角", tags=["主角", "雨夜"])
+
+    created_filter = client.get(
+        f"/api/v1/projects/{project_id}/assets", params={"tags": "主角"}
+    )
+    assert [item["id"] for item in created_filter.json()] == [asset_id]
+    assert set(created_filter.json()[0]["tags"]) == {"主角", "雨夜"}
+    assert "tags" not in created_filter.json()[0]["metadata"]
+
+    cleared = client.put(
+        f"/api/v1/projects/{project_id}/assets/{asset_id}/tags",
+        json={"tags": []},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert cleared.status_code == 200 and cleared.json() == []
+    assert client.get(
+        f"/api/v1/projects/{project_id}/assets", params={"tags": "主角"}
+    ).json() == []
+
+    reset = client.put(
+        f"/api/v1/projects/{project_id}/assets/{asset_id}/tags",
+        json={"tags": ["主角", "主角"]},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert len(reset.json()) == 1
+
+    recycled = client.post(
+        f"/api/v1/projects/{project_id}/assets/{asset_id}/recycle",
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert recycled.status_code == 200
+    assert recycled.json()["tags"] == ["主角"]
+    restored = client.post(
+        f"/api/v1/projects/{project_id}/assets/{asset_id}/restore",
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["tags"] == ["主角"]
+    assert [
+        item["id"]
+        for item in client.get(
+            f"/api/v1/projects/{project_id}/assets", params={"tags": "主角"}
+        ).json()
+    ] == [asset_id]
 
 
 def test_asset_list_filters_kind_status_and_name(client: TestClient) -> None:

@@ -8,6 +8,7 @@ import { EditingSessionPicker } from "./EditingSessionPicker";
 import { queryKeys } from "../../lib/queryKeys";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import {
+  ApiError,
   artifactContentUrl,
   fetchOpenCutManifest,
   fetchSnapshot,
@@ -224,6 +225,7 @@ export function EditingWorkspace({
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<EditableTimeline | null>(null);
   const [baseline, setBaseline] = useState<EditableTimeline | null>(null);
+  const [baselineVersion, setBaselineVersion] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [exported, setExported] = useState<EditExportRead | null>(null);
   const [finalFilm, setFinalFilm] = useState<FinalFilmRead | null>(null);
@@ -315,6 +317,7 @@ export function EditingWorkspace({
     // or export result from session A into session B or the manifest preview.
     setDraft(null);
     setBaseline(null);
+    setBaselineVersion(null);
     setFeedback(null);
     setExported(null);
     setFinalFilm(null);
@@ -342,6 +345,7 @@ export function EditingWorkspace({
     const next = editableTimeline(persistedSession.data);
     setDraft(next);
     setBaseline(next);
+    setBaselineVersion(persistedSession.data.version);
   }, [dirty, persistedSession.data]);
 
   const create = useMutation({
@@ -359,12 +363,16 @@ export function EditingWorkspace({
   const save = useMutation({
     mutationFn: () => {
       if (!sessionId || !draft) throw new Error("没有可保存的剪辑会话草稿");
-      return saveEditTimeline(projectId, sessionId, timelineForSave(draft));
+      if (!isSessionVersion(baselineVersion)) {
+        throw new Error("当前 EditSession 版本尚未加载，无法安全保存。");
+      }
+      return saveEditTimeline(projectId, sessionId, timelineForSave(draft), baselineVersion);
     },
     onSuccess: (saved) => {
       const next = editableTimeline(saved);
       setDraft(next);
       setBaseline(next);
+      setBaselineVersion(saved.version);
       setFeedback("时间线已保存。");
       setExported(null);
       setSuggestionPreview(null);
@@ -377,7 +385,11 @@ export function EditingWorkspace({
     },
     onError: (error: unknown) => {
       // Keep draft/baseline untouched so failed saves leave the editor dirty.
-      setFeedback(`保存时间线失败：${errorMessage(error)}`);
+      setFeedback(
+        error instanceof ApiError && error.status === 409
+          ? "保存时间线失败：服务器时间线已更新；本地未保存草稿已保留。请重新加载后手动合并，再次保存。"
+          : `保存时间线失败：${errorMessage(error)}`,
+      );
     },
   });
 

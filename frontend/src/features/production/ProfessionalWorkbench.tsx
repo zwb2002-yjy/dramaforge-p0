@@ -84,7 +84,7 @@ type ProfessionalWorkbenchProps = {
     description: string;
     tags: string[];
   }) => Promise<void>;
-  onUpdateAsset?: (asset: AssetRead, input: { status: "active" | "archived" }) => Promise<void>;
+  onUpdateAsset?: (asset: AssetRead, input: { status: "active" | "recycled" }) => Promise<void>;
   experiments?: ExperimentRead[];
   annotations?: ReviewAnnotationRead[];
   openCutManifest?: OpenCutManifestRead;
@@ -414,7 +414,7 @@ export function ProfessionalWorkbench({
                       {assets.map((asset) => (
                         <article
                           key={asset.id}
-                          className={asset.status === "archived" ? "archived" : ""}
+                          className={asset.status === "recycled" ? "recycled" : ""}
                         >
                           <span>{assetKindLabel(asset.kind)}</span>
                           <strong>{asset.name}</strong>
@@ -423,8 +423,8 @@ export function ProfessionalWorkbench({
                           </small>
                           <p>{asset.description || "暂无描述"}</p>
                           <small>
-                            {Array.isArray(asset.metadata.tags)
-                              ? asset.metadata.tags.join(" · ")
+                            {Array.isArray(asset.tags) && asset.tags.length > 0
+                              ? asset.tags.join(" · ")
                               : "未分类"}
                           </small>
                           <div className="suggestion-actions">
@@ -436,11 +436,11 @@ export function ProfessionalWorkbench({
                               disabled={!onUpdateAsset}
                               onClick={() =>
                                 void onUpdateAsset?.(asset, {
-                                  status: asset.status === "archived" ? "active" : "archived",
+                                  status: asset.status === "recycled" ? "active" : "recycled",
                                 })
                               }
                             >
-                              {asset.status === "archived" ? "恢复" : "回收站"}
+                              {asset.status === "recycled" ? "恢复" : "回收站"}
                             </Button>
                           </div>
                         </article>

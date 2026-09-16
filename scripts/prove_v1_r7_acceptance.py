@@ -1088,7 +1088,10 @@ class Acceptance:
                     timeline.setdefault("metadata", {})["director_suggestion_applied"] = advice[
                         "suggestion"
                     ]["base_session_version"]
-                return {"timeline": timeline}
+                return {
+                    "timeline": timeline,
+                    "expected_session_version": edit["version"],
+                }
 
             saved = self.once(
                 label + ":timeline-save",
@@ -1211,7 +1214,10 @@ class Acceptance:
             prefix + ":timeline-save",
             "PATCH",
             f"/projects/{project_id}/edit-sessions/{edit['id']}/timeline",
-            {"timeline": saved_step["response"]["timeline"]},
+            {
+                "timeline": saved_step["response"]["timeline"],
+                "expected_session_version": edit["version"],
+            },
         )
         prepared = self.once(
             prefix + ":tail",
@@ -1511,7 +1517,10 @@ class Acceptance:
                 str(timeline["clips"][0].get("subtitle") or "") + " · 复核版"
             )
             timeline.setdefault("metadata", {})["r7_editing_only_rerender"] = self.state["run_key"]
-            return {"timeline": timeline}
+            return {
+                "timeline": timeline,
+                "expected_session_version": free_edit["version"],
+            }
 
         saved = self.once(
             "free_assist:rerender-save",

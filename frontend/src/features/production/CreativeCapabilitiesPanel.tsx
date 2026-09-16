@@ -2,61 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "../../components/ui";
-import { creativeCapabilityLabels } from "../../lib/creativeLabels";
 import { queryKeys } from "../../lib/queryKeys";
-import { fetchCreativeProvenance, freezeCreativeCapabilities } from "./workflow-api";
-
-const GENRES = [
-  "short_drama_romance_v1",
-  "short_drama_suspense_v1",
-  "short_drama_revenge_v1",
-  "dynamic_comic_v1",
-  "commercial_product_v1",
-  "music_montage_v1",
-];
-
-const STYLES = [
-  "cinematic_realism_v1",
-  "chinese_drama_v1",
-  "film_noir_v1",
-  "hong_kong_urban_v1",
-  "cyberpunk_neon_v1",
-  "chinese_ancient_v1",
-  "anime_clean_v1",
-  "dynamic_comic_v1",
-  "commercial_premium_v1",
-  "documentary_natural_v1",
-];
-
-const SHOT_LANGUAGES = [
-  "dialogue_classic_coverage_v1",
-  "subjective_tension_v1",
-  "handheld_documentary_v1",
-  "action_dynamic_v1",
-  "commercial_product_v1",
-  "montage_rhythmic_v1",
-];
-
-const QUALITY_POLICIES = [
-  "dialogue_identity_quality_v1",
-  "multi_character_quality_v1",
-  "action_motion_quality_v1",
-  "comic_consistency_quality_v1",
-  "commercial_product_quality_v1",
-];
-
-const SKILLS = [
-  "short-drama-hook-v1",
-  "suspense-reversal-v1",
-  "emotional-conflict-v1",
-  "adaptation-compression-v1",
-  "dialogue-scene-direction-v1",
-  "action-scene-direction-v1",
-  "emotional-performance-v1",
-  "montage-direction-v1",
-  "character-consistency-v1",
-  "continuity-guardian-v1",
-];
+import {
+  fetchCreativeCapabilityCatalog,
+  fetchCreativeProvenance,
+  freezeCreativeCapabilities,
+  type CreativeCapabilityCatalogItem,
+} from "./workflow-api";
 
 export type CreativeCapabilitiesPanelProps = {
   projectId: string;
@@ -84,6 +36,11 @@ export function CreativeCapabilitiesPanel({
   const [msg, setMsg] = useState<string | null>(null);
 
   const targetId = shotId ?? sceneId ?? null;
+  const catalog = useQuery({
+    queryKey: queryKeys.production.creativeCatalog(projectId),
+    queryFn: () => fetchCreativeCapabilityCatalog(projectId),
+    enabled: Boolean(projectId),
+  });
   const provenance = useQuery({
     queryKey: queryKeys.production.provenance(projectId, targetId),
     queryFn: () =>
@@ -103,6 +60,8 @@ export function CreativeCapabilitiesPanel({
     quality_policy?: { key?: string };
     skill_guidance?: Array<{ skill_key: string; strategy?: string }>;
   };
+  const capabilityLabel = (items: CreativeCapabilityCatalogItem[] | undefined, key: string) =>
+    items?.find((item) => item.key === key)?.display_name ?? key.replace(/[_-]+/g, " ");
 
   const freeze = useMutation({
     mutationFn: () =>
@@ -146,9 +105,9 @@ export function CreativeCapabilitiesPanel({
           创作类型
           <select aria-label="创作类型" value={genre} onChange={(e) => setGenre(e.target.value)}>
             <option value="">默认</option>
-            {GENRES.map((g) => (
-              <option key={g} value={g}>
-                {creativeCapabilityLabels.genre(g)}
+            {(catalog.data?.genres ?? []).map((item) => (
+              <option key={item.key} value={item.key} title={item.description}>
+                {item.display_name}
               </option>
             ))}
           </select>
@@ -157,9 +116,9 @@ export function CreativeCapabilitiesPanel({
           风格
           <select aria-label="风格" value={style} onChange={(e) => setStyle(e.target.value)}>
             <option value="">默认</option>
-            {STYLES.map((s) => (
-              <option key={s} value={s}>
-                {creativeCapabilityLabels.style(s)}
+            {(catalog.data?.styles ?? []).map((item) => (
+              <option key={item.key} value={item.key} title={item.description}>
+                {item.display_name}
               </option>
             ))}
           </select>
@@ -172,9 +131,9 @@ export function CreativeCapabilitiesPanel({
             onChange={(e) => setShotLanguage(e.target.value)}
           >
             <option value="">默认</option>
-            {SHOT_LANGUAGES.map((s) => (
-              <option key={s} value={s}>
-                {creativeCapabilityLabels.shotLanguage(s)}
+            {(catalog.data?.shot_languages ?? []).map((item) => (
+              <option key={item.key} value={item.key} title={item.description}>
+                {item.display_name}
               </option>
             ))}
           </select>
@@ -187,9 +146,9 @@ export function CreativeCapabilitiesPanel({
             onChange={(e) => setQuality(e.target.value)}
           >
             <option value="">默认</option>
-            {QUALITY_POLICIES.map((q) => (
-              <option key={q} value={q}>
-                {creativeCapabilityLabels.qualityPolicy(q)}
+            {(catalog.data?.quality_policies ?? []).map((item) => (
+              <option key={item.key} value={item.key} title={item.description}>
+                {item.display_name}
               </option>
             ))}
           </select>
@@ -197,14 +156,14 @@ export function CreativeCapabilitiesPanel({
 
         <div className="creative-skill-list">
           <small>启用的创作技能</small>
-          {SKILLS.map((key) => (
-            <label key={key} className="creative-skill-toggle">
+          {(catalog.data?.skills ?? []).map((item) => (
+            <label key={item.key} className="creative-skill-toggle" title={item.description}>
               <input
                 type="checkbox"
-                checked={skills.includes(key)}
-                onChange={() => toggleSkill(key)}
+                checked={skills.includes(item.key)}
+                onChange={() => toggleSkill(item.key)}
               />
-              <span>{creativeCapabilityLabels.skill(key)}</span>
+              <span>{item.display_name}</span>
             </label>
           ))}
         </div>
@@ -212,13 +171,18 @@ export function CreativeCapabilitiesPanel({
         <Button
           tone="primary"
           onClick={() => freeze.mutate()}
-          disabled={freeze.isPending || !targetId}
+          disabled={freeze.isPending || !targetId || !catalog.data}
         >
           {freeze.isPending ? "冻结中…" : "冻结创意能力"}
         </Button>
         {msg && (
           <div className="canvas-save-message" role="status">
             {msg}
+          </div>
+        )}
+        {catalog.isError && (
+          <div className="flash err" role="alert">
+            无法加载创意能力目录：{String(catalog.error)}
           </div>
         )}
       </div>
@@ -228,22 +192,26 @@ export function CreativeCapabilitiesPanel({
           <small>当前冻结的创作意图</small>
           <ul data-testid="creative-provenance-summary" className="creative-provenance-summary">
             {summary.genre?.key && (
-              <li>创作类型：{creativeCapabilityLabels.genre(summary.genre.key)}</li>
+              <li>创作类型：{capabilityLabel(catalog.data?.genres, summary.genre.key)}</li>
             )}
             {summary.style?.key && (
-              <li>风格：{creativeCapabilityLabels.style(summary.style.key)}</li>
+              <li>风格：{capabilityLabel(catalog.data?.styles, summary.style.key)}</li>
             )}
             {summary.shot_language?.key && (
-              <li>镜头语言：{creativeCapabilityLabels.shotLanguage(summary.shot_language.key)}</li>
+              <li>
+                镜头语言：
+                {capabilityLabel(catalog.data?.shot_languages, summary.shot_language.key)}
+              </li>
             )}
             {summary.quality_policy?.key && (
               <li>
-                质量策略：{creativeCapabilityLabels.qualityPolicy(summary.quality_policy.key)}
+                质量策略：
+                {capabilityLabel(catalog.data?.quality_policies, summary.quality_policy.key)}
               </li>
             )}
             {summary.skill_guidance?.map((entry) => (
               <li key={entry.skill_key}>
-                {creativeCapabilityLabels.skill(entry.skill_key)}
+                {capabilityLabel(catalog.data?.skills, entry.skill_key)}
                 {entry.strategy ? `：${entry.strategy}` : ""}
               </li>
             ))}

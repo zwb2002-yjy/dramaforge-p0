@@ -661,6 +661,7 @@ export type AssetRead = {
   description: string;
   metadata: Record<string, unknown>;
   status: string;
+  tags: string[];
   version: number;
   created_at: string;
   updated_at: string;
@@ -690,7 +691,8 @@ export async function createProjectAsset(
     name: string;
     description: string;
     metadata?: Record<string, unknown>;
-    status?: "draft" | "active" | "archived";
+    status?: "draft" | "active" | "recycled";
+    tags?: string[];
   },
 ): Promise<AssetRead> {
   const csrf = await fetchCsrf();
@@ -711,7 +713,8 @@ export async function updateProjectAsset(
     name: string;
     description: string;
     metadata?: Record<string, unknown>;
-    status?: "draft" | "active" | "archived";
+    status?: "draft" | "active" | "recycled";
+    tags?: string[];
   },
 ): Promise<AssetRead> {
   const csrf = await fetchCsrf();

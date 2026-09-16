@@ -43,9 +43,21 @@ router = APIRouter(
 )
 
 
+class CapabilityCatalogItem(BaseModel):
+    key: str
+    display_name: str
+    description: str
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
 class CapabilityCatalogBody(BaseModel):
     """The resolvable creative capability catalog (read-only)."""
 
+    genres: list[CapabilityCatalogItem] = Field(default_factory=list)
+    styles: list[CapabilityCatalogItem] = Field(default_factory=list)
+    shot_languages: list[CapabilityCatalogItem] = Field(default_factory=list)
+    quality_policies: list[CapabilityCatalogItem] = Field(default_factory=list)
+    skills: list[CapabilityCatalogItem] = Field(default_factory=list)
     available_staged_strategies: list[str] = Field(default_factory=list)
 
 
@@ -89,6 +101,55 @@ async def creative_capability_catalog(
     """Resolvable genre/style/shot-language/quality/skill catalog (read-only)."""
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=_user)
     return CapabilityCatalogBody(
+        genres=[
+            CapabilityCatalogItem(
+                key=item.genre_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={"version": item.genre_version},
+            )
+            for item in GENRE_PROFILES
+        ],
+        styles=[
+            CapabilityCatalogItem(
+                key=item.style_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={"version": item.style_version, "medium": item.medium},
+            )
+            for item in STYLE_PACKS
+        ],
+        shot_languages=[
+            CapabilityCatalogItem(
+                key=item.pack_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={"version": item.pack_version},
+            )
+            for item in SHOT_LANGUAGE_PACKS
+        ],
+        quality_policies=[
+            CapabilityCatalogItem(
+                key=item.policy_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={"version": item.version},
+            )
+            for item in QUALITY_POLICIES
+        ],
+        skills=[
+            CapabilityCatalogItem(
+                key=item.skill_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={
+                    "version": item.skill_version,
+                    "category": item.category.value,
+                    "applicable_stages": [stage.value for stage in item.applicable_stages],
+                },
+            )
+            for item in _skill_catalog()
+        ],
         available_staged_strategies=[
             "two-pass-i2i-stabilize-v1",
             "lock-a-primary-then-i2i-b",

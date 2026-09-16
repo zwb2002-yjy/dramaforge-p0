@@ -104,7 +104,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
   expect(saveRequests[0]).toEqual({
     method: "PATCH",
     path: `${EDIT_SESSION_PATH}/timeline`,
-    body: { timeline: savedTimeline },
+    body: { timeline: savedTimeline, expected_session_version: 1 },
   });
   expect(saveRequests[0].body).not.toHaveProperty("production_lineage");
   expect(JSON.stringify(saveRequests[0].body)).not.toContain("production_lineage");

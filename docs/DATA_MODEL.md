@@ -1,10 +1,10 @@
 # DATA_MODEL — 数据模型权威
 
 Status: current
-Date: 2026-09-14
-Base: dev 070faa3
-Alembic head: 20260910_0066
-Revisions: 66
+Date: 2026-09-16
+Base: dev 6555395
+Alembic head: 20260916_0070
+Revisions: 70
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Canonical relational graph
@@ -89,17 +89,22 @@ Migration 20260902_0051 removes:
 | 20260910_0064 | `director_invocations`: individual Director text invocation identity and validated output. |
 | 20260910_0065 | Director turn engine binding (`engine_version`, `state_schema_version`, `runtime_execution_id`, `runtime_revision`) and `director_runtime_controls`, `director_runtime_wakeups`, `director_runtime_signal_claims`. |
 | 20260910_0066 | Private `director_runtime_checkpoints` schema and its role. |
+| 20260916_0070 | Canonical Asset/AssetVersion lifecycle constraints, current Formal pointers, and one-time migration of legacy `metadata.tags` into `asset_tags` / `asset_tag_links`. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
-deleted by these revisions. Historical data migration and rollback are not
-required.
+deleted by these revisions. Revision 0070 backfills legacy Asset lifecycle and
+tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20260910_0066.
+- Alembic has one head: 20260916_0070.
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.
+- Asset status is limited to `draft | active | recycled`; AssetVersion status
+  is limited to `candidate | formal | historical | rejected`, and each current
+  Formal version is addressed by `assets.current_version_id`.
+- Asset tags are sourced only from `asset_tags` / `asset_tag_links`.
 - Migration 0051 is the only owner of the hard-removal operation.
 - Director engine identity is all-or-nothing per turn
   (`ck_director_turn_engine_binding`) and `runtime_execution_id` is unique.

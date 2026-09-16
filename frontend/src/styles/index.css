@@ -2051,7 +2051,7 @@ code {
   border-radius: var(--df-radius-control);
   background: var(--df-surface-2);
 }
-.asset-card-list article.archived {
+.asset-card-list article.recycled {
   opacity: 0.55;
 }
 .asset-card-list article span,
