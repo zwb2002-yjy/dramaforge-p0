@@ -34,7 +34,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 - 前端 format / lint / typecheck / Vitest / 生产构建 / Playwright E2E；
 - LiteLLM 集成（固定官方 Proxy 镜像 + 确定性 mock 模型，无外部 Provider 调用）。
 
-CI（`.github/workflows/ci.yml`）执行同一组 container gates。
+本地完整质量门与 GitHub Full Gate 共用 `docker-compose.quality.yml`，不维护第二套
+测试实现。GitHub PR CI 按变更风险分层：
+
+- 所有 PR：`policy` + secret scan；
+- docs-only：不构建 backend/frontend 质量镜像，不启动 PostgreSQL、Redis、
+  Playwright、LiteLLM，也不执行依赖审计；
+- 普通 backend-only：backend 镜像 + ruff / mypy / backend unit；
+- 普通 frontend-only：frontend 镜像 + format / lint / typecheck / Vitest / build；
+- migrations、API contract、Director/Production Runtime、Provider/Worker、
+  Docker/Compose/infra/workflow，以及同时修改 backend + frontend 的 PR：
+  升级为完整 `container-gates`；
+- Python / Node 依赖审计仅在对应依赖描述或 lockfile 变化、`dev -> main`
+  或手动完整门时执行；
+- Trivy filesystem scan 在高风险/依赖变更、`dev -> main` 或手动完整门执行；
+- 同一 PR 的新 commit 会取消旧的未完成 CI，避免验证已过期 SHA。
+
+常规 merge 到 `dev` 后不再原样重复 PR 全量质量门；发布候选和
+`dev -> main` 仍执行完整验证。周度完整安全扫描由
+`.github/workflows/security.yml` 独立执行。
+
+质量 Dockerfile 先安装 lockfile 对应依赖，再复制完整源码，使本地/self-hosted
+以及具有可复用构建缓存的环境不会因普通源码或文档变化无意义重新安装全部依赖。
 
 运行时基线为 Node 24.x、Python 3.14.x；Docker 标签允许系列内维护更新，
 不是不可变的补丁版本 / digest 锁定。Dependabot 的常规版本更新先进入 `dev`，
