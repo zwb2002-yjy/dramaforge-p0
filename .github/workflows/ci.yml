@@ -99,7 +99,7 @@ jobs:
             esac
 
             case "$path" in
-              backend/*) backend=true ;;
+              backend/*|scripts/*|fixtures/*) backend=true ;;
             esac
 
             case "$path" in
@@ -113,7 +113,7 @@ jobs:
             esac
 
             case "$path" in
-              backend/app/api/*|backend/app/schemas/*|frontend/src/api/*|scripts/_export_openapi.py|scripts/generate-openapi-types.mjs|scripts/check-generated-api.mjs)
+              backend/app/api/*|backend/app/schemas/*|frontend/src/api/*|frontend/src/shared/api/*|scripts/_export_openapi.py|scripts/generate_openapi_types.py|scripts/generate-openapi-types.mjs|scripts/check-generated-api.mjs)
                 api_contract=true
                 ;;
             esac
