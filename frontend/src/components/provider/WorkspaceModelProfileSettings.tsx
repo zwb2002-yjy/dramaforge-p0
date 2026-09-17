@@ -68,9 +68,7 @@ export function WorkspaceModelProfileSettings({ workspaceId }: WorkspaceModelPro
     enabled: Boolean(workspaceId),
   });
   const modelsForGroup = (group: keyof typeof SIMPLE_CAPABILITIES) =>
-    (models.data ?? []).filter((model) =>
-      model.capabilities.includes(SIMPLE_CAPABILITIES[group]),
-    );
+    (models.data ?? []).filter((model) => model.capabilities.includes(SIMPLE_CAPABILITIES[group]));
 
   useEffect(() => {
     const first = profiles.data?.[0];
