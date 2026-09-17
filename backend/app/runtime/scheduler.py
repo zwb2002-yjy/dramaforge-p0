@@ -188,6 +188,7 @@ class NodeRunScheduler:
                     project_id=node_run_scope.project_id,
                 )
                 await self._mark_queue_failed(run_id, error=str(exc))
+        await self._dispatcher.pending_count()
         return count
 
     async def enqueue_node_run_only(self, node_run_id: UUID) -> str:

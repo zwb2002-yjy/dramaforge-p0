@@ -2,9 +2,9 @@
 
 Status: current
 Date: 2026-09-17
-Base: dev a17bf96
-Alembic head: 20260917_0071
-Revisions: 71
+Base: dev 597b49d
+Alembic head: 20260917_0072
+Revisions: 72
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Canonical relational graph
@@ -89,6 +89,7 @@ Migration 20260902_0051 removes:
 | 20260910_0064 | `director_invocations`: individual Director text invocation identity and validated output. |
 | 20260910_0065 | Director turn engine binding (`engine_version`, `state_schema_version`, `runtime_execution_id`, `runtime_revision`) and `director_runtime_controls`, `director_runtime_wakeups`, `director_runtime_signal_claims`. |
 | 20260917_0071 | Remove the retired `face_review` node type and unused `export_format` / `export_status` PostgreSQL enum types; `project_stage` now reuses the shared ORM enum definition. |
+| 20260917_0072 | Add a SECURITY DEFINER outbox metrics query for process-wide pending count and oldest pending age. |
 | 20260910_0066 | Private `director_runtime_checkpoints` schema and its role. |
 | 20260916_0070 | Canonical Asset/AssetVersion lifecycle constraints, current Formal pointers, and one-time migration of legacy `metadata.tags` into `asset_tags` / `asset_tag_links`. |
 

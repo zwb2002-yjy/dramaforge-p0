@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.events.models import OutboxDeadLetter, OutboxEvent
@@ -14,6 +14,7 @@ from app.shared.enums import OutboxStatus
 from app.shared.errors import NotFoundError, ValidationAppError
 from app.shared.observability import (
     OUTBOX_DEAD_LETTER_TOTAL,
+    OUTBOX_OLDEST_WAIT_SECONDS,
     OUTBOX_PENDING,
     OUTBOX_PUBLISHED_TOTAL,
     OUTBOX_REPLAY_TOTAL,
@@ -297,9 +298,39 @@ class OutboxDispatcher:
         return row
 
     async def pending_count(self) -> int:
-        result = await self._session.execute(
-            select(OutboxEvent).where(OutboxEvent.status == OutboxStatus.PENDING.value)
-        )
-        n = len(list(result.scalars().all()))
-        OUTBOX_PENDING.set(n)
-        return n
+        bind = self._session.get_bind()
+        dialect = bind.dialect.name if bind is not None else ""
+        if dialect == "postgresql":
+            row = (
+                await self._session.execute(
+                    text("SELECT pending_count, oldest_created_at FROM app.outbox_metrics()")
+                )
+            ).one()
+            pending = int(row.pending_count)
+            oldest = row.oldest_created_at
+        else:
+            pending = int(
+                (
+                    await self._session.scalar(
+                        select(func.count())
+                        .select_from(OutboxEvent)
+                        .where(OutboxEvent.status == OutboxStatus.PENDING.value)
+                    )
+                )
+                or 0
+            )
+            oldest = await self._session.scalar(
+                select(func.min(OutboxEvent.created_at)).where(
+                    OutboxEvent.status == OutboxStatus.PENDING.value
+                )
+            )
+
+        OUTBOX_PENDING.set(pending)
+        if oldest is None:
+            OUTBOX_OLDEST_WAIT_SECONDS.set(0)
+        else:
+            now = datetime.now(UTC)
+            if oldest.tzinfo is None:
+                oldest = oldest.replace(tzinfo=UTC)
+            OUTBOX_OLDEST_WAIT_SECONDS.set(max(0.0, (now - oldest).total_seconds()))
+        return pending

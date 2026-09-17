@@ -86,6 +86,28 @@ async def test_outbox_publish_and_dead_letter_then_idempotent_replay_across_inst
 
 
 @pytest.mark.asyncio
+async def test_outbox_pending_metrics_refresh_pending_and_oldest_wait(engine_factory) -> None:
+    _engine, factory = engine_factory
+    async with factory() as session:
+        event = OutboxEvent(
+            event_id=uuid4(),
+            topic="node.completed",
+            schema_version=1,
+            payload={},
+            status=OutboxStatus.PENDING.value,
+            attempt_count=0,
+        )
+        session.add(event)
+        await session.commit()
+        dispatcher = OutboxDispatcher(session)
+        assert await dispatcher.pending_count() == 1
+
+    metrics = metrics_payload().decode("utf-8")
+    assert "dramaforge_outbox_pending 1.0" in metrics
+    assert "dramaforge_outbox_oldest_wait_seconds" in metrics
+
+
+@pytest.mark.asyncio
 async def test_human_replay_does_not_lease_sibling_pending(engine_factory) -> None:
     """Replay of e1 dead letter must leave sibling e2 PENDING (not stuck LEASED)."""
     _engine, factory = engine_factory
