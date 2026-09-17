@@ -404,6 +404,22 @@ async def record_human_decision(
         raise ValidationAppError(
             "review run not found in project", details={"code": "REVIEW_RUN_NOT_FOUND"}
         )
+    # New review snapshots carry their exact target. Reject an explicit
+    # mismatch, while retaining compatibility with historical evidence rows
+    # that predate target fields and can only be bound by the stored decision.
+    snapshot = dict(review_run.input_snapshot or {})
+    snapshot_shot_id = snapshot.get("shot_id")
+    snapshot_artifact_id = snapshot.get("upstream_artifact_id") or snapshot.get(
+        "source_artifact_id"
+    )
+    if (
+        (snapshot_shot_id is not None and str(snapshot_shot_id) != str(shot_id))
+        or (snapshot_artifact_id is not None and str(snapshot_artifact_id) != str(artifact_id))
+    ):
+        raise ValidationAppError(
+            "review target does not belong to this shot and Artifact",
+            details={"code": "REVIEW_TARGET_MISMATCH"},
+        )
     if review_run.result_artifact_id is None:
         raise ValidationAppError(
             "review run has no evidence artifact",

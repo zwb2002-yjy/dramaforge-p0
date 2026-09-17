@@ -141,7 +141,7 @@ Node installation for development or release evidence.
 | TEXT_LLM_* 与旧文本凭证写面 | 需要文本模型，不需要旧直连配置 | 已确认实例 LiteLLM 网关取代；模型选择与有效网关合同保留 |
 | 旧实验 ORM / DTO | 需要隔离实验，但不需要旧生产轨 | 当前 ExperimentBranch；旧表仅历史映射，不重新给 UI 提供旧入口 |
 
-### 视频证据与候选审核：已补全的设计，尚未实现
+### 视频证据与候选审核：精确目标入口与待完成证据设计
 
 **范围**：仅桌面。复用 Review 工作区与现有候选/修复事实，不新增第二条审核或生产
 主链，不自动生成媒体，也不把读取帧作为付费 Provider 操作。
@@ -153,10 +153,14 @@ Node installation for development or release evidence.
 报错，绝不回退成“当前正式视频”。stage=formal_video 是准入用途，不表示目标
 已经 Formal。服务端仍校验工作空间、Project、Shot、Artifact 血缘和对应审查记录。
 
-**现有缺口**：ReviewWorkspace 当前播放器和人工判断主要绑定 formal_video_artifact_id；
-RepairPlanPanel 的提示却让用户在这里审核新候选。因此必须先打通准确候选身份，
-不能只在正式视频播放器旁添加缩略图。RepairStepRead 还需投影本步 NodeRun 的
-result_artifact_id（只读派生，不另存可修改副本），不能用最新镜头产物猜测候选。
+**当前实现**：候选托盘与修复步骤提供携带精确目标的审查入口。ReviewWorkspace
+使用工作台返回的镜头候选 / 正式结果校验目标；修复入口额外核对请求、步骤和结果。
+显式目标无效时显示错误，不回退正式版本。播放器、批注与人工决定绑定同一 Artifact；
+切换目标会隔离本地草稿、幂等键及迟到提交反馈。RepairStepRead 只读投影本步
+NodeRun.result_artifact_id，不另存可修改副本，也不以 adopted_artifact_id 猜测候选。
+
+**尚待验证和实现**：服务端全链血缘 / 错 Shot 拒绝审计、候选正式采用按钮的资格、
+下述视频证据清单与交付、当前 8080 端到端验收仍未完成，不能据此前端验证宣称阶段通过。
 
 **单一桌面组件**：复用 VideoReviewTimeline，加一条按时间排序的视频证据条与可选
 参考对照区。展示首/中/尾帧及已有的 scene-change 采样；每帧显示准确时间和角色，

@@ -156,6 +156,29 @@ async def _add_node_run(
     return run
 
 
+async def test_shot_workbench_exposes_exact_media_candidates() -> None:
+    engine, session = await _make_env()
+    try:
+        user, project, _episode, _scene, shot = await _seed(session)
+        run = await _add_node_run(
+            session,
+            project_id=project.id,
+            shot_id=shot.id,
+            user=user,
+            status="completed",
+        )
+        workbench = await ShotWorkbenchService(session).get_workbench(
+            project_id=project.id, shot_id=shot.id, actor=user
+        )
+        rows = [row for row in workbench["candidates"] if row.get("artifact_id") is not None]
+        assert len(rows) == 1
+        assert rows[0]["artifact_id"] == run.result_artifact_id
+        assert rows[0]["stage"] == "image_keyframe"
+        assert rows[0]["node_run_id"] == run.id
+    finally:
+        await session.close()
+        await engine.dispose()  # type: ignore[union-attr]
+
 async def test_trace_marks_unknown_provider_submission_for_manual_reconciliation() -> None:
     """A possibly-billed submission must be visible instead of inviting a retry."""
     engine, session = await _make_env()

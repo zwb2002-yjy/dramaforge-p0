@@ -83,6 +83,7 @@ class RepairStepRead(BaseModel):
     command_key: str | None
     node_run_id: UUID | None
     node_run_status: str | None
+    result_artifact_id: UUID | None
     confirmed_at: datetime | None
     adopted_artifact_id: UUID | None
     review_decision_id: UUID | None
@@ -525,9 +526,11 @@ class RepairService:
         step_reads: list[RepairStepRead] = []
         for step in steps:
             status = None
+            result_artifact_id = None
             if step.node_run_id is not None:
                 run = await self._session.get(NodeRun, step.node_run_id)
                 status = run.status if run is not None else None
+                result_artifact_id = run.result_artifact_id if run is not None else None
             step_reads.append(
                 RepairStepRead(
                     id=step.id,
@@ -537,6 +540,7 @@ class RepairService:
                     command_key=step.command_key,
                     node_run_id=step.node_run_id,
                     node_run_status=status,
+                    result_artifact_id=result_artifact_id,
                     confirmed_at=step.confirmed_at,
                     adopted_artifact_id=step.adopted_artifact_id,
                     review_decision_id=step.review_decision_id,

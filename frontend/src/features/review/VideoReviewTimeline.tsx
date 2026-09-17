@@ -11,6 +11,7 @@ export interface VideoReviewTimelineProps {
   durationSeconds: number;
   annotations: VideoAnnotation[];
   videoUrl?: string;
+  mediaLabel?: string;
   note?: string;
   pending?: boolean;
   onAddAnnotation?: (startSeconds: number, endSeconds: number | null) => Promise<void>;
@@ -21,6 +22,7 @@ export function VideoReviewTimeline({
   durationSeconds,
   annotations,
   videoUrl,
+  mediaLabel = "正式视频",
   note = "",
   pending = false,
   onAddAnnotation,
@@ -69,7 +71,7 @@ export function VideoReviewTimeline({
             key={videoUrl}
             ref={video}
             src={videoUrl}
-            aria-label="正式视频审片播放器"
+            aria-label={`${mediaLabel}审片播放器`}
             className="review-video-player"
             controls
             playsInline
@@ -91,7 +93,7 @@ export function VideoReviewTimeline({
             }}
           />
           {mediaError && (
-            <p role="alert">无法加载正式视频，不能保存时间批注。请确认产物是否可用。</p>
+            <p role="alert">无法加载{mediaLabel}，不能保存时间批注。请确认产物是否可用。</p>
           )}
           <div className="video-playback-actions">
             <button

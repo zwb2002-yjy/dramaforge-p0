@@ -13,6 +13,9 @@ import {
 } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { fetchShotWorkbench } from "../shots/api";
+import { isConfirmableShotCandidate, parseShotCandidates } from "../shots/shotCandidates";
+import { readRepair } from "./repairApi";
+import { parseReviewTarget, type ReviewTargetSearch } from "./reviewTarget";
 import { HumanReviewDecisionPanel } from "./HumanReviewDecisionPanel";
 import { MediaReviewCanvas, type NormalizedRegion } from "./MediaReviewCanvas";
 import { RepairPlanPanel } from "./RepairPlanPanel";
@@ -20,6 +23,7 @@ import { VideoReviewTimeline, type VideoAnnotation } from "./VideoReviewTimeline
 
 type ReviewWorkspaceProps = {
   projectId: string;
+  targetSearch?: ReviewTargetSearch;
 };
 
 function asNumber(value: string | null): number | null {
@@ -55,7 +59,18 @@ function videoAnnotation(annotation: ReviewAnnotationRead): VideoAnnotation | nu
 }
 
 /** Canonical review surface over the existing Shot/ReviewAnnotation facts. */
-export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
+export function ReviewWorkspace(props: ReviewWorkspaceProps) {
+  return (
+    <ReviewWorkspaceSession
+      key={JSON.stringify([props.projectId, props.targetSearch])}
+      {...props}
+    />
+  );
+}
+
+function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspaceProps) {
+  const explicitTarget = Object.keys(targetSearch).length > 0;
+  const target = parseReviewTarget(targetSearch);
   const queryClient = useQueryClient();
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [note, setNote] = useState("");
@@ -65,7 +80,9 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
     queryFn: () => fetchProjectShots(projectId),
     enabled: projectId !== "demo",
   });
-  const shotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
+  const shotId = explicitTarget
+    ? (target?.shotId ?? null)
+    : (selectedShotId ?? shots.data?.[0]?.id ?? null);
   const currentShot = useRef(shotId);
   currentShot.current = shotId;
   useEffect(() => {
@@ -109,24 +126,77 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
   });
 
   const shot = workbench.data?.shot ?? null;
-  const rows = annotations.data ?? [];
+  const repair = useQuery({
+    queryKey: ["review-target-repair", projectId, target?.shotId, target?.repairRequestId],
+    queryFn: () => readRepair(projectId, target!.shotId, target!.repairRequestId!),
+    enabled: Boolean(target?.repairRequestId),
+  });
+  const candidateStage = target?.stage === "formal_keyframe" ? "image_keyframe" : "video";
+  const matchesCandidate =
+    target &&
+    parseShotCandidates(workbench.data?.candidates).some(
+      (item) =>
+        item.artifactId === target.artifactId &&
+        item.stage === candidateStage &&
+        isConfirmableShotCandidate(item),
+    );
+  const matchesFormal =
+    target &&
+    (target.stage === "formal_keyframe"
+      ? shot?.formal_keyframe_artifact_id
+      : shot?.formal_video_artifact_id) === target.artifactId;
+  const repairStep = repair.data?.steps.find((step) => step.id === target?.repairStepId);
+  const matchesRepair =
+    !target?.repairRequestId ||
+    (repair.data?.shot_id === target.shotId &&
+      repairStep?.result_artifact_id === target.artifactId &&
+      repairStep.stage ===
+        (candidateStage === "image_keyframe" ? "keyframe_regenerate" : "video_rerun"));
+  const targetValid = Boolean(
+    target && shot?.id === target.shotId && (matchesCandidate || matchesFormal) && matchesRepair,
+  );
+  const keyframeId = explicitTarget
+    ? targetValid && target?.stage === "formal_keyframe"
+      ? target.artifactId
+      : null
+    : shot?.formal_keyframe_artifact_id;
+  const videoId = explicitTarget
+    ? targetValid && target?.stage === "formal_video"
+      ? target.artifactId
+      : null
+    : shot?.formal_video_artifact_id;
+  const rows = (annotations.data ?? []).filter(
+    (row) => !explicitTarget || row.artifact_id === target?.artifactId,
+  );
   const regions = rows
     .filter(
       (annotation) =>
-        annotation.target_kind === "image_region" &&
-        annotation.artifact_id === shot?.formal_keyframe_artifact_id,
+        annotation.target_kind === "image_region" && annotation.artifact_id === keyframeId,
     )
     .map(imageRegion)
     .filter((region): region is NormalizedRegion => region !== null);
   const videoRows = rows
     .filter(
-      (annotation) =>
-        annotation.target_kind === "video_time" &&
-        annotation.artifact_id === shot?.formal_video_artifact_id,
+      (annotation) => annotation.target_kind === "video_time" && annotation.artifact_id === videoId,
     )
     .map(videoAnnotation)
     .filter((annotation): annotation is VideoAnnotation => annotation !== null);
   const durationSeconds = Number(shot?.duration_seconds ?? 0);
+
+  if (
+    explicitTarget &&
+    (!target ||
+      workbench.isError ||
+      repair.isError ||
+      (workbench.isSuccess && (!target.repairRequestId || repair.isSuccess) && !targetValid))
+  ) {
+    return (
+      <div role="alert">
+        无法审查指定结果：目标不存在、不属于当前镜头或与修复步骤不匹配。不会改为显示正式版本。
+      </div>
+    );
+  }
+  if (explicitTarget && !targetValid) return <p role="status">正在核对指定审查结果…</p>;
 
   return (
     <div className="qc-project-page" data-testid="review-workspace">
@@ -148,6 +218,7 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
         当前镜头
         <select
           aria-label="当前镜头"
+          disabled={explicitTarget}
           value={shotId ?? ""}
           onChange={(event) => setSelectedShotId(event.target.value || null)}
         >
@@ -168,11 +239,11 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
         />
       </label>
 
-      {shot?.formal_keyframe_artifact_id ? (
+      {shot && keyframeId ? (
         <section>
           <h2>关键帧</h2>
           <MediaReviewCanvas
-            imageUrl={artifactContentUrl(projectId, shot.formal_keyframe_artifact_id)}
+            imageUrl={artifactContentUrl(projectId, keyframeId)}
             regions={regions}
             mode="region"
             onAddRegion={(region) => {
@@ -180,7 +251,7 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
               addAnnotation.mutate({
                 shotId,
                 note: note.trim(),
-                artifact_id: shot.formal_keyframe_artifact_id,
+                artifact_id: keyframeId,
                 target_kind: "image_region",
                 x: String(region.x),
                 y: String(region.y),
@@ -199,11 +270,11 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
         <p className="muted">
           自动检查的结论只是证据；“人工通过”和“设为正式”是两个独立动作，前者不会自动推进正式版本。
         </p>
-        {shot?.formal_keyframe_artifact_id ? (
+        {shot && keyframeId ? (
           <HumanReviewDecisionPanel
             projectId={projectId}
             shotId={shot.id}
-            artifactId={shot.formal_keyframe_artifact_id}
+            artifactId={keyframeId}
             reviewKind="identity"
             stage="formal_keyframe"
             shotVersion={shot.version}
@@ -214,11 +285,11 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
             尚未选择正式关键帧，暂时没有可判断的素材。
           </p>
         )}
-        {shot?.formal_video_artifact_id && (
+        {shot && videoId && (
           <HumanReviewDecisionPanel
             projectId={projectId}
             shotId={shot.id}
-            artifactId={shot.formal_video_artifact_id}
+            artifactId={videoId}
             reviewKind="video_drift"
             stage="formal_video"
             shotVersion={shot.version}
@@ -248,10 +319,11 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
 
       <section>
         <h2>视频时间线</h2>
-        {shot?.formal_video_artifact_id ? (
+        {shot && videoId ? (
           <VideoReviewTimeline
-            key={`${shot.id}:${shot.formal_video_artifact_id}`}
-            videoUrl={artifactContentUrl(projectId, shot.formal_video_artifact_id)}
+            key={`${shot.id}:${videoId}`}
+            videoUrl={artifactContentUrl(projectId, videoId)}
+            mediaLabel={explicitTarget ? "指定视频" : "正式视频"}
             durationSeconds={durationSeconds}
             annotations={videoRows}
             note={note}
@@ -260,7 +332,7 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
               if (!shotId || !note.trim() || addAnnotation.isPending) return;
               await addAnnotation.mutateAsync({
                 shotId,
-                artifact_id: shot.formal_video_artifact_id,
+                artifact_id: videoId,
                 target_kind: "video_time",
                 note: note.trim(),
                 time_start: String(startSeconds),

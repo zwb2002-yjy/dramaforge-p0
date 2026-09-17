@@ -5439,6 +5439,8 @@ export interface components {
             node_run_id: string | null;
             /** Node Run Status */
             node_run_status: string | null;
+            /** Result Artifact Id */
+            result_artifact_id: string | null;
             /** Confirmed At */
             confirmed_at: string | null;
             /** Adopted Artifact Id */

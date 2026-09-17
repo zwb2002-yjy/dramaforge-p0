@@ -27,7 +27,19 @@ type ReviewDecisionPanelProps = {
  * One human judgement area: automatic evidence, the current decision, and the
  * two explicit actions. Approving here never sets Formal by itself.
  */
-export function HumanReviewDecisionPanel({
+export function HumanReviewDecisionPanel(props: ReviewDecisionPanelProps) {
+  // Drafts, idempotency keys and pending mutation feedback belong to one target.
+  // Remount the session so a late response for A cannot update B's judgement UI.
+  const identity = JSON.stringify([
+    props.projectId,
+    props.shotId,
+    props.artifactId,
+    props.reviewKind,
+    props.stage,
+  ]);
+  return <ReviewDecisionSession key={identity} {...props} />;
+}
+function ReviewDecisionSession({
   projectId,
   shotId,
   artifactId,

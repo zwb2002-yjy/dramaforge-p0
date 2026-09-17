@@ -1,3 +1,4 @@
+import { reviewTargetHref } from "../review/reviewTarget";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -218,6 +219,17 @@ export function ShotCandidateTray({
                   )}
                   <span className="qc-shot-candidate-badge">{selected ? "正在预览" : label}</span>
                 </button>
+                <a
+                  href={reviewTargetHref(projectId, {
+                    shotId: shot.id,
+                    artifactId: candidate.artifactId,
+                    stage:
+                      candidate.stage === "image_keyframe" ? "formal_keyframe" : "formal_video",
+                    reviewKind: candidate.stage === "image_keyframe" ? "identity" : "video_drift",
+                  })}
+                >
+                  审查此候选
+                </a>
                 <div className="qc-shot-candidate-meta">
                   <span>{candidate.status}</span>
                   {candidate.nodeRunId && <small>Run {candidate.nodeRunId.slice(0, 8)}</small>}

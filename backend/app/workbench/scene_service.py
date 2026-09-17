@@ -209,7 +209,7 @@ class ShotWorkbenchService:
                 .order_by(ShotReferenceBinding.sort_order)
             )
         ).scalars().all()
-        candidates = (
+        branch_candidates = (
             await self._session.execute(
                 select(ExperimentBranch)
                 .where(
@@ -219,6 +219,13 @@ class ShotWorkbenchService:
                 .order_by(ExperimentBranch.created_at.desc())
             )
         ).scalars().all()
+        # Keep the shot workbench aligned with the scene workspace: concrete
+        # NodeRun -> Artifact candidates are the only exact media targets.
+        # Experiment branches remain opaque and are appended below, never
+        # substituted for a media candidate.
+        candidates = list((await list_formal_candidates(
+            self._session, project_id=project_id, shot_ids=[shot.id]
+        )).get(shot.id, []))
         formal_artifact_ids = [
             artifact_id
             for artifact_id in (
@@ -325,7 +332,7 @@ class ShotWorkbenchService:
                     else None
                 ),
             },
-            "candidates": [
+            "candidates": candidates + [
                 {
                     "id": branch.id,
                     "name": branch.name,
@@ -333,7 +340,7 @@ class ShotWorkbenchService:
                     "status": branch.status,
                     "selected_model": branch.selected_model,
                 }
-                for branch in candidates
+                for branch in branch_candidates
             ],
             "trace": shot_trace,
             "old_version_warnings": old_version_warnings,

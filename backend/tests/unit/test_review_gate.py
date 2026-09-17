@@ -473,6 +473,27 @@ async def test_decision_submission_is_retry_safe_and_requires_a_reason(
 
 
 @pytest.mark.asyncio
+async def test_decision_rejects_a_review_run_for_another_shot_or_artifact(
+    session: AsyncSession,
+) -> None:
+    user, project, shot = await _env(session)
+    artifact_a = await _artifact(session, project_id=project.id, hash_seed="target-a")
+    artifact_b = await _artifact(session, project_id=project.id, hash_seed="target-b")
+    evidence = await _artifact(session, project_id=project.id, hash_seed="evidence")
+    run_a = await _review_run(
+        session, project_id=project.id, shot_id=shot.id, created_by=user.id,
+        upstream_artifact_id=artifact_a.id, review_artifact_id=evidence.id,
+    )
+    with pytest.raises(ValidationAppError) as mismatch:
+        await record_human_decision(
+            session, project_id=project.id, shot_id=shot.id,
+            artifact_id=artifact_b.id, review_node_run_id=run_a.id,
+            review_kind="identity", decision="approved", reason="错误目标",
+            actor_id=user.id, shot_version=shot.version, request_key="review:mismatch",
+        )
+    assert mismatch.value.details.get("code") == "REVIEW_TARGET_MISMATCH"
+
+@pytest.mark.asyncio
 async def test_admission_rejects_an_unknown_stage(session: AsyncSession) -> None:
     user, project, shot = await _env(session)
     artifact = await _artifact(session, project_id=project.id)

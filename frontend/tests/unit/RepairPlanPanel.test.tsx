@@ -57,6 +57,7 @@ const ACTIVE_REPAIR: RepairRequestRead = {
       command_key: "repair:step:1",
       node_run_id: "66666666-6666-4666-8666-666666666666",
       node_run_status: "completed",
+      result_artifact_id: "77777777-7777-4777-8777-777777777777",
       confirmed_at: "2026-09-15T00:00:00Z",
       adopted_artifact_id: null,
       review_decision_id: null,
