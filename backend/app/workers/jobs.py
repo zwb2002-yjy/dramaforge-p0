@@ -9,7 +9,6 @@ from uuid import UUID
 
 from arq import Retry
 
-from app.config import get_settings
 from app.shared.db import get_session_factory, set_node_run_rls_context
 from app.shared.errors import (
     AppError,
