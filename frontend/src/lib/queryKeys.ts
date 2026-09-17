@@ -122,6 +122,10 @@ export const queryKeys = {
   model: {
     catalog: () => ["models"] as const,
     slots: () => ["model-slots"] as const,
+    workspaceProfiles: (workspaceId: string | null) =>
+      ["workspace-model-profiles", workspaceId] as const,
+    workspaceProfile: (workspaceId: string | null, profileId: string | null) =>
+      ["workspace-model-profile", workspaceId, profileId] as const,
     effectiveBindings: (projectId: string) => ["model-bindings-effective", projectId] as const,
     projectProfile: (projectId: string) => ["project-model-profile", projectId] as const,
   },

@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
+import { WorkspaceModelProfileSettings } from "../components/provider/WorkspaceModelProfileSettings";
+import { WorkspaceTextCredentialSettings } from "../components/provider/WorkspaceTextCredentialSettings";
 import { CreativeAutonomySwitcher } from "../features/project/CreativeAutonomySwitcher";
 import {
   createWorkspace,
@@ -278,6 +280,7 @@ export function WorkspaceSettingsPage() {
           )}
         </div>
       </section>
+      <WorkspaceModelProfileSettings workspaceId={selectedWorkspaceId} />
       {error && <p className="flash err">{error}</p>}
     </main>
   );
@@ -305,6 +308,9 @@ export function ModelConnectionSettingsPage() {
           workspaceId={selectedWorkspaceId}
           projects={projects.data ?? []}
         />
+      </div>
+      <div className="df-settings-section">
+        <WorkspaceTextCredentialSettings workspaceId={selectedWorkspaceId} />
       </div>
     </main>
   );

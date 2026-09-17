@@ -18,6 +18,7 @@ from app.access.projects import ProjectService
 from app.api.deps import (
     CsrfDep,
     CurrentUser,
+    SelectedWorkspace,
     SessionDep,
     require_selected_workspace,
 )
@@ -110,6 +111,13 @@ def _assert_workspace_profile(profile: ProductionModelProfile, workspace_id: UUI
         raise NotFoundError("model profile not found")
 
 
+def _assert_selected_workspace(workspace_id: UUID, workspace: SelectedWorkspace) -> None:
+    if workspace.id != workspace_id:
+        from app.shared.errors import NotFoundError
+
+        raise NotFoundError("workspace not found")
+
+
 @router.get(
     "/workspaces/{workspace_id}/model-profiles",
     response_model=list[ProfileSummaryRead],
@@ -117,8 +125,10 @@ def _assert_workspace_profile(profile: ProductionModelProfile, workspace_id: UUI
 )
 async def list_workspace_profiles(
     workspace_id: UUID,
+    workspace: SelectedWorkspace,
     session: SessionDep,
 ) -> list[ProfileSummaryRead]:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profiles = await service.list_workspace_profiles(workspace_id=workspace_id)
     return [
@@ -145,10 +155,12 @@ async def list_workspace_profiles(
 async def create_workspace_profile(
     workspace_id: UUID,
     body: ProfileCreate,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.create(
         workspace_id=workspace_id,
@@ -170,8 +182,10 @@ async def create_workspace_profile(
 async def get_workspace_profile(
     workspace_id: UUID,
     profile_id: UUID,
+    workspace: SelectedWorkspace,
     session: SessionDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -187,10 +201,12 @@ async def update_workspace_profile(
     workspace_id: UUID,
     profile_id: UUID,
     body: ProfileUpdate,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -218,10 +234,12 @@ async def apply_simple_mode(
     workspace_id: UUID,
     profile_id: UUID,
     body: SimpleModeApply,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -248,10 +266,12 @@ async def apply_simple_mode(
 async def delete_workspace_profile(
     workspace_id: UUID,
     profile_id: UUID,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> Response:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)

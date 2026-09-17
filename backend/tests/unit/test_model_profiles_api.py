@@ -142,6 +142,24 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
     assert conflict.json()["details"]["code"] == "MODEL_PROFILE_VERSION_CONFLICT"
 
 
+def test_workspace_profile_path_must_match_selected_workspace(
+    api: tuple[TestClient, Any],
+) -> None:
+    client, _ = api
+    workspace_id = _register(client)
+    other = client.post(
+        "/api/v1/workspaces",
+        json={"name": "Other workspace"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert other.status_code == 201, other.text
+    response = client.get(
+        f"/api/v1/workspaces/{other.json()['id']}/model-profiles",
+        headers={"X-Workspace-Id": workspace_id},
+    )
+    assert response.status_code == 404, response.text
+
+
 def test_workspace_profile_validation_rejects_capability_mismatch(
     api: tuple[TestClient, Any],
 ) -> None:
