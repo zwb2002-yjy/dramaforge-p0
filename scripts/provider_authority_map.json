@@ -6,7 +6,7 @@
       "symbol": "AgnesImageAdapter",
       "defined_in": "backend/app/providers/agnes.py",
       "decision": "DELETE",
-      "retired": false,
+      "retired": true,
       "replacement": [
         "AgnesImageCompiler",
         "AgnesRuntime"
@@ -18,7 +18,7 @@
       "symbol": "AgnesVideoAdapter",
       "defined_in": "backend/app/providers/agnes.py",
       "decision": "DELETE",
-      "retired": false,
+      "retired": true,
       "replacement": [
         "AgnesVideoCompiler",
         "AgnesRuntime"
@@ -30,7 +30,7 @@
       "symbol": "ArkImageAdapter",
       "defined_in": "backend/app/providers/volcengine.py",
       "decision": "DELETE",
-      "retired": false,
+      "retired": true,
       "replacement": [
         "ArkImageCompiler",
         "ArkRuntime"
@@ -42,7 +42,7 @@
       "symbol": "ArkVideoAdapter",
       "defined_in": "backend/app/providers/volcengine.py",
       "decision": "DELETE",
-      "retired": false,
+      "retired": true,
       "replacement": [
         "ArkVideoCompiler",
         "ArkRuntime"
@@ -54,7 +54,7 @@
       "module": "app.providers.base",
       "path": "backend/app/providers/base.py",
       "decision": "DELETE",
-      "retired": false,
+      "retired": true,
       "replacement": [
         "app.providers.adapter",
         "app.providers.contracts.common",
@@ -67,7 +67,7 @@
       "module": "app.providers.openai",
       "path": "backend/app/providers/openai.py",
       "decision": "DELETE",
-      "retired": false,
+      "retired": true,
       "replacement": [
         "app.providers.litellm_adapter"
       ],
@@ -78,12 +78,9 @@
       "module": "app.providers.fake",
       "path": "backend/app/providers/fake.py",
       "decision": "DELETE",
-      "retired": false,
+      "retired": true,
       "replacement": [],
-      "note": "Fixture builders and FakeOpenAIAdapter had no caller other than the legacy openai module; future test fixtures belong under backend/tests.",
-      "allowed_current_importers": [
-        "backend/app/providers/openai.py"
-      ]
+      "note": "Fixture builders and FakeOpenAIAdapter had no caller other than the legacy openai module; future test fixtures belong under backend/tests."
     },
     {
       "kind": "symbol",

@@ -22,9 +22,9 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 `backend/tests/unit/test_provider_catalog.py` 校验）。
 
 旧 dict Adapter（Agnes / Ark 的 `*Adapter` class）、`providers/base.py` 的旧
-Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py` 的退役
-判定记录在 `scripts/provider_authority_map.json`；`scripts/check_provider_authority.py`
-在门禁中核对“删除项没有生产调用方、替代项已经存在”，并拒绝新增生产调用方。
+Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py` 已经删除；
+退役判定与替代关系记录在 `scripts/provider_authority_map.json`，
+`scripts/check_provider_authority.py` 在门禁中确认它们保持缺席、替代实现始终存在。
 
 ## 不可绕过的规则
 

@@ -478,7 +478,7 @@ provider  → execution.models（数据模型）允许
 | `providers/generation_service.py` | 单节点生成域（无 HTTP 写入口） | provider | KEEP（HTTP 写面 RETIRED） | **问题 8 已决定** |
 | `providers/connection_service.py`、`workspace_credentials.py`、`idempotency.py`、`execution_identity.py` | 连接、凭据、幂等、执行身份 | provider | KEEP | NONE |
 | `providers/reference_delivery.py` | 引用字节投递 | provider | KEEP | 需确认不与 provider → production 规则冲突（见下注） |
-| `providers/fake.py` | 假 Provider 测试替身 | provider | KEEP | NONE（问题 3） |
+| ~~`providers/fake.py`~~ | 假 Provider 测试替身 | provider | **已删除** | 无调用方；未来测试 fixture 放 `backend/tests` |
 
 > **注：** `providers/*` 有 6 条指向 `app.execution.*` / `app.production.*` /
 > `app.runtime.*` 的边（`connection_service`、`generation_service`、
