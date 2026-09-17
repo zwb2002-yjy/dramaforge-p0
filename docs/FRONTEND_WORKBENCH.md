@@ -28,6 +28,7 @@ frontend/src/
 - HTTP response/request 形状一律用 `components["schemas"][...]` 引用生成类型；
   `npm run api:authority` 拒绝在 feature 模块里重新手写同名 schema。
 - Candidate 预览是零写入的本地 UI 状态；Formal 确认才触发服务端写入。
+- NodeRun / 执行状态只从 `frontend/src/lib/runLabels.ts` 取中文词表；页面不得再维护自己的状态映射，未知状态也不直接显示原始 token。
 - Asset 标签由 API 的 `tags` 字段和正式 Tag 关联表提供，UI 不读取或写入
   `metadata.tags`；回收状态统一为 `recycled`。
 - Timeline 保存提交本地基线对应的 `expected_session_version`；409 时保留本地

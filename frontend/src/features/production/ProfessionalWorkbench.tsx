@@ -14,6 +14,7 @@ import type {
 } from "../../lib/api";
 import { Button } from "../../components/ui";
 import { assetKindLabel, assetStatusLabel } from "../../lib/assetLabels";
+import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { shotTypeLabel } from "../../lib/shotLabels";
 import { latestEffectiveNodeRuns } from "./effectiveRuns";
 import { candidateModelKey, type ModelCandidateRead } from "./modelCandidatesApi";
@@ -25,24 +26,6 @@ const EXPERIMENT_STATUS_LABEL: Record<string, string> = {
   rejected: "已拒绝",
   kept: "已保留",
 };
-
-const NODE_RUN_STATUS_LABEL: Record<string, string> = {
-  queued: "已排队",
-  running: "执行中",
-  completed: "已完成",
-  cached: "已复用",
-  failed: "失败",
-  cancelled: "已取消",
-  cancel_requested: "取消中",
-  timed_out: "超时",
-  approved: "已通过",
-  rejected: "已拒绝",
-  skipped: "已跳过",
-};
-
-function nodeRunStatusLabel(status: string): string {
-  return NODE_RUN_STATUS_LABEL[status] ?? status;
-}
 
 const ANNOTATION_SEVERITY_LABEL: Record<string, string> = {
   note: "提示",

@@ -5,22 +5,6 @@
  * 原始值作为契约保持不变：这里只做显示层映射，不改变调用方拿到的数据。
  */
 
-export const ZH_STATUS: Record<string, string> = {
-  queued: "排队中",
-  running: "运行中",
-  leased: "已租约",
-  completed: "已完成",
-  cached: "缓存命中",
-  completed_after_cancel: "取消后完成",
-  failed: "失败",
-  cancelled: "已取消",
-};
-
-export function zhStatus(status: string | null | undefined): string {
-  if (!status) return "—";
-  return ZH_STATUS[status] ?? status;
-}
-
 export const ZH_REVIEW_STATE: Record<string, string> = {
   passed: "通过",
   blocked: "被阻断",

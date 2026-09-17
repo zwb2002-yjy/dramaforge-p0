@@ -31,6 +31,7 @@ import {
 } from "../lib/api";
 import type { ProjectSnapshot } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
+import { nodeRunStatusLabel } from "../lib/runLabels";
 import { zhNode } from "../lib/zh";
 
 const NODES = [
@@ -44,24 +45,6 @@ const NODES = [
   "composite",
   "continuity_review",
 ] as const;
-
-const RUN_STATUS_LABEL: Record<string, string> = {
-  queued: "已排队",
-  running: "执行中",
-  leased: "执行中",
-  completed: "已完成",
-  cached: "已复用",
-  completed_after_cancel: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-  cancel_requested: "取消中",
-  timed_out: "超时",
-  skipped: "已跳过",
-};
-
-function nodeRunStatusLabel(status: string): string {
-  return RUN_STATUS_LABEL[status] ?? status;
-}
 
 function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, string> {
   const map: Record<string, string> = {};
