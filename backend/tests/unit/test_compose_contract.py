@@ -136,6 +136,14 @@ def test_director_worker_has_independent_queue_and_no_api_dependency() -> None:
     assert "POSTGRES_APP_PASSWORD" not in checkpoint_dsn
     assert "worker-director" not in services["api"]["depends_on"]
     assert "worker-director" not in services["worker-default"]["depends_on"]
+    api_checkpoint_dsn = services["api"]["environment"][
+        "DIRECTOR_CHECKPOINT_DATABASE_URL"
+    ]
+    assert "DIRECTOR_CHECKPOINT_USER" in api_checkpoint_dsn
+    assert "DIRECTOR_CHECKPOINT_PASSWORD" in api_checkpoint_dsn
+    assert "POSTGRES_APP_PASSWORD" not in api_checkpoint_dsn
+    assert "WORKER_KIND" not in services["worker-default"]["environment"]
+    assert "WORKER_KIND" not in services["worker-heavy"]["environment"]
     assert DirectorWorker.queue_name != ProductionWorker.queue_name
     assert not any("director" in function.__name__ for function in ProductionWorker.functions)
     assert not getattr(ProductionWorker, "on_startup", None)

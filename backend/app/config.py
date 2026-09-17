@@ -25,7 +25,6 @@ class Settings(BaseSettings):
 
     app_name: str = "DramaForge"
     app_env: Literal["development", "test", "production"] = "development"
-    debug: bool = False
     api_prefix: str = "/api/v1"
     source_commit: str = Field(
         default="",
@@ -106,7 +105,6 @@ class Settings(BaseSettings):
         ge=1,
         description="Maximum concurrent heavy media jobs per Arq worker process",
     )
-    worker_kind: Literal["default", "heavy"] = "default"
     worker_token: str = Field(
         default="",
         description="Shared secret for /api/v1/worker/tick (local Worker substitute)",
@@ -190,11 +188,6 @@ class Settings(BaseSettings):
         default_factory=lambda: ["script-quality", "script-fast"],
         description="Comma-separated LiteLLM logical aliases registered at bootstrap",
     )
-    # Best-effort startup sync of ``GET /v1/models`` into the default registry
-    # (fix spec §36/§37). Default OFF keeps app boot fast and gateway-independent;
-    # admin refresh / tests call the sync service explicitly.
-    litellm_discovery_startup: bool = False
-
     # Local TTS is opt-in for formal development verification.
     tts_enabled: bool = False
     tts_engine: str = "espeak-ng"

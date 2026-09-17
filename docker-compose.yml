@@ -123,6 +123,7 @@ services:
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
+      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:-disabled}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -318,7 +319,6 @@ services:
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
       BYOK_KEYRING: ${BYOK_KEYRING:-}
-      WORKER_KIND: default
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
       AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
@@ -421,7 +421,6 @@ services:
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
       BYOK_KEYRING: ${BYOK_KEYRING:-}
-      WORKER_KIND: heavy
       ARQ_HEAVY_MAX_JOBS: ${ARQ_HEAVY_MAX_JOBS:-4}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}

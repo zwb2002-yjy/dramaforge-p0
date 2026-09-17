@@ -119,8 +119,8 @@ entrypoint is `scripts/p0_backup_restore.py` (see
 `DIRECTOR_RUNTIME_ENGINE` selects the engine for **newly started** Director
 turns and defaults to `legacy`. It is passed to both the API (which starts
 turns) and `worker-director` (which executes them); the `langgraph` value also
-requires `DIRECTOR_CHECKPOINT_DATABASE_URL`, which only `worker-director`
-receives, plus the private `director_runtime_checkpoints` schema created by
+requires `DIRECTOR_CHECKPOINT_DATABASE_URL`, which both processes receive,
+plus the private `director_runtime_checkpoints` schema created by
 migration `20260910_0066` (role `dramaforge_director_checkpoint`, provisioned by
 `database-bootstrap`). Selecting one engine never runs the other, and the manual
 production path must still complete with the director worker stopped.
