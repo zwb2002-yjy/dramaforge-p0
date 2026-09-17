@@ -58,6 +58,7 @@ def test_compose_defines_required_boot0_services() -> None:
         env = services[name]["environment"]
         assert provider_env <= set(env), f"missing runtime provider config in {name}"
         assert "DRAMAFORGE_SOURCE_COMMIT" in env
+        assert "DATABASE_SSL" in env
     assert "ARQ_HEAVY_MAX_JOBS" in services["worker-heavy"]["environment"]
     assert services["dispatcher"]["command"] == ["python", "-m", "app.workers.dispatcher"]
     externally_published = {

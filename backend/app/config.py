@@ -57,6 +57,10 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://dramaforge:dramaforge@localhost:5432/dramaforge",
         description="SQLAlchemy async DSN using asyncpg",
     )
+    database_ssl: bool = Field(
+        default=False,
+        description="Enable TLS for PostgreSQL connections; local Compose defaults to false",
+    )
     director_runtime_engine: Literal["legacy", "langgraph"] = Field(
         default="legacy",
         description="Engine assigned only to newly started Director turns",

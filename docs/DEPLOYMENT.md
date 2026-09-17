@@ -47,6 +47,10 @@ image identities in `.env`. It preserves database credentials,
 before an upgrade; replacing the Fernet key makes saved Provider credentials
 unreadable.
 
+PostgreSQL connections use `DATABASE_SSL=false` for the local Compose network.
+Set it to `true` when the database endpoint requires TLS; the setting is passed
+to the API, dispatcher and Workers and is not encoded in application code.
+
 ## Complete offline install
 
 Use the architecture-specific offline release bundle, not the online bundle.

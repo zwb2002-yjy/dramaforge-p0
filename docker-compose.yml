@@ -122,6 +122,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
       DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:-disabled}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
@@ -276,6 +277,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -310,6 +312,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -380,6 +383,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
       DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:-disabled}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
@@ -412,6 +416,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}

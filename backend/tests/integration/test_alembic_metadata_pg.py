@@ -79,6 +79,23 @@ def _database_checks(connection) -> dict[tuple[str, str], str]:
     }
 
 
+def _database_enum_labels(connection) -> dict[str, tuple[str, ...]]:
+    rows = connection.execute(
+        text(
+            "SELECT t.typname, e.enumlabel "
+            "FROM pg_type t "
+            "JOIN pg_enum e ON e.enumtypid = t.oid "
+            "JOIN pg_namespace n ON n.oid = t.typnamespace "
+            "WHERE n.nspname = 'public' "
+            "ORDER BY t.typname, e.enumsortorder"
+        )
+    ).all()
+    labels: dict[str, list[str]] = {}
+    for type_name, label in rows:
+        labels.setdefault(type_name, []).append(label)
+    return {name: tuple(values) for name, values in labels.items()}
+
+
 def test_migration_head_has_no_orm_metadata_drift() -> None:
     """Compare every reflected table shape plus named CHECK constraints."""
     load_all_models()
@@ -110,5 +127,24 @@ def test_migration_head_has_no_orm_metadata_drift() -> None:
                 f"extra={sorted(database_checks.keys() - orm_checks.keys())}"
             )
             assert database_checks == orm_checks, "CHECK constraint expressions drifted"
+
+            enum_labels = _database_enum_labels(connection)
+            assert "face_review" not in enum_labels["node_type"]
+            orphan_enums = connection.execute(
+                text(
+                    "SELECT t.typname "
+                    "FROM pg_type t "
+                    "JOIN pg_namespace n ON n.oid = t.typnamespace "
+                    "WHERE n.nspname = 'public' AND t.typtype = 'e' "
+                    "AND NOT EXISTS ("
+                    "SELECT 1 FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace cn ON cn.oid = c.relnamespace "
+                    "WHERE a.atttypid = t.oid AND a.attnum > 0 "
+                    "AND NOT a.attisdropped AND cn.nspname = 'public'"
+                    ") ORDER BY t.typname"
+                )
+            ).scalars().all()
+            assert orphan_enums == [], f"orphan public enum types: {orphan_enums!r}"
     finally:
         engine.dispose()

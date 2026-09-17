@@ -10,7 +10,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -27,16 +26,7 @@ from sqlalchemy.types import JSON
 from app.shared.base import Base
 from app.shared.db_types import CURRENCY_CODE, JSON_DOCUMENT
 from app.shared.enums import ProjectStage
-
-# PG native enums (create_type=False — Alembic owns types); SQLite uses string values.
-_project_stage = Enum(
-    ProjectStage,
-    name="project_stage",
-    native_enum=True,
-    create_constraint=False,
-    values_callable=lambda e: [m.value for m in e],
-    validate_strings=True,
-)
+from app.shared.pg_enums import PROJECT_STAGE, col_enum
 
 
 class Workspace(Base):
@@ -112,7 +102,7 @@ class Project(Base):
     )
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     stage: Mapped[ProjectStage | str] = mapped_column(
-        _project_stage.with_variant(String(32), "sqlite"),
+        col_enum(PROJECT_STAGE, 32),
         nullable=False,
         default=ProjectStage.DRAFT,
     )
