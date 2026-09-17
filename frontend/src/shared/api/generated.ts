@@ -600,30 +600,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{project_id}/shots/{shot_id}/repair": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Execute Repair
-         * @description Execute a V1 repair rerun with an Idempotency-Key (03 §58).
-         *
-         *     With ``plan_hash`` this is the staged path: one repair request is created
-         *     and its first step dispatched, so the follow-up steps stay resumable. The
-         *     staged path stops before any step that needs a human review decision.
-         */
-        post: operations["execute_repair_api_v1_projects__project_id__shots__shot_id__repair_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/projects": {
         parameters: {
             query?: never;
@@ -5652,18 +5628,6 @@ export interface components {
             /** Idempotency Key */
             idempotency_key: string;
         };
-        /** RepairExecuteBody */
-        RepairExecuteBody: {
-            /**
-             * Repair Option
-             * @enum {string}
-             */
-            repair_option: "rerun_video" | "regenerate_keyframe_then_video";
-            /** Idempotency Key */
-            idempotency_key: string;
-            /** Plan Hash */
-            plan_hash?: string | null;
-        };
         /** RepairExecuteRead */
         RepairExecuteRead: {
             /**
@@ -8645,50 +8609,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RepairStepExecuteBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RepairExecuteRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    execute_repair_api_v1_projects__project_id__shots__shot_id__repair_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                shot_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RepairExecuteBody"];
             };
         };
         responses: {
