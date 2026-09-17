@@ -16,10 +16,15 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 | Reference delivery | providers/reference_delivery.py, reference_roles.py | 严格参考槽位校验、有序多参考传输（不做 `dict[role, artifact]`）、URL/bytes 决策 |
 | 文本通道 | providers/litellm_adapter.py + infra/litellm | 官方 LiteLLM Proxy 独立 Runtime，OpenAI 兼容 HTTP 面；DramaForge 不安装 litellm SDK |
 
-已接入 adapter：agnes、minimax、volcengine（Seedance / Seedream）、openai、
-local_tts、fake（测试）。固定契约 fixture 在
-`fixtures/providers/contracts/`（由 `backend/tests/unit/test_provider_catalog.py`
-校验）。
+媒体与文本接入的唯一执行路径是 ModelAdapter → Compiler → Runtime（文本为
+`litellm_adapter.py` 的 LiteLLMModelAdapter，运行面是官方 LiteLLM Proxy）。
+固定契约 fixture 在 `fixtures/providers/contracts/`（由
+`backend/tests/unit/test_provider_catalog.py` 校验）。
+
+旧 dict Adapter（Agnes / Ark 的 `*Adapter` class）、`providers/base.py` 的旧
+Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py` 的退役
+判定记录在 `scripts/provider_authority_map.json`；`scripts/check_provider_authority.py`
+在门禁中核对“删除项没有生产调用方、替代项已经存在”，并拒绝新增生产调用方。
 
 ## 不可绕过的规则
 

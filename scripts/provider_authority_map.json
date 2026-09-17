@@ -1,0 +1,125 @@
+{
+  "comment": "Legacy provider surface -> current authority map. checked by scripts/check_provider_authority.py. DELETE entries must have zero production callers today and are flipped to retired=true in the commit that removes the code; KEEP entries must still exist.",
+  "entries": [
+    {
+      "kind": "symbol",
+      "symbol": "AgnesImageAdapter",
+      "defined_in": "backend/app/providers/agnes.py",
+      "decision": "DELETE",
+      "retired": false,
+      "replacement": [
+        "AgnesImageCompiler",
+        "AgnesRuntime"
+      ],
+      "note": "Dict-based legacy media adapter; AgnesImageCompiler + AgnesRuntime (registered in bootstrap.py) are the only Agnes image path."
+    },
+    {
+      "kind": "symbol",
+      "symbol": "AgnesVideoAdapter",
+      "defined_in": "backend/app/providers/agnes.py",
+      "decision": "DELETE",
+      "retired": false,
+      "replacement": [
+        "AgnesVideoCompiler",
+        "AgnesRuntime"
+      ],
+      "note": "Same as AgnesImageAdapter for the video path."
+    },
+    {
+      "kind": "symbol",
+      "symbol": "ArkImageAdapter",
+      "defined_in": "backend/app/providers/volcengine.py",
+      "decision": "DELETE",
+      "retired": false,
+      "replacement": [
+        "ArkImageCompiler",
+        "ArkRuntime"
+      ],
+      "note": "Dict-based legacy media adapter; ArkImageCompiler + ArkRuntime are the only Ark image path."
+    },
+    {
+      "kind": "symbol",
+      "symbol": "ArkVideoAdapter",
+      "defined_in": "backend/app/providers/volcengine.py",
+      "decision": "DELETE",
+      "retired": false,
+      "replacement": [
+        "ArkVideoCompiler",
+        "ArkRuntime"
+      ],
+      "note": "Same as ArkImageAdapter for the video path."
+    },
+    {
+      "kind": "module",
+      "module": "app.providers.base",
+      "path": "backend/app/providers/base.py",
+      "decision": "DELETE",
+      "retired": false,
+      "replacement": [
+        "app.providers.adapter",
+        "app.providers.contracts.common",
+        "app.providers.router"
+      ],
+      "note": "Legacy ProviderAdapter protocol and dict result TypedDicts; the ModelAdapter protocol, typed contracts and CapabilityRouter supersede all of it."
+    },
+    {
+      "kind": "module",
+      "module": "app.providers.openai",
+      "path": "backend/app/providers/openai.py",
+      "decision": "DELETE",
+      "retired": false,
+      "replacement": [
+        "app.providers.litellm_adapter"
+      ],
+      "note": "Director text turns run through CapabilityTextModel -> ModelRegistry -> LiteLLMModelAdapter; the legacy BYOK chat adapter has no importer."
+    },
+    {
+      "kind": "module",
+      "module": "app.providers.fake",
+      "path": "backend/app/providers/fake.py",
+      "decision": "DELETE",
+      "retired": false,
+      "replacement": [],
+      "note": "Fixture builders and FakeOpenAIAdapter had no caller other than the legacy openai module; future test fixtures belong under backend/tests.",
+      "allowed_current_importers": [
+        "backend/app/providers/openai.py"
+      ]
+    },
+    {
+      "kind": "symbol",
+      "symbol": "ModelAdapter",
+      "defined_in": "backend/app/providers/adapter.py",
+      "decision": "KEEP",
+      "retired": false,
+      "replacement": [],
+      "note": "Single provider-specific translation/IO seam (spec section 26)."
+    },
+    {
+      "kind": "symbol",
+      "symbol": "CapabilityRouter",
+      "defined_in": "backend/app/providers/router.py",
+      "decision": "KEEP",
+      "retired": false,
+      "replacement": [],
+      "note": "Business-code entry point: capability + semantic request + context."
+    },
+    {
+      "kind": "symbol",
+      "symbol": "ProviderAdapterBridge",
+      "defined_in": "backend/app/providers/adapters_v2.py",
+      "decision": "KEEP",
+      "retired": false,
+      "replacement": [],
+      "note": "Bridges the typed ModelAdapter path onto the production runtime for the workbench."
+    },
+    {
+      "kind": "symbol",
+      "symbol": "LiteLLMModelAdapter",
+      "defined_in": "backend/app/providers/litellm_adapter.py",
+      "decision": "KEEP",
+      "retired": false,
+      "replacement": [],
+      "note": "The only text-model adapter (Director and creative text turns)."
+    }
+  ]
+}
