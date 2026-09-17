@@ -1,6 +1,7 @@
 type ShotProductionTraceProps = {
   shotId: string;
   trace: unknown[];
+  onSelectRun?: (runId: string) => void;
 };
 
 type TraceRow = {
@@ -15,7 +16,7 @@ function rowOf(value: unknown): TraceRow {
 }
 
 /** Production chain trace for the selected shot. */
-export function ShotProductionTrace({ shotId, trace }: ShotProductionTraceProps) {
+export function ShotProductionTrace({ shotId, trace, onSelectRun }: ShotProductionTraceProps) {
   const rows = trace ?? [];
   return (
     <div
@@ -33,11 +34,17 @@ export function ShotProductionTrace({ shotId, trace }: ShotProductionTraceProps)
         <ol>
           {rows.map((run, index) => {
             const row = rowOf(run);
+            const runId = typeof row.node_run_id === "string" ? row.node_run_id : null;
             return (
               <li key={String(row.node_run_id ?? index)}>
                 <span>{String(row.node_key ?? "node")}</span>
                 <em>{String(row.status ?? "")}</em>
                 {row.error_code ? <code>{String(row.error_code)}</code> : null}
+                {runId && onSelectRun ? (
+                  <button type="button" className="ghost" onClick={() => onSelectRun(runId)}>
+                    查看完整证据
+                  </button>
+                ) : null}
               </li>
             );
           })}

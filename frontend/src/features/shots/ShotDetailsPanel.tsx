@@ -1,11 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
+import { fetchExecutionTrace, type ExecutionTraceRead } from "../../lib/api";
 import { ShotProductionTrace } from "./ShotProductionTrace";
 import type { ShotLite } from "./api";
 
 type ShotDetailsPanelProps = {
   open: boolean;
+  projectId?: string;
   shot: ShotLite | null;
   trace: unknown[];
   onClose: () => void;
@@ -16,7 +18,12 @@ type ShotDetailsPanelProps = {
  * shot version) sunk into an on-demand Details sheet. The default creation
  * flow never sees this surface; the facts themselves are unchanged.
  */
-export function ShotDetailsPanel({ open, shot, trace, onClose }: ShotDetailsPanelProps) {
+export function ShotDetailsPanel({ open, projectId, shot, trace, onClose }: ShotDetailsPanelProps) {
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [traceDetail, setTraceDetail] = useState<ExecutionTraceRead | null>(null);
+  const [traceDetailLoading, setTraceDetailLoading] = useState(false);
+  const [traceDetailError, setTraceDetailError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -25,6 +32,35 @@ export function ShotDetailsPanel({ open, shot, trace, onClose }: ShotDetailsPane
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
+
+  useEffect(() => {
+    setSelectedRunId(null);
+    setTraceDetail(null);
+    setTraceDetailError(null);
+  }, [shot?.id]);
+
+  useEffect(() => {
+    if (!projectId || !selectedRunId) return;
+    let active = true;
+    setTraceDetailLoading(true);
+    setTraceDetailError(null);
+    void fetchExecutionTrace(projectId, selectedRunId)
+      .then((detail) => {
+        if (active) setTraceDetail(detail);
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setTraceDetail(null);
+          setTraceDetailError(cause instanceof Error ? cause.message : "完整执行证据读取失败");
+        }
+      })
+      .finally(() => {
+        if (active) setTraceDetailLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, selectedRunId]);
 
   if (!open) return null;
 
@@ -66,7 +102,41 @@ export function ShotDetailsPanel({ open, shot, trace, onClose }: ShotDetailsPane
             <dt>正式视频</dt>
             <dd>{shot.formal_video_artifact_id ?? "未确认"}</dd>
           </dl>
-          <ShotProductionTrace shotId={shot.id} trace={trace} />
+          <ShotProductionTrace
+            shotId={shot.id}
+            trace={trace}
+            onSelectRun={projectId ? setSelectedRunId : undefined}
+          />
+          {traceDetailLoading && (
+            <p className="muted" role="status">
+              正在读取完整执行证据…
+            </p>
+          )}
+          {traceDetailError && (
+            <p className="flash err">完整执行证据读取失败：{traceDetailError}</p>
+          )}
+          {traceDetail && (
+            <section data-testid="execution-trace-detail" className="qc-execution-trace-detail">
+              <h3>完整执行证据</h3>
+              <dl>
+                <dt>运行</dt>
+                <dd>{traceDetail.run_id}</dd>
+                <dt>节点</dt>
+                <dd>{traceDetail.node_key ?? "—"}</dd>
+                <dt>状态</dt>
+                <dd>{traceDetail.status}</dd>
+                <dt>Provider / 模型</dt>
+                <dd>
+                  {traceDetail.actual_provider ?? "—"} / {traceDetail.actual_model ?? "—"}
+                </dd>
+                <dt>操作状态</dt>
+                <dd>{traceDetail.operation_status ?? "—"}</dd>
+              </dl>
+              {traceDetail.operation_outcome_unknown && (
+                <p className="status-bad">提交结果未知，请先完成对账，不要盲目重试。</p>
+              )}
+            </section>
+          )}
         </div>
       ) : (
         <p className="muted">选择一个镜头查看生产详情。</p>

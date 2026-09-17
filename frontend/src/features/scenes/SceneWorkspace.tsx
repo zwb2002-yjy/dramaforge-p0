@@ -413,6 +413,7 @@ export function SceneWorkspace({
           />
           <ShotDetailsPanel
             open={detailsOpen}
+            projectId={projectId}
             shot={selected}
             trace={trace}
             onClose={() => setDetailsOpen(false)}

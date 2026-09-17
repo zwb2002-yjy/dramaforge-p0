@@ -678,6 +678,14 @@ export type ProjectSnapshot = {
   }>;
 };
 
+export type ExecutionTraceRead = components["schemas"]["ExecutionTraceRead"];
+
+export function fetchExecutionTrace(projectId: string, runId: string): Promise<ExecutionTraceRead> {
+  return apiGet(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/trace`,
+  );
+}
+
 export function fetchSnapshot(projectId: string): Promise<ProjectSnapshot> {
   return apiGet(`/api/v1/projects/${projectId}/snapshot`);
 }
