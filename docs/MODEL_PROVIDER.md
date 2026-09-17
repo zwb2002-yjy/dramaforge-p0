@@ -17,7 +17,7 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 | 文本通道 | providers/litellm_adapter.py + infra/litellm | 官方 LiteLLM Proxy 独立 Runtime，OpenAI 兼容 HTTP 面；DramaForge 不安装 litellm SDK |
 
 已接入 adapter：agnes、minimax、volcengine（Seedance / Seedream）、openai、
-azure_tts、local_tts、comfyui、fake（测试）。固定契约 fixture 在
+local_tts、fake（测试）。固定契约 fixture 在
 `fixtures/providers/contracts/`（由 `backend/tests/unit/test_provider_catalog.py`
 校验）。
 

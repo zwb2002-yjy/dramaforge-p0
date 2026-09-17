@@ -9,7 +9,6 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = REPO_ROOT / "docker-compose.yml"
 DEV_COMPOSE = REPO_ROOT / "docker-compose.dev.yml"
-GPU_COMPOSE = REPO_ROOT / "docker-compose.gpu.yml"
 BUILD_COMPOSE = REPO_ROOT / "docker-compose.build.yml"
 OFFLINE_COMPOSE = REPO_ROOT / "docker-compose.offline.yml"
 
@@ -183,12 +182,6 @@ def test_installers_use_images_without_host_package_installers() -> None:
             assert forbidden not in script
     assert "docker load --input" in scripts[0]
     assert "docker load --input" in scripts[1]
-
-
-def test_gpu_profile_is_optional_and_not_default() -> None:
-    data = yaml.safe_load(GPU_COMPOSE.read_text(encoding="utf-8"))
-    comfy = data["services"]["comfyui"]
-    assert "gpu" in comfy.get("profiles", [])
 
 
 def test_development_override_exposes_infrastructure_debug_ports_only() -> None:
