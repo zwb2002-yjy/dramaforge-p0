@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   artifactContentUrl,
   createReviewAnnotation,
+  decideReviewAnnotation,
   fetchProjectShots,
   fetchReviewAnnotations,
   type ReviewAnnotationRead,
@@ -35,6 +36,12 @@ function imageRegion(annotation: ReviewAnnotationRead): NormalizedRegion | null 
   if (x === null || y === null || width === null || height === null) return null;
   return { x, y, width, height };
 }
+
+const ANNOTATION_SEVERITY_LABEL: Record<string, string> = {
+  note: "提示",
+  warning: "警告",
+  blocker: "阻断",
+};
 
 function videoAnnotation(annotation: ReviewAnnotationRead): VideoAnnotation | null {
   const start = asNumber(annotation.time_start);
@@ -86,6 +93,17 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
       if (saved.shot_id === currentShot.current) setNote("");
       void queryClient.invalidateQueries({
         queryKey: queryKeys.review.annotations(projectId, saved.shot_id),
+      });
+    },
+  });
+
+  const decideAnnotation = useMutation({
+    mutationFn: ({ annotationId, status }: { annotationId: string; status: "open" | "resolved" }) =>
+      decideReviewAnnotation(projectId, shotId!, annotationId, status),
+    retry: false,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.review.annotations(projectId, shotId),
       });
     },
   });
@@ -252,6 +270,57 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
           />
         ) : (
           <p className="muted">尚未选择正式视频，当前没有可供时间批注的正式产物。</p>
+        )}
+      </section>
+      <section data-testid="review-annotation-list">
+        <h2>批注清单</h2>
+        <p className="muted">
+          批注只是审片证据；标记为“已解决”只更新批注状态，不会改动正式产物或放行任何生产动作。
+        </p>
+        {annotations.isLoading ? (
+          <p className="muted" role="status">
+            正在读取批注…
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="muted" data-testid="review-annotation-empty">
+            当前镜头还没有批注。
+          </p>
+        ) : (
+          <ul className="dense">
+            {rows.map((row) => {
+              const resolved = row.status === "resolved";
+              return (
+                <li key={row.id} data-testid="review-annotation-row">
+                  <div>
+                    <strong>{row.note}</strong>
+                    <small>
+                      {ANNOTATION_SEVERITY_LABEL[row.severity] ?? row.severity} ·{" "}
+                      {resolved ? "已解决" : "待处理"}
+                      {row.target_kind === "video_time" && row.time_start !== null
+                        ? ` · ${row.time_start}s${row.time_end ? `–${row.time_end}s` : ""}`
+                        : ""}
+                    </small>
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="review-annotation-decision"
+                    disabled={decideAnnotation.isPending}
+                    onClick={() =>
+                      decideAnnotation.mutate({
+                        annotationId: row.id,
+                        status: resolved ? "open" : "resolved",
+                      })
+                    }
+                  >
+                    {resolved ? "重新打开" : "标记为已解决"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {decideAnnotation.isError && (
+          <div className="flash err">批注状态更新失败：{String(decideAnnotation.error)}</div>
         )}
       </section>
       {addAnnotation.isError && addAnnotation.variables?.shotId === shotId && (

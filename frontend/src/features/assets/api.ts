@@ -83,6 +83,20 @@ export async function promoteAssetVersion(
   );
 }
 
+export async function rejectAssetVersion(
+  projectId: string,
+  assetId: string,
+  versionId: string,
+): Promise<AssetVersionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<AssetVersionRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/assets/${assetId}/versions/${versionId}/reject`,
+    {},
+    csrf,
+  );
+}
+
 export function fetchAssetCard(projectId: string, assetId: string): Promise<AssetCardRead> {
   return apiGet<AssetCardRead>(`/api/v1/projects/${projectId}/assets/${assetId}/card`);
 }

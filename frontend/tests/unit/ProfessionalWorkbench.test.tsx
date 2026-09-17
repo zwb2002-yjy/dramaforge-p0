@@ -77,6 +77,66 @@ describe("ProfessionalWorkbench", () => {
     expect(editor).toHaveValue(shots[0].visual_description);
   });
 
+  it("blocks starting an experiment on a model the runtime would refuse", () => {
+    const onCreateExperiment = vi.fn();
+    render(
+      <ProfessionalWorkbench
+        projectId="project-1"
+        shots={shots}
+        selectedShotId="shot-1"
+        onSelectShot={() => undefined}
+        models={[
+          {
+            id: "agnes/video-v2",
+            provider_id: "agnes",
+            display_name: "Agnes Video",
+            enabled: true,
+            configured: true,
+            available: true,
+            capabilities: ["video.image_to_video"],
+          },
+          {
+            id: "agnes/video-v3",
+            provider_id: "agnes",
+            display_name: "Agnes Video Pro",
+            enabled: true,
+            configured: true,
+            available: true,
+            capabilities: ["video.image_to_video"],
+          },
+        ]}
+        modelCandidates={[
+          {
+            model_binding_id: "binding-1",
+            provider: "agnes",
+            profile: "default",
+            model_id: "video-v2",
+            display_name: "Agnes Video",
+            purpose: "video",
+            eligible: false,
+            supported_capabilities: ["video.image_to_video"],
+            unmet_preferences: [],
+            evidence: {},
+            issues: [{ code: "QUALITY_GATE", detail: "缺少画质证据" }],
+            estimated_cost: null,
+          },
+        ]}
+        onCreateExperiment={onCreateExperiment}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: "agnes/video-v2" } });
+    expect(screen.getByTestId("experiment-model-eligibility")).toHaveTextContent("缺少画质证据");
+    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "换模型验证" } });
+    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: "agnes/video-v3" } });
+    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeEnabled();
+    expect(onCreateExperiment).not.toHaveBeenCalled();
+  });
+
   it("uses the latest retry when labeling the current shot status", () => {
     render(
       <ProfessionalWorkbench

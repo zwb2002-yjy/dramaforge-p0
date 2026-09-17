@@ -498,6 +498,11 @@ export async function loginUser(email: string, password: string): Promise<UserRe
   return apiSend<UserRead>("POST", "/api/v1/auth/login", { email, password }, csrf);
 }
 
+export async function logoutUser(): Promise<void> {
+  const csrf = await fetchCsrf();
+  await apiSend<void>("POST", "/api/v1/auth/logout", {}, csrf);
+}
+
 export function fetchCurrentUser(): Promise<UserRead> {
   return apiGet<UserRead>("/api/v1/auth/me");
 }
@@ -609,14 +614,6 @@ export async function createProject(input: {
     },
     csrf,
   );
-}
-
-export async function enqueueNodeRun(
-  projectId: string,
-  nodeRunId: string,
-): Promise<{ node_run_id: string; status: string; job_id: string }> {
-  const csrf = await fetchCsrf();
-  return apiSend("POST", `/api/v1/projects/${projectId}/node-runs/${nodeRunId}/enqueue`, {}, csrf);
 }
 
 export type ProjectSnapshot = {
@@ -741,34 +738,6 @@ export async function createProjectAsset(
   );
 }
 
-export async function updateProjectAsset(
-  projectId: string,
-  assetId: string,
-  input: {
-    expected_version: number;
-    kind: string;
-    name: string;
-    description: string;
-    metadata?: Record<string, unknown>;
-    status?: "draft" | "active" | "recycled";
-    tags?: string[];
-  },
-): Promise<AssetRead> {
-  const csrf = await fetchCsrf();
-  return apiSend(
-    "PATCH",
-    `/api/v1/projects/${projectId}/assets/${assetId}`,
-    { ...input, metadata: input.metadata ?? {}, status: input.status ?? "draft" },
-    csrf,
-  );
-}
-
-export function fetchAssetVersions(
-  projectId: string,
-  assetId: string,
-): Promise<AssetVersionRead[]> {
-  return apiGet(`/api/v1/projects/${projectId}/assets/${assetId}/versions`);
-}
 export type ExperimentRead = {
   id: string;
   project_id: string;
@@ -874,6 +843,21 @@ export async function createReviewAnnotation(
   return apiSend("POST", `/api/v1/projects/${projectId}/shots/${shotId}/annotations`, input, csrf);
 }
 
+export async function decideReviewAnnotation(
+  projectId: string,
+  shotId: string,
+  annotationId: string,
+  status: "open" | "resolved",
+): Promise<ReviewAnnotationRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/annotations/${annotationId}/decision`,
+    { status },
+    csrf,
+  );
+}
+
 export type OpenCutManifestRead = components["schemas"]["OpenCutManifest"];
 
 export function fetchOpenCutManifest(projectId: string): Promise<OpenCutManifestRead> {
@@ -959,63 +943,7 @@ export function fetchShotCanvasRevisions(
 ): Promise<CanvasRevisionRead[]> {
   return apiGet(`/api/v1/projects/${projectId}/shots/${shotId}/canvas-revisions`);
 }
-export type ShotChangeProposalRead = {
-  id: string;
-  shot_id: string;
-  summary: string;
-  base_shot_version: number;
-  replacement_payload: Record<string, unknown>;
-  affected_node_keys: string[];
-  reusable_artifact_ids: string[];
-  status: string;
-  confirmed_revision_id: string | null;
-  created_at: string;
-  confirmed_at: string | null;
-};
 
-export type ShotChangeProposalResult = {
-  proposal: ShotChangeProposalRead;
-  impact: {
-    affected_shot_ids: string[];
-    invalidated_node_keys: string[];
-    reusable_artifact_ids: string[];
-  };
-};
-
-export async function createShotChangeProposal(
-  projectId: string,
-  shotId: string,
-  input: {
-    idempotency_key: string;
-    summary: string;
-    expected_version: number;
-    replacement_payload: Record<string, unknown>;
-    affected_node_keys: string[];
-    reusable_artifact_ids: string[];
-  },
-): Promise<ShotChangeProposalResult> {
-  const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/shots/${shotId}/change-proposals`,
-    input,
-    csrf,
-  );
-}
-
-export async function confirmShotChangeProposal(
-  projectId: string,
-  shotId: string,
-  proposalId: string,
-): Promise<ShotChangeProposalRead> {
-  const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    `/api/v1/projects/${projectId}/shots/${shotId}/change-proposals/${proposalId}/confirm`,
-    {},
-    csrf,
-  );
-}
 export async function updateShotCanvas(
   projectId: string,
   shotId: string,
@@ -1041,24 +969,9 @@ export function artifactContentUrl(projectId: string, artifactId: string): strin
   return workspaceScopedUrl(`/api/v1/projects/${projectId}/artifacts/${artifactId}/content`);
 }
 
-export function artifactVideoFrameUrl(
-  projectId: string,
-  artifactId: string,
-  role: "start" | "mid" | "end",
-): string {
-  return workspaceScopedUrl(
-    `/api/v1/projects/${projectId}/artifacts/${artifactId}/video-frames/${role}`,
-  );
-}
-
 // ---------------------------------------------------------------------------
 // V3 model capability / unified generation API (spec §58).
 // ---------------------------------------------------------------------------
-
-export interface CapabilityRead {
-  id: string;
-  display_name: string;
-}
 
 export interface ModelRead {
   id: string;
@@ -1111,61 +1024,7 @@ export interface CapabilitySpecRead {
   transport_profile_id: string;
 }
 
-export interface ModelManifestRead {
-  id: string;
-  provider_id: string;
-  model_name: string;
-  display_name: string;
-  execution_mode: string;
-  supports_cancel: boolean;
-  capability_specs: Record<string, CapabilitySpecRead>;
-}
-
-export async function listCapabilities(): Promise<CapabilityRead[]> {
-  return apiGetList<CapabilityRead>("/api/v1/capabilities");
-}
-
 export async function listModels(capability?: string): Promise<ModelRead[]> {
   const query = capability ? `?capability=${encodeURIComponent(capability)}` : "";
   return apiGetList<ModelRead>(`/api/v1/models${query}`);
-}
-
-export async function getModelManifest(modelId: string): Promise<ModelManifestRead> {
-  return apiGet<ModelManifestRead>(`/api/v1/models/${modelId}`);
-}
-
-export interface GenerationCreateResult {
-  operation_id: string;
-  status: string;
-  requested_capability: string;
-  requested_model?: string | null;
-}
-
-export async function createGeneration(
-  projectId: string,
-  body: {
-    capability: string;
-    model_id?: string | null;
-    input: Record<string, unknown>;
-    options: Record<string, unknown>;
-    native_options: Record<string, unknown>;
-  },
-  idempotencyKey?: string,
-): Promise<GenerationCreateResult> {
-  const csrf = await fetchCsrf();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-    "X-CSRF-Token": csrf,
-    ...workspaceHeaders(),
-  };
-  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
-  const response = await fetch(`${API_BASE}/api/v1/projects/${projectId}/generations`, {
-    method: "POST",
-    credentials: "include",
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw await parseError(response);
-  return (await response.json()) as GenerationCreateResult;
 }

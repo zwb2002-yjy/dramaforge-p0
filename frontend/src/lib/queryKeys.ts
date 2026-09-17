@@ -44,6 +44,8 @@ export const queryKeys = {
     review: (projectId: string) => ["review-shots", projectId] as const,
     reviewWorkbench: (projectId: string, shotId: string | null | undefined) =>
       ["review-shot-workbench", projectId, shotId] as const,
+    changeProposals: (projectId: string, shotId: string | null | undefined) =>
+      ["shot-change-proposals", projectId, shotId] as const,
   },
 
   asset: {
@@ -128,6 +130,8 @@ export const queryKeys = {
       ["workspace-model-profile", workspaceId, profileId] as const,
     effectiveBindings: (projectId: string) => ["model-bindings-effective", projectId] as const,
     projectProfile: (projectId: string) => ["project-model-profile", projectId] as const,
+    candidates: (projectId: string, operation: string) =>
+      ["model-candidates", projectId, operation] as const,
   },
 
   provider: {

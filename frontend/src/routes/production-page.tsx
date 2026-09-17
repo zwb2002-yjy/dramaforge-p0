@@ -7,6 +7,7 @@ import { ProductionMonitor } from "../features/production/ProductionMonitor";
 import { ProfessionalWorkbench } from "../features/production/ProfessionalWorkbench";
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
+import { listModelCandidates } from "../features/production/modelCandidatesApi";
 import { fetchScenes } from "../features/scenes/api";
 import { createShotExecution } from "../features/shots/api";
 import { recycleAsset, restoreAsset } from "../features/assets/api";
@@ -202,6 +203,11 @@ export function ProductionPage({ projectId }: { projectId: string }) {
     queryKey: queryKeys.model.catalog(),
     queryFn: () => listModels(),
   });
+  const modelCandidates = useQuery({
+    queryKey: queryKeys.model.candidates(projectId, "video.generate"),
+    queryFn: () => listModelCandidates(projectId, "video.generate"),
+    enabled: projectId !== "demo",
+  });
   const openCutManifest = useQuery({
     queryKey: queryKeys.production.opencutManifest(projectId),
     queryFn: () => fetchOpenCutManifest(projectId),
@@ -310,6 +316,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
           annotations={Array.isArray(reviewAnnotations.data) ? reviewAnnotations.data : []}
           openCutManifest={openCutManifest.data}
           models={Array.isArray(availableModels.data) ? availableModels.data : []}
+          modelCandidates={Array.isArray(modelCandidates.data) ? modelCandidates.data : []}
           directorBoard={directorBoard.data}
           selectedShotId={selectedShotId}
           onSelectShot={setSelectedShotId}

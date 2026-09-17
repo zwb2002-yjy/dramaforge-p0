@@ -32,6 +32,13 @@ frontend/src/
   draft 并要求用户重新加载后手动合并。
 - Creative Capability 选择项与显示名全部来自后端 Catalog；前端不维护业务 key
   或 Registry 映射副本。
+- Shot Change Proposal 是显式 Apply 门：列表与确认分别对应
+  `GET/POST …/change-proposals`；只有用户确认才写 CanvasRevision 并提升 Shot 版本，
+  基线版本过期的提案在前端标记为失效并禁止确认。
+- 实验模型选择读取项目级 `model-candidates` 资格结果（与运行时 resolver 共用同一
+  eligibility 引擎）；不可用模型在选择项中禁用并显示原因，前端不复制资格规则。
+- Review 批注的“已解决/重新打开”只更新批注状态，不改变正式产物，也不同于
+  `review-decisions` 的人工放行。
 
 ## 设计系统（Visual System 2.0）
 

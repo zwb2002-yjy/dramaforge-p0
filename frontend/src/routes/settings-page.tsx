@@ -16,6 +16,7 @@ import {
   getSelectedWorkspaceId,
   listWorkspaceProjects,
   listWorkspaces,
+  logoutUser,
   renameWorkspace,
   setSelectedWorkspaceId as persistSelectedWorkspaceId,
   type WorkspaceRead,
@@ -106,10 +107,26 @@ function WorkspaceSelector({
 }
 
 export function AccountSettingsPage() {
+  const queryClient = useQueryClient();
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const currentUser = useQuery({
     queryKey: queryKeys.auth.currentUser(),
     queryFn: fetchCurrentUser,
     retry: false,
+  });
+  const logout = useMutation({
+    mutationFn: logoutUser,
+    onSuccess: async () => {
+      setLogoutError(null);
+      // Drop every cached fact that was scoped to the previous session, then
+      // let the routes re-read bootstrap/current-user from the server.
+      persistSelectedWorkspaceId(null);
+      queryClient.removeQueries({ queryKey: queryKeys.workspace.list() });
+      queryClient.removeQueries({ queryKey: queryKeys.workspace.projectsRoot() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.auth.bootstrap() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.auth.currentUser() });
+    },
+    onError: (cause: Error) => setLogoutError(cause.message),
   });
   const health = useQuery({ queryKey: queryKeys.health(), queryFn: fetchHealth, retry: 1 });
   const serviceReady = health.data?.status === "ok" && (!health.data.db || health.data.db === "up");
@@ -126,12 +143,29 @@ export function AccountSettingsPage() {
           {currentUser.isLoading ? (
             <p className="muted">正在读取账号…</p>
           ) : currentUser.data ? (
-            <dl>
-              <dt>显示名</dt>
-              <dd>{currentUser.data.display_name}</dd>
-              <dt>邮箱</dt>
-              <dd>{currentUser.data.email}</dd>
-            </dl>
+            <>
+              <dl>
+                <dt>显示名</dt>
+                <dd>{currentUser.data.display_name}</dd>
+                <dt>邮箱</dt>
+                <dd>{currentUser.data.email}</dd>
+              </dl>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="ghost danger"
+                  data-testid="logout-button"
+                  onClick={() => logout.mutate()}
+                  disabled={logout.isPending}
+                >
+                  {logout.isPending ? "正在退出…" : "退出登录"}
+                </button>
+              </div>
+              <p className="muted">
+                退出只清除当前浏览器会话；已保存的项目、凭证与生产事实不受影响。
+              </p>
+              {logoutError && <p className="status-bad">退出失败：{logoutError}</p>}
+            </>
           ) : (
             <p className="muted">请先在项目大厅登录 Owner 账号。</p>
           )}

@@ -16,6 +16,7 @@ import { Button } from "../../components/ui";
 import { assetKindLabel, assetStatusLabel } from "../../lib/assetLabels";
 import { shotTypeLabel } from "../../lib/shotLabels";
 import { latestEffectiveNodeRuns } from "./effectiveRuns";
+import { candidateModelKey, type ModelCandidateRead } from "./modelCandidatesApi";
 
 const EXPERIMENT_STATUS_LABEL: Record<string, string> = {
   proposed: "待选择",
@@ -99,6 +100,11 @@ type ProfessionalWorkbenchProps = {
     },
   ) => Promise<void>;
   models?: ModelRead[];
+  /**
+   * Project-scoped eligibility for the experiment target, from the same engine
+   * the runtime resolver uses. Absent means "unknown", never "eligible".
+   */
+  modelCandidates?: ModelCandidateRead[];
   onCreateAnnotation?: (input: {
     artifact_id?: string | null;
     target_kind: "shot" | "video_time" | "image_point" | "image_region";
@@ -177,6 +183,7 @@ export function ProfessionalWorkbench({
   onStartExperiment,
   onDecideExperiment,
   models = [],
+  modelCandidates = [],
   onCreateAnnotation,
   directorBoard,
   onSaveDirectorBoard,
@@ -262,6 +269,20 @@ export function ProfessionalWorkbench({
     : false;
   const selectedStatus = selectedShot ? shotRunStatus(selectedShot, snapshot) : "";
   const experimentModelRecord = models.find((model) => model.id === experimentModel);
+  const candidateByModel = useMemo(() => {
+    const map = new Map<string, ModelCandidateRead>();
+    for (const candidate of modelCandidates) {
+      // The catalog names a model "provider/model"; the candidate view splits
+      // the two, so index both spellings to keep matching exact.
+      map.set(candidateModelKey(candidate), candidate);
+      map.set(candidate.model_id, candidate);
+    }
+    return map;
+  }, [modelCandidates]);
+  const selectedCandidate = experimentModel
+    ? (candidateByModel.get(experimentModel) ?? null)
+    : null;
+  const selectedIneligible = Boolean(selectedCandidate && !selectedCandidate.eligible);
   const imageArtifacts = (snapshot?.artifacts ?? []).filter((artifact) =>
     artifact.mime_type.startsWith("image/"),
   );
@@ -970,18 +991,45 @@ export function ProfessionalWorkbench({
                 onChange={(event) => setExperimentModel(event.target.value)}
               >
                 <option value="">选择模型</option>
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.display_name}
-                  </option>
-                ))}
+                {models.map((model) => {
+                  const candidate = candidateByModel.get(model.id) ?? null;
+                  return (
+                    <option
+                      key={model.id}
+                      value={model.id}
+                      disabled={Boolean(candidate && !candidate.eligible)}
+                    >
+                      {model.display_name}
+                      {candidate ? (candidate.eligible ? " · 可用" : " · 不可用") : ""}
+                    </option>
+                  );
+                })}
               </select>
               {experimentModelRecord && (
                 <small>动态能力：{experimentModelRecord.capabilities.join(" · ")}</small>
               )}
+              {selectedCandidate && (
+                <small
+                  data-testid="experiment-model-eligibility"
+                  className={selectedCandidate.eligible ? "status-ok" : "status-bad"}
+                >
+                  {selectedCandidate.eligible
+                    ? "该模型通过当前项目资格检查。"
+                    : `该模型不可用于本实验：${
+                        selectedCandidate.issues.map((issue) => issue.detail).join("；") ||
+                        selectedCandidate.unmet_preferences.join("；") ||
+                        "未满足资格条件"
+                      }`}
+                </small>
+              )}
               <Button
                 tone="primary"
-                disabled={!experimentName.trim() || !experimentModel.trim() || !onCreateExperiment}
+                disabled={
+                  !experimentName.trim() ||
+                  !experimentModel.trim() ||
+                  !onCreateExperiment ||
+                  selectedIneligible
+                }
                 onClick={() =>
                   void onCreateExperiment?.({
                     name: experimentName.trim(),

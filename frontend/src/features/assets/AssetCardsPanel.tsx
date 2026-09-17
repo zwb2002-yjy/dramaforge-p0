@@ -15,6 +15,7 @@ import {
   fetchAssetTags,
   fetchAssetVersions,
   promoteAssetVersion,
+  rejectAssetVersion,
   recycleAsset,
   restoreAsset,
   setAssetTags,
@@ -107,6 +108,11 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
   const promote = useMutation({
     mutationFn: ({ assetId, versionId }: { assetId: string; versionId: string }) =>
       promoteAssetVersion(projectId, assetId, versionId),
+    onSuccess: invalidate,
+  });
+  const reject = useMutation({
+    mutationFn: ({ assetId, versionId }: { assetId: string; versionId: string }) =>
+      rejectAssetVersion(projectId, assetId, versionId),
     onSuccess: invalidate,
   });
 
@@ -230,6 +236,7 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
                 projectId={projectId}
                 onAddCandidate={(name) => addCandidate.mutate({ assetId: asset.id, name })}
                 onPromote={(versionId) => promote.mutate({ assetId: asset.id, versionId })}
+                onReject={(versionId) => reject.mutate({ assetId: asset.id, versionId })}
               />
             </footer>
           </li>
@@ -305,11 +312,13 @@ function VersionControls({
   projectId,
   onAddCandidate,
   onPromote,
+  onReject,
 }: {
   asset: AssetRead;
   projectId: string;
   onAddCandidate: (name: string) => void;
   onPromote: (versionId: string) => void;
+  onReject: (versionId: string) => void;
 }) {
   const [showVersions, setShowVersions] = useState(false);
   const [candidateName, setCandidateName] = useState("");
@@ -355,9 +364,23 @@ function VersionControls({
                   {VERSION_STATUS_LABEL[version.status] ?? version.status}
                 </span>
                 {version.status === "candidate" && (
-                  <button type="button" onClick={() => onPromote(version.id)}>
-                    提升为正式
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      data-testid="asset-version-promote"
+                      onClick={() => onPromote(version.id)}
+                    >
+                      提升为正式
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost danger"
+                      data-testid="asset-version-reject"
+                      onClick={() => onReject(version.id)}
+                    >
+                      拒绝候选
+                    </button>
+                  </>
                 )}
               </li>
             ))}
