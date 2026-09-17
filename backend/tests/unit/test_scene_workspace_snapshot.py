@@ -337,3 +337,43 @@ async def test_shot_workbench_snapshot_aggregates_and_warns_old_version() -> Non
     finally:
         await session.close()
         await engine.dispose()  # type: ignore[union-attr]
+
+async def test_scene_and_shot_render_the_same_node_run_identically() -> None:
+    """B6: one NodeRun must not render differently between the two views."""
+    engine, session = await _make_env()
+    try:
+        user, project, _episode, scene, shot = await _seed(session)
+        run = await _add_node_run(
+            session, project_id=project.id, shot_id=shot.id, user=user, status="failed"
+        )
+        run.error_code = "PROVIDER_FAILED"
+        run.error_summary = "agnes video generation failed"
+        session.add(
+            ProviderOperation(
+                node_run_id=run.id,
+                attempt_no=1,
+                purpose="primary",
+                operation_kind="video.generate",
+                actual_provider="agnes",
+                actual_model="agnes-video-v2.0",
+                request_fingerprint=uuid4().hex * 2,
+                status="unknown_submission",
+            )
+        )
+        await session.flush()
+
+        workspace = await SceneWorkspaceService(session).get_workspace(
+            project_id=project.id, scene_id=scene.id, actor=user
+        )
+        scene_rows = {str(row["node_run_id"]): row for row in workspace["trace"][str(shot.id)]}
+        workbench = await ShotWorkbenchService(session).get_workbench(
+            project_id=project.id, shot_id=shot.id, actor=user
+        )
+        shot_rows = {str(row["node_run_id"]): row for row in workbench["trace"]}
+
+        assert scene_rows[str(run.id)] == shot_rows[str(run.id)]
+        assert scene_rows[str(run.id)]["error_summary"] == "agnes video generation failed"
+        assert scene_rows[str(run.id)]["operation_outcome_unknown"] is True
+    finally:
+        await session.close()
+        await engine.dispose()  # type: ignore[union-attr]
