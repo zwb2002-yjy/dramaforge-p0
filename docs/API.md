@@ -153,7 +153,7 @@ Node installation for development or release evidence.
 报错，绝不回退成“当前正式视频”。stage=formal_video 是准入用途，不表示目标
 已经 Formal。服务端仍校验工作空间、Project、Shot、Artifact 血缘和对应审查记录。
 
-**当前实现**：候选托盘与修复步骤提供携带精确目标的审查入口。ReviewWorkspace
+**当前实现**：候选托盘与修复步骤提供携带精确目标的审查入口。Review 摘要同时返回视频证据清单（来源 Artifact / 哈希、审查运行与证据 Artifact、采样版本、参考图哈希、逐帧时间 / 角色 / 哈希 / 可用状态），桌面证据条仅做读取和播放器定位，不触发生成。ReviewWorkspace
 使用工作台返回的镜头候选 / 正式结果校验目标；修复入口额外核对请求、步骤和结果。
 显式目标无效时显示错误，不回退正式版本。播放器、批注与人工决定绑定同一 Artifact；
 切换目标会隔离本地草稿、幂等键及迟到提交反馈。RepairStepRead 只读投影本步

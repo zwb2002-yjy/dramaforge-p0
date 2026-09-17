@@ -14,7 +14,7 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Shot
 from app.delivery.models import HumanReviewDecision, ReviewAnnotation
-from app.execution.models import Artifact
+from app.execution.models import Artifact, NodeRun
 from app.production.review_gate import evaluate_artifact_admission, record_human_decision
 from app.shared.errors import ConflictError, NotFoundError
 
@@ -269,6 +269,27 @@ class ReviewDecisionRead(BaseModel):
     created_at: datetime
 
 
+class ReviewFrameEvidenceRead(BaseModel):
+    sample_id: str
+    role: str
+    timestamp_seconds: float
+    frame_content_hash: str | None
+    delivery_path: str | None
+    status: str
+    unavailable_reason: str | None = None
+
+
+class ReviewEvidenceRead(BaseModel):
+    source_artifact_id: UUID
+    source_content_hash: str | None
+    review_node_run_id: UUID
+    review_artifact_id: UUID | None
+    sampling_version: str | None
+    canonical_artifact_id: UUID | None
+    canonical_content_hash: str | None
+    frames: list[ReviewFrameEvidenceRead]
+
+
 class ReviewSummaryRead(BaseModel):
     """What the review page needs: machine evidence, the human call, what is allowed."""
 
@@ -285,6 +306,7 @@ class ReviewSummaryRead(BaseModel):
     blocked_reason: str | None
     allowed_actions: list[str]
     shot_version: int
+    evidence: ReviewEvidenceRead | None
 
 
 def _decision_read(row: HumanReviewDecision) -> ReviewDecisionRead:
@@ -334,6 +356,55 @@ async def read_review_summary(
         stage=stage,
     )
     requirement = admission.requirements[0]
+    evidence: ReviewEvidenceRead | None = None
+    if requirement.review_node_run_id is not None:
+        review_run = await session.get(NodeRun, requirement.review_node_run_id)
+        output = dict(review_run.output_summary or {}) if review_run is not None else {}
+        policy = output.get("video_drift_policy")
+        raw_samples = output.get("samples")
+        if isinstance(policy, dict) and isinstance(raw_samples, list):
+            source_id = output.get("video_artifact_id") or artifact_id
+            source_hash = output.get("video_content_hash")
+            canonical_id = output.get("canonical_artifact_id")
+            canonical_hash = output.get("canonical_content_hash")
+            frames: list[ReviewFrameEvidenceRead] = []
+            for sample in raw_samples:
+                if not isinstance(sample, dict):
+                    continue
+                role = str(sample.get("role") or "")
+                timestamp = sample.get("timestamp_seconds")
+                if not role or not isinstance(timestamp, (int, float)):
+                    continue
+                status = str(sample.get("status") or "unavailable")
+                frames.append(ReviewFrameEvidenceRead(
+                    sample_id=f"{role}@{timestamp}", role=role,
+                    timestamp_seconds=float(timestamp),
+                    frame_content_hash=(
+                        str(sample["frame_content_hash"])
+                        if sample.get("frame_content_hash") is not None else None
+                    ),
+                    delivery_path=(
+                        f"/api/v1/projects/{project_id}/artifacts/{artifact_id}/video-frames/{role}"
+                        if role in {"start", "mid", "end"} and status.startswith("available")
+                        else None
+                    ),
+                    status=status,
+                    unavailable_reason=None if status.startswith("available") else "证据不可用",
+                ))
+            evidence = ReviewEvidenceRead(
+                source_artifact_id=UUID(str(source_id)), source_content_hash=(
+                    str(source_hash) if source_hash is not None else None
+                ), review_node_run_id=requirement.review_node_run_id,
+                review_artifact_id=requirement.review_artifact_id,
+                sampling_version=(
+                    str(policy.get("sampling_version"))
+                    if policy.get("sampling_version") is not None else None
+                ),
+                canonical_artifact_id=UUID(str(canonical_id)) if canonical_id else None,
+                canonical_content_hash=(
+                    str(canonical_hash) if canonical_hash is not None else None
+                ), frames=frames,
+            )
     actions: list[str] = []
     if requirement.decision != "approved":
         actions.append("approve")
@@ -355,6 +426,7 @@ async def read_review_summary(
         blocked_reason=requirement.blocked_reason,
         allowed_actions=actions,
         shot_version=shot.version or 1,
+        evidence=evidence,
     )
 
 

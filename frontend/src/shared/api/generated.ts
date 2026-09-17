@@ -5556,6 +5556,48 @@ export interface components {
              */
             created_at: string;
         };
+        /** ReviewEvidenceRead */
+        ReviewEvidenceRead: {
+            /**
+             * Source Artifact Id
+             * Format: uuid
+             */
+            source_artifact_id: string;
+            /** Source Content Hash */
+            source_content_hash: string | null;
+            /**
+             * Review Node Run Id
+             * Format: uuid
+             */
+            review_node_run_id: string;
+            /** Review Artifact Id */
+            review_artifact_id: string | null;
+            /** Sampling Version */
+            sampling_version: string | null;
+            /** Canonical Artifact Id */
+            canonical_artifact_id: string | null;
+            /** Canonical Content Hash */
+            canonical_content_hash: string | null;
+            /** Frames */
+            frames: components["schemas"]["ReviewFrameEvidenceRead"][];
+        };
+        /** ReviewFrameEvidenceRead */
+        ReviewFrameEvidenceRead: {
+            /** Sample Id */
+            sample_id: string;
+            /** Role */
+            role: string;
+            /** Timestamp Seconds */
+            timestamp_seconds: number;
+            /** Frame Content Hash */
+            frame_content_hash: string | null;
+            /** Delivery Path */
+            delivery_path: string | null;
+            /** Status */
+            status: string;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
+        };
         /**
          * ReviewSummaryRead
          * @description What the review page needs: machine evidence, the human call, what is allowed.
@@ -5593,6 +5635,7 @@ export interface components {
             allowed_actions: string[];
             /** Shot Version */
             shot_version: number;
+            evidence: components["schemas"]["ReviewEvidenceRead"] | null;
         };
         /** SceneActionRead */
         SceneActionRead: {

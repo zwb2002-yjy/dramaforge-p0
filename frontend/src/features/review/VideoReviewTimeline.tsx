@@ -15,6 +15,7 @@ export interface VideoReviewTimelineProps {
   note?: string;
   pending?: boolean;
   onAddAnnotation?: (startSeconds: number, endSeconds: number | null) => Promise<void>;
+  seekToSeconds?: number | null;
 }
 
 /** Playback and selection are local; only the explicit Save button persists a note. */
@@ -23,6 +24,7 @@ export function VideoReviewTimeline({
   annotations,
   videoUrl,
   mediaLabel = "正式视频",
+  seekToSeconds = null,
   note = "",
   pending = false,
   onAddAnnotation,
@@ -57,6 +59,12 @@ export function VideoReviewTimeline({
     endValue >= startValue &&
     endValue <= duration;
   const ready = mediaDuration !== null && !mediaError;
+  useEffect(() => {
+    if (seekToSeconds === null || !ready || !video.current) return;
+    const next = Math.max(0, Math.min(seekToSeconds, duration));
+    video.current.currentTime = next;
+    setPosition(next);
+  }, [duration, ready, seekToSeconds]);
   function seek(value: number) {
     if (!video.current || !ready) return;
     const next = Math.max(0, Math.min(value, duration));

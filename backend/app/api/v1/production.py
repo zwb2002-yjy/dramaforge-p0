@@ -164,9 +164,9 @@ async def get_artifact_video_frame(
     from app.consistency.video_drift import extract_video_samples
     from app.storage.minio_store import get_object_store
 
-    if role not in {"start", "mid", "end"}:
+    if role not in {"start", "mid", "end", "scene_change_1", "scene_change_2"}:
         raise ValidationAppError(
-            "video frame role must be start, mid, or end",
+            "video frame role must be start, mid, end, scene_change_1, or scene_change_2",
             details={"code": "VIDEO_FRAME_ROLE_INVALID"},
         )
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)

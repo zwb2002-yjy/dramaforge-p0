@@ -18,6 +18,7 @@ import { readRepair } from "./repairApi";
 import { parseReviewTarget, type ReviewTargetSearch } from "./reviewTarget";
 import { HumanReviewDecisionPanel } from "./HumanReviewDecisionPanel";
 import { MediaReviewCanvas, type NormalizedRegion } from "./MediaReviewCanvas";
+import { ReviewEvidenceStrip } from "./ReviewEvidenceStrip";
 import { RepairPlanPanel } from "./RepairPlanPanel";
 import { VideoReviewTimeline, type VideoAnnotation } from "./VideoReviewTimeline";
 
@@ -75,6 +76,7 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [repairOpen, setRepairOpen] = useState(false);
+  const [evidenceTime, setEvidenceTime] = useState<number | null>(null);
   const shots = useQuery({
     queryKey: queryKeys.shot.review(projectId),
     queryFn: () => fetchProjectShots(projectId),
@@ -88,6 +90,7 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
   useEffect(() => {
     setNote("");
     setRepairOpen(false);
+    setEvidenceTime(null);
   }, [shotId]);
 
   const workbench = useQuery({
@@ -320,26 +323,37 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
       <section>
         <h2>视频时间线</h2>
         {shot && videoId ? (
-          <VideoReviewTimeline
-            key={`${shot.id}:${videoId}`}
-            videoUrl={artifactContentUrl(projectId, videoId)}
-            mediaLabel={explicitTarget ? "指定视频" : "正式视频"}
-            durationSeconds={durationSeconds}
-            annotations={videoRows}
-            note={note}
-            pending={addAnnotation.isPending}
-            onAddAnnotation={async (startSeconds, endSeconds) => {
-              if (!shotId || !note.trim() || addAnnotation.isPending) return;
-              await addAnnotation.mutateAsync({
-                shotId,
-                artifact_id: videoId,
-                target_kind: "video_time",
-                note: note.trim(),
-                time_start: String(startSeconds),
-                time_end: endSeconds === null ? null : String(endSeconds),
-              });
-            }}
-          />
+          <>
+            <ReviewEvidenceStrip
+              projectId={projectId}
+              shotId={shot.id}
+              artifactId={videoId}
+              reviewKind="video_drift"
+              stage="formal_video"
+              onSelectTime={setEvidenceTime}
+            />
+            <VideoReviewTimeline
+              key={`${shot.id}:${videoId}`}
+              videoUrl={artifactContentUrl(projectId, videoId)}
+              seekToSeconds={evidenceTime}
+              mediaLabel={explicitTarget ? "指定视频" : "正式视频"}
+              durationSeconds={durationSeconds}
+              annotations={videoRows}
+              note={note}
+              pending={addAnnotation.isPending}
+              onAddAnnotation={async (startSeconds, endSeconds) => {
+                if (!shotId || !note.trim() || addAnnotation.isPending) return;
+                await addAnnotation.mutateAsync({
+                  shotId,
+                  artifact_id: videoId,
+                  target_kind: "video_time",
+                  note: note.trim(),
+                  time_start: String(startSeconds),
+                  time_end: endSeconds === null ? null : String(endSeconds),
+                });
+              }}
+            />
+          </>
         ) : (
           <p className="muted">尚未选择正式视频，当前没有可供时间批注的正式产物。</p>
         )}
