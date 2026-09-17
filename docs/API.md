@@ -29,15 +29,28 @@ Migration head: 20260916_0070
 | Scenes | scenes.py, workflow_overview.py | scene structure, workspace snapshot, structural commands, read-only project workflow view |
 | Workbench | workbench.py | workspace state, Shot design, execution-plan preview, execution dispatch, formal selection, trace, staged repair (`repair-plan`, `repairs`, `repairs/{id}`, `repairs/{id}/steps`) |
 | Director Assistant | director.py | proposal-only Shot suggestion and recommendation (`/director/shots/{shot_id}/...`), bounded Director turns, runtime start/control/resume signals, read-only runtime capabilities |
-| Director board | director_board.py | per-shot 2D and rough-3D director board state |
+| Director board | director_board.py | per-shot 2D and rough-3D director board state — the only authoritative director-board writer |
 | Review | review.py | evidence annotations and annotation decisions, plus the human review decision (`review-summary`, `review-decisions`) that admits an exact Artifact |
 | Production monitor | production.py | Artifact bytes/frames, project snapshot, Outbox/Arq enqueue |
-| Providers | provider_connections.py, provider_references.py, credentials.py, generations.py, model_profiles.py, model_candidates.py | model catalog, connection/credential revisions, capability probe and generation, reference delivery, model profiles and read-only candidates |
-| Experiments | experiments.py | isolated Shot experiment branches and adoption |
+| Providers | provider_connections.py, provider_references.py, credentials.py, generations.py, model_profiles.py, model_candidates.py | model catalog, connection/credential revisions, capability probe and generation, reference delivery, model profiles (binding validation is an invariant of the save path, not a separate endpoint) and read-only candidates |
+| Experiments | experiments.py | isolated Shot experiment branches; adoption is the ExperimentBranch decision, never a second adopt endpoint |
 | Editing | editing.py, opencut.py, final_film.py | EditSession timeline, suggestion, export, OpenCut manifest, Final Film bound to a timeline version |
-| Creative capabilities | creative_capabilities.py, workflow_planning.py | provider-neutral intent/capability planning and workflow-state freeze |
+| Creative capabilities | creative_capabilities.py, workflow_planning.py | provider-neutral intent/capability planning and the read-only workflow-state aggregation; workflow/participation freeze is a domain action for Director/Workbench, not an HTTP surface |
 | Events | events.py | SSE subscription with Last-Event-ID resume |
 | Worker tick | worker.py | worker-only HTTP tick for local/dev when Arq runs separately |
+
+## Single authoritative write entry
+
+Each product concept has exactly one write entry point. These writers were
+retired as duplicate surfaces; the underlying domain logic stays where an
+internal caller still needs it:
+
+| Retired surface | Kept as the sole authority |
+|---|---|
+| `POST …/experiments/{experiment_id}/adopt` | the `ExperimentBranch` `decision` endpoint |
+| `PATCH …/scenes/{scene_id}/shots/{shot_id}/director-board` | `DirectorBoardState` `GET`/`PUT` |
+| `POST …/shots/{shot_id}/workflow-template`, `POST …/shots/{shot_id}/participation-plan` | the workflow/participation domain used by Director and Workbench |
+| `POST /model-profiles/validate` | `validate_bindings`, enforced on the profile save path |
 
 ## Deliberately absent
 

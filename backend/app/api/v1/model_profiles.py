@@ -36,9 +36,6 @@ from app.providers.model_profiles.schemas import (
     ProfileRead,
     ProfileSummaryRead,
     ProfileUpdate,
-    ProfileValidateRequest,
-    ProfileValidateResponse,
-    ProfileValidationIssue,
     SimpleModeApply,
 )
 from app.providers.model_profiles.service import ProductionModelProfileService
@@ -346,32 +343,6 @@ async def put_project_profile(
     )
     await session.commit()
     return await service.profile_read(profile)
-
-
-@router.post(
-    "/model-profiles/validate",
-    response_model=ProfileValidateResponse,
-    dependencies=[Depends(require_selected_workspace)],
-)
-async def validate_profile(
-    body: ProfileValidateRequest,
-    session: SessionDep,
-    _: CsrfDep,
-) -> ProfileValidateResponse:
-    service = ProductionModelProfileService(session)
-    report = service.validate_bindings(_to_domain_bindings(body.bindings))
-    return ProfileValidateResponse(
-        valid=report.valid,
-        issues=[
-            ProfileValidationIssue(
-                code=issue.code,
-                slot=issue.slot,
-                model_id=issue.model_id,
-                message=issue.message,
-            )
-            for issue in report.issues
-        ],
-    )
 
 
 @router.get(

@@ -919,27 +919,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/director-board": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update Director Board P8
-         * @description Phase 8: write 2D blocking to Scene.design_state.blocking_2d and
-         *     Shot.director_state (03 §72).
-         */
-        patch: operations["update_director_board_p8_api_v1_projects__project_id__scenes__scene_id__shots__shot_id__director_board_patch"];
-        trace?: never;
-    };
     "/api/v1/projects/{project_id}/edit-sessions": {
         parameters: {
             query?: never;
@@ -2082,23 +2061,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-profiles/validate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Validate Profile */
-        post: operations["validate_profile_api_v1_model_profiles_validate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/projects/{project_id}/model-bindings/effective": {
         parameters: {
             query?: never;
@@ -2226,26 +2188,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{project_id}/experiments/{experiment_id}/adopt": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Adopt Experiment
-         * @description Adopt selected experiment results onto the formal line (03 §50).
-         */
-        post: operations["adopt_experiment_api_v1_projects__project_id__experiments__experiment_id__adopt_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/projects/{project_id}/final-film/prepare": {
         parameters: {
             query?: never;
@@ -2332,57 +2274,6 @@ export interface paths {
         get: operations["get_shot_workflow_state_api_v1_projects__project_id__shots__shot_id__workflow_state_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/shots/{shot_id}/workflow-template": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Freeze Workflow Template
-         * @description Freeze an explicitly requested workflow template onto the shot.
-         *
-         *     The request must resolve to a registered, eligible template for the shot's
-         *     current visible character count; anything else raises UNAVAILABLE and
-         *     nothing is frozen (fail closed).
-         */
-        post: operations["freeze_workflow_template_api_v1_projects__project_id__shots__shot_id__workflow_template_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/shots/{shot_id}/participation-plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Freeze Participation Plan
-         * @description Freeze the multi-character participation plan onto ``Shot.director_state``.
-         *
-         *     Validates cross-project bindings through the existing WF5 service.  The
-         *     multi-subject capability assessment against the workspace keyframe model is
-         *     recomputed here for planning visibility only: freezing itself is not gated
-         *     (planning may proceed while UNSUPPORTED), but the assessment result is part
-         *     of the response and every paid dispatch path independently fails closed
-         *     before any Provider POST.
-         */
-        post: operations["freeze_participation_plan_api_v1_projects__project_id__shots__shot_id__participation_plan_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4132,26 +4023,6 @@ export interface components {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
         };
-        /** ExperimentAdoptBody */
-        ExperimentAdoptBody: {
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "current_result_only" | "keyframe_only" | "keyframe_and_rerun_video" | "design_only" | "full_shot";
-        };
-        /** ExperimentAdoptRead */
-        ExperimentAdoptRead: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Status */
-            status: string;
-            /** Adopted Scope */
-            adopted_scope: string;
-        };
         /** ExperimentCreateBody */
         ExperimentCreateBody: {
             /** Idempotency Key */
@@ -4544,23 +4415,6 @@ export interface components {
             accepted_proposal?: {
                 [key: string]: unknown;
             };
-        };
-        /** FreezeParticipationBody */
-        FreezeParticipationBody: {
-            /** Expected Version */
-            expected_version: number;
-            /** Participations */
-            participations: components["schemas"]["ParticipationItemBody"][];
-        };
-        /**
-         * FreezeWorkflowBody
-         * @description Freeze an explicitly chosen template identity (never auto-picked).
-         */
-        FreezeWorkflowBody: {
-            /** Expected Version */
-            expected_version: number;
-            /** Template Key */
-            template_key: string;
         };
         /** GeneratedStoryProposalRead */
         GeneratedStoryProposalRead: {
@@ -4976,47 +4830,6 @@ export interface components {
             /** Clips */
             clips: components["schemas"]["OpenCutClip"][];
         };
-        /** P8BoardElementWrite */
-        P8BoardElementWrite: {
-            /** Kind */
-            kind: string;
-            /** Name */
-            name: string;
-            /** X */
-            x: number;
-            /** Y */
-            y: number;
-            /** Orientation */
-            orientation?: number | null;
-        };
-        /** P8DirectorBoardRead */
-        P8DirectorBoardRead: {
-            /** Blocking 2D */
-            blocking_2d?: {
-                [key: string]: unknown;
-            }[];
-            /** Composition Bounds */
-            composition_bounds?: {
-                [key: string]: number;
-            };
-            /** Director State */
-            director_state?: {
-                [key: string]: unknown;
-            };
-        };
-        /** P8DirectorBoardWrite */
-        P8DirectorBoardWrite: {
-            /** Blocking 2D */
-            blocking_2d?: components["schemas"]["P8BoardElementWrite"][];
-            /** Composition Bounds */
-            composition_bounds?: {
-                [key: string]: number;
-            };
-            /** Director State */
-            director_state?: {
-                [key: string]: unknown;
-            };
-        };
         /** PartialApplyInput */
         PartialApplyInput: {
             /** Decisions */
@@ -5032,58 +4845,6 @@ export interface components {
             failed?: {
                 [key: string]: unknown;
             }[];
-        };
-        /** ParticipationItemBody */
-        ParticipationItemBody: {
-            /**
-             * Asset Id
-             * Format: uuid
-             */
-            asset_id: string;
-            /** Asset Version Id */
-            asset_version_id?: string | null;
-            /**
-             * Screen Role
-             * @default secondary
-             */
-            screen_role: string;
-            /**
-             * Importance
-             * @default 50
-             */
-            importance: number;
-            /** Wardrobe Asset Version Id */
-            wardrobe_asset_version_id?: string | null;
-            /**
-             * Position
-             * @default
-             */
-            position: string;
-            /**
-             * Pose
-             * @default
-             */
-            pose: string;
-            /**
-             * Gaze Target
-             * @default
-             */
-            gaze_target: string;
-            /**
-             * Action
-             * @default
-             */
-            action: string;
-            /**
-             * Expression
-             * @default
-             */
-            expression: string;
-            /**
-             * Dialogue Role
-             * @default none
-             */
-            dialogue_role: string;
         };
         /**
          * PendingSuggestion
@@ -5293,31 +5054,6 @@ export interface components {
             is_default?: boolean | null;
             /** Expected Version */
             expected_version?: number | null;
-        };
-        /** ProfileValidateRequest */
-        ProfileValidateRequest: {
-            /** Bindings */
-            bindings?: {
-                [key: string]: components["schemas"]["BindingInput"];
-            };
-        };
-        /** ProfileValidateResponse */
-        ProfileValidateResponse: {
-            /** Valid */
-            valid: boolean;
-            /** Issues */
-            issues?: components["schemas"]["ProfileValidationIssue"][];
-        };
-        /** ProfileValidationIssue */
-        ProfileValidationIssue: {
-            /** Code */
-            code: string;
-            /** Slot */
-            slot: string;
-            /** Model Id */
-            model_id: string;
-            /** Message */
-            message: string;
         };
         /** ProjectBindingRead */
         ProjectBindingRead: {
@@ -6850,13 +6586,6 @@ export interface components {
         WorkflowOverviewResponse: {
             /** Overview */
             overview: {
-                [key: string]: unknown;
-            };
-        };
-        /** WorkflowStateResponse */
-        WorkflowStateResponse: {
-            /** Workflow State */
-            workflow_state: {
                 [key: string]: unknown;
             };
         };
@@ -9413,51 +9142,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DirectorBoardRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_director_board_p8_api_v1_projects__project_id__scenes__scene_id__shots__shot_id__director_board_patch: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                scene_id: string;
-                shot_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["P8DirectorBoardWrite"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["P8DirectorBoardRead"];
                 };
             };
             /** @description Validation Error */
@@ -12561,47 +12245,6 @@ export interface operations {
             };
         };
     };
-    validate_profile_api_v1_model_profiles_validate_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProfileValidateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProfileValidateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_effective_bindings_api_v1_projects__project_id__model_bindings_effective_get: {
         parameters: {
             query?: {
@@ -12911,50 +12554,6 @@ export interface operations {
             };
         };
     };
-    adopt_experiment_api_v1_projects__project_id__experiments__experiment_id__adopt_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                experiment_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ExperimentAdoptBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExperimentAdoptRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     prepare_final_film_api_v1_projects__project_id__final_film_prepare_post: {
         parameters: {
             query?: {
@@ -13145,94 +12744,6 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    freeze_workflow_template_api_v1_projects__project_id__shots__shot_id__workflow_template_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                shot_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FreezeWorkflowBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    freeze_participation_plan_api_v1_projects__project_id__shots__shot_id__participation_plan_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                shot_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FreezeParticipationBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStateResponse"];
                 };
             };
             /** @description Validation Error */
