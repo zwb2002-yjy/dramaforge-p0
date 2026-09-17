@@ -110,3 +110,11 @@ tag data before enforcing the canonical constraints.
 - Migration 0051 is the only owner of the hard-removal operation.
 - Director engine identity is all-or-nothing per turn
   (`ck_director_turn_engine_binding`) and `runtime_execution_id` is unique.
+
+## 历史实验记录
+
+当前实验唯一事实是 ExperimentBranch，HTTP 与 Director 共享创建服务。
+production_experiments / shot_experiments 的 ORM、迁移与历史 RLS 测试保留，
+以便既有持久数据仍可管理；没有当前运行时读取/写入或独立采用服务。
+不以本次收口为由删除历史表或伪造迁移后的候选结果。Golden fixture 使用当前
+ExperimentBranch，不再为旧轨制造新样本。

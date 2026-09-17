@@ -430,29 +430,6 @@ export function getEffectiveBindings(projectId: string): Promise<EffectiveBindin
 export type ProjectRead = components["schemas"]["ProjectRead"];
 export type ProjectCreativeProfileRead = components["schemas"]["ProjectCreativeProfileRead"];
 export type CreativeAutonomy = "AUTO" | "ASSIST" | "MANUAL";
-export type WorkspaceCredentialRead = components["schemas"]["WorkspaceCredentialRead"];
-
-export async function putWorkspaceCredential(
-  workspaceId: string,
-  provider: "text" | "agnes",
-  apiKey: string,
-): Promise<WorkspaceCredentialRead> {
-  const csrf = await fetchCsrf();
-  return apiSend(
-    "PUT",
-    `/api/v1/workspaces/${workspaceId}/provider-credentials`,
-    { provider, api_key: apiKey },
-    csrf,
-  );
-}
-
-export function getWorkspaceCredentialStatus(
-  workspaceId: string,
-  provider: "text" | "agnes",
-): Promise<WorkspaceCredentialRead> {
-  return apiGet(`/api/v1/workspaces/${workspaceId}/provider-credentials/${provider}`, workspaceId);
-}
-
 export async function fetchCsrf(): Promise<string> {
   const r = await apiGet<CsrfResponse>("/api/v1/auth/csrf");
   return r.csrf_token;

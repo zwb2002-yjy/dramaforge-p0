@@ -19,7 +19,7 @@ from app.assets.models import Episode, Scene, Shot
 from app.delivery.models import ReviewAnnotation
 from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.execution.models import Artifact
-from app.production.models import ShotExperiment, ShotReferenceBinding
+from app.production.models import ExperimentBranch, ShotReferenceBinding
 from app.providers.model_profiles.service import ProductionModelProfileService
 
 
@@ -117,9 +117,9 @@ class AssistantContextBuilder:
             rows = (
                 (
                     await self._session.execute(
-                        select(ShotExperiment).where(
-                            ShotExperiment.project_id == project.id,
-                            ShotExperiment.shot_id == scope_entity_id,
+                        select(ExperimentBranch).where(
+                            ExperimentBranch.project_id == project.id,
+                            ExperimentBranch.source_shot_id == scope_entity_id,
                         )
                     )
                 )
@@ -128,9 +128,11 @@ class AssistantContextBuilder:
             )
             ctx.experiments = [
                 {
-                    "shot_experiment_id": str(row.id),
+                    "experiment_id": str(row.id),
+                    "name": row.name,
                     "status": row.status,
-                    "model_overrides": row.model_overrides,
+                    "selected_model": row.selected_model,
+                    "parameters": row.parameters,
                 }
                 for row in rows
             ]

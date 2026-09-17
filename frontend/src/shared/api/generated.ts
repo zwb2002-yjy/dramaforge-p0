@@ -1600,40 +1600,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace_id}/provider-credentials": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Put Workspace Provider Credential */
-        put: operations["put_workspace_provider_credential_api_v1_workspaces__workspace_id__provider_credentials_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace_id}/provider-credentials/{provider}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Workspace Provider Credential Status */
-        get: operations["get_workspace_provider_credential_status_api_v1_workspaces__workspace_id__provider_credentials__provider__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/provider-plugins": {
         parameters: {
             query?: never;
@@ -4066,43 +4032,6 @@ export interface components {
             };
             /** Selected Model */
             selected_model?: string | null;
-        };
-        /**
-         * ExperimentCreateInput
-         * @description Inputs for creating a Phase 5 experiment (03 §47).
-         */
-        ExperimentCreateInput: {
-            /** Name */
-            name: string;
-            /** Shot Ids */
-            shot_ids?: string[];
-            /** Scene Id */
-            scene_id?: string | null;
-            /**
-             * Experiment Type
-             * @default model_swap
-             */
-            experiment_type: string;
-            /** Model Overrides */
-            model_overrides?: {
-                [key: string]: string;
-            };
-            /** Idempotency Key */
-            idempotency_key: string;
-        };
-        /** ExperimentCreateRead */
-        ExperimentCreateRead: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Name */
-            name: string;
-            /** Experiment Type */
-            experiment_type: string;
-            /** Status */
-            status: string;
         };
         /** ExperimentDecisionBody */
         ExperimentDecisionBody: {
@@ -6681,25 +6610,6 @@ export interface components {
         WorkspaceCreate: {
             /** Name */
             name: string;
-        };
-        /** WorkspaceCredentialRead */
-        WorkspaceCredentialRead: {
-            /** Provider */
-            provider: string;
-            /** Configured */
-            configured: boolean;
-            /** Key Version */
-            key_version?: string | null;
-        };
-        /** WorkspaceCredentialWrite */
-        WorkspaceCredentialWrite: {
-            /** Provider */
-            provider: string;
-            /**
-             * Api Key
-             * Format: password
-             */
-            api_key: string;
         };
         /** WorkspaceRead */
         WorkspaceRead: {
@@ -10819,87 +10729,6 @@ export interface operations {
             };
         };
     };
-    put_workspace_provider_credential_api_v1_workspaces__workspace_id__provider_credentials_put: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                workspace_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WorkspaceCredentialWrite"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkspaceCredentialRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_workspace_provider_credential_status_api_v1_workspaces__workspace_id__provider_credentials__provider__get: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                workspace_id: string;
-                provider: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkspaceCredentialRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_provider_plugins_api_v1_provider_plugins_get: {
         parameters: {
             query?: never;
@@ -12345,7 +12174,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ExperimentCreateInput"] | components["schemas"]["ExperimentCreateBody"];
+                "application/json": components["schemas"]["ExperimentCreateBody"];
             };
         };
         responses: {
@@ -12355,7 +12184,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExperimentRead"] | components["schemas"]["ExperimentCreateRead"];
+                    "application/json": components["schemas"]["ExperimentRead"];
                 };
             };
             /** @description Validation Error */

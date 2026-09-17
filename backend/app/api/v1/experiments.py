@@ -8,19 +8,19 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 
 from app.access.models import Project
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
-from app.assets.models import Shot
 from app.execution.branches import experiment_id as run_experiment_id
 from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.production.experiment_service import (
-    ExperimentCreateInput,
-    ExperimentService,
+    ExperimentCreateBody,
+    create_experiment_branch,
+    latest_formal_artifact_ids,
 )
 from app.production.models import ExperimentBranch
 from app.providers.catalog_models import ModelCatalogEntry
@@ -39,25 +39,6 @@ _DOWNSTREAM_AFTER_KEYFRAME = [
     "composite",
     "continuity_review",
 ]
-
-
-class ExperimentCreateBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    idempotency_key: str = Field(min_length=1, max_length=160)
-    name: str = Field(min_length=1, max_length=160)
-    branch_type: str = Field(default="model_experiment", max_length=32)
-    source_shot_id: UUID | None = None
-    source_artifact_ids: list[str] = Field(default_factory=list)
-    parameters: dict[str, object] = Field(default_factory=dict)
-    selected_model: str | None = None
-
-
-class ExperimentCreateRead(BaseModel):
-    id: UUID
-    name: str
-    experiment_type: str
-    status: str
 
 
 class ExperimentRead(BaseModel):
@@ -89,11 +70,14 @@ class ExperimentStartRead(BaseModel):
 
 class ExperimentDecisionBody(BaseModel):
     decision: Literal["accepted", "rejected", "kept"]
-    adoption_scope: Literal[
-        "current_node",
-        "keyframe_keep_video",
-        "keyframe_rerun_downstream",
-    ] | None = None
+    adoption_scope: (
+        Literal[
+            "current_node",
+            "keyframe_keep_video",
+            "keyframe_rerun_downstream",
+        ]
+        | None
+    ) = None
     candidate_artifact_id: UUID | None = None
     adopted_shot_ids: list[UUID] = Field(default_factory=list)
 
@@ -177,11 +161,7 @@ async def _candidate_state(
         if run_ids
         else []
     )
-    runs = [
-        run
-        for run in runs
-        if run_experiment_id(run.input_snapshot) == str(row.id)
-    ]
+    runs = [run for run in runs if run_experiment_id(run.input_snapshot) == str(row.id)]
     runs.sort(key=lambda item: (item.attempt_no, item.created_at, str(item.id)))
     candidate_ids = [
         str(run.result_artifact_id)
@@ -190,9 +170,7 @@ async def _candidate_state(
     ]
     candidate_ids = list(dict.fromkeys(candidate_ids))
     formal = [
-        await _artifact_summary(session, UUID(value))
-        for value in row.source_artifact_ids
-        if value
+        await _artifact_summary(session, UUID(value)) for value in row.source_artifact_ids if value
     ]
     candidates = [await _artifact_summary(session, UUID(value)) for value in candidate_ids]
     run_states = [
@@ -217,43 +195,6 @@ async def _candidate_state(
         and all(run.status in {*_DONE, "failed", "cancelled"} for run in runs),
     }
     return candidate_ids, comparison, runs
-
-
-async def _latest_formal_artifact_ids(
-    session: SessionDep,
-    *,
-    project_id: UUID,
-    shot_id: UUID,
-    node_key: str,
-) -> list[str]:
-    rows = list(
-        (
-            await session.execute(
-                select(NodeRun, GraphNode)
-                .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
-                .where(
-                    NodeRun.project_id == project_id,
-                    GraphNode.node_key == node_key,
-                    NodeRun.status.in_(_DONE),
-                    NodeRun.result_artifact_id.is_not(None),
-                )
-            )
-        )
-        .tuples()
-        .all()
-    )
-    matching = [
-        run
-        for run, _node in rows
-        if str((run.input_snapshot or {}).get("shot_id") or "") == str(shot_id)
-        and run_experiment_id(run.input_snapshot) is None
-    ]
-    latest = max(
-        matching,
-        key=lambda item: (item.attempt_no, item.created_at, str(item.id)),
-        default=None,
-    )
-    return [str(latest.result_artifact_id)] if latest and latest.result_artifact_id else []
 
 
 async def _resolve_model_binding(
@@ -374,16 +315,19 @@ async def _promote_candidate(
     )
     if existing is not None:
         return existing
-    attempt = int(
-        await session.scalar(
-            select(func.coalesce(func.max(NodeRun.attempt_no), 0)).where(
-                NodeRun.project_id == row.project_id,
-                NodeRun.graph_version_id == candidate_run.graph_version_id,
-                NodeRun.graph_node_id == candidate_run.graph_node_id,
+    attempt = (
+        int(
+            await session.scalar(
+                select(func.coalesce(func.max(NodeRun.attempt_no), 0)).where(
+                    NodeRun.project_id == row.project_id,
+                    NodeRun.graph_version_id == candidate_run.graph_version_id,
+                    NodeRun.graph_node_id == candidate_run.graph_node_id,
+                )
             )
+            or 0
         )
-        or 0
-    ) + 1
+        + 1
+    )
     snapshot = {
         **dict(candidate_run.input_snapshot or {}),
         "execution_branch": "formal",
@@ -440,82 +384,31 @@ async def list_experiments(
     result: list[ExperimentRead] = []
     for row in rows:
         candidate_ids, comparison, _runs = await _candidate_state(session, row)
-        result.append(
-            _read(row, candidate_artifact_ids=candidate_ids, comparison=comparison)
-        )
+        result.append(_read(row, candidate_artifact_ids=candidate_ids, comparison=comparison))
     return result
 
 
 @router.post(
     "/projects/{project_id}/experiments",
-    response_model=ExperimentRead | ExperimentCreateRead,
+    response_model=ExperimentRead,
     status_code=201,
 )
 async def create_experiment(
     project_id: UUID,
-    body: ExperimentCreateInput | ExperimentCreateBody,
+    body: ExperimentCreateBody,
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
-) -> ExperimentRead | ExperimentCreateRead:
-    if isinstance(body, ExperimentCreateInput):
-        project = await ProjectService(session).get_project_for_owner(
-            project_id=project_id, actor=user
-        )
-        experiment = await ExperimentService(session).create_experiment(
-            project=project,
-            actor=user,
-            experiment_input=body,
-        )
-        await session.commit()
-        return ExperimentCreateRead(
-            id=experiment.id,
-            name=experiment.name,
-            experiment_type=experiment.experiment_type,
-            status=experiment.status,
-        )
-
+) -> ExperimentRead:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    existing = (
-        await session.execute(
-            select(ExperimentBranch).where(
-                ExperimentBranch.project_id == project_id,
-                ExperimentBranch.idempotency_key == body.idempotency_key,
-            )
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        candidate_ids, comparison, _runs = await _candidate_state(session, existing)
-        return _read(existing, candidate_artifact_ids=candidate_ids, comparison=comparison)
-    if body.source_shot_id is not None:
-        shot = await session.get(Shot, body.source_shot_id)
-        if shot is None or shot.project_id != project_id:
-            raise NotFoundError("source shot not found")
-    target_node_key = str(body.parameters.get("target_node_key") or "video")
-    if target_node_key not in _TARGET_PURPOSE:
-        raise ValidationAppError("experiment target must be keyframe or video")
-    source_artifact_ids = list(body.source_artifact_ids)
-    if not source_artifact_ids and body.source_shot_id is not None:
-        source_artifact_ids = await _latest_formal_artifact_ids(
-            session,
-            project_id=project_id,
-            shot_id=body.source_shot_id,
-            node_key=target_node_key,
-        )
-    row = ExperimentBranch(
-        project_id=project_id,
-        source_shot_id=body.source_shot_id,
-        created_by=user.id,
-        idempotency_key=body.idempotency_key,
-        name=body.name,
-        branch_type=body.branch_type,
-        source_artifact_ids=source_artifact_ids,
-        parameters={**dict(body.parameters), "target_node_key": target_node_key},
-        selected_model=body.selected_model,
+    row = await create_experiment_branch(
+        session, project_id=project_id, actor_id=user.id, body=body
     )
-    session.add(row)
     await session.commit()
-    return _read(row)
+    if row.status == "draft":
+        return _read(row)
+    candidate_ids, comparison, _runs = await _candidate_state(session, row)
+    return _read(row, candidate_artifact_ids=candidate_ids, comparison=comparison)
 
 
 @router.post(
@@ -530,9 +423,7 @@ async def start_experiment(
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> ExperimentStartRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     row = await _experiment_or_404(
         session,
         project_id=project_id,
@@ -564,7 +455,7 @@ async def start_experiment(
         target_node_key=body.target_node_key,
     )
     if not row.source_artifact_ids:
-        row.source_artifact_ids = await _latest_formal_artifact_ids(
+        row.source_artifact_ids = await latest_formal_artifact_ids(
             session,
             project_id=project_id,
             shot_id=row.source_shot_id,

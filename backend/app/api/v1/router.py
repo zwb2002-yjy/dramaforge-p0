@@ -6,7 +6,6 @@ from app.api.v1 import (
     assets,
     auth,
     creative_capabilities,
-    credentials,
     director,
     director_board,
     editing,
@@ -45,7 +44,6 @@ api_router.include_router(review.router)
 api_router.include_router(scenes.router)
 api_router.include_router(scripts.router)
 api_router.include_router(story.router)
-api_router.include_router(credentials.router)
 api_router.include_router(provider_connections.router)
 api_router.include_router(provider_references.router)
 api_router.include_router(references.router)

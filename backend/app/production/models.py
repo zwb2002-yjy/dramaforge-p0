@@ -289,10 +289,9 @@ class ShotReferenceBinding(Base):
 
 
 class ProductionExperiment(Base):
-    """Phase 5 project-level A/B experiment grouping shot experiments (03 §45).
+    """Historical experiment grouping, retained for persisted data only.
 
-    Formal results are never overwritten by an experiment; adoption (P5-06)
-    explicitly copies selected results onto the formal line.
+    Runtime creation and adoption use ExperimentBranch exclusively.
     """
 
     __tablename__ = "production_experiments"
@@ -328,12 +327,9 @@ class ProductionExperiment(Base):
 
 
 class ShotExperiment(Base):
-    """One shot's A/B experiment inside a :class:`ProductionExperiment` (03 §45).
+    """Historical shot snapshot retained for persisted data only.
 
-    Snapshots the source shot's execution inputs (version, director state,
-    prompts, references, common controls) and carries per-experiment model
-    overrides plus candidate result artifacts. Nothing here mutates the formal
-    shot graph.
+    Not a current creation, context, execution or adoption authority.
     """
 
     __tablename__ = "shot_experiments"

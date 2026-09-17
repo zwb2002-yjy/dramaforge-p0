@@ -18,7 +18,7 @@ Migration head: 20260916_0070
 - User-facing access is the frontend gateway at port 8080; the API process is
   an internal Compose service on port 8000.
 - No compatibility endpoint is kept for retired product concepts.
-- `backend/app/api/v1/router.py` registers 27 routers and exposes `/status`.
+- `backend/app/api/v1/router.py` registers 26 routers and exposes `/status`.
 
 ## Route ownership
 
@@ -36,7 +36,7 @@ Migration head: 20260916_0070
 | Director board | director_board.py | per-shot 2D and rough-3D director board state — the only authoritative director-board writer |
 | Review | review.py | evidence annotations and annotation decisions, plus the human review decision (`review-summary`, `review-decisions`) that admits an exact Artifact |
 | Production monitor | production.py | Artifact bytes/frames, project snapshot, Outbox/Arq enqueue |
-| Providers | provider_connections.py, provider_references.py, credentials.py, generations.py, model_profiles.py, model_candidates.py | read-only model catalog/capabilities/manifest, connection/credential revisions, capability probe, reference delivery, model profiles (binding validation is an invariant of the save path, not a separate endpoint) and read-only candidates; media generation has no second write surface |
+| Providers | provider_connections.py, provider_references.py, generations.py, model_profiles.py, model_candidates.py | read-only model catalog/capabilities/manifest, connection/credential revisions, capability probe, reference delivery, model profiles (binding validation is an invariant of the save path, not a separate endpoint) and read-only candidates; media generation has no second write surface |
 | Experiments | experiments.py | isolated Shot experiment branches; adoption is the ExperimentBranch decision, never a second adopt endpoint |
 | Editing | editing.py, opencut.py, final_film.py | EditSession timeline, suggestion, export, OpenCut manifest, Final Film bound to a timeline version |
 | Creative capabilities | creative_capabilities.py, workflow_planning.py | provider-neutral intent/capability planning and the read-only workflow-state aggregation; workflow/participation freeze is a domain action for Director/Workbench, not an HTTP surface |
@@ -52,6 +52,8 @@ internal caller still needs it:
 
 | Retired surface | Kept as the sole authority |
 |---|---|
+| `PUT/GET …/provider-credentials` | instance-level LiteLLM configuration for text; immutable ProviderConnection credential revisions for media |
+| legacy `shot_ids` experiment creation DTO | `ExperimentCreateBody` -> shared ExperimentBranch draft service (also used by Director); no old creation response union |
 | `POST …/experiments/{experiment_id}/adopt` | the `ExperimentBranch` `decision` endpoint |
 | `PATCH …/scenes/{scene_id}/shots/{shot_id}/director-board` | `DirectorBoardState` `GET`/`PUT` |
 | `POST …/shots/{shot_id}/workflow-template`, `POST …/shots/{shot_id}/participation-plan` | the workflow/participation domain used by Director and Workbench |

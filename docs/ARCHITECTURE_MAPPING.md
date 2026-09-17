@@ -455,7 +455,7 @@ provider  → execution.models（数据模型）允许
 | `production/formal_selection.py` | Candidate / Formal | production | KEEP | NONE |
 | `production/repair_service.py` | Repair 显式计划 | production | KEEP | **问题 2 (V-2)** |
 | `production/golden_project.py` | Golden project 种子/fixture | production | **MOVE**（移至测试或工具位置） | **问题 2 (V-3)** |
-| `production/experiment_service.py`、`models.py::ExperimentBranch` 等 | Experiment 隔离分支 | production | KEEP | NONE |
+| `production/experiment_service.py`、`models.py::ExperimentBranch` | HTTP / Director 共用的 Experiment 隔离分支创建；旧 ORM 仅历史存储 | production | KEEP | NONE（旧创建/采用服务已退役） |
 | `production/final_film.py`、`timeline_renderer.py`、`timeline_subtitles.py` | Final Film（MP4 + SRT） | production + domain/editing | KEEP | NONE |
 | `production/reference_intents.py` | `ShotReferenceIntent`（被 contract 反向引用） | **contract** | **MOVE** | **问题 2 (V-1)** |
 | `production/templates.py` | `dialogue-post-dub-shot-v1` 图定义 | production | **MERGE**（合并进统一模板模块） | 问题 5 |

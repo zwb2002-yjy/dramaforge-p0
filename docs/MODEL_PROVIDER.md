@@ -26,6 +26,16 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
 退役判定与替代关系记录在 `scripts/provider_authority_map.json`，
 `scripts/check_provider_authority.py` 在门禁中确认它们保持缺席、替代实现始终存在。
 
+## 文本凭证边界
+
+文本通道采用**实例级 LiteLLM 网关配置**：DramaForge 仅以
+LITELLM_GATEWAY_URL / LITELLM_API_KEY 连接网关；上游供应商
+Key 与模型路由由 LiteLLM 部署管理。设置页仅说明配置位置，不宣称网关就绪。
+工作空间 provider-name 文本 Key 表单、通用 provider-credentials API 和旧
+Settings 覆盖 resolver 已退役；历史加密记录保留，不读取、不迁成网关 Key。
+旧 TEXT_LLM_* 配置不是文本执行入口。媒体 BYOK 仍使用 ProviderConnection
+及其不可变 credential revision，不受文本表面退役影响。
+
 ## 不可绕过的规则
 
 1. **无静默回退**：选择 X 不静默运行 Y；unsupported input fail-closed 且不

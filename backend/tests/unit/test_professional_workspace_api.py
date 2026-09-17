@@ -115,8 +115,8 @@ def test_experiment_annotation_and_opencut_manifest(client: TestClient) -> None:
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
-    assert canonical_experiment.status_code == 201, canonical_experiment.text
-    assert canonical_experiment.json()["experiment_type"] == "model_swap"
+    # Legacy DTO must not create an invisible second experiment track.
+    assert canonical_experiment.status_code == 422, canonical_experiment.text
 
     experiment = client.post(
         f"/api/v1/projects/{project_id}/experiments",

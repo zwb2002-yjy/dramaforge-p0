@@ -97,3 +97,17 @@ Schema 修复上限、总时限、无进展阈值、每次唤醒最多提交 1 �
 - 唤醒重放由 `wakeup_replay.py` 与 worker 启动恢复承担。
 - Assistant 边界：Shot 建议为非持久响应；editing 建议持久化
   DirectorProposal/DirectorProposalItem 并只能经 typed command registry 应用。
+
+## 实验提案与唯一分支
+
+Director 的 experiment.create / shot.set_model_override 在用户 Apply
+后调用与 HTTP 相同的 ExperimentBranch 创建服务，只创建 draft，不排队执行、
+不改写 Shot 的 Formal 或模型绑定。每条命令明确一个 source_shot_id；旧单 Shot
+payload 可规范化，含糊的多 Shot / 多模型覆盖拒绝，不静默选择一个。
+Director 幂等键由持久 proposal-item 身份提供，不信任模型自选键；同一项重试复用
+分支，不同项即使内容相同也可新建。HTTP 仍要求显式 idempotency_key。
+相同键不同创建输入冲突，已开始/已决定的分支重放不重置状态。
+Assistant context 只读取当前 Shot 的 ExperimentBranch，返回 experiment_id、
+selected_model 与参数；后续 start / decision 仍通过现有显式用户 Gate。
+ProductionExperiment / ShotExperiment 只保留历史存储，不再创建、采用或作为
+Assistant 当前事实；旧 Phase 5 服务测试由当前分支回归测试替代。

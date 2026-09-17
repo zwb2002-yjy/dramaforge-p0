@@ -41,10 +41,21 @@ FORBIDDEN_TEXT = (
     "manual_" + "media",
     "/projects/" + "{project_id}/generations",
     "/generations/" + "{operation_id}/cancel",
+    "provider-" + "credentials",
+    "settings_for_workspace_" + "provider",
+    "Experiment" + "Service",
+    "ExperimentCreate" + "Input",
 )
 FORBIDDEN_FILES = (
     ROOT / "backend" / "app" / "creation",
     ROOT / "backend" / "app" / "api" / "v1" / "characters.py",
+    ROOT / "backend" / "app" / "api" / "v1" / "credentials.py",
+    ROOT
+    / "frontend"
+    / "src"
+    / "components"
+    / "provider"
+    / "WorkspaceTextCredentialSettings.tsx",
     ROOT / "backend" / "app" / "api" / "v1" / "shot_ops.py",
     ROOT / "backend" / "app" / "director" / "legacy_guard.py",
     ROOT / "backend" / "app" / "director" / "execution_guard.py",
@@ -89,12 +100,26 @@ def main() -> int:
         if path.resolve() == Path(__file__).resolve():
             continue
         source = path.read_text(encoding="utf-8", errors="replace")
+        # Old ORM definitions remain for data retention, never runtime consumers.
+        if path.is_relative_to(ROOT / "backend" / "app") and path != (
+            ROOT / "backend" / "app" / "production" / "models.py"
+        ):
+            for legacy_model in ("Production" + "Experiment", "Shot" + "Experiment"):
+                if legacy_model in source:
+                    failures.append(
+                        f"{path.relative_to(ROOT)} consumes archival model {legacy_model}"
+                    )
         for token in FORBIDDEN_TEXT:
             if token in source:
-                failures.append(f"{path.relative_to(ROOT)} contains retired token {token!r}")
+                failures.append(
+                    f"{path.relative_to(ROOT)} contains retired token {token!r}"
+                )
     if failures:
         print("Canonical surface check FAILED:", file=sys.stderr)
-        print("\n".join(f"  - {failure}" for failure in sorted(set(failures))), file=sys.stderr)
+        print(
+            "\n".join(f"  - {failure}" for failure in sorted(set(failures))),
+            file=sys.stderr,
+        )
         return 1
     print("Canonical surface check passed.")
     return 0

@@ -34,7 +34,7 @@ Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
 | **AssetVersionReference** | Shot/Production 对某个 AssetVersion 的显式身份引用——**唯一身份引用源**，不存在 Character/CharacterReference 兼容层 | `assets/models.py::AssetVersionReference` |
 | **Candidate** | 生产出来但未被用户选定的结果。**没有 Candidate 表**：候选直接从 NodeRun + Artifact 派生 | `production/formal_selection.py::list_formal_candidates` |
 | **Formal** | 用户显式确认后的正式结果。Keyframe 与 Video 各记录一个正式 Artifact 引用 | `production/formal_selection.py::set_formal_keyframe` / `set_formal_video` / `require_formal_keyframe`；列为 `Shot.formal_keyframe_artifact_id`、`Shot.formal_video_artifact_id` |
-| **Experiment** | 隔离的 Shot 实验分支与采纳；**复用同一图引擎，不是第二条生产链** | `production/models.py::ExperimentBranch`、`production/models.py::ProductionExperiment`、`production/models.py::ShotExperiment`、`production/experiment_service.py` |
+| **Experiment** | 隔离的 Shot 实验分支与采纳；**复用同一图引擎，不是第二条生产链** | `production/models.py::ExperimentBranch`、`production/experiment_service.py` |
 | **Review** | 对生产结果的标注与决策；只读生产事实、只写评审事实 | `delivery/models.py::ReviewAnnotation`、`production/service.py` |
 | **Repair** | 有证据的显式修复计划，绝不静默重跑 | `production/repair_service.py` |
 | **EditSession** | 剪辑会话及其 timeline 版本（成片领域） | `editing/models.py::EditSession`、`editing/timeline_builder.py` |
@@ -162,6 +162,6 @@ explicit user value > accepted proposal > project override > pack default
 
 | 词 | 现状 | 处置 |
 |---|---|---|
-| `Experiment`（`ExperimentBranch` / `ProductionExperiment` / `ShotExperiment`） | 三个类名并存，语义分层合理但命名易混 | KEEP，但必须在文档中固定为"Experiment = 隔离的 Shot 分支" |
+| `Experiment`（`ExperimentBranch`） | 唯一当前实验分支；`ProductionExperiment` / `ShotExperiment` 为历史持久记录 | 旧 ORM 留存数据，不再拥有运行时创建、上下文或采用入口 |
 | `Node` 与 `GraphNode` | `Node` 是概念，`GraphNode` 是持久化实例 | KEEP，成对使用 |
 | `Workflow` | 仅存在于 `director/workflows/`，指"镜头生产模板目录" | RENAME/MERGE，见映射文档 |

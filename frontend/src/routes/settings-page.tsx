@@ -5,7 +5,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
 import { WorkspaceModelProfileSettings } from "../components/provider/WorkspaceModelProfileSettings";
-import { WorkspaceTextCredentialSettings } from "../components/provider/WorkspaceTextCredentialSettings";
+import { TextGatewaySettings } from "../components/provider/TextGatewaySettings";
 import { AdvancedRecoveryPanel } from "../features/maintenance/AdvancedRecoveryPanel";
 import { CreativeAutonomySwitcher } from "../features/project/CreativeAutonomySwitcher";
 import {
@@ -346,7 +346,7 @@ export function ModelConnectionSettingsPage() {
         />
       </div>
       <div className="df-settings-section">
-        <WorkspaceTextCredentialSettings workspaceId={selectedWorkspaceId} />
+        <TextGatewaySettings />
       </div>
     </main>
   );
