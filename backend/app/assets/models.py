@@ -154,6 +154,9 @@ class CanvasRevision(Base):
     __tablename__ = "canvas_revisions"
     __table_args__ = (
         UniqueConstraint("shot_id", "revision_number", name="uq_canvas_revision_number"),
+        CheckConstraint("revision_number > 0", name="ck_canvas_revision_number_positive"),
+        CheckConstraint("base_shot_version > 0", name="ck_canvas_revision_base_version_positive"),
+        CheckConstraint("duration_seconds > 0", name="ck_canvas_revision_duration_positive"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -188,6 +191,9 @@ class ShotChangeProposal(Base):
     __table_args__ = (
         UniqueConstraint(
             "project_id", "idempotency_key", name="uq_shot_change_proposal_idempotency"
+        ),
+        CheckConstraint(
+            "base_shot_version > 0", name="ck_shot_change_proposal_base_version_positive"
         ),
     )
 
@@ -273,6 +279,7 @@ class AssetVersion(Base):
     __tablename__ = "asset_versions"
     __table_args__ = (
         UniqueConstraint("asset_id", "version_number", name="uq_asset_version_number"),
+        CheckConstraint("version_number > 0", name="ck_asset_version_number_positive"),
         CheckConstraint(
             "status IN ('candidate','formal','historical','rejected')",
             name="ck_asset_versions_status",

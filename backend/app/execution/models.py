@@ -251,16 +251,16 @@ class NodeRun(Base):
             "graph_node_id", "attempt_no", name="node_runs_graph_node_id_attempt_no_key"
         ),
         CheckConstraint(
-            "(status <> 'cached') OR reused_from_run_id IS NOT NULL",
+            "(CAST(status AS TEXT) <> 'cached') OR reused_from_run_id IS NOT NULL",
             name="ck_node_runs_cached_reused",
         ),
         CheckConstraint(
-            "(status NOT IN ('completed', 'cached', 'completed_after_cancel')) "
+            "(CAST(status AS TEXT) NOT IN ('completed', 'cached', 'completed_after_cancel')) "
             "OR result_artifact_id IS NOT NULL",
             name="ck_node_runs_completed_artifact",
         ),
         CheckConstraint(
-            "(status <> 'cached') OR (provider_cost = 0 AND platform_cost = 0)",
+            "(CAST(status AS TEXT) <> 'cached') OR (provider_cost = 0 AND platform_cost = 0)",
             name="ck_node_runs_cached_zero_cost",
         ),
     )

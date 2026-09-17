@@ -108,7 +108,10 @@ class DirectorBoardState(Base):
     """Per-shot 2D/rough-3D staging state for camera and performance blocking."""
 
     __tablename__ = "director_board_states"
-    __table_args__ = (UniqueConstraint("shot_id", name="uq_director_board_shot"),)
+    __table_args__ = (
+        UniqueConstraint("shot_id", name="uq_director_board_shot"),
+        CheckConstraint("version > 0", name="ck_director_board_version_positive"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(

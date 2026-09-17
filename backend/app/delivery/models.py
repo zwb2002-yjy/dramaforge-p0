@@ -29,6 +29,37 @@ class ReviewAnnotation(Base):
     """Human review note attached to a shot artifact and optional time range."""
 
     __tablename__ = "review_annotations"
+    __table_args__ = (
+        CheckConstraint(
+            "time_start IS NULL OR time_start >= 0", name="ck_review_annotation_start_nonnegative"
+        ),
+        CheckConstraint(
+            "time_end IS NULL OR time_end >= 0", name="ck_review_annotation_end_nonnegative"
+        ),
+        CheckConstraint(
+            "time_end IS NULL OR time_start IS NULL OR time_end >= time_start",
+            name="ck_review_annotation_range",
+        ),
+        CheckConstraint(
+            "target_kind IN ('shot', 'video_time', 'image_point', 'image_region')",
+            name="ck_review_annotation_target_kind",
+        ),
+        *(
+            CheckConstraint(
+                f"{column} IS NULL OR ({column} >= 0 AND {column} <= 1)",
+                name=f"ck_review_annotation_{column}_normalized",
+            )
+            for column in ("x", "y", "width", "height")
+        ),
+        CheckConstraint(
+            "x IS NULL OR width IS NULL OR x + width <= 1",
+            name="ck_review_annotation_region_x_bounds",
+        ),
+        CheckConstraint(
+            "y IS NULL OR height IS NULL OR y + height <= 1",
+            name="ck_review_annotation_region_y_bounds",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(

@@ -33,6 +33,7 @@ class Workspace(Base):
     __tablename__ = "workspaces"
     __table_args__ = (
         UniqueConstraint("owner_user_id", "name", name="uq_workspaces_owner_name"),
+        CheckConstraint("version > 0", name="ck_workspaces_version_positive"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -51,6 +52,7 @@ class Workspace(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (CheckConstraint("version > 0", name="ck_users_version_positive"),)
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
@@ -94,6 +96,9 @@ class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="uq_projects_workspace_name"),
+        CheckConstraint("aspect_ratio IN ('9:16','16:9')", name="ck_projects_aspect"),
+        CheckConstraint("budget_limit >= 0", name="ck_projects_budget"),
+        CheckConstraint("version > 0", name="ck_projects_version"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
