@@ -1,8 +1,8 @@
 # V1_STATUS — 当前 V1 / 发布状态
 
 Status: current  
-Date: 2026-09-16  
-Branch: `dev` = `d2c7655b452714c540aaea36cf08de285e5df824`
+Date: 2026-09-17  
+Branch: `dev` = `b96a5216a4c67de50cf8b175d6a5914f7909b471`
 
 ## 当前结论
 
@@ -11,6 +11,14 @@ Branch: `dev` = `d2c7655b452714c540aaea36cf08de285e5df824`
 当前发布 PR 为 **#90：`dev -> main`**，HEAD 为 `d2c7655b`，GitHub 返回
 `mergeable=true`；`main` 基线仍为 `c12c3dfb`。Owner 仍是唯一合并人。
 
+
+### 本轮已验证的当前候选事实
+
+- 当前 `dev` 已实现精确候选审查目标：普通候选与修复步骤都绑定不可变 Artifact，错误目标失败关闭，不回退 Formal。
+- Review 摘要已返回视频证据清单：来源 Artifact / 哈希、审查 NodeRun / Artifact、采样版本、参考图哈希和逐帧可用状态；桌面证据条只读并定位播放器。
+- 当前候选质量镜像已通过 1228 单元测试、84 PostgreSQL 集成测试；前端通过 268 单元测试、45 Playwright 测试。
+- 已从当前提交启动正式 8080 拓扑并验证 gateway/API/数据库身份；在该实例初始化 Owner、创建“乌镇宣传短片”并导入 1 集 / 1 场景 / 6 镜头剧本。
+- 上述运行验证没有发起付费 Provider 生成；因此不能替代真实模型 Golden、异常恢复全矩阵和发布物安装验证。
 ## 还差什么
 
 ### 1. GitHub required checks 需要真正跑起来
