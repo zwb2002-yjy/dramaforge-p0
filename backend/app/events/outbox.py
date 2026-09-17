@@ -182,16 +182,31 @@ class OutboxDispatcher:
             event.status = OutboxStatus.DEAD_LETTER.value
             event.locked_by = None
             event.leased_until = None
-            dl = OutboxDeadLetter(
-                outbox_event_id=event.id,
-                event_id=event.event_id,
-                project_id=event.project_id,
-                topic=event.topic,
-                payload=event.payload,
-                attempt_count=event.attempt_count,
-                last_error_summary=error[:500],
+            # A replayed event that fails again updates its one dead-letter row
+            # instead of inserting a duplicate (outbox_event_id is unique). The
+            # refreshed dead_lettered_at is the new failure identity, so a page
+            # holding the old one cannot replay blind.
+            dl = await self._session.scalar(
+                select(OutboxDeadLetter)
+                .where(OutboxDeadLetter.outbox_event_id == event.id)
+                .with_for_update()
             )
-            self._session.add(dl)
+            if dl is None:
+                dl = OutboxDeadLetter(
+                    outbox_event_id=event.id,
+                    event_id=event.event_id,
+                    project_id=event.project_id,
+                    topic=event.topic,
+                    payload=event.payload,
+                    attempt_count=event.attempt_count,
+                    last_error_summary=error[:500],
+                )
+                self._session.add(dl)
+            else:
+                dl.payload = event.payload
+                dl.attempt_count = event.attempt_count
+                dl.last_error_summary = error[:500]
+                dl.dead_lettered_at = datetime.now(UTC)
             OUTBOX_DEAD_LETTER_TOTAL.inc()
             await self._session.flush()
             return dl
