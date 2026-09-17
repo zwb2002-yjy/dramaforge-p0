@@ -32,6 +32,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError(
-        "20260917_0071 is intentionally irreversible; face_review is a retired node type"
+    op.execute("ALTER TYPE node_type RENAME TO node_type_current")
+    op.execute(
+        "CREATE TYPE node_type AS ENUM ("
+        "'prompt_compose', 'keyframe', 'identity_review', 'face_review', 'video', "
+        "'video_review', 'voice', 'subtitle', 'composite', 'continuity_review', 'export')"
+    )
+    op.execute(
+        "ALTER TABLE graph_nodes ALTER COLUMN node_type TYPE node_type "
+        "USING node_type::text::node_type"
+    )
+    op.execute("DROP TYPE node_type_current")
+    op.execute(
+        "CREATE TYPE export_format AS ENUM ("
+        "'mp4', 'srt', 'asset_package', 'timeline_json', 'jianying_draft', "
+        "'davinci_fcpxml', 'edl', 'aaf')"
+    )
+    op.execute(
+        "CREATE TYPE export_status AS ENUM ("
+        "'queued', 'running', 'completed', 'failed', 'cancelled')"
     )
