@@ -36,7 +36,7 @@ Migration head: 20260916_0070
 | Director board | director_board.py | per-shot 2D and rough-3D director board state — the only authoritative director-board writer |
 | Review | review.py | evidence annotations and annotation decisions, plus the human review decision (`review-summary`, `review-decisions`) that admits an exact Artifact |
 | Production monitor | production.py | Artifact bytes/frames, project snapshot, Outbox/Arq enqueue |
-| Providers | provider_connections.py, provider_references.py, credentials.py, generations.py, model_profiles.py, model_candidates.py | model catalog, connection/credential revisions, capability probe and generation, reference delivery, model profiles (binding validation is an invariant of the save path, not a separate endpoint) and read-only candidates |
+| Providers | provider_connections.py, provider_references.py, credentials.py, generations.py, model_profiles.py, model_candidates.py | read-only model catalog/capabilities/manifest, connection/credential revisions, capability probe, reference delivery, model profiles (binding validation is an invariant of the save path, not a separate endpoint) and read-only candidates; media generation has no second write surface |
 | Experiments | experiments.py | isolated Shot experiment branches; adoption is the ExperimentBranch decision, never a second adopt endpoint |
 | Editing | editing.py, opencut.py, final_film.py | EditSession timeline, suggestion, export, OpenCut manifest, Final Film bound to a timeline version |
 | Creative capabilities | creative_capabilities.py, workflow_planning.py | provider-neutral intent/capability planning and the read-only workflow-state aggregation; workflow/participation freeze is a domain action for Director/Workbench, not an HTTP surface |
@@ -56,6 +56,7 @@ internal caller still needs it:
 | `PATCH …/scenes/{scene_id}/shots/{shot_id}/director-board` | `DirectorBoardState` `GET`/`PUT` |
 | `POST …/shots/{shot_id}/workflow-template`, `POST …/shots/{shot_id}/participation-plan` | the workflow/participation domain used by Director and Workbench |
 | `POST /model-profiles/validate` | `validate_bindings`, enforced on the profile save path |
+| `POST`/`GET`/`cancel /projects/{id}/generations` | the Workbench execution path (`execution-plan` -> `executions` -> NodeRun) is the only media generation writer; `generations.py` keeps only the read-only catalog |
 
 ## Deliberately absent
 

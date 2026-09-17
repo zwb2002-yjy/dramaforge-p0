@@ -39,6 +39,8 @@ FORBIDDEN_TEXT = (
     "trial_" + "quality_gate_exception",
     "audited_" + "manual_upload",
     "manual_" + "media",
+    "/projects/" + "{project_id}/generations",
+    "/generations/" + "{operation_id}/cancel",
 )
 FORBIDDEN_FILES = (
     ROOT / "backend" / "app" / "creation",

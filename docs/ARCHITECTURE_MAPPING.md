@@ -284,10 +284,10 @@ providers/models.py        :: ArtifactReferenceToken
 发起，服务端经 `api/v1/workbench.py::create_execution` →
 `ProductionCommands.submit_user_execution()`，**完全合规**。
 
-**发现 7-a（前端死代码）：** `frontend/src/lib/api.ts:1090 createGeneration()` 与
-`:1083 GenerationCreateResult` 定义后**无任何调用方**（实测）。它指向
-`POST /api/v1/projects/{id}/generations`，即"独立生成"入口。前端已不再使用，但
-后端路由仍注册且被单元/集成测试覆盖。属**待决表面**，见问题 8。
+**发现 7-a（已解决）：** 前端 `createGeneration()` 死代码已删除；独立生成 HTTP
+写入口（`POST`/`GET`/`cancel /api/v1/projects/{id}/generations`）也已退役，
+`generations.py` 只保留 capabilities/models/manifest 只读目录。媒体生成的唯一
+产品写入口是 Workbench Execution（见问题 8 的结论）。
 
 **发现 7-b（Director 侧旁路，重要）：**
 `director/runtime/delegation.py:71` 的 `DirectorRuntimeDelegationService.accept`
@@ -354,21 +354,18 @@ GraphService.create_graph / materialize_definition
 `production/workbench_execution.py:850`、`execution/experiment_nodes.py:227`、
 `production/final_film.py:450`、`providers/generation_service.py:367`。
 
-**唯一的未决表面：** `providers/generation_service.py::GenerationService`。
-它创建"最小单节点图 + NodeRun"，引擎正确（复用同一套提交安全机制），但它是一个
-**独立生成域**，绕过了 `WorkbenchExecutionPlan` 的冻结阶段契约。
+**已决定的表面：** `providers/generation_service.py::GenerationService`。
 
-- 前端已不再使用（问题 7-a）；
-- 后端路由仍注册（`api/v1/router.py:52`），且被
-  `tests/unit/test_model_profiles_api.py`、`tests/unit/test_model_profile_snapshot.py`、
-  `tests/integration/test_runtime_recovery_matrix_pg.py` 覆盖；
+- 用户可触发的 HTTP 写入口（`POST`/`GET`/`cancel
+  /api/v1/projects/{id}/generations`）**已退役**，并由
+  `scripts/check_canonical_surface.py` 固定，不能再被注册回来；
+- `GenerationService` 作为领域能力**保留**：它复用同一套提交安全机制，不制造
+  第二套 NodeRun/ProviderOperation/Artifact 真相；生产代码已无调用方，调用方是
+  `tests/unit/test_model_profile_snapshot.py`、`test_model_profiles_api.py`、
+  `test_v3_review_fixes.py` 与
+  `tests/integration/test_runtime_recovery_matrix_pg.py`。若未来这些测试也消失，
+  再连同领域能力一起删除；
 - 其自身 docstring 声明 video 能力**有意拒绝**，必须走 Shot 门链。
-
-**处置选项（留待 Phase 4/5 决策，本轮不改动）：**
-
-1. **保留**并明确记为"独立单节点生成域"，由图模板统一收敛（推荐——它没有制造
-   第二套 NodeRun/ProviderOperation/Artifact 真相）；
-2. 删除路由与 `GenerationService`，同步删除前端死代码与相关测试。
 
 **不得**在两处同时实现同一业务的 NodeRun 创建——目前已满足该条件。
 
@@ -478,7 +475,7 @@ provider  → execution.models（数据模型）允许
 | `providers/manifest.py`、`capabilities.py`、`contracts/` | ModelManifest / Capability / Provider 契约 | provider | KEEP | NONE |
 | `providers/model_profiles/`（含 `slots.py`、`node_snapshot.py`） | ModelSlot 与能力映射 | provider | KEEP | NONE |
 | `providers/registry.py`、`router.py`、`runtime.py`、`selection.py`、`model_resolution.py` | 注册、路由、运行时、选择 | provider | KEEP | NONE（但被 Director 直接 import，见问题 3） |
-| `providers/generation_service.py` | 独立单节点生成域 | provider | **DECIDE** | **问题 8** |
+| `providers/generation_service.py` | 单节点生成域（无 HTTP 写入口） | provider | KEEP（HTTP 写面 RETIRED） | **问题 8 已决定** |
 | `providers/connection_service.py`、`workspace_credentials.py`、`idempotency.py`、`execution_identity.py` | 连接、凭据、幂等、执行身份 | provider | KEEP | NONE |
 | `providers/reference_delivery.py` | 引用字节投递 | provider | KEEP | 需确认不与 provider → production 规则冲突（见下注） |
 | `providers/fake.py` | 假 Provider 测试替身 | provider | KEEP | NONE（问题 3） |
@@ -518,7 +515,7 @@ provider  → execution.models（数据模型）允许
 | **Phase 2** Creative Layer 解耦 | 需要拆依赖、可能需要 facade 过渡 | **依赖已解耦**。工作量 = 物理目录迁移决策 + 依赖 Gate。7 条 director → provider 文本推理边 + 4 条 production → director 边才是真正要处理的对象 |
 | **Phase 3** CreativeIntent Contract | 需要"新建" CreativeIntent | **已存在** `CompiledCreativeIntent`。真实任务是决定是否把嵌套 patch 结构收敛为 canonical 顶层字段表，并定义版本化/持久化/来源记录 |
 | **Phase 4** ProductionGraph 收敛 | 需要删除/降级大量滥用 Node | **Node 无滥用**（10 个全部 KEEP）。真实任务是① 统一 3 个模块中的模板目录；② 消除 `_node()` 重复；③ 成形 Production Planner 以支持自动最小重算 |
-| **Phase 5** 入口统一 | 需要清查大量旁路 | 生产写入路径**已合规**。真实任务是 ① 修 `director/runtime/delegation.py:71` 旁路；② 决定 `GenerationService` 去留 |
+| **Phase 5** 入口统一 | 需要清查大量旁路 | 生产写入路径**已合规**。① `director/runtime/delegation.py:71` 旁路仍待处理；② `GenerationService` 已决定：HTTP 写面退役、领域能力保留 |
 | **Phase 6** 前端收敛 | 需要拆多个并列工作台 | **无并列一级产品**。`DirectorBoard2D` 已是内部 tab。真实任务主要是命名与文档对齐 |
 | **Phase 7** 验证与防回归 | 需要新写依赖测试 | 需要，且应立即做——因为 Phase 2–6 的改动面比预期小，**依赖 Gate 是防止未来回归的主要价值** |
 
@@ -536,14 +533,13 @@ provider  → execution.models（数据模型）允许
    （依赖已干净，迁移是纯目录收益，风险来自 30+ 处 import 与 generated OpenAPI 稳定性）
 2. `ShotReferenceIntent` 迁入 `app/contracts/` 是否接受一次契约层新增？
 3. `provider !→ production` 规则是否按 §3.4 注细化为"允许依赖 `execution.models`"？
-4. `GenerationService` 保留还是删除？
-5. `director/workflows/` 中的 `reference_capability` / `character_participation`
+4. `director/workflows/` 中的 `reference_capability` / `character_participation`
    迁往何处（creative 还是 production）？
-6. `production/golden_project.py` 迁往测试工具位置是否影响现有证明脚本
+5. `production/golden_project.py` 迁往测试工具位置是否影响现有证明脚本
    （`scripts/prove_*.py`）？
-7. `domain → creative`（`access/projects.py → creative_templates`）是改为由
+6. `domain → creative`（`access/projects.py → creative_templates`）是改为由
    application 层注入模板查找，还是正式声明为允许例外？
-8. `shared/db.py` 的 RLS 上下文解析与 `shared/model_registry.py` 的模型引导是否
+7. `shared/db.py` 的 RLS 上下文解析与 `shared/model_registry.py` 的模型引导是否
    上移到新包，使 `shared` 回到叶子层？
-9. [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) §三 的
+8. [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) §三 的
    `provider !→ production` 是否按附加发现 B 细化？

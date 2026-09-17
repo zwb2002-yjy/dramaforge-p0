@@ -1921,57 +1921,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{project_id}/generations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Generation */
-        post: operations["create_generation_api_v1_projects__project_id__generations_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/generations/{operation_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Generation */
-        get: operations["get_generation_api_v1_projects__project_id__generations__operation_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/generations/{operation_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel Generation */
-        post: operations["cancel_generation_api_v1_projects__project_id__generations__operation_id__cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/model-slots": {
         parameters: {
             query?: never;
@@ -4496,60 +4445,6 @@ export interface components {
             draft_text: string;
             director_evidence: components["schemas"]["DirectorInvocationEvidence"];
         };
-        /** GenerationCreateBody */
-        GenerationCreateBody: {
-            /** Capability */
-            capability: string;
-            /** Model Id */
-            model_id?: string | null;
-            /** Slot */
-            slot?: string | null;
-            /** Input */
-            input?: {
-                [key: string]: unknown;
-            };
-            /** Options */
-            options?: {
-                [key: string]: unknown;
-            };
-            /** Native Options */
-            native_options?: {
-                [key: string]: unknown;
-            };
-        };
-        /** GenerationCreateResponse */
-        GenerationCreateResponse: {
-            /**
-             * Operation Id
-             * Format: uuid
-             */
-            operation_id: string;
-            /** Status */
-            status: string;
-            /** Requested Capability */
-            requested_capability: string;
-            /** Requested Model */
-            requested_model: string | null;
-        };
-        /** GenerationOperationRead */
-        GenerationOperationRead: {
-            /**
-             * Operation Id
-             * Format: uuid
-             */
-            operation_id: string;
-            /** Status */
-            status: string;
-            /** Requested Capability */
-            requested_capability: string;
-            /** Requested Model */
-            requested_model: string | null;
-            /** Error Code */
-            error_code: string | null;
-            /** Result Artifact Id */
-            result_artifact_id: string | null;
-            provider_operation: components["schemas"]["app__api__v1__generations__ProviderOperationRead"];
-        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -5293,7 +5188,7 @@ export interface components {
             /** Artifacts */
             artifacts: components["schemas"]["ArtifactRead"][];
             /** Provider Operations */
-            provider_operations: components["schemas"]["app__api__v1__production__ProviderOperationRead"][];
+            provider_operations: components["schemas"]["ProviderOperationRead"][];
         };
         /**
          * ProjectStage
@@ -5309,6 +5204,60 @@ export interface components {
             item_id: string;
             /** Decision */
             decision: string;
+        };
+        /** ProviderOperationRead */
+        ProviderOperationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Node Run Id */
+            node_run_id: string | null;
+            /** Operation Kind */
+            operation_kind: string;
+            /** Actual Provider */
+            actual_provider: string;
+            /** Actual Model */
+            actual_model: string;
+            /** Provider Request Id */
+            provider_request_id: string | null;
+            /** Protocol Profile */
+            protocol_profile: string | null;
+            /** Status */
+            status: string;
+            /** Request Fingerprint */
+            request_fingerprint: string;
+            /** Request Summary */
+            request_summary: {
+                [key: string]: unknown;
+            };
+            /** Response Summary */
+            response_summary: {
+                [key: string]: unknown;
+            };
+            /** Model Binding Id */
+            model_binding_id: string | null;
+            /** Catalog Entry Id */
+            catalog_entry_id: string | null;
+            /** Capability Manifest Hash */
+            capability_manifest_hash: string | null;
+            /** Connection Id */
+            connection_id: string | null;
+            /** Provider Connection Revision Id */
+            provider_connection_revision_id: string | null;
+            /** Credential Revision Id */
+            credential_revision_id: string | null;
+            /** Execution Path Version */
+            execution_path_version: string | null;
+            /** Provider Cost */
+            provider_cost: string | null;
+            /** Currency */
+            currency: string;
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
         };
         /** ProviderPluginModelRead */
         ProviderPluginModelRead: {
@@ -6797,71 +6746,6 @@ export interface components {
         WorkspaceUpdate: {
             /** Name */
             name: string;
-        };
-        /** ProviderOperationRead */
-        app__api__v1__generations__ProviderOperationRead: {
-            /** Provider Operation Id */
-            provider_operation_id: string | null;
-            /** Provider */
-            provider: string | null;
-            /** Model */
-            model: string | null;
-            /** Remote Task Id */
-            remote_task_id: string | null;
-        };
-        /** ProviderOperationRead */
-        app__api__v1__production__ProviderOperationRead: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Node Run Id */
-            node_run_id: string | null;
-            /** Operation Kind */
-            operation_kind: string;
-            /** Actual Provider */
-            actual_provider: string;
-            /** Actual Model */
-            actual_model: string;
-            /** Provider Request Id */
-            provider_request_id: string | null;
-            /** Protocol Profile */
-            protocol_profile: string | null;
-            /** Status */
-            status: string;
-            /** Request Fingerprint */
-            request_fingerprint: string;
-            /** Request Summary */
-            request_summary: {
-                [key: string]: unknown;
-            };
-            /** Response Summary */
-            response_summary: {
-                [key: string]: unknown;
-            };
-            /** Model Binding Id */
-            model_binding_id: string | null;
-            /** Catalog Entry Id */
-            catalog_entry_id: string | null;
-            /** Capability Manifest Hash */
-            capability_manifest_hash: string | null;
-            /** Connection Id */
-            connection_id: string | null;
-            /** Provider Connection Revision Id */
-            provider_connection_revision_id: string | null;
-            /** Credential Revision Id */
-            credential_revision_id: string | null;
-            /** Execution Path Version */
-            execution_path_version: string | null;
-            /** Provider Cost */
-            provider_cost: string | null;
-            /** Currency */
-            currency: string;
-            /** Submitted At */
-            submitted_at: string | null;
-            /** Completed At */
-            completed_at: string | null;
         };
         /** BindingRead */
         app__api__v1__references__BindingRead: {
@@ -11892,126 +11776,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ManifestRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_generation_api_v1_projects__project_id__generations_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "Idempotency-Key"?: string | null;
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                project_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerationCreateBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GenerationCreateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_generation_api_v1_projects__project_id__generations__operation_id__get: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                project_id: string;
-                operation_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GenerationOperationRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    cancel_generation_api_v1_projects__project_id__generations__operation_id__cancel_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                operation_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GenerationOperationRead"];
                 };
             };
             /** @description Validation Error */
