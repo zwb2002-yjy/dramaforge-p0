@@ -67,7 +67,7 @@ async def _seed_run_with_trace(
         graph_node_id=node.id,
         idempotency_key=f"trace:{uuid4().hex}",
         input_hash="a" * 64,
-        status="completed",
+        status="queued",
         input_snapshot={
             "node_key": "video",
             "workbench_plan": {
@@ -121,6 +121,9 @@ async def _seed_run_with_trace(
         produced_by_run_id=run.id,
     )
     session.add(artifact)
+    await session.flush()
+    run.result_artifact_id = artifact.id
+    run.status = "completed"
     await session.flush()
     return project, run, user
 

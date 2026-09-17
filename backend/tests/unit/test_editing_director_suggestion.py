@@ -135,7 +135,7 @@ async def _seed(
         graph_node_id=node.id,
         idempotency_key=f"suggestion:{uuid4().hex}",
         input_hash="a" * 64,
-        status="completed",
+        status="queued",
         input_snapshot={"shot_id": str(shot.id), "stage": "video"},
         output_summary={"source": "test"},
         created_by=user.id,
@@ -156,6 +156,7 @@ async def _seed(
     session.add(artifact)
     await session.flush()
     run.result_artifact_id = artifact.id
+    run.status = "completed"
     shot.formal_video_artifact_id = artifact.id
     operation = ProviderOperation(
         node_run_id=run.id,

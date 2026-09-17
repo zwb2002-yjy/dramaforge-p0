@@ -7,6 +7,7 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -78,6 +79,10 @@ class HumanReviewDecision(Base):
             "shot_id",
             "artifact_id",
             "review_kind",
+        ),
+        CheckConstraint(
+            "decision IN ('approved','rejected')",
+            name="ck_human_review_decision_value",
         ),
     )
 

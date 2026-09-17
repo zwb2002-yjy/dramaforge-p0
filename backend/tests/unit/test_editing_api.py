@@ -187,7 +187,7 @@ async def _seed_formal_facts(factory: async_sessionmaker[AsyncSession], project_
             graph_node_id=node.id,
             idempotency_key=f"editing-api:{uuid4().hex}",
             input_hash="a" * 64,
-            status="completed",
+            status="queued",
             input_snapshot={"shot_id": str(shot.id), "stage": "video"},
             output_summary={"source": "editing-api-test"},
             result_artifact_id=None,
@@ -209,6 +209,7 @@ async def _seed_formal_facts(factory: async_sessionmaker[AsyncSession], project_
         session.add(artifact)
         await session.flush()
         run.result_artifact_id = artifact.id
+        run.status = "completed"
         shot.formal_video_artifact_id = artifact.id
         operation = ProviderOperation(
             node_run_id=run.id,

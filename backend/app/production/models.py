@@ -403,6 +403,10 @@ class RepairRequest(Base):
     __tablename__ = "repair_requests"
     __table_args__ = (
         UniqueConstraint("project_id", "request_key", name="uq_repair_request_key"),
+        CheckConstraint(
+            "option IN ('rerun_video','regenerate_keyframe_then_video')",
+            name="ck_repair_request_option",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)

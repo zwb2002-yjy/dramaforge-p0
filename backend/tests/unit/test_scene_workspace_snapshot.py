@@ -123,6 +123,19 @@ async def _add_node_run(
         )
         session.add(node)
         await session.flush()
+    result_artifact = None
+    if status in {"completed", "cached", "completed_after_cancel"}:
+        result_artifact = Artifact(
+            project_id=project_id,
+            artifact_type="image",
+            storage_state="available",
+            object_key=f"trace/{uuid4().hex}.png",
+            content_hash=uuid4().hex * 2,
+            mime_type="image/png",
+            byte_size=1,
+        )
+        session.add(result_artifact)
+        await session.flush()
     run = NodeRun(
         project_id=project_id,
         graph_version_id=current_version_id,
@@ -132,10 +145,14 @@ async def _add_node_run(
         input_hash=uuid4().hex * 2,
         input_snapshot={"shot_id": str(shot_id), "node_key": "keyframe"},
         status=status,
+        result_artifact_id=result_artifact.id if result_artifact is not None else None,
         created_by=user.id,
     )
     session.add(run)
     await session.flush()
+    if result_artifact is not None:
+        result_artifact.produced_by_run_id = run.id
+        await session.flush()
     return run
 
 

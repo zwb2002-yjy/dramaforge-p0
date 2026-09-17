@@ -695,7 +695,6 @@ async def test_history_uses_frozen_timeline_and_survives_unavailable_media(
     )
     run = await session.get(NodeRun, job.node_run_id)
     assert run is not None
-    run.status = "completed"
     artifact = Artifact(
         project_id=project.id,
         artifact_type="video",
@@ -705,8 +704,12 @@ async def test_history_uses_frozen_timeline_and_survives_unavailable_media(
         mime_type="video/mp4",
         byte_size=32,
         duration_seconds=Decimal("5"),
+        produced_by_run_id=run.id,
     )
     session.add(artifact)
+    await session.flush()
+    run.result_artifact_id = artifact.id
+    run.status = "completed"
     await session.flush()
     exported = Export(
         project_id=project.id,
