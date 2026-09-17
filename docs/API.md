@@ -11,6 +11,10 @@ Migration head: 20260916_0070
 
 - FastAPI OpenAPI is the only HTTP contract source.
 - Frontend types are generated into frontend/src/shared/api/generated.ts.
+- Frontend modules consume those schemas as `components["schemas"][...]`; they
+  never re-declare a generated schema by hand. `npm run --prefix frontend
+  api:authority` (CI `frontend-fast` and the container gate) fails when a
+  frontend file re-declares a schema name that the generated contract owns.
 - User-facing access is the frontend gateway at port 8080; the API process is
   an internal Compose service on port 8000.
 - No compatibility endpoint is kept for retired product concepts.

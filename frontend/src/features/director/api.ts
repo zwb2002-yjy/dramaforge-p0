@@ -1,4 +1,5 @@
 import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
+import type { components } from "../../shared/api/generated";
 import type {
   DirectorNextActionRead,
   DirectorRecommendation,
@@ -51,15 +52,7 @@ export function directorPath(
 }
 
 /** Report the effective Director engine and why a new runtime turn may be blocked. */
-export type DirectorCapabilitiesRead = {
-  effective_engine: string;
-  runtime_turns_available: boolean;
-  blocker_code: string | null;
-  blocker_message: string | null;
-  manual_production_available: boolean;
-  checkpoint_configured: boolean;
-};
-
+export type DirectorCapabilitiesRead = components["schemas"]["DirectorCapabilitiesRead"];
 export function fetchDirectorCapabilities(projectId: string): Promise<DirectorCapabilitiesRead> {
   return apiGet<DirectorCapabilitiesRead>(directorPath(projectId, "capabilities"));
 }

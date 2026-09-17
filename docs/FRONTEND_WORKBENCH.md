@@ -25,6 +25,8 @@ frontend/src/
 - 服务端状态只存在于 TanStack Query；Zustand 只保存布局/选择类 UI 状态。
 - `frontend/src/shared/api/generated.ts` 由 OpenAPI 生成，不手改
   （`npm run api:generate` / `api:check`）。
+- HTTP response/request 形状一律用 `components["schemas"][...]` 引用生成类型；
+  `npm run api:authority` 拒绝在 feature 模块里重新手写同名 schema。
 - Candidate 预览是零写入的本地 UI 状态；Formal 确认才触发服务端写入。
 - Asset 标签由 API 的 `tags` 字段和正式 Tag 关联表提供，UI 不读取或写入
   `metadata.tags`；回收状态统一为 `recycled`。

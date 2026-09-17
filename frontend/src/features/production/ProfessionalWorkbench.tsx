@@ -244,7 +244,8 @@ export function ProfessionalWorkbench({
   }, [shots]);
   useEffect(() => {
     if (!directorBoard) return;
-    setBoardMode(directorBoard.mode);
+    // The board read model is a plain string on the wire; the route validates it to these two modes.
+    setBoardMode(directorBoard.mode === "rough_3d" ? "rough_3d" : "2d");
     setBoardCamera(String(directorBoard.camera.summary ?? "中景 · 50mm · 平视"));
     const character = directorBoard.characters[0] ?? {};
     setBoardBlocking(String(character.blocking ?? "主角 x=0.35 y=0.55 · 面向镜头"));

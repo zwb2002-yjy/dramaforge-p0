@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "api:generate": "node ../scripts/generate-openapi-types.mjs",
-    "api:check": "node ../scripts/check-generated-api.mjs"
+    "api:check": "node ../scripts/check-generated-api.mjs",
+    "api:authority": "node ../scripts/check-api-type-authority.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.8",

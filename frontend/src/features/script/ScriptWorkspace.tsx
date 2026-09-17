@@ -120,9 +120,11 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
       decisions: Array<{ item_id: string; decision: "accepted" | "rejected" }>;
     }) => applyStoryProposal(projectId, proposalId, decisions),
     onSuccess: (result) => {
-      const accepted = result.accepted.length;
-      const rejected = result.rejected.length;
-      const failed = result.failed.length;
+      // The backend defaults these to empty lists; the generated contract keeps
+      // them optional because they carry schema defaults.
+      const accepted = result.accepted?.length ?? 0;
+      const rejected = result.rejected?.length ?? 0;
+      const failed = result.failed?.length ?? 0;
       setApplyMessage(
         `Story 更新完成：采用 ${accepted}，拒绝 ${rejected}${failed ? `，失败 ${failed}` : ""}`,
       );

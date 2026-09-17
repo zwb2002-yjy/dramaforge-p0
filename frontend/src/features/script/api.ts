@@ -1,13 +1,12 @@
 /** Script workspace contract + reader (Phase 1 §17.4).
  *
- * These are hand-written DTOs for the Script workspace read. Phase 2 replaces
- * them with OpenAPI-generated types; until then they live here so the
- * already-large `lib/api.ts` does not grow further. `importScript` (POST) remains
- * reused from `lib/api.ts` unchanged.
+ * Response shapes come from the OpenAPI-generated contract; this module only
+ * binds them to routes. `importScript` (POST) stays reused from `lib/api.ts`
+ * unchanged.
  */
 
 import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
-import type { DirectorInvocationEvidence } from "../director/suggestion-types";
+import type { components } from "../../shared/api/generated";
 
 /** Bound shared with the backend parser (`MAX_SCRIPT_TEXT_BYTES`). */
 export const MAX_SCRIPT_TEXT_BYTES = 1024 * 1024;
@@ -24,39 +23,10 @@ export function scriptTextSizeError(text: string): string | null {
   return `文件为 ${size} 字节，超过上限 ${MAX_SCRIPT_TEXT_BYTES} 字节（1 MiB）；请拆分为多次导入。`;
 }
 
-export type SceneRead = {
-  id: string;
-  scene_number: number;
-  location_name: string;
-  time_of_day: string;
-  synopsis: string;
-  shot_count: number;
-  version: number;
-};
-
-export type EpisodeRead = {
-  id: string;
-  episode_number: number;
-  title: string | null;
-  synopsis: string;
-  scenes: SceneRead[];
-  version: number;
-};
-
-export type ScriptDocumentRead = {
-  script_document_id: string;
-  filename: string;
-  content_hash: string;
-  format: string;
-  raw_text: string;
-  version: number;
-};
-
-export type ScriptWorkspaceRead = {
-  document: ScriptDocumentRead | null;
-  episodes: EpisodeRead[];
-};
-
+export type SceneRead = components["schemas"]["SceneRead"];
+export type EpisodeRead = components["schemas"]["EpisodeRead"];
+export type ScriptDocumentRead = components["schemas"]["ScriptDocumentRead"];
+export type ScriptWorkspaceRead = components["schemas"]["ScriptWorkspaceRead"];
 export async function fetchScriptWorkspace(projectId: string): Promise<ScriptWorkspaceRead> {
   return apiGet<ScriptWorkspaceRead>(`/api/v1/projects/${projectId}/script`);
 }
@@ -72,27 +42,9 @@ export type StoryProposalOperation = {
   payload: Record<string, unknown>;
 };
 
-export type StoryProposalRead = {
-  id: string;
-  project_id: string;
-  status: string;
-  summary: string;
-  created_at: string;
-  operations: StoryProposalOperation[];
-};
-
-export type PartialApplyResult = {
-  accepted: string[];
-  rejected: string[];
-  failed: Array<{ item_id?: string; error?: string }>;
-};
-
-export type GeneratedStoryProposalRead = {
-  proposal: StoryProposalRead;
-  draft_text: string;
-  director_evidence: DirectorInvocationEvidence;
-};
-
+export type StoryProposalRead = components["schemas"]["StoryProposalRead"];
+export type PartialApplyResult = components["schemas"]["PartialApplyResult"];
+export type GeneratedStoryProposalRead = components["schemas"]["GeneratedStoryProposalRead"];
 export async function createStoryProposal(
   projectId: string,
   input: { idempotency_key: string; brief: string; filename: string; draft_text: string },

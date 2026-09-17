@@ -124,12 +124,7 @@ export function fetchHealth(): Promise<HealthResponse> {
   return apiGet<HealthResponse>("/health");
 }
 
-export type BootstrapStatusRead = {
-  owner_initialized: boolean;
-  registration_available: boolean;
-  public_registration_enabled: boolean;
-};
-
+export type BootstrapStatusRead = components["schemas"]["BootstrapStatusRead"];
 export function fetchBootstrapStatus(): Promise<BootstrapStatusRead> {
   return apiGet<BootstrapStatusRead>("/api/v1/auth/bootstrap-status");
 }
@@ -292,14 +287,7 @@ export async function bindProjectProvider(
 // Production Model Profiles (model role configuration, V3 spec §34–§37).
 // ---------------------------------------------------------------------------
 
-export type ModelSlotRead = {
-  id: string;
-  display_name: string;
-  capabilities: string[];
-  description: string;
-  p0_scope: boolean;
-};
-
+export type ModelSlotRead = components["schemas"]["ModelSlotRead"];
 export type ProfileBindingInput = {
   model_id: string;
   native_options?: Record<string, unknown>;
@@ -339,16 +327,7 @@ export type ModelProfileSummary = {
   updated_at: string;
 };
 
-export type EffectiveBindingRead = {
-  slot: string;
-  capability: string;
-  model_id: string;
-  source: string;
-  profile_id: string | null;
-  profile_version: number | null;
-  native_options: Record<string, unknown>;
-};
-
+export type EffectiveBindingRead = components["schemas"]["EffectiveBindingRead"];
 export function listModelSlots(): Promise<ModelSlotRead[]> {
   return apiGetList<ModelSlotRead>("/api/v1/model-slots");
 }
@@ -616,65 +595,7 @@ export async function createProject(input: {
   );
 }
 
-export type ProjectSnapshot = {
-  project_id: string;
-  name: string;
-  node_runs: Array<{
-    id: string;
-    status: string;
-    result_artifact_id: string | null;
-    output_summary: Record<string, unknown>;
-    input_snapshot: Record<string, unknown>;
-    idempotency_key: string;
-    attempt_no: number;
-    node_key: string;
-    provider_cost: string;
-    started_at: string | null;
-    finished_at: string | null;
-    error_code: string | null;
-    error_summary: string | null;
-    upstream_dependencies: Array<{
-      node_key: string;
-      run_id: string | null;
-      status: string;
-      result_artifact_id: string | null;
-    }>;
-  }>;
-  artifacts: Array<{
-    id: string;
-    object_key: string;
-    content_hash: string;
-    byte_size: number;
-    mime_type: string;
-    storage_state: string;
-    produced_by_run_id: string | null;
-    width: number | null;
-    height: number | null;
-    duration_seconds: string | null;
-  }>;
-  provider_operations: Array<{
-    id: string;
-    node_run_id: string | null;
-    operation_kind: string;
-    actual_provider: string;
-    actual_model: string;
-    provider_request_id: string | null;
-    protocol_profile: string | null;
-    status: string;
-    request_fingerprint: string;
-    request_summary: Record<string, unknown>;
-    response_summary: Record<string, unknown>;
-    model_binding_id: string | null;
-    catalog_entry_id: string | null;
-    capability_manifest_hash: string | null;
-    execution_path_version: string | null;
-    provider_cost: string | null;
-    currency: string;
-    submitted_at: string | null;
-    completed_at: string | null;
-  }>;
-};
-
+export type ProjectSnapshot = components["schemas"]["ProjectSnapshot"];
 export type ExecutionTraceRead = components["schemas"]["ExecutionTraceRead"];
 
 export function fetchExecutionTrace(projectId: string, runId: string): Promise<ExecutionTraceRead> {
@@ -687,33 +608,8 @@ export function fetchSnapshot(projectId: string): Promise<ProjectSnapshot> {
   return apiGet(`/api/v1/projects/${projectId}/snapshot`);
 }
 
-export type AssetRead = {
-  id: string;
-  project_id: string;
-  kind: string;
-  name: string;
-  description: string;
-  metadata: Record<string, unknown>;
-  status: string;
-  tags: string[];
-  version: number;
-  created_at: string;
-  updated_at: string;
-};
-
-export type AssetVersionRead = {
-  id: string;
-  asset_id: string;
-  version_number: number;
-  kind: string;
-  name: string;
-  description: string;
-  metadata: Record<string, unknown>;
-  status: string;
-  created_by: string;
-  created_at: string;
-};
-
+export type AssetRead = components["schemas"]["AssetRead"];
+export type AssetVersionRead = components["schemas"]["AssetVersionRead"];
 export function fetchProjectAssets(projectId: string): Promise<AssetRead[]> {
   return apiGet(`/api/v1/projects/${projectId}/assets`);
 }
@@ -738,23 +634,7 @@ export async function createProjectAsset(
   );
 }
 
-export type ExperimentRead = {
-  id: string;
-  project_id: string;
-  source_shot_id: string | null;
-  name: string;
-  branch_type: string;
-  status: string;
-  source_artifact_ids: string[];
-  candidate_artifact_ids: string[];
-  comparison: Record<string, unknown>;
-  adopted_shot_ids: string[];
-  parameters: Record<string, unknown>;
-  selected_model: string | null;
-  created_at: string;
-  decided_at: string | null;
-};
-
+export type ExperimentRead = components["schemas"]["ExperimentRead"];
 export function fetchExperiments(projectId: string): Promise<ExperimentRead[]> {
   return apiGet(`/api/v1/projects/${projectId}/experiments`);
 }
@@ -775,12 +655,7 @@ export async function createExperiment(
   return apiSend("POST", `/api/v1/projects/${projectId}/experiments`, input, csrf);
 }
 
-export type ExperimentStartRead = {
-  experiment: ExperimentRead;
-  run_ids: string[];
-  job_ids: string[];
-};
-
+export type ExperimentStartRead = components["schemas"]["ExperimentStartRead"];
 export async function startExperiment(
   projectId: string,
   experimentId: string,
@@ -863,17 +738,7 @@ export type OpenCutManifestRead = components["schemas"]["OpenCutManifest"];
 export function fetchOpenCutManifest(projectId: string): Promise<OpenCutManifestRead> {
   return apiGet(`/api/v1/projects/${projectId}/opencut-manifest`);
 }
-export type DirectorBoardRead = {
-  id: string;
-  shot_id: string;
-  mode: "2d" | "rough_3d";
-  camera: Record<string, unknown>;
-  characters: Array<Record<string, unknown>>;
-  scene: Record<string, unknown>;
-  version: number;
-  updated_at: string;
-};
-
+export type DirectorBoardRead = components["schemas"]["DirectorBoardRead"];
 export function fetchDirectorBoard(
   projectId: string,
   shotId: string,
@@ -900,43 +765,13 @@ export async function saveDirectorBoard(
     csrf,
   );
 }
-export type ShotRead = {
-  id: string;
-  scene_id: string;
-  shot_number: number;
-  shot_type: string;
-  camera_move?: string;
-  visual_description: string;
-  dialogue: string;
-  duration_seconds?: string;
-  sort_order: number;
-  status: string;
-  version: number;
-};
-
+export type ShotRead = components["schemas"]["ShotRead"];
 export function fetchProjectShots(projectId: string): Promise<ShotRead[]> {
   return apiGetList<ShotRead>(`/api/v1/projects/${projectId}/shots`);
 }
 
-export type ShotCanvasUpdateResponse = {
-  shot: ShotRead;
-  revision_id: string;
-  revision_number: number;
-};
-
-export type CanvasRevisionRead = {
-  id: string;
-  revision_number: number;
-  base_shot_version: number;
-  visual_description: string;
-  shot_type: string;
-  camera_move: string;
-  dialogue: string;
-  duration_seconds: string;
-  source: string;
-  created_at: string;
-};
-
+export type ShotCanvasUpdateResponse = components["schemas"]["ShotCanvasUpdateResponse"];
+export type CanvasRevisionRead = components["schemas"]["CanvasRevisionRead"];
 export function fetchShotCanvasRevisions(
   projectId: string,
   shotId: string,
@@ -973,16 +808,7 @@ export function artifactContentUrl(projectId: string, artifactId: string): strin
 // V3 model capability / unified generation API (spec §58).
 // ---------------------------------------------------------------------------
 
-export interface ModelRead {
-  id: string;
-  provider_id: string;
-  display_name: string;
-  enabled: boolean;
-  configured: boolean;
-  available: boolean;
-  capabilities: string[];
-}
-
+export type ModelRead = components["schemas"]["ModelRead"];
 export interface ParameterSpecRead {
   type: "string" | "integer" | "number" | "boolean" | "array" | "object";
   title?: string | null;
