@@ -254,6 +254,7 @@ async function installMock(page: Page) {
 test("professional page surfaces the wire-visible workflow navigator", async ({ page }) => {
   await installMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByTestId("production-workflow-disclosure").locator(":scope > summary").click();
 
   await expect(page.getByTestId("workflow-navigator")).toBeVisible();
   await expect(page.getByTestId("workflow-episode-1")).toBeVisible();

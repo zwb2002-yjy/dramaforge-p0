@@ -309,10 +309,6 @@
   min-width: 180px;
 }
 
-.project-create input:nth-child(2) {
-  min-width: min(320px, 100%);
-}
-
 .workspace-list,
 .project-list {
   border-top: 1px solid var(--border);

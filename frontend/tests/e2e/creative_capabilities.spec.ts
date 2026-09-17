@@ -112,6 +112,7 @@ test("creative capabilities panel reads and freezes effective intent with proven
     freezeBody = body;
   });
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByTestId("production-capabilities-disclosure").locator(":scope > summary").click();
 
   await expect(page.getByTestId("creative-capabilities-panel")).toBeVisible();
 

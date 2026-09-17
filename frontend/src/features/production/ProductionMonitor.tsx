@@ -1,15 +1,11 @@
-/**
- * Phase 10 cross-scene Production Monitor (plan 03 §89).
- *
- * The production page is a monitor: cross-scene summary + per-scene status,
- * while the actual work happens in the Scene Workbench (/scenes/$sceneId) and
- * the ProfessionalWorkbench. Script Import, budget controls and the former
- * large storyboard workspace were removed from this surface.
- */
+import { useState } from "react";
+
+import { Button, Disclosure } from "../../components/ui";
 import type { ProjectSnapshot } from "../../lib/api";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
 import type { SceneSummary } from "../scenes/api";
 import { latestEffectiveNodeRuns } from "./effectiveRuns";
+import "./production-monitor.css";
 
 type ProductionMonitorProps = {
   projectId: string;
@@ -23,7 +19,13 @@ type ProductionMonitorProps = {
     status: string;
   }>;
   snapshot?: ProjectSnapshot;
-  experimentCount: number;
+  experimentCount?: number;
+  scenesLoading?: boolean;
+  scenesError?: boolean;
+  shotsLoading?: boolean;
+  shotsError?: boolean;
+  snapshotError?: boolean;
+  onRetry?: () => void;
 };
 
 const DONE = new Set(["completed", "cached", "completed_after_cancel", "approved"]);
@@ -35,68 +37,103 @@ export function ProductionMonitor({
   shots,
   snapshot,
   experimentCount,
+  scenesLoading = false,
+  scenesError = false,
+  shotsLoading = false,
+  shotsError = false,
+  snapshotError = false,
+  onRetry,
 }: ProductionMonitorProps) {
+  const [riskOnly, setRiskOnly] = useState(false);
   const runs = latestEffectiveNodeRuns(snapshot?.node_runs ?? []);
-  const completedRuns = runs.filter((r) => DONE.has(r.status)).length;
-  const runningRuns = runs.filter((r) => RUNNING.has(r.status)).length;
-  const failedRuns = runs.filter((r) => r.status === "failed").length;
-  const artifacts = snapshot?.artifacts ?? [];
-  const formalKeyframes = scenes.reduce((sum, s) => sum + (s.formal_keyframe_count || 0), 0);
-  const formalVideos = scenes.reduce((sum, s) => sum + (s.formal_video_count || 0), 0);
-  const risks = scenes.reduce((sum, s) => sum + (s.risk_count || 0), 0);
-  const sceneCount = scenes.length;
+  const completedRuns = runs.filter((run) => DONE.has(run.status)).length;
+  const runningRuns = runs.filter((run) => RUNNING.has(run.status)).length;
+  const failedRuns = runs.filter((run) => run.status === "failed").length;
+  const sceneFactsKnown = !scenesLoading && !scenesError;
+  const runFactsKnown = Array.isArray(snapshot?.node_runs) && !snapshotError;
+  const risks = scenes.reduce((sum, scene) => sum + (scene.risk_count ?? 0), 0);
+  const formalKeyframes = scenes.reduce(
+    (sum, scene) => sum + (scene.formal_keyframe_count ?? 0),
+    0,
+  );
+  const formalVideos = scenes.reduce((sum, scene) => sum + (scene.formal_video_count ?? 0), 0);
+  const visibleScenes = riskOnly ? scenes.filter((scene) => (scene.risk_count ?? 0) > 0) : scenes;
 
   return (
-    <section className="production-monitor" data-testid="production-monitor">
-      <div className="status-grid" data-testid="monitor-stats">
-        <div className="status-card">
-          <span className="status-label">场景</span>
-          <strong data-testid="stat-scenes">{sceneCount}</strong>
+    <section className="production-monitor" data-testid="production-monitor" aria-label="制作进度">
+      {(scenesError || shotsError || snapshotError) && (
+        <div className="flash err" role="alert">
+          部分制作状态读取失败，相关统计暂不可用。已有场景列表可能不是最新状态。
+          {onRetry && <Button onClick={onRetry}>重新读取状态</Button>}
         </div>
-        <div className="status-card">
-          <span className="status-label">镜头</span>
-          <strong data-testid="stat-shots">{shots.length}</strong>
-        </div>
-        <div className="status-card">
-          <span className="status-label">正式关键帧</span>
-          <strong data-testid="stat-formal-keyframes">{formalKeyframes}</strong>
-        </div>
-        <div className="status-card">
-          <span className="status-label">正式视频</span>
-          <strong data-testid="stat-formal-videos">{formalVideos}</strong>
-        </div>
-        <div className="status-card">
-          <span className="status-label">已完成</span>
-          <strong className="status-ok" data-testid="stat-completed">
-            {completedRuns}
+      )}
+      <div className="monitor-overview" data-testid="monitor-stats">
+        <div>
+          <span>镜头总数</span>
+          <strong data-testid="stat-shots">
+            {!shotsLoading && !shotsError ? shots.length : "—"}
           </strong>
         </div>
-        <div className="status-card">
-          <span className="status-label">进行中</span>
-          <strong className="status-pending" data-testid="stat-running">
-            {runningRuns}
+        <div>
+          <span>正式关键帧</span>
+          <strong data-testid="stat-formal-keyframes">
+            {sceneFactsKnown ? formalKeyframes : "—"}
           </strong>
         </div>
-        <div className="status-card">
-          <span className="status-label">失败 / 风险</span>
-          <strong className={failedRuns + risks ? "status-bad" : ""} data-testid="stat-failed">
-            {failedRuns + risks}
+        <div>
+          <span>正式视频</span>
+          <strong data-testid="stat-formal-videos">{sceneFactsKnown ? formalVideos : "—"}</strong>
+        </div>
+        <div>
+          <span>场景风险</span>
+          <strong
+            className={sceneFactsKnown && risks ? "status-bad" : undefined}
+            data-testid="stat-risks"
+          >
+            {sceneFactsKnown ? risks : "—"}
           </strong>
-        </div>
-        <div className="status-card">
-          <span className="status-label">媒体结果</span>
-          <strong data-testid="stat-artifacts">{artifacts.length}</strong>
-        </div>
-        <div className="status-card">
-          <span className="status-label">实验</span>
-          <strong data-testid="stat-experiments">{experimentCount}</strong>
         </div>
       </div>
+      <p className="monitor-execution-status">
+        进行中 <strong data-testid="stat-running">{runFactsKnown ? runningRuns : "—"}</strong>
+        <span>
+          失败执行{" "}
+          <strong
+            className={runFactsKnown && failedRuns ? "status-bad" : undefined}
+            data-testid="stat-failed"
+          >
+            {runFactsKnown ? failedRuns : "—"}
+          </strong>
+        </span>
+        <span className="muted">执行完成不等于已确认正式结果</span>
+      </p>
 
-      <div className="panel">
-        <h3>跨场景状态</h3>
-        {scenes.length === 0 ? (
-          <p className="muted">尚无场景。请在场景工作区创建场景与镜头。</p>
+      <section className="monitor-scenes" aria-labelledby="monitor-scenes-title">
+        <header className="monitor-scene-heading">
+          <h2 id="monitor-scenes-title">
+            跨场景状态{" "}
+            <span data-testid="stat-scenes">{sceneFactsKnown ? scenes.length : "—"}</span>
+          </h2>
+          <div className="monitor-filters" role="group" aria-label="场景状态筛选">
+            <Button aria-pressed={!riskOnly} onClick={() => setRiskOnly(false)}>
+              全部场景
+            </Button>
+            <Button aria-pressed={riskOnly} onClick={() => setRiskOnly(true)}>
+              仅看风险
+            </Button>
+          </div>
+        </header>
+        {scenesLoading ? (
+          <p role="status">正在读取场景制作进度…</p>
+        ) : scenesError && scenes.length === 0 ? (
+          <p>无法读取场景，请重试；这不代表项目中没有场景。</p>
+        ) : scenes.length === 0 ? (
+          <div className="monitor-empty">
+            <p>尚无场景。请在场景工作区创建场景与镜头。</p>
+            <a href={`/projects/${projectId}/scenes`}>前往场景工作区</a>
+          </div>
+        ) : visibleScenes.length === 0 ? (
+          <p role="status">当前没有带风险的场景。失败执行请在镜头工作流中查看。</p>
         ) : (
           <div
             className="monitor-table-scroll"
@@ -115,7 +152,7 @@ export function ProductionMonitor({
                 </tr>
               </thead>
               <tbody>
-                {scenes.map((scene) => (
+                {visibleScenes.map((scene) => (
                   <tr key={scene.id} data-testid={`monitor-scene-${scene.id}`}>
                     <td>
                       <a
@@ -140,7 +177,29 @@ export function ProductionMonitor({
             </table>
           </div>
         )}
-      </div>
+      </section>
+      <Disclosure
+        title="执行与资源统计"
+        description="辅助统计，不代表正式成片进度"
+        testId="production-statistics-disclosure"
+      >
+        <dl className="monitor-resource-stats">
+          <div>
+            <dt>已完成执行</dt>
+            <dd data-testid="stat-completed">{runFactsKnown ? completedRuns : "—"}</dd>
+          </div>
+          <div>
+            <dt>媒体结果</dt>
+            <dd data-testid="stat-artifacts">
+              {!snapshotError ? (snapshot?.artifacts?.length ?? "—") : "—"}
+            </dd>
+          </div>
+          <div>
+            <dt>实验</dt>
+            <dd data-testid="stat-experiments">{experimentCount ?? "—"}</dd>
+          </div>
+        </dl>
+      </Disclosure>
     </section>
   );
 }

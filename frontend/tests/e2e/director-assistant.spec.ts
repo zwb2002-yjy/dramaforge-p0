@@ -9,6 +9,7 @@ test("director assistant: contextual proposal, explicit design save, canvas and 
   const state = await installProfessionalMock(page);
   const suggestion = await installContextualDirectorMock(page, state);
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
   await exerciseContextualDirector(page, state, suggestion);
 

@@ -33,6 +33,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
 
   // The production monitor consumes the current formal OpenCut v2 contract.
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
   await expect(page.getByText(/正式镜头 2 个 · 3 条轨道/)).toBeVisible();
 

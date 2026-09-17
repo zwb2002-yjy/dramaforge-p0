@@ -1,0 +1,33 @@
+.df-project-create-form fieldset {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+.df-project-create-form label {
+  display: grid;
+  gap: var(--df-space-2);
+  font-size: var(--df-text-sm);
+  color: var(--df-text-secondary);
+}
+.df-project-create-basics {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--df-space-4);
+  margin-bottom: var(--df-space-4);
+}
+.df-project-create-options {
+  display: grid;
+  gap: var(--df-space-4);
+}
+.df-project-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--df-space-3);
+}
+@media (max-width: 640px) {
+  .df-project-create-basics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

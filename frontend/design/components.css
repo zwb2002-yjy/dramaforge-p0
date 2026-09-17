@@ -1133,3 +1133,48 @@ body {
     grid-row: auto;
   }
 }
+
+/* Progressive disclosure: secondary tools never compete with the main task. */
+.df-disclosure {
+  border-block: 1px solid var(--df-border-subtle);
+  margin-block: var(--df-space-4);
+  min-width: 0;
+}
+.df-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--df-space-3);
+  padding: var(--df-space-4) var(--df-space-2);
+  color: var(--df-text-secondary);
+  cursor: pointer;
+  list-style: none;
+}
+.df-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.df-disclosure > summary span {
+  display: grid;
+  gap: var(--df-space-1);
+}
+.df-disclosure > summary strong {
+  font-size: var(--df-text-md);
+  color: var(--df-text-primary);
+}
+.df-disclosure > summary small {
+  font-size: var(--df-text-sm);
+}
+.df-disclosure > summary svg {
+  flex-shrink: 0;
+}
+.df-disclosure[open] > summary svg {
+  transform: rotate(180deg);
+}
+.df-disclosure > summary:focus-visible {
+  outline: 2px solid var(--df-verdigris);
+  outline-offset: 2px;
+}
+.df-disclosure-body {
+  padding: var(--df-space-2) var(--df-space-2) var(--df-space-4);
+  min-width: 0;
+}

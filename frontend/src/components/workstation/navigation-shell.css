@@ -477,3 +477,17 @@
     grid-template-columns: 1fr;
   }
 }
+
+.df-model-scope-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-3);
+  padding-block: var(--df-space-3);
+  margin-bottom: var(--df-space-4);
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+.df-model-scope-switch [aria-pressed="true"] {
+  color: var(--df-verdigris);
+  border-color: var(--df-verdigris);
+  background: var(--df-verdigris-tint);
+}

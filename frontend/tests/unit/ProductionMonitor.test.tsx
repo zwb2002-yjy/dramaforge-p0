@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { ProductionMonitor } from "../../src/features/production/ProductionMonitor";
@@ -106,8 +106,9 @@ describe("ProductionMonitor", () => {
     expect(screen.getByTestId("stat-formal-videos").textContent).toBe("1");
     expect(screen.getByTestId("stat-completed").textContent).toBe("1");
     expect(screen.getByTestId("stat-running").textContent).toBe("1");
-    // failed runs + scene risks
-    expect(screen.getByTestId("stat-failed").textContent).toBe("3");
+    // Failures and scene risks have different units and may overlap.
+    expect(screen.getByTestId("stat-failed").textContent).toBe("1");
+    expect(screen.getByTestId("stat-risks").textContent).toBe("2");
     expect(screen.getByTestId("stat-artifacts").textContent).toBe("1");
     expect(screen.getByTestId("stat-experiments").textContent).toBe("3");
 
@@ -169,4 +170,46 @@ describe("ProductionMonitor", () => {
     expect(screen.getByTestId("stat-completed")).toHaveTextContent("1");
     expect(screen.getByTestId("stat-failed")).toHaveTextContent("0");
   });
+});
+
+it("filters risk scenes locally without changing the overview totals", () => {
+  render(
+    <ProductionMonitor
+      projectId="project-1"
+      scenes={scenes}
+      shots={shots}
+      snapshot={snapshot as never}
+      experimentCount={0}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "仅看风险" }));
+  expect(screen.queryByTestId("monitor-scene-scene-1")).not.toBeInTheDocument();
+  expect(screen.getByTestId("monitor-scene-scene-2")).toBeInTheDocument();
+  expect(screen.getByTestId("stat-scenes")).toHaveTextContent("2");
+  expect(screen.getByTestId("stat-risks")).toHaveTextContent("2");
+  fireEvent.click(screen.getByRole("button", { name: "全部场景" }));
+  expect(screen.getByTestId("monitor-scene-scene-1")).toBeInTheDocument();
+});
+
+it("does not turn pending or failed queries into empty successful facts", () => {
+  const { rerender } = render(
+    <ProductionMonitor projectId="project-1" scenes={[]} shots={[]} scenesLoading shotsLoading />,
+  );
+  expect(screen.getByText("正在读取场景制作进度…")).toBeInTheDocument();
+  expect(screen.getByTestId("stat-formal-videos")).toHaveTextContent("—");
+  expect(screen.getByTestId("stat-failed")).toHaveTextContent("—");
+  expect(screen.queryByText(/尚无场景/)).not.toBeInTheDocument();
+  rerender(
+    <ProductionMonitor
+      projectId="project-1"
+      scenes={[]}
+      shots={[]}
+      scenesError
+      shotsError
+      snapshotError
+    />,
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent("读取失败");
+  expect(screen.getByTestId("stat-shots")).toHaveTextContent("—");
+  expect(screen.queryByText(/尚无场景/)).not.toBeInTheDocument();
 });

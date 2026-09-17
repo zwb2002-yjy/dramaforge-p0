@@ -9,6 +9,7 @@ test("professional workspace persists contextual design, canvas, assets, review,
   const state = await installProfessionalMock(page);
   const suggestion = await installContextualDirectorMock(page, state);
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
   await expect(page.getByRole("heading", { name: "场景与镜头" })).toBeVisible();
   await expect(page.getByText(/预算|计费|费用/)).toHaveCount(0);

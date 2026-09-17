@@ -5,6 +5,7 @@ import { PROJECT_ID, installProfessionalMock } from "./professional-mocks";
 test("experiment branch lifecycle: create, run, adopt candidate", async ({ page }) => {
   const state = await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
 
   await page.getByLabel("实验名称").fill("Model B 转头验证");

@@ -106,3 +106,5 @@ const badgeToneClass: Record<BadgeTone, string> = {
 export function Badge({ tone = "default", className, ...props }: BadgeProps) {
   return <span className={classes("df-badge", badgeToneClass[tone], className)} {...props} />;
 }
+
+export { Disclosure } from "./Disclosure";

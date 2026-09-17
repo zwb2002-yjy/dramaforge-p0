@@ -191,6 +191,7 @@ test("manual professional production: Scene Workbench design → candidate previ
 
   // /production only monitors cross-scene facts; its existing professional
   // workbench remains available for compatibility evidence.
+  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
   expect(state.shotVersion).toBeGreaterThanOrEqual(1);
 });
@@ -292,6 +293,7 @@ test("Scene draft survives sheet close and guards route departure", async ({ pag
 test("production monitor never surfaces legacy budget UI", async ({ page }) => {
   await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
   await expect(page.getByText(/预算|计费|费用/)).toHaveCount(0);
 });

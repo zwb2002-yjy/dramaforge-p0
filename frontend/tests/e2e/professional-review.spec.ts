@@ -5,6 +5,7 @@ import { PROJECT_ID, installProfessionalMock } from "./professional-mocks";
 test("review annotations: video time range and image region, both persisted", async ({ page }) => {
   const state = await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
 
   await page.getByRole("button", { name: "审片" }).click();

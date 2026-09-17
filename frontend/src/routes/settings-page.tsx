@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
+import { Button } from "../components/ui";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
 import { WorkspaceModelProfileSettings } from "../components/provider/WorkspaceModelProfileSettings";
@@ -324,34 +325,66 @@ export function WorkspaceSettingsPage() {
 
 export function ModelConnectionSettingsPage() {
   const { workspaces, projects, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
+  const [scope, setScope] = useState<"media" | "text">("media");
 
   return (
     <main className="df-page df-settings-page" data-testid="model-settings-page">
       <SettingsHeader
         title="模型连接"
-        description="管理当前工作空间的模型供应连接和能力验证，不占用项目大厅。"
+        description="先选择要配置的能力。图像与视频按工作空间管理，文本与导演使用实例级网关。"
       />
-      <div className="df-settings-section">
-        <WorkspaceSelector
-          workspaces={workspaces.data ?? []}
-          selectedWorkspaceId={selectedWorkspaceId}
-          onChange={selectWorkspace}
-        />
+      <div className="df-model-scope-switch" role="group" aria-label="模型配置范围">
+        <Button
+          aria-pressed={scope === "media"}
+          aria-controls="media-model-settings"
+          onClick={() => setScope("media")}
+        >
+          图像与视频 · 工作空间
+        </Button>
+        <Button
+          aria-pressed={scope === "text"}
+          aria-controls="text-model-settings"
+          onClick={() => setScope("text")}
+        >
+          文本与导演 · 当前实例
+        </Button>
       </div>
-      <div className="df-settings-section">
-        <ProviderConnectionPanel
-          key={selectedWorkspaceId ?? "no-workspace"}
-          workspaceId={selectedWorkspaceId}
-          projects={projects.data ?? []}
-        />
-      </div>
-      <div className="df-settings-section">
+      <section id="media-model-settings" aria-label="图像与视频连接" hidden={scope !== "media"}>
+        <div className="df-settings-section">
+          {workspaces.isError ? (
+            <p className="flash err" role="alert">
+              无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重新读取</Button>
+            </p>
+          ) : workspaces.isPending ? (
+            <p role="status">正在读取工作空间…</p>
+          ) : (
+            <WorkspaceSelector
+              workspaces={workspaces.data ?? []}
+              selectedWorkspaceId={selectedWorkspaceId}
+              onChange={selectWorkspace}
+            />
+          )}
+        </div>
+        <div className="df-settings-section">
+          <ProviderConnectionPanel
+            key={selectedWorkspaceId ?? "no-workspace"}
+            workspaceId={selectedWorkspaceId}
+            projects={projects.data ?? []}
+          />
+        </div>
+      </section>
+      <section
+        id="text-model-settings"
+        className="df-settings-section"
+        aria-label="文本与导演网关"
+        hidden={scope !== "text"}
+      >
+        <p className="muted">作用于整个实例，不随工作空间切换。此处不配置图像或视频供应商。</p>
         <TextGatewaySettings />
-      </div>
+      </section>
     </main>
   );
 }
-
 export function DefaultPreferencesSettingsPage() {
   return (
     <main className="df-page df-settings-page" data-testid="default-settings-page">

@@ -259,12 +259,12 @@ test("mobile Production prioritizes the cross-scene overview and progressively d
 
   const firstStat = await page
     .getByTestId("monitor-stats")
-    .locator(".status-card")
+    .locator(":scope > div")
     .nth(0)
     .boundingBox();
   const secondStat = await page
     .getByTestId("monitor-stats")
-    .locator(".status-card")
+    .locator(":scope > div")
     .nth(1)
     .boundingBox();
   expect(firstStat).not.toBeNull();
@@ -286,7 +286,7 @@ test("mobile Production prioritizes the cross-scene overview and progressively d
   await expect(page.getByRole("columnheader", { name: "进入" })).toHaveCount(0);
   await expect(page.getByTestId("shot-timeline")).toHaveCount(0);
 
-  await workflowDisclosure.locator("summary").click();
+  await workflowDisclosure.locator(":scope > summary").click();
   await expect(workflowDisclosure).toHaveAttribute("open", "");
   await expect(page.getByTestId("workflow-navigator")).toBeVisible();
   await expect
@@ -435,4 +435,115 @@ test("settings activation reveals navigation without resetting the page, and ret
   await page.reload();
   await page.getByRole("link", { name: "返回创作", exact: true }).click();
   await expect(page).toHaveURL(scenePath);
+});
+
+for (const width of [910, 1440]) {
+  test(`production stays focused and preserves drafts at ${width}px`, async ({ page }) => {
+    const state = await installProfessionalMock(page);
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`/projects/${PROJECT_ID}/production`);
+    await expect(page.getByTestId("production-monitor")).toBeVisible();
+    await expect(page.getByTestId("monitor-stats").locator(":scope > div")).toHaveCount(4);
+    const advanced = page.getByTestId("production-workbench-disclosure");
+    const summary = advanced.locator(":scope > summary");
+    await expect(advanced).not.toHaveAttribute("open", "");
+    await expect(page.getByTestId("professional-workbench")).not.toBeVisible();
+    await expect(page.getByTestId("stat-completed")).not.toBeVisible();
+    await summary.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("professional-workbench")).toBeVisible();
+    await page.getByLabel("镜头导演语义").fill("还没有保存的镜头草稿");
+    await summary.click();
+    await page.setViewportSize({ width: 700, height: 900 });
+    await page.setViewportSize({ width, height: 900 });
+    await expect(advanced).not.toHaveAttribute("open", "");
+    await summary.focus();
+    await page.keyboard.press("Space");
+    await expect(page.getByLabel("镜头导演语义")).toHaveValue("还没有保存的镜头草稿");
+    await summary.click();
+    await page.getByRole("button", { name: "仅看风险" }).click();
+    await expect(page.getByRole("button", { name: "仅看风险" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // Route restoration persists UI navigation, never production facts.
+    expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([
+      {
+        method: "PATCH",
+        path: `/api/v1/projects/${PROJECT_ID}/workspace-state`,
+        body: { state: { last_view: "production" } },
+      },
+    ]);
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true);
+  });
+}
+
+test("new project keeps essentials visible and retains collapsed options without writes", async ({
+  page,
+}) => {
+  const state = await installProfessionalMock(page);
+  await page.goto("/?create=true");
+  await expect(page.getByRole("region", { name: "新建项目" })).toBeVisible();
+  await expect(page.getByLabel("项目名", { exact: true })).toBeFocused();
+  await expect(page.getByLabel("新项目工作空间")).toHaveValue(WORKSPACE_ID);
+  await expect(page.getByLabel("创作起点", { exact: true })).not.toBeVisible();
+  await page.getByLabel("项目名", { exact: true }).fill("未提交的作品");
+  const options = page.getByRole("region", { name: "新建项目" }).locator("summary");
+  await options.focus();
+  await page.keyboard.press("Enter");
+  await page.getByLabel("创作起点", { exact: true }).selectOption("TEMPLATE");
+  await page.getByLabel("创作模板", { exact: true }).selectOption("single_monologue_v1");
+  await page.getByLabel("导演参与度", { exact: true }).selectOption("MANUAL");
+  await options.click();
+  await expect(options).toContainText("从模板开始 · 手动控制");
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(page.getByRole("region", { name: "新建项目" })).not.toBeVisible();
+  await page.getByRole("button", { name: "新建项目", exact: true }).click();
+  await expect(page.getByLabel("项目名", { exact: true })).toHaveValue("未提交的作品");
+  await options.click();
+  await expect(page.getByLabel("创作模板", { exact: true })).toHaveValue("single_monologue_v1");
+  expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([]);
+});
+
+test("model settings separate workspace media connections from instance text configuration", async ({
+  page,
+}) => {
+  const state = await installProfessionalMock(page);
+  await page.route("**/api/v1/provider-plugins", (route) => route.fulfill({ json: [] }));
+  await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.goto("/settings/models");
+  await expect(page.getByRole("region", { name: "图像与视频连接" })).toBeVisible();
+  await expect(page.getByTestId("text-gateway-settings")).not.toBeVisible();
+  await page.getByLabel("供应商服务地址").fill("https://example.invalid/unsaved");
+  await page.getByRole("button", { name: "文本与导演 · 当前实例" }).click();
+  await expect(page.getByTestId("text-gateway-settings")).toBeVisible();
+  await expect(page.getByLabel("设置工作空间")).not.toBeVisible();
+  await expect(page.getByRole("region", { name: "文本与导演网关" })).toContainText(
+    "作用于整个实例",
+  );
+  await page.getByRole("button", { name: "图像与视频 · 工作空间" }).click();
+  await expect(page.getByLabel("设置工作空间")).toHaveValue(WORKSPACE_ID);
+  await expect(page.getByLabel("供应商服务地址")).toHaveValue("https://example.invalid/unsaved");
+  expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([]);
+});
+
+test("production request failure is not presented as an empty successful project", async ({
+  page,
+}) => {
+  await installProfessionalMock(page);
+  await page.route(`**/api/v1/projects/${PROJECT_ID}/scenes`, (route) =>
+    route.fulfill({ status: 503, json: { detail: "Unavailable" } }),
+  );
+  await page.goto(`/projects/${PROJECT_ID}/production`);
+  await expect(page.getByText("正在读取场景制作进度…")).toBeVisible();
+  await expect(page.getByTestId("stat-formal-videos")).toHaveText("—");
+  await expect(page.getByText("无法读取场景，请重试；这不代表项目中没有场景。")).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.getByRole("button", { name: "重新读取状态" })).toBeVisible();
+  await expect(page.getByText("尚无场景。请在场景工作区创建场景与镜头。")).toHaveCount(0);
 });

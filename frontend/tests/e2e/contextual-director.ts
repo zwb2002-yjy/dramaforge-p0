@@ -237,5 +237,6 @@ export async function exerciseContextualDirector(
   await expect(page.getByTestId("save-shot-design")).toBeDisabled();
   expect(writes()).toHaveLength(3);
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
 }

@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createRoute, useNavigate, redirect } from "@tanstack/react-router";
 import { Clapperboard, Plus, Search } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiError,
-  createProject,
   fetchBootstrapStatus,
   fetchCurrentUser,
   fetchHealth,
@@ -18,6 +17,8 @@ import {
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
 import { getRememberedProjectId } from "../lib/navigationPreferences";
+import { Button } from "../components/ui";
+import { CreateProjectForm } from "../features/project/CreateProjectForm";
 import { rootRoute } from "./__root";
 
 export const indexRoute = createRoute({
@@ -44,11 +45,6 @@ export const indexRoute = createRoute({
   }),
   component: HomePage,
 });
-
-const V1_TEMPLATES = [
-  { key: "dual_character_conflict_v1", name: "双人对白反转" },
-  { key: "single_monologue_v1", name: "单人情绪独白" },
-] as const;
 
 const STAGE_LABELS: Record<string, string> = {
   draft: "创作准备",
@@ -93,11 +89,6 @@ function HomePage() {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
     getSelectedWorkspaceId,
   );
-  const [projectName, setProjectName] = useState("新短剧");
-  const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9">("9:16");
-  const [startType, setStartType] = useState<"TEMPLATE" | "FREE">("FREE");
-  const [templateKey, setTemplateKey] = useState<string>(V1_TEMPLATES[0].key);
-  const [directorAutonomy, setDirectorAutonomy] = useState<"AUTO" | "ASSIST" | "MANUAL">("ASSIST");
   const createOpen = search.create;
   const setCreateOpen = (open: boolean) =>
     void navigate({ to: "/", search: { ...search, create: open } });
@@ -165,28 +156,6 @@ function HomePage() {
     },
   });
 
-  const createProjectMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedWorkspaceId) throw new Error("请先选择一个空间");
-      return createProject({
-        workspace_id: selectedWorkspaceId,
-        name: projectName,
-        aspect_ratio: aspectRatio,
-        start_type: startType,
-        template_key: startType === "TEMPLATE" ? templateKey : null,
-        director_autonomy: directorAutonomy,
-      });
-    },
-    onSuccess: async (project) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.workspace.projectsRoot() });
-      void navigate({
-        to: "/projects/$projectId/script",
-        params: { projectId: project.id },
-      });
-    },
-    onError: (cause: Error) => setError(cause.message),
-  });
-
   const dbUp = health.data?.db === "up" || (health.data?.status === "ok" && !health.data?.db);
   const apiLive = Boolean(health.data && !health.isError && health.data.status === "ok" && dbUp);
   const registrationAvailable = bootstrapStatus.data?.registration_available === true;
@@ -227,18 +196,13 @@ function HomePage() {
     void navigate({ to: "/projects/$projectId", params: { projectId } });
   }
 
-  function submitProject(event: FormEvent) {
-    event.preventDefault();
-    createProjectMutation.mutate();
-  }
-
   return (
     <main className="df-page" data-testid="home-panel">
       <header className="df-page-header">
         <h1>{search.panel === "select" ? "选择项目开始创作" : "项目大厅"}</h1>
         <div className="toolbar">
           {!apiLive && <span className="status-bad">服务未就绪</span>}
-          {currentUser.data && (
+          {currentUser.data && !createOpen && (
             <button className="primary" type="button" onClick={() => setCreateOpen(true)}>
               <Plus size={16} aria-hidden="true" />
               新建项目
@@ -337,76 +301,16 @@ function HomePage() {
         </section>
       ) : (
         <>
-          {createOpen && (
-            <section className="panel df-create-panel" aria-label="新建项目">
-              <div className="panel-header">
-                <h2>新建项目</h2>
-                <button className="ghost" type="button" onClick={() => setCreateOpen(false)}>
-                  取消
-                </button>
-              </div>
-              <form className="inline-form project-create" onSubmit={submitProject}>
-                <input
-                  aria-label="项目名"
-                  value={projectName}
-                  onChange={(event) => setProjectName(event.target.value)}
-                  disabled={!selectedWorkspaceId}
-                />
-                <select
-                  aria-label="画幅"
-                  value={aspectRatio}
-                  onChange={(event) => setAspectRatio(event.target.value as "9:16" | "16:9")}
-                  disabled={!selectedWorkspaceId}
-                >
-                  <option value="9:16">9:16 竖屏</option>
-                  <option value="16:9">16:9 横屏</option>
-                </select>
-                <select
-                  aria-label="创作起点"
-                  value={startType}
-                  onChange={(event) => setStartType(event.target.value as "TEMPLATE" | "FREE")}
-                  disabled={!selectedWorkspaceId}
-                >
-                  <option value="FREE">自由创建</option>
-                  <option value="TEMPLATE">从模板开始</option>
-                </select>
-                {startType === "TEMPLATE" && (
-                  <select
-                    aria-label="创作模板"
-                    value={templateKey}
-                    onChange={(event) => setTemplateKey(event.target.value)}
-                    disabled={!selectedWorkspaceId}
-                  >
-                    {V1_TEMPLATES.map((template) => (
-                      <option key={template.key} value={template.key}>
-                        {template.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <select
-                  aria-label="导演参与度"
-                  value={directorAutonomy}
-                  onChange={(event) =>
-                    setDirectorAutonomy(event.target.value as "AUTO" | "ASSIST" | "MANUAL")
-                  }
-                  disabled={!selectedWorkspaceId}
-                >
-                  <option value="AUTO">导演自动 AUTO</option>
-                  <option value="ASSIST">导演辅助 ASSIST</option>
-                  <option value="MANUAL">手动控制 MANUAL</option>
-                </select>
-                <button
-                  className="primary"
-                  type="submit"
-                  disabled={!selectedWorkspaceId || createProjectMutation.isPending}
-                >
-                  创建并进入剧本
-                </button>
-              </form>
-            </section>
-          )}
-
+          <CreateProjectForm
+            open={createOpen}
+            workspaceId={selectedWorkspaceId}
+            workspaces={workspaces.data ?? []}
+            onWorkspaceChange={selectWorkspace}
+            onCancel={() => setCreateOpen(false)}
+            onCreated={(projectId) =>
+              void navigate({ to: "/projects/$projectId/script", params: { projectId } })
+            }
+          />
           {recentProject && search.panel !== "workspace" && (
             <section className="df-lobby-section" id="recent-projects">
               <header>
@@ -475,7 +379,21 @@ function HomePage() {
               </label>
             </div>
 
-            {!workspaces.isLoading && !workspaces.data?.length ? (
+            {workspaces.isError || projects.isError ? (
+              <div className="panel" role="status">
+                <p>无法读取项目列表，请重新加载。不会因此创建或删除项目。</p>
+                <Button
+                  onClick={() => {
+                    void workspaces.refetch();
+                    if (selectedWorkspaceId) void projects.refetch();
+                  }}
+                >
+                  重新加载列表
+                </Button>
+              </div>
+            ) : workspaces.isPending ? (
+              <p role="status">正在读取工作空间…</p>
+            ) : !workspaces.data?.length ? (
               <div className="panel">
                 <p>还没有工作空间。</p>
                 <Link to="/settings/workspaces">前往设置创建工作空间</Link>

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ChevronDown } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Disclosure } from "../components/ui";
+import { useMemo, useState } from "react";
 
 import { ProductionMonitor } from "../features/production/ProductionMonitor";
 import { ProfessionalWorkbench } from "../features/production/ProfessionalWorkbench";
@@ -89,51 +89,6 @@ function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, str
     }
   }
   return map;
-}
-
-function ProductionDetail({
-  children,
-  description,
-  testId,
-  title,
-}: {
-  children: ReactNode;
-  description: string;
-  testId: string;
-  title: string;
-}) {
-  const [open, setOpen] = useState(() => window.innerWidth > 720);
-
-  useEffect(() => {
-    let wideViewport = window.innerWidth > 720;
-    const resetForViewport = () => {
-      const nextWideViewport = window.innerWidth > 720;
-      if (nextWideViewport !== wideViewport) {
-        wideViewport = nextWideViewport;
-        setOpen(nextWideViewport);
-      }
-    };
-    window.addEventListener("resize", resetForViewport);
-    return () => window.removeEventListener("resize", resetForViewport);
-  }, []);
-
-  return (
-    <details
-      className="production-detail"
-      data-testid={testId}
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>
-        <span>
-          <strong>{title}</strong>
-          <small>{description}</small>
-        </span>
-        <ChevronDown size={18} aria-hidden="true" />
-      </summary>
-      <div className="production-detail-body">{children}</div>
-    </details>
-  );
 }
 
 export function ProductionPage({ projectId }: { projectId: string }) {
@@ -240,9 +195,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      <div className="callout">
-        这里汇总全部场景的生产进度；单个镜头的实际制作在场景工作区完成，付费生成、修复与导出都需要你确认。
-      </div>
+      <p className="muted">查看正式产物与待处理状态；点击场景继续制作，或进入待审内容确认结果。</p>
 
       {msg && (
         <div
@@ -259,19 +212,29 @@ export function ProductionPage({ projectId }: { projectId: string }) {
         scenes={Array.isArray(scenes.data) ? scenes.data : []}
         shots={shots.data ?? []}
         snapshot={snapshot.data}
-        experimentCount={Array.isArray(experiments.data) ? experiments.data.length : 0}
+        experimentCount={experiments.data?.length}
+        scenesLoading={scenes.isPending}
+        scenesError={scenes.isError}
+        shotsLoading={shots.isPending}
+        shotsError={shots.isError}
+        snapshotError={snapshot.isError}
+        onRetry={() => {
+          void scenes.refetch();
+          void shots.refetch();
+          void snapshot.refetch();
+        }}
       />
 
-      <ProductionDetail
+      <Disclosure
         title="镜头工作流"
         description="按场景查看镜头级进度"
         testId="production-workflow-disclosure"
       >
         <WorkflowNavigator projectId={projectId} />
-      </ProductionDetail>
+      </Disclosure>
 
       {revisionShotId && (
-        <ProductionDetail
+        <Disclosure
           title="创意能力"
           description="调整当前镜头的创作策略"
           testId="production-capabilities-disclosure"
@@ -281,10 +244,10 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             sceneId={selectedSceneId}
             shotId={revisionShotId}
           />
-        </ProductionDetail>
+        </Disclosure>
       )}
 
-      <ProductionDetail
+      <Disclosure
         title="高级镜头工具"
         description="资产、实验、审片与画布"
         testId="production-workbench-disclosure"
@@ -437,7 +400,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             </span>
           ))}
         </div>
-      </ProductionDetail>
+      </Disclosure>
     </div>
   );
 }

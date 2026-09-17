@@ -1,4 +1,4 @@
-﻿/* ========================================================================
+/* ========================================================================
    Visual 2.1 workstation refinement
    ------------------------------------------------------------------------
    This layer consumes the existing Visual 2.0 tokens and intentionally sits
@@ -680,72 +680,6 @@
 
   .page-title-row p {
     margin-top: var(--df-space-1);
-  }
-
-  .production-detail {
-    min-width: 0;
-    overflow: hidden;
-    border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-  }
-
-  .production-detail > summary {
-    min-height: 56px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--df-space-4);
-    padding: var(--df-space-3) var(--df-space-4);
-    color: var(--df-text-primary);
-    background: var(--df-surface-1);
-    cursor: pointer;
-    list-style: none;
-  }
-
-  .production-detail > summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .production-detail > summary > span {
-    min-width: 0;
-    display: grid;
-    gap: var(--df-space-1);
-  }
-
-  .production-detail > summary strong {
-    font-size: var(--df-text-md);
-  }
-
-  .production-detail > summary small {
-    color: var(--df-text-muted);
-    font-size: var(--df-text-xs);
-  }
-
-  .production-detail > summary svg {
-    flex: 0 0 auto;
-    color: var(--df-text-muted);
-    transition: transform var(--df-duration-fast) var(--df-ease);
-  }
-
-  .production-detail[open] > summary {
-    border-bottom: 1px solid var(--df-border-subtle);
-    background: var(--df-surface-2);
-  }
-
-  .production-detail[open] > summary svg {
-    transform: rotate(180deg);
-  }
-
-  .production-detail-body {
-    min-width: 0;
-    padding: var(--df-space-4);
-  }
-
-  .production-detail-body > .workflow-navigator,
-  .production-detail-body > .creative-capabilities-panel,
-  .production-detail-body > .professional-workbench {
-    margin: 0;
   }
 
   .panel {
