@@ -2256,6 +2256,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/maintenance/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Recovery
+         * @description Failures the current Owner can still replay (empty for everyone else).
+         */
+        get: operations["list_recovery_api_v1_maintenance_recovery_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance/director-wakeups/{inbox_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay Director Wakeup
+         * @description Replay one dead-lettered Director wakeup.
+         */
+        post: operations["replay_director_wakeup_api_v1_maintenance_director_wakeups__inbox_id__replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance/outbox/dead-letters/{dead_letter_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay Outbox Dead Letter
+         * @description Replay one dead-lettered Outbox event exactly once.
+         */
+        post: operations["replay_outbox_dead_letter_api_v1_maintenance_outbox_dead_letters__dead_letter_id__replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/workflow-state": {
         parameters: {
             query?: never;
@@ -2268,8 +2328,8 @@ export interface paths {
          * @description Wire-visible workflow state for one shot (read-only aggregation).
          *
          *     Resolves the workspace keyframe manifest so ``capability_assessment`` is a
-         *     deterministic read (mirrors the planning freeze), letting the UI surface the
-         *     EXACT / APPROXIMATE / UNSUPPORTED status honestly without a provider call.
+         *     deterministic read (mirrors the domain planning freeze), letting the UI
+         *     surface EXACT / APPROXIMATE / UNSUPPORTED honestly without a provider call.
          */
         get: operations["get_shot_workflow_state_api_v1_projects__project_id__shots__shot_id__workflow_state_get"];
         put?: never;
@@ -3537,6 +3597,19 @@ export interface components {
         DirectorTurnStopBody: {
             /** Expected Revision */
             expected_revision: number;
+        };
+        /** DirectorWakeupReplayRequest */
+        DirectorWakeupReplayRequest: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Expected Dead Letter At
+             * Format: date-time
+             */
+            expected_dead_letter_at: string;
         };
         /** DispatchResponse */
         DispatchResponse: {
@@ -4830,6 +4903,14 @@ export interface components {
             /** Clips */
             clips: components["schemas"]["OpenCutClip"][];
         };
+        /** OutboxDeadLetterReplayRequest */
+        OutboxDeadLetterReplayRequest: {
+            /**
+             * Expected Dead Lettered At
+             * Format: date-time
+             */
+            expected_dead_lettered_at: string;
+        };
         /** PartialApplyInput */
         PartialApplyInput: {
             /** Decisions */
@@ -5329,6 +5410,64 @@ export interface components {
              * Format: uuid
              */
             artifact_id: string;
+        };
+        /**
+         * RecoveryItemRead
+         * @description One replayable failure as shown in Settings -> Advanced recovery.
+         */
+        RecoveryItemRead: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "director_wakeup" | "outbox_dead_letter";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Project Id */
+            project_id: string | null;
+            /** Label */
+            label: string;
+            /** Detail */
+            detail: string;
+            /** Attempts */
+            attempts: number;
+            /**
+             * Failed At
+             * Format: date-time
+             */
+            failed_at: string;
+        };
+        /** RecoveryListRead */
+        RecoveryListRead: {
+            /** Items */
+            items: components["schemas"]["RecoveryItemRead"][];
+        };
+        /**
+         * RecoveryReplayRead
+         * @description Result of one replay; ``applied`` is False when nothing was left to do.
+         */
+        RecoveryReplayRead: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "director_wakeup" | "outbox_dead_letter";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Applied */
+            applied: boolean;
+            /**
+             * Replayed At
+             * Format: date-time
+             * @description Server time of the accepted replay
+             */
+            replayed_at: string;
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -12704,6 +12843,117 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FinalFilmJobRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recovery_api_v1_maintenance_recovery_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_director_wakeup_api_v1_maintenance_director_wakeups__inbox_id__replay_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                inbox_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectorWakeupReplayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryReplayRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_outbox_dead_letter_api_v1_maintenance_outbox_dead_letters__dead_letter_id__replay_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                dead_letter_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutboxDeadLetterReplayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryReplayRead"];
                 };
             };
             /** @description Validation Error */

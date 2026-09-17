@@ -18,7 +18,7 @@ Migration head: 20260916_0070
 - User-facing access is the frontend gateway at port 8080; the API process is
   an internal Compose service on port 8000.
 - No compatibility endpoint is kept for retired product concepts.
-- `backend/app/api/v1/router.py` registers 26 routers and exposes `/status`.
+- `backend/app/api/v1/router.py` registers 27 routers and exposes `/status`.
 
 ## Route ownership
 
@@ -41,6 +41,7 @@ Migration head: 20260916_0070
 | Editing | editing.py, opencut.py, final_film.py | EditSession timeline, suggestion, export, OpenCut manifest, Final Film bound to a timeline version |
 | Creative capabilities | creative_capabilities.py, workflow_planning.py | provider-neutral intent/capability planning and the read-only workflow-state aggregation; workflow/participation freeze is a domain action for Director/Workbench, not an HTTP surface |
 | Events | events.py | SSE subscription with Last-Event-ID resume |
+| Maintenance | maintenance.py | Owner-only recovery: list persisted failures, replay one Director wakeup or one Outbox dead letter with the expected failure identity |
 | Worker tick | worker.py | worker-only HTTP tick for local/dev when Arq runs separately |
 
 ## Single authoritative write entry

@@ -6,6 +6,7 @@ import { ModelProfileSettings } from "../components/provider/ModelProfileSetting
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
 import { WorkspaceModelProfileSettings } from "../components/provider/WorkspaceModelProfileSettings";
 import { WorkspaceTextCredentialSettings } from "../components/provider/WorkspaceTextCredentialSettings";
+import { AdvancedRecoveryPanel } from "../features/maintenance/AdvancedRecoveryPanel";
 import { CreativeAutonomySwitcher } from "../features/project/CreativeAutonomySwitcher";
 import {
   createWorkspace,
@@ -193,6 +194,7 @@ export function AccountSettingsPage() {
           )}
         </section>
       </div>
+      <AdvancedRecoveryPanel />
     </main>
   );
 }

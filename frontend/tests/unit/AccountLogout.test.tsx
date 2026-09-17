@@ -16,6 +16,11 @@ vi.mock("../../src/lib/api", () => ({
   logoutUser: vi.fn(),
   getSelectedWorkspaceId: vi.fn(() => "workspace-1"),
   setSelectedWorkspaceId: vi.fn(),
+  // The account page also mounts the recovery panel; it hides itself when the
+  // owner-only query is not available.
+  apiGet: vi.fn(() => Promise.reject(new Error("no recovery access"))),
+  apiSend: vi.fn(),
+  fetchCsrf: vi.fn(),
 }));
 
 afterEach(() => vi.clearAllMocks());
