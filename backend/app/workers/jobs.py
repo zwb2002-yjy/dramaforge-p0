@@ -50,11 +50,6 @@ def _worker_failure_code(exc: Exception) -> str:
     return "WORKER_ERROR"
 
 
-async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
-    _ = ctx
-    return {"status": "ok", "job": "health_ping"}
-
-
 async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
     """Resume polling persisted remote tasks after a Heavy Worker restart."""
     from datetime import UTC, datetime, timedelta
@@ -401,25 +396,7 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             return {"status": "failed", "error": str(exc)[:300]}
 
 
-async def dispatch_outbox(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Periodic: claim outbox + enqueue Arq jobs (no Adapter)."""
-    from app.runtime.scheduler import NodeRunScheduler, RedisStreamPublisher
-
-    settings = get_settings()
-    factory = get_session_factory()
-    async with factory() as session:
-        pub = RedisStreamPublisher(settings.redis_url)
-        try:
-            n = await NodeRunScheduler(session, publisher=pub).dispatch_pending(
-                worker_id=str(ctx.get("job_id", "worker"))
-            )
-            return {"enqueued": n}
-        finally:
-            await pub.close()
-
-
-JOB_FUNCTIONS = [
-    health_ping,
-    execute_node_run,
-    dispatch_outbox,
-]
+# Outbox dispatch is a resident process (``app.workers.dispatcher``), not an
+# Arq job. Keeping only executable NodeRun work here prevents a registered but
+# never-enqueued maintenance job from becoming a second dispatch path.
+JOB_FUNCTIONS = [execute_node_run]
