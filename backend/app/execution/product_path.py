@@ -371,15 +371,6 @@ class ExecuteNodeResult:
     node_type: str
 
 
-# Back-compat alias
-ExecuteKeyframeResult = ExecuteNodeResult
-
-
-def _input_hash(payload: dict[str, object]) -> str:
-    raw = repr(sorted(payload.items())).encode()
-    return hashlib.sha256(raw).hexdigest()
-
-
 def _snapshot_int(value: object, *, default: int) -> int:
     if isinstance(value, bool):
         return default

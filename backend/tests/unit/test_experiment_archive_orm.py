@@ -1,4 +1,4 @@
-"""P5-01 Experiment ORM tests (03 §45)."""
+"""Retained experiment archive mappings: storage compatibility, not product behavior."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.assets.models import Shot
-from app.production.models import ProductionExperiment, ShotExperiment
+from app.production.archive_models import ProductionExperiment, ShotExperiment
 from app.shared.base import Base
 from app.shared.security import hash_password
 from sqlalchemy import select
@@ -86,10 +86,16 @@ async def test_experiment_round_trip_with_shot_experiments(session: AsyncSession
     await session.flush()
 
     rows = (
-        await session.execute(
-            select(ShotExperiment).where(ShotExperiment.production_experiment_id == experiment.id)
+        (
+            await session.execute(
+                select(ShotExperiment).where(
+                    ShotExperiment.production_experiment_id == experiment.id
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].model_overrides["video.shot"] == "agnes/video-model-b"
     assert rows[0].source_shot_version == 1
@@ -146,3 +152,17 @@ async def test_shot_experiment_unique_per_experiment_and_shot(session: AsyncSess
 
     with pytest.raises(IntegrityError):
         await session.flush()
+
+
+def test_archive_is_not_exported_from_current_production_models() -> None:
+    from app.production import models
+    from app.shared.model_registry import load_all_models
+
+    load_all_models()
+    assert not hasattr(models, "ProductionExperiment")
+    assert not hasattr(models, "ShotExperiment")
+    assert ProductionExperiment.__module__ == "app.production.archive_models"
+    assert ShotExperiment.__module__ == "app.production.archive_models"
+    assert Base.metadata.tables["production_experiments"] is ProductionExperiment.__table__
+    assert Base.metadata.tables["shot_experiments"] is ShotExperiment.__table__
+    assert "experiment_branches" in Base.metadata.tables

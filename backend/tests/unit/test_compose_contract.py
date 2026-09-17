@@ -45,11 +45,9 @@ def test_compose_defines_required_boot0_services() -> None:
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "NO_PROXY",
-        "TEXT_LLM_ENABLED",
-        "TEXT_LLM_API_KEY",
-        "TEXT_LLM_BASE_URL",
-        "TEXT_LLM_MODEL",
-        "TEXT_LLM_API_STYLE",
+        "LITELLM_GATEWAY_URL",
+        "LITELLM_API_KEY",
+        "LITELLM_LOGICAL_MODELS",
         "TTS_ENABLED",
         "TTS_ENGINE",
         "TTS_VOICE",
@@ -287,3 +285,24 @@ def test_frontend_html_cannot_cache_old_chunk_entrypoints() -> None:
     assert 'location ^~ /assets/' in nginx
     assert 'try_files $uri =404;' in nginx
     assert 'add_header X-Content-Type-Options "nosniff" always;' in nginx
+
+
+def test_retired_text_settings_are_not_deployment_inputs() -> None:
+    for filename in ("docker-compose.yml", "docker-compose.quality.yml", ".env.example"):
+        assert "TEXT_LLM_" not in (REPO_ROOT / filename).read_text(encoding="utf-8")
+
+
+def test_provider_forbidden_processes_disable_canonical_text_gateway() -> None:
+    runtime = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    quality = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
+    )["services"]
+    for service in (runtime["worker-director"], quality["backend-quality"]):
+        env = service["environment"]
+        assert env["AGNES_ENABLED"] == "false"
+        assert env["LITELLM_GATEWAY_URL"] == ""
+        assert env["LITELLM_API_KEY"] == ""
+    for name in ("api", "worker-default", "worker-heavy"):
+        env = runtime[name]["environment"]
+        assert env["LITELLM_GATEWAY_URL"] == "${LITELLM_GATEWAY_URL:-http://litellm:4000}"
+        assert env["LITELLM_API_KEY"] == "${LITELLM_API_KEY:-}"

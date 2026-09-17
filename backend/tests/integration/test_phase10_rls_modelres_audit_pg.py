@@ -34,11 +34,8 @@ from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
-from app.production.models import (
-    ProductionExperiment,
-    ShotExperiment,
-    ShotReferenceBinding,
-)
+from app.production.archive_models import ProductionExperiment, ShotExperiment
+from app.production.models import ShotReferenceBinding
 from app.production.workbench_execution import (
     WorkbenchExecutionInput,
     WorkbenchExecutionService,

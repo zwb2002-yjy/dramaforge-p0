@@ -14,8 +14,9 @@ from app.director.proposal_commands import (
     ProposalCommandRegistry,
 )
 from app.execution.models import NodeRun
+from app.production.archive_models import ProductionExperiment, ShotExperiment
 from app.production.experiment_service import ExperimentCreateBody, create_experiment_branch
-from app.production.models import ExperimentBranch, ProductionExperiment, ShotExperiment
+from app.production.models import ExperimentBranch
 from app.shared.base import Base
 from app.shared.errors import ConflictError, NotFoundError
 from app.shared.security import hash_password

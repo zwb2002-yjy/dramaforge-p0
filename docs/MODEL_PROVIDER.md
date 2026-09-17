@@ -33,8 +33,11 @@ LITELLM_GATEWAY_URL / LITELLM_API_KEY 连接网关；上游供应商
 Key 与模型路由由 LiteLLM 部署管理。设置页仅说明配置位置，不宣称网关就绪。
 工作空间 provider-name 文本 Key 表单、通用 provider-credentials API 和旧
 Settings 覆盖 resolver 已退役；历史加密记录保留，不读取、不迁成网关 Key。
-旧 TEXT_LLM_* 配置不是文本执行入口。媒体 BYOK 仍使用 ProviderConnection
-及其不可变 credential revision，不受文本表面退役影响。
+旧 TEXT_LLM_* Settings / 环境变量入口及其就绪检查已删除；遗留环境变量不再被读取，
+不迁移为网关凭证，也不能启用文本执行。通用单元测试、backend-quality 与禁止直接
+调用 Provider 的 worker-director 显式清空 LITELLM_GATEWAY_URL / LITELLM_API_KEY。
+现有 litellm/text-llm 引导桥、legacy-text 与其他逻辑别名及模型选择保持不变。
+媒体 BYOK 仍使用 ProviderConnection 及其不可变 credential revision，不受文本表面退役影响。
 
 ## 不可绕过的规则
 

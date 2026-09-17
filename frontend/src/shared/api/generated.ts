@@ -1131,46 +1131,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{project_id}/dispatch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Dispatch Project Work
-         * @description Publish Outbox + enqueue Arq jobs only — does not run Adapters.
-         */
-        post: operations["dispatch_project_work_api_v1_projects__project_id__dispatch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/node-runs/{node_run_id}/enqueue": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Enqueue Node Run
-         * @description Enqueue Worker job for a NodeRun. Adapter runs only in Worker.
-         */
-        post: operations["enqueue_node_run_api_v1_projects__project_id__node_runs__node_run_id__enqueue_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/annotations": {
         parameters: {
             query?: never;
@@ -3526,13 +3486,6 @@ export interface components {
              */
             expected_dead_letter_at: string;
         };
-        /** DispatchResponse */
-        DispatchResponse: {
-            /** Enqueued */
-            enqueued: number;
-            /** Job Ids */
-            job_ids: string[];
-        };
         /** EditExportRead */
         EditExportRead: {
             /**
@@ -3791,18 +3744,6 @@ export interface components {
             native_options?: {
                 [key: string]: unknown;
             };
-        };
-        /** EnqueueResponse */
-        EnqueueResponse: {
-            /**
-             * Node Run Id
-             * Format: uuid
-             */
-            node_run_id: string;
-            /** Status */
-            status: string;
-            /** Job Id */
-            job_id: string;
         };
         /** EpisodeRead */
         EpisodeRead: {
@@ -9566,85 +9507,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectSnapshot"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dispatch_project_work_api_v1_projects__project_id__dispatch_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DispatchResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    enqueue_node_run_api_v1_projects__project_id__node_runs__node_run_id__enqueue_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                node_run_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnqueueResponse"];
                 };
             };
             /** @description Validation Error */

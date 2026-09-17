@@ -152,19 +152,6 @@ class Settings(BaseSettings):
     )
     reference_token_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
 
-    # Text LLM BYOK (Anthropic-compatible Messages API, e.g. baizhi / DeepSeek).
-    text_llm_enabled: bool = False
-    text_llm_api_key: str = Field(default="", description="User BYOK for text LLM")
-    text_llm_base_url: str = Field(
-        default="",
-        description="Anthropic-compatible base, e.g. https://host/api/anthropic",
-    )
-    text_llm_model: str = Field(
-        default="deepseek-v4-flash",
-        description="Catalog id (baizhi dsv4flash → deepseek-v4-flash)",
-    )
-    text_llm_api_style: Literal["anthropic", "openai"] = "anthropic"
-
     # LiteLLM Gateway backend (spec §24–§26, §113; fix spec §3/§22). Text models
     # registered in the V3 registry with ``backend.kind="litellm"`` submit
     # through this OpenAI-compatible gateway. ``LITELLM_API_KEY`` is the
@@ -179,7 +166,7 @@ class Settings(BaseSettings):
     )
     litellm_api_key: str = Field(default="", description="LiteLLM Gateway API key")
     # Logical alias the ``litellm/text-llm`` bootstrap bridge sends to the
-    # gateway (fix spec §32/§33). Decoupled from TEXT_LLM_MODEL — DramaForge
+    # gateway (fix spec §32/§33). DramaForge
     # requests the logical group, the LiteLLM Router picks the deployment.
     litellm_text_gateway_model: str = Field(
         default="legacy-text",
@@ -242,13 +229,6 @@ class Settings(BaseSettings):
     def minimax_configured(self) -> bool:
         """True when MiniMax BYOK is present and its profile is enabled."""
         return bool(self.minimax_enabled and self.minimax_api_key.strip())
-
-    def text_llm_configured(self) -> bool:
-        return bool(
-            self.text_llm_enabled
-            and self.text_llm_api_key.strip()
-            and self.text_llm_base_url.strip()
-        )
 
 
 @lru_cache

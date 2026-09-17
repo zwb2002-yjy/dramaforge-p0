@@ -160,11 +160,6 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
-      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
-      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
-      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
-      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
-      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
@@ -344,11 +339,6 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
-      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
-      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
-      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
-      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
-      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
@@ -392,7 +382,9 @@ services:
       WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       AGNES_ENABLED: "false"
-      TEXT_LLM_ENABLED: "false"
+      # This process must not submit text provider requests.
+      LITELLM_GATEWAY_URL: ""
+      LITELLM_API_KEY: ""
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
@@ -449,11 +441,6 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
-      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
-      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
-      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
-      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
-      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}

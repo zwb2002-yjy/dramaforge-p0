@@ -1,4 +1,4 @@
-"""Production snapshot and Outbox-Arq enqueue routes (no Adapter in API)."""
+"""Read-only production snapshots and Artifact evidence delivery."""
 
 from __future__ import annotations
 
@@ -10,9 +10,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
-from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.api.deps import CurrentUser, SessionDep, require_selected_workspace
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
-from app.runtime.scheduler import NodeRunScheduler
 from app.shared.errors import NotFoundError, ValidationAppError
 
 router = APIRouter(
@@ -89,17 +88,6 @@ class ProjectSnapshot(BaseModel):
     node_runs: list[NodeRunRead]
     artifacts: list[ArtifactRead]
     provider_operations: list[ProviderOperationRead]
-
-
-class DispatchResponse(BaseModel):
-    enqueued: int
-    job_ids: list[str]
-
-
-class EnqueueResponse(BaseModel):
-    node_run_id: UUID
-    status: str
-    job_id: str
 
 
 def _public_provider_request_summary(operation: ProviderOperation) -> dict[str, object]:
@@ -349,55 +337,4 @@ async def project_snapshot(
             )
             for operation in operations
         ],
-    )
-
-
-@router.post(
-    "/projects/{project_id}/dispatch",
-    response_model=DispatchResponse,
-)
-async def dispatch_project_work(
-    project_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-) -> DispatchResponse:
-    """Publish Outbox + enqueue Arq jobs only — does not run Adapters."""
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    sched = NodeRunScheduler(session)
-    n = await sched.dispatch_pending(
-        worker_id=f"api-enqueue:{user.id}",
-        project_id=project_id,
-    )
-    return DispatchResponse(enqueued=n, job_ids=list(sched.enqueued_job_ids))
-
-
-@router.post(
-    "/projects/{project_id}/node-runs/{node_run_id}/enqueue",
-    response_model=EnqueueResponse,
-)
-async def enqueue_node_run(
-    project_id: UUID,
-    node_run_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-) -> EnqueueResponse:
-    """Enqueue Worker job for a NodeRun. Adapter runs only in Worker."""
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    run = await session.get(NodeRun, node_run_id)
-    if run is None or run.project_id != project_id:
-        from app.shared.errors import NotFoundError
-
-        raise NotFoundError("node_run not found")
-    response_run_id = run.id
-    response_status = run.status
-    job_id = await NodeRunScheduler(session).enqueue_node_run_only(node_run_id)
-    # enqueue_node_run_only commits before publishing to Arq. PostgreSQL RLS
-    # settings are transaction-local, so refreshing here would query without
-    # the request's project scope and can race a fast Worker to a terminal state.
-    return EnqueueResponse(
-        node_run_id=response_run_id,
-        status=response_status,
-        job_id=job_id,
     )

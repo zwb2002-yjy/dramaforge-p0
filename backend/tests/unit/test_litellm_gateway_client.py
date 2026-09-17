@@ -8,6 +8,7 @@ system-default preference (§34/§103).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -15,6 +16,8 @@ import pytest
 from app.config import Settings
 from app.providers.bootstrap import litellm_text_manifest
 from app.providers.capabilities import Capability
+from app.providers.contracts.common import ExecutionContext
+from app.providers.contracts.text import TextGenerateRequest, TextMessage
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.client import (
     LiteLLMGatewayClient,
@@ -28,6 +31,7 @@ from app.providers.litellm_gateway.model_catalog import (
 )
 from app.providers.registry import ModelRegistry
 from app.providers.selector import DefaultModelSelector
+from app.shared.errors import ValidationAppError
 
 _GATEWAY = Settings(
     app_env="development",
@@ -190,7 +194,7 @@ class TestLogicalAliases:
         manifest = litellm_text_manifest()
         assert manifest.metadata["bootstrap_bridge"] is True
         assert manifest.metadata["legacy_compat"] is True
-        # gateway_model is the logical alias, not TEXT_LLM_MODEL (fix spec §32/§33).
+        # The bridge sends a logical alias; LiteLLM owns upstream model routing.
         assert manifest.metadata["backend"]["gateway_model"] == "legacy-text"
 
     def test_system_default_prefers_bootstrap_bridge(self) -> None:
@@ -290,3 +294,77 @@ class TestProfileLogicalAliasRouting:
         assert result.status.value == "succeeded"
         payload = json.loads(requests[0].content)
         assert payload["model"] == "script-quality"
+
+
+class TestRetiredTextSettings:
+    @pytest.mark.parametrize("source", ["environment", "dotenv"])
+    def test_legacy_knobs_are_ignored(
+        self, source: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        retired = {
+            "TEXT_LLM_ENABLED": "true",
+            "TEXT_LLM_API_KEY": "obsolete-test-key",
+            "TEXT_LLM_BASE_URL": "https://obsolete.example",
+            "TEXT_LLM_MODEL": "obsolete-model",
+            "TEXT_LLM_API_STYLE": "no-longer-validated",
+        }
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "" if source == "environment" else "\n".join(
+                f"{key}={value}" for key, value in retired.items()
+            ),
+            encoding="utf-8",
+        )
+        for key, value in retired.items():
+            monkeypatch.delenv(key, raising=False)
+            if source == "environment":
+                monkeypatch.setenv(key, value)
+        settings = Settings(
+            _env_file=env_file, litellm_gateway_url="", litellm_api_key=""
+        )
+        for key in retired:
+            assert key.lower() not in Settings.model_fields
+            assert not hasattr(settings, key.lower())
+        assert not hasattr(settings, "text_llm_configured")
+        assert not LiteLLMModelAdapter(litellm_text_manifest(), settings=settings).configured()
+        # Explicit canonical configuration still enables the unchanged bridge.
+        gateway = Settings(
+            _env_file=env_file,
+            litellm_gateway_url="https://gateway.example",
+            litellm_api_key="gateway-key",
+        )
+        assert LiteLLMModelAdapter(litellm_text_manifest(), settings=gateway).configured()
+        assert gateway.litellm_text_gateway_model == "legacy-text"
+
+    async def test_unit_defaults_override_dotenv_and_reject_before_http(
+        self, tmp_path: Path
+    ) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "LITELLM_GATEWAY_URL=https://gateway.example\n"
+            "LITELLM_API_KEY=must-not-be-used\n",
+            encoding="utf-8",
+        )
+        # No explicit gateway overrides: conftest must blank inherited settings.
+        settings = Settings(_env_file=env_file)
+        assert settings.litellm_gateway_url == ""
+        assert settings.litellm_api_key == ""
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            raise AssertionError("disabled gateway must not attempt HTTP")
+
+        adapter = LiteLLMModelAdapter(
+            litellm_text_manifest(), settings=settings, transport=httpx.MockTransport(handler)
+        )
+        assert not adapter.configured()
+        with pytest.raises(ValidationAppError) as exc:
+            await adapter.create(
+                Capability.TEXT_GENERATE,
+                TextGenerateRequest(messages=[TextMessage(role="user", content="test")]),
+                ExecutionContext(trace_id="isolated-unit-test"),
+            )
+        assert exc.value.details["code"] == "MODEL_PROFILE_MODEL_NOT_CONFIGURED"
+        assert requests == []
+        assert adapter.calls == []

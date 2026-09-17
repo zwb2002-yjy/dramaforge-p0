@@ -45,9 +45,13 @@ FORBIDDEN_TEXT = (
     "settings_for_workspace_" + "provider",
     "Experiment" + "Service",
     "ExperimentCreate" + "Input",
+    "ExecuteKeyframe" + "Result",
+    "/projects/" + "{project_id}/dispatch",
+    "/projects/" + "{project_id}/node-runs/{node_run_id}/enqueue",
 )
 FORBIDDEN_FILES = (
     ROOT / "backend" / "app" / "creation",
+    ROOT / "backend" / "app" / "shared" / "ids.py",
     ROOT / "backend" / "app" / "api" / "v1" / "characters.py",
     ROOT / "backend" / "app" / "api" / "v1" / "credentials.py",
     ROOT
@@ -100,9 +104,21 @@ def main() -> int:
         if path.resolve() == Path(__file__).resolve():
             continue
         source = path.read_text(encoding="utf-8", errors="replace")
+        if (
+            path.is_relative_to(ROOT / "backend" / "app")
+            and path
+            not in {
+                ROOT / "backend" / "app" / "production" / "archive_models.py",
+                ROOT / "backend" / "app" / "shared" / "model_registry.py",
+            }
+            and "archive_models" in source
+        ):
+            failures.append(
+                f"{path.relative_to(ROOT)} imports archival storage into runtime"
+            )
         # Old ORM definitions remain for data retention, never runtime consumers.
         if path.is_relative_to(ROOT / "backend" / "app") and path != (
-            ROOT / "backend" / "app" / "production" / "models.py"
+            ROOT / "backend" / "app" / "production" / "archive_models.py"
         ):
             for legacy_model in ("Production" + "Experiment", "Shot" + "Experiment"):
                 if legacy_model in source:
