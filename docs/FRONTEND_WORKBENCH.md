@@ -58,7 +58,8 @@ frontend/src/
   （导演介入 / 人工确认 / proposal），语义状态色独立；
 - 深色专业工作台风格；专业感来自结构、密度、信息层级与动作纪律；
 - Resonance 是受控例外的独立表现世界；
-- `/design-preview` 路由提供中性设计系统展示。
+- `/design-preview` 是开发期工具：`routeTree` 只在 `import.meta.env.DEV` 时注册该路由，
+  生产构建（`vite build`）下不存在这个入口。
 
 骨架方法论（先定骨架再写页面、Token-only 样式、出现两次即抽象等）来自
 `.claude/skills/frontend-skeleton/SKILL.md`。

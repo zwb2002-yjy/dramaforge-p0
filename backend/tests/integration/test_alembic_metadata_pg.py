@@ -14,13 +14,10 @@ from pg_support import alembic_head, available, database_url
 from sqlalchemy import CheckConstraint, create_engine, inspect, text
 
 _DATABASE_URL = database_url("postgresql+psycopg")
-_CANONICAL_CHECK_NAMES = {
-    "ck_human_review_decision_value",
-    "ck_repair_request_option",
-    "ck_node_runs_cached_reused",
-    "ck_node_runs_completed_artifact",
-    "ck_node_runs_cached_zero_cost",
-}
+# Project-named CHECK constraints carry the `ck_` prefix. Comparing all of
+# them (instead of a hand-maintained subset) auto-discovers every new check and
+# fails when either side is missing one.
+_CHECK_NAME_PREFIX = "ck_"
 pytestmark = pytest.mark.skipif(
     os.environ.get("TEST_PG_ENABLED") != "1" or not available(_DATABASE_URL),
     reason="set TEST_PG_ENABLED=1 with an available PostgreSQL quality database",
@@ -61,7 +58,8 @@ def _orm_checks() -> dict[tuple[str, str], str]:
         for constraint in table.constraints
         if (
             isinstance(constraint, CheckConstraint)
-            and constraint.name in _CANONICAL_CHECK_NAMES
+            and constraint.name is not None
+            and constraint.name.startswith(_CHECK_NAME_PREFIX)
         )
     }
 
@@ -73,7 +71,8 @@ def _database_checks(connection) -> dict[tuple[str, str], str]:
         for table_name in inspector.get_table_names(schema="public")
         for item in inspector.get_check_constraints(table_name, schema="public")
         if (
-            item.get("name") in _CANONICAL_CHECK_NAMES
+            item.get("name") is not None
+            and str(item["name"]).startswith(_CHECK_NAME_PREFIX)
             and item.get("sqltext") is not None
         )
     }
@@ -97,7 +96,7 @@ def _database_enum_labels(connection) -> dict[str, tuple[str, ...]]:
 
 
 def test_migration_head_has_no_orm_metadata_drift() -> None:
-    """Compare every reflected table shape plus named CHECK constraints."""
+    """Compare every reflected table shape plus every project-named CHECK."""
     load_all_models()
     engine = create_engine(_DATABASE_URL, pool_pre_ping=True)
     try:
