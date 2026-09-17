@@ -610,7 +610,7 @@ async def test_old_task_never_reads_new_binding_pg(
     p5_plugin: ProviderPlugin,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.execution.product_path as pp
+    import app.execution.provider_execution as provider_execution
     from app.assets.models import Episode, Scene, Shot
     from app.providers.models import ProjectProviderBinding
 
@@ -703,7 +703,7 @@ async def test_old_task_never_reads_new_binding_pg(
 
     # Execute the OLD run. It must submit against B1 (frozen at dispatch), not B2.
     monkeypatch.setattr(
-        pp,
+        provider_execution,
         "get_settings",
         lambda: Settings(
             app_env="test",

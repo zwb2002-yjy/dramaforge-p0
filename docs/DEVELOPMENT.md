@@ -23,7 +23,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_docker.ps1
 ```
 
-（Linux/macOS 用 run_quality.ps1 中的等价 Docker Compose 命令。）
+（Linux/macOS 用 scripts/run_quality_in_docker.ps1 中的等价 Docker Compose 命令。）
 该门构建 backend 质量容器（Python 3.14.x / Debian Bookworm）与 frontend 质量容器
 （Node 24 LTS + Chromium），执行：
 
@@ -31,7 +31,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 - backend 单测；
 - PostgreSQL `alembic upgrade head` / `alembic check` 与集成测试；
 - OpenAPI 导出与 generated client 检查；
-- 前端 format / lint / typecheck / Vitest / 生产构建 / Playwright E2E；
+- 前端 format / lint / typecheck / Vitest / 生产构建 / 生产路由注册检查 / Playwright E2E；
 - LiteLLM 集成（固定官方 Proxy 镜像 + 确定性 mock 模型，无外部 Provider 调用）。
 
 本地完整质量门与 GitHub Full Gate 共用 `docker-compose.quality.yml`，不维护第二套
@@ -41,7 +41,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 - docs-only：不构建 backend/frontend 质量镜像，不启动 PostgreSQL、Redis、
   Playwright、LiteLLM，也不执行依赖审计；
 - 普通 backend-only：backend 镜像 + ruff / mypy / backend unit；
-- 普通 frontend-only：frontend 镜像 + format / lint / typecheck / Vitest / build；
+- 普通 frontend-only：frontend 镜像 + format / lint / typecheck / Vitest / build / routes:check；
 - migrations、API contract、Director/Production Runtime、Provider/Worker、
   Docker/Compose/infra/workflow，以及同时修改 backend + frontend 的 PR：
   升级为完整 `container-gates`；
@@ -101,3 +101,12 @@ docker compose --profile maintenance run --rm maintenance backup --out /workspac
 docker compose --profile maintenance run --rm maintenance restore-verify \
   --archive /workspace/tmp/<name>.tar --restore-database-url <dsn> --restore-bucket <bucket>
 ```
+
+### 生产路由与 API 契约复现
+
+- `npm run --prefix frontend routes:check` 用项目 Vite production transforms 编译真实
+  router，并在 Chromium 读取 `routesByPath`；必须保留核心业务路由且不得注册
+  `/design-preview`。它不以 UI 隐藏或开发服务器的 404 作为生产证据。
+- 完整门先从当前后端导出 OpenAPI，再运行 `api:check`，重生成并逐字节比较
+  `frontend/src/shared/api/generated.ts`；`api:authority` 同时拒绝手写重声明生成的
+  API schema。检查不会改写提交中的 generated.ts。

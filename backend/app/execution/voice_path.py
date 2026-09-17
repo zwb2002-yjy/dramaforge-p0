@@ -23,7 +23,7 @@ from app.shared.errors import ValidationAppError
 from app.storage.minio_store import ObjectStore
 
 if TYPE_CHECKING:
-    from app.execution.product_path import ExecuteNodeResult
+    from app.execution.run_state import ExecuteNodeResult
 
 
 async def execute_voice_node_run(
@@ -37,7 +37,7 @@ async def execute_voice_node_run(
 ) -> ExecuteNodeResult:
     """Execute one explicit local TTS node and persist its immutable output."""
 
-    from app.execution.product_path import ExecuteNodeResult, _commit_terminal_failure
+    from app.execution.run_state import ExecuteNodeResult, _commit_terminal_failure
 
     adapter = get_voice_adapter()
     operation = await session.scalar(
@@ -46,9 +46,7 @@ async def execute_voice_node_run(
         .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
         .limit(1)
     )
-    request_fingerprint = hashlib.sha256(
-        f"voice:{prompt}:{run.input_hash}".encode()
-    ).hexdigest()
+    request_fingerprint = hashlib.sha256(f"voice:{prompt}:{run.input_hash}".encode()).hexdigest()
     if operation is None:
         operation = ProviderOperation(
             node_run_id=run.id,

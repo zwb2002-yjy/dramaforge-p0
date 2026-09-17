@@ -98,6 +98,17 @@ Schema 修复上限、总时限、无进展阈值、每次唤醒最多提交 1 �
 - Assistant 边界：Shot 建议为非持久响应；editing 建议持久化
   DirectorProposal/DirectorProposalItem 并只能经 typed command registry 应用。
 
+## Proposal 创建与应用分工
+
+`director/proposal_creation.py` 只统一 DirectorProposal 父子行的持久创建：
+thread/project 归属、先父后子的 flush、输入项顺序、默认状态及 expected version。
+Story、Editing suggestion / repair、已授权 delegation 共用此处；领域 payload 和
+Story 的 `sort_order` 仍由 feature 构造，创建层不 commit、不执行 command。
+delegation 的 applied/accepted 记录必须在原有显式授权校验之后创建。
+
+这不是统一所有叫 Proposal 的实体：资产域 `ShotChangeProposal` 保留独立语义。
+Apply 的部分成功、幂等持久 item identity、Save/Formal/Export 用户门均未迁入创建层。
+
 ## 实验提案与唯一分支
 
 Director 的 experiment.create / shot.set_model_override 在用户 Apply

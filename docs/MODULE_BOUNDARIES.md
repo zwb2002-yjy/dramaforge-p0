@@ -37,8 +37,8 @@ production → creative.contracts, provider, domain, contract, shared
 provider   → domain, shared
 domain     → shared          ← 注意：当前存在 1 条 domain → creative，见 §三 与
                                ARCHITECTURE_MAPPING.md 附加发现（待 Owner 决定）
-shared     → 无内部层依赖     ← 注意：当前 shared 有 13 条延迟 import，见
-                               ARCHITECTURE_MAPPING.md 附加发现 A
+shared     → 无内部层依赖     ← 注意：当前 shared/rls_scopes 与 model_registry 依赖域模型，见
+                               ARCHITECTURE_MAPPING.md §4
 ```
 
 **规则与现状不一致时，以 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) 记录

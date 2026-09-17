@@ -63,7 +63,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
   同步生产与编排调用，不只是重命名文件。
 - Provider 对 execution.models 的事实依赖，与对 production/runtime 业务的
   依赖应分别判断；在修改 MODULE_BOUNDARIES 规则前，不把现状自动宣告合规。
-- shared/db 的 RLS 上下文和 model_registry 的全图注册是组合根性质，不能因为
+- shared/db 的事务上下文、shared/rls_scopes 的持久归属发现与 model_registry 的全图注册
+  是组合根性质；拆分职责没有消除 scope discovery 的域模型依赖，不能因为
   shared 理想上是叶子层，就删除这些有消费者的基础设施。
 - golden_project 是证明/测试种子而非产品入口；迁出前要核对证明脚本，不因
   位置看起来旧就删除测试资产。

@@ -52,6 +52,7 @@ FORBIDDEN_TEXT = (
 FORBIDDEN_FILES = (
     ROOT / "backend" / "app" / "creation",
     ROOT / "backend" / "app" / "shared" / "ids.py",
+    ROOT / "backend" / "app" / "providers" / "connection.py",
     ROOT / "backend" / "app" / "api" / "v1" / "characters.py",
     ROOT / "backend" / "app" / "api" / "v1" / "credentials.py",
     ROOT

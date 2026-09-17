@@ -6,8 +6,8 @@ import base64
 
 import httpx
 import pytest
-from app.execution import product_path
-from app.execution.product_path import (
+from app.execution import media_io
+from app.execution.media_io import (
     _download_provider_media,
     _resolve_media_bytes,
     _validate_public_media_url,
@@ -42,7 +42,7 @@ async def test_provider_media_url_rejects_dns_that_resolves_to_private_address(
     def private_resolution(*_args: object, **_kwargs: object) -> list[tuple[object, ...]]:
         return [(0, 0, 0, "", ("10.0.0.4", 443))]
 
-    monkeypatch.setattr(product_path.socket, "getaddrinfo", private_resolution)
+    monkeypatch.setattr(media_io.socket, "getaddrinfo", private_resolution)
     with pytest.raises(ValidationAppError, match="not public"):
         await _validate_public_media_url("https://provider.example/result.png")
 
@@ -57,7 +57,7 @@ async def test_provider_media_url_pins_all_public_dns_addresses(
             (0, 0, 0, "", ("151.101.1.69", 443)),
         ]
 
-    monkeypatch.setattr(product_path.socket, "getaddrinfo", public_resolution)
+    monkeypatch.setattr(media_io.socket, "getaddrinfo", public_resolution)
     value, addresses = await _validate_public_media_url("https://provider.example/result.png")
     assert value == "https://provider.example/result.png"
     assert addresses == {"93.184.216.34", "151.101.1.69"}
@@ -166,7 +166,7 @@ async def test_resolve_media_bytes_accepts_valid_data_uri_and_rejects_malformed_
 async def test_resolve_media_bytes_bounds_encoded_data_before_decode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(product_path, "_MAX_PROVIDER_MEDIA_BYTES", 6)
+    monkeypatch.setattr(media_io, "_MAX_PROVIDER_MEDIA_BYTES", 6)
     oversized = base64.b64encode(b"0123456789").decode("ascii")
     with pytest.raises(ValidationAppError, match="data URI is too large"):
         await _resolve_media_bytes(

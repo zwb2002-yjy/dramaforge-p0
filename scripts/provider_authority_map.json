@@ -117,6 +117,18 @@
       "retired": false,
       "replacement": [],
       "note": "The only text-model adapter (Director and creative text turns)."
+    },
+    {
+      "kind": "module",
+      "module": "app.providers.connection",
+      "path": "backend/app/providers/connection.py",
+      "decision": "DELETE",
+      "retired": true,
+      "replacement": [
+        "app.providers.models",
+        "app.providers.connection_service"
+      ],
+      "note": "Unused Pydantic ProviderConnection DTO; persistent connection identity belongs only to providers.models.ProviderConnection and immutable revisions."
     }
   ]
 }

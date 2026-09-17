@@ -12,7 +12,7 @@ from app.access.models import Project, User
 from app.config import Settings
 from app.contracts.production_commands import ExecutionBody
 from app.director.assistant_models import DirectorThread
-from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.runtime.models import DirectorRuntimeWakeup
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.turn_models import DirectorTurn
@@ -120,37 +120,29 @@ class DirectorRuntimeDelegationService:
             )
             self._session.add(thread)
             await self._session.flush()
-        proposal = DirectorProposal(
-            project_id=project.id,
-            thread_id=thread.id,
+        proposal, _items = await create_proposal(
+            self._session,
+            thread=thread,
             scope_type="shot",
             scope_entity_id=shot_id,
-            status="applied",
             created_by=actor.id,
-            decided_at=now,
+            applied_at=now,
+            items=[ProposalItemDraft(
+                command="production.request_stage_execution",
+                payload={
+                    "shot_id": str(shot_id),
+                    "stage": execution.stage,
+                    "authorization_ref": str(authorization_id),
+                    "plan_fingerprint": execution.plan_fingerprint,
+                },
+                expected_target_version=execution.expected_shot_version,
+                rationale="User explicitly delegated this frozen production plan.",
+                benefit="Director runtime can coordinate one accepted execution.",
+                cost="One authorized provider execution.",
+                risk="The grant expires and cannot be reused for another plan.",
+                impact=f"shot:{shot_id}:{execution.stage}",
+            )],
         )
-        self._session.add(proposal)
-        await self._session.flush()
-        self._session.add(DirectorProposalItem(
-            proposal_id=proposal.id,
-            project_id=project.id,
-            command="production.request_stage_execution",
-            payload={
-                "shot_id": str(shot_id),
-                "stage": execution.stage,
-                "authorization_ref": str(authorization_id),
-                "plan_fingerprint": execution.plan_fingerprint,
-            },
-            expected_target_version=execution.expected_shot_version,
-            rationale="User explicitly delegated this frozen production plan.",
-            benefit="Director runtime can coordinate one accepted execution.",
-            cost="One authorized provider execution.",
-            risk="The grant expires and cannot be reused for another plan.",
-            impact=f"shot:{shot_id}:{execution.stage}",
-            status="accepted",
-            decided_at=now,
-        ))
-        await self._session.flush()
         return await DirectorRuntimeStartService(
             self._session, settings=self._settings,
         ).accept(

@@ -58,6 +58,20 @@ tables `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`,
 `dramaforge_director_checkpoint` role. It is revoked from `PUBLIC` and
 `dramaforge_app` and is never part of the application model registry.
 
+## RLS scope discovery and transaction context
+
+`app/shared/rls_scopes.py` discovers persisted ownership for NodeRun, Artifact,
+Outbox and Director recovery. PostgreSQL paths call only the existing narrow
+SECURITY DEFINER functions; resolver failures never fall back to unrestricted ORM
+reads. Non-PostgreSQL queries exist for local/test execution, retain source-commit
+filters and skip orphaned ownership chains.
+
+`app/shared/db.py` owns engines, sessions and transaction-local RLS application.
+It explicitly re-exports the scope types and discovery entrypoints for existing
+callers. Missing ownership or an Artifact workspace mismatch never applies a new
+owner scope. Commit/recovery callers still reapply context for each transaction;
+this module split changes no table, policy, resolver function or migration.
+
 ## Removed tables and columns
 
 Migration 20260902_0051 removes:

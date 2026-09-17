@@ -9,10 +9,11 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 |---|---|---|
 | ProviderPlugin + ModelCatalogEntry | backend/app/providers（registry、catalog_*） | 只读插件契约：供应商名称、Base URL、协议、模型 ID、能力列表；前端不写死任何供应商事实 |
 | ModelManifest | backend/app/providers/manifest.py | 对外能力唯一事实源：模型、模式、参考槽位、输入约束 |
-| Workspace Provider Connection / Credential | providers/connection*.py, workspace_credentials.py, security/ | BYOK 加密凭据（Fernet）、不可变 connection/credential revision、key rotation 审计；界面不回读 Key |
+| Workspace Provider Connection / Credential | providers/models.py, connection_service.py, workspace_credentials.py, security/ | BYOK 加密凭据（Fernet）、不可变 connection/credential revision、key rotation 审计；界面不回读 Key |
 | Production Model Profile | providers/model_profiles/ | 项目/工作台级模型绑定与冻结 |
 | ExecutionModelResolution | providers/model_resolution.py, execution_identity.py | 执行身份：冻结 model、binding、connection/credential revision、mode 与 reference identity |
-| Compiler / Runtime | providers/adapters_v2.py, runtime.py | unified-v1：把冻结的执行计划编译为具体 Provider 请求 |
+| TransportProfile | providers/transport.py, transport_registry.py | 不可变协议事实声明（endpoint、认证方式、编码、poll/cancel），不含凭证与业务 payload |
+| Compiler / Runtime | providers/adapters_v2.py, runtime.py 与各 Provider 实现 | Compiler 唯一构造 wire_request；Runtime 校验身份后原样提交并负责认证、网络、poll/resume |
 | Reference delivery | providers/reference_delivery.py, reference_roles.py | 严格参考槽位校验、有序多参考传输（不做 `dict[role, artifact]`）、URL/bytes 决策 |
 | 文本通道 | providers/litellm_adapter.py + infra/litellm | 官方 LiteLLM Proxy 独立 Runtime，OpenAI 兼容 HTTP 面；DramaForge 不安装 litellm SDK |
 
@@ -23,8 +24,21 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 
 旧 dict Adapter（Agnes / Ark 的 `*Adapter` class）、`providers/base.py` 的旧
 Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py` 已经删除；
+未被调用的 `providers/connection.py` 纯 DTO 也已删除；持久连接唯一使用
+`providers/models.py::ProviderConnection`，不保留同名第二份连接模型。
 退役判定与替代关系记录在 `scripts/provider_authority_map.json`，
 `scripts/check_provider_authority.py` 在门禁中确认它们保持缺席、替代实现始终存在。
+
+## 协议声明、编译与网络执行
+
+- `TransportProfile` / `AuthSpec` / `PollSpec` 是不可变声明；`async_poll` 必须有
+  poll 合同，轮询间隔若提供必须是正有限数。声明不生成模型 payload，也不持有 Key。
+- 媒体 Compiler 负责确定 `wire_request` 的模型与全部 body。Runtime 在网络前检查
+  provider / protocol profile / operation 与自身一致，并要求 wire `model` 与编译
+  envelope 的 `model_id` 一致；拒绝 mismatch，不使用配置默认模型修补。
+- Runtime 负责从连接修订读取配置、认证头、请求发送、poll/cancel/resume；发送时
+  不重编译、不改变 Compiler body。已有持久 request/resume 格式不因该分层变化。
+- 文本仍走专用 LiteLLM 通道；不要把文本协议声明强行套到媒体 submit/poll 之上。
 
 ## 文本凭证边界
 

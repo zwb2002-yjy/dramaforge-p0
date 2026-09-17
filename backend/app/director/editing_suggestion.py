@@ -33,6 +33,7 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.config import get_settings
 from app.director.assistant_models import DirectorThread
+from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
@@ -598,36 +599,27 @@ class EditingDirectorSuggestionService:
                 self._session.add(thread)
                 await self._session.flush()
 
-            proposal = DirectorProposal(
-                project_id=project.id,
-                thread_id=thread.id,
+            proposal, items = await create_proposal(
+                self._session,
+                thread=thread,
                 scope_type="edit_session",
                 scope_entity_id=edit_session.id,
-                status="pending",
                 created_by=actor.id,
+                items=[ProposalItemDraft(
+                    command="edit_session.apply_timeline_plan",
+                    payload={
+                        "edit_session_id": str(edit_session.id),
+                        "plan": candidate.plan.model_dump(mode="json"),
+                    },
+                    expected_target_version=context.session_version,
+                    rationale=candidate.rationale,
+                    benefit=candidate.benefit,
+                    cost=candidate.cost,
+                    risk=candidate.risk,
+                    impact=candidate.impact,
+                )],
             )
-            self._session.add(proposal)
-            await self._session.flush()
-            item = DirectorProposalItem(
-                proposal_id=proposal.id,
-                project_id=project.id,
-                command="edit_session.apply_timeline_plan",
-                payload={
-                    "edit_session_id": str(edit_session.id),
-                    "plan": candidate.plan.model_dump(mode="json"),
-                },
-                expected_target_version=context.session_version,
-                rationale=candidate.rationale,
-                benefit=candidate.benefit,
-                cost=candidate.cost,
-                risk=candidate.risk,
-                impact=candidate.impact,
-                status="pending",
-            )
-            self._session.add(item)
-            # Both ids are read from rows created in this invocation; never a
-            # timestamp-based "latest" query.
-            await self._session.flush()
+            item = items[0]
         except Exception as exc:  # noqa: BLE001 - keep text evidence durable
             if text_result is not None:
                 await self._record_persistence_failure(

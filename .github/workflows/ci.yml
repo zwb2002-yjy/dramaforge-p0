@@ -241,6 +241,7 @@ jobs:
               npm run --prefix frontend typecheck
               npm run --prefix frontend test -- --run --maxWorkers=1 --minWorkers=1
               npm run --prefix frontend build
+              npm run --prefix frontend routes:check
             '
 
   container-gates:

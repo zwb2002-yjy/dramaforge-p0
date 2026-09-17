@@ -22,7 +22,7 @@ from app.access.projects import ProjectService
 from app.assets.models import Shot
 from app.director.assistant_models import DirectorThread
 from app.director.editing_suggestion import _timeline_context
-from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.shared.errors import ConflictError
@@ -181,35 +181,28 @@ class EditingRepairRoutingService:
             self._session.add(thread)
             await self._session.flush()
 
-        proposal = DirectorProposal(
-            project_id=project.id,
-            thread_id=thread.id,
+        proposal, items = await create_proposal(
+            self._session,
+            thread=thread,
             scope_type="edit_session",
             scope_entity_id=edit_session.id,
-            status="pending",
             created_by=actor.id,
+            items=[ProposalItemDraft(
+                command="editing.repair_proposal",
+                payload={
+                    "edit_session_id": str(edit_session.id),
+                    "shot_ids": shot_ids,
+                    "no_auto_execute": True,
+                },
+                expected_target_version=edit_session.version,
+                rationale=reason or "Repair Proposal",
+                benefit="只提出生产层修复范围，不自动执行任何 Repair。",
+                cost="需要人工到 Shot/审片 Repair 计划中确认并执行。",
+                risk="Repair Proposal 本身不改变时间线、Shot、NodeRun 或 Provider 事实。",
+                impact="仅记录 production repair 需求；timeline 与 production lineage 保持只读。",
+            )],
         )
-        self._session.add(proposal)
-        await self._session.flush()
-        item = DirectorProposalItem(
-            proposal_id=proposal.id,
-            project_id=project.id,
-            command="editing.repair_proposal",
-            payload={
-                "edit_session_id": str(edit_session.id),
-                "shot_ids": shot_ids,
-                "no_auto_execute": True,
-            },
-            expected_target_version=edit_session.version,
-            rationale=reason or "Repair Proposal",
-            benefit="只提出生产层修复范围，不自动执行任何 Repair。",
-            cost="需要人工到 Shot/审片 Repair 计划中确认并执行。",
-            risk="Repair Proposal 本身不改变时间线、Shot、NodeRun 或 Provider 事实。",
-            impact="仅记录 production repair 需求；timeline 与 production lineage 保持只读。",
-            status="pending",
-        )
-        self._session.add(item)
-        await self._session.flush()
+        item = items[0]
         await self._session.commit()
 
         return EditingRepairRoutingRead(

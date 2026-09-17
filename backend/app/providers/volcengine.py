@@ -743,8 +743,18 @@ class ArkRuntime:
         return bool(self._key and self._enabled)
 
     async def submit_image(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="image.generate",
+        )
         if not self._configured():
             raise RuntimeError("Volcengine Ark connection is not configured")
         try:
@@ -796,8 +806,18 @@ class ArkRuntime:
         )
 
     async def submit_video(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="video.generate",
+        )
         if not self._configured():
             raise RuntimeError("Volcengine Ark connection is not configured")
         try:

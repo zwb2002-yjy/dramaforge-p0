@@ -42,7 +42,7 @@ Date: 2026-09-14 / Base: dev 070faa3 / Alembic head: 20260910_0066
 | Workbench | backend/app/workbench and backend/app/production/workbench_execution.py | workspace state, frozen execution plan and NodeRun creation | direct Provider HTTP, budget gate |
 | Production graph | backend/app/production | graph versions, branches, formal selection, repair plans, Final Film and timeline rendering | HTTP/API concerns, silent rerun |
 | Archived storage | backend/app/production/archive_models.py | historical experiment mappings registered for migration parity only | frontend contracts, runtime reads/writes or adoption |
-| Runtime | backend/app/execution/product_path.py and voice_path.py | Worker execution, lineage, artifact persistence, shot locks | HTTP/API concerns, old branches |
+| Runtime | backend/app/execution (module responsibilities in PRODUCTION_RUNTIME.md) | Worker execution, lineage, artifact persistence, shot locks | HTTP/API concerns, old branches |
 | Director Assistant | backend/app/director/assistant_models.py, suggestion.py, proposal_* | suggestions, threads, typed proposal/apply boundary | media, budgets, workflow ownership |
 | Director runtime | backend/app/director/runtime and backend/app/workers/director.py | turn/invocation identity, engine routing, checkpoints, wakeups, resume fencing | Canonical media writes or bypassing Apply/Save/Formal gates |
 | Providers | backend/app/providers | manifests, compilers, runtime adapters, connection/credential revisions, model profiles | product stages or UI state |

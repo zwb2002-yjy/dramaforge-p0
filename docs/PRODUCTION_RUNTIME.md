@@ -28,8 +28,22 @@ Workbench execution-plan preview → executions dispatch → Outbox → Arq Work
 - voice → 显式 `local-voice-v1` runtime → Artifact。
 - review / subtitle / composite → 零成本本地节点 → Artifact。
 
-共享执行模块（`backend/app/execution/product_path.py`、`voice_path.py`）
-没有 Director workflow、budget、batch 或历史路径分支。
+执行模块位于 `backend/app/execution/`，按实际副作用与恢复职责分工：
+
+| 模块 | 职责 |
+|---|---|
+| `product_path.py` | 稳定 Worker 入口、claim、节点类型分派；公开 `ExecuteNodeResult` 保持可导入 |
+| `media_submission.py` | 冻结身份校验、模型与引用解析、Compiler 调用，提交 `submission_started` 标记；不调用 submit/poll |
+| `provider_execution.py` | 一次提交、resume/poll/cancel、unknown-submission 防重、Provider 结果持久化 |
+| `media_io.py` | HTTPS/DNS pinning、大小/MIME/魔数校验、媒体元数据解码 |
+| `artifact_inputs.py` | 同项目不可变 Artifact 绑定、哈希校验与 Review 输入血缘 |
+| `local_nodes.py` | 零成本 Review / subtitle / composite 完成路径 |
+| `run_state.py` | 共享执行结果与持久终态；保留 commit 后重新设置 RLS 的语义 |
+| `voice_path.py` | 本地语音执行 |
+
+这些模块没有 Director workflow、budget、batch 或历史路径分支。
+准备阶段与网络阶段的拆分不改变事务边界：提交标记必须在 paid call 前持久化，
+resume 不重编译或重复提交，取消和下载失败仍按原有恢复语义处理。
 Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
 
 ## 核心概念
