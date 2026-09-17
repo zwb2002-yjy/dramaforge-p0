@@ -66,6 +66,29 @@ function mockBackend() {
         },
       ]);
     }
+    if (url.endsWith("/card") && method === "GET") {
+      return json({ current_version_id: "version-1", current_version_number: 1 });
+    }
+    if (url.endsWith("/references/binding-1") && method === "PATCH") {
+      return json({
+        id: "binding-1",
+        project_id: "project-1",
+        shot_id: "shot-1",
+        shot_experiment_id: null,
+        stage: "both",
+        asset_id: "asset-linmo",
+        asset_version_id: "version-1",
+        artifact_id: null,
+        resolution_mode: "pinned_version",
+        purpose: "identity",
+        label: "@林墨",
+        sort_order: 0,
+        metadata: {},
+        version: 2,
+        created_at: "",
+        updated_at: "",
+      });
+    }
     if (url.endsWith("/references/resolve") && method === "POST") {
       return json([
         {
@@ -235,6 +258,108 @@ describe("AssetReferencePicker", () => {
     await waitFor(() => expect(bindingPresent).toBe(false));
     await waitFor(() => expect(emitted).toEqual([]));
     expect(screen.getByText("尚未绑定资产引用。")).toBeInTheDocument();
+  });
+
+  it("pins a binding to the asset's current formal version", async () => {
+    const calls = mockBackend();
+    renderPicker();
+    await screen.findByText(/@林墨/);
+    fireEvent.click(screen.getByRole("button", { name: /编辑引用/ }));
+    fireEvent.change(screen.getByLabelText("参考方式 binding-1"), {
+      target: { value: "pinned_version" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存引用 binding-1" }));
+
+    await waitFor(() => {
+      const patch = calls.find(
+        (call) => call.method === "PATCH" && call.url.endsWith("/references/binding-1"),
+      );
+      expect(patch).toBeTruthy();
+      expect(JSON.parse(String(patch?.body))).toMatchObject({
+        expected_version: 1,
+        asset_id: "asset-linmo",
+        asset_version_id: "version-1",
+        resolution_mode: "pinned_version",
+        purpose: "identity",
+      });
+    });
+  });
+
+  it("switches a pinned binding back to follow the current formal version", async () => {
+    const calls = mockBackend();
+    vi.mocked(globalThis.fetch)
+      .mockClear()
+      .mockImplementation((input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        calls.push({ method, url, body: init?.body });
+        if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+        if (url.endsWith("/assets") && method === "GET") {
+          return json([
+            {
+              id: "asset-linmo",
+              project_id: "project-1",
+              kind: "character",
+              name: "林墨",
+              description: "",
+              metadata: {},
+              status: "active",
+              version: 1,
+              created_at: "",
+              updated_at: "",
+            },
+          ]);
+        }
+        if (url.endsWith("/shots/shot-1/references") && method === "GET") {
+          return json([
+            {
+              id: "binding-1",
+              project_id: "project-1",
+              shot_id: "shot-1",
+              shot_experiment_id: null,
+              stage: "both",
+              asset_id: "asset-linmo",
+              asset_version_id: "version-1",
+              artifact_id: null,
+              resolution_mode: "pinned_version",
+              purpose: "identity",
+              label: "@林墨",
+              sort_order: 0,
+              metadata: {},
+              version: 3,
+              created_at: "",
+              updated_at: "",
+            },
+          ]);
+        }
+        if (url.endsWith("/references/binding-1") && method === "PATCH") {
+          return json({ id: "binding-1", version: 4 });
+        }
+        if (url.endsWith("/references/resolve") && method === "POST") return json([]);
+        return json({});
+      });
+
+    renderPicker();
+    await screen.findByText(/@林墨/);
+    fireEvent.click(screen.getByRole("button", { name: /编辑引用/ }));
+    expect(screen.getByLabelText("参考方式 binding-1")).toHaveValue("pinned_version");
+    fireEvent.change(screen.getByLabelText("参考方式 binding-1"), {
+      target: { value: "current_formal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存引用 binding-1" }));
+
+    await waitFor(() => {
+      const patch = calls.find(
+        (call) => call.method === "PATCH" && call.url.endsWith("/references/binding-1"),
+      );
+      expect(patch).toBeTruthy();
+      expect(JSON.parse(String(patch?.body))).toMatchObject({
+        expected_version: 3,
+        asset_id: "asset-linmo",
+        asset_version_id: null,
+        resolution_mode: "current_formal",
+      });
+    });
   });
 });
 

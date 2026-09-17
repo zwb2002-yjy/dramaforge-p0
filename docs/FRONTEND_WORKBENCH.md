@@ -41,6 +41,10 @@ frontend/src/
   eligibility 引擎）；不可用模型在选择项中禁用并显示原因，前端不复制资格规则。
 - Review 批注的“已解决/重新打开”只更新批注状态，不改变正式产物，也不同于
   `review-decisions` 的人工放行。
+- Shot 引用操作收敛为产品语言：添加引用、更换参考素材、跟随正式版本
+  （`current_formal`）、固定到当前版本（`pinned_version`，取 Asset Card 的
+  `current_version_id`）、改变用途、删除；PATCH 一律携带 `expected_version`，
+  409 时要求重新加载，不静默覆盖其他会话的修改。
 
 ## 设计系统（Visual System 2.0）
 

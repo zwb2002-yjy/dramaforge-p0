@@ -6,8 +6,10 @@ import { queryKeys } from "../../lib/queryKeys";
 import {
   createShotReference,
   deleteShotReference,
+  fetchAssetCard,
   fetchShotReferences,
   resolveShotReferences,
+  updateShotReference,
   type ShotBindingRead,
   type ResolvedReferenceRead,
   type ShotExecutionReference,
@@ -56,6 +58,11 @@ export function AssetReferencePicker({
   const [selectedAssetId, setSelectedAssetId] = useState("");
   const [selectedPurpose, setSelectedPurpose] = useState<string>(purpose);
   const [resolvedReferences, setResolvedReferences] = useState<ResolvedReferenceRead[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editAssetId, setEditAssetId] = useState("");
+  const [editPurpose, setEditPurpose] = useState<string>(purpose);
+  const [editMode, setEditMode] = useState<"current_formal" | "pinned_version">("current_formal");
+  const [editError, setEditError] = useState<string | null>(null);
 
   const assets = useQuery({
     queryKey: queryKeys.asset.picker(projectId),
@@ -112,6 +119,44 @@ export function AssetReferencePicker({
       await invalidate();
     },
   });
+
+  const update = useMutation({
+    mutationFn: async (binding: ShotBindingRead) => {
+      const assetId = editAssetId || binding.asset_id;
+      if (!assetId) throw new Error("请先选择参考素材。");
+      let assetVersionId: string | null = null;
+      if (editMode === "pinned_version") {
+        const card = await fetchAssetCard(projectId, assetId);
+        assetVersionId = card.current_version_id;
+        if (!assetVersionId) {
+          throw new Error("该资产还没有正式版本，无法固定到当前版本。");
+        }
+      }
+      return updateShotReference(projectId, binding.id, {
+        expected_version: binding.version,
+        asset_id: assetId,
+        asset_version_id: assetVersionId,
+        resolution_mode: editMode,
+        purpose: editPurpose,
+      });
+    },
+    onSuccess: async () => {
+      setEditingId(null);
+      setEditError(null);
+      await queryClient.cancelQueries({ queryKey: resolutionQueryKey });
+      clearResolvedReferences();
+      await invalidate();
+    },
+    onError: (cause: Error) => setEditError(cause.message),
+  });
+
+  function startEditing(binding: ShotBindingRead) {
+    setEditingId(binding.id);
+    setEditAssetId(binding.asset_id ?? "");
+    setEditPurpose(binding.purpose);
+    setEditMode(binding.resolution_mode === "pinned_version" ? "pinned_version" : "current_formal");
+    setEditError(null);
+  }
 
   const remove = useMutation({
     mutationFn: (bindingId: string) => deleteShotReference(projectId, bindingId),
@@ -216,21 +261,94 @@ export function AssetReferencePicker({
         </button>
       </form>
 
+      {editError && (
+        <p className="flash err" role="alert">
+          引用修改失败：{editError}
+        </p>
+      )}
+
       <ul className="qc-binding-list" data-testid="binding-list">
         {rows.map((binding) => (
           <li key={binding.id}>
-            <span>
-              {binding.label || "（无标签）"} · {binding.purpose} · {binding.resolution_mode}
-            </span>
-            {binding.asset_id && <code>{binding.asset_id}</code>}
-            <button
-              type="button"
-              aria-label={`删除引用 ${binding.label || binding.id}`}
-              onClick={() => remove.mutate(binding.id)}
-              disabled={remove.isPending}
-            >
-              删除引用
-            </button>
+            {editingId === binding.id ? (
+              <div className="qc-binding-editor" data-testid={`binding-editor-${binding.id}`}>
+                <select
+                  aria-label={`参考素材 ${binding.id}`}
+                  value={editAssetId}
+                  onChange={(event) => setEditAssetId(event.target.value)}
+                >
+                  <option value="">选择资产…</option>
+                  {assetOptions.map((asset) => (
+                    <option key={asset.id} value={asset.id}>
+                      {asset.name}（{asset.kind}）
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label={`参考用途 ${binding.id}`}
+                  value={editPurpose}
+                  onChange={(event) => setEditPurpose(event.target.value)}
+                >
+                  {PURPOSES.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label={`参考方式 ${binding.id}`}
+                  value={editMode}
+                  onChange={(event) =>
+                    setEditMode(
+                      event.target.value === "pinned_version" ? "pinned_version" : "current_formal",
+                    )
+                  }
+                >
+                  <option value="current_formal">跟随正式版本</option>
+                  <option value="pinned_version">固定到当前版本</option>
+                </select>
+                <button
+                  type="button"
+                  aria-label={`保存引用 ${binding.id}`}
+                  onClick={() => update.mutate(binding)}
+                  disabled={update.isPending}
+                >
+                  保存引用
+                </button>
+                <button
+                  type="button"
+                  aria-label={`取消编辑 ${binding.id}`}
+                  onClick={() => {
+                    setEditingId(null);
+                    setEditError(null);
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <>
+                <span>
+                  {binding.label || "（无标签）"} · {binding.purpose} · {binding.resolution_mode}
+                </span>
+                {binding.asset_id && <code>{binding.asset_id}</code>}
+                <button
+                  type="button"
+                  aria-label={`编辑引用 ${binding.label || binding.id}`}
+                  onClick={() => startEditing(binding)}
+                >
+                  修改引用
+                </button>
+                <button
+                  type="button"
+                  aria-label={`删除引用 ${binding.label || binding.id}`}
+                  onClick={() => remove.mutate(binding.id)}
+                  disabled={remove.isPending}
+                >
+                  删除引用
+                </button>
+              </>
+            )}
           </li>
         ))}
       </ul>

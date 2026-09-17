@@ -225,6 +225,32 @@ export async function createShotReference(
   );
 }
 
+/**
+ * Change one binding in product language: swap the asset, follow the current
+ * formal version, pin to a concrete version, or change its purpose. The
+ * expected_version keeps a stale page from overwriting a newer binding.
+ */
+export async function updateShotReference(
+  projectId: string,
+  bindingId: string,
+  input: {
+    expected_version: number;
+    asset_id?: string | null;
+    asset_version_id?: string | null;
+    resolution_mode?: "current_formal" | "pinned_version" | "direct_artifact";
+    purpose?: string;
+    label?: string;
+  },
+): Promise<ShotBindingRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<ShotBindingRead>(
+    "PATCH",
+    `/api/v1/projects/${projectId}/references/${bindingId}`,
+    input,
+    csrf,
+  );
+}
+
 export async function deleteShotReference(projectId: string, bindingId: string): Promise<void> {
   const csrf = await fetchCsrf();
   await apiSend<void>(
