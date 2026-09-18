@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import socket
 import tempfile
 from collections.abc import Iterable
@@ -28,7 +29,14 @@ from app.shared.errors import (
     ValidationAppError,
 )
 
+logger = logging.getLogger(__name__)
+
 _MAX_PROVIDER_MEDIA_BYTES = 512 * 1024 * 1024
+
+# One dropped connection must not discard an already-paid generation, so a
+# failed fetch is retried a bounded number of times before it becomes terminal.
+_MEDIA_DOWNLOAD_ATTEMPTS = 3
+_MEDIA_DOWNLOAD_RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0)
 
 
 _MAX_PROVIDER_IMAGE_BYTES = 20 * 1024 * 1024
@@ -139,8 +147,49 @@ async def _download_provider_media(
     artifact_uri: str,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> bytes:
-    """Download one provider result with pinned DNS and bounded streaming."""
+    """Download one provider result with pinned DNS, bounded streaming and retries.
+
+    The remote task has already succeeded by the time its bytes are fetched, so a
+    transient transport error (a dropped connection mid-response, a momentary
+    resolver/route failure) must not destroy an already-paid generation.  Only
+    transport failures are retried: a redirect, an oversized body or invalid
+    media is a policy answer and fails immediately.
+    """
     value, addresses = await _validate_public_media_url(artifact_uri)
+    last_transport_error: Exception | None = None
+    for attempt in range(1, _MEDIA_DOWNLOAD_ATTEMPTS + 1):
+        try:
+            return await _download_provider_media_once(
+                kind=kind,
+                value=value,
+                addresses=addresses,
+                transport=transport,
+            )
+        except (httpx.TransportError, OSError) as exc:
+            last_transport_error = exc
+            if attempt == _MEDIA_DOWNLOAD_ATTEMPTS:
+                break
+            delay = _MEDIA_DOWNLOAD_RETRY_DELAYS[attempt - 1]
+            logger.warning(
+                "Provider media download attempt %s/%s failed (%s); retrying in %ss",
+                attempt,
+                _MEDIA_DOWNLOAD_ATTEMPTS,
+                type(exc).__name__,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    assert last_transport_error is not None
+    raise last_transport_error
+
+
+async def _download_provider_media_once(
+    *,
+    kind: str,
+    value: str,
+    addresses: set[str],
+    transport: httpx.AsyncBaseTransport | None,
+) -> bytes:
+    """One download attempt over an already validated public URL."""
     if transport is not None:
         async with (
             httpx.AsyncClient(

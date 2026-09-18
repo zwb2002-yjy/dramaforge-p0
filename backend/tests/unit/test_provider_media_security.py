@@ -192,3 +192,48 @@ async def test_download_rejects_truncated_content_length() -> None:
             artifact_uri="https://93.184.216.34/result.png",
             transport=httpx.MockTransport(handler),
         )
+
+
+@pytest.mark.asyncio
+async def test_download_recovers_from_a_transient_transport_failure() -> None:
+    """One dropped connection must not destroy an already-paid generation.
+
+    The remote task has already succeeded by the time its bytes are fetched, so
+    a transient transport error here is recoverable by fetching again.
+    """
+    calls = {"count": 0}
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise httpx.RemoteProtocolError("connection dropped mid-response")
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "video/mp4"},
+            content=b"\x00\x00\x00\x18ftypmp42recovered-video",
+        )
+
+    video = await _download_provider_media(
+        kind="video",
+        artifact_uri="https://93.184.216.34/result.mp4",
+        transport=httpx.MockTransport(handler),
+    )
+    assert calls["count"] == 2
+    assert video[4:8] == b"ftyp"
+
+
+@pytest.mark.asyncio
+async def test_download_gives_up_after_bounded_attempts() -> None:
+    calls = {"count": 0}
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        raise httpx.RemoteProtocolError("connection dropped mid-response")
+
+    with pytest.raises(httpx.TransportError):
+        await _download_provider_media(
+            kind="video",
+            artifact_uri="https://93.184.216.34/result.mp4",
+            transport=httpx.MockTransport(handler),
+        )
+    assert calls["count"] == 3, "retries stay bounded"
