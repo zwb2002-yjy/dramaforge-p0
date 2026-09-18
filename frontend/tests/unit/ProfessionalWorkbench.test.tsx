@@ -81,7 +81,7 @@ describe("ProfessionalWorkbench", () => {
     expect(editor).toHaveValue(shots[0].visual_description);
   });
 
-  it("blocks starting an experiment on a model the runtime would refuse", () => {
+  it("blocks a branch the experiment worker would refuse, and says why in Chinese", () => {
     const onCreateExperiment = vi.fn();
     render(
       <ProfessionalWorkbench
@@ -109,36 +109,89 @@ describe("ProfessionalWorkbench", () => {
             capabilities: ["video.image_to_video"],
           },
         ]}
-        modelCandidates={[
+        modelCandidates={{
+          video: [
+            {
+              model_binding_id: "binding-1",
+              provider: "agnes",
+              profile: "default",
+              model_id: "video-v2",
+              display_name: "Agnes Video",
+              purpose: "video",
+              eligible: false,
+              supported_capabilities: ["video.image_to_video"],
+              unmet_preferences: [],
+              evidence: {},
+              issues: [{ code: "MODEL_QUALITY_GATE_MISSING", detail: "" }],
+              estimated_cost: null,
+            },
+          ],
+        }}
+        onCreateExperiment={onCreateExperiment}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("实验阶段"), { target: { value: "video" } });
+    fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: "agnes/video-v2" } });
+    // The experiment worker resolves through the same eligibility engine, so a
+    // branch on this binding dies with MODEL_INELIGIBLE before dispatch: the
+    // reason is explained in product wording and the provider's issue code never
+    // reaches the open surface.
+    expect(screen.getByTestId("experiment-model-eligibility")).toHaveTextContent(
+      "尚未通过画质验收",
+    );
+    expect(screen.getByTestId("experiment-model-eligibility")).not.toHaveTextContent(
+      "MODEL_QUALITY_GATE_MISSING",
+    );
+    fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "换模型验证" } });
+    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeDisabled();
+
+    // A model with no binding for this stage is refused even earlier, by start.
+    fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: "agnes/video-v3" } });
+    expect(screen.getByTestId("experiment-model-eligibility")).toHaveTextContent(
+      "没有可用于视频阶段的绑定",
+    );
+    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeDisabled();
+    expect(onCreateExperiment).not.toHaveBeenCalled();
+  });
+
+  it("keeps the form usable while stage eligibility is still unknown", async () => {
+    const onCreateExperiment = vi.fn();
+    render(
+      <ProfessionalWorkbench
+        projectId="project-1"
+        shots={shots}
+        selectedShotId="shot-1"
+        onSelectShot={() => undefined}
+        models={[
           {
-            model_binding_id: "binding-1",
-            provider: "agnes",
-            profile: "default",
-            model_id: "video-v2",
+            id: "agnes/video-v2",
+            provider_id: "agnes",
             display_name: "Agnes Video",
-            purpose: "video",
-            eligible: false,
-            supported_capabilities: ["video.image_to_video"],
-            unmet_preferences: [],
-            evidence: {},
-            issues: [{ code: "QUALITY_GATE", detail: "缺少画质证据" }],
-            estimated_cost: null,
+            enabled: true,
+            configured: true,
+            available: true,
+            capabilities: ["video.image_to_video"],
           },
         ]}
         onCreateExperiment={onCreateExperiment}
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: "agnes/video-v2" } });
-    expect(screen.getByTestId("experiment-model-eligibility")).toHaveTextContent("缺少画质证据");
-    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeDisabled();
-
+    // No candidate group at all: the read is pending, so nothing is asserted
+    // about eligibility and the Owner is not locked out.
+    expect(screen.queryByTestId("experiment-model-eligibility")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "换模型验证" } });
-    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: "agnes/video-v3" } });
+    fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: "agnes/video-v2" } });
     expect(screen.getByRole("button", { name: "创建实验分支" })).toBeEnabled();
-    expect(onCreateExperiment).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
+    await waitFor(() => expect(onCreateExperiment).toHaveBeenCalledTimes(1));
+    expect(onCreateExperiment).toHaveBeenCalledWith({
+      name: "换模型验证",
+      selected_model: "agnes/video-v2",
+      targetNodeKey: "keyframe",
+    });
   });
 
   it("uses the latest retry when labeling the current shot status", () => {

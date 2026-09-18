@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
 import { fetchExecutionTrace, type ExecutionTraceRead } from "../../lib/api";
+import { nodeRunStatusLabel } from "../../lib/runLabels";
+import { shotStatusLabel } from "../../lib/shotLabels";
+import { zhNode } from "../../lib/zh";
 import { ShotChangeProposalsPanel } from "./ShotChangeProposalsPanel";
 import { ShotProductionTrace } from "./ShotProductionTrace";
 import type { ShotLite } from "./api";
@@ -95,14 +98,21 @@ export function ShotDetailsPanel({ open, projectId, shot, trace, onClose }: Shot
             <dt>镜头版本</dt>
             <dd>v{shot.version}</dd>
             <dt>镜头状态</dt>
-            <dd>{shot.status}</dd>
+            <dd data-testid="shot-details-status">{shotStatusLabel(shot.status)}</dd>
             <dt>时长</dt>
             <dd>{shot.duration_seconds ?? "—"}s</dd>
             <dt>正式关键帧</dt>
-            <dd>{shot.formal_keyframe_artifact_id ?? "未确认"}</dd>
+            <dd>{shot.formal_keyframe_artifact_id ? "已确认" : "未确认"}</dd>
             <dt>正式视频</dt>
-            <dd>{shot.formal_video_artifact_id ?? "未确认"}</dd>
+            <dd>{shot.formal_video_artifact_id ? "已确认" : "未确认"}</dd>
           </dl>
+          <details className="editing-diagnostics" data-testid="shot-details-diagnostics">
+            <summary>开发 / 诊断详情（只读）</summary>
+            <small>
+              状态 {shot.status} · 正式关键帧 {shot.formal_keyframe_artifact_id ?? "无"} · 正式视频{" "}
+              {shot.formal_video_artifact_id ?? "无"}
+            </small>
+          </details>
           <ShotProductionTrace
             shotId={shot.id}
             trace={trace}
@@ -121,28 +131,39 @@ export function ShotDetailsPanel({ open, projectId, shot, trace, onClose }: Shot
             </p>
           )}
           {traceDetailError && (
-            <p className="flash err">完整执行证据读取失败：{traceDetailError}</p>
+            <div className="flash err" data-testid="execution-trace-error" role="alert">
+              <p>完整执行证据暂时读取失败，可以重开详情重试。</p>
+              <details
+                className="editing-diagnostics"
+                data-testid="execution-trace-error-diagnostics"
+              >
+                <summary>开发 / 诊断详情（只读）</summary>
+                <small>{traceDetailError}</small>
+              </details>
+            </div>
           )}
           {traceDetail && (
             <section data-testid="execution-trace-detail" className="qc-execution-trace-detail">
               <h3>完整执行证据</h3>
               <dl>
-                <dt>运行</dt>
-                <dd>{traceDetail.run_id}</dd>
                 <dt>节点</dt>
-                <dd>{traceDetail.node_key ?? "—"}</dd>
+                <dd>{zhNode(traceDetail.node_key)}</dd>
                 <dt>状态</dt>
-                <dd>{traceDetail.status}</dd>
-                <dt>Provider / 模型</dt>
-                <dd>
-                  {traceDetail.actual_provider ?? "—"} / {traceDetail.actual_model ?? "—"}
-                </dd>
-                <dt>操作状态</dt>
-                <dd>{traceDetail.operation_status ?? "—"}</dd>
+                <dd>{nodeRunStatusLabel(traceDetail.status)}</dd>
+                <dt>生成模型</dt>
+                <dd>{traceDetail.actual_model ?? "—"}</dd>
               </dl>
               {traceDetail.operation_outcome_unknown && (
                 <p className="status-bad">提交结果未知，请先完成对账，不要盲目重试。</p>
               )}
+              <details className="editing-diagnostics" data-testid="execution-trace-diagnostics">
+                <summary>开发 / 诊断详情（只读）</summary>
+                <small>
+                  运行 {traceDetail.run_id} · 节点 {traceDetail.node_key ?? "无"} · 状态{" "}
+                  {traceDetail.status} · Provider {traceDetail.actual_provider ?? "无"} · 操作状态{" "}
+                  {traceDetail.operation_status ?? "无"}
+                </small>
+              </details>
             </section>
           )}
         </div>

@@ -23,7 +23,8 @@ export const ZH_EVIDENCE_STATE: Record<string, string> = {
 
 export function zhEvidenceState(state: string | null | undefined): string {
   if (!state) return "—";
-  return ZH_EVIDENCE_STATE[state] ?? state;
+  // An unrecognised evidence flag must not print the stored key on the surface.
+  return ZH_EVIDENCE_STATE[state] ?? "状态待确认";
 }
 
 export const ZH_NODE: Record<string, string> = {
@@ -70,8 +71,16 @@ export const ZH_ERROR_CODE: Record<string, string> = {
   VIDEO_DRIFT_BLOCKED: "视频漂移阻断",
   VIDEO_DRIFT_POLICY_UNAPPROVED: "视频漂移策略未批准",
   QUEUE_UNAVAILABLE: "队列不可用",
+  WORKER_ERROR: "执行失败",
+  EXECUTION_IDENTITY_INVALID: "执行身份无效",
+  EXECUTION_IDENTITY_MISMATCH: "执行身份不匹配",
+  MODEL_INELIGIBLE: "模型未通过资格检查",
+  MODEL_BINDING_MISSING: "缺少模型绑定",
   APPROVE_GATE: "审核门禁未通过",
   EXPORT_GATE: "导出门禁未通过",
+  REFERENCE_NOT_RESOLVED: "参考素材未解析",
+  REFERENCE_ASSET_RECYCLED: "参考素材已回收",
+  REFERENCE_PROJECT_MISMATCH: "参考素材不属于本项目",
   COMPOSITE_INPUT_MISSING: "合成输入缺失",
   COMPOSITE_RENDER_FAILED: "合成渲染失败",
   ARTIFACT_NOT_INDEPENDENT: "产物不独立",
@@ -86,9 +95,13 @@ export const ZH_ERROR_CODE: Record<string, string> = {
   HTTP_ERROR: "网络请求失败",
 };
 
+/**
+ * 错误码 → 中文。未收录的码不返回原始 token：普通创作界面不得直接出现英文错误码，
+ * 原始码由调用方放进"开发 / 诊断详情（只读）"块。
+ */
 export function zhErrorCode(code: string | null | undefined): string {
   if (!code) return "—";
-  return ZH_ERROR_CODE[code] ?? code;
+  return ZH_ERROR_CODE[code] ?? "执行失败";
 }
 
 /** 常见后端 error_summary 的结构化英文模式 → 中文。 */
@@ -96,7 +109,7 @@ const SUMMARY_PATTERNS: Array<[RegExp, (...m: string[]) => string]> = [
   [
     /required review (\w+) is (blocked|needs_human|failed)/,
     (_all, node: string, state: string) =>
-      `必需审核「${zhNode(node)}」${ZH_REVIEW_STATE[state] ?? state}`,
+      `必需审核「${zhNode(node)}」${ZH_REVIEW_STATE[state] ?? "状态待确认"}`,
   ],
   [
     /required upstream (\w+) ended with (failed|blocked|cancelled)/,
@@ -130,12 +143,28 @@ export function zhErrorSummary(
   code: string | null | undefined,
   summary: string | null | undefined,
 ): string {
+  const { label, raw } = zhErrorParts(code, summary);
+  return raw ? `${label}：${raw}` : label;
+}
+
+/**
+ * 拆分"产品用语"与"Provider 原文"。
+ *
+ * `zhErrorSummary` 对未映射的 Provider 文本会原样保留（诊断视图需要），
+ * 但普通创作界面不得直接出现英文原文，因此这里显式区分：
+ * 只有当摘要未被完整翻译时，`raw` 才非空，调用方必须把它放进
+ * 明确标记、默认折叠、只读的诊断块里。
+ */
+export function zhErrorParts(
+  code: string | null | undefined,
+  summary: string | null | undefined,
+): { label: string; raw: string | null } {
   const name = zhErrorCode(code);
   const raw = (summary ?? "").trim();
-  if (!raw) return name;
+  if (!raw) return { label: name, raw: null };
   for (const [pattern, render] of SUMMARY_PATTERNS) {
     const match = raw.match(pattern);
-    if (match) return render(...match);
+    if (match) return { label: render(...match), raw: null };
   }
-  return `${name}：${raw}`;
+  return { label: name, raw };
 }

@@ -501,7 +501,7 @@ export function ShotDirectorSuggestionPanel({
     >
       <header>
         <div>
-          <span className="director-stage-kicker">Director suggestion</span>
+          <span className="director-stage-kicker">导演建议</span>
           <strong>导演分析与建议</strong>
         </div>
         <span className="qc-shot-production-version">v{shot.version}</span>

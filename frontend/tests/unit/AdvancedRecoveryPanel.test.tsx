@@ -69,7 +69,17 @@ describe("AdvancedRecoveryPanel", () => {
     await screen.findByTestId("advanced-recovery-panel");
     fireEvent.click(screen.getByRole("button", { name: "重放这一项" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const alert = await screen.findByRole("alert");
+    // The surface explains the situation; the backend sentence stays behind the
+    // collapsed diagnostics block.
+    const visible = (() => {
+      const clone = alert.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll("details").forEach((element) => element.remove());
+      return clone.textContent ?? "";
+    })();
+    expect(visible).toContain("重放未成功");
+    expect(visible).not.toContain("Director wakeup failure changed");
+    expect(screen.getByTestId("advanced-recovery-error-diagnostics")).toHaveTextContent(
       "Director wakeup failure changed; reload before replay",
     );
   });
@@ -95,6 +105,14 @@ describe("AdvancedRecoveryPanel", () => {
     renderPanel();
     const panel = await screen.findByTestId("advanced-recovery-panel");
     expect(panel).toHaveTextContent("生成任务中断（可续跑）");
+    // The stored sentence is a backend code plus provider text: the surface shows
+    // the Chinese failure class and keeps the raw sentence in diagnostics.
+    const reason = screen.getByTestId("recovery-reason-run-1");
+    expect(reason).toHaveTextContent("Provider 媒体下载失败");
+    expect(reason).not.toHaveTextContent("PROVIDER_MEDIA_DOWNLOAD_FAILED");
+    expect(screen.getByTestId("recovery-diagnostics-run-1")).toHaveTextContent(
+      "PROVIDER_MEDIA_DOWNLOAD_FAILED: RemoteProtocolError",
+    );
     // The wording must promise a resume over the existing remote task, not a
     // second generation the Owner would pay for again.
     fireEvent.click(screen.getByRole("button", { name: "续跑这次生成" }));

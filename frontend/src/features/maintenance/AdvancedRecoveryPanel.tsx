@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { fetchRecoveryItems, replayRecoveryItem, type RecoveryItemRead } from "./api";
+import { zhErrorParts } from "../../lib/zh";
 
 const KIND_LABELS: Record<RecoveryItemRead["kind"], string> = {
   director_wakeup: "导演唤醒失败",
@@ -18,6 +19,20 @@ const REPLAY_LABELS: Record<RecoveryItemRead["kind"], string> = {
 function formatFailureTime(value: string): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+/**
+ * Why a persisted failure is offered here, in product wording.
+ *
+ * The stored `detail` is a backend sentence (often `ERROR_CODE: provider text`),
+ * which belongs in diagnostics: the surface states the failure class and, when
+ * the backend sentence is one of the known codes, its Chinese name.
+ */
+function itemReason(item: RecoveryItemRead): { label: string } {
+  const detail = (item.detail ?? "").trim();
+  const [code, ...rest] = detail.split(":");
+  const parts = zhErrorParts(code?.trim() ?? "", rest.join(":").trim());
+  return { label: parts.label };
 }
 
 /**
@@ -57,9 +72,16 @@ export function AdvancedRecoveryPanel() {
       </p>
       {message && <p role="status">{message}</p>}
       {error && (
-        <p className="flash err" role="alert">
-          {error}
-        </p>
+        <div className="flash err" data-testid="advanced-recovery-error" role="alert">
+          <p>重放未成功。状态可能已被其他会话改变，请刷新后再试；不会盲目重试。</p>
+          <details
+            className="editing-diagnostics"
+            data-testid="advanced-recovery-error-diagnostics"
+          >
+            <summary>开发 / 诊断详情（只读）</summary>
+            <small>{error}</small>
+          </details>
+        </div>
       )}
       <ul className="df-recovery-list">
         {failures.map((item) => (
@@ -68,9 +90,17 @@ export function AdvancedRecoveryPanel() {
               <strong>{KIND_LABELS[item.kind]}</strong>
               <span className="muted"> {item.label}</span>
             </div>
-            <small className="muted">
-              {item.detail} · 失败 {item.attempts} 次 · {formatFailureTime(item.failed_at)}
+            <small className="muted" data-testid={`recovery-reason-${item.id}`}>
+              {itemReason(item).label} · 失败 {item.attempts} 次 ·{" "}
+              {formatFailureTime(item.failed_at)}
             </small>
+            <details
+              className="editing-diagnostics"
+              data-testid={`recovery-diagnostics-${item.id}`}
+            >
+              <summary>开发 / 诊断详情（只读）</summary>
+              <small>{item.detail}</small>
+            </details>
             <button
               type="button"
               disabled={replay.isPending}

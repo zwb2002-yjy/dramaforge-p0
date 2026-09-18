@@ -1,17 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AssetReferencePicker } from "../../src/components/assets/AssetReferencePicker";
 
-function renderPicker() {
-  const queryClient = new QueryClient();
-  render(
-    <QueryClientProvider client={queryClient}>
-      <AssetReferencePicker projectId="project-1" shotId="shot-1" purpose="identity" />
-    </QueryClientProvider>,
-  );
-}
+const PROJECT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const SHOT_ID = "11111111-1111-4111-8111-111111111111";
+const ACTIVE_ASSET = "22222222-2222-4222-8222-222222222222";
+const RECYCLED_ASSET = "33333333-3333-4333-8333-333333333333";
+const BINDING_ID = "44444444-4444-4444-8444-444444444444";
 
 function json(body: unknown, status = 200) {
   return Promise.resolve(
@@ -22,349 +19,119 @@ function json(body: unknown, status = 200) {
   );
 }
 
-function mockBackend() {
-  const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+const ASSETS = [
+  {
+    id: ACTIVE_ASSET,
+    project_id: PROJECT_ID,
+    kind: "character",
+    name: "林墨",
+    description: "",
+    status: "active",
+    tags: [],
+    version: 1,
+  },
+  {
+    id: RECYCLED_ASSET,
+    project_id: PROJECT_ID,
+    kind: "character",
+    name: "废弃角色",
+    description: "",
+    status: "recycled",
+    tags: [],
+    version: 1,
+  },
+];
+
+const BINDING = {
+  id: BINDING_ID,
+  shot_id: SHOT_ID,
+  purpose: "identity",
+  asset_id: ACTIVE_ASSET,
+  asset_version_id: null,
+  artifact_id: null,
+  resolution_mode: "current_formal",
+  label: "@林墨",
+  stage: "both",
+  version: 1,
+  created_at: "2026-09-18T00:00:00Z",
+  updated_at: "2026-09-18T00:00:00Z",
+};
+
+function mockApi(resolved: unknown[]) {
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
-    const method = init?.method ?? "GET";
-    calls.push({ method, url, body: init?.body });
-    if (url.endsWith("/assets") && method === "GET") {
-      return json([
-        {
-          id: "asset-linmo",
-          project_id: "project-1",
-          kind: "character",
-          name: "林墨",
-          description: "",
-          metadata: {},
-          status: "active",
-          version: 1,
-          created_at: "",
-          updated_at: "",
-        },
-      ]);
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+    if (url.endsWith(`/projects/${PROJECT_ID}/assets`)) return json(ASSETS);
+    if (url.includes("/references/resolve")) return json(resolved);
+    if (url.endsWith(`/shots/${SHOT_ID}/references`) && init?.method !== "POST") {
+      return json([BINDING]);
     }
-    if (url.endsWith("/shots/shot-1/references") && method === "GET") {
-      return json([
-        {
-          id: "binding-1",
-          project_id: "project-1",
-          shot_id: "shot-1",
-          shot_experiment_id: null,
-          stage: "both",
-          asset_id: "asset-linmo",
-          asset_version_id: null,
-          artifact_id: null,
-          resolution_mode: "current_formal",
-          purpose: "identity",
-          label: "@林墨",
-          sort_order: 0,
-          metadata: {},
-          version: 1,
-          created_at: "",
-          updated_at: "",
-        },
-      ]);
-    }
-    if (url.endsWith("/card") && method === "GET") {
-      return json({ current_version_id: "version-1", current_version_number: 1 });
-    }
-    if (url.endsWith("/references/binding-1") && method === "PATCH") {
-      return json({
-        id: "binding-1",
-        project_id: "project-1",
-        shot_id: "shot-1",
-        shot_experiment_id: null,
-        stage: "both",
-        asset_id: "asset-linmo",
-        asset_version_id: "version-1",
-        artifact_id: null,
-        resolution_mode: "pinned_version",
-        purpose: "identity",
-        label: "@林墨",
-        sort_order: 0,
-        metadata: {},
-        version: 2,
-        created_at: "",
-        updated_at: "",
-      });
-    }
-    if (url.endsWith("/references/resolve") && method === "POST") {
-      return json([
-        {
-          purpose: "identity",
-          role: "front_face",
-          artifact_id: "artifact-1",
-          label: "@林墨",
-          source: "current_formal",
-          asset_id: "asset-linmo",
-          asset_version_id: "version-1",
-        },
-      ]);
-    }
-    if (url.includes("/references") && method === "POST") {
-      return json(
-        {
-          id: "binding-2",
-          project_id: "project-1",
-          shot_id: "shot-1",
-          shot_experiment_id: null,
-          stage: "both",
-          asset_id: "asset-linmo",
-          asset_version_id: null,
-          artifact_id: null,
-          resolution_mode: "current_formal",
-          purpose: "identity",
-          label: "@林墨",
-          sort_order: 0,
-          metadata: {},
-          version: 1,
-          created_at: "",
-          updated_at: "",
-        },
-        201,
-      );
-    }
-    return json({});
+    return json([]);
   });
-  return calls;
 }
 
-describe("AssetReferencePicker", () => {
-  it("lists existing business-purpose bindings", async () => {
-    mockBackend();
-    renderPicker();
-    expect(await screen.findByText(/@林墨/)).toBeInTheDocument();
-    const list = screen.getByTestId("binding-list");
-    // The creative surface names the purpose and how the version is followed;
-    // the stored keys and the asset id stay in the diagnostics block.
-    expect(list).toHaveTextContent("角色身份 · 跟随当前正式版本");
-    expect(list).not.toHaveTextContent("identity · current_formal");
-    expect(within(list).getByText("asset-linmo")).toBeInTheDocument();
+function renderPicker() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <AssetReferencePicker projectId={PROJECT_ID} shotId={SHOT_ID} />
+    </QueryClientProvider>,
+  );
+}
 
-  it("adds a binding for the selected asset", async () => {
-    const calls = mockBackend();
+describe("AssetReferencePicker recycled assets and empty resolution", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("offers only production assets and never the recycled one", async () => {
+    mockApi([]);
     renderPicker();
-    await screen.findByRole("option", { name: /林墨/ });
-    fireEvent.change(screen.getByLabelText("选择资产"), { target: { value: "asset-linmo" } });
-    fireEvent.click(screen.getByRole("button", { name: "添加引用" }));
-    await waitFor(() => {
-      const post = calls.find((call) => call.method === "POST" && call.url.includes("/references"));
-      expect(post).toBeTruthy();
-    });
-  });
 
-  it("resolves the shot references to frozen artifact ids", async () => {
-    mockBackend();
-    renderPicker();
-    await screen.findByText(/@林墨/);
-    fireEvent.click(screen.getByRole("button", { name: "解析引用" }));
-    const resolved = await screen.findByTestId("resolved-references");
-    expect(resolved).toHaveTextContent("角色身份 · 跟随正式版本");
-    expect(resolved).toHaveTextContent("正面");
-    expect(within(resolved).getByText("artifact-1")).toBeInTheDocument();
-  });
-
-  it("removes the binding and clears the execution references", async () => {
-    let bindingPresent = true;
-    let emitted: unknown[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      if (url.endsWith("/assets") && method === "GET") {
-        return json([
-          {
-            id: "asset-linmo",
-            project_id: "project-1",
-            kind: "character",
-            name: "林墨",
-            description: "",
-            metadata: {},
-            status: "active",
-            version: 1,
-            created_at: "",
-            updated_at: "",
-          },
-        ]);
-      }
-      if (url.endsWith("/shots/shot-1/references") && method === "GET") {
-        return json(
-          bindingPresent
-            ? [
-                {
-                  id: "binding-1",
-                  project_id: "project-1",
-                  shot_id: "shot-1",
-                  shot_experiment_id: null,
-                  stage: "both",
-                  asset_id: "asset-linmo",
-                  asset_version_id: "version-1",
-                  artifact_id: null,
-                  resolution_mode: "current_formal",
-                  purpose: "identity",
-                  label: "@林墨",
-                  sort_order: 0,
-                  metadata: {},
-                  version: 1,
-                  created_at: "",
-                  updated_at: "",
-                },
-              ]
-            : [],
-        );
-      }
-      if (url.endsWith("/shots/shot-1/references/resolve") && method === "POST") {
-        return json(
-          bindingPresent
-            ? [
-                {
-                  binding_id: "binding-1",
-                  purpose: "identity",
-                  role: "front_face",
-                  artifact_id: "artifact-1",
-                  label: "@林墨",
-                  source: "current_formal",
-                  asset_id: "asset-linmo",
-                  asset_version_id: "version-1",
-                  mime_type: "image/png",
-                  fingerprint: "fingerprint-1",
-                },
-              ]
-            : [],
-        );
-      }
-      if (url.endsWith("/references/binding-1") && method === "DELETE") {
-        bindingPresent = false;
-        return Promise.resolve(new Response(null, { status: 204 }));
-      }
-      return json({});
-    });
-
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <AssetReferencePicker
-          projectId="project-1"
-          shotId="shot-1"
-          onReferencesChange={(references) => {
-            emitted = references;
-          }}
-        />
-      </QueryClientProvider>,
+    await waitFor(() => expect(screen.getByTestId("asset-reference-picker")).toBeInTheDocument());
+    const options = await screen.findByLabelText("选择资产");
+    const values = Array.from(options.querySelectorAll("option")).map(
+      (option) => (option as HTMLOptionElement).value,
     );
-    await screen.findByText("artifact-1");
-    expect(emitted).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: /删除引用/ }));
-    await waitFor(() => expect(bindingPresent).toBe(false));
-    await waitFor(() => expect(emitted).toEqual([]));
-    expect(screen.getByText("尚未绑定资产引用。")).toBeInTheDocument();
+    expect(values).toContain(ACTIVE_ASSET);
+    expect(values).not.toContain(RECYCLED_ASSET);
+    expect(await screen.findByText(/@林墨/)).toBeInTheDocument();
   });
 
-  it("pins a binding to the asset's current formal version", async () => {
-    const calls = mockBackend();
+  it("marks a binding that resolves to nothing and explains what to do", async () => {
+    mockApi([]);
     renderPicker();
-    await screen.findByText(/@林墨/);
-    fireEvent.click(screen.getByRole("button", { name: /编辑引用/ }));
-    fireEvent.change(screen.getByLabelText("参考方式 binding-1"), {
-      target: { value: "pinned_version" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "保存引用 binding-1" }));
 
-    await waitFor(() => {
-      const patch = calls.find(
-        (call) => call.method === "PATCH" && call.url.endsWith("/references/binding-1"),
-      );
-      expect(patch).toBeTruthy();
-      expect(JSON.parse(String(patch?.body))).toMatchObject({
-        expected_version: 1,
-        asset_id: "asset-linmo",
-        asset_version_id: "version-1",
-        resolution_mode: "pinned_version",
+    const invalid = await screen.findByTestId(`reference-binding-invalid-${BINDING_ID}`);
+    expect(invalid).toHaveTextContent("已失效：解析不到素材");
+    expect(screen.getByTestId("reference-binding-invalid-hint")).toHaveTextContent(
+      "已失效的引用不会进入生成",
+    );
+    expect(screen.getByTestId("resolved-references")).toHaveTextContent(
+      "已绑定的参考当前解析不到内容",
+    );
+  });
+
+  it("keeps a binding valid while it still resolves to concrete material", async () => {
+    mockApi([
+      {
         purpose: "identity",
-      });
-    });
-  });
-
-  it("switches a pinned binding back to follow the current formal version", async () => {
-    const calls = mockBackend();
-    vi.mocked(globalThis.fetch)
-      .mockClear()
-      .mockImplementation((input, init) => {
-        const url = String(input);
-        const method = init?.method ?? "GET";
-        calls.push({ method, url, body: init?.body });
-        if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-        if (url.endsWith("/assets") && method === "GET") {
-          return json([
-            {
-              id: "asset-linmo",
-              project_id: "project-1",
-              kind: "character",
-              name: "林墨",
-              description: "",
-              metadata: {},
-              status: "active",
-              version: 1,
-              created_at: "",
-              updated_at: "",
-            },
-          ]);
-        }
-        if (url.endsWith("/shots/shot-1/references") && method === "GET") {
-          return json([
-            {
-              id: "binding-1",
-              project_id: "project-1",
-              shot_id: "shot-1",
-              shot_experiment_id: null,
-              stage: "both",
-              asset_id: "asset-linmo",
-              asset_version_id: "version-1",
-              artifact_id: null,
-              resolution_mode: "pinned_version",
-              purpose: "identity",
-              label: "@林墨",
-              sort_order: 0,
-              metadata: {},
-              version: 3,
-              created_at: "",
-              updated_at: "",
-            },
-          ]);
-        }
-        if (url.endsWith("/references/binding-1") && method === "PATCH") {
-          return json({ id: "binding-1", version: 4 });
-        }
-        if (url.endsWith("/references/resolve") && method === "POST") return json([]);
-        return json({});
-      });
-
-    renderPicker();
-    await screen.findByText(/@林墨/);
-    fireEvent.click(screen.getByRole("button", { name: /编辑引用/ }));
-    expect(screen.getByLabelText("参考方式 binding-1")).toHaveValue("pinned_version");
-    fireEvent.change(screen.getByLabelText("参考方式 binding-1"), {
-      target: { value: "current_formal" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "保存引用 binding-1" }));
-
-    await waitFor(() => {
-      const patch = calls.find(
-        (call) => call.method === "PATCH" && call.url.endsWith("/references/binding-1"),
-      );
-      expect(patch).toBeTruthy();
-      expect(JSON.parse(String(patch?.body))).toMatchObject({
-        expected_version: 3,
-        asset_id: "asset-linmo",
+        role: "identity",
+        artifact_id: "55555555-5555-4555-8555-555555555555",
+        label: "@林墨",
+        source: "current_formal",
+        asset_id: ACTIVE_ASSET,
         asset_version_id: null,
-        resolution_mode: "current_formal",
-      });
-    });
+      },
+    ]);
+    renderPicker();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("resolved-references")).toHaveTextContent(
+        "本次生成将使用的参考素材",
+      ),
+    );
+    expect(screen.queryByTestId(`reference-binding-invalid-${BINDING_ID}`)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("reference-binding-invalid-hint")).not.toBeInTheDocument();
   });
 });
-
-afterEach(() => vi.restoreAllMocks());

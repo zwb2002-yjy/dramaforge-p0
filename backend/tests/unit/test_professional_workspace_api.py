@@ -103,6 +103,129 @@ def test_professional_assets_are_versioned(client: TestClient) -> None:
     assert archived.status_code == 422
 
 
+def test_experiment_stage_selects_the_model_purpose(client: TestClient) -> None:
+    """The branch stage is part of the experiment's identity.
+
+    It decides which model purpose `start` resolves, so a stage the caller did
+    not choose must never be assumed: an image model started on the video stage
+    is refused with the purpose that was actually asked for.
+    """
+    _, project_id = _project(client)
+    shot_id = _shot(client, project_id)
+
+    keyframe = client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={
+            "idempotency_key": "stage-keyframe-1",
+            "name": "Keyframe model experiment",
+            "source_shot_id": shot_id,
+            "selected_model": "agnes/agnes-image-2.1-flash",
+            "parameters": {"target_node_key": "keyframe"},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert keyframe.status_code == 201, keyframe.text
+    assert keyframe.json()["parameters"]["target_node_key"] == "keyframe"
+
+    # No binding exists in this workspace, so start fails closed and names the
+    # stage it resolved instead of blaming the stage the client did not send.
+    started = client.post(
+        f"/api/v1/projects/{project_id}/experiments/{keyframe.json()['id']}/start",
+        json={"target_node_key": "keyframe"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert started.status_code == 422, started.text
+    assert started.json()["details"] == {
+        "code": "MODEL_BINDING_MISSING",
+        "selected_model": "agnes/agnes-image-2.1-flash",
+        "purpose": "keyframe",
+    }
+
+    video = client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={
+            "idempotency_key": "stage-video-1",
+            "name": "Video model experiment",
+            "source_shot_id": shot_id,
+            "selected_model": "agnes/agnes-video-v2.0",
+            "parameters": {"target_node_key": "video"},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert video.status_code == 201, video.text
+    assert video.json()["parameters"]["target_node_key"] == "video"
+
+    # Keyframe adoption scopes rewrite the keyframe's downstream lineage, so
+    # they are refused on a branch that never produced a keyframe candidate.
+    refused = client.post(
+        f"/api/v1/projects/{project_id}/experiments/{video.json()['id']}/decision",
+        json={
+            "decision": "accepted",
+            "adoption_scope": "keyframe_keep_video",
+            "adopted_shot_ids": [shot_id],
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert refused.status_code == 409, refused.text
+
+    # An unknown stage is rejected rather than silently becoming the default.
+    invalid = client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={
+            "idempotency_key": "stage-invalid-1",
+            "name": "Invalid stage",
+            "source_shot_id": shot_id,
+            "selected_model": "agnes/agnes-video-v2.0",
+            "parameters": {"target_node_key": "keyframes"},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert invalid.status_code == 422, invalid.text
+
+
+def test_experiment_creation_is_idempotent_per_key(client: TestClient) -> None:
+    """One experiment identity creates one draft, so it can be run (and billed) once.
+
+    The production page derives the idempotency key from the experiment's
+    identity (shot + stage + model + name) instead of the clock, so a double
+    click or a retry must return the same draft rather than a second branch.
+    """
+    _, project_id = _project(client)
+    shot_id = _shot(client, project_id)
+    body = {
+        "idempotency_key": "experiment:shot|keyframe|agnes/agnes-image-2.1-flash|镜头1 实验",
+        "name": "镜头1 实验",
+        "source_shot_id": shot_id,
+        "selected_model": "agnes/agnes-image-2.1-flash",
+        "parameters": {"target_node_key": "keyframe"},
+    }
+    first = client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json=body,
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json=body,
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["id"] == first.json()["id"]
+    listed = client.get(f"/api/v1/projects/{project_id}/experiments")
+    assert [item["id"] for item in listed.json()] == [first.json()["id"]]
+
+    # Reusing the key for a different experiment identity is a conflict, not a
+    # silent second branch.
+    changed = {**body, "parameters": {"target_node_key": "video"}}
+    conflict = client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json=changed,
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert conflict.status_code == 409, conflict.text
+
+
 def test_experiment_annotation_and_opencut_manifest(client: TestClient) -> None:
     _, project_id = _project(client)
     shot_id = _shot(client, project_id)

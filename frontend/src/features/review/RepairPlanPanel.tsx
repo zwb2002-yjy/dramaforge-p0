@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 
 import { reviewTargetHref } from "./reviewTarget";
 import { queryKeys } from "../../lib/queryKeys";
+import { nodeRunStatusLabel } from "../../lib/runLabels";
 import {
   REPAIR_OPTION_LABEL,
   createRepair,
@@ -25,7 +26,8 @@ type RepairPlanPanelProps = {
 
 function stepSummary(step: RepairStepRead): string {
   const parts = [`第 ${step.ordinal} 步 · ${repairStageLabel(step.stage)}`];
-  if (step.node_run_status) parts.push(`运行状态 ${step.node_run_status}`);
+  // The stored run status is a contract token; the surface states it in Chinese.
+  if (step.node_run_status) parts.push(`运行状态 ${nodeRunStatusLabel(step.node_run_status)}`);
   parts.push(repairStepActionLabel(step.next_action));
   return parts.join(" · ");
 }
@@ -141,7 +143,7 @@ export function RepairPlanPanel({ projectId, shotId, onClose }: RepairPlanPanelP
                   onChange={() => setOption(value as RepairOption)}
                   disabled={Boolean(active)}
                 />
-                {REPAIR_OPTION_LABEL[value as RepairOption] ?? value}
+                {REPAIR_OPTION_LABEL[value as RepairOption] ?? "修复方式待同步"}
               </label>
             ))}
           </fieldset>

@@ -138,7 +138,9 @@ describe("RepairPlanPanel", () => {
     const active = await screen.findByTestId("repair-active");
     expect(active).toHaveAttribute("data-next-action", "human_decision");
     expect(screen.getByTestId("repair-step-1")).toHaveTextContent("第 1 步");
-    expect(screen.getByTestId("repair-step-1")).toHaveTextContent("运行状态 completed");
+    // The stored run status is a contract token; the surface states it in Chinese.
+    expect(screen.getByTestId("repair-step-1")).toHaveTextContent("运行状态 已完成");
+    expect(screen.getByTestId("repair-step-1")).not.toHaveTextContent("completed");
     expect(screen.getByTestId("repair-review-hint")).toHaveTextContent("修复尚未完成");
     expect(screen.queryByTestId("repair-execute-step")).not.toBeInTheDocument();
     expect(screen.queryByTestId("repair-finished")).not.toBeInTheDocument();
@@ -196,8 +198,10 @@ describe("RepairPlanPanel", () => {
 
   it("labels stages and step actions in the product vocabulary", () => {
     expect(repairStageLabel("keyframe_review")).toBe("审查并确认关键帧");
-    expect(repairStageLabel("unknown_stage")).toBe("unknown_stage");
+    // An unknown stored stage must not be printed raw on the surface.
+    expect(repairStageLabel("unknown_stage")).toBe("修复环节待同步");
     expect(repairStepActionLabel("review_candidate")).toContain("等待人工审查");
+    expect(repairStepActionLabel("unknown_action")).toBe("按修复计划继续");
     expect(repairIsWaitingForHuman(ACTIVE_REPAIR)).toBe(true);
     expect(repairIsWaitingForHuman({ ...ACTIVE_REPAIR, next_action: "execute_step" })).toBe(false);
   });

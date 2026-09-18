@@ -238,6 +238,10 @@ class QualityEvidenceRead(BaseModel):
 async def _connection_read(
     service: ProviderConnectionService, connection: ProviderConnection
 ) -> ConnectionRead:
+    # Report the stored credential, not an assumption: a connection can exist
+    # without one (created before a key was saved, or after its credential row was
+    # removed), and claiming "已保存" then is a state lie the Owner cannot detect.
+    credential_version = await service.credential_version(connection)
     return ConnectionRead(
         id=connection.id,
         workspace_id=connection.workspace_id,
@@ -246,8 +250,8 @@ async def _connection_read(
         base_url=connection.base_url,
         protocol_profile=connection.protocol_profile,
         enabled=connection.enabled,
-        credential_configured=True,
-        credential_key_version=await service.credential_version(connection),
+        credential_configured=credential_version is not None,
+        credential_key_version=credential_version,
         verification_status=connection.verification_status,
         verified_at=connection.verified_at,
     )

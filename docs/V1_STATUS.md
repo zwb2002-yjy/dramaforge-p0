@@ -1,8 +1,13 @@
 # V1_STATUS — 当前 V1 / 发布状态
 
 Status: current  
-Date: 2026-09-17  
-Branch: `dev` = `b96a5216a4c67de50cf8b175d6a5914f7909b471`
+Date: 2026-09-18（本节为最新实测；下方"当前结论"及历史小节保留其原始日期与语境）  
+Branch: `dev` = `9456f6c999ed661e3585b6f578563dbebf9dea40`（= `origin/dev`）；`main` 基线仍为 `c12c3dfb`
+
+> 2026-09-18 重要更正：本文件此前记录的"当前候选"是 `b96a5216` / PR #90 HEAD `d2c7655b`
+> 时期的状态。当前 `dev` 已推进到 `9456f6c`，且**工作区有大量未提交改动**（139 个路径，
+> 含另一 agent 正在进行的前端/导航/设置重构）；本文件的验证数字与"正式 8080 实例身份"
+> 两处已与实际不符，见文末「2026-09-18 工作区实测」。发布完成条件本身未变。
 
 ## 当前结论
 
@@ -10,6 +15,7 @@ Branch: `dev` = `b96a5216a4c67de50cf8b175d6a5914f7909b471`
 
 当前发布 PR 为 **#90：`dev -> main`**，HEAD 为 `d2c7655b`，GitHub 返回
 `mergeable=true`；`main` 基线仍为 `c12c3dfb`。Owner 仍是唯一合并人。
+（该 PR 事实来自 2026-09-17 记录，本轮未复核远端 PR 状态。）
 
 
 
@@ -24,6 +30,7 @@ Branch: `dev` = `b96a5216a4c67de50cf8b175d6a5914f7909b471`
 - 当前 `dev` 已实现精确候选审查目标：普通候选与修复步骤都绑定不可变 Artifact，错误目标失败关闭，不回退 Formal。
 - Review 摘要已返回视频证据清单：来源 Artifact / 哈希、审查 NodeRun / Artifact、采样版本、参考图哈希和逐帧可用状态；桌面证据条只读并定位播放器。
 - 当前候选质量镜像已通过 1228 单元测试、84 PostgreSQL 集成测试；前端通过 268 单元测试、45 Playwright 测试。
+  （**历史数字**，属上述旧候选；当前工作区的实测数字见文末「2026-09-18 工作区实测」。）
 - 已从当前提交启动正式 8080 拓扑并验证 gateway/API/数据库身份；在该实例初始化 Owner、创建“乌镇宣传短片”并导入 1 集 / 1 场景 / 6 镜头剧本。
 - 上述运行验证没有发起付费 Provider 生成；因此不能替代真实模型 Golden、异常恢复全矩阵和发布物安装验证。
 ## 还差什么
@@ -82,3 +89,58 @@ V1 发布完成至少同时满足：
 ### 安装包本地烟测
 
 当前候选已在临时隔离目录完成离线安装烟测：本地构建的运行镜像集单趟压缩、gzip 完整性、`docker load`、`install.ps1 -Offline` 和全 Compose 健康检查均通过。该证据仅证明本地安装路径，不能替代 Release workflow 产物、CI required checks 或最终发布身份。
+
+## 2026-09-18 工作区实测（第 26 轮更正）
+
+口径：本节只描述**当前工作区**（`dev` @ `9456f6c` + 未提交改动）的实测事实，
+不是提交级结论，也不是发布候选结论。
+
+**身份**
+
+- `dev` = `9456f6c999ed661e3585b6f578563dbebf9dea40`，与 `origin/dev` 一致；`main` 仍为 `c12c3dfb`。
+- 工作区 **139 个路径未提交**：另一 agent 正在重构前端（导航/设置/资产画廊等），
+  本会话的修复也混在同一工作区里。**因此当前没有任何"候选 SHA"可引用。**
+
+**本工作区实测通过的门禁**
+
+| 门禁 | 结果 |
+|---|---|
+| 后端单测 | 1246 passed |
+| 后端集成（真实 Postgres + Redis） | 84/84 passed |
+| `ruff` / `mypy` | 全通过 / 286 源文件无问题 |
+| `alembic check` | No new upgrade operations detected（模型与迁移一致） |
+| 前端单测 | 323 passed / 64 文件 |
+| 前端 e2e（Playwright，含 v1 主链旅程） | 76 passed |
+| 前端 `format:check` / `lint` / `typecheck` / `build` / `routes:check` | 全通过 |
+| `api:check`（生成类型 vs OpenAPI） | generated.ts is up to date |
+| 后端集成环境注意 | 在 `dramaforge-v1-release-quality_default` 网络上必须用容器名 `dramaforge-redis-quality-1`；别名 `redis-quality` 只存在于 `dramaforge_default`，用错会得到 4 个假失败 |
+
+**当前 8080 运行实例的真实身份（与上文历史记录不同）**
+
+- `GET /health` 报告 `env=development`、`source_commit=9456f6c`；
+  API 容器 `APP_ENV=development`、`SESSION_SECRET=dev-only-change-me-…`。
+  这是**本会话用于实时验证的开发环境实例**，不是发布身份实例。
+- 前端镜像是 **2026-09-02 构建的 `c44df24` 版本**（`org.opencontainers.image.revision`），
+  落后于 `9456f6c`：本会话修复的前端行为（镜头画布四项可写、失败原因中文呈现、
+  词表兜底与泄漏清理）**在 8080 上尚不可见**，只在 5173 开发服务器可见。
+
+**已知限制（首版范围）**
+
+- 镜头 6 没有正式视频：其视频提交处于 `unknown_submission`（远端任务编号缺失，
+  禁止盲目重试）。Owner 已确认未找到可对账的远端任务；该镜头按已知限制处理，
+  待 Owner 决定"重提"或"记录为首版限制"。
+
+**剩余待决策项（阻塞继续推进的不是代码，而是决策）**
+
+1. 资格门禁语义：`quality_gated` 是硬准入门禁还是质量认证信息（两条最小方案与影响见
+   `tmp/p0-evidence/eligibility-gate-audit/ELIGIBILITY_GATE_AUDIT.md`）；
+2. 死表面处置：#13 制作工作台非实验部分（应用内不可达）、#15 `ExperimentCompare`
+   无消费者、#6 导演提案路径无生产者——删除或接线属产品决策；
+3. 跨 agent 协调项：#9 项目级绑定读取接口、#10 供应商连接启停/删除（消费端都在
+   另一 agent 正在修改的文件里）。
+
+**阶段 12 一致性审计**（方案 1498-1594 行要求）已完成：用户动作清单（53 条，机械提取）、
+四域链路追踪、技术信息泄漏审计 7 问、16 条明确问题与逐条可达性分类，见
+`tmp/p0-evidence/stage12-consistency-audit/STAGE12_CONSISTENCY_AUDIT.md`。
+其中本会话已修复并现场验证：镜头画布四项不可写、失败原因不可见、参考静默失效、
+回收素材可被绑定、实验创建幂等键非确定、以及三类界面词表/错误消息泄漏。

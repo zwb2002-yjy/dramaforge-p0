@@ -310,9 +310,11 @@ describe("HumanReviewDecisionPanel", () => {
   it("translates the machine and blocker vocabulary", () => {
     expect(reviewMachineStatusLabel(null)).toBe("尚无自动检查证据");
     expect(reviewMachineStatusLabel("needs_human")).toBe("待人工判断");
-    expect(reviewMachineStatusLabel("weird_status")).toBe("weird_status");
+    expect(reviewMachineStatusLabel("not_applicable")).toBe("无需自动检查");
+    // An unknown stored value must not reach the surface as a raw token.
+    expect(reviewMachineStatusLabel("weird_status")).toBe("自动检查状态待同步");
     expect(reviewBlockerLabel(null)).toBeNull();
     expect(reviewBlockerLabel("REVIEW_DECISION_REJECTED")).toContain("拒绝");
-    expect(reviewBlockerLabel("SOMETHING_ELSE")).toBe("SOMETHING_ELSE");
+    expect(reviewBlockerLabel("SOMETHING_ELSE")).toBe("该素材尚未满足采用条件。");
   });
 });

@@ -82,7 +82,7 @@ export function ShotChangeProposalsPanel({
         <div>
           <strong>{row.summary}</strong>
           <small>
-            {STATUS_LABEL[row.status] ?? row.status} · 基于 v{row.base_shot_version} ·{" "}
+            {STATUS_LABEL[row.status] ?? "状态待同步"} · 基于 v{row.base_shot_version} ·{" "}
             {payloadSummary(row.replacement_payload)}
           </small>
           {row.affected_node_keys.length > 0 && (

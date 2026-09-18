@@ -222,7 +222,11 @@ export function AssetReferencePicker({
     },
   });
 
-  const assetOptions = Array.isArray(assets.data) ? assets.data : [];
+  // A recycled asset is retired from production, so it is neither offered here
+  // nor accepted by the server when a binding is created/updated. Existing
+  // bindings that still point at one stay readable (labelled below).
+  const allAssets = Array.isArray(assets.data) ? assets.data : [];
+  const assetOptions = allAssets.filter((asset) => asset.status !== "recycled");
   const rows = useMemo(() => (Array.isArray(bindings.data) ? bindings.data : []), [bindings.data]);
 
   useEffect(() => {
@@ -256,9 +260,22 @@ export function AssetReferencePicker({
   }, [onReferencesChange, resolution.data, rows]);
 
   const resolved = resolvedReferences;
+  // A binding that produced no resolved reference does not reach generation even
+  // though it is stored: after a version change without usable material, or for a
+  // recycled asset, resolution is empty. Surface that instead of showing nothing.
+  const resolvedBindingIds = new Set(
+    resolved
+      .map((reference) => bindingIdForResolvedReference(reference, rows))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const invalidBindings = rows.filter(
+    (binding) => resolution.isSuccess && !resolvedBindingIds.has(binding.id),
+  );
 
   function labelFor(assetId: string): string {
-    return `@${assetOptions.find((asset) => asset.id === assetId)?.name ?? assetId.slice(0, 8)}`;
+    const asset = allAssets.find((item) => item.id === assetId);
+    if (!asset) return "@已移除素材";
+    return asset.status === "recycled" ? `@${asset.name}（已回收）` : `@${asset.name}`;
   }
 
   const bindingLabels = rows.map((binding) => binding.label);
@@ -382,6 +399,14 @@ export function AssetReferencePicker({
                   {binding.label || "（无标签）"} · {purposeLabel(binding.purpose)} ·{" "}
                   {resolutionModeLabel(binding.resolution_mode)}
                 </span>
+                {resolution.isSuccess && !resolvedBindingIds.has(binding.id) && (
+                  <strong
+                    className="status-bad"
+                    data-testid={`reference-binding-invalid-${binding.id}`}
+                  >
+                    已失效：解析不到素材
+                  </strong>
+                )}
                 {binding.asset_id && (
                   <details className="editing-diagnostics">
                     <summary>开发 / 诊断详情（只读）</summary>
@@ -409,6 +434,12 @@ export function AssetReferencePicker({
         ))}
       </ul>
 
+      {invalidBindings.length > 0 && (
+        <p className="muted" data-testid="reference-binding-invalid-hint">
+          已失效的引用不会进入生成。请更换参考素材，或重新选定版本。
+        </p>
+      )}
+
       {resolution.isSuccess && (
         <div className="qc-resolved-references" data-testid="resolved-references">
           <h4>本次生成将使用的参考素材</h4>
@@ -427,7 +458,13 @@ export function AssetReferencePicker({
               </li>
             ))}
           </ul>
-          {resolved.length === 0 && <p className="muted">当前无已解析引用。</p>}
+          {resolved.length === 0 && (
+            <p className="muted">
+              {rows.length > 0
+                ? "已绑定的参考当前解析不到内容：素材换版后没有可用素材，或素材已被回收。请更换参考素材。"
+                : "尚未绑定参考素材。"}
+            </p>
+          )}
         </div>
       )}
 

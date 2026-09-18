@@ -174,3 +174,116 @@ describe("ShotDesignPanel save feedback", () => {
     expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
   });
 });
+
+describe("ShotDesignPanel canvas write gate", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Records every PATCH so the canvas/design split can be asserted. */
+  function recordingFetch(canvasVersion = 5) {
+    const patches: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        patches.push({ url, body });
+        if (url.endsWith(`/shots/${SHOT.id}/canvas`)) {
+          return json({
+            shot: { ...SHOT, version: canvasVersion },
+            revision_id: "33333333-3333-4333-8333-333333333333",
+            revision_number: 1,
+          });
+        }
+        return json({ id: SHOT.id, version: canvasVersion });
+      }
+      return json({});
+    });
+    return patches;
+  }
+
+  it("writes the canvas facts that no other endpoint can persist", async () => {
+    const patches = recordingFetch();
+    renderPanel();
+
+    expect(screen.getByTestId("shot-design-camera-facts")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("画面描述"), { target: { value: "A turns" } });
+    fireEvent.change(screen.getByLabelText("镜头类型"), { target: { value: "close_up" } });
+    fireEvent.change(screen.getByLabelText("机位运动"), { target: { value: "缓慢推近" } });
+    fireEvent.change(screen.getByLabelText("时长（秒）"), { target: { value: "5" } });
+    fireEvent.click(screen.getByTestId("save-shot-design"));
+
+    await waitFor(() => expect(patches.length).toBe(1));
+    expect(patches[0].url).toContain(`/shots/${SHOT.id}/canvas`);
+    expect(patches[0].body).toMatchObject({
+      expected_version: 4,
+      visual_description: "A turns",
+      shot_type: "close_up",
+      camera_move: "缓慢推近",
+      duration_seconds: "5",
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已保存画布版本"),
+    );
+  });
+
+  it("threads the canvas version into the design write instead of the stale prop", async () => {
+    const patches = recordingFetch(7);
+    renderPanel();
+
+    fireEvent.change(screen.getByLabelText("画面描述"), { target: { value: "A turns" } });
+    editImagePrompt("local draft prompt");
+    fireEvent.click(screen.getByTestId("save-shot-design"));
+
+    await waitFor(() => expect(patches.length).toBe(2));
+    expect(patches[0].url).toContain("/canvas");
+    expect(patches[0].body.expected_version).toBe(4);
+    expect(patches[1].url).toContain(`/shots/${SHOT.id}/design`);
+    // The canvas write produced v7, so the design gate must not reuse v4.
+    expect(patches[1].body).toMatchObject({
+      expected_version: 7,
+      image_prompt: "local draft prompt",
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已保存画布版本与提示词"),
+    );
+  });
+
+  it("keeps prompt-only saves on the design endpoint alone", async () => {
+    const patches = recordingFetch();
+    renderPanel();
+
+    editImagePrompt("local draft prompt");
+    fireEvent.click(screen.getByTestId("save-shot-design"));
+
+    await waitFor(() => expect(patches.length).toBe(1));
+    expect(patches[0].url).toContain(`/shots/${SHOT.id}/design`);
+    expect(patches.some((patch) => patch.url.endsWith("/canvas"))).toBe(false);
+  });
+
+  it("keeps the local canvas draft when the canvas gate reports a conflict", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (init?.method === "PATCH") {
+        return json(
+          {
+            code: "CONFLICT",
+            detail: "shot canvas version conflict",
+            details: { expected_version: 4, actual_version: 6 },
+          },
+          409,
+        );
+      }
+      return json({});
+    });
+    renderPanel();
+
+    fireEvent.change(screen.getByLabelText("画面描述"), { target: { value: "A turns away" } });
+    fireEvent.click(screen.getByTestId("save-shot-design"));
+
+    const conflict = await screen.findByTestId("shot-design-conflict");
+    expect(conflict).toHaveTextContent("本地草稿基于 v4");
+    expect((screen.getByLabelText("画面描述") as HTMLTextAreaElement).value).toBe("A turns away");
+    expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
+  });
+});

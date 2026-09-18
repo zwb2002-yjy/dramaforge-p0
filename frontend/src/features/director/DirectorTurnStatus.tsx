@@ -38,6 +38,10 @@ const WAIT_LABEL: Record<string, string> = {
   formal_confirmation: "生产完成，等待确认正式候选",
   production_review: "生产完成，等待审阅",
   execution_in_progress: "生产仍在进行",
+  // Reasons the Director runtime records when it cannot continue on the facts it
+  // was given. Stored keys stay the contract; the surface explains the state.
+  context_changed: "镜头或场景事实已变化，等待重新对齐",
+  proposal_invalid: "建议已失效，等待重新生成",
   execution_failed: "生产失败，等待处理",
   formal_selected: "正式候选已确认",
   candidate_rejected: "候选未设为正式版本",
@@ -152,7 +156,7 @@ export function DirectorTurnStatus({
                 : loading && !latest
                   ? "正在同步"
                   : latest
-                    ? (STATUS_LABEL[latest.status] ?? latest.status)
+                    ? (STATUS_LABEL[latest.status] ?? "状态待同步")
                     : "导演在这里"
         }
       />
@@ -178,7 +182,7 @@ export function DirectorTurnStatus({
             <dd data-testid="director-current-understanding">{understanding(latest)}</dd>
             <dt>等待原因</dt>
             <dd data-testid="director-wait-reason">
-              {WAIT_LABEL[latest.wait_reason ?? ""] ?? latest.wait_reason ?? "—"}
+              {WAIT_LABEL[latest.wait_reason ?? ""] ?? "等待导演继续"}
             </dd>
             {focusedSuggestion(latest) ? (
               <>
@@ -195,11 +199,15 @@ export function DirectorTurnStatus({
               </>
             ) : null}
           </dl>
-          <details className="rs-memory-detail">
-            <summary>本次协作记录</summary>
+          <details className="rs-memory-detail" data-testid="director-turn-diagnostics">
+            <summary>开发 / 诊断详情（只读）</summary>
             <p>
               #{latest.id.slice(0, 8)} · {latest.step_count} 步 · revision{" "}
               {latest.runtime_revision ?? latest.revision}
+            </p>
+            <p>
+              状态 {latest.status}
+              {latest.wait_reason ? ` · 等待原因 ${latest.wait_reason}` : ""}
             </p>
           </details>
           {latest.last_error ? (

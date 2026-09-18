@@ -65,6 +65,10 @@ def test_connection_api_is_fixed_write_only_and_duplicate_is_conflict(
     assert body["base_url"] == "https://api.agnes-ai.cn"
     assert body["protocol_profile"] == "agnes_cn_v1"
     assert body["credential_configured"] is True
+    # The read model reports the stored credential instead of assuming one: the
+    # two fields must never contradict each other.
+    assert body["credential_key_version"] is not None
+    assert body["credential_configured"] is (body["credential_key_version"] is not None)
     assert "api_key" not in body
     assert secret not in created.text
 

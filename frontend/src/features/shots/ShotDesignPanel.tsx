@@ -1,8 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { ApiError } from "../../lib/api";
-import { shotTypeLabel } from "../../lib/shotLabels";
+import { ApiError, updateShotCanvas } from "../../lib/api";
+import { shotTypeOptionsFor } from "../../lib/shotLabels";
 import { updateShotDesign } from "./api";
 import { fetchShotWorkbench } from "./api";
 import type { ShotLite } from "./api";
@@ -112,6 +112,12 @@ export function ShotDesignPanel({
   const showMotion = focus === "all" || focus === "motion";
   const showLook = focus === "all" || focus === "look";
   const [visual, setVisual] = useState(shot.visual_description);
+  // Canvas facts: stored on the Shot itself and written through the CanvasRevision
+  // gate (`PATCH /shots/{id}/canvas`), which is the only endpoint that advances
+  // visual_description / shot_type / camera_move / duration_seconds.
+  const [shotType, setShotType] = useState(shot.shot_type);
+  const [cameraMove, setCameraMove] = useState(shot.camera_move ?? "");
+  const [durationSeconds, setDurationSeconds] = useState(shot.duration_seconds ?? "");
   const [localDraft, setLocalDraft] = useState<ShotDesignDraft>(() => ({
     image_prompt: shot.image_prompt,
     video_prompt: shot.video_prompt,
@@ -136,10 +142,16 @@ export function ShotDesignPanel({
   };
 
   const serverDirectorStateText = serializeDirectorState(shot.director_state);
-  const dirty =
+  const designDirty =
     draft.image_prompt !== shot.image_prompt ||
     draft.video_prompt !== shot.video_prompt ||
     directorStateText !== serverDirectorStateText;
+  const canvasDirty =
+    visual !== shot.visual_description ||
+    shotType !== shot.shot_type ||
+    cameraMove !== (shot.camera_move ?? "") ||
+    durationSeconds !== (shot.duration_seconds ?? "");
+  const dirty = designDirty || canvasDirty;
 
   // The panel remains mounted while the shot strip changes selection. Reset
   // editor state to the newly selected shot's server read model so edits and
@@ -147,6 +159,9 @@ export function ShotDesignPanel({
   // is also a server refresh signal after a successful save.
   useEffect(() => {
     setVisual(shot.visual_description);
+    setShotType(shot.shot_type);
+    setCameraMove(shot.camera_move ?? "");
+    setDurationSeconds(shot.duration_seconds ?? "");
     if (!onDraftChange) {
       setLocalDraft({
         image_prompt: shot.image_prompt,
@@ -159,6 +174,9 @@ export function ShotDesignPanel({
     shot.id,
     shot.version,
     shot.visual_description,
+    shot.shot_type,
+    shot.camera_move,
+    shot.duration_seconds,
     shot.image_prompt,
     shot.video_prompt,
     shot.director_state,
@@ -190,22 +208,47 @@ export function ShotDesignPanel({
   }, [dirty, onDirtyChange]);
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const directorState = parseDirectorState(directorStateText);
-      return updateShotDesign(projectId, shot.id, {
-        expected_version: shot.version,
-        director_state: directorState,
-        image_prompt: draft.image_prompt,
-        video_prompt: draft.video_prompt,
-      });
+      // Two explicit server gates, in the order that keeps the version chain
+      // honest: the CanvasRevision gate owns the Shot's canvas facts and is the
+      // only writer of a new Shot version, so the design write that follows must
+      // use the version that write produced instead of the stale prop.
+      let expectedVersion = shot.version;
+      if (canvasDirty) {
+        const canvas = await updateShotCanvas(projectId, shot.id, {
+          expected_version: expectedVersion,
+          visual_description: visual,
+          shot_type: shotType,
+          camera_move: cameraMove,
+          dialogue: shot.dialogue ?? "",
+          duration_seconds: durationSeconds,
+        });
+        expectedVersion = canvas?.shot?.version ?? expectedVersion;
+      }
+      if (designDirty) {
+        await updateShotDesign(projectId, shot.id, {
+          expected_version: expectedVersion,
+          director_state: directorState,
+          image_prompt: draft.image_prompt,
+          video_prompt: draft.video_prompt,
+        });
+      }
+      return { canvasChanged: canvasDirty, designChanged: designDirty };
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       // Do not use the mutation response as a local fake Shot/version. The
       // SceneWorkspace refetch is the only path that can make this draft
       // clean and enable production again.
       setConflict(null);
       await onSaved?.();
-      setMessage("已保存设计（版本已递增）");
+      setMessage(
+        result.canvasChanged && result.designChanged
+          ? "已保存画布版本与提示词（版本已递增）"
+          : result.canvasChanged
+            ? "已保存画布版本（版本已递增）"
+            : "已保存设计（版本已递增）",
+      );
     },
     onError: (error: unknown, _variables, context) => {
       // Keep the draft untouched on a stale-version or validation failure so
@@ -272,12 +315,43 @@ export function ShotDesignPanel({
         </label>
       ) : null}
       {showCamera ? (
-        <dl className="qc-shot-design-facts" data-testid="shot-design-camera-facts">
-          <dt>镜头类型</dt>
-          <dd>{shotTypeLabel(shot.shot_type)}</dd>
-          <dt>机位运动</dt>
-          <dd>{shot.camera_move || "—"}</dd>
-        </dl>
+        <div className="qc-shot-design-canvas-fields" data-testid="shot-design-camera-facts">
+          <label>
+            镜头类型
+            <select
+              aria-label="镜头类型"
+              value={shotType}
+              onChange={(event) => setShotType(event.target.value)}
+            >
+              {shotTypeOptionsFor(shotType).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            机位运动
+            <input
+              aria-label="机位运动"
+              value={cameraMove}
+              onChange={(event) => setCameraMove(event.target.value)}
+              placeholder="例如：缓慢推近"
+            />
+          </label>
+          <label>
+            时长（秒）
+            <input
+              aria-label="时长（秒）"
+              type="number"
+              min="0.1"
+              max="30"
+              step="0.1"
+              value={durationSeconds}
+              onChange={(event) => setDurationSeconds(event.target.value)}
+            />
+          </label>
+        </div>
       ) : null}
       {showLook ? (
         <label>
@@ -339,8 +413,10 @@ export function ShotDesignPanel({
           </button>
         </div>
       )}
-      {visual !== shot.visual_description && (
-        <p className="muted">画面描述修改需在画布版本中保存才会成为正式事实。</p>
+      {canvasDirty && (
+        <p className="muted" data-testid="shot-design-canvas-note">
+          画面描述、镜头类型、机位运动与时长会作为新的画布版本保存，并成为后续执行的事实源。
+        </p>
       )}
       {dirty ? (
         <p className="canvas-dirty" data-testid="shot-design-dirty" role="status">

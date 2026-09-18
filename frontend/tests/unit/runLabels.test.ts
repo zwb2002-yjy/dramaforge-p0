@@ -14,7 +14,7 @@ describe("nodeRunStatusLabel", () => {
   });
 
   it("never prints a raw token for an unmapped status", () => {
-    expect(nodeRunStatusLabel("provider_waiting")).toBe("provider waiting");
+    expect(nodeRunStatusLabel("provider_waiting")).toBe("状态待同步");
     expect(nodeRunStatusLabel(null)).toBe("—");
   });
 });
