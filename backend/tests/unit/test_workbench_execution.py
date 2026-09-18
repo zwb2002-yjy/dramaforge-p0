@@ -1080,6 +1080,111 @@ async def test_regenerated_candidate_gets_its_own_review_run(session: AsyncSessi
 
 
 @pytest.mark.asyncio
+async def test_ensure_stage_review_run_serves_a_candidate_without_evidence(
+    session: AsyncSession,
+) -> None:
+    """A candidate that exists without evidence can obtain its review.
+
+    A graph published before the gate existed, or a candidate whose tail review
+    was consumed by an earlier attempt, would otherwise dead-end the review page:
+    no evidence means no decision can ever be recorded.
+    """
+
+    from app.execution.models import Artifact, GraphNode
+    from app.production.workbench_execution import ensure_stage_review_run
+
+    project, video_binding, user = await _seed(session)
+    shot, _keyframe_seed, binding = await _seed_image_shot(
+        session,
+        project=project,
+        user=user,
+        connection_id=video_binding.connection_id,
+    )
+    command = _input(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="image_keyframe",
+        requested_binding_id=binding.id,
+        mode_id="text_to_image",
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    media_run = await service.create_and_dispatch(
+        project=project,
+        execution_input=command,
+        idempotency_key_override="evidence:keyframe:one",
+    )
+    await session.commit()
+
+    candidate = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key="projects/test/keyframes/candidate.png",
+        content_hash="candidate-hash",
+        mime_type="image/png",
+        byte_size=2048,
+        produced_by_run_id=media_run.id,
+    )
+    session.add(candidate)
+    await session.flush()
+
+    review_run = await ensure_stage_review_run(
+        session,
+        project=project,
+        shot=shot,
+        artifact_id=candidate.id,
+        stage="image_keyframe",
+        created_by=user.id,
+    )
+    await session.commit()
+
+    assert review_run.status == "queued"
+    assert review_run.input_snapshot["upstream_node_run_id"] == str(media_run.id)
+
+    # Asking again is the same review, not a second run for one candidate.
+    same = await ensure_stage_review_run(
+        session,
+        project=project,
+        shot=shot,
+        artifact_id=candidate.id,
+        stage="image_keyframe",
+        created_by=user.id,
+    )
+    await session.commit()
+    assert same.id == review_run.id
+    review_nodes = await session.execute(
+        select(NodeRun)
+        .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+        .where(GraphNode.node_key == "identity_review")
+    )
+    assert len(review_nodes.scalars().all()) == 1
+
+    # An artifact without an admitted producer is refused, not silently bound.
+    orphan = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key="projects/test/keyframes/orphan.png",
+        content_hash="orphan-hash",
+        mime_type="image/png",
+        byte_size=1024,
+    )
+    session.add(orphan)
+    await session.flush()
+    with pytest.raises(WorkbenchExecutionError) as mismatch:
+        await ensure_stage_review_run(
+            session,
+            project=project,
+            shot=shot,
+            artifact_id=orphan.id,
+            stage="image_keyframe",
+            created_by=user.id,
+        )
+    assert mismatch.value.details["code"] == "ARTIFACT_PRODUCER_MISSING"
+
+
+@pytest.mark.asyncio
 async def test_command_replay_is_frozen_and_new_keys_allocate_attempts(session, monkeypatch):
     from app.shared.errors import ConflictError
 

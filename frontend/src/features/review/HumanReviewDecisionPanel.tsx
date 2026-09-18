@@ -5,6 +5,7 @@ import { queryKeys } from "../../lib/queryKeys";
 import { reviewBlockerLabel, reviewMachineStatusLabel } from "./reviewLabels";
 import {
   createReviewDecision,
+  createReviewEvidence,
   fetchReviewSummary,
   type ReviewDecisionWrite,
   type ReviewStage,
@@ -90,6 +91,21 @@ function ReviewDecisionSession({
     },
   });
 
+  // A candidate can exist before its review does; without evidence no judgement
+  // can be recorded, so the page offers the zero-cost review of this candidate.
+  const requestEvidence = useMutation({
+    mutationFn: () => createReviewEvidence(projectId, shotId, { artifact_id: artifactId, stage }),
+    onSuccess: async () => {
+      setFeedback("已提交本候选的审查证据生成，完成后即可判断。");
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.review.summary(projectId, shotId, artifactId, reviewKind, stage),
+      });
+    },
+    onError: (error: unknown) => {
+      setFeedback(`生成审查证据失败：${error instanceof Error ? error.message : String(error)}`);
+    },
+  });
+
   const data: ReviewSummaryRead | undefined = summary.data;
   const blocker = reviewBlockerLabel(data?.blocked_reason ?? null);
   const hasEvidence = Boolean(data?.review_node_run_id);
@@ -156,9 +172,21 @@ function ReviewDecisionSession({
         </button>
       </div>
       {!hasEvidence && (
-        <p className="muted" data-testid="review-evidence-missing">
-          当前素材还没有自动检查证据，无法记录人工决定；请先运行对应审查节点。
-        </p>
+        <>
+          <p className="muted" data-testid="review-evidence-missing">
+            当前素材还没有自动检查证据，无法记录人工决定；请先运行对应审查节点。
+          </p>
+          <div className="qc-unsaved-actions">
+            <button
+              type="button"
+              data-testid={`review-request-evidence-${reviewKind}`}
+              onClick={() => requestEvidence.mutate()}
+              disabled={requestEvidence.isPending}
+            >
+              {requestEvidence.isPending ? "正在提交…" : "生成本候选的审查证据"}
+            </button>
+          </div>
+        </>
       )}
       {feedback && (
         <p className="muted" data-testid="review-decision-feedback" role="status">

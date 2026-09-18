@@ -1206,6 +1206,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/review-evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Review Evidence
+         * @description Queue the zero-cost review of this candidate so it can be judged.
+         *
+         *     A candidate whose review evidence is missing cannot receive any human
+         *     decision, which leaves the review page in a dead end.  This runs the tail
+         *     review for the Artifact the person is looking at; it contacts no Provider
+         *     and reuses the evidence when it already exists.
+         */
+        post: operations["create_review_evidence_api_v1_projects__project_id__shots__shot_id__review_evidence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/scenes": {
         parameters: {
             query?: never;
@@ -5581,6 +5606,37 @@ export interface components {
             /** Frames */
             frames: components["schemas"]["ReviewFrameEvidenceRead"][];
         };
+        /**
+         * ReviewEvidenceRequestBody
+         * @description Ask for the machine evidence of one exact candidate.
+         */
+        ReviewEvidenceRequestBody: {
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /**
+             * Stage
+             * @default formal_keyframe
+             */
+            stage: string;
+        };
+        /**
+         * ReviewEvidenceRequestRead
+         * @description The review run that will produce this candidate's evidence.
+         */
+        ReviewEvidenceRequestRead: {
+            /**
+             * Review Node Run Id
+             * Format: uuid
+             */
+            review_node_run_id: string;
+            /** Status */
+            status: string;
+            /** Queued */
+            queued: boolean;
+        };
         /** ReviewFrameEvidenceRead */
         ReviewFrameEvidenceRead: {
             /** Sample Id */
@@ -9765,6 +9821,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewDecisionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_review_evidence_api_v1_projects__project_id__shots__shot_id__review_evidence_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewEvidenceRequestBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewEvidenceRequestRead"];
                 };
             };
             /** @description Validation Error */

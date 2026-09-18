@@ -480,3 +480,72 @@ async def create_review_decision(
     )
     await session.commit()
     return _decision_read(row)
+
+
+class ReviewEvidenceRequestBody(BaseModel):
+    """Ask for the machine evidence of one exact candidate."""
+
+    artifact_id: UUID
+    stage: str = Field(default="formal_keyframe", pattern="^(formal_keyframe|formal_video)$")
+
+
+class ReviewEvidenceRequestRead(BaseModel):
+    """The review run that will produce this candidate's evidence."""
+
+    review_node_run_id: UUID
+    status: str
+    queued: bool
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/review-evidence",
+    response_model=ReviewEvidenceRequestRead,
+    status_code=201,
+)
+async def create_review_evidence(
+    project_id: UUID,
+    shot_id: UUID,
+    body: ReviewEvidenceRequestBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> ReviewEvidenceRequestRead:
+    """Queue the zero-cost review of this candidate so it can be judged.
+
+    A candidate whose review evidence is missing cannot receive any human
+    decision, which leaves the review page in a dead end.  This runs the tail
+    review for the Artifact the person is looking at; it contacts no Provider
+    and reuses the evidence when it already exists.
+    """
+    from app.production.workbench_execution import ensure_stage_review_run
+    from app.runtime.scheduler import NodeRunScheduler
+
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    shot = (
+        await session.execute(
+            select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id)
+        )
+    ).scalar_one_or_none()
+    if shot is None:
+        raise NotFoundError("shot not found")
+    stage = "image_keyframe" if body.stage == "formal_keyframe" else "video"
+    review_run = await ensure_stage_review_run(
+        session,
+        project=project,
+        shot=shot,
+        artifact_id=body.artifact_id,
+        stage=stage,  # type: ignore[arg-type]
+        created_by=user.id,
+    )
+    await session.commit()
+    already_running = review_run.status != "queued"
+    if not already_running:
+        await NodeRunScheduler(session).enqueue_node_run_only(review_run.id)
+        await session.refresh(review_run)
+    return ReviewEvidenceRequestRead(
+        review_node_run_id=review_run.id,
+        status=review_run.status,
+        queued=not already_running,
+    )

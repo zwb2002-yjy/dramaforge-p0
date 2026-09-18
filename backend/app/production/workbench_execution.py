@@ -106,6 +106,68 @@ def _workbench_idempotency_key(
     return f"workbench:{stage}:sha256:{digest}"
 
 
+async def ensure_stage_review_run(
+    session: AsyncSession,
+    *,
+    project: Project,
+    shot: Shot,
+    artifact_id: UUID,
+    stage: PlanStage,
+    created_by: UUID,
+) -> NodeRun:
+    """Queue (or return) the review run that admits this exact Artifact.
+
+    A candidate can exist before its review evidence does — a graph published
+    before the gate existed, or a candidate produced while the tail review was
+    still bound to an earlier attempt.  The review page then reports missing
+    evidence and the person cannot record any decision, so the candidate needs a
+    supported way to obtain its evidence.  This queues the same zero-cost tail
+    review; it contacts no Provider and invents no second truth.
+    """
+
+    artifact = await session.scalar(
+        select(Artifact).where(
+            Artifact.id == artifact_id,
+            Artifact.project_id == project.id,
+            Artifact.deleted_at.is_(None),
+        )
+    )
+    if artifact is None:
+        raise WorkbenchExecutionError(
+            "artifact not found in project", details={"code": "ARTIFACT_NOT_FOUND"}
+        )
+    producer = None
+    if artifact.produced_by_run_id is not None:
+        producer = await session.get(NodeRun, artifact.produced_by_run_id)
+    if producer is None or producer.project_id != project.id:
+        raise WorkbenchExecutionError(
+            "artifact has no admitted production run",
+            details={"code": "ARTIFACT_PRODUCER_MISSING"},
+        )
+    shot_id = str((producer.input_snapshot or {}).get("shot_id") or "")
+    if shot_id != str(shot.id):
+        raise WorkbenchExecutionError(
+            "artifact was not produced for this shot",
+            details={"code": "ARTIFACT_SHOT_MISMATCH"},
+        )
+    review_run = await _queue_stage_review_run(
+        session,
+        run=producer,
+        stage=stage,
+        project=project,
+        shot=shot,
+        created_by=created_by,
+    )
+    if review_run is None:
+        # The published graph carries no review node for this stage, so no
+        # evidence can be produced without a new graph version.
+        raise WorkbenchExecutionError(
+            "the published graph has no review node for this stage",
+            details={"code": "REVIEW_NODE_MISSING"},
+        )
+    return review_run
+
+
 def _chain_input_hash(payload: dict[str, object]) -> str:
     canonical = json.dumps(
         payload,

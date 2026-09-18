@@ -61,3 +61,30 @@ export async function createReviewDecision(
     { "Idempotency-Key": requestKey },
   );
 }
+
+export type ReviewEvidenceRead = {
+  review_node_run_id: string;
+  status: string;
+  queued: boolean;
+};
+
+/**
+ * Ask for the machine evidence of this exact candidate.
+ *
+ * Without evidence the person cannot record any judgement, so a candidate that
+ * exists before its review does needs this zero-cost entry point. It contacts
+ * no Provider and reuses evidence that already exists.
+ */
+export async function createReviewEvidence(
+  projectId: string,
+  shotId: string,
+  input: { artifact_id: string; stage: ReviewStage },
+): Promise<ReviewEvidenceRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<ReviewEvidenceRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/review-evidence`,
+    input,
+    csrf,
+  );
+}
