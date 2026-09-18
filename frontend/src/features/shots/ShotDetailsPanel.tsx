@@ -5,7 +5,6 @@ import { fetchExecutionTrace, type ExecutionTraceRead } from "../../lib/api";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { shotStatusLabel } from "../../lib/shotLabels";
 import { zhNode } from "../../lib/zh";
-import { ShotChangeProposalsPanel } from "./ShotChangeProposalsPanel";
 import { ShotProductionTrace } from "./ShotProductionTrace";
 import type { ShotLite } from "./api";
 
@@ -118,13 +117,6 @@ export function ShotDetailsPanel({ open, projectId, shot, trace, onClose }: Shot
             trace={trace}
             onSelectRun={projectId ? setSelectedRunId : undefined}
           />
-          {projectId && (
-            <ShotChangeProposalsPanel
-              projectId={projectId}
-              shotId={shot.id}
-              shotVersion={shot.version}
-            />
-          )}
           {traceDetailLoading && (
             <p className="muted" role="status">
               正在读取完整执行证据…

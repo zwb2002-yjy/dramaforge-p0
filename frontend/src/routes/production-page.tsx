@@ -4,7 +4,7 @@ import { Field, Select, Tab, Tabs, PageHeader } from "../components/ui";
 import { useState } from "react";
 
 import { ProductionMonitor } from "../features/production/ProductionMonitor";
-import { ProfessionalWorkbench } from "../features/production/ProfessionalWorkbench";
+import { ExperimentBranchPanel } from "../features/production/ExperimentBranchPanel";
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
 import { listModelCandidates } from "../features/production/modelCandidatesApi";
@@ -233,11 +233,8 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             ))}
           </Select>
         </Field>
-        <ProfessionalWorkbench
-          experimentsOnly
+        <ExperimentBranchPanel
           projectId={projectId}
-          shots={shots.data ?? []}
-          snapshot={snapshot.data}
           experiments={Array.isArray(experiments.data) ? experiments.data : []}
           models={Array.isArray(availableModels.data) ? availableModels.data : []}
           modelCandidates={{
@@ -245,8 +242,6 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             keyframe: keyframeCandidates.data,
             video: videoCandidates.data,
           }}
-          selectedShotId={revisionShotId}
-          onSelectShot={setSelectedShotId}
           onCreateExperiment={async (input) => {
             // The key is derived from the experiment's identity, not from the
             // clock: the server treats a repeated key as the same draft, so a

@@ -67,6 +67,18 @@ Settings 覆盖 resolver 已退役；历史加密记录保留，不读取、不�
    Artifact ID/哈希、提交状态和远端任务 ID，但绝不记录 Key、签名 URL
    或原始私密素材。
 
+## 质量认证不是执行准入
+
+`ProviderModelBinding.quality_gated` 表示**已有人工验收过该绑定的代表产物**
+（`ProviderQualityEvidence`：一次带人工接受的身份复核或视频漂移复核）。它属于
+**质量认证 / 正式支持证据**，会通过 `ModelCandidateRead.certified` 与
+`CandidateEvaluation.certified` 对外呈现。
+
+它**不是**普通执行或实验线的硬准入条件：缺少它的绑定仍可生成、仍可用于实验分支，
+`app.providers.eligibility.evaluate_candidate` 不会因此产生 blocking issue。
+真正会 fail-closed 的是：绑定/连接停用、未登记能力文档、未通过契约测试、账号未验证、
+目录或 manifest 不匹配、以及所需能力/参考槽位缺失（决策日期 2026-09-19）。
+
 ## 冻结的接入合同（真实账号）
 
 | 供应商 | 插件 / Profile | 默认视频模型 | 调用方式 | 当前产品范围 |

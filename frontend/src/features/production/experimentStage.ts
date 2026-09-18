@@ -67,6 +67,16 @@ export function modelIssueLabels(codes: string[]): string {
 }
 
 /**
+ * Quality certification is evidence, not an admission gate (decision 2026-09-19).
+ *
+ * A binding without it runs — normal production and the experiment line — so the
+ * form states what is missing instead of refusing the model.
+ */
+export function certificationNotice(): string {
+  return "尚未通过质量验收（可用于生成，正式支持证据待补齐）。";
+}
+
+/**
  * Explain a refused experiment request in product terms.
  *
  * `start` re-resolves the frozen model binding for the chosen stage, so a model

@@ -6,13 +6,14 @@ import asyncio
 from collections.abc import AsyncIterator, Iterator
 from datetime import date
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.config import clear_settings_cache, get_settings
 from app.main import create_app
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
+from app.providers.models import ProviderModelBinding
 from app.shared.base import Base
 from app.shared.db import get_session
 from app.shared.security import CSRF_HEADER
@@ -59,8 +60,8 @@ def _csrf(client: TestClient) -> str:
     return str(client.get("/api/v1/auth/csrf").json()["csrf_token"])
 
 
-def _seed_catalog(factory: Any) -> None:
-    manifest = next(m for m in SEED_MANIFESTS if m["model_id"] == "agnes-video-v2.0")
+def _seed_catalog(factory: Any, model_id: str = "agnes-video-v2.0") -> None:
+    manifest = next(m for m in SEED_MANIFESTS if m["model_id"] == model_id)
 
     async def _insert() -> None:
         async with factory() as session:
@@ -166,7 +167,116 @@ def test_model_candidates_api_lists_unverified_binding_as_ineligible(
     assert candidate["eligible"] is False
     codes = {issue["code"] for issue in candidate["issues"]}
     assert "MODEL_NOT_ACCOUNT_VERIFIED" in codes
-    assert "MODEL_QUALITY_GATE_MISSING" in codes
+    # Quality certification is reported separately and never blocks.
+    assert "MODEL_QUALITY_GATE_MISSING" not in codes
+    assert candidate["certified"] is False
+    assert candidate["evidence"]["quality_gated"] is False
+
+
+def _mark_binding_account_verified(factory: Any, model_binding_id: str) -> None:
+    """Stand in for the zero-cost account probe the Owner runs in the product."""
+
+    async def _update() -> None:
+        async with factory() as session:
+            binding = await session.get(ProviderModelBinding, UUID(model_binding_id))
+            assert binding is not None
+            binding.account_verified = True
+            await session.commit()
+
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_update())
+    finally:
+        loop.close()
+
+
+def test_project_provider_bindings_can_be_read_back_with_their_model_identity(
+    api: tuple[TestClient, Any],
+) -> None:
+    """The settings surface must answer "which model serves this purpose?".
+
+    Decision 2026-09-19 (#9): a read-only project binding API. Previously only PUT
+    existed, so a refresh lost the answer and the page could only print a raw
+    binding id.
+    """
+    client, factory = api
+    keyring_key = Fernet.generate_key().decode("ascii")
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": f"bindings-{uuid4().hex}@example.com",
+            "password": "password123",
+            "display_name": "Binding Owner",
+        },
+    )
+    workspace_id = str(client.get("/api/v1/workspaces").json()[0]["id"])
+    client.headers["X-Workspace-Id"] = workspace_id
+    _seed_catalog(factory, model_id="agnes-image-2.1-flash")
+
+    import os
+
+    os.environ["BYOK_PRIMARY_KEY_VERSION"] = "v1"
+    os.environ["BYOK_KEYRING"] = f"v1:{keyring_key}"
+    clear_settings_cache()
+
+    connection = client.post(
+        f"/api/v1/workspaces/{workspace_id}/provider-connections",
+        json={
+            "provider_type": "agnes",
+            "protocol_profile": "agnes_cn_v1",
+            "api_key": "binding-read-secret",
+            "enabled": True,
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert connection.status_code == 201, connection.text
+    connection_id = connection.json()["id"]
+    model_binding = client.post(
+        f"/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/model-bindings",
+        json={
+            "media_type": "image",
+            "model_id": "agnes-image-2.1-flash",
+            "purpose": "keyframe",
+            "enabled": True,
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert model_binding.status_code == 201, model_binding.text
+    model_binding_id = model_binding.json()["id"]
+    _mark_binding_account_verified(factory, model_binding_id)
+
+    project = client.post(
+        "/api/v1/projects",
+        json={"workspace_id": workspace_id, "name": "Binding read", "aspect_ratio": "16:9"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert project.status_code == 201, project.text
+    project_id = project.json()["id"]
+
+    empty = client.get(f"/api/v1/projects/{project_id}/provider-bindings")
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == []
+
+    saved = client.put(
+        f"/api/v1/projects/{project_id}/provider-bindings/keyframe",
+        json={"model_binding_id": model_binding_id},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert saved.status_code == 200, saved.text
+
+    listed = client.get(f"/api/v1/projects/{project_id}/provider-bindings")
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["purpose"] == "keyframe"
+    assert row["model_binding_id"] == model_binding_id
+    assert row["model_id"] == "agnes-image-2.1-flash"
+    assert row["provider_type"] == "agnes"
+    assert row["model_binding_enabled"] is True
+    assert row["selection_strategy"] == "explicit_binding"
+    assert row["fallback_policy"] == "none"
 
 
 def test_model_candidates_api_requires_project_ownership(api: tuple[TestClient, Any]) -> None:

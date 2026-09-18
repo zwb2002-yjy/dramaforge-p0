@@ -44,8 +44,6 @@ export const queryKeys = {
     review: (projectId: string) => ["review-shots", projectId] as const,
     reviewWorkbench: (projectId: string, shotId: string | null | undefined) =>
       ["review-shot-workbench", projectId, shotId] as const,
-    changeProposals: (projectId: string, shotId: string | null | undefined) =>
-      ["shot-change-proposals", projectId, shotId] as const,
   },
 
   asset: {
@@ -148,5 +146,8 @@ export const queryKeys = {
       ["provider-bindings", workspaceId, connectionId] as const,
     /** Bare prefix: invalidate bindings for every connection of a workspace. */
     bindingsRoot: (workspaceId: string | null) => ["provider-bindings", workspaceId] as const,
+    /** Read-only project → purpose → model binding view (#9). */
+    projectBindings: (projectId: string | null) =>
+      ["project-provider-bindings", projectId] as const,
   },
 } as const;

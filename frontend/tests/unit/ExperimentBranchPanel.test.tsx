@@ -1,31 +1,11 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ProfessionalWorkbench } from "../../src/features/production/ProfessionalWorkbench";
+import { ExperimentBranchPanel } from "../../src/features/production/ExperimentBranchPanel";
 import { ApiError } from "../../src/lib/api";
-import type { ExperimentRead, ModelRead, ShotRead } from "../../src/lib/api";
+import type { ExperimentRead, ModelRead } from "../../src/lib/api";
 import type { ModelCandidateRead } from "../../src/features/production/modelCandidatesApi";
-
-const SHOT = {
-  id: "shot-4",
-  project_id: "project-1",
-  scene_id: "scene-1",
-  shot_number: 4,
-  shot_type: "medium",
-  camera_move: "static",
-  visual_description: "A turns",
-  dialogue: "",
-  duration_seconds: "4",
-  status: "draft",
-  sort_order: 4,
-  version: 6,
-  director_state: {},
-  image_prompt: "",
-  video_prompt: "",
-  formal_keyframe_artifact_id: "kf-4",
-  formal_video_artifact_id: "video-4",
-  formal_composite_artifact_id: null,
-} as unknown as ShotRead;
 
 const MODELS: ModelRead[] = [
   {
@@ -57,6 +37,7 @@ function candidate(overrides: Partial<ModelCandidateRead>): ModelCandidateRead {
     display_name: "Agnes Image Flash",
     purpose: "keyframe",
     eligible: true,
+    certified: true,
     supported_capabilities: ["image.generate"],
     unmet_preferences: [],
     evidence: {},
@@ -98,12 +79,8 @@ function renderPanel(overrides: {
 }) {
   const onCreateExperiment = overrides.onCreateExperiment ?? vi.fn(async () => {});
   render(
-    <ProfessionalWorkbench
-      experimentsOnly
+    <ExperimentBranchPanel
       projectId="project-1"
-      shots={[SHOT]}
-      selectedShotId="shot-4"
-      onSelectShot={vi.fn()}
       experiments={overrides.experiments ?? []}
       models={MODELS}
       modelCandidates={overrides.modelCandidates ?? { keyframe: [], video: [] }}
@@ -115,7 +92,7 @@ function renderPanel(overrides: {
   return { onCreateExperiment };
 }
 
-describe("ProfessionalWorkbench experiment branch", () => {
+describe("ExperimentBranchPanel", () => {
   it("creates the experiment on the stage the Owner chose", async () => {
     const { onCreateExperiment } = renderPanel({
       modelCandidates: {
@@ -199,13 +176,14 @@ describe("ProfessionalWorkbench experiment branch", () => {
     ).toBe(true);
   });
 
-  it("blocks a branch the eligibility engine would refuse, with the reason in Chinese", () => {
+  it("keeps an uncertified but bound model selectable and states the missing evidence", () => {
     renderPanel({
       modelCandidates: {
         keyframe: [
           candidate({
-            eligible: false,
-            issues: [{ code: "MODEL_QUALITY_GATE_MISSING", detail: "" }],
+            eligible: true,
+            certified: false,
+            evidence: { quality_gated: false },
           }),
         ],
       },
@@ -214,11 +192,30 @@ describe("ProfessionalWorkbench experiment branch", () => {
     fireEvent.change(screen.getByLabelText("实验模型"), {
       target: { value: "agnes/agnes-image-2.1-flash" },
     });
+    // Decision 2026-09-19: quality certification is evidence, not admission, so
+    // the model stays selectable and the form says what is still missing.
     const eligibility = screen.getByTestId("experiment-model-eligibility");
-    expect(eligibility.textContent).toContain("尚未通过画质验收");
+    expect(eligibility.textContent).toContain("尚未通过质量验收");
     expect(eligibility.textContent).not.toContain("MODEL_QUALITY_GATE_MISSING");
-    // Measured on the live stack: a keyframe branch on a binding without the
-    // quality gate fails with MODEL_INELIGIBLE and produces no candidate.
+    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeEnabled();
+  });
+
+  it("still refuses a binding the engine rejects for a hard reason", () => {
+    renderPanel({
+      modelCandidates: {
+        keyframe: [
+          candidate({
+            eligible: false,
+            issues: [{ code: "MODEL_BINDING_DISABLED", detail: "" }],
+          }),
+        ],
+      },
+    });
+    fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "绑定已停用" } });
+    fireEvent.change(screen.getByLabelText("实验模型"), {
+      target: { value: "agnes/agnes-image-2.1-flash" },
+    });
+    expect(screen.getByTestId("experiment-model-eligibility").textContent).toContain("绑定已停用");
     expect(screen.getByRole("button", { name: "创建实验分支" })).toBeDisabled();
   });
 
@@ -245,5 +242,98 @@ describe("ProfessionalWorkbench experiment branch", () => {
     expect(screen.getByTestId("experiment-error-diagnostics").textContent).toContain(
       "no enabled workspace binding",
     );
+  });
+
+  it("labels stage availability per option and keeps the provider codes out of the surface", () => {
+    const VIDEO_MODELS: ModelRead[] = [
+      {
+        id: "agnes/video-v2",
+        provider_id: "agnes",
+        display_name: "Agnes Video",
+        enabled: true,
+        configured: true,
+        available: true,
+        capabilities: ["video.image_to_video"],
+      },
+      {
+        id: "agnes/video-v3",
+        provider_id: "agnes",
+        display_name: "Agnes Video Pro",
+        enabled: true,
+        configured: true,
+        available: true,
+        capabilities: ["video.image_to_video"],
+      },
+    ];
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const onCreateExperiment = vi.fn(async () => {});
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ExperimentBranchPanel
+          projectId="project-1"
+          models={VIDEO_MODELS}
+          modelCandidates={{
+            video: [candidate({ purpose: "video", model_id: "video-v2", certified: false })],
+          }}
+          onCreateExperiment={onCreateExperiment}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(screen.getByLabelText("实验阶段"), { target: { value: "video" } });
+    // A bound but uncertified model is selectable: certification is evidence.
+    const boundOption = screen.getByRole("option", {
+      name: "Agnes Video · 未认证",
+    }) as HTMLOptionElement;
+    expect(boundOption.disabled).toBe(false);
+    expect(boundOption.textContent).toContain("未认证");
+    // A model without a binding for this stage is a hard stop.
+    const unboundOption = screen.getByRole("option", {
+      name: "Agnes Video Pro · 无视频阶段绑定",
+    }) as HTMLOptionElement;
+    expect(unboundOption.disabled).toBe(true);
+    expect(unboundOption.textContent).toContain("无视频阶段绑定");
+
+    fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: "agnes/video-v2" } });
+    const eligibility = screen.getByTestId("experiment-model-eligibility");
+    expect(eligibility.textContent).toContain("尚未通过质量验收");
+    expect(eligibility.textContent).not.toContain("MODEL_QUALITY_GATE_MISSING");
+    fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "换模型验证" } });
+    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeEnabled();
+  });
+
+  it("keeps the form usable while stage eligibility is still unknown", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const onCreateExperiment = vi.fn(async () => {});
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ExperimentBranchPanel
+          projectId="project-1"
+          models={[MODELS[1]]}
+          onCreateExperiment={onCreateExperiment}
+        />
+      </QueryClientProvider>,
+    );
+
+    // No candidate group at all: the read is pending, so nothing is asserted
+    // about eligibility and the Owner is not locked out.
+    expect(screen.queryByTestId("experiment-model-eligibility")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "换模型验证" } });
+    fireEvent.change(screen.getByLabelText("实验模型"), {
+      target: { value: "agnes/agnes-video-v2.0" },
+    });
+    expect(screen.getByRole("button", { name: "创建实验分支" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
+    await waitFor(() => expect(onCreateExperiment).toHaveBeenCalledTimes(1));
+    expect(onCreateExperiment).toHaveBeenCalledWith({
+      name: "换模型验证",
+      selected_model: "agnes/agnes-video-v2.0",
+      targetNodeKey: "keyframe",
+    });
   });
 });

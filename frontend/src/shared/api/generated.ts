@@ -1716,6 +1716,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/provider-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Project Bindings
+         * @description Read-only view of the project's Provider bindings (one row per purpose).
+         */
+        get: operations["list_project_bindings_api_v1_projects__project_id__provider_bindings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/provider-bindings/{purpose}": {
         parameters: {
             query?: never;
@@ -4506,6 +4526,8 @@ export interface components {
             purpose: string;
             /** Eligible */
             eligible: boolean;
+            /** Certified */
+            certified: boolean;
             /** Supported Capabilities */
             supported_capabilities: string[];
             /** Unmet Preferences */
@@ -4978,6 +5000,45 @@ export interface components {
             is_default?: boolean | null;
             /** Expected Version */
             expected_version?: number | null;
+        };
+        /**
+         * ProjectBindingDetailRead
+         * @description Project binding plus the model identity it currently points at.
+         *
+         *     The settings surface has to answer "which model serves this purpose?"; without
+         *     the read model the page could only print a raw binding id, and a refresh lost
+         *     the answer entirely (decision 2026-09-19: add a read-only project binding API).
+         */
+        ProjectBindingDetailRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Purpose */
+            purpose: string;
+            /**
+             * Model Binding Id
+             * Format: uuid
+             */
+            model_binding_id: string;
+            /** Selection Strategy */
+            selection_strategy: string;
+            /** Fallback Policy */
+            fallback_policy: string;
+            /** Model Id */
+            model_id?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+            /** Provider Type */
+            provider_type?: string | null;
+            /** Model Binding Enabled */
+            model_binding_enabled?: boolean | null;
         };
         /** ProjectBindingRead */
         ProjectBindingRead: {
@@ -11215,6 +11276,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QualityEvidenceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_bindings_api_v1_projects__project_id__provider_bindings_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectBindingDetailRead"][];
                 };
             };
             /** @description Validation Error */

@@ -258,7 +258,33 @@ async def test_unverified_binding_is_fail_closed(session: AsyncSession) -> None:
         await ModelSelectionService(session).select_video(project=project, intent=_intent())
     issues = exc_info.value.details["issues"]
     assert "MODEL_NOT_ACCOUNT_VERIFIED" in issues
-    assert "MODEL_QUALITY_GATE_MISSING" in issues
+    # Certification is not an execution gate.
+    assert "MODEL_QUALITY_GATE_MISSING" not in issues
+
+
+@pytest.mark.asyncio
+async def test_uncertified_binding_still_resolves(session: AsyncSession) -> None:
+    """The experiment line and normal execution run before quality certification.
+
+    Decision (2026-09-19): ``quality_gated`` is quality certification / formal
+    support evidence, not hard admission. An account-verified but uncertified
+    binding must therefore resolve instead of raising MODEL_INELIGIBLE.
+    """
+    project, binding = await _seed(session, account_verified=True, quality_gated=False)
+    session.add(
+        ProjectProviderBinding(
+            project_id=project.id,
+            workspace_id=project.workspace_id,
+            purpose="video",
+            model_binding_id=binding.id,
+            selection_strategy="explicit_binding",
+            fallback_policy="none",
+            updated_by=uuid4(),
+        )
+    )
+    await session.flush()
+    plan = await ModelSelectionService(session).select_video(project=project, intent=_intent())
+    assert plan.model_binding_id == binding.id
 
 
 @pytest.mark.asyncio

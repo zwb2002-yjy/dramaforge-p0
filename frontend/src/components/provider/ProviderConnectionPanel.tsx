@@ -8,6 +8,7 @@ import {
   bindProjectProvider,
   createProviderConnection,
   createProviderModelBinding,
+  listProjectProviderBindings,
   listProviderConnections,
   listProviderPlugins,
   listProviderModelBindings,
@@ -201,7 +202,33 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
       return bindProjectProvider(selectedProjectId, input.purpose, input.modelBindingId);
     },
     onMutate: resetFeedback,
-    onSuccess: (result) => setMessage(`${result.purpose} 项目绑定已保存（fallback=none）`),
+    onSuccess: async (result) => {
+      setMessage(`${result.purpose} 项目绑定已保存（fallback=none）`);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.provider.projectBindings(selectedProjectId),
+      });
+    },
+    onError: (cause: Error) => setError(cause.message),
+  });
+
+  // Read-only project bindings: the settings page answers "which model serves this
+  // purpose?" after a refresh instead of printing a raw binding id (#9).
+  const projectBindings = useQuery({
+    queryKey: queryKeys.provider.projectBindings(selectedProjectId),
+    queryFn: () => listProjectProviderBindings(selectedProjectId),
+    enabled: Boolean(selectedProjectId),
+  });
+
+  const connectionEnabledMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      if (!workspaceId || !connection) throw new Error("请先创建供应商连接");
+      return updateProviderConnection(workspaceId, connection.id, { enabled });
+    },
+    onMutate: resetFeedback,
+    onSuccess: async (_result, enabled) => {
+      setMessage(enabled ? "供应商连接已启用。" : "供应商连接已停用；已停用的连接不会参与生成。");
+      await refresh();
+    },
     onError: (cause: Error) => setError(cause.message),
   });
 
@@ -312,6 +339,22 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
                   ? "待验证"
                   : "未配置"}
         </span>
+        {connection && (
+          <Button
+            type="button"
+            tone="ghost"
+            data-testid="provider-connection-toggle"
+            disabled={connectionEnabledMutation.isPending}
+            onClick={() => connectionEnabledMutation.mutate(!connection.enabled)}
+          >
+            {connection.enabled ? "停用连接" : "启用连接"}
+          </Button>
+        )}
+        {connection && !connection.enabled && (
+          <span className="status-pending" data-testid="provider-connection-disabled-note">
+            已停用：不会参与生成
+          </span>
+        )}
       </div>
 
       {connectionLoadError && <p className="flash err">连接列表加载失败：{connectionLoadError}</p>}
@@ -693,7 +736,33 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
                   ))}
                 </Select>
               </Field>
-              {selectedProject && <p className="muted">降级策略：无 · {selectedProject.name}</p>}
+              {selectedProject && (
+                <div className="provider-project-bindings" data-testid="project-provider-bindings">
+                  <p className="muted">降级策略：无 · {selectedProject.name}</p>
+                  {projectBindings.isSuccess &&
+                    (projectBindings.data.length ? (
+                      <ul className="dense">
+                        {projectBindings.data.map((row) => (
+                          <li key={row.id}>
+                            <span>
+                              {row.purpose === "keyframe" ? "关键帧" : "视频"}：
+                              {row.display_name ?? row.model_id ?? "未知模型"}
+                              {row.provider_type ? `（${row.provider_type}）` : ""}
+                            </span>
+                            {row.model_binding_enabled === false && (
+                              <small className="status-pending">绑定已停用</small>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="muted">该项目尚未绑定关键帧或视频模型。</p>
+                    ))}
+                  {projectBindings.isError && (
+                    <p className="status-bad">当前绑定读取失败，请稍后重试。</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

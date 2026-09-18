@@ -283,6 +283,22 @@ export async function bindProjectProvider(
   );
 }
 
+/**
+ * Read-only view of a project's Provider bindings.
+ *
+ * Decision 2026-09-19 (#9): the settings surface must be able to show which model
+ * currently serves each purpose, so a refresh no longer loses that answer.
+ */
+export type ProjectProviderBindingDetailRead = components["schemas"]["ProjectBindingDetailRead"];
+
+export function listProjectProviderBindings(
+  projectId: string,
+): Promise<ProjectProviderBindingDetailRead[]> {
+  return apiGetList<ProjectProviderBindingDetailRead>(
+    `/api/v1/projects/${projectId}/provider-bindings`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Production Model Profiles (model role configuration, V3 spec §34–§37).
 // ---------------------------------------------------------------------------
