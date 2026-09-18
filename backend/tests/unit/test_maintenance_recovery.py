@@ -120,6 +120,75 @@ async def _seed_outbox_dead_letter(
     return event, dead_letter
 
 
+async def _seed_failed_media_run(
+    session: AsyncSession, *, project: Project, owner: User, failed_at: datetime
+) -> tuple[object, object]:
+    """A media generation that failed after its remote task already existed."""
+    from app.execution.models import GraphNode, NodeRun, ProviderOperation
+    from app.production.models import GraphVersion, ProductionGraph
+
+    graph = ProductionGraph(
+        project_id=project.id,
+        scope_type="shot",
+        scope_entity_id=uuid4(),
+        template_key="test_pipeline",
+        created_by=owner.id,
+    )
+    session.add(graph)
+    await session.flush()
+    version = GraphVersion(
+        graph_id=graph.id,
+        version_number=1,
+        status="published",
+        definition={"nodes": []},
+        definition_hash="hash",
+    )
+    session.add(version)
+    await session.flush()
+    node = GraphNode(
+        graph_version_id=version.id,
+        node_key="video",
+        node_type="video",
+        display_name="Video",
+        input_schema={},
+        output_schema={},
+    )
+    session.add(node)
+    await session.flush()
+    run = NodeRun(
+        project_id=project.id,
+        graph_version_id=version.id,
+        graph_node_id=node.id,
+        attempt_no=1,
+        idempotency_key=f"run-{uuid4().hex}",
+        input_hash="input-hash",
+        status="failed",
+        input_snapshot={"stage": "video", "node_key": "video"},
+        error_code="PROVIDER_MEDIA_DOWNLOAD_FAILED",
+        error_summary="PROVIDER_MEDIA_DOWNLOAD_FAILED: RemoteProtocolError",
+        finished_at=failed_at,
+        created_by=owner.id,
+    )
+    session.add(run)
+    await session.flush()
+    operation = ProviderOperation(
+        node_run_id=run.id,
+        attempt_no=1,
+        purpose="primary",
+        operation_kind="video.generate",
+        actual_provider="agnes",
+        actual_model="agnes-video-v2.0",
+        status="running",
+        provider_operation_id="video_remote_task_1",
+        request_fingerprint="fingerprint-1",
+        request_summary={},
+        response_summary={},
+    )
+    session.add(operation)
+    await session.flush()
+    return run, operation
+
+
 async def test_list_recovery_items_is_owner_scoped() -> None:
     engine, session = await _make_env()
     try:
@@ -145,6 +214,94 @@ async def test_list_recovery_items_is_owner_scoped() -> None:
         session.add(stranger)
         await session.flush()
         assert await recovery_service.list_recovery_items(session, actor=stranger) == []
+    finally:
+        await session.close()
+        await engine.dispose()  # type: ignore[union-attr]
+
+
+async def test_failed_media_run_is_resumable_and_never_resubmitted() -> None:
+    """A generation that failed after its remote task existed can be resumed.
+
+    The remote task is already paid for, so recovery must poll it rather than
+    submit a second generation; a failure with no remote task stays unreplayable.
+    """
+    engine, session = await _make_env()
+    try:
+        owner, project = await _seed_owner(session)
+        session.add(InstanceBootstrapState(singleton_id=1, owner_user_id=owner.id))
+        failed_at = datetime.now(UTC) - timedelta(minutes=5)
+        run, _operation = await _seed_failed_media_run(
+            session, project=project, owner=owner, failed_at=failed_at
+        )
+
+        items = await recovery_service.list_recovery_items(session, actor=owner)
+        assert [item.kind for item in items] == ["media_node_run"]
+        assert items[0].id == run.id
+        assert "PROVIDER_MEDIA_DOWNLOAD_FAILED" in items[0].detail
+
+        enqueued: list[object] = []
+
+        async def _record_enqueue(self, node_run_id):  # type: ignore[no-untyped-def]
+            enqueued.append(node_run_id)
+            return "job-1"
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(
+            "app.runtime.scheduler.NodeRunScheduler.enqueue_node_run_only",
+            _record_enqueue,
+        )
+        try:
+            with pytest.raises(ConflictError):
+                await recovery_service.replay_media_node_run(
+                    session,
+                    actor=owner,
+                    project_id=project.id,
+                    node_run_id=run.id,
+                    expected_failed_at=failed_at - timedelta(seconds=1),
+                )
+
+            applied = await recovery_service.replay_media_node_run(
+                session,
+                actor=owner,
+                project_id=project.id,
+                node_run_id=run.id,
+                expected_failed_at=failed_at,
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert applied is True
+        assert enqueued == [run.id]
+        assert run.status == "queued"
+        assert run.error_code is None and run.error_summary is None
+        # A resumed run is no longer an actionable failure.
+        assert await recovery_service.list_recovery_items(session, actor=owner) == []
+    finally:
+        await session.close()
+        await engine.dispose()  # type: ignore[union-attr]
+
+
+async def test_media_run_without_a_remote_task_is_not_offered() -> None:
+    engine, session = await _make_env()
+    try:
+        owner, project = await _seed_owner(session)
+        session.add(InstanceBootstrapState(singleton_id=1, owner_user_id=owner.id))
+        failed_at = datetime.now(UTC) - timedelta(minutes=5)
+        run, operation = await _seed_failed_media_run(
+            session, project=project, owner=owner, failed_at=failed_at
+        )
+        operation.provider_operation_id = None
+        await session.flush()
+
+        assert await recovery_service.list_recovery_items(session, actor=owner) == []
+        with pytest.raises(ConflictError):
+            await recovery_service.replay_media_node_run(
+                session,
+                actor=owner,
+                project_id=project.id,
+                node_run_id=run.id,
+                expected_failed_at=failed_at,
+            )
     finally:
         await session.close()
         await engine.dispose()  # type: ignore[union-attr]

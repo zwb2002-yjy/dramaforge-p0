@@ -73,4 +73,33 @@ describe("AdvancedRecoveryPanel", () => {
       "Director wakeup failure changed; reload before replay",
     );
   });
+
+  it("offers to resume an interrupted generation, not to regenerate it", async () => {
+    const mediaItem = {
+      kind: "media_node_run" as const,
+      id: "run-1",
+      project_id: "project-1",
+      label: "video",
+      detail: "PROVIDER_MEDIA_DOWNLOAD_FAILED: RemoteProtocolError",
+      attempts: 1,
+      failed_at: "2026-09-18T08:03:37Z",
+    };
+    vi.mocked(fetchRecoveryItems).mockResolvedValue({ items: [mediaItem] });
+    vi.mocked(replayRecoveryItem).mockResolvedValue({
+      kind: "media_node_run",
+      id: "run-1",
+      applied: true,
+      replayed_at: "2026-09-18T08:40:00Z",
+    });
+
+    renderPanel();
+    const panel = await screen.findByTestId("advanced-recovery-panel");
+    expect(panel).toHaveTextContent("生成任务中断（可续跑）");
+    // The wording must promise a resume over the existing remote task, not a
+    // second generation the Owner would pay for again.
+    fireEvent.click(screen.getByRole("button", { name: "续跑这次生成" }));
+
+    await waitFor(() => expect(replayRecoveryItem).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(replayRecoveryItem).mock.calls[0][0]).toEqual(mediaItem);
+  });
 });

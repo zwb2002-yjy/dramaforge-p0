@@ -22,7 +22,7 @@ router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 class RecoveryItemRead(BaseModel):
     """One replayable failure as shown in Settings -> Advanced recovery."""
 
-    kind: Literal["director_wakeup", "outbox_dead_letter"]
+    kind: Literal["director_wakeup", "outbox_dead_letter", "media_node_run"]
     id: UUID
     project_id: UUID | None
     label: str
@@ -48,10 +48,17 @@ class OutboxDeadLetterReplayRequest(BaseModel):
     expected_dead_lettered_at: datetime
 
 
+class MediaNodeRunReplayRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    expected_failed_at: datetime
+
+
 class RecoveryReplayRead(BaseModel):
     """Result of one replay; ``applied`` is False when nothing was left to do."""
 
-    kind: Literal["director_wakeup", "outbox_dead_letter"]
+    kind: Literal["director_wakeup", "outbox_dead_letter", "media_node_run"]
     id: UUID
     applied: bool
     replayed_at: datetime = Field(description="Server time of the accepted replay")
@@ -127,6 +134,31 @@ async def replay_outbox_dead_letter(
     return RecoveryReplayRead(
         kind="outbox_dead_letter",
         id=dead_letter_id,
+        applied=applied,
+        replayed_at=datetime.now(UTC),
+    )
+
+
+@router.post("/media-node-runs/{node_run_id}/replay", response_model=RecoveryReplayRead)
+async def replay_media_node_run(
+    node_run_id: UUID,
+    body: MediaNodeRunReplayRequest,
+    session: SessionDep,
+    user: CurrentUser,
+    _csrf: CsrfDep,
+) -> RecoveryReplayRead:
+    """Resume one failed media generation over the remote task it already created."""
+    applied = await recovery_service.replay_media_node_run(
+        session,
+        actor=user,
+        project_id=body.project_id,
+        node_run_id=node_run_id,
+        expected_failed_at=body.expected_failed_at,
+    )
+    await session.commit()
+    return RecoveryReplayRead(
+        kind="media_node_run",
+        id=node_run_id,
         applied=applied,
         replayed_at=datetime.now(UTC),
     )

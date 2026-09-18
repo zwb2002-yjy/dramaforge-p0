@@ -2216,6 +2216,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/maintenance/media-node-runs/{node_run_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay Media Node Run
+         * @description Resume one failed media generation over the remote task it already created.
+         */
+        post: operations["replay_media_node_run_api_v1_maintenance_media_node_runs__node_run_id__replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shots/{shot_id}/workflow-state": {
         parameters: {
             query?: never;
@@ -4375,6 +4395,19 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** MediaNodeRunReplayRequest */
+        MediaNodeRunReplayRequest: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Expected Failed At
+             * Format: date-time
+             */
+            expected_failed_at: string;
+        };
         /** ModelBindingCreate */
         ModelBindingCreate: {
             /**
@@ -5264,7 +5297,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "director_wakeup" | "outbox_dead_letter";
+            kind: "director_wakeup" | "outbox_dead_letter" | "media_node_run";
             /**
              * Id
              * Format: uuid
@@ -5298,7 +5331,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "director_wakeup" | "outbox_dead_letter";
+            kind: "director_wakeup" | "outbox_dead_letter" | "media_node_run";
             /**
              * Id
              * Format: uuid
@@ -12544,6 +12577,46 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["OutboxDeadLetterReplayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryReplayRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_media_node_run_api_v1_maintenance_media_node_runs__node_run_id__replay_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                node_run_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaNodeRunReplayRequest"];
             };
         };
         responses: {

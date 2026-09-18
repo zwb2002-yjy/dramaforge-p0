@@ -1,9 +1,13 @@
 """Owner-triggered recovery of failed asynchronous work.
 
-Two persisted failures can be replayed, and only these two:
+Three persisted failures can be replayed, and only these three:
 
 - a Director wakeup the inbox worker dead-lettered,
-- an Outbox event that exhausted its publish attempts.
+- an Outbox event that exhausted its publish attempts,
+- a media NodeRun that failed after its remote task already existed (for example
+  a provider result whose download hit a transient network error). Replaying it
+  resumes the stored execution identity and polls the existing remote task; it
+  never submits a second paid generation.
 
 Every replay is explicit (the caller must present the failure identity it saw,
 so a stale page cannot reset a newer failure), owner-scoped, idempotent and
@@ -28,7 +32,8 @@ from app.director.wakeup_replay import replay_failed_wakeup
 from app.events.models import OutboxDeadLetter, OutboxEvent
 from app.events.outbox import OutboxDispatcher, StreamPublisher
 from app.events.service import EventService
-from app.runtime.scheduler import RedisStreamPublisher
+from app.execution.models import GraphNode, NodeRun, ProviderOperation
+from app.runtime.scheduler import NodeRunScheduler, RedisStreamPublisher
 from app.shared.enums import OutboxStatus
 from app.shared.errors import ConflictError, ForbiddenError, NotFoundError
 
@@ -40,7 +45,7 @@ class RecoveryItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["director_wakeup", "outbox_dead_letter"]
+    kind: Literal["director_wakeup", "outbox_dead_letter", "media_node_run"]
     id: UUID
     project_id: UUID | None
     label: str
@@ -136,9 +141,124 @@ async def list_recovery_items(
                 )
             )
 
+    if project_ids:
+        # A media run that failed after its remote task existed can still be
+        # finished by polling that task; a run that never reached the provider
+        # has nothing to resume and is not offered here.
+        resumable = (
+            await session.execute(
+                select(NodeRun, GraphNode.node_key)
+                .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                .where(
+                    NodeRun.project_id.in_(project_ids),
+                    NodeRun.status == "failed",
+                    NodeRun.finished_at.is_not(None),
+                    NodeRun.result_artifact_id.is_(None),
+                    NodeRun.id.in_(
+                        select(ProviderOperation.node_run_id).where(
+                            ProviderOperation.provider_operation_id.is_not(None)
+                        )
+                    ),
+                )
+                .order_by(NodeRun.finished_at.desc())
+                .limit(_RECOVERY_LIMIT)
+            )
+        ).all()
+        for run, node_key in resumable:
+            assert run.finished_at is not None
+            items.append(
+                RecoveryItem(
+                    kind="media_node_run",
+                    id=run.id,
+                    project_id=run.project_id,
+                    label=node_key,
+                    detail=run.error_summary or run.error_code or "generation failed",
+                    attempts=run.attempt_no,
+                    failed_at=_as_utc(run.finished_at),
+                )
+            )
+
     items.sort(key=lambda item: item.failed_at, reverse=True)
     return items[:_RECOVERY_LIMIT]
 
+
+async def replay_media_node_run(
+    session: AsyncSession,
+    *,
+    actor: User,
+    project_id: UUID,
+    node_run_id: UUID,
+    expected_failed_at: datetime,
+) -> bool:
+    """Resume one failed media generation over its existing remote task.
+
+    The run is reset to ``queued`` and handed back to the normal dispatcher: the
+    worker resumes the persisted execution identity and polls the remote task it
+    already created, so no second paid submission can happen.  ``False`` means
+    the failure is no longer replayable exactly as the caller saw it.
+    """
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=actor)
+    run = await session.scalar(
+        select(NodeRun).where(NodeRun.id == node_run_id, NodeRun.project_id == project_id)
+    )
+    if run is None:
+        raise NotFoundError("node run not found")
+    if run.status != "failed" or run.result_artifact_id is not None:
+        return False
+    failed_at = _as_utc(run.finished_at) if run.finished_at is not None else None
+    if failed_at is None:
+        return False
+    if failed_at != _as_utc(expected_failed_at):
+        raise ConflictError(
+            "this run's failure changed since the page was loaded",
+            details={"code": "RECOVERY_STALE_FAILURE"},
+        )
+    operation = await session.scalar(
+        select(ProviderOperation)
+        .where(
+            ProviderOperation.node_run_id == node_run_id,
+            ProviderOperation.provider_operation_id.is_not(None),
+        )
+        .order_by(ProviderOperation.attempt_no.desc())
+        .limit(1)
+    )
+    if operation is None:
+        # Nothing remote to resume: a fresh retry would be a new paid
+        # submission, which this surface deliberately does not perform.
+        raise ConflictError(
+            "this failure has no remote task to resume",
+            details={"code": "RECOVERY_NOT_RESUMABLE"},
+        )
+    previous_status = run.status
+    run.status = "queued"
+    run.error_code = None
+    run.error_summary = None
+    run.finished_at = None
+    await session.flush()
+    await NodeRunScheduler(session).enqueue_node_run_only(node_run_id)
+    run.output_summary = {
+        **(run.output_summary or {}),
+        "recovery": {
+            "replayed_from": previous_status,
+            "operation_id": str(operation.id),
+            "resumed": True,
+        },
+    }
+    settings = get_settings()
+    if settings.app_env != "test":
+        await EventService(session).append_with_outbox(
+            project_id=project_id,
+            aggregate_type="node_run",
+            aggregate_id=node_run_id,
+            event_type="maintenance.media_node_run.replayed",
+            topic="maintenance.media_node_run.replayed",
+            payload={
+                "node_run_id": str(node_run_id),
+                "provider_operation_id": str(operation.id),
+                "actor_id": str(actor.id),
+            },
+        )
+    return True
 
 async def replay_director_wakeup(
     session: AsyncSession,

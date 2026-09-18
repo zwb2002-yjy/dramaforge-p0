@@ -6,6 +6,13 @@ import { fetchRecoveryItems, replayRecoveryItem, type RecoveryItemRead } from ".
 const KIND_LABELS: Record<RecoveryItemRead["kind"], string> = {
   director_wakeup: "导演唤醒失败",
   outbox_dead_letter: "事件发布失败",
+  media_node_run: "生成任务中断（可续跑）",
+};
+
+const REPLAY_LABELS: Record<RecoveryItemRead["kind"], string> = {
+  director_wakeup: "重放这一项",
+  outbox_dead_letter: "重放这一项",
+  media_node_run: "续跑这次生成",
 };
 
 function formatFailureTime(value: string): string {
@@ -70,7 +77,7 @@ export function AdvancedRecoveryPanel() {
               onClick={() => replay.mutate(item)}
               data-testid={`recovery-replay-${item.id}`}
             >
-              {replay.isPending ? "重放中…" : "重放这一项"}
+              {replay.isPending ? "重放中…" : REPLAY_LABELS[item.kind]}
             </button>
           </li>
         ))}

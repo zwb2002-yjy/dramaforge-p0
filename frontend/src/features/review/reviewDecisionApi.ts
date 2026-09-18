@@ -62,12 +62,6 @@ export async function createReviewDecision(
   );
 }
 
-export type ReviewEvidenceRead = {
-  review_node_run_id: string;
-  status: string;
-  queued: boolean;
-};
-
 /**
  * Ask for the machine evidence of this exact candidate.
  *
@@ -79,9 +73,9 @@ export async function createReviewEvidence(
   projectId: string,
   shotId: string,
   input: { artifact_id: string; stage: ReviewStage },
-): Promise<ReviewEvidenceRead> {
+): Promise<components["schemas"]["ReviewEvidenceRequestRead"]> {
   const csrf = await fetchCsrf();
-  return apiSend<ReviewEvidenceRead>(
+  return apiSend<components["schemas"]["ReviewEvidenceRequestRead"]>(
     "POST",
     `/api/v1/projects/${projectId}/shots/${shotId}/review-evidence`,
     input,

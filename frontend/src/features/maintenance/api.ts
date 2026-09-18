@@ -26,6 +26,15 @@ export async function replayRecoveryItem(item: RecoveryItemRead): Promise<Recove
       csrf,
     );
   }
+  if (item.kind === "media_node_run") {
+    if (!item.project_id) throw new Error("该生成任务缺少项目身份，无法恢复。");
+    return apiSend<RecoveryReplayRead>(
+      "POST",
+      `/api/v1/maintenance/media-node-runs/${encodeURIComponent(item.id)}/replay`,
+      { project_id: item.project_id, expected_failed_at: item.failed_at },
+      csrf,
+    );
+  }
   return apiSend<RecoveryReplayRead>(
     "POST",
     `/api/v1/maintenance/outbox/dead-letters/${encodeURIComponent(item.id)}/replay`,
