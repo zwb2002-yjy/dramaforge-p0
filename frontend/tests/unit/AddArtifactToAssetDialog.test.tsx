@@ -58,6 +58,38 @@ function renderDialog(props: Partial<React.ComponentProps<typeof AddArtifactToAs
 describe("AddArtifactToAssetDialog", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("offers only the asset kinds a video Artifact may become", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      return json(ASSET, 201);
+    });
+
+    renderDialog({ artifactType: "video", defaultKind: "character" });
+    const kindSelect = screen.getByLabelText("资产类型");
+    const options = Array.from(kindSelect.querySelectorAll("option")).map(
+      (option) => option.textContent,
+    );
+    // 角色 / 场景 are image-only server side; offering them here would turn the
+    // explicit confirmation into a late refusal.
+    expect(options).toEqual(["视频"]);
+    expect((kindSelect as HTMLSelectElement).value).toBe("video");
+  });
+
+  it("keeps 角色 / 场景 available for an image Artifact", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      return json(ASSET, 201);
+    });
+
+    renderDialog({ artifactType: "image", defaultKind: "character" });
+    const options = Array.from(screen.getByLabelText("资产类型").querySelectorAll("option")).map(
+      (option) => option.textContent,
+    );
+    expect(options).toEqual(["角色", "场景", "视频"]);
+  });
+
   it("shows the provenance and sends one explicit creation request with a stable key", async () => {
     const calls: Array<{ url: string; key: string | undefined; body: Record<string, unknown> }> =
       [];

@@ -140,6 +140,25 @@ export function rolesForAssetKind(kind: string): string[] {
 }
 
 /**
+ * Asset kinds one Artifact type may become.
+ *
+ * Mirrors the server's ARTIFACT_KIND_MATCH guard: a video Artifact may only
+ * become a video asset, and 角色 / 场景 cards are image-only. Offering a kind the
+ * server will refuse turns an explicit user action into a late error.
+ */
+const ASSET_KINDS_BY_ARTIFACT_TYPE: Record<string, string[]> = {
+  image: ["character", "scene", "video"],
+  video: ["video"],
+  audio: ["audio"],
+  subtitle: ["subtitle"],
+};
+
+export function assetKindsForArtifactType(artifactType: string | null | undefined): string[] {
+  if (!artifactType) return Object.keys(ASSET_KIND_ROLES);
+  return ASSET_KINDS_BY_ARTIFACT_TYPE[artifactType] ?? Object.keys(ASSET_KIND_ROLES);
+}
+
+/**
  * Explicitly add a generated Artifact as an asset card.
  *
  * The request key makes a retried submission (lost response, double click)

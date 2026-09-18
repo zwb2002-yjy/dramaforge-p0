@@ -263,7 +263,8 @@ export function ShotCandidateTray({
           projectId={projectId}
           artifactId={assetCandidate.artifactId}
           defaultName={shot.shot_number ? `镜头 ${shot.shot_number}` : "未命名资产"}
-          defaultKind="character"
+          defaultKind={assetCandidate.artifactType === "video" ? "video" : "character"}
+          artifactType={assetCandidate.artifactType}
           sourceLabel={`${shotCandidateStageLabel(assetCandidate.stage)}候选`}
           shotId={shot.id}
           onCreated={async (asset) => {
