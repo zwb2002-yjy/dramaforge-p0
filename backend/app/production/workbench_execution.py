@@ -139,9 +139,11 @@ async def _queue_stage_review_run(
     consumes the media run as its upstream (bound at execution time from the run's
     own artifact), and it contacts no Provider.
 
-    An existing live or finished review for this node is returned instead of a
-    second one: `prepare_formal_tail` materializes the same tail review, and two
-    runs for one node would break the (graph_node_id, attempt_no) identity.
+    A review of this exact producer is reused rather than queued twice
+    (`prepare_formal_tail` materializes the same tail review, and two live runs
+    for one node would break the (graph_node_id, attempt_no) identity).  A new
+    media candidate gets its own attempt of the tail review, because a human
+    decision is bound to the exact upstream Artifact.
     """
     review_key, _review_type, review_name = REVIEW_NODE_FOR_STAGE[stage]
     node = await session.scalar(
@@ -155,22 +157,22 @@ async def _queue_stage_review_run(
         # this stage gained a gate). The media run is already durable; the review
         # is added by the next graph version instead of being invented here.
         return None
-    # Reuse the review this shot already has, whichever entry point queued it:
-    # `prepare_formal_tail` materializes the tail review too, and a second live
-    # run for the same node would violate (graph_node_id, attempt_no).
-    existing = await session.scalar(
+    # The review must judge the candidate that was just produced: a decision is
+    # bound to the exact upstream Artifact, so reusing the review of a previous
+    # candidate would leave this one with evidence that can never be approved.
+    # A review for this exact producer is reused; otherwise the new candidate
+    # gets its own attempt of the tail review.
+    producer_review = await session.scalar(
         select(NodeRun)
         .where(
             NodeRun.graph_node_id == node.id,
-            NodeRun.status.in_(
-                ("queued", "running", "completed", "cached", "completed_after_cancel")
-            ),
+            NodeRun.input_snapshot["upstream_node_run_id"].as_string() == str(run.id),
         )
         .order_by(NodeRun.attempt_no.desc(), NodeRun.created_at.desc())
         .limit(1)
     )
-    if existing is not None:
-        return existing
+    if producer_review is not None:
+        return producer_review
     latest = await session.scalar(
         select(NodeRun)
         .where(NodeRun.graph_node_id == node.id)

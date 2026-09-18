@@ -999,6 +999,87 @@ async def test_scene_frozen_capabilities_are_inherited_by_shots(
 
 
 @pytest.mark.asyncio
+async def test_regenerated_candidate_gets_its_own_review_run(session: AsyncSession) -> None:
+    """A new media candidate must be admitted by a review of that candidate.
+
+    The review gate binds a decision to the exact upstream Artifact.  When a
+    Shot is regenerated, reusing the review run that judged the previous
+    candidate leaves the new candidate with no admissible evidence: the review
+    page reports missing evidence and Formal can never be reached.
+    """
+
+    project, video_binding, user = await _seed(session)
+    shot, _keyframe_seed, binding = await _seed_image_shot(
+        session,
+        project=project,
+        user=user,
+        connection_id=video_binding.connection_id,
+    )
+    from app.execution.models import Artifact, GraphNode
+
+    command = _input(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="image_keyframe",
+        requested_binding_id=binding.id,
+        mode_id="text_to_image",
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+
+    def _review_runs():
+        return (
+            select(NodeRun)
+            .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+            .where(GraphNode.node_key == "identity_review")
+            .order_by(NodeRun.attempt_no)
+        )
+
+    first_media = await service.create_and_dispatch(
+        project=project,
+        execution_input=command,
+        idempotency_key_override="regen:keyframe:one",
+    )
+    await session.commit()
+    first_review = (await session.execute(_review_runs())).scalars().first()
+    assert first_review is not None, "the first dispatch must queue a review run"
+    # The first candidate's review is finished and its evidence is stored, which
+    # is exactly the state a reviewer leaves behind before regenerating.
+    evidence = Artifact(
+        project_id=project.id,
+        artifact_type="probe",
+        storage_state="available",
+        object_key="projects/test/reviews/identity/probe.json",
+        content_hash="identity-evidence-hash",
+        mime_type="application/json",
+        byte_size=128,
+        produced_by_run_id=first_review.id,
+    )
+    session.add(evidence)
+    await session.flush()
+    first_review.status = "completed"
+    first_review.result_artifact_id = evidence.id
+    await session.commit()
+
+    # Regeneration: a new keyframe attempt for the same Shot.
+    second_media = await service.create_and_dispatch(
+        project=project,
+        execution_input=command,
+        idempotency_key_override="regen:keyframe:two",
+    )
+    await session.commit()
+    assert second_media.id != first_media.id
+
+    reviews = (await session.execute(_review_runs())).scalars().all()
+    assert len(reviews) == 2, "a new candidate needs a review of that candidate"
+    newest = reviews[-1]
+    assert newest.id != first_review.id
+    assert newest.status == "queued", "the new review must actually run for the new candidate"
+    assert newest.input_snapshot["upstream_node_run_id"] == str(second_media.id)
+    assert newest.parent_run_id == first_review.id
+
+
+@pytest.mark.asyncio
 async def test_command_replay_is_frozen_and_new_keys_allocate_attempts(session, monkeypatch):
     from app.shared.errors import ConflictError
 
