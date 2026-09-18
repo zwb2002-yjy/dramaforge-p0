@@ -26,6 +26,7 @@ function json(body: unknown, status = 200): Promise<Response> {
 function mockEditingFetch(implementation: typeof fetch) {
   return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
+    if ((init?.method ?? "GET") === "GET" && url.endsWith("/assets")) return json([]);
     if (
       (init?.method ?? "GET") === "GET" &&
       (url.endsWith("/edit-sessions") || url.endsWith("/final-films"))
@@ -366,6 +367,38 @@ describe("EditingWorkspace", () => {
     expect(screen.getByTestId("edit-session-lineage")).toHaveTextContent("lineage_readonly");
     expect(screen.getAllByTestId("edit-session-clip")).toHaveLength(2);
     expect(calls).toEqual([`/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}`]);
+  });
+
+  it("keeps raw identifiers out of the creative surface", async () => {
+    // The plan forbids ordinary creative UI from showing interface/database
+    // fields, hashes or internal ids; they belong in a marked read-only
+    // diagnostics block that is collapsed by default.
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/assets")) return json([]);
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-facts");
+
+    const facts = screen.getByTestId("edit-session-facts");
+    // Raw lineage fields stay inside the collapsed diagnostics block: the
+    // default-visible part of the panel carries no interface/database names.
+    const diagnostics = screen.getByTestId("edit-session-diagnostics");
+    const visible = (facts.textContent ?? "").replace(diagnostics.textContent ?? "", "");
+    expect(visible).not.toMatch(/\b(artifact_id|shot_id|scene_id|episode_id)\b/);
+    expect(visible).not.toContain("artifact-formal");
+    // The identifiers are still available, just inside the diagnostics block.
+    expect(
+      within(screen.getByTestId("edit-session-diagnostics")).getByText(SESSION_ID),
+    ).toBeInTheDocument();
+
+    // Clip audio is chosen by name, not by pasting an Artifact id.
+    const audioControl = screen.getByTestId("clip-audio-0");
+    expect(audioControl.tagName).toBe("SELECT");
+    expect(within(audioControl as HTMLElement).getByText("无配音")).toBeInTheDocument();
+    expect(screen.getByTestId("clip-diagnostics-0")).not.toHaveAttribute("open");
   });
 
   it("edits only local clip order/duration until an explicit save", async () => {
