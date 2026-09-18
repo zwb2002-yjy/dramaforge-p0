@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
@@ -14,6 +14,8 @@ export type CreativeCapabilitiesPanelProps = {
   projectId: string;
   sceneId?: string | null;
   shotId?: string | null;
+  /** Freeze target. Defaults to the Shot, which is the more specific scope. */
+  scope?: "scene" | "shot";
 };
 
 /** CC10 functional UI: Genre / Style / Shot Language / Quality Policy / Skills.
@@ -21,11 +23,19 @@ export type CreativeCapabilitiesPanelProps = {
  * A user-explicit selection is frozen via POST; nothing is applied silently.
  * Read-only exposure includes both provenance and the compiled effective
  * intent that production will consume. No Provider call is made here.
+ *
+ * The freeze target is exactly one canonical scope. A Scene freeze is the
+ * shared configuration the Scene's Shots inherit; a Shot freeze is the
+ * override for that Shot only. Both scopes write the same frozen provenance
+ * onto existing Scene/Shot state — there is no second capability system — and
+ * the execution plan resolves Project + Scene + Shot into one effective
+ * creative intent when it freezes a run snapshot.
  */
 export function CreativeCapabilitiesPanel({
   projectId,
   sceneId,
   shotId,
+  scope = "shot",
 }: CreativeCapabilitiesPanelProps) {
   const qc = useQueryClient();
   const [genre, setGenre] = useState("");
@@ -35,22 +45,29 @@ export function CreativeCapabilitiesPanel({
   const [skills, setSkills] = useState<string[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const targetId = shotId ?? sceneId ?? null;
+  const targetScope = scope === "scene" ? "scene" : "shot";
+  const targetId = (targetScope === "scene" ? sceneId : shotId) ?? null;
+
   const catalog = useQuery({
     queryKey: queryKeys.production.creativeCatalog(projectId),
     queryFn: () => fetchCreativeCapabilityCatalog(projectId),
     enabled: Boolean(projectId),
   });
   const provenance = useQuery({
-    queryKey: queryKeys.production.provenance(projectId, targetId),
+    queryKey: queryKeys.production.provenance(projectId, targetId, targetScope),
     queryFn: () =>
-      fetchCreativeProvenance(projectId, {
-        shot_id: shotId ?? undefined,
-        scene_id: sceneId ?? undefined,
-      }),
+      fetchCreativeProvenance(
+        projectId,
+        targetScope === "scene"
+          ? { scene_id: sceneId ?? undefined }
+          : { shot_id: shotId ?? undefined },
+      ),
     enabled: Boolean(projectId) && Boolean(targetId),
   });
   const prov = provenance.data?.creative_capabilities ?? {};
+  // A Scene freeze is inherited by its Shots; showing where the displayed
+  // value comes from keeps the two scopes distinguishable to the user.
+  const inheritedFromScene = targetScope === "shot" && provenance.data?.target === "scene";
   // The provenance payload is an open record; these are the parts the panel
   // renders as readable labels before the raw record.
   const summary = prov as {
@@ -63,6 +80,23 @@ export function CreativeCapabilitiesPanel({
   const capabilityLabel = (items: CreativeCapabilityCatalogItem[] | undefined, key: string) =>
     items?.find((item) => item.key === key)?.display_name ?? key.replace(/[_-]+/g, " ");
 
+  // Seed the draft from what is already frozen for this exact scope so the
+  // Owner edits the current configuration instead of an empty form. Selecting
+  // a value is never implied by the read: the freeze stays an explicit action.
+  const frozenGenre = summary.genre?.key ?? "";
+  const frozenStyle = summary.style?.key ?? "";
+  const frozenShotLanguage = summary.shot_language?.key ?? "";
+  const frozenQuality = summary.quality_policy?.key ?? "";
+  const frozenSkills = (summary.skill_guidance ?? []).map((entry) => entry.skill_key).join(",");
+  useEffect(() => {
+    setGenre(frozenGenre);
+    setStyle(frozenStyle);
+    setShotLanguage(frozenShotLanguage);
+    setQuality(frozenQuality);
+    setSkills(frozenSkills ? frozenSkills.split(",") : []);
+    // Draft state follows the canonical frozen value, never local-only input.
+  }, [frozenGenre, frozenStyle, frozenShotLanguage, frozenQuality, frozenSkills]);
+
   const freeze = useMutation({
     mutationFn: () =>
       freezeCreativeCapabilities(projectId, {
@@ -71,16 +105,18 @@ export function CreativeCapabilitiesPanel({
         shot_language_key: shotLanguage || undefined,
         quality_policy_key: quality || undefined,
         skill_keys: skills,
-        shot_id: shotId ?? undefined,
-        // Freeze and read must address the same canonical target.  When the
-        // production page has a selected Shot it also knows its parent Scene;
-        // sending both made the backend freeze the Scene while this panel read
-        // the Shot provenance.
-        scene_id: shotId ? undefined : (sceneId ?? undefined),
+        // Freeze and read must address the same canonical target.  A Scene
+        // freeze is the shared configuration its Shots inherit; a Shot freeze
+        // is that Shot's override.  Exactly one target is ever sent.
+        ...(targetScope === "scene"
+          ? { scene_id: sceneId ?? undefined }
+          : { shot_id: shotId ?? undefined }),
       }),
     onSuccess: () => {
       setMsg("已冻结有效创作意图与来源说明。");
-      void qc.invalidateQueries({ queryKey: queryKeys.production.provenance(projectId, targetId) });
+      void qc.invalidateQueries({
+        queryKey: queryKeys.production.provenance(projectId, targetId, targetScope),
+      });
     },
     onError: (e: Error) => setMsg(`冻结失败：${e.message}`),
   });
@@ -97,6 +133,9 @@ export function CreativeCapabilitiesPanel({
         <div>
           <h3>创意能力选择</h3>
         </div>
+        <span className="fact-source-badge" data-testid="creative-capability-scope">
+          {targetScope === "scene" ? "场景配置（镜头继承）" : "当前镜头配置"}
+        </span>
         <span className="fact-source-badge">人工指定</span>
       </header>
 
@@ -189,7 +228,9 @@ export function CreativeCapabilitiesPanel({
 
       {prov && Object.keys(prov).length > 0 && (
         <div className="creative-provenance" data-testid="creative-provenance">
-          <small>当前冻结的创作意图</small>
+          <small>
+            {inheritedFromScene ? "当前生效的创作意图（来自场景配置）" : "当前冻结的创作意图"}
+          </small>
           <ul data-testid="creative-provenance-summary" className="creative-provenance-summary">
             {summary.genre?.key && (
               <li>创作类型：{capabilityLabel(catalog.data?.genres, summary.genre.key)}</li>

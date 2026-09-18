@@ -117,6 +117,12 @@ export function ProductionPage({ projectId }: { projectId: string }) {
   const revisionShotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
   const selectedShot = (shots.data ?? []).find((s) => s.id === revisionShotId) ?? null;
   const selectedSceneId = selectedShot?.scene_id ?? null;
+  // Scene scope is the shared configuration for the Scene; it falls back to
+  // the first Scene so the Owner can configure it before any Shot exists.
+  const [chosenSceneId, setChosenSceneId] = useState<string | null>(null);
+  const firstSceneId = scenes.data?.[0]?.id ?? null;
+  const sceneCapabilityId =
+    projectId === "demo" ? null : (chosenSceneId ?? selectedSceneId ?? firstSceneId ?? null);
   const projectAssets = useQuery({
     queryKey: queryKeys.asset.root(projectId),
     queryFn: () => fetchProjectAssets(projectId),
@@ -232,6 +238,36 @@ export function ProductionPage({ projectId }: { projectId: string }) {
       >
         <WorkflowNavigator projectId={projectId} />
       </Disclosure>
+
+      {sceneCapabilityId && (
+        <Disclosure
+          title="场景创作能力"
+          description="本场景共享的创作类型 / 画面风格 / 导演方式 / 创作技巧；镜头默认继承"
+          testId="production-scene-capabilities-disclosure"
+        >
+          {(scenes.data?.length ?? 0) > 1 && (
+            <label className="df-field">
+              场景
+              <select
+                aria-label="场景创作能力目标场景"
+                value={sceneCapabilityId}
+                onChange={(e) => setChosenSceneId(e.target.value)}
+              >
+                {(scenes.data ?? []).map((scene) => (
+                  <option key={scene.id} value={scene.id}>
+                    {scene.location_name || `场景 ${scene.scene_number}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <CreativeCapabilitiesPanel
+            projectId={projectId}
+            sceneId={sceneCapabilityId}
+            scope="scene"
+          />
+        </Disclosure>
+      )}
 
       {revisionShotId && (
         <Disclosure

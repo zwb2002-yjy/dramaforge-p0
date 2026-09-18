@@ -926,6 +926,79 @@ async def test_frozen_effective_creative_content_enters_plan_and_run(
 
 
 @pytest.mark.asyncio
+async def test_scene_frozen_capabilities_are_inherited_by_shots(
+    session: AsyncSession,
+) -> None:
+    """Scene scope is the shared configuration; Shots inherit it at plan time.
+
+    The Owner configures the Scene once.  No Shot carries a copied selection;
+    the plan resolves Project + Scene + Shot and freezes that single effective
+    intent into the run snapshot.
+    """
+
+    from app.director.creative_capabilities.creative_compiler import (
+        CreativeCapabilityCompiler,
+    )
+    from app.director.creative_capabilities.freeze import freeze_scene_capabilities
+    from app.director.creative_capabilities.packs_library import STYLE_PACKS
+    from app.director.creative_capabilities.skill_library import BASELINE_SKILLS
+
+    project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    base_prompt = "documentary wide shot of the water town at dawn"
+    shot.video_prompt = base_prompt
+    shot.director_state = {}
+    scene = await session.get(Scene, shot.scene_id)
+    assert scene is not None
+    scene.design_state = {}
+
+    style = next(item for item in STYLE_PACKS if item.style_key == "documentary_natural_v1")
+    skill = next(item for item in BASELINE_SKILLS if item.skill_key == "emotional-performance-v1")
+    intent = CreativeCapabilityCompiler().compile(style=style, skill_stack=[skill])
+    scene_freeze = await freeze_scene_capabilities(
+        session,
+        project_id=project.id,
+        scene_id=scene.id,
+        intent=intent,
+        actor_id=user.id,
+    )
+    await session.flush()
+
+    # The configuration lives on the Scene only.  The Shot keeps no copied
+    # capability state, so inheritance cannot be mistaken for an override.
+    assert scene_freeze.design_state["creative_capabilities"]["effective_intent"]
+    assert "creative_capabilities" not in (shot.director_state or {})
+
+    execution_input = _input(
+        shot_id=shot.id,
+        requested_binding_id=binding.id,
+        prompt=base_prompt,
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    effective = plan.semantic_intent["effective_creative_intent"]
+    assert skill.strategy in plan.prompt
+    # The Scene's style pack content — not a Shot copy — is what the plan
+    # resolves into the effective intent.
+    assert effective["lighting"] == style.lighting
+    assert effective["production_design"] == style.production_design
+    assert plan.semantic_intent["creative_snapshot_hashes"]["scene"] == (
+        scene_freeze.design_state["creative_capabilities"]["compiled_hash"]
+    )
+
+    run = await service.create_and_dispatch(
+        project=project,
+        execution_input=execution_input,
+    )
+    frozen_plan = run.input_snapshot["workbench_plan"]
+    assert frozen_plan["prompt"] == plan.prompt
+    assert frozen_plan["semantic_intent"]["skill_guidance"][0]["skill_key"] == (
+        "emotional-performance-v1"
+    )
+
+
+@pytest.mark.asyncio
 async def test_command_replay_is_frozen_and_new_keys_allocate_attempts(session, monkeypatch):
     from app.shared.errors import ConflictError
 
