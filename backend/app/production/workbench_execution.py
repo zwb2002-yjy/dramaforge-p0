@@ -712,15 +712,28 @@ class WorkbenchExecutionService:
                 "scene not found",
                 details={"code": "SCENE_NOT_FOUND"},
             )
+        profile = await self._session.scalar(
+            select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project.id)
+        )
+        project_snapshot = _mapping(
+            _mapping(profile.strategy_snapshot if profile else {}).get("creative_capabilities")
+        )
         scene_design = _mapping(scene.design_state)
         shot_state = _mapping(shot.director_state)
         scene_snapshot = _mapping(scene_design.get("creative_capabilities"))
         shot_snapshot = _mapping(shot_state.get("creative_capabilities"))
         effective_intent = _deep_merge(
-            _mapping(scene_snapshot.get("effective_intent")),
+            _deep_merge(
+                _mapping(project_snapshot.get("effective_intent")),
+                _mapping(scene_snapshot.get("effective_intent")),
+            ),
             _mapping(shot_snapshot.get("effective_intent")),
         )
         value_sources = {
+            **{
+                str(key): "project_default"
+                for key in _mapping(project_snapshot.get("value_sources"))
+            },
             **{
                 str(key): str(value)
                 for key, value in _mapping(scene_snapshot.get("value_sources")).items()
@@ -730,9 +743,12 @@ class WorkbenchExecutionService:
                 for key, value in _mapping(shot_snapshot.get("value_sources")).items()
             },
         }
-        skills = _skill_guidance(scene_snapshot, shot_snapshot)
+        skills = _skill_guidance(project_snapshot, scene_snapshot, shot_snapshot)
         shot_language = _deep_merge(
-            _mapping(scene_snapshot.get("shot_director_intent_patch")),
+            _deep_merge(
+                _mapping(project_snapshot.get("shot_director_intent_patch")),
+                _mapping(scene_snapshot.get("shot_director_intent_patch")),
+            ),
             _mapping(shot_snapshot.get("shot_director_intent_patch")),
         )
         continuity_context = _mapping(scene_design.get("continuity_context"))
@@ -769,6 +785,11 @@ class WorkbenchExecutionService:
             "creative_snapshot_hashes": cast(
                 JsonValue,
                 {
+                    **(
+                        {"project": project_snapshot.get("compiled_hash")}
+                        if project_snapshot
+                        else {}
+                    ),
                     "scene": scene_snapshot.get("compiled_hash"),
                     "shot": shot_snapshot.get("compiled_hash"),
                 },
@@ -812,7 +833,18 @@ class WorkbenchExecutionService:
         }
         shot_language = _mapping(semantic_intent.get("shot_language"))
         suggestions: list[PendingSuggestion] = []
+        project_snapshot = _mapping(
+            _mapping(profile.strategy_snapshot).get("creative_capabilities")
+        )
+        uses_project_defaults = bool(project_snapshot.get("compiled_hash")) and _mapping(
+            semantic_intent.get("creative_snapshot_hashes")
+        ).get("project") == project_snapshot.get("compiled_hash")
         for style_id in profile.selected_style_ids or []:
+            if (
+                uses_project_defaults
+                and _mapping(project_snapshot.get("style")).get("key") == style_id
+            ):
+                continue
             suggestions.append(
                 PendingSuggestion(
                     key=f"style:{style_id}",
@@ -830,9 +862,7 @@ class WorkbenchExecutionService:
                 PendingSuggestion(
                     key=f"skill:{skill_id}",
                     label=str(skill_id),
-                    reason=(
-                        "该技能尚未编译进本镜头的创作快照，因此本次执行不会注入它的指导文本。"
-                    ),
+                    reason=("该技能尚未编译进本镜头的创作快照，因此本次执行不会注入它的指导文本。"),
                 )
             )
         selected_language = profile.selected_shot_language
@@ -847,16 +877,16 @@ class WorkbenchExecutionService:
                     ),
                 )
             )
-        if profile.selected_genre:
-            # The genre has no compiled consumer in this repository: it stays a
-            # profile annotation and must never be shown as an execution input.
+        if profile.selected_genre and not (
+            uses_project_defaults
+            and _mapping(project_snapshot.get("genre")).get("key") == profile.selected_genre
+        ):
+            # Unaccepted template recommendations remain annotations.
             suggestions.append(
                 PendingSuggestion(
                     key=f"genre:{profile.selected_genre}",
                     label=str(profile.selected_genre),
-                    reason=(
-                        "题材仅作为项目档案记录；它不参与执行计划，也不作为模型参数。"
-                    ),
+                    reason=("题材仅作为项目档案记录；它不参与执行计划，也不作为模型参数。"),
                 )
             )
         return suggestions
@@ -1018,8 +1048,13 @@ class WorkbenchExecutionService:
         )
 
     async def find_command_receipt(
-        self, *, project_id: UUID, shot_id: UUID, stage: PlanStage,
-        command_key: str | None, plan_fingerprint: str | None = None,
+        self,
+        *,
+        project_id: UUID,
+        shot_id: UUID,
+        stage: PlanStage,
+        command_key: str | None,
+        plan_fingerprint: str | None = None,
         expected_request_hash: str | None = None,
     ) -> NodeRun | None:
         """Read a committed frozen receipt; never resolve or submit a model."""
@@ -1028,30 +1063,43 @@ class WorkbenchExecutionService:
         if command_key is None and not plan_fingerprint:
             return None
         key = _workbench_idempotency_key(
-            stage=stage, override=command_key, plan_fingerprint=plan_fingerprint or "",
+            stage=stage,
+            override=command_key,
+            plan_fingerprint=plan_fingerprint or "",
         )
-        run = await self._session.scalar(select(NodeRun).where(
-            NodeRun.project_id == project_id, NodeRun.idempotency_key == key,
-        ))
+        run = await self._session.scalar(
+            select(NodeRun).where(
+                NodeRun.project_id == project_id,
+                NodeRun.idempotency_key == key,
+            )
+        )
         if run is None:
             return None
         snapshot = run.input_snapshot or {}
         graph_shot = await self._session.scalar(
             select(ProductionGraph.scope_entity_id)
             .join(GraphVersion, GraphVersion.graph_id == ProductionGraph.id)
-            .where(GraphVersion.id == run.graph_version_id,
-                   ProductionGraph.project_id == project_id, ProductionGraph.scope_type == "shot")
+            .where(
+                GraphVersion.id == run.graph_version_id,
+                ProductionGraph.project_id == project_id,
+                ProductionGraph.scope_type == "shot",
+            )
         )
-        if (graph_shot != shot_id or snapshot.get("shot_id") != str(shot_id)
-                or snapshot.get("stage") != stage):
+        if (
+            graph_shot != shot_id
+            or snapshot.get("shot_id") != str(shot_id)
+            or snapshot.get("stage") != stage
+        ):
             raise ConflictError(
                 "Execution command key belongs to a different Shot or stage",
                 details={"code": "EXECUTION_COMMAND_SCOPE_CONFLICT"},
             )
         if expected_request_hash is not None and (
             snapshot.get("workbench_request_hash") != expected_request_hash
-            or (plan_fingerprint is not None
-                and snapshot.get("plan_fingerprint") != plan_fingerprint)
+            or (
+                plan_fingerprint is not None
+                and snapshot.get("plan_fingerprint") != plan_fingerprint
+            )
         ):
             raise ConflictError(
                 "Execution command key was already used with a different request",
@@ -1077,7 +1125,9 @@ class WorkbenchExecutionService:
         identity = request_hash or workbench_request_hash(execution_input.model_dump(mode="json"))
         await self.lock_command_scope(project_id=project.id)
         existing = await self.find_command_receipt(
-            project_id=project.id, shot_id=execution_input.shot_id, stage=execution_input.stage,
+            project_id=project.id,
+            shot_id=execution_input.shot_id,
+            stage=execution_input.stage,
             command_key=idempotency_key_override,
             plan_fingerprint=prepared_plan.plan_fingerprint if prepared_plan else None,
             expected_request_hash=identity,
@@ -1089,8 +1139,11 @@ class WorkbenchExecutionService:
             execution_input=execution_input,
         )
         existing = await self.find_command_receipt(
-            project_id=project.id, shot_id=execution_input.shot_id, stage=execution_input.stage,
-            command_key=idempotency_key_override, plan_fingerprint=plan.plan_fingerprint,
+            project_id=project.id,
+            shot_id=execution_input.shot_id,
+            stage=execution_input.stage,
+            command_key=idempotency_key_override,
+            plan_fingerprint=plan.plan_fingerprint,
             expected_request_hash=identity,
         )
         if existing is not None:
@@ -1151,8 +1204,10 @@ class WorkbenchExecutionService:
             select(GraphNode.id).where(GraphNode.id == node.id).with_for_update()
         )
         previous_run = await self._session.scalar(
-            select(NodeRun).where(NodeRun.graph_node_id == node.id)
-            .order_by(NodeRun.attempt_no.desc()).limit(1)
+            select(NodeRun)
+            .where(NodeRun.graph_node_id == node.id)
+            .order_by(NodeRun.attempt_no.desc())
+            .limit(1)
         )
         attempt_no = (previous_run.attempt_no if previous_run is not None else 0) + 1
         await _ensure_pure_chain_upstreams(

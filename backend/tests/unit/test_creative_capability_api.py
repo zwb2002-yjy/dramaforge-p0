@@ -41,18 +41,14 @@ def _project(client: TestClient) -> str:
 
 def test_catalog_projects_every_backend_registry(client: TestClient) -> None:
     project_id = _project(client)
-    response = client.get(
-        f"/api/v1/projects/{project_id}/creative-capabilities/catalog"
-    )
+    response = client.get(f"/api/v1/projects/{project_id}/creative-capabilities/catalog")
     assert response.status_code == 200, response.text
     catalog = response.json()
 
     assert [item["key"] for item in catalog["genres"]] == [
         item.genre_key for item in GENRE_PROFILES
     ]
-    assert [item["key"] for item in catalog["styles"]] == [
-        item.style_key for item in STYLE_PACKS
-    ]
+    assert [item["key"] for item in catalog["styles"]] == [item.style_key for item in STYLE_PACKS]
     assert [item["key"] for item in catalog["shot_languages"]] == [
         item.pack_key for item in SHOT_LANGUAGE_PACKS
     ]
@@ -63,3 +59,32 @@ def test_catalog_projects_every_backend_registry(client: TestClient) -> None:
         item.skill_key for item in BASELINE_SKILLS
     ]
     assert all(item["display_name"] and item["description"] for item in catalog["skills"])
+
+
+def test_creation_choices_use_the_same_catalog_and_persist_via_api(client: TestClient) -> None:
+    assert client.get("/api/v1/creative-capabilities/catalog").status_code in {401, 403}
+    project_id = _project(client)
+    catalog = client.get("/api/v1/creative-capabilities/catalog")
+    assert catalog.status_code == 200, catalog.text
+    assert (
+        catalog.json()
+        == client.get(f"/api/v1/projects/{project_id}/creative-capabilities/catalog").json()
+    )
+    genre_key = catalog.json()["genres"][0]["key"]
+    style_key = catalog.json()["styles"][0]["key"]
+    response = client.post(
+        "/api/v1/projects",
+        json={
+            "workspace_id": client.headers["X-Workspace-Id"],
+            "name": "Chosen style",
+            "aspect_ratio": "9:16",
+            "genre_key": genre_key,
+            "style_key": style_key,
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert response.status_code == 201, response.text
+    profile = response.json()["creative_profile"]
+    assert profile["selected_genre"] == genre_key
+    assert profile["selected_style_ids"] == [style_key]
+    assert profile["strategy_snapshot"]["creative_capabilities"]["compiled_hash"]

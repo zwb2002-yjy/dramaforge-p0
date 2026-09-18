@@ -21,6 +21,9 @@
    ============================================================ */
 
 .qc-scene-wall .qc-scene-card.qc-scene-card {
+  background: var(--df-surface-tier-raised-bg);
+  border-color: var(--df-surface-tier-raised-border);
+  box-shadow: var(--df-surface-tier-raised-shadow);
   border-radius: var(--df-radius-container);
 }
 
@@ -30,4 +33,20 @@
 
 .qc-scene-wall .rs-scene-portal.rs-scene-portal {
   border-radius: var(--df-radius-container);
+}
+
+.qc-scene-card-synopsis {
+  margin: 0;
+  padding: var(--df-space-3) var(--df-space-4);
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-md);
+  line-height: var(--df-leading-relaxed);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.qc-scene-placeholder small {
+  font-size: var(--df-text-sm);
+  color: var(--df-text-muted);
 }

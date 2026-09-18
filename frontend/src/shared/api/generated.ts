@@ -2300,6 +2300,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/creative-capabilities/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Creation Capability Catalog
+         * @description The same read-only choices before a project exists; requires a workspace/session.
+         */
+        get: operations["creation_capability_catalog_api_v1_creative_capabilities_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/creative-capabilities/provenance": {
         parameters: {
             query?: never;
@@ -5035,6 +5055,10 @@ export interface components {
              * @enum {string}
              */
             director_autonomy: "AUTO" | "ASSIST" | "MANUAL";
+            /** Genre Key */
+            genre_key?: string | null;
+            /** Style Key */
+            style_key?: string | null;
         };
         /** ProjectCreativeProfileRead */
         ProjectCreativeProfileRead: {
@@ -12728,6 +12752,41 @@ export interface operations {
             path: {
                 project_id: string;
             };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityCatalogBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    creation_capability_catalog_api_v1_creative_capabilities_catalog_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
             cookie?: {
                 dramaforge_session?: string | null;
             };

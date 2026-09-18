@@ -1,3 +1,4 @@
+import { Button, Checkbox, Field, Input, Textarea, PageHeader } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -30,12 +31,12 @@ const PROPOSAL_STATUS_LABEL: Record<string, string> = {
 
 const COMMAND_LABELS: Record<string, string> = {
   "story.set_script_document": "剧本原文",
-  "story.upsert_episode": "Episode",
-  "story.upsert_scene": "Scene",
-  "story.upsert_shot": "Shot",
-  "story.delete_shot": "删除 Shot",
-  "story.delete_scene": "删除 Scene",
-  "story.delete_episode": "删除 Episode",
+  "story.upsert_episode": "分集",
+  "story.upsert_scene": "场景",
+  "story.upsert_shot": "镜头",
+  "story.delete_shot": "删除镜头",
+  "story.delete_scene": "删除场景",
+  "story.delete_episode": "删除分集",
 };
 
 function operationLabel(operation: StoryProposalOperation): string {
@@ -138,10 +139,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
   if (projectId === "demo") {
     return (
       <div data-testid="project-script-page" className="qc-project-page">
-        <header className="qc-page-heading">
-          <h1>剧本工作区</h1>
-          <span>演示项目不读取真实剧本数据。</span>
-        </header>
+        <PageHeader title="剧本工作区" description="演示项目不读取真实剧本数据。" />
       </div>
     );
   }
@@ -163,10 +161,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
 
   return (
     <div data-testid="project-script-page" className="qc-project-page">
-      <header className="qc-page-heading">
-        <h1>剧本工作区</h1>
-        <span>修改先形成提案预览，确认后才成为正式剧本。</span>
-      </header>
+      <PageHeader title="剧本工作区" description="写下故事，预览修改，确认后保存。" />
 
       {workspace.isError && (
         <div className="flash err" role="alert">
@@ -234,9 +229,9 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
             createMut.mutate();
           }}
         >
-          <label>
+          <Field>
             故事方向 Brief
-            <textarea
+            <Textarea
               aria-label="故事方向"
               value={brief}
               onChange={(event) => setBrief(event.target.value)}
@@ -244,19 +239,19 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
               placeholder="例如：双人冲突反转短剧"
               disabled={createMut.isPending || generateMut.isPending}
             />
-          </label>
-          <label>
+          </Field>
+          <Field>
             文件名
-            <input
+            <Input
               aria-label="剧本文件名"
               value={filename}
               onChange={(event) => setFilename(event.target.value)}
               disabled={createMut.isPending || generateMut.isPending}
             />
-          </label>
-          <label>
+          </Field>
+          <Field>
             Markdown 草稿
-            <textarea
+            <Textarea
               aria-label="剧本文本"
               value={draftText}
               onChange={(event) => setDraftText(event.target.value)}
@@ -266,23 +261,23 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
               }
               disabled={createMut.isPending || generateMut.isPending}
             />
-          </label>
-          <button
+          </Field>
+          <Button
             type="submit"
             className="primary"
             data-testid="story-proposal-create"
             disabled={createMut.isPending || generateMut.isPending || !draftText.trim()}
           >
             {createMut.isPending ? "生成中…" : "创建剧本提案"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             data-testid="story-proposal-generate"
             disabled={generateMut.isPending || createMut.isPending || !brief.trim()}
             onClick={() => generateMut.mutate()}
           >
             {generateMut.isPending ? "模型正在写剧本…" : "用故事方向生成剧本"}
-          </button>
+          </Button>
         </form>
         {generationEvidence && (
           <p className="muted" data-testid="story-generation-evidence">
@@ -312,12 +307,12 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
           ) : (
             <div className="qc-proposal-operation-list">
               {proposalOperations.map((operation) => (
-                <label
+                <Field
                   key={operation.id}
                   className="qc-proposal-operation-row"
                   data-testid={`story-operation-${operation.action}`}
                 >
-                  <input
+                  <Checkbox
                     type="checkbox"
                     checked={Boolean(selected[operation.id])}
                     onChange={(event) =>
@@ -330,12 +325,12 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
                   />
                   <strong>{operationLabel(operation)}</strong>
                   <small>{operation.rationale || operation.key}</small>
-                </label>
+                </Field>
               ))}
             </div>
           )}
           <div className="qc-proposal-actions">
-            <button
+            <Button
               type="button"
               className="primary"
               data-testid="story-proposal-apply-selected"
@@ -343,8 +338,8 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
               onClick={() => submitApply(selectedIds, "accepted")}
             >
               {applyMut.isPending ? "采用中…" : "采用已选"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               data-testid="story-proposal-apply-all"
               disabled={proposalOperations.length === 0 || applyMut.isPending}
@@ -356,8 +351,8 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
               }
             >
               全部采用
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               data-testid="story-proposal-reject-all"
               disabled={proposalOperations.length === 0 || applyMut.isPending}
@@ -369,7 +364,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
               }
             >
               拒绝全部
-            </button>
+            </Button>
           </div>
         </section>
       )}

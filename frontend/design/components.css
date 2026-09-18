@@ -196,11 +196,12 @@
 
 .df-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--df-space-1);
-  background: var(--df-surface-2);
-  border: 1px solid var(--df-border);
-  border-radius: var(--df-radius-md);
-  padding: 2px;
+  background: var(--df-control-background);
+  border: 1px solid transparent;
+  border-radius: var(--df-radius-container);
+  padding: var(--df-space-1);
 }
 
 .df-tab {
@@ -210,7 +211,7 @@
   color: var(--df-text-muted);
   text-decoration: none;
   padding: var(--df-space-1) var(--df-space-3);
-  border-radius: calc(var(--df-radius-md) - 2px);
+  border-radius: var(--df-radius-control);
   font-size: var(--df-text-sm);
   font-weight: var(--df-weight-medium);
   line-height: var(--df-leading-normal);
@@ -227,8 +228,9 @@
 }
 
 .df-tab.active {
-  background: var(--df-surface-3);
-  color: var(--df-text-primary);
+  background: var(--df-nav-active-background);
+  box-shadow: var(--df-shadow-sm);
+  color: var(--df-verdigris);
 }
 
 /* ============================================================
@@ -285,18 +287,32 @@
 .df-page-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--df-space-4);
   flex-wrap: wrap;
-  margin-bottom: var(--df-space-2);
+  padding-block: var(--df-space-3);
+  margin-bottom: var(--df-space-6);
 }
-
+.df-page-header-copy {
+  min-width: 0;
+  flex: 1;
+}
 .df-page-header h1 {
   margin: 0;
+  font-family: var(--df-font-sans);
+  font-size: var(--df-page-title-size);
+  line-height: var(--df-leading-tight);
+  overflow-wrap: anywhere;
 }
-
+.df-page-header .df-page-description {
+  margin: var(--df-space-2) 0 0;
+  max-width: var(--df-page-description-width);
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-body-lg);
+}
 .df-page-header-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--df-space-2);
   align-items: center;
 }
@@ -305,16 +321,22 @@
    7. CARD
    ============================================================ */
 
-.df-card {
-  background: var(--df-surface-2);
-  border: 1px solid var(--df-border);
-  border-radius: var(--df-radius-lg);
+.df-card,
+.df-panel,
+.panel {
+  min-width: 0;
+  background: var(--df-surface-tier-raised-bg);
+  border: 1px solid var(--df-surface-tier-raised-border);
+  border-radius: var(--df-radius-container);
   padding: var(--df-space-5);
-  transition: border-color var(--df-duration-fast) var(--df-ease);
+  box-shadow: var(--df-surface-tier-raised-shadow);
+  transition:
+    border-color var(--df-duration-fast) var(--df-ease),
+    box-shadow var(--df-duration-fast) var(--df-ease);
 }
-
 .df-card:hover {
-  border-color: var(--df-border-strong);
+  box-shadow: var(--df-hover-shadow);
+  border-color: var(--df-border);
 }
 
 .df-card.selected {
@@ -343,136 +365,191 @@
    8. BUTTON
    ============================================================ */
 
-.df-btn {
+.df-btn,
+:where(button) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--df-space-2);
-  border: 1px solid var(--df-border-strong);
+  border: 1px solid transparent;
   background: var(--df-surface-3);
   color: var(--df-text-primary);
-  border-radius: var(--df-radius-md);
-  padding: var(--df-space-2) var(--df-space-4);
+  border-radius: var(--df-radius-control);
+  padding: var(--df-control-padding-y) var(--df-space-4);
   cursor: pointer;
   font-size: var(--df-text-md);
   font-weight: var(--df-weight-medium);
-  line-height: 1;
-  white-space: nowrap;
+  min-height: var(--df-control-height);
+  line-height: var(--df-control-line-height);
+  white-space: normal;
   transition:
     background var(--df-duration-fast) var(--df-ease),
     border-color var(--df-duration-fast) var(--df-ease),
     box-shadow var(--df-duration-fast) var(--df-ease);
 }
 
-.df-btn:hover {
-  border-color: var(--df-verdigris);
+.df-btn:hover:not(:disabled),
+:where(button:hover:not(:disabled)) {
+  border-color: var(--df-border);
   background: var(--df-surface-raised);
 }
 
-.df-btn:active {
-  transform: scale(0.98);
+.df-btn:active:not(:disabled) {
+  border-color: var(--df-verdigris);
 }
 
 /* Primary — verdigris filled */
-.df-btn.primary {
+.df-btn.primary,
+:where(button.primary) {
   background: var(--df-verdigris);
   border-color: var(--df-verdigris);
   color: var(--df-obsidian);
   font-weight: var(--df-weight-semibold);
 }
 
-.df-btn.primary:hover {
+.df-btn.primary:hover:not(:disabled),
+:where(button.primary:hover:not(:disabled)) {
   background: var(--df-verdigris-dim);
   border-color: var(--df-verdigris-dim);
 }
 
 /* Accent — brass */
-.df-btn.accent {
+.df-btn.accent,
+:where(button.accent) {
   background: var(--df-brass);
   border-color: var(--df-brass);
   color: var(--df-obsidian);
   font-weight: var(--df-weight-semibold);
 }
 
-.df-btn.accent:hover {
+.df-btn.accent:hover:not(:disabled),
+:where(button.accent:hover:not(:disabled)) {
   background: var(--df-brass-dim);
   border-color: var(--df-brass-dim);
 }
 
 /* Ghost — transparent */
-.df-btn.ghost {
+.df-btn.ghost,
+:where(button.ghost) {
   background: transparent;
   border-color: transparent;
 }
 
-.df-btn.ghost:hover {
+.df-btn.ghost:hover:not(:disabled),
+:where(button.ghost:hover:not(:disabled)) {
   background: var(--df-surface-2);
   border-color: var(--df-border);
 }
 
 /* Danger */
-.df-btn.danger {
+.df-btn.danger,
+:where(button.danger) {
   border-color: var(--df-danger-border);
   color: var(--df-danger-text);
 }
 
-.df-btn.danger:hover {
+.df-btn.danger:hover:not(:disabled),
+:where(button.danger:hover:not(:disabled)) {
   background: var(--df-danger-dim);
   border-color: var(--df-danger);
 }
 
-.df-btn:disabled {
+.df-btn:disabled,
+:where(button:disabled) {
   opacity: 0.4;
   cursor: not-allowed;
-  pointer-events: none;
 }
 
 /* ============================================================
    9. INPUT
    ============================================================ */
 
-.df-input {
-  background: var(--df-surface-0);
-  border: 1px solid var(--df-border);
-  border-radius: var(--df-radius-md);
+.df-input,
+:where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(
+      [type="file"]
+    ),
+  textarea,
+  select
+) {
+  min-width: 0;
+  min-height: var(--df-control-height);
+  background: var(--df-control-background);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-control);
   color: var(--df-text-primary);
-  padding: var(--df-space-2) var(--df-space-3);
-  font-size: var(--df-text-md);
-  line-height: var(--df-leading-normal);
-  width: 100%;
+  padding: var(--df-control-padding-y) var(--df-control-padding-x);
+  font-size: var(--df-font-size-body-lg);
+  line-height: var(--df-control-line-height);
   transition:
     border-color var(--df-duration-fast) var(--df-ease),
     box-shadow var(--df-duration-fast) var(--df-ease);
 }
+.df-input {
+  width: 100%;
+}
 
-.df-input::placeholder {
+/* The native popup is a separate surface: it cannot use the closed control's
+   translucent fill. Leave active/selected highlighting to the browser/OS. */
+:where(select) {
+  color-scheme: dark;
+}
+:where(select option, select optgroup) {
+  color: var(--df-text-primary);
+  background-color: var(--df-surface-2);
+}
+:where(select option:disabled, select optgroup:disabled) {
   color: var(--df-text-muted);
 }
-
-.df-input:focus {
-  outline: none;
-  border-color: var(--df-verdigris);
-  box-shadow: 0 0 0 2px var(--df-focus-ring);
+:where(input, textarea)::placeholder {
+  color: var(--df-text-muted);
 }
-
+:where(input, textarea, select):focus {
+  border-color: var(--df-verdigris);
+}
+:where(button, input, textarea, select, summary, a):focus-visible {
+  outline: var(--df-focus-width) solid var(--df-verdigris);
+  outline-offset: var(--df-focus-offset);
+}
+.df-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.df-input[aria-invalid="true"] {
+  border-color: var(--df-danger);
+}
 textarea.df-input {
-  min-height: 8rem;
+  min-height: var(--df-textarea-min-height);
   resize: vertical;
 }
-
 select.df-input {
   cursor: pointer;
 }
-
-/* Form group */
-.df-form-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--df-space-1);
+.df-checkbox,
+:where(input[type="checkbox"], input[type="radio"]) {
+  width: var(--df-checkbox-size);
+  height: var(--df-checkbox-size);
+  min-height: 0;
+  padding: 0;
+  flex: none;
+  accent-color: var(--df-verdigris);
 }
-
+.df-field,
+.df-form-group,
+:where(label) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--df-space-2);
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-body);
+}
+.df-field:has(> .df-checkbox) {
+  flex-direction: row;
+  align-items: center;
+}
 .df-label {
-  font-size: var(--df-text-sm);
+  font-size: var(--df-font-size-body);
   color: var(--df-text-secondary);
   font-weight: var(--df-weight-medium);
 }
@@ -481,30 +558,36 @@ select.df-input {
    10. PANEL (Content Container)
    ============================================================ */
 
-.df-panel {
-  background: var(--df-surface-2);
-  border: 1px solid var(--df-border);
-  border-radius: var(--df-radius-lg);
-  padding: var(--df-space-5);
+.df-panel,
+.panel {
   margin-bottom: var(--df-space-4);
 }
-
-.df-panel h2 {
-  margin: 0 0 var(--df-space-2);
+:is(.df-panel, .panel) h2 {
+  margin: 0 0 var(--df-space-3);
   font-size: var(--df-text-xl);
 }
-
-.df-panel h3 {
+:is(.df-panel, .panel) h3 {
   margin: 0 0 var(--df-space-3);
   font-size: var(--df-text-lg);
-  color: var(--df-text-primary);
 }
-
-.df-panel h4 {
+:is(.df-panel, .panel) h4 {
   margin: var(--df-space-2) 0;
   font-size: var(--df-text-md);
   color: var(--df-text-secondary);
-  font-weight: var(--df-weight-semibold);
+}
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--df-space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--df-space-3);
+}
+.panel-header :is(h1, h2, h3) {
+  margin: 0;
+}
+.panel-header h1 {
+  font-size: var(--df-text-lg);
 }
 
 /* ============================================================
@@ -799,82 +882,6 @@ select.df-input {
   color: var(--df-text-primary);
 }
 
-/* Legacy panels → new tokens */
-.panel {
-  background: var(--df-surface-2);
-  border-color: var(--df-border);
-  box-shadow: var(--df-shadow-md);
-}
-.panel h2,
-.panel h3 {
-  color: var(--df-text-primary);
-}
-.panel h4 {
-  color: var(--df-text-secondary);
-}
-
-.panel-header {
-  gap: var(--df-space-4);
-  margin-bottom: var(--df-space-3);
-}
-.panel-header h1 {
-  font-size: var(--df-text-lg);
-}
-
-/* Legacy forms */
-input,
-textarea,
-select {
-  background: var(--df-surface-0);
-  border-color: var(--df-border);
-  color: var(--df-text-primary);
-}
-input:focus,
-textarea:focus {
-  outline: none;
-  border-color: var(--df-verdigris);
-  box-shadow: 0 0 0 2px var(--df-focus-ring);
-}
-
-label {
-  color: var(--df-text-secondary);
-  font-size: var(--df-text-sm);
-}
-
-/* Legacy buttons → new tokens */
-button {
-  background: var(--df-surface-3);
-  border-color: var(--df-border-strong);
-  color: var(--df-text-primary);
-  border-radius: var(--df-radius-md);
-  cursor: pointer;
-  font-size: var(--df-text-md);
-}
-button.primary {
-  background: var(--df-verdigris);
-  border-color: var(--df-verdigris);
-  color: var(--df-obsidian);
-}
-button.accent {
-  background: var(--df-brass);
-  border-color: var(--df-brass);
-  color: var(--df-obsidian);
-}
-button.ghost {
-  background: transparent;
-}
-button.danger {
-  border-color: var(--df-danger-border);
-  color: var(--df-danger-text);
-}
-button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-button:not(:disabled):hover {
-  border-color: var(--df-verdigris);
-}
-
 /* Legacy status */
 .status-ok {
   color: var(--df-success);
@@ -1136,7 +1143,9 @@ body {
 
 /* Progressive disclosure: secondary tools never compete with the main task. */
 .df-disclosure {
-  border-block: 1px solid var(--df-border-subtle);
+  border: 1px solid transparent;
+  border-radius: var(--df-radius-container);
+  background: var(--df-control-background);
   margin-block: var(--df-space-4);
   min-width: 0;
 }
@@ -1145,7 +1154,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: var(--df-space-3);
-  padding: var(--df-space-4) var(--df-space-2);
+  padding: var(--df-space-4) var(--df-space-5);
   color: var(--df-text-secondary);
   cursor: pointer;
   list-style: none;
@@ -1175,6 +1184,57 @@ body {
   outline-offset: 2px;
 }
 .df-disclosure-body {
-  padding: var(--df-space-2) var(--df-space-2) var(--df-space-4);
+  padding: var(--df-space-2) var(--df-space-5) var(--df-space-5);
   min-width: 0;
+}
+
+/* Nested structural panels do not create a second frame. */
+:is(.panel, .df-panel, .df-card) > :is(.panel, .df-panel) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  padding-inline: 0;
+}
+
+/* Quiet empty states are shared by domain pages, not bordered warning boxes. */
+.df-empty-state {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--df-space-3);
+  min-height: var(--df-empty-min-height);
+  padding: var(--df-space-8);
+  border-radius: var(--df-radius-container-lg);
+  background: var(--df-cover-background);
+  text-align: center;
+}
+.df-empty-state-icon {
+  color: var(--df-verdigris);
+}
+.df-empty-state-icon svg {
+  width: var(--df-icon-display-size);
+  height: var(--df-icon-display-size);
+  stroke-width: 1.25;
+}
+.df-empty-state h2 {
+  font-size: var(--df-text-xl);
+}
+.df-empty-state p {
+  max-width: var(--df-page-description-width);
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-md);
+}
+:where(a, summary, button, input, textarea, select):focus-visible {
+  outline: var(--df-focus-width) solid var(--df-verdigris);
+  outline-offset: var(--df-focus-offset);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

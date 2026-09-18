@@ -68,17 +68,13 @@ async def test_template_create_stores_profile_without_media_or_scenes(
 ) -> None:
     project, user = await _seed(session)
     profile = await session.scalar(
-        select(ProjectCreativeProfile).where(
-            ProjectCreativeProfile.project_id == project.id
-        )
+        select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project.id)
     )
     assert profile is not None
     assert profile.start_type == "TEMPLATE"
     assert profile.created_from_template_key == "dual_character_conflict_v1"
     assert profile.director_autonomy == "ASSIST"
-    assert "character_a" in (
-        (profile.asset_slot_requirements or {}).get("required") or []
-    )
+    assert "character_a" in ((profile.asset_slot_requirements or {}).get("required") or [])
 
     from app.assets.models import Episode, Shot
     from app.execution.models import NodeRun
@@ -86,9 +82,7 @@ async def test_template_create_stores_profile_without_media_or_scenes(
 
     for model in (Episode, Shot, NodeRun, ProductionGraph):
         count = await session.scalar(
-            select(func.count())
-            .select_from(model)
-            .where(model.project_id == project.id)
+            select(func.count()).select_from(model).where(model.project_id == project.id)
         )
         assert (count or 0) == 0, model.__tablename__
 
@@ -112,9 +106,7 @@ async def test_free_create_has_free_profile(session: AsyncSession) -> None:
         actor=user,
     )
     profile = await session.scalar(
-        select(ProjectCreativeProfile).where(
-            ProjectCreativeProfile.project_id == project.id
-        )
+        select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project.id)
     )
     assert profile is not None
     assert profile.start_type == "FREE"
@@ -156,3 +148,57 @@ def test_project_api_returns_template_profile(client: TestClient) -> None:
     body = created.json()
     assert body["creative_profile"]["start_type"] == "TEMPLATE"
     assert body["creative_profile"]["created_from_template_key"] == "single_monologue_v1"
+
+
+@pytest.mark.asyncio
+async def test_explicit_project_choices_compile_once_without_media(session: AsyncSession) -> None:
+    from app.director.creative_capabilities.packs_library import GENRE_PROFILES, STYLE_PACKS
+    from app.execution.models import NodeRun
+
+    original, user = await _seed(session)
+    genre, style = GENRE_PROFILES[0], STYLE_PACKS[0]
+    project = await ProjectService(session).create_project(
+        workspace_id=original.workspace_id,
+        name="My creative choices",
+        aspect_ratio="16:9",
+        actor=user,
+        genre_key=genre.genre_key,
+        style_key=style.style_key,
+    )
+    profile = await session.scalar(
+        select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project.id)
+    )
+    assert profile is not None
+    assert profile.selected_genre == genre.genre_key
+    assert profile.selected_style_ids == [style.style_key]
+    frozen = profile.strategy_snapshot["creative_capabilities"]
+    assert frozen["genre"]["key"] == genre.genre_key
+    assert frozen["style"]["key"] == style.style_key
+    assert frozen["effective_intent"]["lighting"] == style.lighting
+    assert frozen["compiled_hash"]
+    assert (
+        await session.scalar(
+            select(func.count()).select_from(NodeRun).where(NodeRun.project_id == project.id)
+        )
+        == 0
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", [{"genre_key": "unknown"}, {"style_key": "unknown"}])
+async def test_invalid_creation_choices_do_not_create_project(
+    session: AsyncSession, selection: dict[str, str]
+) -> None:
+    from app.shared.errors import ValidationAppError
+
+    original, user = await _seed(session)
+    before = await session.scalar(select(func.count()).select_from(Project))
+    with pytest.raises(ValidationAppError):
+        await ProjectService(session).create_project(
+            workspace_id=original.workspace_id,
+            name="Invalid",
+            aspect_ratio="9:16",
+            actor=user,
+            **selection,
+        )
+    assert await session.scalar(select(func.count()).select_from(Project)) == before

@@ -1,3 +1,5 @@
+import { Button, Checkbox, Disclosure, Field, Input, Select } from "../ui";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
@@ -204,30 +206,10 @@ export function WorkspaceModelProfileSettings({ workspaceId }: WorkspaceModelPro
     <section className="df-settings-card" data-testid="workspace-model-profile-settings">
       <div className="panel-header">
         <div>
-          <h2>工作区模型方案</h2>
-          <p className="muted">配置项目未固化模型方案时使用的默认模型；项目方案仍可单独覆盖。</p>
+          <h2>工作空间默认模型</h2>
+          <p className="muted">用于未单独配置模型的项目。</p>
         </div>
       </div>
-
-      <form className="inline-form" onSubmit={submitNewProfile}>
-        <input
-          aria-label="新模型方案名称"
-          value={newProfileName}
-          onChange={(event) => setNewProfileName(event.target.value)}
-          placeholder="新模型方案名称"
-        />
-        <label>
-          <input
-            type="checkbox"
-            checked={newProfileDefault}
-            onChange={(event) => setNewProfileDefault(event.target.checked)}
-          />
-          设为默认
-        </label>
-        <button type="submit" disabled={!newProfileName.trim() || createMutation.isPending}>
-          创建方案
-        </button>
-      </form>
 
       {profiles.isLoading ? (
         <p className="muted" role="status">
@@ -237,9 +219,9 @@ export function WorkspaceModelProfileSettings({ workspaceId }: WorkspaceModelPro
         <p className="flash err">工作区方案读取失败：{(profiles.error as Error).message}</p>
       ) : profiles.data?.length ? (
         <>
-          <label>
+          <Field>
             当前方案
-            <select
+            <Select
               aria-label="工作区模型方案"
               value={selectedProfileId ?? ""}
               onChange={(event) => setSelectedProfileId(event.target.value || null)}
@@ -250,32 +232,32 @@ export function WorkspaceModelProfileSettings({ workspaceId }: WorkspaceModelPro
                   {candidate.is_default ? " · 默认" : ""} · v{candidate.version}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
           {profile.data && (
             <div className="status-grid" style={{ marginTop: "0.8rem" }}>
-              <label className="status-card">
+              <Field className="status-card">
                 <span className="status-label">方案名称</span>
-                <input
+                <Input
                   aria-label="当前方案名称"
                   value={profileName}
                   onChange={(event) => setProfileName(event.target.value)}
                 />
-                <button
+                <Button
                   type="button"
                   className="ghost"
                   onClick={() => renameMutation.mutate()}
                   disabled={renameMutation.isPending || !profileName.trim()}
                 >
                   保存名称
-                </button>
-              </label>
+                </Button>
+              </Field>
               {(["llm", "image", "video"] as const).map((group) => (
-                <label className="status-card" key={group}>
+                <Field className="status-card" key={group}>
                   <span className="status-label">
                     {group === "llm" ? "语言模型" : group === "image" ? "图片模型" : "视频模型"}
                   </span>
-                  <select
+                  <Select
                     aria-label={`工作区${group === "llm" ? "语言" : group === "image" ? "图片" : "视频"}模型`}
                     value={simple[group]}
                     onChange={(event) =>
@@ -288,21 +270,21 @@ export function WorkspaceModelProfileSettings({ workspaceId }: WorkspaceModelPro
                         {model.display_name} · {model.provider_id}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </Select>
+                </Field>
               ))}
             </div>
           )}
           <div className="toolbar">
-            <button
+            <Button
               type="button"
               className="primary"
               onClick={() => simpleMutation.mutate()}
               disabled={simpleMutation.isPending || !profile.data}
             >
               保存默认模型
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               className="ghost danger"
               onClick={() => {
@@ -314,7 +296,7 @@ export function WorkspaceModelProfileSettings({ workspaceId }: WorkspaceModelPro
               title={selectedSummary?.is_default ? "默认方案不能删除" : undefined}
             >
               删除方案
-            </button>
+            </Button>
           </div>
         </>
       ) : (
@@ -323,6 +305,27 @@ export function WorkspaceModelProfileSettings({ workspaceId }: WorkspaceModelPro
 
       {message && <div className="status-ok">{message}</div>}
       {error && <div className="status-bad">{error}</div>}
+      <Disclosure title="新建模型方案">
+        <form className="inline-form" onSubmit={submitNewProfile}>
+          <Input
+            aria-label="新模型方案名称"
+            value={newProfileName}
+            onChange={(event) => setNewProfileName(event.target.value)}
+            placeholder="新模型方案名称"
+          />
+          <Field>
+            <Checkbox
+              type="checkbox"
+              checked={newProfileDefault}
+              onChange={(event) => setNewProfileDefault(event.target.checked)}
+            />
+            设为默认
+          </Field>
+          <Button type="submit" disabled={!newProfileName.trim() || createMutation.isPending}>
+            创建方案
+          </Button>
+        </form>
+      </Disclosure>
     </section>
   );
 }

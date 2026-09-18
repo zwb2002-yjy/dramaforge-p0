@@ -1,15 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
-import { Button } from "../components/ui";
+import { Button, Disclosure, Field, Input, Select, PageHeader } from "../components/ui";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
 import { WorkspaceModelProfileSettings } from "../components/provider/WorkspaceModelProfileSettings";
 import { TextGatewaySettings } from "../components/provider/TextGatewaySettings";
 import { AdvancedRecoveryPanel } from "../features/maintenance/AdvancedRecoveryPanel";
-import { CreativeAutonomySwitcher } from "../features/project/CreativeAutonomySwitcher";
 import {
+  ApiError,
   createWorkspace,
   deleteWorkspace,
   fetchCurrentUser,
@@ -25,15 +25,8 @@ import {
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
 
-function SettingsHeader({ title, description }: { title: string; description: string }) {
-  return (
-    <header className="df-page-header">
-      <div>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
-    </header>
-  );
+function SettingsHeader({ title }: { title: string }) {
+  return <PageHeader title={title} />;
 }
 
 const ENVIRONMENT_LABELS: Record<string, string> = {
@@ -48,7 +41,7 @@ function environmentLabel(env: string | undefined): string {
   return ENVIRONMENT_LABELS[env] ?? env;
 }
 
-function useSettingsWorkspace() {
+function useSettingsWorkspace(onSelect?: (workspaceId: string | null) => void) {
   const workspaces = useQuery({
     queryKey: queryKeys.workspace.list(),
     queryFn: listWorkspaces,
@@ -56,10 +49,14 @@ function useSettingsWorkspace() {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
     getSelectedWorkspaceId,
   );
-  const selectWorkspace = useCallback((workspaceId: string | null) => {
-    persistSelectedWorkspaceId(workspaceId);
-    setSelectedWorkspaceId(workspaceId);
-  }, []);
+  const selectWorkspace = useCallback(
+    (workspaceId: string | null) => {
+      persistSelectedWorkspaceId(workspaceId);
+      setSelectedWorkspaceId(workspaceId);
+      onSelect?.(workspaceId);
+    },
+    [onSelect],
+  );
 
   useEffect(() => {
     if (!selectedWorkspaceId && workspaces.data?.[0]) selectWorkspace(workspaces.data[0].id);
@@ -91,9 +88,9 @@ function WorkspaceSelector({
   onChange: (workspaceId: string | null) => void;
 }) {
   return (
-    <label>
+    <Field>
       工作空间
-      <select
+      <Select
         aria-label="设置工作空间"
         value={selectedWorkspaceId ?? ""}
         onChange={(event) => onChange(event.target.value || null)}
@@ -103,8 +100,8 @@ function WorkspaceSelector({
             {workspace.name}
           </option>
         ))}
-      </select>
-    </label>
+      </Select>
+    </Field>
   );
 }
 
@@ -120,6 +117,7 @@ export function AccountSettingsPage() {
     mutationFn: logoutUser,
     onSuccess: async () => {
       setLogoutError(null);
+      queryClient.setQueryData(queryKeys.auth.currentUser(), null);
       // Drop every cached fact that was scoped to the previous session, then
       // let the routes re-read bootstrap/current-user from the server.
       persistSelectedWorkspaceId(null);
@@ -135,16 +133,24 @@ export function AccountSettingsPage() {
 
   return (
     <main className="df-page df-settings-page" data-testid="account-settings-page">
-      <SettingsHeader
-        title="账号与实例"
-        description="查看当前 Owner 和实例状态。项目与模型管理分别位于各自设置页面。"
-      />
-      <div className="df-settings-grid">
+      <SettingsHeader title="账号" />
+      <div>
         <section className="df-settings-card">
-          <h2>Owner</h2>
           {currentUser.isLoading ? (
             <p className="muted">正在读取账号…</p>
-          ) : currentUser.data ? (
+          ) : currentUser.isError &&
+            !(currentUser.error instanceof ApiError && currentUser.error.status === 401) ? (
+            <div role="alert">
+              <p>无法读取账号：{currentUser.error.message}</p>
+              <Button
+                type="button"
+                onClick={() => void currentUser.refetch()}
+                disabled={currentUser.isFetching}
+              >
+                重试
+              </Button>
+            </div>
+          ) : !currentUser.isError && currentUser.data ? (
             <>
               <dl>
                 <dt>显示名</dt>
@@ -153,7 +159,7 @@ export function AccountSettingsPage() {
                 <dd>{currentUser.data.email}</dd>
               </dl>
               <div className="toolbar">
-                <button
+                <Button
                   type="button"
                   className="ghost danger"
                   data-testid="logout-button"
@@ -161,48 +167,58 @@ export function AccountSettingsPage() {
                   disabled={logout.isPending}
                 >
                   {logout.isPending ? "正在退出…" : "退出登录"}
-                </button>
+                </Button>
               </div>
-              <p className="muted">
-                退出只清除当前浏览器会话；已保存的项目、凭证与生产事实不受影响。
-              </p>
-              {logoutError && <p className="status-bad">退出失败：{logoutError}</p>}
-            </>
-          ) : (
-            <p className="muted">请先在项目大厅登录 Owner 账号。</p>
-          )}
-        </section>
-        <section className="df-settings-card">
-          <h2>实例状态</h2>
-          {health.isLoading ? (
-            <p className="muted" role="status">
-              正在读取实例状态…
-            </p>
-          ) : (
-            <>
-              <p className={serviceReady ? "status-ok" : "status-bad"}>
-                {serviceReady ? "服务就绪" : "服务未就绪"}
-              </p>
-              {health.data && (
-                <dl>
-                  <dt>环境</dt>
-                  <dd>{environmentLabel(health.data.env)}</dd>
-                  <dt>版本</dt>
-                  <dd>{health.data.version}</dd>
-                </dl>
+              {logoutError && (
+                <p className="status-bad" role="alert">
+                  退出失败：{logoutError}
+                </p>
               )}
             </>
+          ) : (
+            <p>
+              未登录。<a href="/">前往登录</a>
+            </p>
           )}
         </section>
+        <Disclosure title="实例与维护" testId="account-maintenance-disclosure">
+          <section className="df-settings-card">
+            <h2>实例状态</h2>
+            {health.isLoading ? (
+              <p className="muted" role="status">
+                正在读取实例状态…
+              </p>
+            ) : (
+              <>
+                <p className={serviceReady ? "status-ok" : "status-bad"}>
+                  {serviceReady ? "服务就绪" : "服务未就绪"}
+                </p>
+                {health.data && (
+                  <dl>
+                    <dt>环境</dt>
+                    <dd>{environmentLabel(health.data.env)}</dd>
+                    <dt>版本</dt>
+                    <dd>{health.data.version}</dd>
+                  </dl>
+                )}
+              </>
+            )}
+          </section>
+          <AdvancedRecoveryPanel />
+        </Disclosure>
       </div>
-      <AdvancedRecoveryPanel />
     </main>
   );
 }
 
-export function WorkspaceSettingsPage() {
+export function WorkspaceSettingsPage({
+  onWorkspaceChange,
+}: {
+  onWorkspaceChange?: (workspaceId: string | null) => void;
+}) {
   const queryClient = useQueryClient();
-  const { workspaces, projects, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
+  const { workspaces, projects, selectedWorkspaceId, selectWorkspace } =
+    useSettingsWorkspace(onWorkspaceChange);
   const [workspaceName, setWorkspaceName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -244,26 +260,22 @@ export function WorkspaceSettingsPage() {
   }
 
   return (
-    <main className="df-page df-settings-page" data-testid="workspace-settings-page">
-      <SettingsHeader
-        title="工作空间（项目归集）"
-        description="一个工作空间可以包含多个影片项目，按客户或系列归集。具体影片请从项目大厅打开。"
-      />
+    <section data-testid="workspace-settings-page" aria-label="工作空间管理">
       <section className="df-settings-card">
         <form className="inline-form" onSubmit={submit}>
-          <input
+          <Input
             aria-label="新空间名"
             value={workspaceName}
             onChange={(event) => setWorkspaceName(event.target.value)}
             placeholder="新空间名"
           />
-          <button
+          <Button
             type="submit"
             disabled={!workspaceName.trim() || createMutation.isPending}
             title={workspaceName.trim() ? undefined : "请先填写新空间名"}
           >
             创建空间
-          </button>
+          </Button>
         </form>
         <div className="workspace-list" role="list" aria-label="我的空间">
           {(workspaces.data ?? []).map((workspace) => {
@@ -273,33 +285,36 @@ export function WorkspaceSettingsPage() {
             const isSelected = workspace.id === selectedWorkspaceId;
             // Only the active, empty workspace can be deleted; the disabled
             // action states the reason instead of failing silently.
-            const deleteDisabledReason = hasProjects
-              ? "该空间仍有项目，请先移动或删除其中的项目。"
-              : isSelected
-                ? ""
-                : "请先切换到该空间，再删除它。";
+            const deleteDisabledReason =
+              projects.isPending || projects.isError
+                ? "请先读取该空间的项目。"
+                : hasProjects
+                  ? "该空间仍有项目，请先移动或删除其中的项目。"
+                  : isSelected
+                    ? ""
+                    : "请先切换到该空间，再删除它。";
             return (
               <div
                 className={isSelected ? "workspace-row selected" : "workspace-row"}
                 key={workspace.id}
                 role="listitem"
               >
-                <button
+                <Button
                   className="workspace-select"
                   type="button"
                   onClick={() => selectWorkspace(workspace.id)}
                 >
                   {workspace.name}
-                </button>
+                </Button>
                 <div className="workspace-actions">
-                  <button
-                    className="ghost"
+                  <Button
+                    tone="ghost"
                     type="button"
                     onClick={() => renameMutation.mutate(workspace)}
                   >
                     重命名
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     className="ghost danger"
                     type="button"
                     onClick={() => deleteMutation.mutate(workspace)}
@@ -307,7 +322,7 @@ export function WorkspaceSettingsPage() {
                     title={deleteDisabledReason || undefined}
                   >
                     删除
-                  </button>
+                  </Button>
                 </div>
               </div>
             );
@@ -317,43 +332,24 @@ export function WorkspaceSettingsPage() {
           )}
         </div>
       </section>
-      <WorkspaceModelProfileSettings workspaceId={selectedWorkspaceId} />
       {error && <p className="flash err">{error}</p>}
-    </main>
+    </section>
   );
 }
 
 export function ModelConnectionSettingsPage() {
   const { workspaces, projects, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
-  const [scope, setScope] = useState<"media" | "text">("media");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const selectedProject = projects.data?.find((project) => project.id === selectedProjectId);
 
   return (
     <main className="df-page df-settings-page" data-testid="model-settings-page">
-      <SettingsHeader
-        title="模型连接"
-        description="先选择要配置的能力。图像与视频按工作空间管理，文本与导演使用实例级网关。"
-      />
-      <div className="df-model-scope-switch" role="group" aria-label="模型配置范围">
-        <Button
-          aria-pressed={scope === "media"}
-          aria-controls="media-model-settings"
-          onClick={() => setScope("media")}
-        >
-          图像与视频 · 工作空间
-        </Button>
-        <Button
-          aria-pressed={scope === "text"}
-          aria-controls="text-model-settings"
-          onClick={() => setScope("text")}
-        >
-          文本与导演 · 当前实例
-        </Button>
-      </div>
-      <section id="media-model-settings" aria-label="图像与视频连接" hidden={scope !== "media"}>
+      <SettingsHeader title="模型连接" />
+      <section aria-label="图像与视频连接">
         <div className="df-settings-section">
           {workspaces.isError ? (
             <p className="flash err" role="alert">
-              无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重新读取</Button>
+              无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
             </p>
           ) : workspaces.isPending ? (
             <p role="status">正在读取工作空间…</p>
@@ -361,50 +357,55 @@ export function ModelConnectionSettingsPage() {
             <WorkspaceSelector
               workspaces={workspaces.data ?? []}
               selectedWorkspaceId={selectedWorkspaceId}
-              onChange={selectWorkspace}
+              onChange={(id) => {
+                selectWorkspace(id);
+                setSelectedProjectId("");
+              }}
             />
           )}
         </div>
-        <div className="df-settings-section">
-          <ProviderConnectionPanel
-            key={selectedWorkspaceId ?? "no-workspace"}
-            workspaceId={selectedWorkspaceId}
-            projects={projects.data ?? []}
-          />
-        </div>
+        <ProviderConnectionPanel
+          key={selectedWorkspaceId ?? "no-workspace"}
+          workspaceId={selectedWorkspaceId}
+          projects={projects.data ?? []}
+        />
       </section>
-      <section
-        id="text-model-settings"
-        className="df-settings-section"
-        aria-label="文本与导演网关"
-        hidden={scope !== "text"}
-      >
-        <p className="muted">作用于整个实例，不随工作空间切换。此处不配置图像或视频供应商。</p>
+      <Disclosure title="默认模型方案" testId="default-models-disclosure">
+        <WorkspaceModelProfileSettings
+          key={selectedWorkspaceId ?? "no-workspace"}
+          workspaceId={selectedWorkspaceId}
+        />
+      </Disclosure>
+      <Disclosure title="项目模型覆盖" testId="project-models-disclosure">
+        <Field>
+          项目
+          <Select
+            aria-label="项目模型覆盖"
+            value={selectedProject?.id ?? ""}
+            onChange={(event) => setSelectedProjectId(event.target.value)}
+          >
+            <option value="">选择项目</option>
+            {(projects.data ?? []).map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {projects.isError && <p role="alert">无法读取项目列表。</p>}
+        {selectedProject && (
+          <Link
+            className="df-btn"
+            to="/settings/projects/$projectId"
+            params={{ projectId: selectedProject.id }}
+          >
+            配置项目模型
+          </Link>
+        )}
+      </Disclosure>
+      <Disclosure title="文本服务（实例级）" testId="text-service-disclosure">
         <TextGatewaySettings />
-      </section>
-    </main>
-  );
-}
-export function DefaultPreferencesSettingsPage() {
-  return (
-    <main className="df-page df-settings-page" data-testid="default-settings-page">
-      <SettingsHeader
-        title="新项目默认偏好（只读）"
-        description="新建项目表单以这些值作为初始选择，每个项目创建时都能改。"
-      />
-      <section className="df-settings-card">
-        <dl>
-          <dt>创作起点</dt>
-          <dd>自由创建</dd>
-          <dt>导演参与度</dt>
-          <dd>导演辅助</dd>
-          <dt>默认画幅</dt>
-          <dd>9:16 竖屏</dd>
-        </dl>
-        <p className="muted">
-          当前版本不保存实例级自定义值，因此这些初始值只在新建项目时出现，不会生成不同的工作台或制作路径。
-        </p>
-      </section>
+      </Disclosure>
     </main>
   );
 }
@@ -412,7 +413,6 @@ export function DefaultPreferencesSettingsPage() {
 export function ProjectSettingsPage() {
   const params = useParams({ strict: false }) as { projectId?: string };
   const projectId = params.projectId ?? "";
-  const selectedWorkspaceId = getSelectedWorkspaceId();
   const project = useQuery({
     queryKey: queryKeys.project.detail(projectId),
     queryFn: () => fetchProject(projectId),
@@ -422,10 +422,7 @@ export function ProjectSettingsPage() {
 
   return (
     <main className="df-page df-settings-page" data-testid="project-settings-page">
-      <SettingsHeader
-        title={project.data?.name ? `${project.data.name} · 项目设置` : "当前项目设置"}
-        description="项目偏好只影响当前作品，不改变统一创作主链。"
-      />
+      <SettingsHeader title={project.data?.name ? `${project.data.name} · 项目模型` : "项目模型"} />
       {project.isLoading ? (
         <p className="muted" role="status">
           正在读取项目设置…
@@ -434,9 +431,8 @@ export function ProjectSettingsPage() {
         <p className="flash err">无法读取当前项目，请返回项目大厅重新选择。</p>
       ) : (
         <>
-          <CreativeAutonomySwitcher project={project.data} />
           <section className="df-settings-section">
-            <ModelProfileSettings projectId={projectId} workspaceId={selectedWorkspaceId} />
+            <ModelProfileSettings projectId={projectId} workspaceId={project.data.workspace_id} />
           </section>
         </>
       )}

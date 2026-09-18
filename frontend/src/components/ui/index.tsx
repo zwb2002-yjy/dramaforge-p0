@@ -3,6 +3,9 @@ import {
   type ButtonHTMLAttributes,
   type HTMLAttributes,
   type InputHTMLAttributes,
+  type LabelHTMLAttributes,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
   type ReactNode,
 } from "react";
 
@@ -41,15 +44,26 @@ export function Card({ className, selected = false, ...props }: CardProps) {
 type PageHeaderProps = HTMLAttributes<HTMLElement> & {
   title: string;
   eyebrow?: string;
+  description?: ReactNode;
   actions?: ReactNode;
 };
 
-export function PageHeader({ title, eyebrow, actions, className, ...props }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  eyebrow,
+  description,
+  actions,
+  children,
+  className,
+  ...props
+}: PageHeaderProps) {
   return (
     <header className={classes("df-page-header", className)} {...props}>
-      <div>
+      <div className="df-page-header-copy">
         {eyebrow && <p className="kicker">{eyebrow}</p>}
         <h1>{title}</h1>
+        {description && <p className="df-page-description">{description}</p>}
+        {children}
       </div>
       {actions && <div className="df-page-header-actions">{actions}</div>}
     </header>
@@ -62,13 +76,64 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
   },
 );
 
+/** Native controls retain browser semantics, validation, refs and event types. */
+export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
+  function Select({ className, ...props }, ref) {
+    return <select ref={ref} className={classes("df-input", className)} {...props} />;
+  },
+);
+
+export const Textarea = forwardRef<
+  HTMLTextAreaElement,
+  TextareaHTMLAttributes<HTMLTextAreaElement>
+>(function Textarea({ className, ...props }, ref) {
+  return <textarea ref={ref} className={classes("df-input", className)} {...props} />;
+});
+
+export const Checkbox = forwardRef<
+  HTMLInputElement,
+  Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & { type?: "checkbox" }
+>(function Checkbox({ className, type = "checkbox", ...props }, ref) {
+  return <input ref={ref} type={type} className={classes("df-checkbox", className)} {...props} />;
+});
+
+/** Wrap exactly one labelled control; keep checkbox/radio groups in a fieldset. */
+export function Field({ className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
+  return <label className={classes("df-field", className)} {...props} />;
+}
+
 type TabsProps = HTMLAttributes<HTMLDivElement> & {
   label: string;
 };
 
-export function Tabs({ label, className, ...props }: TabsProps) {
+export function Tabs({ label, className, onKeyDown, ...props }: TabsProps) {
   return (
-    <div role="tablist" aria-label={label} className={classes("df-tabs", className)} {...props} />
+    <div
+      role="tablist"
+      aria-label={label}
+      className={classes("df-tabs", className)}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+        const tabs = Array.from(
+          event.currentTarget.querySelectorAll<HTMLButtonElement>(
+            ':scope > button[role="tab"]:not(:disabled)',
+          ),
+        );
+        const index = tabs.indexOf(event.target as HTMLButtonElement);
+        if (index < 0 || tabs.length === 0) return;
+        let next: number;
+        if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+        else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        tabs[next].focus();
+        tabs[next].click();
+      }}
+      {...props}
+    />
   );
 }
 
@@ -82,6 +147,7 @@ export function Tab({ active = false, className, ...props }: TabProps) {
       type="button"
       role="tab"
       aria-selected={active}
+      tabIndex={active ? 0 : -1}
       className={classes("df-tab", active && "active", className)}
       {...props}
     />
@@ -108,3 +174,29 @@ export function Badge({ tone = "default", className, ...props }: BadgeProps) {
 }
 
 export { Disclosure } from "./Disclosure";
+
+/** Shared, calm empty state. Actions stay explicit and owned by the feature. */
+export function EmptyState({
+  title,
+  description,
+  icon,
+  children,
+}: {
+  title: string;
+  description?: string;
+  icon?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <section className="df-empty-state">
+      {icon && (
+        <span className="df-empty-state-icon" aria-hidden="true">
+          {icon}
+        </span>
+      )}
+      <h2>{title}</h2>
+      {description && <p>{description}</p>}
+      {children}
+    </section>
+  );
+}

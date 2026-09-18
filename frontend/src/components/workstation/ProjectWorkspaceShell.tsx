@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import "./project-shell.css";
 import "./project-shell-visual.css";
+import "./creation-controls.css";
 
 export type ProjectWorkspaceView =
   "overview" | "script" | "assets" | "scenes" | "production" | "review" | "edit";
@@ -12,6 +13,7 @@ type ProjectWorkspaceShellProps = {
   activeView: ProjectWorkspaceView;
   children: ReactNode;
   modeLabel?: string;
+  creationControls?: ReactNode;
 };
 
 const VIEW_LABELS: Record<ProjectWorkspaceView, string> = {
@@ -30,6 +32,7 @@ export function ProjectWorkspaceShell({
   activeView,
   children,
   modeLabel,
+  creationControls,
 }: ProjectWorkspaceShellProps) {
   const displayModeLabel = modeLabel ?? VIEW_LABELS[activeView];
 
@@ -42,6 +45,7 @@ export function ProjectWorkspaceShell({
       <header className="qc-project-bar">
         <span className="qc-project-name">{projectName}</span>
         <span className="qc-project-mode">{displayModeLabel}</span>
+        {creationControls}
       </header>
 
       <div className="qc-content-grid no-inspector">

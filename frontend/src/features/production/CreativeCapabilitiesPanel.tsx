@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { Button } from "../../components/ui";
+import "./creative-settings.css";
+import { Button, Checkbox, Disclosure, Field, Select } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
 import {
   fetchCreativeCapabilityCatalog,
@@ -68,6 +69,7 @@ export function CreativeCapabilitiesPanel({
   // A Scene freeze is inherited by its Shots; showing where the displayed
   // value comes from keeps the two scopes distinguishable to the user.
   const inheritedFromScene = targetScope === "shot" && provenance.data?.target === "scene";
+  const inheritedFromProject = provenance.data?.target === "project";
   // The provenance payload is an open record; these are the parts the panel
   // renders as readable labels before the raw record.
   const summary = prov as {
@@ -95,7 +97,7 @@ export function CreativeCapabilitiesPanel({
     setQuality(frozenQuality);
     setSkills(frozenSkills ? frozenSkills.split(",") : []);
     // Draft state follows the canonical frozen value, never local-only input.
-  }, [frozenGenre, frozenStyle, frozenShotLanguage, frozenQuality, frozenSkills]);
+  }, [targetId, frozenGenre, frozenStyle, frozenShotLanguage, frozenQuality, frozenSkills]);
 
   const freeze = useMutation({
     mutationFn: () =>
@@ -113,12 +115,12 @@ export function CreativeCapabilitiesPanel({
           : { shot_id: shotId ?? undefined }),
       }),
     onSuccess: () => {
-      setMsg("已冻结有效创作意图与来源说明。");
+      setMsg("设置已保存，后续生成时生效。");
       void qc.invalidateQueries({
         queryKey: queryKeys.production.provenance(projectId, targetId, targetScope),
       });
     },
-    onError: (e: Error) => setMsg(`冻结失败：${e.message}`),
+    onError: (e: Error) => setMsg(`保存失败：${e.message}`),
   });
 
   function toggleSkill(key: string) {
@@ -131,93 +133,105 @@ export function CreativeCapabilitiesPanel({
     <div className="creative-capabilities-panel" data-testid="creative-capabilities-panel">
       <header className="panel-header">
         <div>
-          <h3>创意能力选择</h3>
+          <h3>局部创作设置</h3>
         </div>
         <span className="fact-source-badge" data-testid="creative-capability-scope">
           {targetScope === "scene" ? "场景配置（镜头继承）" : "当前镜头配置"}
         </span>
-        <span className="fact-source-badge">人工指定</span>
       </header>
 
       <div className="creative-capability-form">
-        <label>
+        <Field>
           创作类型
-          <select aria-label="创作类型" value={genre} onChange={(e) => setGenre(e.target.value)}>
+          <Select aria-label="创作类型" value={genre} onChange={(e) => setGenre(e.target.value)}>
             <option value="">默认</option>
             {(catalog.data?.genres ?? []).map((item) => (
               <option key={item.key} value={item.key} title={item.description}>
                 {item.display_name}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </Select>
+        </Field>
+        <Field>
           风格
-          <select aria-label="风格" value={style} onChange={(e) => setStyle(e.target.value)}>
+          <Select aria-label="风格" value={style} onChange={(e) => setStyle(e.target.value)}>
             <option value="">默认</option>
             {(catalog.data?.styles ?? []).map((item) => (
               <option key={item.key} value={item.key} title={item.description}>
                 {item.display_name}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
-          镜头语言
-          <select
-            aria-label="镜头语言"
-            value={shotLanguage}
-            onChange={(e) => setShotLanguage(e.target.value)}
-          >
-            <option value="">默认</option>
-            {(catalog.data?.shot_languages ?? []).map((item) => (
-              <option key={item.key} value={item.key} title={item.description}>
-                {item.display_name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          质量策略
-          <select
-            aria-label="质量策略"
-            value={quality}
-            onChange={(e) => setQuality(e.target.value)}
-          >
-            <option value="">默认</option>
-            {(catalog.data?.quality_policies ?? []).map((item) => (
-              <option key={item.key} value={item.key} title={item.description}>
-                {item.display_name}
-              </option>
-            ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
+        <Disclosure title="更多生成设置">
+          <Field>
+            镜头语言
+            <Select
+              aria-label="镜头语言"
+              value={shotLanguage}
+              onChange={(e) => setShotLanguage(e.target.value)}
+            >
+              <option value="">默认</option>
+              {(catalog.data?.shot_languages ?? []).map((item) => (
+                <option key={item.key} value={item.key} title={item.description}>
+                  {item.display_name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field>
+            质量策略
+            <Select
+              aria-label="质量策略"
+              value={quality}
+              onChange={(e) => setQuality(e.target.value)}
+            >
+              <option value="">默认</option>
+              {(catalog.data?.quality_policies ?? []).map((item) => (
+                <option key={item.key} value={item.key} title={item.description}>
+                  {item.display_name}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-        <div className="creative-skill-list">
-          <small>启用的创作技能</small>
-          {(catalog.data?.skills ?? []).map((item) => (
-            <label key={item.key} className="creative-skill-toggle" title={item.description}>
-              <input
-                type="checkbox"
-                checked={skills.includes(item.key)}
-                onChange={() => toggleSkill(item.key)}
-              />
-              <span>{item.display_name}</span>
-            </label>
-          ))}
-        </div>
-
+          <div className="creative-skill-list">
+            <small>启用的创作技能</small>
+            {(catalog.data?.skills ?? []).map((item) => (
+              <Field key={item.key} className="creative-skill-toggle" title={item.description}>
+                <Checkbox
+                  type="checkbox"
+                  checked={skills.includes(item.key)}
+                  onChange={() => toggleSkill(item.key)}
+                />
+                <span>{item.display_name}</span>
+              </Field>
+            ))}
+          </div>
+        </Disclosure>
         <Button
           tone="primary"
           onClick={() => freeze.mutate()}
-          disabled={freeze.isPending || !targetId || !catalog.data}
+          disabled={
+            freeze.isPending ||
+            !targetId ||
+            !catalog.data ||
+            provenance.isPending ||
+            provenance.isError
+          }
         >
-          {freeze.isPending ? "冻结中…" : "冻结创意能力"}
+          {freeze.isPending ? "保存中…" : "保存局部设置"}
         </Button>
         {msg && (
           <div className="canvas-save-message" role="status">
             {msg}
           </div>
+        )}
+        {provenance.isError && (
+          <p role="alert">
+            无法读取当前设置，请重试后再保存。
+            <Button onClick={() => void provenance.refetch()}>重试</Button>
+          </p>
         )}
         {catalog.isError && (
           <div className="flash err" role="alert">
@@ -227,9 +241,13 @@ export function CreativeCapabilitiesPanel({
       </div>
 
       {prov && Object.keys(prov).length > 0 && (
-        <div className="creative-provenance" data-testid="creative-provenance">
+        <Disclosure title="已保存的设置" testId="creative-provenance">
           <small>
-            {inheritedFromScene ? "当前生效的创作意图（来自场景配置）" : "当前冻结的创作意图"}
+            {inheritedFromProject
+              ? "沿用项目设置"
+              : inheritedFromScene
+                ? "沿用场景设置"
+                : "当前设置"}
           </small>
           <ul data-testid="creative-provenance-summary" className="creative-provenance-summary">
             {summary.genre?.key && (
@@ -258,10 +276,10 @@ export function CreativeCapabilitiesPanel({
             ))}
           </ul>
           <details className="creative-provenance-raw">
-            <summary>查看冻结的原始记录</summary>
+            <summary>技术记录</summary>
             <pre>{JSON.stringify(prov, null, 2)}</pre>
           </details>
-        </div>
+        </Disclosure>
       )}
     </div>
   );

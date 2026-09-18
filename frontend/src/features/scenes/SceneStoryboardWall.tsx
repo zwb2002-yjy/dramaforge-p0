@@ -1,4 +1,6 @@
+import { PageHeader, EmptyState } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ArrowUpRight } from "lucide-react";
 import "../resonance/resonance.css";
@@ -58,10 +60,14 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
 
   return (
     <div data-testid="scene-storyboard-wall" className="qc-scene-wall rs-scene-world">
-      <header className="qc-page-heading">
-        <h1>场景总览</h1>
-        <span>{rows.length > 0 ? `${rows.length} 个故事发生的地方` : "故事从这里展开"}</span>
-      </header>
+      <PageHeader
+        title="场景总览"
+        description={
+          rows.length > 0
+            ? `${rows.length} 段故事 · 点开查看分镜`
+            : "把故事分成场景，再把每个场景拍成镜头"
+        }
+      />
 
       {scenes.isError && <div className="flash err">无法读取场景：{String(scenes.error)}</div>}
 
@@ -94,6 +100,7 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
                 {scene.episode_number}.{scene.scene_number} · {timeOfDayLabel(scene.time_of_day)}
               </span>
             </header>
+            {scene.synopsis && <p className="qc-scene-card-synopsis">{scene.synopsis}</p>}
             <footer>
               <span>{scene.shot_count} 镜头</span>
               <span>
@@ -117,7 +124,14 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
         </p>
       )}
       {!scenes.isPending && !scenes.isError && rows.length === 0 && (
-        <p className="muted">暂无场景。导入剧本后会在这里生成故事板墙。</p>
+        <EmptyState
+          title="先写下你的故事"
+          description="导入剧本并确认分场后，这里会按顺序呈现每一段故事。"
+        >
+          <Link className="df-btn primary" to="/projects/$projectId/script" params={{ projectId }}>
+            去写剧本
+          </Link>
+        </EmptyState>
       )}
     </div>
   );
@@ -136,6 +150,7 @@ function SceneThumbnail({ scene, projectId }: { scene: SceneSummary; projectId: 
       ) : (
         <span className="qc-scene-placeholder rs-scene-silhouette" aria-label="尚无代表画面">
           <span aria-hidden="true">{String(scene.scene_number).padStart(2, "0")}</span>
+          <small>等待第一张画面</small>
         </span>
       )}
     </div>

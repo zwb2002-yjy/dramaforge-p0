@@ -707,6 +707,13 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         },
       ]);
     }
+    if (
+      method === "GET" &&
+      (path === "/api/v1/provider-plugins" ||
+        path.endsWith("/provider-connections") ||
+        path.endsWith("/model-profiles"))
+    )
+      return json(route, []);
     if (path === "/api/v1/model-slots") return json(route, []);
     if (path.endsWith("/model-bindings/effective")) return json(route, []);
     if (path.endsWith("/model-profile") && method === "GET") {

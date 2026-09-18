@@ -200,48 +200,7 @@
   font-weight: 600;
 }
 
-/* ----- Panels ----- */
-.panel {
-  background: var(--df-surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--df-radius-container);
-  padding: 1.1rem 1.2rem;
-  box-shadow: var(--df-surface-tier-raised-shadow);
-  margin-bottom: 0.9rem;
-}
-
-.panel h2 {
-  margin: 0 0 0.3rem;
-  font-size: 1.25rem;
-}
-
-.panel h3 {
-  margin: 0 0 0.65rem;
-  font-size: 1rem;
-  color: var(--text);
-}
-
-.panel h4 {
-  margin: 0.5rem 0 0.4rem;
-  font-size: 0.875rem;
-  color: var(--muted);
-  font-weight: 600;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.75rem;
-}
-
-.panel-header h1 {
-  margin: 0;
-  font-size: 1.125rem;
-}
-
+/* Primitive surfaces are owned by design/components.css. */
 .subnav {
   display: flex;
   gap: 0.35rem;
@@ -630,30 +589,7 @@
   align-items: center;
 }
 
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.8125rem;
-  color: var(--muted);
-}
-
-input,
-textarea,
-select {
-  background: var(--df-surface-0);
-  border: 1px solid var(--border);
-  border-radius: var(--df-radius-control);
-  color: var(--text);
-  padding: 0.55rem 0.7rem;
-}
-
-input:focus,
-textarea:focus {
-  outline: 1px solid var(--accent-dim);
-  border-color: var(--accent);
-}
-
+/* Form controls are owned by design/components.css. */
 .creative-summary {
   display: grid;
   grid-template-columns: minmax(72px, 100px) 1fr;
@@ -751,47 +687,7 @@ textarea:focus {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
-button {
-  background: var(--df-surface-3);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  border-radius: var(--df-radius-control);
-  padding: 0.5rem 0.9rem;
-  cursor: pointer;
-  font-size: 0.875rem;
-}
-
-button.primary {
-  background: var(--df-verdigris);
-  border-color: var(--df-verdigris);
-  color: var(--df-obsidian);
-  font-weight: 600;
-}
-
-button.accent {
-  background: var(--df-brass);
-  border-color: var(--df-brass);
-  color: var(--df-obsidian);
-  font-weight: 600;
-}
-
-button.ghost {
-  background: transparent;
-}
-
-button.danger {
-  border-color: var(--df-danger-border);
-  color: var(--df-danger-text);
-}
-
-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-button:not(:disabled):hover {
-  border-color: var(--df-verdigris);
-}
+/* Buttons are owned by design/components.css. */
 
 /* ----- Studio layout ----- */
 .studio {
@@ -1959,21 +1855,6 @@ code {
   gap: 0.55rem;
   align-items: end;
 }
-.creative-capability-form label {
-  display: grid;
-  gap: 0.2rem;
-  color: var(--text);
-  font-size: 0.75rem;
-}
-.creative-capability-form select,
-.creative-capability-form input {
-  border: 1px solid var(--border);
-  border-radius: var(--df-radius-control);
-  padding: 0.32rem 0.4rem;
-  background: var(--df-surface-0);
-  color: var(--text);
-  font-size: 0.75rem;
-}
 .creative-skill-list {
   grid-column: 1 / -1;
   display: grid;
@@ -1982,13 +1863,6 @@ code {
   padding: 0.4rem;
   border: 1px solid var(--border);
   border-radius: var(--df-radius-control);
-}
-.creative-skill-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.75rem;
-  color: var(--text);
 }
 .creative-provenance {
   margin-top: 0.6rem;
@@ -2069,13 +1943,8 @@ code {
 .asset-create-form select,
 .asset-create-form textarea,
 .director-board-workspace input {
-  box-sizing: border-box;
+  min-width: 0;
   width: 100%;
-  padding: 0.45rem 0.55rem;
-  border: 1px solid var(--border);
-  border-radius: var(--df-radius-control);
-  background: var(--df-surface-2);
-  color: var(--text);
 }
 .director-board-stage {
   min-height: 105px;

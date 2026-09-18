@@ -4,12 +4,6 @@
   border: 0;
   min-width: 0;
 }
-.df-project-create-form label {
-  display: grid;
-  gap: var(--df-space-2);
-  font-size: var(--df-text-sm);
-  color: var(--df-text-secondary);
-}
 .df-project-create-basics {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);

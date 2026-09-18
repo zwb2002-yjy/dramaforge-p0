@@ -31,7 +31,7 @@ type ShotCandidateTrayProps = {
   onConfirmed?: (result: FormalKeyframeRead | FormalVideoRead) => void | Promise<void>;
   /**
    * V2 Canvas-first (UI-1): the tray is a conditional review surface.
-   * Collapsed (default) it renders a single "Takes · N" line; it expands
+   * Collapsed (default) it renders a single "备选画面 · N" line; it expands
    * after Generate, in review, or when the user opens it from the dock.
    */
   expanded?: boolean;
@@ -90,13 +90,9 @@ export function ShotCandidateTray({
     },
     onMutate: () => setFeedback(null),
     onSuccess: async (result) => {
-      const formalArtifactId =
-        "formal_keyframe_artifact_id" in result
-          ? result.formal_keyframe_artifact_id
-          : result.formal_video_artifact_id;
       setFeedback({
         kind: "success",
-        message: `已确认 ${formalArtifactId}（Shot v${result.version}）`,
+        message: "formal_keyframe_artifact_id" in result ? "已设为正式关键帧" : "已设为正式视频",
       });
       // Keep the existing cache aliases coherent.  No browser-side Shot or
       // formal id is manufactured; the follow-up workspace read is the truth.
@@ -142,8 +138,7 @@ export function ShotCandidateTray({
         aria-expanded="false"
         onClick={onToggleExpanded}
       >
-        <span className="director-stage-kicker">候选</span>
-        <strong>Takes · {parsedCandidates.length}</strong>
+        <strong>备选画面 · {parsedCandidates.length}</strong>
       </button>
     );
   }

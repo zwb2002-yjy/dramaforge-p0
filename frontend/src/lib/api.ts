@@ -551,6 +551,8 @@ export async function updateProjectCreativeProfile(
 export async function createProject(input: {
   workspace_id: string;
   name: string;
+  genre_key?: string;
+  style_key?: string;
   aspect_ratio: string;
   start_type?: "TEMPLATE" | "FREE";
   template_key?: string | null;
@@ -563,6 +565,8 @@ export async function createProject(input: {
     {
       workspace_id: input.workspace_id,
       name: input.name,
+      ...(input.genre_key ? { genre_key: input.genre_key } : {}),
+      ...(input.style_key ? { style_key: input.style_key } : {}),
       aspect_ratio: input.aspect_ratio,
       start_type: input.start_type ?? "FREE",
       template_key: input.template_key ?? null,

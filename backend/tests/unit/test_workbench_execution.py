@@ -76,8 +76,11 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     from app.security.models import EncryptedProviderCredential
 
     credential = EncryptedProviderCredential(
-        workspace_id=workspace.id, provider="agnes", revision_no=1,
-        ciphertext="isolated-test-ciphertext", key_version="test",
+        workspace_id=workspace.id,
+        provider="agnes",
+        revision_no=1,
+        ciphertext="isolated-test-ciphertext",
+        key_version="test",
     )
     session.add(credential)
     await session.flush()
@@ -889,9 +892,7 @@ async def test_frozen_effective_creative_content_enters_plan_and_run(
     assert plan.semantic_intent["continuity_context"]["story_entry_state"] == (
         "explicit wardrobe change to red in this scene"
     )
-    assert plan.semantic_intent["creative_value_sources"]["camera_motion"] == (
-        "user_confirmed"
-    )
+    assert plan.semantic_intent["creative_value_sources"]["camera_motion"] == ("user_confirmed")
 
     run = await service.create_and_dispatch(
         project=project,
@@ -899,8 +900,9 @@ async def test_frozen_effective_creative_content_enters_plan_and_run(
     )
     frozen_plan = run.input_snapshot["workbench_plan"]
     assert frozen_plan["prompt"] == plan.prompt
-    assert frozen_plan["semantic_intent"]["continuity_context"] == (
-        plan.semantic_intent["continuity_context"]
+    assert (
+        frozen_plan["semantic_intent"]["continuity_context"]
+        == (plan.semantic_intent["continuity_context"])
     )
 
     # Resume reads the NodeRun's frozen plan, not mutable Scene/Shot state.
@@ -983,8 +985,9 @@ async def test_scene_frozen_capabilities_are_inherited_by_shots(
     # resolves into the effective intent.
     assert effective["lighting"] == style.lighting
     assert effective["production_design"] == style.production_design
-    assert plan.semantic_intent["creative_snapshot_hashes"]["scene"] == (
-        scene_freeze.design_state["creative_capabilities"]["compiled_hash"]
+    assert (
+        plan.semantic_intent["creative_snapshot_hashes"]["scene"]
+        == (scene_freeze.design_state["creative_capabilities"]["compiled_hash"])
     )
 
     run = await service.create_and_dispatch(
@@ -1191,15 +1194,23 @@ async def test_command_replay_is_frozen_and_new_keys_allocate_attempts(session, 
     project, binding, user = await _seed(session)
     shot, _artifact = await _seed_video_shot(session, project=project, user=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
-    command = _input(project_id=project.id, shot_id=shot.id,
-                     requested_binding_id=binding.id, expected_shot_version=shot.version)
+    command = _input(
+        project_id=project.id,
+        shot_id=shot.id,
+        requested_binding_id=binding.id,
+        expected_shot_version=shot.version,
+    )
     first = await service.create_and_dispatch(
-        project=project, execution_input=command, idempotency_key_override="command:one",
+        project=project,
+        execution_input=command,
+        idempotency_key_override="command:one",
     )
     await session.commit()
     first_id, first_hash = first.id, first.input_hash
     second = await service.create_and_dispatch(
-        project=project, execution_input=command, idempotency_key_override="command:two",
+        project=project,
+        execution_input=command,
+        idempotency_key_override="command:two",
     )
     assert second.attempt_no == first.attempt_no + 1
     assert second.parent_run_id == first.id
@@ -1213,12 +1224,15 @@ async def test_command_replay_is_frozen_and_new_keys_allocate_attempts(session, 
     shot.version += 1
     await session.commit()
     replay = await service.create_and_dispatch(
-        project=project, execution_input=command, idempotency_key_override="command:one",
+        project=project,
+        execution_input=command,
+        idempotency_key_override="command:one",
     )
     assert replay.id == first_id and replay.input_hash == first_hash
     with pytest.raises(ConflictError) as conflict:
         await service.create_and_dispatch(
-            project=project, execution_input=command.model_copy(update={"prompt": "changed"}),
+            project=project,
+            execution_input=command.model_copy(update={"prompt": "changed"}),
             idempotency_key_override="command:one",
         )
     assert conflict.value.details["code"] == "EXECUTION_COMMAND_REUSED"
@@ -1414,3 +1428,74 @@ async def test_keyframe_dispatch_queues_the_review_that_the_formal_gate_requires
     )
     await session.commit()
     assert updated.formal_keyframe_artifact_id == keyframe.id
+
+
+@pytest.mark.asyncio
+async def test_project_creative_snapshot_is_inherited_and_shot_override_wins(
+    session: AsyncSession,
+) -> None:
+    from app.access.models import ProjectCreativeProfile
+    from app.director.creative_capabilities.creative_compiler import CreativeCapabilityCompiler
+    from app.director.creative_capabilities.freeze import serialize_compiled_creative_intent
+    from app.director.creative_capabilities.packs_library import STYLE_PACKS
+    from sqlalchemy import func
+
+    project, binding, user = await _seed(session)
+    shot, _ = await _seed_video_shot(session, project=project, user=user)
+    style = STYLE_PACKS[0]
+    frozen = serialize_compiled_creative_intent(CreativeCapabilityCompiler().compile(style=style))
+    profile = ProjectCreativeProfile(
+        project_id=project.id,
+        start_type="FREE",
+        director_autonomy="ASSIST",
+        selected_style_ids=[style.style_key],
+        strategy_snapshot={"creative_capabilities": frozen},
+        version=1,
+    )
+    session.add(profile)
+    shot.video_prompt = "A traveller arrives at the station"
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+        ),
+    )
+    assert style.lighting in plan.prompt
+    assert plan.semantic_intent["creative_snapshot_hashes"]["project"] == frozen["compiled_hash"]
+    assert not any(item.key == f"style:{style.style_key}" for item in plan.pending_suggestions)
+    scene = await session.get(Scene, shot.scene_id)
+    assert scene is not None
+    scene.design_state = {
+        "creative_capabilities": serialize_compiled_creative_intent(
+            CreativeCapabilityCompiler().compile(user_intent={"lighting": "Soft morning light"})
+        )
+    }
+    await session.flush()
+    scene_plan = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+        ),
+    )
+    assert (
+        scene_plan.semantic_intent["effective_creative_intent"]["lighting"] == "Soft morning light"
+    )
+    assert "Soft morning light" in scene_plan.prompt
+    assert style.lighting not in scene_plan.prompt
+    shot.director_state = {
+        "creative_capabilities": serialize_compiled_creative_intent(
+            CreativeCapabilityCompiler().compile(user_intent={"lighting": "Only candlelight"})
+        )
+    }
+    await session.flush()
+    changed = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+        ),
+    )
+    assert changed.semantic_intent["effective_creative_intent"]["lighting"] == "Only candlelight"
+    assert style.lighting not in changed.prompt
+    assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0

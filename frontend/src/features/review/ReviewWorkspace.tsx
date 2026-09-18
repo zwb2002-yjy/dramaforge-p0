@@ -1,3 +1,4 @@
+import { Button, Field, Input, Select, PageHeader } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Link } from "@tanstack/react-router";
@@ -211,15 +212,12 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
           待审内容
         </Link>
       </nav>
-      <header className="qc-page-heading">
-        <h1>镜头审片与批注</h1>
-        <span>在关键帧或时间线上标注并填写说明；批注不会改动正式产物。</span>
-      </header>
+      <PageHeader title="镜头审片与批注" description="标出想调整的画面，留下修改建议。" />
 
       {shots.isError && <div className="flash err">无法读取镜头：{String(shots.error)}</div>}
-      <label>
+      <Field>
         当前镜头
-        <select
+        <Select
           aria-label="当前镜头"
           disabled={explicitTarget}
           value={shotId ?? ""}
@@ -230,17 +228,17 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
               #{item.shot_number} {item.visual_description || "未命名镜头"}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </Select>
+      </Field>
+      <Field>
         批注说明
-        <input
+        <Input
           aria-label="批注说明"
           value={note}
           onChange={(event) => setNote(event.target.value)}
           placeholder="说明需要检查的内容"
         />
-      </label>
+      </Field>
 
       {shot && keyframeId ? (
         <section>
@@ -303,14 +301,14 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
 
       <section>
         <h2>修复</h2>
-        <button
+        <Button
           type="button"
           data-testid="review-open-repair"
           onClick={() => setRepairOpen((open) => !open)}
           disabled={!shotId}
         >
           {repairOpen ? "收起修复计划" : "创建修复计划"}
-        </button>
+        </Button>
         {repairOpen && shotId && (
           <RepairPlanPanel
             projectId={projectId}
@@ -387,7 +385,7 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
                         : ""}
                     </small>
                   </div>
-                  <button
+                  <Button
                     type="button"
                     data-testid="review-annotation-decision"
                     disabled={decideAnnotation.isPending}
@@ -399,7 +397,7 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
                     }
                   >
                     {resolved ? "重新打开" : "标记为已解决"}
-                  </button>
+                  </Button>
                 </li>
               );
             })}

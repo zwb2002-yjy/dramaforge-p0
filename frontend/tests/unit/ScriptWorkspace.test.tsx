@@ -171,7 +171,7 @@ describe("ScriptWorkspace proposal-first UI", () => {
     // Scope to the proposal preview: the import panel also shows an Episode
     // example, so a page-wide text query would match two elements.
     const preview = screen.getByTestId("story-proposal-preview");
-    expect(within(preview).getByText(/Episode 1/)).toBeInTheDocument();
+    expect(within(preview).getByText("分集 1", { exact: true })).toBeInTheDocument();
     expect(within(preview).getByText(/待确认/)).toBeInTheDocument();
   });
 

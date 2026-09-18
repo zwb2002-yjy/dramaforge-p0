@@ -148,16 +148,17 @@ test("creative capabilities panel reads and freezes effective intent with proven
     freezeBody = body;
   });
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await page.getByTestId("production-capabilities-disclosure").locator(":scope > summary").click();
+  await page.getByRole("tab", { name: "高级设置", exact: true }).click();
+  await page.getByLabel("修改范围").selectOption("shot");
 
-  const shotPanel = page
-    .getByTestId("production-capabilities-disclosure")
-    .getByTestId("creative-capabilities-panel");
+  const shotPanel = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
   await expect(shotPanel).toBeVisible();
 
   // The frozen effective content and its sources are exposed (read-only). The
   // panel shows readable labels; the exact frozen payload stays in a collapsed
   // read-only block with its raw values.
+  await expect(shotPanel.getByTestId("creative-provenance-summary")).not.toBeVisible();
+  await shotPanel.getByText("已保存的设置", { exact: true }).click();
   await expect(shotPanel.getByTestId("creative-provenance")).toBeVisible();
   await expect(shotPanel.getByTestId("creative-provenance-summary")).toContainText("短剧悬疑");
   await expect(shotPanel.getByTestId("creative-provenance")).toContainText(
@@ -171,8 +172,8 @@ test("creative capabilities panel reads and freezes effective intent with proven
   // User selects a genre + style and freezes an explicit selection.
   await shotPanel.getByLabel("创作类型").selectOption("short_drama_suspense_v1");
   await shotPanel.getByLabel("风格").selectOption("film_noir_v1");
-  await shotPanel.getByRole("button", { name: "冻结创意能力" }).click();
-  await expect(shotPanel.getByText("已冻结有效创作意图与来源说明。")).toBeVisible();
+  await shotPanel.getByRole("button", { name: "保存局部设置" }).click();
+  await expect(shotPanel.getByText("设置已保存，后续生成时生效。")).toBeVisible();
   expect(freezeBody).toMatchObject({ shot_id: SHOT_ID });
   expect(freezeBody).not.toHaveProperty("scene_id");
 });
@@ -189,34 +190,29 @@ test("scene creative capabilities freeze the shared configuration the Shots inhe
     { scenes: true },
   );
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await page
-    .getByTestId("production-scene-capabilities-disclosure")
-    .locator(":scope > summary")
-    .click();
+  await page.getByRole("tab", { name: "高级设置", exact: true }).click();
 
-  const scenePanel = page
-    .getByTestId("production-scene-capabilities-disclosure")
-    .getByTestId("creative-capabilities-panel");
+  const scenePanel = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
   await expect(scenePanel).toBeVisible();
   // The two scopes stay distinguishable: this panel is the Scene's shared
   // configuration, not a per-Shot override.
   await expect(scenePanel.getByTestId("creative-capability-scope")).toContainText("场景配置");
+  await scenePanel.getByText("已保存的设置", { exact: true }).click();
   await expect(scenePanel.getByTestId("creative-provenance-summary")).toContainText("纪实自然");
 
   await scenePanel.getByLabel("风格").selectOption("documentary_natural_v1");
-  await scenePanel.getByRole("button", { name: "冻结创意能力" }).click();
-  await expect(scenePanel.getByText("已冻结有效创作意图与来源说明。")).toBeVisible();
+  await scenePanel.getByRole("button", { name: "保存局部设置" }).click();
+  await expect(scenePanel.getByText("设置已保存，后续生成时生效。")).toBeVisible();
   expect(freezeBodies).toHaveLength(1);
   expect(freezeBodies[0]).toMatchObject({ scene_id: SCENE_ID });
   expect(freezeBodies[0]).not.toHaveProperty("shot_id");
 
   // The Shot scope is a separate target: its own panel still freezes the Shot.
-  await page.getByTestId("production-capabilities-disclosure").locator(":scope > summary").click();
-  const shotPanel = page
-    .getByTestId("production-capabilities-disclosure")
-    .getByTestId("creative-capabilities-panel");
-  await shotPanel.getByRole("button", { name: "冻结创意能力" }).click();
-  await expect(shotPanel.getByText("已冻结有效创作意图与来源说明。")).toBeVisible();
+  await page.getByRole("tab", { name: "高级设置", exact: true }).click();
+  await page.getByLabel("修改范围").selectOption("shot");
+  const shotPanel = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
+  await shotPanel.getByRole("button", { name: "保存局部设置" }).click();
+  await expect(shotPanel.getByText("设置已保存，后续生成时生效。")).toBeVisible();
   expect(freezeBodies).toHaveLength(2);
   expect(freezeBodies[1]).toMatchObject({ shot_id: SHOT_ID });
   expect(freezeBodies[1]).not.toHaveProperty("scene_id");

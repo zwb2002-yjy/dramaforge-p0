@@ -9,14 +9,15 @@
   list-style: none;
   padding: 0;
   display: grid;
-  gap: 10px;
+  gap: var(--df-space-3);
 }
 .editing-session-picker li {
   display: grid;
-  gap: 5px;
+  gap: var(--df-space-2);
   min-width: 0;
-  padding: 12px;
-  border: 1px solid rgb(148 163 184 / 20%);
+  padding: var(--df-space-4);
+  border: 1px solid var(--df-border-subtle);
+  background: var(--df-surface-tier-raised-bg);
   border-radius: var(--df-radius-container);
   overflow-wrap: anywhere;
 }
@@ -35,8 +36,8 @@
 .film-playback-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-block: 8px;
+  gap: var(--df-space-2);
+  margin-block: var(--df-space-2);
 }
 
 .qc-project-page[data-testid="editing-workspace"] {

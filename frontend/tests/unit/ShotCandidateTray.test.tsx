@@ -101,7 +101,7 @@ describe("ShotCandidateTray", () => {
     );
 
     expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
-    expect(screen.getByTestId("shot-candidate-tray")).toHaveTextContent("Takes · 2");
+    expect(screen.getByTestId("shot-candidate-tray")).toHaveTextContent("备选画面 · 2");
     expect(screen.queryByTestId("shot-candidate-artifact-keyframe")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("shot-candidate-tray"));
     expect(onToggleExpanded).toHaveBeenCalledTimes(1);
@@ -162,7 +162,7 @@ describe("ShotCandidateTray", () => {
     fireEvent.click(screen.getByTestId("shot-candidate-confirm-artifact-keyframe"));
     await screen.findByTestId("shot-candidate-success");
     fireEvent.click(screen.getByTestId("shot-candidate-confirm-artifact-video"));
-    await screen.findByText(/已确认 artifact-video/);
+    await screen.findByText("已设为正式视频");
 
     expect(calls.find((call) => call.url.endsWith("/formal-keyframe"))).toMatchObject({
       method: "POST",

@@ -1,10 +1,15 @@
+.production-monitor {
+  gap: var(--df-space-3);
+  grid-template-columns: minmax(0, 1fr);
+}
 .monitor-overview {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--df-space-4);
   padding: var(--df-space-5);
-  background: var(--df-surface-1);
-  border: 1px solid var(--df-border-subtle);
+  background: var(--df-surface-tier-raised-bg);
+  box-shadow: var(--df-surface-tier-raised-shadow);
+  border: 1px solid var(--df-surface-tier-raised-border);
   border-radius: var(--df-radius-container);
 }
 .monitor-overview > div {
@@ -28,7 +33,8 @@
   gap: var(--df-space-3);
 }
 .monitor-execution-status {
-  padding-block: var(--df-space-2);
+  margin: 0;
+  padding-block: var(--df-space-1);
   font-size: var(--df-text-sm);
 }
 .monitor-execution-status > span {
@@ -70,11 +76,74 @@
 }
 .monitor-empty {
   padding: var(--df-space-5);
-  border: 1px dashed var(--df-border);
+  border: 1px solid transparent;
+  background: var(--df-control-background);
   border-radius: var(--df-radius-container);
 }
 @media (max-width: 900px) {
   .monitor-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+.monitor-next-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--df-space-3);
+  padding: var(--df-space-4);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-container);
+  background: var(--df-verdigris-tint);
+}
+.monitor-next-step h2 {
+  margin: 0;
+  font-size: var(--df-text-lg);
+}
+.monitor-next-step p {
+  margin: var(--df-space-2) 0 0;
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+}
+.monitor-next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+}
+.monitor-scene-link {
+  display: grid;
+  gap: var(--df-space-1);
+}
+.monitor-scene-link > span {
+  font-size: var(--df-text-sm);
+  color: var(--df-verdigris);
+}
+.monitor-scene-description {
+  display: block;
+  margin-top: var(--df-space-2);
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+}
+.monitor-failures {
+  padding: var(--df-space-3);
+  background: var(--df-surface-1);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-container);
+}
+.monitor-failures p {
+  margin: 0;
+}
+.monitor-failures ul {
+  margin: var(--df-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.monitor-failures li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--df-space-2);
+  padding: var(--df-space-2) 0;
+  overflow-wrap: anywhere;
 }

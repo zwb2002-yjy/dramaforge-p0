@@ -33,10 +33,14 @@ function productionStateLabel(state: string): string {
       draft: "草稿",
       ready: "就绪",
       producing: "制作中",
+      queued: "排队中",
+      running: "生成中",
+      failed: "生成失败",
+      completed: "已完成",
       review: "待审",
       complete: "完成",
       blocked: "阻塞",
-    }[state] ?? state
+    }[state] ?? "待确认"
   );
 }
 
@@ -46,6 +50,10 @@ function productionStateTone(state: string): string {
       draft: "idle",
       ready: "done",
       producing: "running",
+      queued: "idle",
+      running: "running",
+      failed: "attention",
+      completed: "done",
       review: "running",
       complete: "done",
       blocked: "attention",
@@ -60,7 +68,7 @@ function ShotWorkflowRow({ shot }: { shot: ShotWorkflowStateRead }) {
       <span className="shot-index">{String(shot.shot_number).padStart(2, "0")}</span>
       <span className="workflow-shot-main">
         <span className="workflow-shot-template">
-          {shot.workflow_template_key ?? shot.status ?? "未选模板"}
+          {productionStateLabel(shot.status ?? "draft")}
         </span>
         <small>
           {RESOLUTION_LABEL[shot.template_resolution_status] ?? shot.template_resolution_status}
@@ -127,7 +135,7 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
   return (
     <div className="workflow-navigator" data-testid="workflow-navigator">
       <div className="workflow-navigator-header">
-        <span>镜头工作流</span>
+        <span>生成任务</span>
         <small>
           {data
             ? `${data.total_shots} 镜头 · 正式 ${data.formal_shots} · 阻塞 ${data.blocked_scenes} 场景`
@@ -136,7 +144,7 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
       </div>
       <div className="workflow-episode-list">
         {episodes.length === 0 && (
-          <p className="muted">暂无剧本。可在场景工作区导入剧本后回看镜头工作流状态。</p>
+          <p className="muted">还没有生成任务。先到剧本页准备故事，再选择镜头生成画面。</p>
         )}
         {episodes.map((episode) => (
           <section
@@ -149,7 +157,8 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
               data-testid={`workflow-episode-${episode.episode_number}-title`}
             >
               <strong>
-                EP{episode.episode_number} · {episode.title || `第 ${episode.episode_number} 集`}
+                第 {episode.episode_number} 集 ·{" "}
+                {episode.title || `第 ${episode.episode_number} 集`}
               </strong>
               <small>
                 {episode.scene_count} 场景 · {episode.total_shots} 镜头
@@ -164,9 +173,6 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
             </div>
           </section>
         ))}
-      </div>
-      <div className="workflow-nav-footer">
-        <small>未声明多角色的镜头会标记为不可双人，不会自动降级执行。</small>
       </div>
     </div>
   );

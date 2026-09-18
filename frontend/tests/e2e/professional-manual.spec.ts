@@ -140,7 +140,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   );
 
   await page.getByTestId("shot-candidate-confirm-candidate-keyframe-1").click();
-  await expect(page.getByTestId("shot-candidate-success")).toContainText("candidate-keyframe-1");
+  await expect(page.getByTestId("shot-candidate-success")).toContainText("已设为正式关键帧");
   await expect.poll(() => state.formalKeyframeArtifactId).toBe("candidate-keyframe-1");
   // The real backend keeps the successful Artifact in the candidate
   // projection after formal selection. The Scene refetch clears only the
@@ -189,9 +189,8 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("stat-scenes")).toHaveText("1");
   await expect(page.getByTestId("monitor-scene-table")).toBeVisible();
 
-  // /production only monitors cross-scene facts; its existing professional
-  // workbench remains available for compatibility evidence.
-  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
+  // Version experiments have a separate view; scene authoring is not duplicated.
+  await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
   expect(state.shotVersion).toBeGreaterThanOrEqual(1);
 });
@@ -293,7 +292,7 @@ test("Scene draft survives sheet close and guards route departure", async ({ pag
 test("production monitor never surfaces legacy budget UI", async ({ page }) => {
   await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await page.getByTestId("production-workbench-disclosure").locator(":scope > summary").click();
+  await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
   await expect(page.getByText(/预算|计费|费用/)).toHaveCount(0);
 });

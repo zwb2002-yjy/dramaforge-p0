@@ -6,9 +6,9 @@ import { TextGatewaySettings } from "../../src/components/provider/TextGatewaySe
 describe("TextGatewaySettings", () => {
   it("explains instance configuration without a dead credential form or false readiness", () => {
     const { container } = render(<TextGatewaySettings />);
-    expect(screen.getByRole("heading", { name: "文本模型 · 实例级网关配置" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "文本服务" })).toBeInTheDocument();
     expect(screen.getByText(/LITELLM_GATEWAY_URL 与 LITELLM_API_KEY/)).toBeInTheDocument();
-    expect(screen.getByText(/不表示网关已配置或可用/)).toBeInTheDocument();
+    expect(screen.getByText(/不检测连接状态/)).toBeInTheDocument();
     expect(container.querySelector("input, form, button")).toBeNull();
     expect(screen.queryByText("已配置")).not.toBeInTheDocument();
   });

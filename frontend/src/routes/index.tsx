@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createRoute, useNavigate, redirect } from "@tanstack/react-router";
-import { Clapperboard, Plus, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpRight, Clapperboard, Plus, Search } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiError,
@@ -17,8 +17,9 @@ import {
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
 import { getRememberedProjectId } from "../lib/navigationPreferences";
-import { Button } from "../components/ui";
+import { Button, Disclosure, Field, Input, Select, PageHeader } from "../components/ui";
 import { CreateProjectForm } from "../features/project/CreateProjectForm";
+import { LazyWorkspaceSettingsPage } from "./pages";
 import { rootRoute } from "./__root";
 
 export const indexRoute = createRoute({
@@ -29,16 +30,28 @@ export const indexRoute = createRoute({
     if (hash === "project-filters" || hash === "recent-projects") {
       throw redirect({
         to: "/",
-        search: { create: false, panel: hash === "project-filters" ? "workspace" : "recent" },
+        search: { create: undefined, panel: hash === "project-filters" ? "workspace" : "recent" },
         hash: "",
+        replace: true,
+      });
+    }
+    const createParam = new URLSearchParams(location.searchStr).get("create");
+    if (createParam === "false" || createParam === "0") {
+      throw redirect({
+        to: "/",
+        search: { ...location.search, create: undefined },
+        hash: location.hash,
         replace: true,
       });
     }
   },
   validateSearch: (
     search: Record<string, unknown>,
-  ): { create: boolean; panel?: "workspace" | "recent" | "select" } => ({
-    create: search.create === true || search.create === "1",
+  ): { create?: boolean; panel?: "workspace" | "recent" | "select" } => ({
+    create:
+      search.create === true || search.create === "1" || search.create === "true"
+        ? true
+        : undefined,
     panel: (search.panel === "workspace" || search.panel === "recent" || search.panel === "select"
       ? search.panel
       : undefined) as "workspace" | "recent" | "select" | undefined,
@@ -89,9 +102,9 @@ function HomePage() {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
     getSelectedWorkspaceId,
   );
-  const createOpen = search.create;
+  const createOpen = Boolean(search.create);
   const setCreateOpen = (open: boolean) =>
-    void navigate({ to: "/", search: { ...search, create: open } });
+    void navigate({ to: "/", search: { ...search, create: open || undefined } });
   const [projectFilter, setProjectFilter] = useState("");
   const [visibleProjectLimit, setVisibleProjectLimit] = useState(PROJECT_PAGE_SIZE);
   const [error, setError] = useState<string | null>(null);
@@ -197,19 +210,21 @@ function HomePage() {
   }
 
   return (
-    <main className="df-page" data-testid="home-panel">
-      <header className="df-page-header">
-        <h1>{search.panel === "select" ? "选择项目开始创作" : "项目大厅"}</h1>
-        <div className="toolbar">
-          {!apiLive && <span className="status-bad">服务未就绪</span>}
-          {currentUser.data && !createOpen && (
-            <button className="primary" type="button" onClick={() => setCreateOpen(true)}>
-              <Plus size={16} aria-hidden="true" />
-              新建项目
-            </button>
-          )}
-        </div>
-      </header>
+    <main className="df-page df-project-lobby" data-testid="home-panel">
+      <PageHeader
+        title={search.panel === "select" ? "选择项目开始创作" : "项目大厅"}
+        actions={
+          <>
+            {!apiLive && <span className="status-bad">服务未就绪</span>}
+            {currentUser.data && !createOpen && (
+              <Button tone="primary" onClick={() => setCreateOpen(true)}>
+                <Plus size={16} aria-hidden="true" />
+                新建项目
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {!currentUser.data ? (
         <section className="panel auth-panel">
@@ -235,9 +250,9 @@ function HomePage() {
                   authenticate.mutate(ownerInitialized ? "login" : "register");
                 }}
               >
-                <label>
+                <Field>
                   邮箱
-                  <input
+                  <Input
                     id="email"
                     name="email"
                     type="email"
@@ -247,10 +262,10 @@ function HomePage() {
                     placeholder="owner@example.com"
                     required
                   />
-                </label>
-                <label>
+                </Field>
+                <Field>
                   密码
-                  <input
+                  <Input
                     id={ownerInitialized ? "current-password" : "new-password"}
                     name="password"
                     type="password"
@@ -260,39 +275,39 @@ function HomePage() {
                     placeholder="输入密码"
                     required
                   />
-                </label>
+                </Field>
                 {registrationAvailable && (
-                  <label>
+                  <Field>
                     显示名
-                    <input
+                    <Input
                       id="display-name"
                       name="display-name"
                       value={displayName}
                       onChange={(event) => setDisplayName(event.target.value)}
                       autoComplete="name"
                     />
-                  </label>
+                  </Field>
                 )}
                 <div className="toolbar">
                   {ownerInitialized && (
-                    <button
-                      className="primary"
+                    <Button
+                      tone="primary"
                       type="submit"
                       disabled={authenticate.isPending || !apiLive || !authFormReady}
                     >
                       登录
-                    </button>
+                    </Button>
                   )}
                   {registrationAvailable && (
-                    <button
-                      className="primary"
+                    <Button
+                      tone="primary"
                       type="submit"
                       disabled={
                         authenticate.isPending || !apiLive || !authFormReady || !displayName.trim()
                       }
                     >
                       初始化 Owner
-                    </button>
+                    </Button>
                   )}
                 </div>
               </form>
@@ -311,6 +326,13 @@ function HomePage() {
               void navigate({ to: "/projects/$projectId/script", params: { projectId } })
             }
           />
+          {search.panel === "workspace" && (
+            <Disclosure title="管理工作空间" testId="workspace-management-disclosure">
+              <Suspense fallback={<p role="status">正在读取工作空间…</p>}>
+                <LazyWorkspaceSettingsPage onWorkspaceChange={selectWorkspace} />
+              </Suspense>
+            </Disclosure>
+          )}
           {recentProject && search.panel !== "workspace" && (
             <section className="df-lobby-section" id="recent-projects">
               <header>
@@ -327,13 +349,9 @@ function HomePage() {
                     {recentProject.aspect_ratio}
                   </p>
                 </div>
-                <button
-                  className="primary"
-                  type="button"
-                  onClick={() => openProject(recentProject.id)}
-                >
+                <Button tone="primary" type="button" onClick={() => openProject(recentProject.id)}>
                   继续创作
-                </button>
+                </Button>
               </article>
             </section>
           )}
@@ -350,9 +368,9 @@ function HomePage() {
               <h2 id="all-projects-title">全部项目</h2>
             </header>
             <div className="df-project-filters" id="project-filters">
-              <label>
+              <Field>
                 <span className="sr-only">工作空间</span>
-                <select
+                <Select
                   ref={workspaceFilter}
                   aria-label="工作空间筛选"
                   value={selectedWorkspaceId ?? ""}
@@ -363,25 +381,25 @@ function HomePage() {
                       {workspace.name}
                     </option>
                   ))}
-                </select>
-              </label>
-              <label>
+                </Select>
+              </Field>
+              <Field>
                 <span className="sr-only">搜索项目</span>
                 <span className="df-search-field">
                   <Search size={16} aria-hidden="true" />
-                  <input
+                  <Input
                     aria-label="搜索项目"
                     value={projectFilter}
                     onChange={(event) => setProjectFilter(event.target.value)}
                     placeholder="搜索项目名称"
                   />
                 </span>
-              </label>
+              </Field>
             </div>
 
             {workspaces.isError || projects.isError ? (
               <div className="panel" role="status">
-                <p>无法读取项目列表，请重新加载。不会因此创建或删除项目。</p>
+                <p>无法读取项目列表，请重新加载。</p>
                 <Button
                   onClick={() => {
                     void workspaces.refetch();
@@ -396,7 +414,9 @@ function HomePage() {
             ) : !workspaces.data?.length ? (
               <div className="panel">
                 <p>还没有工作空间。</p>
-                <Link to="/settings/workspaces">前往设置创建工作空间</Link>
+                <Link to="/" search={{ panel: "workspace" }}>
+                  管理工作空间
+                </Link>
               </div>
             ) : projects.isLoading ? (
               <div className="panel muted" role="status">
@@ -406,21 +426,27 @@ function HomePage() {
               <div className="df-project-grid" role="list" aria-label="项目列表">
                 {displayedProjects.map((project) => (
                   <div role="listitem" key={project.id}>
-                    <button
+                    <Button
                       className="df-project-card"
                       type="button"
                       onClick={() => openProject(project.id)}
                     >
                       <span className="df-project-cover" aria-hidden="true">
-                        <Clapperboard size={20} />
+                        <span className="df-cover-letter">{project.name.trim().slice(0, 1)}</span>
+                        <span className="df-cover-format">
+                          {project.aspect_ratio === "16:9" ? "横屏作品" : "竖屏作品"}
+                        </span>
                       </span>
-                      <span>
-                        <strong>{project.name}</strong>
+                      <span className="df-project-card-body">
+                        <strong title={project.name}>{project.name}</strong>
                         <p>
-                          {STAGE_LABELS[project.stage] ?? project.stage} · {project.aspect_ratio}
+                          {STAGE_LABELS[project.stage] ?? "创作中"} · {project.aspect_ratio}
                         </p>
+                        <span className="df-project-card-enter">
+                          打开作品 <ArrowUpRight size={16} aria-hidden="true" />
+                        </span>
                       </span>
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -432,13 +458,13 @@ function HomePage() {
 
             {remainingProjectCount > 0 && (
               <div className="df-project-more">
-                <button
-                  className="ghost"
+                <Button
+                  tone="ghost"
                   type="button"
                   onClick={() => setVisibleProjectLimit((limit) => limit + PROJECT_PAGE_SIZE)}
                 >
                   显示更多项目（剩余 {remainingProjectCount} 个）
-                </button>
+                </Button>
               </div>
             )}
           </section>

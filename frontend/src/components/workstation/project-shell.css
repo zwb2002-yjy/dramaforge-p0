@@ -5,7 +5,7 @@
   min-height: 100vh;
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
-  background: var(--df-surface-0);
+  background: transparent;
   color: var(--df-text-primary);
   overflow-x: hidden;
 }
@@ -208,11 +208,6 @@
   min-width: 0;
 }
 
-.qc-page-heading {
-  padding: var(--df-space-6) 0 var(--df-space-4);
-}
-
-.qc-page-heading > p:not(.callout),
 .qc-section-heading p,
 .qc-constraints > p,
 .qc-director-kicker {
@@ -220,28 +215,6 @@
   font-size: var(--df-text-xs);
   font-weight: var(--df-weight-semibold);
   text-transform: uppercase;
-}
-
-/* A callout inside the page heading keeps its own surface treatment. */
-.qc-page-heading > .callout {
-  margin: var(--df-space-2) 0 0;
-  max-width: 620px;
-  font-size: var(--df-text-sm);
-  font-weight: var(--df-weight-regular);
-  text-transform: none;
-}
-
-.qc-page-heading h1 {
-  margin: var(--df-space-1) 0 var(--df-space-2);
-  font-family: var(--df-font-display);
-  font-size: 2.5rem;
-  line-height: 1.16;
-}
-
-.qc-page-heading > span {
-  display: block;
-  max-width: 620px;
-  color: var(--df-text-secondary);
 }
 
 .qc-story-card {
@@ -499,10 +472,6 @@
 .qc-project-inspector-summary dd {
   color: var(--df-text-primary);
   text-align: right;
-}
-
-.qc-project-overview .qc-page-heading {
-  padding-bottom: var(--df-space-6);
 }
 
 .qc-overview-band {
@@ -827,9 +796,6 @@
   }
   .qc-main-canvas {
     padding-inline: var(--df-space-4);
-  }
-  .qc-page-heading h1 {
-    font-size: 2.25rem;
   }
   .qc-project-save,
   .qc-project-mode {

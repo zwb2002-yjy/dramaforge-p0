@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/ui";
 import { FinalFilmPlayback } from "./FinalFilmPlayback";
 import "./editing-recovery.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -854,13 +855,11 @@ export function EditingWorkspace({
           onSelect={onSessionSelected}
         />
 
-        <header className="qc-page-heading">
-          <h1>剪辑会话</h1>
-          <span>编辑层只保存时间线，不会反向修改镜头或生产事实。</span>
+        <PageHeader title="剪辑会话" description="安排画面与声音的节奏，保留原始镜头。">
           <p className="callout" data-testid="editing-session-read-only">
             生产血缘只读 · 不渲染媒体、不调用模型。
           </p>
-        </header>
+        </PageHeader>
 
         {persistedSession.isLoading && (
           <p className="muted" data-testid="editing-session-loading">
@@ -1567,13 +1566,11 @@ export function EditingWorkspace({
     <div className="qc-project-page" data-testid="editing-workspace">
       <EditingSessionPicker projectId={projectId} onSelect={onSessionSelected} />
 
-      <header className="qc-page-heading">
-        <h1>剪辑交接</h1>
-        <span>当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。</span>
+      <PageHeader title="剪辑交接" description="只读预览已完成的镜头，继续剪辑或新建会话。">
         <p className="callout" data-testid="editing-read-only">
           只读预览 · 仅展示已确认的正式视频，不会触发生成或写回生产事实。
         </p>
-      </header>
+      </PageHeader>
       {manifest.isLoading && (
         <p className="muted" data-testid="editing-loading">
           正在读取正式剪辑时间线…
