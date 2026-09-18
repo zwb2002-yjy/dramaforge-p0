@@ -146,6 +146,32 @@ V1 发布完成至少同时满足：
 3. 跨 agent 协调项：#9 项目级绑定读取接口、#10 供应商连接启停/删除（消费端都在
    另一 agent 正在修改的文件里）。
 
+## 2026-09-19 发布决策与收口（第 30 轮）
+
+Owner 决策（本轮全部落地并验证）：
+
+| 决策 | 落地 |
+|---|---|
+| `quality_gated` = 质量认证 / 正式支持证据，**不是**普通执行与实验线硬准入 | `eligibility.evaluate_candidate` 不再把它当 blocking issue，改由 `CandidateEvaluation.certified` / `ModelCandidateRead.certified` 呈现；实验表单对"已绑定但未认证"的模型可选中并显示「尚未通过质量验收（可用于生成，正式支持证据待补齐）」；ADR 0005、`MODEL_PROVIDER.md`、`FRONTEND_WORKBENCH.md` 同步改写 |
+| 镜头 6：不对 `unknown_submission` 做技术重试，保留原证据，按新的用户重生成意图重新提交 | 待在该候选上执行（需付费授权，随 D 组进行） |
+| #6 删除无生产者的旧导演提案死面板，保留现行 Director Turn / Shot Suggestion 路径 | 删除 `ShotChangeProposalsPanel` / `changeProposalsApi` 及其测试与 query key；服务端 `…/change-proposals` 端点保留但无前端消费者；`FRONTEND_WORKBENCH.md` 已改写 |
+| #9 增加项目 Provider Binding 只读接口并让设置页正确回显 | 新增 `GET /projects/{id}/provider-bindings`（含模型 display_name / provider / 绑定启用状态）+ 设置页「当前绑定」区块；前端类型已重新生成 |
+| #10 首版接通 Provider Connection 启用/停用，删除能力延期 | 设置页新增「停用连接 / 启用连接」并显示「已停用：不会参与生成」；连接**删除**仍延期（不在首版） |
+| #13 删除不可达的 ProfessionalWorkbench 非实验旧分支 | 旧 `ProfessionalWorkbench.tsx` 删除，实验功能迁至 `ExperimentBranchPanel.tsx`（保留 `professional-workbench` testid 供导航与 e2e 断言）；画布/资产/审片分支与 3 条死测试一并删除 |
+| #15 删除未消费的 `ExperimentCompare`，不扩展 API | 组件与测试删除 |
+| #14 不改 CI 类型门禁 | 未改动 |
+| 两份 20260918 方案文档不作为正式发布文档 | 已从最终树删除，内容留在 Git 历史（`a5d5851`） |
+
+**本候选（唯一 runtime candidate）**
+
+- `8354198`（`dev`，已推送 `origin/dev`）；运行相关内容的候选即该提交本身，
+  其后只允许文档类提交。
+- 门禁（同一棵树实测）：后端 ruff/mypy + **1249** 单测；前端 format/lint/typecheck +
+  **317** 单测 + build + routes:check + **76** e2e；`api:check` 与 `alembic check` 通过。
+- 授权 D1–D4：先以本候选完成 CI、production 8080、Recovery 与 GPT + Computer Use 完整旅程，
+  全部通过后再 `dev→main`、tag、Release workflow，最后用实际 Release 产物做在线/离线安装验证。
+  **新候选冻结后不再夹带非发布阻塞代码。**
+
 **阶段 12 一致性审计**（方案 1498-1594 行要求）已完成：用户动作清单（53 条，机械提取）、
 四域链路追踪、技术信息泄漏审计 7 问、16 条明确问题与逐条可达性分类，见
 `tmp/p0-evidence/stage12-consistency-audit/STAGE12_CONSISTENCY_AUDIT.md`。
