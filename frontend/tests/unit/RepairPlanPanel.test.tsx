@@ -57,6 +57,7 @@ const ACTIVE_REPAIR: RepairRequestRead = {
       command_key: "repair:step:1",
       node_run_id: "66666666-6666-4666-8666-666666666666",
       node_run_status: "completed",
+      result_artifact_id: "77777777-7777-4777-8777-777777777777",
       confirmed_at: "2026-09-15T00:00:00Z",
       adopted_artifact_id: null,
       review_decision_id: null,
@@ -82,9 +83,9 @@ describe("RepairPlanPanel", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("previews the plan, both options, the step list and the cost boundary", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       return json([]);
     });
     renderPanel();
@@ -100,7 +101,7 @@ describe("RepairPlanPanel", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       if (url.endsWith("/repairs") && init?.method === "POST") {
         writes.push({
           url,
@@ -127,9 +128,9 @@ describe("RepairPlanPanel", () => {
   });
 
   it("shows an in-progress repair with review required instead of 'repair complete'", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       return json([ACTIVE_REPAIR]);
     });
     renderPanel();
@@ -137,7 +138,9 @@ describe("RepairPlanPanel", () => {
     const active = await screen.findByTestId("repair-active");
     expect(active).toHaveAttribute("data-next-action", "human_decision");
     expect(screen.getByTestId("repair-step-1")).toHaveTextContent("第 1 步");
-    expect(screen.getByTestId("repair-step-1")).toHaveTextContent("运行状态 completed");
+    // The stored run status is a contract token; the surface states it in Chinese.
+    expect(screen.getByTestId("repair-step-1")).toHaveTextContent("运行状态 已完成");
+    expect(screen.getByTestId("repair-step-1")).not.toHaveTextContent("completed");
     expect(screen.getByTestId("repair-review-hint")).toHaveTextContent("修复尚未完成");
     expect(screen.queryByTestId("repair-execute-step")).not.toBeInTheDocument();
     expect(screen.queryByTestId("repair-finished")).not.toBeInTheDocument();
@@ -145,11 +148,11 @@ describe("RepairPlanPanel", () => {
 
   it("offers the next step only when the server says one may be executed", async () => {
     const calls: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       if (url.includes("/steps")) {
         return json({
           node_run_id: "77777777-7777-4777-8777-777777777777",
@@ -177,7 +180,7 @@ describe("RepairPlanPanel", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      if (url.endsWith("/repair-plan")) return json(PLAN);
+      if (url.endsWith("/repair-plan") && init?.method === "POST") return json(PLAN);
       if (url.endsWith("/repairs") && init?.method === "POST") {
         return json(
           { code: "CONFLICT", detail: "repair plan changed since it was previewed" },
@@ -195,8 +198,10 @@ describe("RepairPlanPanel", () => {
 
   it("labels stages and step actions in the product vocabulary", () => {
     expect(repairStageLabel("keyframe_review")).toBe("审查并确认关键帧");
-    expect(repairStageLabel("unknown_stage")).toBe("unknown_stage");
+    // An unknown stored stage must not be printed raw on the surface.
+    expect(repairStageLabel("unknown_stage")).toBe("修复环节待同步");
     expect(repairStepActionLabel("review_candidate")).toContain("等待人工审查");
+    expect(repairStepActionLabel("unknown_action")).toBe("按修复计划继续");
     expect(repairIsWaitingForHuman(ACTIVE_REPAIR)).toBe(true);
     expect(repairIsWaitingForHuman({ ...ACTIVE_REPAIR, next_action: "execute_step" })).toBe(false);
   });

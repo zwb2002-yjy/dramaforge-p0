@@ -606,8 +606,18 @@ class MiniMaxRuntime:
         return {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
 
     async def submit_image(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="image.generate",
+        )
         if not self._configured():
             raise RuntimeError("MiniMax connection is not configured")
         try:
@@ -656,8 +666,18 @@ class MiniMaxRuntime:
         )
 
     async def submit_video(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="video.generate",
+        )
         if not self._configured():
             raise RuntimeError("MiniMax connection is not configured")
         try:

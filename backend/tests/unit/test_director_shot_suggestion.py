@@ -275,6 +275,45 @@ async def test_nested_forbidden_field_families_fail_closed(
 
 
 @pytest.mark.asyncio
+async def test_director_state_the_design_endpoint_would_reject_fails_closed(
+    session: AsyncSession,
+) -> None:
+    """A suggestion must be savable.
+
+    The suggestion service accepted any design-only state map, but the design
+    save endpoint validates the canonical shot director state.  A model that
+    emitted `continuity_constraints` as plain strings therefore produced a
+    proposal the user could accept and was then unable to save: the design PATCH
+    answered "Request validation failed" and the work was stranded in the draft.
+    """
+    user, project, scene, shot = await _seed(session)
+
+    class ShapeBrokenTransport:
+        async def generate(self, _context: ShotDirectorSuggestionContext) -> object:
+            return {
+                "base_shot_version": shot.version,
+                "suggested_image_prompt": "restrained street scene",
+                "suggested_video_prompt": "slow restrained movement",
+                "suggested_director_state": {
+                    "action": {"description": "小幅动作"},
+                    "continuity_constraints": ["身份跨镜头稳定", "造型配色一致"],
+                },
+                "change_summary": "把情绪调得更克制",
+            }
+
+    with pytest.raises(ValidationAppError) as raised:
+        await ShotDirectorSuggestionService(
+            session, transport=ShapeBrokenTransport()
+        ).suggest(
+            project_id=project.id,
+            actor=user,
+            request=_request(scene, shot),
+        )
+    assert raised.value.details["code"] == "INVALID_DIRECTOR_SUGGESTION_STATE"
+    assert shot.version == 5
+
+
+@pytest.mark.asyncio
 async def test_existing_design_extensions_are_preserved_in_valid_suggestion(
     session: AsyncSession,
 ) -> None:

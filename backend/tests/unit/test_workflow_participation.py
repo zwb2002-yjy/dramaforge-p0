@@ -67,7 +67,7 @@ async def _seed_character(
         id=uuid4(),
         name=f"Char-{uuid4().hex[:6]}",
         kind=kind,
-        status="ready",
+        status="active",
     )
     session.add(asset)
     await session.flush()
@@ -77,10 +77,12 @@ async def _seed_character(
         version_number=1,
         kind=kind,
         name="v1",
-        status="ready",
+        status="formal",
         created_by=user_id,
     )
     session.add(version)
+    await session.flush()
+    asset.current_version_id = version.id
     await session.flush()
     return asset.id, version.id
 

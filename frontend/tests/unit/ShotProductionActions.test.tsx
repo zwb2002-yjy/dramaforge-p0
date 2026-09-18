@@ -274,7 +274,14 @@ describe("ShotProductionActions", () => {
       "data-delivery",
       "exact",
     );
-    expect(screen.getByTestId("shot-execution-plan-model")).toHaveTextContent(
+    expect(screen.getByTestId("shot-execution-plan-model")).toHaveTextContent("执行模型：");
+    // The stored `provider/model` id is contract data: the surface shows the
+    // catalogue display name (or a neutral phrase when it is unknown) and keeps
+    // the id inside the collapsed diagnostics block.
+    expect(screen.getByTestId("shot-execution-plan-model")).not.toHaveTextContent(
+      "agnes/agnes-image-2.1-flash",
+    );
+    expect(screen.getByTestId("shot-execution-plan-diagnostics")).toHaveTextContent(
       "agnes/agnes-image-2.1-flash",
     );
     expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已排队");

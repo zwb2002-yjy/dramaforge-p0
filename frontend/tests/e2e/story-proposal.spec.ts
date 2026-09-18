@@ -185,8 +185,8 @@ test("Story proposal: create typed diff, partial accept only the episode", async
   await expect(page.getByTestId(/story-operation-create/)).toHaveCount(3);
 
   // Partial accept: only keep the Episode operation checked.
-  const sceneCheckbox = page.getByLabel("采用 Scene 1.1");
-  const shotCheckbox = page.getByLabel("采用 Shot 1.1.1");
+  const sceneCheckbox = page.getByLabel("采用 场景 1.1");
+  const shotCheckbox = page.getByLabel("采用 镜头 1.1.1");
   await sceneCheckbox.uncheck();
   await shotCheckbox.uncheck();
   await page.getByTestId("story-proposal-apply-selected").click();

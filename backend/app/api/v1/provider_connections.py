@@ -9,6 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field, SecretStr
+from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import (
@@ -18,9 +19,11 @@ from app.api.deps import (
     SessionDep,
     require_selected_workspace,
 )
+from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import (
+    ProjectProviderBinding,
     ProviderCapabilityEvidence,
     ProviderConnection,
     ProviderModelBinding,
@@ -218,6 +221,20 @@ class ProjectBindingRead(BaseModel):
     fallback_policy: str
 
 
+class ProjectBindingDetailRead(ProjectBindingRead):
+    """Project binding plus the model identity it currently points at.
+
+    The settings surface has to answer "which model serves this purpose?"; without
+    the read model the page could only print a raw binding id, and a refresh lost
+    the answer entirely (decision 2026-09-19: add a read-only project binding API).
+    """
+
+    model_id: str | None = None
+    display_name: str | None = None
+    provider_type: str | None = None
+    model_binding_enabled: bool | None = None
+
+
 class QualityEvidenceWrite(BaseModel):
     node_run_id: UUID
     artifact_id: UUID
@@ -238,6 +255,10 @@ class QualityEvidenceRead(BaseModel):
 async def _connection_read(
     service: ProviderConnectionService, connection: ProviderConnection
 ) -> ConnectionRead:
+    # Report the stored credential, not an assumption: a connection can exist
+    # without one (created before a key was saved, or after its credential row was
+    # removed), and claiming "已保存" then is a state lie the Owner cannot detect.
+    credential_version = await service.credential_version(connection)
     return ConnectionRead(
         id=connection.id,
         workspace_id=connection.workspace_id,
@@ -246,8 +267,8 @@ async def _connection_read(
         base_url=connection.base_url,
         protocol_profile=connection.protocol_profile,
         enabled=connection.enabled,
-        credential_configured=True,
-        credential_key_version=await service.credential_version(connection),
+        credential_configured=credential_version is not None,
+        credential_key_version=credential_version,
         verification_status=connection.verification_status,
         verified_at=connection.verified_at,
     )
@@ -551,6 +572,59 @@ async def record_quality_evidence(
     )
     await session.commit()
     return _quality_read(evidence)
+
+
+@router.get(
+    "/projects/{project_id}/provider-bindings",
+    response_model=list[ProjectBindingDetailRead],
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def list_project_bindings(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[ProjectBindingDetailRead]:
+    """Read-only view of the project's Provider bindings (one row per purpose)."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    rows = (
+        await session.execute(
+            select(ProjectProviderBinding)
+            .where(ProjectProviderBinding.project_id == project.id)
+            .order_by(ProjectProviderBinding.purpose)
+        )
+    ).scalars().all()
+    details: list[ProjectBindingDetailRead] = []
+    for row in rows:
+        model = await session.get(ProviderModelBinding, row.model_binding_id)
+        entry = (
+            await session.get(ModelCatalogEntry, model.catalog_entry_id)
+            if model is not None and model.catalog_entry_id is not None
+            else None
+        )
+        connection = (
+            await session.get(ProviderConnection, model.connection_id)
+            if model is not None
+            else None
+        )
+        details.append(
+            ProjectBindingDetailRead(
+                id=row.id,
+                project_id=row.project_id,
+                purpose=row.purpose,
+                model_binding_id=row.model_binding_id,
+                selection_strategy=row.selection_strategy,
+                fallback_policy=row.fallback_policy,
+                model_id=model.model_id if model is not None else None,
+                display_name=(
+                    entry.display_name
+                    if entry is not None
+                    else (model.model_id if model is not None else None)
+                ),
+                provider_type=connection.provider_type if connection is not None else None,
+                model_binding_enabled=model.enabled if model is not None else None,
+            )
+        )
+    return details
 
 
 @router.put(

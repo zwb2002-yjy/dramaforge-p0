@@ -11,7 +11,7 @@ from app.access.projects import ProjectService
 from app.assets.models import Shot
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.proposal_service import PartialApplyInput, ProposalDecision, ProposalService
-from app.production.models import ShotExperiment, ShotReferenceBinding
+from app.production.models import ExperimentBranch, ShotReferenceBinding
 from app.shared.base import Base
 from app.shared.security import hash_password
 from sqlalchemy import select
@@ -47,9 +47,14 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
         actor=user,
     )
     shot = Shot(
-        project_id=project.id, scene_id=uuid4(), shot_number=1, version=1,
-        visual_description="Shot", director_state={"camera": "static"},
-        image_prompt="kf", video_prompt="video",
+        project_id=project.id,
+        scene_id=uuid4(),
+        shot_number=1,
+        version=1,
+        visual_description="Shot",
+        director_state={"camera": "static"},
+        image_prompt="kf",
+        video_prompt="video",
     )
     session.add(shot)
     await session.flush()
@@ -64,28 +69,38 @@ async def _proposal_with_items(
     user: User,
 ) -> tuple[DirectorProposal, dict[str, DirectorProposalItem]]:
     proposal = DirectorProposal(
-        project_id=project.id, thread_id=uuid4(), scope_type="shot",
-        scope_entity_id=shot.id, status="pending", created_by=user.id,
+        project_id=project.id,
+        thread_id=uuid4(),
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        status="pending",
+        created_by=user.id,
     )
     session.add(proposal)
     await session.flush()
     low_camera = DirectorProposalItem(
-        proposal_id=proposal.id, project_id=project.id,
+        proposal_id=proposal.id,
+        project_id=project.id,
         command="shot.update_director_state",
         payload={"shot_id": str(shot.id), "director_state": {"camera": "low"}},
-        expected_target_version=shot.version, status="pending",
+        expected_target_version=shot.version,
+        status="pending",
     )
     model_swap = DirectorProposalItem(
-        proposal_id=proposal.id, project_id=project.id,
+        proposal_id=proposal.id,
+        project_id=project.id,
         command="shot.set_model_override",
         payload={"shot_id": str(shot.id), "model_overrides": {"video.shot": "model-x"}},
-        expected_target_version=shot.version, status="pending",
+        expected_target_version=shot.version,
+        status="pending",
     )
     add_ref = DirectorProposalItem(
-        proposal_id=proposal.id, project_id=project.id,
+        proposal_id=proposal.id,
+        project_id=project.id,
         command="shot_reference.add",
         payload={"shot_id": str(shot.id), "purpose": "identity", "asset_id": str(uuid4())},
-        expected_target_version=shot.version, status="pending",
+        expected_target_version=shot.version,
+        status="pending",
     )
     session.add_all([low_camera, model_swap, add_ref])
     await session.flush()
@@ -115,18 +130,26 @@ async def test_phase7_gate_accept_two_reject_one(session: AsyncSession) -> None:
     assert shot.director_state == {"camera": "low"}
     # reference added
     refs = (
-        await session.execute(
-            select(ShotReferenceBinding).where(ShotReferenceBinding.shot_id == shot.id)
+        (
+            await session.execute(
+                select(ShotReferenceBinding).where(ShotReferenceBinding.shot_id == shot.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(refs) == 1
     assert refs[0].purpose == "identity"
-    # model swap rejected -> no ShotExperiment created, model unchanged
+    # model swap rejected -> no ExperimentBranch created, model unchanged
     experiments = (
-        await session.execute(
-            select(ShotExperiment).where(ShotExperiment.shot_id == shot.id)
+        (
+            await session.execute(
+                select(ExperimentBranch).where(ExperimentBranch.source_shot_id == shot.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert experiments == []
     # only ONE shot version bump (from the accepted director_state command)
     assert shot.version == 2
@@ -179,3 +202,68 @@ async def test_panel_close_semantics_unconfirmed_not_executed(session: AsyncSess
     assert proposal.status == "pending"
     await session.refresh(items["camera"])
     assert items["camera"].status == "pending"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"parameters": 1},
+        {"parameters": "bad"},
+        {"parameters": ["bad"]},
+        {"source_artifact_ids": ["not-a-uuid"]},
+        {"source_shot_id": str(uuid4()), "shot_id": None},
+        {"parameters": {"target_node_key": "unsupported"}, "model_overrides": {}},
+    ],
+)
+async def test_invalid_experiment_is_an_item_failure_not_a_partial_apply_abort(
+    session: AsyncSession,
+    invalid: dict,
+) -> None:
+    project, shot, user = await _seed(session)
+    proposal, items = await _proposal_with_items(session, project=project, shot=shot, user=user)
+    items["model"].payload = {**items["model"].payload, **invalid}
+    await session.flush()
+    result = await ProposalService(session, actor=user).partial_apply(
+        project=project,
+        proposal_id=proposal.id,
+        apply_input=PartialApplyInput(
+            decisions=[
+                ProposalDecision(item_id=items["model"].id, decision="accepted"),
+                ProposalDecision(item_id=items["camera"].id, decision="accepted"),
+            ]
+        ),
+    )
+    assert [failure["item_id"] for failure in result.failed] == [str(items["model"].id)]
+    assert result.accepted == [items["camera"].id]
+    assert (await session.scalars(select(ExperimentBranch))).all() == []
+    assert shot.director_state == {"camera": "low"}
+
+
+@pytest.mark.asyncio
+async def test_identical_proposal_items_create_distinct_drafts_but_retries_do_not(
+    session: AsyncSession,
+) -> None:
+    project, shot, user = await _seed(session)
+    service = ProposalService(session, actor=user)
+    for _index in range(2):
+        proposal, items = await _proposal_with_items(session, project=project, shot=shot, user=user)
+        # The model cannot use a repeated self-selected key to collapse two user decisions.
+        items["model"].payload = {**items["model"].payload, "idempotency_key": "model-chosen"}
+        await session.flush()
+        command = PartialApplyInput(
+            decisions=[ProposalDecision(item_id=items["model"].id, decision="accepted")]
+        )
+        result = await service.partial_apply(
+            project=project, proposal_id=proposal.id, apply_input=command
+        )
+        assert result.accepted == [items["model"].id]
+        replay = await service.partial_apply(
+            project=project, proposal_id=proposal.id, apply_input=command
+        )
+        assert replay.accepted == result.accepted
+    branches = (await session.scalars(select(ExperimentBranch))).all()
+    assert len(branches) == 2
+    assert all(branch.status == "draft" for branch in branches)
+    assert len({branch.idempotency_key for branch in branches}) == 2
+    assert shot.formal_video_artifact_id is None

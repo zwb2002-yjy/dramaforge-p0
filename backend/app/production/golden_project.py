@@ -30,10 +30,9 @@ from app.editing.timeline_builder import build_edit_session_from_shots
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.production.formal_selection import set_formal_keyframe, set_formal_video
 from app.production.models import (
+    ExperimentBranch,
     GraphVersion,
-    ProductionExperiment,
     ProductionGraph,
-    ShotExperiment,
     ShotReferenceBinding,
     definition_hash,
 )
@@ -87,7 +86,7 @@ class GoldenProject:
     scene_assets: list[Asset] = field(default_factory=list)
     keyframe: Artifact | None = None
     video: Artifact | None = None
-    experiment: ProductionExperiment | None = None
+    experiment: ExperimentBranch | None = None
     open_annotation: ReviewAnnotation | None = None
     resolved_annotation: ReviewAnnotation | None = None
     repair_suggested: str | None = None
@@ -381,9 +380,10 @@ async def seed_golden_project(session: AsyncSession, *, suffix: str) -> GoldenPr
     shot_one.director_state = {"camera": {"summary": "static medium"}, "characters": []}
     await session.flush()
 
-    # Experiment branch.
-    experiment = ProductionExperiment(
+    # Canonical experiment branch.
+    experiment = ExperimentBranch(
         project_id=project.id,
+        source_shot_id=shot_one.id,
         name="Golden model swap",
         idempotency_key=f"golden-exp-{suffix}",
         status="draft",
@@ -391,17 +391,6 @@ async def seed_golden_project(session: AsyncSession, *, suffix: str) -> GoldenPr
     )
     session.add(experiment)
     await session.flush()
-    session.add(
-        ShotExperiment(
-            production_experiment_id=experiment.id,
-            project_id=project.id,
-            shot_id=shot_one.id,
-            prompts={},
-            created_by=user.id,
-        )
-    )
-    await session.flush()
-
     # Review + repair: open video-range annotation drives a repair plan; a
     # resolved annotation records the fix outcome.
     open_annotation = ReviewAnnotation(

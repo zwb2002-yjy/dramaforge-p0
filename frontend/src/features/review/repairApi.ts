@@ -38,14 +38,14 @@ export const REPAIR_STEP_ACTION_LABEL: Record<string, string> = {
   closed: "修复已结束",
 };
 
-/** Chinese label for one staged step, or the raw stage when it is unknown. */
+/** Chinese label for one staged step; an unknown stored stage is not printed raw. */
 export function repairStageLabel(stage: string): string {
-  return REPAIR_STAGE_LABEL[stage] ?? stage;
+  return REPAIR_STAGE_LABEL[stage] ?? "修复环节待同步";
 }
 
 /** What the user should do next for one step. */
 export function repairStepActionLabel(nextAction: string): string {
-  return REPAIR_STEP_ACTION_LABEL[nextAction] ?? nextAction;
+  return REPAIR_STEP_ACTION_LABEL[nextAction] ?? "按修复计划继续";
 }
 
 /**
@@ -58,7 +58,10 @@ export function repairIsWaitingForHuman(request: RepairRequestRead): boolean {
 }
 
 export function fetchRepairPlan(projectId: string, shotId: string): Promise<RepairPlanRead> {
-  return apiGet<RepairPlanRead>(`/api/v1/projects/${projectId}/shots/${shotId}/repair-plan`);
+  return apiSend<RepairPlanRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/shots/${shotId}/repair-plan`,
+  );
 }
 
 export function listRepairs(projectId: string, shotId: string): Promise<RepairRequestRead[]> {

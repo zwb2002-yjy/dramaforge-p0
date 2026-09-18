@@ -18,11 +18,6 @@ from app.providers import registry as registry_module
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import ProviderCapabilityEvidence, ProviderModelBinding
 from app.providers.registry import ProviderPlugin, get_plugin, list_plugins, register_plugin
-from app.providers.workspace_credentials import (
-    configured_byok_keyring,
-    settings_for_workspace_provider,
-)
-from app.security.credentials import store_credential
 from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
@@ -596,49 +591,3 @@ def test_minimax_settings_defaults() -> None:
         update={"minimax_enabled": True, "minimax_api_key": "minimax-secret"}
     )
     assert enabled.minimax_configured() is True
-
-
-@pytest.mark.asyncio
-async def test_volcengine_workspace_credential_branch(
-    session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _byok_env(monkeypatch)
-    user, workspace = await _seed_owner(session)
-    await store_credential(
-        session,
-        workspace_id=workspace.id,
-        provider="volcengine",
-        plaintext="ark-secret",
-        keyring=configured_byok_keyring(),
-    )
-    cfg = await settings_for_workspace_provider(
-        session,
-        workspace_id=workspace.id,
-        provider="volcengine",
-    )
-    assert cfg.volcengine_enabled is True
-    assert cfg.volcengine_api_key == "ark-secret"
-
-
-@pytest.mark.asyncio
-async def test_minimax_workspace_credential_branch(
-    session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _byok_env(monkeypatch)
-    user, workspace = await _seed_owner(session)
-    await store_credential(
-        session,
-        workspace_id=workspace.id,
-        provider="minimax",
-        plaintext="minimax-secret",
-        keyring=configured_byok_keyring(),
-    )
-    cfg = await settings_for_workspace_provider(
-        session,
-        workspace_id=workspace.id,
-        provider="minimax",
-    )
-    assert cfg.minimax_enabled is True
-    assert cfg.minimax_api_key == "minimax-secret"

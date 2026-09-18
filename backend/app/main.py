@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -16,14 +17,26 @@ from app import __version__
 from app.api.errors import register_exception_handlers
 from app.api.v1.router import api_router
 from app.config import Settings, get_settings
+from app.events.sse import RedisSseBridge
 from app.shared.db import get_session
 from app.shared.observability import REQUESTS_TOTAL, metrics_payload
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    # BOOT-0: no DB/Redis startup required for /health.
-    yield
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # BOOT-0: /health remains usable without DB/Redis, while production facts
+    # are bridged into this API process when Redis is available.
+    cfg = getattr(app.state, "settings", get_settings())
+    bridge = None if cfg.app_env == "test" else RedisSseBridge(cfg.redis_url)
+    bridge_task = asyncio.create_task(bridge.run_forever()) if bridge else None
+    try:
+        yield
+    finally:
+        if bridge_task is not None:
+            bridge_task.cancel()
+            await asyncio.gather(bridge_task, return_exceptions=True)
+        if bridge is not None:
+            await bridge.close()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -36,6 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs" if cfg.app_env != "production" else None,
         redoc_url=None,
     )
+    app.state.settings = cfg
 
     app.add_middleware(
         CORSMiddleware,

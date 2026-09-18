@@ -378,14 +378,6 @@ async def get_execution_trace(
     )
 
 
-class RepairExecuteBody(BaseModel):
-    repair_option: Literal["rerun_video", "regenerate_keyframe_then_video"]
-    idempotency_key: str = Field(min_length=1, max_length=160)
-    # Optional: confirm a previously previewed plan. When omitted the legacy
-    # single-shot behaviour is kept for callers that predate staged repairs.
-    plan_hash: str | None = Field(default=None, min_length=64, max_length=64)
-
-
 class RepairExecuteRead(BaseModel):
     node_run_id: UUID
     status: str
@@ -513,66 +505,6 @@ async def execute_repair_step(
     )
     # Read before committing: the repair tables are RLS-scoped per transaction,
     # so a post-commit read starts a fresh scope and finds nothing.
-    state = await service.read_repair(project=project, shot_id=shot_id, repair_id=request.id)
-    await session.commit()
-    return RepairExecuteRead(
-        node_run_id=run.id,
-        status=run.status,
-        repair_option=request.option,
-        repair_id=request.id,
-        step_ordinal=step.ordinal,
-        next_action=state.next_action,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/shots/{shot_id}/repair",
-    response_model=RepairExecuteRead,
-)
-async def execute_repair(
-    project_id: UUID,
-    shot_id: UUID,
-    body: RepairExecuteBody,
-    user: CurrentUser,
-    session: SessionDep,
-    _csrf: CsrfDep,
-) -> RepairExecuteRead:
-    """Execute a V1 repair rerun with an Idempotency-Key (03 §58).
-
-    With ``plan_hash`` this is the staged path: one repair request is created
-    and its first step dispatched, so the follow-up steps stay resumable. The
-    staged path stops before any step that needs a human review decision.
-    """
-    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    service = RepairService(session)
-    if body.plan_hash is None:
-        request, step, run = await service.create_and_execute_first_step(
-            project=project,
-            user=user,
-            shot_id=shot_id,
-            option=body.repair_option,
-            idempotency_key=body.idempotency_key,
-        )
-    else:
-        request = await service.create_repair(
-            project=project,
-            user=user,
-            shot_id=shot_id,
-            option=body.repair_option,
-            plan_hash=body.plan_hash,
-            request_key=body.idempotency_key,
-        )
-        request, step, run = await service.execute_step(
-            project=project,
-            user=user,
-            shot_id=shot_id,
-            repair_id=request.id,
-            idempotency_key=body.idempotency_key,
-        )
-    # Read the step state before committing. The repair tables are RLS-scoped by
-    # `app.current_project_id()`, which is set per transaction, so a read that
-    # starts a new transaction after the commit sees nothing and the whole call
-    # would fail with "repair request not found" after doing its work.
     state = await service.read_repair(project=project, shot_id=shot_id, repair_id=request.id)
     await session.commit()
     return RepairExecuteRead(

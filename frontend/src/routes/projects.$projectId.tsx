@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Outlet, createRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
+import { CreativeAutonomySwitcher } from "../features/project/CreativeAutonomySwitcher";
 import { ProjectWorkspaceShell } from "../components/workstation/ProjectWorkspaceShell";
 import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
 import { ApiError, fetchProject } from "../lib/api";
@@ -70,6 +71,11 @@ function ProjectLayout() {
       projectId={projectId}
       projectName={projectRead?.name ?? (projectId === "demo" ? "演示项目" : "短剧项目")}
       activeView={activeView}
+      creationControls={
+        projectRead?.creative_profile ? (
+          <CreativeAutonomySwitcher key={projectId} project={projectRead} compact />
+        ) : undefined
+      }
     >
       {project.isError && (
         <div className="flash err">

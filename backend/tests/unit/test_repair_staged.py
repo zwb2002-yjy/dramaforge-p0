@@ -224,6 +224,31 @@ async def test_regenerate_stops_before_the_video_step_and_stays_resumable(
     # The step has just been queued, so waiting on the server is the next action;
     # the candidate cannot be reviewed before the run produced it.
     assert state.steps[0].next_action == "wait"
+    assert state.steps[0].result_artifact_id is None
+
+    # Completed candidate B must be readable before any Formal adoption;
+    # it is not the Shot's existing formal A or an adopted-artifact pointer.
+    from app.execution.models import Artifact
+
+    candidate = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="stored",
+        object_key=f"candidate/{uuid4().hex}",
+        content_hash="b" * 64,
+        mime_type="image/png",
+        byte_size=1,
+        produced_by_run_id=run.id,
+    )
+    session.add(candidate)
+    await session.flush()
+    run.result_artifact_id = candidate.id
+    run.status = "completed"
+    await session.flush()
+    state = await service.read_repair(project=project, shot_id=shot.id, repair_id=request.id)
+    assert state.steps[0].result_artifact_id == candidate.id
+    assert state.steps[0].adopted_artifact_id is None
+    assert state.steps[0].result_artifact_id != shot.formal_keyframe_artifact_id
 
     # The review step itself is a human decision, not a media action.
     with pytest.raises(ValidationAppError) as needs_review:

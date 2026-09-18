@@ -4,10 +4,8 @@ import { rootRoute } from "./__root";
 import { validateSettingsReturnTo } from "../lib/navigationPreferences";
 import {
   LazyAccountSettingsPage,
-  LazyDefaultPreferencesSettingsPage,
   LazyModelConnectionSettingsPage,
   LazyProjectSettingsPage,
-  LazyWorkspaceSettingsPage,
 } from "./pages";
 
 export const settingsRoute = createRoute({
@@ -22,7 +20,7 @@ export const settingsRoute = createRoute({
 export const settingsIndexRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/",
-  component: () => <Navigate to="/settings/account" replace />,
+  component: () => <Navigate to="/settings/models" replace />,
 });
 
 export const settingsAccountRoute = createRoute({
@@ -34,7 +32,7 @@ export const settingsAccountRoute = createRoute({
 export const settingsWorkspacesRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/workspaces",
-  component: LazyWorkspaceSettingsPage,
+  component: () => <Navigate to="/" search={{ panel: "workspace" }} replace />,
 });
 
 export const settingsModelsRoute = createRoute({
@@ -46,7 +44,7 @@ export const settingsModelsRoute = createRoute({
 export const settingsDefaultsRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/defaults",
-  component: LazyDefaultPreferencesSettingsPage,
+  component: () => <Navigate to="/" search={{ create: true }} replace />,
 });
 
 export const settingsProjectRoute = createRoute({

@@ -122,7 +122,9 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
+      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:-disabled}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -158,11 +160,6 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
-      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
-      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
-      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
-      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
-      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
@@ -275,6 +272,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -309,6 +307,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -318,7 +317,6 @@ services:
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
       BYOK_KEYRING: ${BYOK_KEYRING:-}
-      WORKER_KIND: default
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
       AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
@@ -341,11 +339,6 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
-      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
-      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
-      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
-      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
-      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
@@ -380,14 +373,18 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
       DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:-disabled}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       DIRECTOR_QUEUE_NAME: ${DIRECTOR_QUEUE_NAME:-dramaforge:director}
       SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       AGNES_ENABLED: "false"
-      TEXT_LLM_ENABLED: "false"
+      # This process must not submit text provider requests.
+      LITELLM_GATEWAY_URL: ""
+      LITELLM_API_KEY: ""
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
@@ -411,6 +408,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -420,7 +418,6 @@ services:
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
       BYOK_KEYRING: ${BYOK_KEYRING:-}
-      WORKER_KIND: heavy
       ARQ_HEAVY_MAX_JOBS: ${ARQ_HEAVY_MAX_JOBS:-4}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
@@ -444,11 +441,6 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
-      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
-      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
-      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
-      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
-      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
+from app.access.models import ProjectCreativeProfile
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Episode, Scene, Shot
@@ -43,9 +44,21 @@ router = APIRouter(
 )
 
 
+class CapabilityCatalogItem(BaseModel):
+    key: str
+    display_name: str
+    description: str
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
 class CapabilityCatalogBody(BaseModel):
     """The resolvable creative capability catalog (read-only)."""
 
+    genres: list[CapabilityCatalogItem] = Field(default_factory=list)
+    styles: list[CapabilityCatalogItem] = Field(default_factory=list)
+    shot_languages: list[CapabilityCatalogItem] = Field(default_factory=list)
+    quality_policies: list[CapabilityCatalogItem] = Field(default_factory=list)
+    skills: list[CapabilityCatalogItem] = Field(default_factory=list)
     available_staged_strategies: list[str] = Field(default_factory=list)
 
 
@@ -88,11 +101,70 @@ async def creative_capability_catalog(
 ) -> CapabilityCatalogBody:
     """Resolvable genre/style/shot-language/quality/skill catalog (read-only)."""
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=_user)
+    return _creative_catalog()
+
+
+@router.get("/creative-capabilities/catalog", response_model=CapabilityCatalogBody)
+async def creation_capability_catalog(_user: CurrentUser) -> CapabilityCatalogBody:
+    """The same read-only choices before a project exists; requires a workspace/session."""
+    return _creative_catalog()
+
+
+def _creative_catalog() -> CapabilityCatalogBody:
     return CapabilityCatalogBody(
+        genres=[
+            CapabilityCatalogItem(
+                key=item.genre_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={"version": item.genre_version},
+            )
+            for item in GENRE_PROFILES
+        ],
+        styles=[
+            CapabilityCatalogItem(
+                key=item.style_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={"version": item.style_version, "medium": item.medium},
+            )
+            for item in STYLE_PACKS
+        ],
+        shot_languages=[
+            CapabilityCatalogItem(
+                key=item.pack_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={"version": item.pack_version},
+            )
+            for item in SHOT_LANGUAGE_PACKS
+        ],
+        quality_policies=[
+            CapabilityCatalogItem(
+                key=item.policy_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={"version": item.version},
+            )
+            for item in QUALITY_POLICIES
+        ],
+        skills=[
+            CapabilityCatalogItem(
+                key=item.skill_key,
+                display_name=item.display_name,
+                description=item.description,
+                metadata={
+                    "version": item.skill_version,
+                    "category": item.category.value,
+                    "applicable_stages": [stage.value for stage in item.applicable_stages],
+                },
+            )
+            for item in _skill_catalog()
+        ],
         available_staged_strategies=[
             "two-pass-i2i-stabilize-v1",
             "lock-a-primary-then-i2i-b",
-        ]
+        ],
     )
 
 
@@ -126,13 +198,23 @@ async def creative_capability_provenance(
         shot = await session.get(Shot, shot_id)
         if shot is None or shot.project_id != project_id:
             raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
-        return CreativeStateResponse(
-            creative_capabilities=_frozen(shot.director_state), target="shot"
-        )
+        if _frozen(shot.director_state):
+            return CreativeStateResponse(
+                creative_capabilities=_frozen(shot.director_state), target="shot"
+            )
+        scene_id = shot.scene_id
     if scene_id is not None:
         scene = await _scene_in_project(session, scene_id=scene_id, project_id=project_id)
+        if _frozen(scene.design_state):
+            return CreativeStateResponse(
+                creative_capabilities=_frozen(scene.design_state), target="scene"
+            )
+        profile = await session.scalar(
+            select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project_id)
+        )
         return CreativeStateResponse(
-            creative_capabilities=_frozen(scene.design_state), target="scene"
+            creative_capabilities=_frozen(profile.strategy_snapshot if profile else None),
+            target="project",
         )
     # Fall back to the first scene of the project as the default target.
     default_scene = await session.scalar(

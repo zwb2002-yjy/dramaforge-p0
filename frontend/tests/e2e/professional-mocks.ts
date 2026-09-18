@@ -707,6 +707,13 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         },
       ]);
     }
+    if (
+      method === "GET" &&
+      (path === "/api/v1/provider-plugins" ||
+        path.endsWith("/provider-connections") ||
+        path.endsWith("/model-profiles"))
+    )
+      return json(route, []);
     if (path === "/api/v1/model-slots") return json(route, []);
     if (path.endsWith("/model-bindings/effective")) return json(route, []);
     if (path.endsWith("/model-profile") && method === "GET") {
@@ -884,8 +891,17 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       if ((await request.headerValue("x-csrf-token")) !== "csrf-e2e") {
         throw new Error("EditSession timeline save must carry the fetched CSRF token");
       }
-      assertExactKeys(body, ["timeline"], "EditSession timeline save body");
+      assertExactKeys(
+        body,
+        ["expected_session_version", "timeline"],
+        "EditSession timeline save body",
+      );
       const timeline = (body as { timeline?: unknown }).timeline;
+      const expectedVersion = (body as { expected_session_version?: unknown })
+        .expected_session_version;
+      if (expectedVersion !== state.editing.session.version) {
+        throw new Error("EditSession timeline save must target the loaded session version");
+      }
       assertExactKeys(timeline, ["clips", "metadata"], "EditSession timeline payload");
       assertNoProductionLineage(body);
       assertExactJson(

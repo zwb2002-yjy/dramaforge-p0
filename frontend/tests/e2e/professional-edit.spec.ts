@@ -33,8 +33,8 @@ test("professional edit: formal manifest → persisted session → proposal-only
 
   // The production monitor consumes the current formal OpenCut v2 contract.
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await expect(page.getByTestId("professional-workbench")).toBeVisible();
-  await expect(page.getByText(/正式镜头 2 个 · 3 条轨道/)).toBeVisible();
+  await expect(page.getByTestId("production-monitor")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "剪辑交接" })).toHaveCount(0);
 
   // No session yet: the edit page is a read-only formal manifest preview.
   await page.goto(`/projects/${PROJECT_ID}/edit`);
@@ -42,9 +42,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
   await expect(page.getByRole("heading", { name: "剪辑交接" })).toBeVisible();
   await expect(page.getByTestId("editing-read-only")).toBeVisible();
   await expect(page.getByRole("heading", { name: "正式时间线" })).toBeVisible();
-  await expect(
-    page.getByText("当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。"),
-  ).toBeVisible();
+  await expect(page.getByText("只读预览已完成的镜头，继续剪辑或新建会话。")).toBeVisible();
   const formalPreviewClip = page.getByTestId("editing-clip").first();
   await expect(formalPreviewClip).toContainText("正式视频 · 0–5 秒 · 片段 1 · 镜头 #1");
   await expect(formalPreviewClip).toContainText("正式素材已交付");
@@ -72,7 +70,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
     body: {},
   });
   expect(state.editing.requests.filter((request) => request.path === MANIFEST_PATH)).toHaveLength(
-    2,
+    1,
   );
 
   // Reorder and duration edits stay local until the explicit save.
@@ -104,7 +102,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
   expect(saveRequests[0]).toEqual({
     method: "PATCH",
     path: `${EDIT_SESSION_PATH}/timeline`,
-    body: { timeline: savedTimeline },
+    body: { timeline: savedTimeline, expected_session_version: 1 },
   });
   expect(saveRequests[0].body).not.toHaveProperty("production_lineage");
   expect(JSON.stringify(saveRequests[0].body)).not.toContain("production_lineage");

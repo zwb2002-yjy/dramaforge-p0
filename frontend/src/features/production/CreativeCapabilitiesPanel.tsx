@@ -1,67 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { Button } from "../../components/ui";
-import { creativeCapabilityLabels } from "../../lib/creativeLabels";
+import "./creative-settings.css";
+import { Button, Checkbox, Disclosure, Field, Select } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
-import { fetchCreativeProvenance, freezeCreativeCapabilities } from "./workflow-api";
-
-const GENRES = [
-  "short_drama_romance_v1",
-  "short_drama_suspense_v1",
-  "short_drama_revenge_v1",
-  "dynamic_comic_v1",
-  "commercial_product_v1",
-  "music_montage_v1",
-];
-
-const STYLES = [
-  "cinematic_realism_v1",
-  "chinese_drama_v1",
-  "film_noir_v1",
-  "hong_kong_urban_v1",
-  "cyberpunk_neon_v1",
-  "chinese_ancient_v1",
-  "anime_clean_v1",
-  "dynamic_comic_v1",
-  "commercial_premium_v1",
-  "documentary_natural_v1",
-];
-
-const SHOT_LANGUAGES = [
-  "dialogue_classic_coverage_v1",
-  "subjective_tension_v1",
-  "handheld_documentary_v1",
-  "action_dynamic_v1",
-  "commercial_product_v1",
-  "montage_rhythmic_v1",
-];
-
-const QUALITY_POLICIES = [
-  "dialogue_identity_quality_v1",
-  "multi_character_quality_v1",
-  "action_motion_quality_v1",
-  "comic_consistency_quality_v1",
-  "commercial_product_quality_v1",
-];
-
-const SKILLS = [
-  "short-drama-hook-v1",
-  "suspense-reversal-v1",
-  "emotional-conflict-v1",
-  "adaptation-compression-v1",
-  "dialogue-scene-direction-v1",
-  "action-scene-direction-v1",
-  "emotional-performance-v1",
-  "montage-direction-v1",
-  "character-consistency-v1",
-  "continuity-guardian-v1",
-];
+import {
+  fetchCreativeCapabilityCatalog,
+  fetchCreativeProvenance,
+  freezeCreativeCapabilities,
+  type CreativeCapabilityCatalogItem,
+} from "./workflow-api";
 
 export type CreativeCapabilitiesPanelProps = {
   projectId: string;
   sceneId?: string | null;
   shotId?: string | null;
+  /** Freeze target. Defaults to the Shot, which is the more specific scope. */
+  scope?: "scene" | "shot";
 };
 
 /** CC10 functional UI: Genre / Style / Shot Language / Quality Policy / Skills.
@@ -69,11 +24,19 @@ export type CreativeCapabilitiesPanelProps = {
  * A user-explicit selection is frozen via POST; nothing is applied silently.
  * Read-only exposure includes both provenance and the compiled effective
  * intent that production will consume. No Provider call is made here.
+ *
+ * The freeze target is exactly one canonical scope. A Scene freeze is the
+ * shared configuration the Scene's Shots inherit; a Shot freeze is the
+ * override for that Shot only. Both scopes write the same frozen provenance
+ * onto existing Scene/Shot state — there is no second capability system — and
+ * the execution plan resolves Project + Scene + Shot into one effective
+ * creative intent when it freezes a run snapshot.
  */
 export function CreativeCapabilitiesPanel({
   projectId,
   sceneId,
   shotId,
+  scope = "shot",
 }: CreativeCapabilitiesPanelProps) {
   const qc = useQueryClient();
   const [genre, setGenre] = useState("");
@@ -83,17 +46,30 @@ export function CreativeCapabilitiesPanel({
   const [skills, setSkills] = useState<string[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const targetId = shotId ?? sceneId ?? null;
+  const targetScope = scope === "scene" ? "scene" : "shot";
+  const targetId = (targetScope === "scene" ? sceneId : shotId) ?? null;
+
+  const catalog = useQuery({
+    queryKey: queryKeys.production.creativeCatalog(projectId),
+    queryFn: () => fetchCreativeCapabilityCatalog(projectId),
+    enabled: Boolean(projectId),
+  });
   const provenance = useQuery({
-    queryKey: queryKeys.production.provenance(projectId, targetId),
+    queryKey: queryKeys.production.provenance(projectId, targetId, targetScope),
     queryFn: () =>
-      fetchCreativeProvenance(projectId, {
-        shot_id: shotId ?? undefined,
-        scene_id: sceneId ?? undefined,
-      }),
+      fetchCreativeProvenance(
+        projectId,
+        targetScope === "scene"
+          ? { scene_id: sceneId ?? undefined }
+          : { shot_id: shotId ?? undefined },
+      ),
     enabled: Boolean(projectId) && Boolean(targetId),
   });
   const prov = provenance.data?.creative_capabilities ?? {};
+  // A Scene freeze is inherited by its Shots; showing where the displayed
+  // value comes from keeps the two scopes distinguishable to the user.
+  const inheritedFromScene = targetScope === "shot" && provenance.data?.target === "scene";
+  const inheritedFromProject = provenance.data?.target === "project";
   // The provenance payload is an open record; these are the parts the panel
   // renders as readable labels before the raw record.
   const summary = prov as {
@@ -103,6 +79,25 @@ export function CreativeCapabilitiesPanel({
     quality_policy?: { key?: string };
     skill_guidance?: Array<{ skill_key: string; strategy?: string }>;
   };
+  const capabilityLabel = (items: CreativeCapabilityCatalogItem[] | undefined, key: string) =>
+    items?.find((item) => item.key === key)?.display_name ?? key.replace(/[_-]+/g, " ");
+
+  // Seed the draft from what is already frozen for this exact scope so the
+  // Owner edits the current configuration instead of an empty form. Selecting
+  // a value is never implied by the read: the freeze stays an explicit action.
+  const frozenGenre = summary.genre?.key ?? "";
+  const frozenStyle = summary.style?.key ?? "";
+  const frozenShotLanguage = summary.shot_language?.key ?? "";
+  const frozenQuality = summary.quality_policy?.key ?? "";
+  const frozenSkills = (summary.skill_guidance ?? []).map((entry) => entry.skill_key).join(",");
+  useEffect(() => {
+    setGenre(frozenGenre);
+    setStyle(frozenStyle);
+    setShotLanguage(frozenShotLanguage);
+    setQuality(frozenQuality);
+    setSkills(frozenSkills ? frozenSkills.split(",") : []);
+    // Draft state follows the canonical frozen value, never local-only input.
+  }, [targetId, frozenGenre, frozenStyle, frozenShotLanguage, frozenQuality, frozenSkills]);
 
   const freeze = useMutation({
     mutationFn: () =>
@@ -112,18 +107,20 @@ export function CreativeCapabilitiesPanel({
         shot_language_key: shotLanguage || undefined,
         quality_policy_key: quality || undefined,
         skill_keys: skills,
-        shot_id: shotId ?? undefined,
-        // Freeze and read must address the same canonical target.  When the
-        // production page has a selected Shot it also knows its parent Scene;
-        // sending both made the backend freeze the Scene while this panel read
-        // the Shot provenance.
-        scene_id: shotId ? undefined : (sceneId ?? undefined),
+        // Freeze and read must address the same canonical target.  A Scene
+        // freeze is the shared configuration its Shots inherit; a Shot freeze
+        // is that Shot's override.  Exactly one target is ever sent.
+        ...(targetScope === "scene"
+          ? { scene_id: sceneId ?? undefined }
+          : { shot_id: shotId ?? undefined }),
       }),
     onSuccess: () => {
-      setMsg("已冻结有效创作意图与来源说明。");
-      void qc.invalidateQueries({ queryKey: queryKeys.production.provenance(projectId, targetId) });
+      setMsg("设置已保存，后续生成时生效。");
+      void qc.invalidateQueries({
+        queryKey: queryKeys.production.provenance(projectId, targetId, targetScope),
+      });
     },
-    onError: (e: Error) => setMsg(`冻结失败：${e.message}`),
+    onError: (e: Error) => setMsg(`保存失败：${e.message}`),
   });
 
   function toggleSkill(key: string) {
@@ -136,123 +133,153 @@ export function CreativeCapabilitiesPanel({
     <div className="creative-capabilities-panel" data-testid="creative-capabilities-panel">
       <header className="panel-header">
         <div>
-          <h3>创意能力选择</h3>
+          <h3>局部创作设置</h3>
         </div>
-        <span className="fact-source-badge">人工指定</span>
+        <span className="fact-source-badge" data-testid="creative-capability-scope">
+          {targetScope === "scene" ? "场景配置（镜头继承）" : "当前镜头配置"}
+        </span>
       </header>
 
       <div className="creative-capability-form">
-        <label>
+        <Field>
           创作类型
-          <select aria-label="创作类型" value={genre} onChange={(e) => setGenre(e.target.value)}>
+          <Select aria-label="创作类型" value={genre} onChange={(e) => setGenre(e.target.value)}>
             <option value="">默认</option>
-            {GENRES.map((g) => (
-              <option key={g} value={g}>
-                {creativeCapabilityLabels.genre(g)}
+            {(catalog.data?.genres ?? []).map((item) => (
+              <option key={item.key} value={item.key} title={item.description}>
+                {item.display_name}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </Select>
+        </Field>
+        <Field>
           风格
-          <select aria-label="风格" value={style} onChange={(e) => setStyle(e.target.value)}>
+          <Select aria-label="风格" value={style} onChange={(e) => setStyle(e.target.value)}>
             <option value="">默认</option>
-            {STYLES.map((s) => (
-              <option key={s} value={s}>
-                {creativeCapabilityLabels.style(s)}
+            {(catalog.data?.styles ?? []).map((item) => (
+              <option key={item.key} value={item.key} title={item.description}>
+                {item.display_name}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
-          镜头语言
-          <select
-            aria-label="镜头语言"
-            value={shotLanguage}
-            onChange={(e) => setShotLanguage(e.target.value)}
-          >
-            <option value="">默认</option>
-            {SHOT_LANGUAGES.map((s) => (
-              <option key={s} value={s}>
-                {creativeCapabilityLabels.shotLanguage(s)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          质量策略
-          <select
-            aria-label="质量策略"
-            value={quality}
-            onChange={(e) => setQuality(e.target.value)}
-          >
-            <option value="">默认</option>
-            {QUALITY_POLICIES.map((q) => (
-              <option key={q} value={q}>
-                {creativeCapabilityLabels.qualityPolicy(q)}
-              </option>
-            ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
+        <Disclosure title="更多生成设置">
+          <Field>
+            镜头语言
+            <Select
+              aria-label="镜头语言"
+              value={shotLanguage}
+              onChange={(e) => setShotLanguage(e.target.value)}
+            >
+              <option value="">默认</option>
+              {(catalog.data?.shot_languages ?? []).map((item) => (
+                <option key={item.key} value={item.key} title={item.description}>
+                  {item.display_name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field>
+            质量策略
+            <Select
+              aria-label="质量策略"
+              value={quality}
+              onChange={(e) => setQuality(e.target.value)}
+            >
+              <option value="">默认</option>
+              {(catalog.data?.quality_policies ?? []).map((item) => (
+                <option key={item.key} value={item.key} title={item.description}>
+                  {item.display_name}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-        <div className="creative-skill-list">
-          <small>启用的创作技能</small>
-          {SKILLS.map((key) => (
-            <label key={key} className="creative-skill-toggle">
-              <input
-                type="checkbox"
-                checked={skills.includes(key)}
-                onChange={() => toggleSkill(key)}
-              />
-              <span>{creativeCapabilityLabels.skill(key)}</span>
-            </label>
-          ))}
-        </div>
-
+          <div className="creative-skill-list">
+            <small>启用的创作技能</small>
+            {(catalog.data?.skills ?? []).map((item) => (
+              <Field key={item.key} className="creative-skill-toggle" title={item.description}>
+                <Checkbox
+                  type="checkbox"
+                  checked={skills.includes(item.key)}
+                  onChange={() => toggleSkill(item.key)}
+                />
+                <span>{item.display_name}</span>
+              </Field>
+            ))}
+          </div>
+        </Disclosure>
         <Button
           tone="primary"
           onClick={() => freeze.mutate()}
-          disabled={freeze.isPending || !targetId}
+          disabled={
+            freeze.isPending ||
+            !targetId ||
+            !catalog.data ||
+            provenance.isPending ||
+            provenance.isError
+          }
         >
-          {freeze.isPending ? "冻结中…" : "冻结创意能力"}
+          {freeze.isPending ? "保存中…" : "保存局部设置"}
         </Button>
         {msg && (
           <div className="canvas-save-message" role="status">
             {msg}
           </div>
         )}
+        {provenance.isError && (
+          <p role="alert">
+            无法读取当前设置，请重试后再保存。
+            <Button onClick={() => void provenance.refetch()}>重试</Button>
+          </p>
+        )}
+        {catalog.isError && (
+          <div className="flash err" role="alert">
+            无法加载创意能力目录：{String(catalog.error)}
+          </div>
+        )}
       </div>
 
       {prov && Object.keys(prov).length > 0 && (
-        <div className="creative-provenance" data-testid="creative-provenance">
-          <small>当前冻结的创作意图</small>
+        <Disclosure title="已保存的设置" testId="creative-provenance">
+          <small>
+            {inheritedFromProject
+              ? "沿用项目设置"
+              : inheritedFromScene
+                ? "沿用场景设置"
+                : "当前设置"}
+          </small>
           <ul data-testid="creative-provenance-summary" className="creative-provenance-summary">
             {summary.genre?.key && (
-              <li>创作类型：{creativeCapabilityLabels.genre(summary.genre.key)}</li>
+              <li>创作类型：{capabilityLabel(catalog.data?.genres, summary.genre.key)}</li>
             )}
             {summary.style?.key && (
-              <li>风格：{creativeCapabilityLabels.style(summary.style.key)}</li>
+              <li>风格：{capabilityLabel(catalog.data?.styles, summary.style.key)}</li>
             )}
             {summary.shot_language?.key && (
-              <li>镜头语言：{creativeCapabilityLabels.shotLanguage(summary.shot_language.key)}</li>
+              <li>
+                镜头语言：
+                {capabilityLabel(catalog.data?.shot_languages, summary.shot_language.key)}
+              </li>
             )}
             {summary.quality_policy?.key && (
               <li>
-                质量策略：{creativeCapabilityLabels.qualityPolicy(summary.quality_policy.key)}
+                质量策略：
+                {capabilityLabel(catalog.data?.quality_policies, summary.quality_policy.key)}
               </li>
             )}
             {summary.skill_guidance?.map((entry) => (
               <li key={entry.skill_key}>
-                {creativeCapabilityLabels.skill(entry.skill_key)}
+                {capabilityLabel(catalog.data?.skills, entry.skill_key)}
                 {entry.strategy ? `：${entry.strategy}` : ""}
               </li>
             ))}
           </ul>
           <details className="creative-provenance-raw">
-            <summary>查看冻结的原始记录</summary>
+            <summary>技术记录</summary>
             <pre>{JSON.stringify(prov, null, 2)}</pre>
           </details>
-        </div>
+        </Disclosure>
       )}
     </div>
   );

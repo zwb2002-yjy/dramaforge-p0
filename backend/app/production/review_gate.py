@@ -67,6 +67,35 @@ def review_request_hash(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def judgement_fingerprint(
+    *,
+    artifact_id: UUID,
+    review_kind: str,
+    decision: str,
+    reason: str,
+) -> str:
+    """The judgement a person expressed, independent of when they expressed it.
+
+    ``review_request_hash`` additionally binds the review run and the Shot
+    version, so it changes when the Shot moves on (for example after a Formal
+    selection) even though the person's verdict and words are unchanged.  That
+    makes it the wrong key for deciding whether a submission is a new decision.
+    """
+
+    canonical = json.dumps(
+        {
+            "artifact_id": str(artifact_id),
+            "review_kind": review_kind,
+            "decision": decision,
+            "reason": reason,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def subject_fingerprint(
     *,
     artifact_id: UUID,
@@ -394,6 +423,27 @@ async def record_human_decision(
             )
         return existing
 
+    # Key-only idempotency is not enough for this operation: the reviewer panel
+    # mints a fresh key per page load, so pressing the same button again after a
+    # reload would append a byte-identical second decision.  The same judgement
+    # on the same Artifact is one decision; the stored row is returned instead.
+    # A changed verdict or reason still appends (superseding) as before.
+    latest = await _latest_decision(
+        session, project_id=project_id, artifact_id=artifact_id, review_kind=review_kind
+    )
+    if latest is not None and judgement_fingerprint(
+        artifact_id=artifact_id,
+        review_kind=review_kind,
+        decision=decision,
+        reason=reason.strip(),
+    ) == judgement_fingerprint(
+        artifact_id=latest.artifact_id,
+        review_kind=latest.review_kind,
+        decision=latest.decision,
+        reason=latest.reason,
+    ):
+        return latest
+
     artifact = await session.get(Artifact, artifact_id)
     if artifact is None or artifact.project_id != project_id:
         raise ValidationAppError(
@@ -403,6 +453,22 @@ async def record_human_decision(
     if review_run is None or review_run.project_id != project_id:
         raise ValidationAppError(
             "review run not found in project", details={"code": "REVIEW_RUN_NOT_FOUND"}
+        )
+    # New review snapshots carry their exact target. Reject an explicit
+    # mismatch, while retaining compatibility with historical evidence rows
+    # that predate target fields and can only be bound by the stored decision.
+    snapshot = dict(review_run.input_snapshot or {})
+    snapshot_shot_id = snapshot.get("shot_id")
+    snapshot_artifact_id = snapshot.get("upstream_artifact_id") or snapshot.get(
+        "source_artifact_id"
+    )
+    if (
+        (snapshot_shot_id is not None and str(snapshot_shot_id) != str(shot_id))
+        or (snapshot_artifact_id is not None and str(snapshot_artifact_id) != str(artifact_id))
+    ):
+        raise ValidationAppError(
+            "review target does not belong to this shot and Artifact",
+            details={"code": "REVIEW_TARGET_MISMATCH"},
         )
     if review_run.result_artifact_id is None:
         raise ValidationAppError(
@@ -454,6 +520,7 @@ __all__ = [
     "ReviewRequirement",
     "StageAdmission",
     "evaluate_artifact_admission",
+    "judgement_fingerprint",
     "record_human_decision",
     "review_request_hash",
     "subject_fingerprint",

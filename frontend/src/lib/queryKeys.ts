@@ -71,8 +71,12 @@ export const queryKeys = {
   production: {
     snapshot: (projectId: string) => ["snapshot", projectId] as const,
     workflowOverview: (projectId: string) => ["workflow-overview", projectId] as const,
-    provenance: (projectId: string, targetId: string | null | undefined) =>
-      ["creative-provenance", projectId, targetId] as const,
+    provenance: (
+      projectId: string,
+      targetId: string | null | undefined,
+      scope: "scene" | "shot" = "shot",
+    ) => ["creative-provenance", projectId, scope, targetId] as const,
+    creativeCatalog: (projectId: string) => ["creative-capability-catalog", projectId] as const,
     opencutManifest: (projectId: string) => ["opencut-manifest", projectId] as const,
     canvasRevisions: (projectId: string, shotId: string | null | undefined) =>
       ["canvas-revisions", projectId, shotId] as const,
@@ -121,8 +125,14 @@ export const queryKeys = {
   model: {
     catalog: () => ["models"] as const,
     slots: () => ["model-slots"] as const,
+    workspaceProfiles: (workspaceId: string | null) =>
+      ["workspace-model-profiles", workspaceId] as const,
+    workspaceProfile: (workspaceId: string | null, profileId: string | null) =>
+      ["workspace-model-profile", workspaceId, profileId] as const,
     effectiveBindings: (projectId: string) => ["model-bindings-effective", projectId] as const,
     projectProfile: (projectId: string) => ["project-model-profile", projectId] as const,
+    candidates: (projectId: string, operation: string) =>
+      ["model-candidates", projectId, operation] as const,
   },
 
   provider: {
@@ -136,5 +146,8 @@ export const queryKeys = {
       ["provider-bindings", workspaceId, connectionId] as const,
     /** Bare prefix: invalidate bindings for every connection of a workspace. */
     bindingsRoot: (workspaceId: string | null) => ["provider-bindings", workspaceId] as const,
+    /** Read-only project → purpose → model binding view (#9). */
+    projectBindings: (projectId: string | null) =>
+      ["project-provider-bindings", projectId] as const,
   },
 } as const;

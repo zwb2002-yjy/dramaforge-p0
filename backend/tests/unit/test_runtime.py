@@ -9,7 +9,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from app.config import Settings
-from app.execution.product_path import _unknown_submission_error_summary
+from app.execution.provider_execution import _unknown_submission_error_summary
 from app.providers.agnes import AgnesRuntime
 from app.providers.runtime import (
     CompiledImageRequest,

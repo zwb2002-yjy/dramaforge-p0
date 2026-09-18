@@ -38,6 +38,10 @@ const WAIT_LABEL: Record<string, string> = {
   formal_confirmation: "生产完成，等待确认正式候选",
   production_review: "生产完成，等待审阅",
   execution_in_progress: "生产仍在进行",
+  // Reasons the Director runtime records when it cannot continue on the facts it
+  // was given. Stored keys stay the contract; the surface explains the state.
+  context_changed: "镜头或场景事实已变化，等待重新对齐",
+  proposal_invalid: "建议已失效，等待重新生成",
   execution_failed: "生产失败，等待处理",
   formal_selected: "正式候选已确认",
   candidate_rejected: "候选未设为正式版本",
@@ -46,6 +50,9 @@ const WAIT_LABEL: Record<string, string> = {
   autonomy_changed: "导演模式已变化",
   context_rejected: "相同建议上下文已被拒绝",
   user_rejected: "建议已拒绝",
+  // The runtime stops a turn when it reaches its step budget; the product says
+  // so in creative language instead of naming the internal limit.
+  step_limit_reached: "本轮协作步数已用完，等待你确认后继续",
 };
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -75,6 +82,43 @@ function focusedSuggestion(turn: DirectorTurnRead): string | null {
     if (typeof value === "string" && value.trim()) return value;
   }
   return null;
+}
+
+/**
+ * Creative label for a runtime checkpoint action.
+ *
+ * The stored action key is an internal state name; the ordinary surface names
+ * the creative step and keeps the key out of the product language.
+ */
+const NEXT_ACTION_LABEL: Record<string, string> = {
+  review_production_result: "审阅生成结果",
+  confirm_formal_candidate: "确认正式版本",
+  apply_proposal: "采纳建议",
+  save_shot_design: "保存镜头设计",
+  resolve_recovery: "处理失败任务",
+  provide_input: "补充创作说明",
+  wait_for_production: "等待生产完成",
+};
+
+function nextActionLabel(value: unknown): string {
+  const key = typeof value === "string" ? value : "";
+  if (!key) return "—";
+  return NEXT_ACTION_LABEL[key] ?? "按建议继续下一步";
+}
+
+/**
+ * Product wording for a stopped Director turn.
+ *
+ * The runtime message is English and names internal reasons; the surface states
+ * what happened and what to do, and keeps the raw message in the diagnostics
+ * block the panel already provides.
+ */
+function stopSummary(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  if (raw.includes("step_limit_reached")) return "本轮导演协作步数已用完，确认后可继续。";
+  if (raw.toLowerCase().includes("cancel")) return "导演协作已停止。";
+  if (raw.toLowerCase().includes("timeout")) return "导演协作超时，可重新发起。";
+  return "导演协作未能完成，可在诊断详情中查看原因。";
 }
 
 export function DirectorTurnStatus({
@@ -112,7 +156,7 @@ export function DirectorTurnStatus({
                 : loading && !latest
                   ? "正在同步"
                   : latest
-                    ? (STATUS_LABEL[latest.status] ?? latest.status)
+                    ? (STATUS_LABEL[latest.status] ?? "状态待同步")
                     : "导演在这里"
         }
       />
@@ -138,7 +182,7 @@ export function DirectorTurnStatus({
             <dd data-testid="director-current-understanding">{understanding(latest)}</dd>
             <dt>等待原因</dt>
             <dd data-testid="director-wait-reason">
-              {WAIT_LABEL[latest.wait_reason ?? ""] ?? latest.wait_reason ?? "—"}
+              {WAIT_LABEL[latest.wait_reason ?? ""] ?? "等待导演继续"}
             </dd>
             {focusedSuggestion(latest) ? (
               <>
@@ -150,20 +194,33 @@ export function DirectorTurnStatus({
               <>
                 <dt>下一确认点</dt>
                 <dd data-testid="director-next-action">
-                  {String(currentAction(latest)?.action ?? "—")} ·{" "}
-                  {String(currentAction(latest)?.reason ?? "")}
+                  {nextActionLabel(currentAction(latest)?.action)}
                 </dd>
               </>
             ) : null}
           </dl>
-          <details className="rs-memory-detail">
-            <summary>本次协作记录</summary>
+          <details className="rs-memory-detail" data-testid="director-turn-diagnostics">
+            <summary>开发 / 诊断详情（只读）</summary>
             <p>
               #{latest.id.slice(0, 8)} · {latest.step_count} 步 · revision{" "}
               {latest.runtime_revision ?? latest.revision}
             </p>
+            <p>
+              状态 {latest.status}
+              {latest.wait_reason ? ` · 等待原因 ${latest.wait_reason}` : ""}
+            </p>
           </details>
-          {latest.last_error ? <p role="alert">{latest.last_error}</p> : null}
+          {latest.last_error ? (
+            <>
+              <p role="alert" data-testid="director-stop-summary">
+                {stopSummary(latest.last_error)}
+              </p>
+              <details className="rs-memory-detail">
+                <summary>开发 / 诊断详情（只读）</summary>
+                <p>{latest.last_error}</p>
+              </details>
+            </>
+          ) : null}
           <div className="qc-shot-director-suggestion-actions">
             {latest.status === "awaiting_user" || latest.status === "awaiting_execution" ? (
               <button

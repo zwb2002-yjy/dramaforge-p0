@@ -20,9 +20,7 @@ from app.shared.db import set_rls_context
 from app.shared.enums import ProjectStage
 from app.shared.errors import ConflictError, NotFoundError
 
-router = APIRouter(
-    tags=["projects"], dependencies=[Depends(require_selected_workspace)]
-)
+router = APIRouter(tags=["projects"], dependencies=[Depends(require_selected_workspace)])
 
 router.include_router(_workbench.router)
 
@@ -36,6 +34,8 @@ class ProjectCreate(BaseModel):
     template_key: str | None = Field(default=None, max_length=80)
     template_version: str | None = Field(default=None, max_length=40)
     director_autonomy: Literal["AUTO", "ASSIST", "MANUAL"] = "ASSIST"
+    genre_key: str | None = Field(default=None, max_length=80)
+    style_key: str | None = Field(default=None, max_length=80)
 
 
 class ProjectCreativeProfileRead(BaseModel):
@@ -121,9 +121,7 @@ async def _profile_for_project(
     project_id: UUID,
 ) -> ProjectCreativeProfile:
     profile = await session.scalar(
-        select(ProjectCreativeProfile).where(
-            ProjectCreativeProfile.project_id == project_id
-        )
+        select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project_id)
     )
     if profile is None:
         raise NotFoundError("project creative profile not found")
@@ -147,6 +145,8 @@ async def create_project(
         template_key=body.template_key,
         template_version=body.template_version,
         director_autonomy=body.director_autonomy,
+        genre_key=body.genre_key,
+        style_key=body.style_key,
     )
     await session.commit()
     # ``SET LOCAL`` RLS context is cleared by commit.  Re-apply the new
@@ -191,9 +191,7 @@ async def get_project(
     user: CurrentUser,
     session: SessionDep,
 ) -> ProjectRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     profile = await _profile_for_project(session, project.id)
     return _project_read(project, profile)
 
@@ -209,9 +207,7 @@ async def update_project_creative_profile(
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> ProjectCreativeProfileRead:
-    await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     profile = await session.scalar(
         select(ProjectCreativeProfile)
         .where(ProjectCreativeProfile.project_id == project_id)

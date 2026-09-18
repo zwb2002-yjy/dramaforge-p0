@@ -471,6 +471,7 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 project_id=project.id,
                 session_id=edit.id,
                 timeline={"clips": clips, "metadata": {"manual": True}},
+                expected_session_version=edit.version,
             )
             assert edit.version == 2 and edit.production_lineage == lineage_before
             source_operation_ids = set((await session.scalars(select(ProviderOperation.id).where(
@@ -550,6 +551,7 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 project_id=project.id,
                 session_id=edit.id,
                 timeline={"clips": clips, "metadata": {"manual": True, "revision": 2}},
+                expected_session_version=edit.version,
             )
             await session.commit()
             second = await _render_final(

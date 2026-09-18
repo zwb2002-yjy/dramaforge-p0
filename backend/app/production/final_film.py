@@ -759,7 +759,11 @@ async def _final_film_read(
         or subtitle_artifact.project_id != export.project_id
         or subtitle_artifact.storage_state != "available"
         or subtitle_artifact.deleted_at is not None
-        or subtitle_artifact.produced_by_run_id != run_id
+        # Rendering the same frozen timeline twice produces identical bytes on
+        # purpose, so a re-export reuses the earlier run's Artifact. Requiring
+        # this run to own the bytes dropped the newest export out of history;
+        # the declared content hash is what actually proves the linkage, and it
+        # still fails closed when the Artifact carries different bytes.
         or subtitle_artifact.content_hash != manifest.get("subtitle_content_hash")
     ):
         raise ValidationAppError(

@@ -27,7 +27,8 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 
 - `DIRECTOR_RUNTIME_ENGINE` 选择**新启动**轮次的引擎，默认 `legacy`；
   `langgraph` 只在硬门满足时分配给新轮次。选择一个引擎绝不静默运行另一个。
-- `langgraph` 需要 `DIRECTOR_CHECKPOINT_DATABASE_URL`（只给 worker-director），
+- `langgraph` 需要 `DIRECTOR_CHECKPOINT_DATABASE_URL`（API 与 worker-director
+  均接收，用于能力报告与实际执行），
   使用私有 `director_runtime_checkpoints` schema（迁移 `20260910_0066`，
   角色 `dramaforge_director_checkpoint`，对 `PUBLIC` / `dramaforge_app` REVOKE，
   不进应用 model registry）。
@@ -96,3 +97,28 @@ Schema 修复上限、总时限、无进展阈值、每次唤醒最多提交 1 �
 - 唤醒重放由 `wakeup_replay.py` 与 worker 启动恢复承担。
 - Assistant 边界：Shot 建议为非持久响应；editing 建议持久化
   DirectorProposal/DirectorProposalItem 并只能经 typed command registry 应用。
+
+## Proposal 创建与应用分工
+
+`director/proposal_creation.py` 只统一 DirectorProposal 父子行的持久创建：
+thread/project 归属、先父后子的 flush、输入项顺序、默认状态及 expected version。
+Story、Editing suggestion / repair、已授权 delegation 共用此处；领域 payload 和
+Story 的 `sort_order` 仍由 feature 构造，创建层不 commit、不执行 command。
+delegation 的 applied/accepted 记录必须在原有显式授权校验之后创建。
+
+这不是统一所有叫 Proposal 的实体：资产域 `ShotChangeProposal` 保留独立语义。
+Apply 的部分成功、幂等持久 item identity、Save/Formal/Export 用户门均未迁入创建层。
+
+## 实验提案与唯一分支
+
+Director 的 experiment.create / shot.set_model_override 在用户 Apply
+后调用与 HTTP 相同的 ExperimentBranch 创建服务，只创建 draft，不排队执行、
+不改写 Shot 的 Formal 或模型绑定。每条命令明确一个 source_shot_id；旧单 Shot
+payload 可规范化，含糊的多 Shot / 多模型覆盖拒绝，不静默选择一个。
+Director 幂等键由持久 proposal-item 身份提供，不信任模型自选键；同一项重试复用
+分支，不同项即使内容相同也可新建。HTTP 仍要求显式 idempotency_key。
+相同键不同创建输入冲突，已开始/已决定的分支重放不重置状态。
+Assistant context 只读取当前 Shot 的 ExperimentBranch，返回 experiment_id、
+selected_model 与参数；后续 start / decision 仍通过现有显式用户 Gate。
+ProductionExperiment / ShotExperiment 只保留历史存储，不再创建、采用或作为
+Assistant 当前事实；旧 Phase 5 服务测试由当前分支回归测试替代。

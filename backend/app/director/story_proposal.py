@@ -22,6 +22,7 @@ from app.access.models import User
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.assets.script_import import ParsedScript, parse_script_markdown
 from app.director.assistant_models import DirectorMessage, DirectorThread
+from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.shared.errors import ValidationAppError
 
@@ -502,41 +503,29 @@ async def create_story_proposal(
                 created_by=actor.id,
             )
         )
-    proposal = DirectorProposal(
-        project_id=project_id,
-        thread_id=thread.id,
+    proposal, items = await create_proposal(
+        session,
+        thread=thread,
         scope_type="project",
         scope_entity_id=project_id,
-        status="pending",
         created_by=actor.id,
+        items=[
+            ProposalItemDraft(
+                command=op.command,
+                payload={**op.payload, "key": op.key, "sort_order": sort_order},
+                expected_target_version=op.expected_target_version,
+                rationale=op.rationale or "",
+                benefit="按脚本草稿结构更新 Canonical Story",
+                cost="仅修改被用户接受的 Scene/Shot/Episode 结构",
+                risk=(
+                    "结构变化可能影响已绑定的镜头与制作事实；"
+                    "删除带正式媒体/执行记录的 Shot 会 fail closed"
+                ),
+                impact=op.key,
+            )
+            for sort_order, op in enumerate(operation_inputs)
+        ],
     )
-    session.add(proposal)
-    await session.flush()
-
-    items: list[DirectorProposalItem] = []
-    for sort_order, op in enumerate(operation_inputs):
-        payload = dict(op.payload)
-        payload["key"] = op.key
-        payload["sort_order"] = sort_order
-        item = DirectorProposalItem(
-            proposal_id=proposal.id,
-            project_id=project_id,
-            command=op.command,
-            payload=payload,
-            expected_target_version=op.expected_target_version,
-            rationale=op.rationale or "",
-            benefit="按脚本草稿结构更新 Canonical Story",
-            cost="仅修改被用户接受的 Scene/Shot/Episode 结构",
-    risk=(
-        "结构变化可能影响已绑定的镜头与制作事实；"
-        "删除带正式媒体/执行记录的 Shot 会 fail closed"
-    ),
-            impact=op.key,
-            status="pending",
-        )
-        session.add(item)
-        items.append(item)
-    await session.flush()
     operations = [_operation_dict(op) for op in operation_inputs]
     return StoryProposalResult(
         proposal=proposal,

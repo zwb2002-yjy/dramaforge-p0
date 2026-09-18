@@ -34,11 +34,8 @@ from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
-from app.production.models import (
-    ProductionExperiment,
-    ShotExperiment,
-    ShotReferenceBinding,
-)
+from app.production.archive_models import ProductionExperiment, ShotExperiment
+from app.production.models import ShotReferenceBinding
 from app.production.workbench_execution import (
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
@@ -178,7 +175,7 @@ async def _seed_user_workspace_projects(session: AsyncSession, suffix: str) -> d
             name="Lin Xia",
             description="Lead",
             metadata_json={},
-            status="draft",
+            status="formal",
             created_by=user.id,
         )
     )

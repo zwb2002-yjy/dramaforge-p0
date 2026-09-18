@@ -254,6 +254,7 @@ async function installMock(page: Page) {
 test("professional page surfaces the wire-visible workflow navigator", async ({ page }) => {
   await installMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByRole("tab", { name: "生成任务", exact: true }).click();
 
   await expect(page.getByTestId("workflow-navigator")).toBeVisible();
   await expect(page.getByTestId("workflow-episode-1")).toBeVisible();
@@ -261,7 +262,7 @@ test("professional page surfaces the wire-visible workflow navigator", async ({ 
 
   // Scene 1 (two-character) is BLOCKED with a frozen two-character template.
   await expect(page.getByTestId("workflow-scene-1")).toBeVisible();
-  await expect(page.getByTestId("workflow-scene-1")).toContainText("two-character-dialogue-v1");
+  await expect(page.getByTestId("workflow-scene-1")).not.toContainText("two-character-dialogue-v1");
 
   // The capability status is honest: UNSUPPORTED for the two-char shot.
   await expect(page.getByTestId("workflow-shot-3")).toContainText("不可双人");
@@ -272,6 +273,6 @@ test("professional page surfaces the wire-visible workflow navigator", async ({ 
   await expect(page.getByTestId("workflow-scene-2")).toContainText("制作中");
   await expect(page.getByTestId("workflow-shot-4")).toContainText("可双人");
 
-  // The navigator exposes the staged strategies and the caution footer.
-  await expect(page.getByText(/未声明多角色的镜头会标记为不可双人/)).toBeVisible();
+  // Technical template identifiers and static caution prose are not primary UI.
+  await expect(page.getByText(/未声明多角色的镜头会标记为不可双人/)).toHaveCount(0);
 });

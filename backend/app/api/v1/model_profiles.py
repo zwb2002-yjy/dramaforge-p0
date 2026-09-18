@@ -18,6 +18,7 @@ from app.access.projects import ProjectService
 from app.api.deps import (
     CsrfDep,
     CurrentUser,
+    SelectedWorkspace,
     SessionDep,
     require_selected_workspace,
 )
@@ -35,9 +36,6 @@ from app.providers.model_profiles.schemas import (
     ProfileRead,
     ProfileSummaryRead,
     ProfileUpdate,
-    ProfileValidateRequest,
-    ProfileValidateResponse,
-    ProfileValidationIssue,
     SimpleModeApply,
 )
 from app.providers.model_profiles.service import ProductionModelProfileService
@@ -110,6 +108,13 @@ def _assert_workspace_profile(profile: ProductionModelProfile, workspace_id: UUI
         raise NotFoundError("model profile not found")
 
 
+def _assert_selected_workspace(workspace_id: UUID, workspace: SelectedWorkspace) -> None:
+    if workspace.id != workspace_id:
+        from app.shared.errors import NotFoundError
+
+        raise NotFoundError("workspace not found")
+
+
 @router.get(
     "/workspaces/{workspace_id}/model-profiles",
     response_model=list[ProfileSummaryRead],
@@ -117,8 +122,10 @@ def _assert_workspace_profile(profile: ProductionModelProfile, workspace_id: UUI
 )
 async def list_workspace_profiles(
     workspace_id: UUID,
+    workspace: SelectedWorkspace,
     session: SessionDep,
 ) -> list[ProfileSummaryRead]:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profiles = await service.list_workspace_profiles(workspace_id=workspace_id)
     return [
@@ -145,10 +152,12 @@ async def list_workspace_profiles(
 async def create_workspace_profile(
     workspace_id: UUID,
     body: ProfileCreate,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.create(
         workspace_id=workspace_id,
@@ -170,8 +179,10 @@ async def create_workspace_profile(
 async def get_workspace_profile(
     workspace_id: UUID,
     profile_id: UUID,
+    workspace: SelectedWorkspace,
     session: SessionDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -187,10 +198,12 @@ async def update_workspace_profile(
     workspace_id: UUID,
     profile_id: UUID,
     body: ProfileUpdate,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -218,10 +231,12 @@ async def apply_simple_mode(
     workspace_id: UUID,
     profile_id: UUID,
     body: SimpleModeApply,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -248,10 +263,12 @@ async def apply_simple_mode(
 async def delete_workspace_profile(
     workspace_id: UUID,
     profile_id: UUID,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> Response:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -326,32 +343,6 @@ async def put_project_profile(
     )
     await session.commit()
     return await service.profile_read(profile)
-
-
-@router.post(
-    "/model-profiles/validate",
-    response_model=ProfileValidateResponse,
-    dependencies=[Depends(require_selected_workspace)],
-)
-async def validate_profile(
-    body: ProfileValidateRequest,
-    session: SessionDep,
-    _: CsrfDep,
-) -> ProfileValidateResponse:
-    service = ProductionModelProfileService(session)
-    report = service.validate_bindings(_to_domain_bindings(body.bindings))
-    return ProfileValidateResponse(
-        valid=report.valid,
-        issues=[
-            ProfileValidationIssue(
-                code=issue.code,
-                slot=issue.slot,
-                model_id=issue.model_id,
-                message=issue.message,
-            )
-            for issue in report.issues
-        ],
-    )
 
 
 @router.get(

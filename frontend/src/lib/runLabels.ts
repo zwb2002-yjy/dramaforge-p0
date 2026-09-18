@@ -28,5 +28,7 @@ export const NODE_RUN_STATUS_LABEL: Record<string, string> = {
 export function nodeRunStatusLabel(status: string | null | undefined): string {
   const value = (status ?? "").trim();
   if (!value) return "—";
-  return NODE_RUN_STATUS_LABEL[value] ?? value.replace(/[_-]+/g, " ");
+  // A status the UI does not know must not be printed as a stored token: the
+  // surface states that it is out of sync and the raw value stays in diagnostics.
+  return NODE_RUN_STATUS_LABEL[value] ?? "状态待同步";
 }

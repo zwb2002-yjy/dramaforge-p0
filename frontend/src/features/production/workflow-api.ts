@@ -107,6 +107,28 @@ export function fetchShotWorkflowState(
 
 export type CreativeProvenanceRead = Record<string, object>;
 
+export type CreativeCapabilityCatalogItem = {
+  key: string;
+  display_name: string;
+  description: string;
+  metadata: Record<string, unknown>;
+};
+
+export type CreativeCapabilityCatalogRead = {
+  genres: CreativeCapabilityCatalogItem[];
+  styles: CreativeCapabilityCatalogItem[];
+  shot_languages: CreativeCapabilityCatalogItem[];
+  quality_policies: CreativeCapabilityCatalogItem[];
+  skills: CreativeCapabilityCatalogItem[];
+  available_staged_strategies: string[];
+};
+
+export function fetchCreativeCapabilityCatalog(
+  projectId: string,
+): Promise<CreativeCapabilityCatalogRead> {
+  return apiGet(`/api/v1/projects/${projectId}/creative-capabilities/catalog`);
+}
+
 export function fetchCreativeProvenance(
   projectId: string,
   params: { scene_id?: string; shot_id?: string } = {},

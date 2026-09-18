@@ -1,161 +1,35 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ChevronDown } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Field, Select, Tab, Tabs, PageHeader } from "../components/ui";
+import { useState } from "react";
 
 import { ProductionMonitor } from "../features/production/ProductionMonitor";
-import { ProfessionalWorkbench } from "../features/production/ProfessionalWorkbench";
+import { ExperimentBranchPanel } from "../features/production/ExperimentBranchPanel";
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
+import { listModelCandidates } from "../features/production/modelCandidatesApi";
 import { fetchScenes } from "../features/scenes/api";
-import { createShotExecution } from "../features/shots/api";
 import {
   createExperiment,
-  createProjectAsset,
-  createReviewAnnotation,
   decideExperiment,
-  fetchDirectorBoard,
   fetchExperiments,
-  fetchOpenCutManifest,
-  fetchProjectAssets,
   fetchProjectShots,
-  fetchReviewAnnotations,
-  fetchShotCanvasRevisions,
   fetchSnapshot,
   listModels,
-  saveDirectorBoard,
   startExperiment,
-  updateProjectAsset,
-  updateShotCanvas,
 } from "../lib/api";
-import type { ProjectSnapshot } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
-import { zhNode } from "../lib/zh";
-
-const NODES = [
-  "prompt",
-  "keyframe",
-  "identity_review",
-  "video",
-  "video_drift_review",
-  "voice",
-  "subtitle",
-  "composite",
-  "continuity_review",
-] as const;
-
-const RUN_STATUS_LABEL: Record<string, string> = {
-  queued: "已排队",
-  running: "执行中",
-  leased: "执行中",
-  completed: "已完成",
-  cached: "已复用",
-  completed_after_cancel: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-  cancel_requested: "取消中",
-  timed_out: "超时",
-  skipped: "已跳过",
-};
-
-function nodeRunStatusLabel(status: string): string {
-  return RUN_STATUS_LABEL[status] ?? status;
-}
-
-function nodeRailForRuns(runs: ProjectSnapshot["node_runs"]): Record<string, string> {
-  const map: Record<string, string> = {};
-  const completed = runs.filter((run) =>
-    ["completed", "cached", "completed_after_cancel"].includes(run.status),
-  ).length;
-  for (const node of NODES) {
-    const matching = runs.filter((run) => {
-      const input = run.input_snapshot ?? {};
-      const summary = run.output_summary ?? {};
-      const key = String(
-        run.node_key ??
-          input.node_key ??
-          summary.node_key ??
-          summary.node_type ??
-          summary.node_name ??
-          summary.kind ??
-          "",
-      );
-      return key === node || key.includes(node);
-    });
-    if (matching.some((run) => run.status === "failed")) map[node] = "fail";
-    else if (matching.some((run) => ["queued", "running", "leased"].includes(run.status)))
-      map[node] = "run";
-    else if (
-      matching.some((run) => ["completed", "cached", "completed_after_cancel"].includes(run.status))
-    )
-      map[node] = "done";
-    else map[node] = "";
-  }
-
-  if (!Object.values(map).some(Boolean) && runs.length > 0) {
-    const ratio = completed / runs.length;
-    NODES.forEach((node, index) => {
-      if (index / NODES.length < ratio) map[node] = "done";
-    });
-    if (runs.some((run) => run.status === "failed")) {
-      map[NODES[Math.min(NODES.length - 1, Math.floor(ratio * NODES.length))]] = "fail";
-    }
-    if (runs.some((run) => ["queued", "running", "leased"].includes(run.status))) {
-      map[NODES[Math.min(NODES.length - 1, Math.ceil(ratio * NODES.length))]] = "run";
-    }
-  }
-  return map;
-}
-
-function ProductionDetail({
-  children,
-  description,
-  testId,
-  title,
-}: {
-  children: ReactNode;
-  description: string;
-  testId: string;
-  title: string;
-}) {
-  const [open, setOpen] = useState(() => window.innerWidth > 720);
-
-  useEffect(() => {
-    let wideViewport = window.innerWidth > 720;
-    const resetForViewport = () => {
-      const nextWideViewport = window.innerWidth > 720;
-      if (nextWideViewport !== wideViewport) {
-        wideViewport = nextWideViewport;
-        setOpen(nextWideViewport);
-      }
-    };
-    window.addEventListener("resize", resetForViewport);
-    return () => window.removeEventListener("resize", resetForViewport);
-  }, []);
-
-  return (
-    <details
-      className="production-detail"
-      data-testid={testId}
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>
-        <span>
-          <strong>{title}</strong>
-          <small>{description}</small>
-        </span>
-        <ChevronDown size={18} aria-hidden="true" />
-      </summary>
-      <div className="production-detail-body">{children}</div>
-    </details>
-  );
-}
 
 export function ProductionPage({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
-  const [msg, setMsg] = useState<string | null>(null);
-  const [msgTone, setMsgTone] = useState<"ok" | "err">("ok");
+  const [view, setView] = useState("progress");
+  const [overrideScope, setOverrideScope] = useState<"scene" | "shot">("scene");
+  const views = [
+    { id: "progress", label: "进度" },
+    { id: "workflow", label: "生成任务" },
+    { id: "experiments", label: "版本尝试" },
+    { id: "advanced", label: "高级设置" },
+  ];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
 
   const snapshot = useQuery({
@@ -168,72 +42,46 @@ export function ProductionPage({ projectId }: { projectId: string }) {
     queryKey: queryKeys.shot.list(projectId),
     queryFn: () => fetchProjectShots(projectId),
     enabled: projectId !== "demo",
+    refetchInterval: 4000,
   });
   const scenes = useQuery({
     queryKey: queryKeys.scene.list(projectId),
     queryFn: () => fetchScenes(projectId),
     enabled: projectId !== "demo",
+    refetchInterval: 4000,
   });
 
   const revisionShotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
   const selectedShot = (shots.data ?? []).find((s) => s.id === revisionShotId) ?? null;
   const selectedSceneId = selectedShot?.scene_id ?? null;
-  const projectAssets = useQuery({
-    queryKey: queryKeys.asset.root(projectId),
-    queryFn: () => fetchProjectAssets(projectId),
-    enabled: projectId !== "demo",
-  });
+  // Scene scope is the shared configuration for the Scene; it falls back to
+  // the first Scene so the Owner can configure it before any Shot exists.
+  const [chosenSceneId, setChosenSceneId] = useState<string | null>(null);
+  const firstSceneId = scenes.data?.[0]?.id ?? null;
+  const sceneCapabilityId =
+    projectId === "demo" ? null : (chosenSceneId ?? selectedSceneId ?? firstSceneId ?? null);
   const experiments = useQuery({
     queryKey: queryKeys.experiment.list(projectId),
     queryFn: () => fetchExperiments(projectId),
     enabled: projectId !== "demo",
   });
-  const directorBoard = useQuery({
-    queryKey: queryKeys.director.board(projectId, revisionShotId),
-    queryFn: () => fetchDirectorBoard(projectId, revisionShotId!),
-    enabled: projectId !== "demo" && Boolean(revisionShotId),
-  });
-  const reviewAnnotations = useQuery({
-    queryKey: queryKeys.review.annotations(projectId, revisionShotId),
-    queryFn: () => fetchReviewAnnotations(projectId, revisionShotId!),
-    enabled: projectId !== "demo" && Boolean(revisionShotId),
-  });
   const availableModels = useQuery({
     queryKey: queryKeys.model.catalog(),
     queryFn: () => listModels(),
   });
-  const openCutManifest = useQuery({
-    queryKey: queryKeys.production.opencutManifest(projectId),
-    queryFn: () => fetchOpenCutManifest(projectId),
+  // Eligibility is per stage: an image model has a keyframe binding, a video
+  // model has a video binding, and an experiment may branch either stage. Both
+  // views come from the same engine the runtime resolver uses.
+  const keyframeCandidates = useQuery({
+    queryKey: queryKeys.model.candidates(projectId, "image.generate"),
+    queryFn: () => listModelCandidates(projectId, "image.generate"),
     enabled: projectId !== "demo",
   });
-  const canvasRevisions = useQuery({
-    queryKey: queryKeys.production.canvasRevisions(projectId, revisionShotId),
-    queryFn: () => fetchShotCanvasRevisions(projectId, revisionShotId!),
-    enabled: projectId !== "demo" && Boolean(revisionShotId),
+  const videoCandidates = useQuery({
+    queryKey: queryKeys.model.candidates(projectId, "video.generate"),
+    queryFn: () => listModelCandidates(projectId, "video.generate"),
+    enabled: projectId !== "demo",
   });
-
-  const runs = useMemo(() => snapshot.data?.node_runs ?? [], [snapshot.data?.node_runs]);
-  const nodeRailClass = useMemo(() => nodeRailForRuns(runs), [runs]);
-
-  async function runShotOp(
-    label: string,
-    fn: () => Promise<{ status: string; message: string }>,
-    shotId: string | null = selectedShotId,
-  ) {
-    if (!shotId) return;
-    setMsg(null);
-    setMsgTone("ok");
-    try {
-      const r = await fn();
-      setMsg(`${label}：${nodeRunStatusLabel(r.status)} — ${r.message}`);
-      await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
-      await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
-    } catch (e) {
-      setMsgTone("err");
-      setMsg(e instanceof Error ? e.message : String(e));
-    }
-  }
 
   return (
     <div data-testid="production-mode">
@@ -245,102 +93,175 @@ export function ProductionPage({ projectId }: { projectId: string }) {
           待审内容
         </Link>
       </nav>
-      <div className="page-title-row">
-        <div>
-          <h1 style={{ margin: 0 }}>跨场景生产监控</h1>
-        </div>
-      </div>
+      <PageHeader title="制作进度" />
 
-      <div className="callout">
-        这里汇总全部场景的生产进度；单个镜头的实际制作在场景工作区完成，付费生成、修复与导出都需要你确认。
-      </div>
-
-      {msg && (
-        <div
-          className={`flash ${msgTone}`}
-          data-testid="production-msg"
-          role={msgTone === "err" ? "alert" : "status"}
-        >
-          {msg}
-        </div>
-      )}
-
-      <ProductionMonitor
-        projectId={projectId}
-        scenes={Array.isArray(scenes.data) ? scenes.data : []}
-        shots={shots.data ?? []}
-        snapshot={snapshot.data}
-        experimentCount={Array.isArray(experiments.data) ? experiments.data.length : 0}
-      />
-
-      <ProductionDetail
-        title="镜头工作流"
-        description="按场景查看镜头级进度"
-        testId="production-workflow-disclosure"
+      <Tabs label="制作内容">
+        {views.map((item) => (
+          <Tab
+            key={item.id}
+            id={`production-tab-${item.id}`}
+            active={view === item.id}
+            aria-controls={`production-panel-${item.id}`}
+            tabIndex={view === item.id ? 0 : -1}
+            onClick={() => setView(item.id)}
+          >
+            {item.label}
+          </Tab>
+        ))}
+      </Tabs>
+      <section
+        id="production-panel-progress"
+        role="tabpanel"
+        aria-labelledby="production-tab-progress"
+        hidden={view !== "progress"}
       >
-        <WorkflowNavigator projectId={projectId} />
-      </ProductionDetail>
-
-      {revisionShotId && (
-        <ProductionDetail
-          title="创意能力"
-          description="调整当前镜头的创作策略"
-          testId="production-capabilities-disclosure"
-        >
-          <CreativeCapabilitiesPanel
-            projectId={projectId}
-            sceneId={selectedSceneId}
-            shotId={revisionShotId}
-          />
-        </ProductionDetail>
-      )}
-
-      <ProductionDetail
-        title="高级镜头工具"
-        description="资产、实验、审片与画布"
-        testId="production-workbench-disclosure"
-      >
-        <ProfessionalWorkbench
+        <ProductionMonitor
           projectId={projectId}
+          scenes={Array.isArray(scenes.data) ? scenes.data : []}
           shots={shots.data ?? []}
           snapshot={snapshot.data}
-          revisions={canvasRevisions.data ?? []}
-          assets={Array.isArray(projectAssets.data) ? projectAssets.data : []}
-          experiments={Array.isArray(experiments.data) ? experiments.data : []}
-          annotations={Array.isArray(reviewAnnotations.data) ? reviewAnnotations.data : []}
-          openCutManifest={openCutManifest.data}
-          models={Array.isArray(availableModels.data) ? availableModels.data : []}
-          directorBoard={directorBoard.data}
-          selectedShotId={selectedShotId}
-          onSelectShot={setSelectedShotId}
-          onCreateAsset={async (input) => {
-            await createProjectAsset(projectId, {
-              kind: input.kind,
-              name: input.name,
-              description: input.description,
-              metadata: { tags: input.tags },
-              status: "active",
-            });
-            await qc.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
+          experimentCount={experiments.data?.length}
+          scenesLoading={scenes.isPending}
+          scenesError={scenes.isError}
+          shotsLoading={shots.isPending}
+          shotsError={shots.isError}
+          snapshotError={snapshot.isError}
+          onRetry={() => {
+            void scenes.refetch();
+            void shots.refetch();
+            void snapshot.refetch();
           }}
-          onUpdateAsset={async (asset, input) => {
-            await updateProjectAsset(projectId, asset.id, {
-              expected_version: asset.version,
-              kind: asset.kind,
-              name: asset.name,
-              description: asset.description,
-              metadata: asset.metadata,
-              status: input.status,
-            });
-            await qc.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
+        />
+      </section>
+      <section
+        id="production-panel-workflow"
+        role="tabpanel"
+        aria-labelledby="production-tab-workflow"
+        hidden={view !== "workflow"}
+      >
+        <WorkflowNavigator projectId={projectId} />
+      </section>
+      <section
+        id="production-panel-advanced"
+        role="tabpanel"
+        aria-labelledby="production-tab-advanced"
+        hidden={view !== "advanced"}
+      >
+        <p className="muted">默认沿用项目选择，仅在个别画面需要不同效果时修改。</p>
+        <Field className="df-field">
+          修改范围
+          <Select
+            aria-label="修改范围"
+            value={overrideScope}
+            onChange={(event) => setOverrideScope(event.target.value as "scene" | "shot")}
+          >
+            <option value="scene">整个场景</option>
+            <option value="shot">单个镜头</option>
+          </Select>
+        </Field>
+        <div hidden={overrideScope !== "scene"}>
+          {sceneCapabilityId && (
+            <section>
+              {(scenes.data?.length ?? 0) > 1 && (
+                <Field className="df-field">
+                  场景
+                  <Select
+                    aria-label="场景创作能力目标场景"
+                    value={sceneCapabilityId}
+                    onChange={(e) => setChosenSceneId(e.target.value)}
+                  >
+                    {(scenes.data ?? []).map((scene) => (
+                      <option key={scene.id} value={scene.id}>
+                        {scene.location_name || `场景 ${scene.scene_number}`}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+              <CreativeCapabilitiesPanel
+                projectId={projectId}
+                sceneId={sceneCapabilityId}
+                scope="scene"
+              />
+            </section>
+          )}
+        </div>
+        <div hidden={overrideScope !== "shot"}>
+          <Field className="df-field">
+            镜头
+            <Select
+              aria-label="设置目标镜头"
+              value={revisionShotId ?? ""}
+              onChange={(event) => setSelectedShotId(event.target.value)}
+            >
+              {(shots.data ?? []).map((shot) => (
+                <option key={shot.id} value={shot.id}>
+                  镜头 {shot.shot_number}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {revisionShotId && (
+            <section>
+              <CreativeCapabilitiesPanel
+                projectId={projectId}
+                sceneId={selectedSceneId}
+                shotId={revisionShotId}
+              />
+            </section>
+          )}
+        </div>
+        {!sceneCapabilityId && !revisionShotId && <p>先在剧本页准备故事，再到这里调整具体画面。</p>}
+      </section>
+      <section
+        id="production-panel-experiments"
+        role="tabpanel"
+        aria-labelledby="production-tab-experiments"
+        hidden={view !== "experiments"}
+      >
+        <Field className="df-field">
+          尝试哪个镜头
+          <Select
+            aria-label="实验目标镜头"
+            value={revisionShotId ?? ""}
+            onChange={(event) => setSelectedShotId(event.target.value)}
+          >
+            {(shots.data ?? []).map((shot) => (
+              <option key={shot.id} value={shot.id}>
+                镜头 {shot.shot_number}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <ExperimentBranchPanel
+          projectId={projectId}
+          experiments={Array.isArray(experiments.data) ? experiments.data : []}
+          models={Array.isArray(availableModels.data) ? availableModels.data : []}
+          modelCandidates={{
+            // `undefined` keeps "not loaded yet" distinct from "no binding".
+            keyframe: keyframeCandidates.data,
+            video: videoCandidates.data,
           }}
           onCreateExperiment={async (input) => {
+            // The key is derived from the experiment's identity, not from the
+            // clock: the server treats a repeated key as the same draft, so a
+            // double click or a retry cannot create a second branch that would
+            // later run (and bill) twice. A genuinely new experiment changes the
+            // name, stage, model or target shot.
+            const identity = [
+              revisionShotId ?? "no-shot",
+              input.targetNodeKey,
+              input.selected_model,
+              input.name,
+            ].join("|");
             await createExperiment(projectId, {
-              idempotency_key: `experiment-${Date.now()}-${input.name}`,
+              idempotency_key: `experiment:${identity}`,
               name: input.name,
               source_shot_id: revisionShotId,
               selected_model: input.selected_model,
-              parameters: { target_node_key: "video" },
+              // The stage is part of the experiment's identity: it selects the
+              // model purpose and which adoption scopes the branch can offer.
+              parameters: { target_node_key: input.targetNodeKey },
             });
             await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
           }}
@@ -355,104 +276,8 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
             await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
           }}
-          onCreateAnnotation={async (input) => {
-            if (!revisionShotId) return;
-            await createReviewAnnotation(projectId, revisionShotId, input);
-            await qc.invalidateQueries({
-              queryKey: queryKeys.review.annotations(projectId, revisionShotId),
-            });
-          }}
-          onSaveDirectorBoard={async (input) => {
-            if (!revisionShotId) return;
-            await saveDirectorBoard(projectId, revisionShotId, {
-              expected_version: directorBoard.data?.version ?? null,
-              ...input,
-            });
-            await qc.invalidateQueries({
-              queryKey: queryKeys.director.board(projectId, revisionShotId),
-            });
-          }}
-          onStart={(shotId) =>
-            void runShotOp(
-              "生成关键帧",
-              async () => {
-                const shot = (shots.data ?? []).find((item) => item.id === shotId);
-                if (!shot) throw new Error("镜头不存在");
-                const result = await createShotExecution(
-                  projectId,
-                  shotId,
-                  {
-                    stage: "image_keyframe",
-                    prompt: shot.visual_description,
-                    semantic_intent: { intent: "shot_keyframe", shot_id: shotId },
-                    mode_id: "text_to_image",
-                    requested_model_id: null,
-                    requested_binding_id: null,
-                    accept_approximations: false,
-                    references: [],
-                    expected_shot_version: shot.version,
-                  },
-                  `production-start-${shotId}-${shot.version}`,
-                );
-                return { status: result.status, message: `NodeRun ${result.node_run_id}` };
-              },
-              shotId,
-            )
-          }
-          onRerun={(shotId) =>
-            void runShotOp(
-              "局部重跑视频",
-              async () => {
-                const shot = (shots.data ?? []).find((item) => item.id === shotId);
-                if (!shot) throw new Error("镜头不存在");
-                const result = await createShotExecution(
-                  projectId,
-                  shotId,
-                  {
-                    stage: "video",
-                    prompt: shot.visual_description,
-                    semantic_intent: { intent: "shot_video", shot_id: shotId },
-                    mode_id: "first_frame",
-                    requested_model_id: null,
-                    requested_binding_id: null,
-                    accept_approximations: false,
-                    references: [],
-                    expected_shot_version: shot.version,
-                  },
-                  `production-rerun-${shotId}-${shot.version}`,
-                );
-                return { status: result.status, message: `NodeRun ${result.node_run_id}` };
-              },
-              shotId,
-            )
-          }
-          onSave={async (shot, input) => {
-            const result = await updateShotCanvas(projectId, shot.id, {
-              expected_version: shot.version,
-              visual_description: input.visual_description,
-              shot_type: input.shot_type,
-              camera_move: input.camera_move,
-              dialogue: input.dialogue,
-              duration_seconds: input.duration_seconds,
-              source: "user",
-            });
-            await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
-            await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
-            await qc.invalidateQueries({
-              queryKey: queryKeys.production.canvasRevisions(projectId, shot.id),
-            });
-            return result;
-          }}
         />
-
-        <div className="pipeline-rail" aria-label="镜头生产链">
-          {NODES.map((n) => (
-            <span key={n} className={`pipeline-node ${nodeRailClass[n] ?? ""}`}>
-              {zhNode(n)}
-            </span>
-          ))}
-        </div>
-      </ProductionDetail>
+      </section>
     </div>
   );
 }

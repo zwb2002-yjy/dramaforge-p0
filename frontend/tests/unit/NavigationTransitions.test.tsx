@@ -22,6 +22,8 @@ function mockFetch(): void {
       return json({ id: "owner-1", display_name: "创作者", email: "owner@example.com" });
     }
     if (url.endsWith("/api/v1/workspaces")) return json([{ id: "workspace-1", name: "空间" }]);
+    if (/\/(provider-plugins|provider-connections|model-profiles|projects)$/.test(url))
+      return json([]);
     if (url.includes("/workspace-state")) return json({ state: { last_view: "production" } });
     if (url.includes("/projects/project-1")) return json({ id: "project-1", name: "作品" });
     return json({});
@@ -54,8 +56,8 @@ it("keeps the Settings entry reachable from a Project route", async () => {
 
   fireEvent.click(screen.getByRole("link", { name: "设置" }));
 
-  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/settings/account"));
-  expect(await screen.findByTestId("account-settings-page")).toBeInTheDocument();
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/settings/models"));
+  expect(await screen.findByTestId("model-settings-page")).toBeInTheDocument();
 });
 
 it("keeps the Project Lobby entry reachable from a Project route", async () => {

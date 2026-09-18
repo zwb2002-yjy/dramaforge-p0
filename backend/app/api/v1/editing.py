@@ -76,6 +76,7 @@ class EditTimelineUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     timeline: EditTimelinePayload
+    expected_session_version: int = Field(ge=1)
 
     @model_validator(mode="after")
     def reject_production_lineage(self) -> EditTimelineUpdateRequest:
@@ -271,6 +272,7 @@ async def save_edit_timeline(
         project_id=project_id,
         session_id=row.id,
         timeline=dict(body.timeline.model_dump(mode="json")),
+        expected_session_version=body.expected_session_version,
     )
     await DirectorTurnService(session).mark_scope_stale(
         project_id=project_id,

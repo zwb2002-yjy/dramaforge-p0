@@ -27,6 +27,36 @@ REPO = Path(__file__).resolve().parents[1]
 WORKSPACE = os.environ.get(
     "DRAMAFORGE_PROOF_WORKSPACE", "c00b1899-b4ac-46c7-b4c7-25a230e9ebe2"
 )
+ALEMBIC_VERSIONS = REPO / "backend" / "alembic" / "versions"
+ENTRY_PORT = int(os.environ.get("DRAMAFORGE_PROOF_ENTRY_PORT", "8080"))
+
+
+def repository_migration_head() -> str:
+    """Return the single Alembic head declared by the candidate's own migrations.
+
+    The external runtime proof binds the running services to the candidate, and
+    the release workflow refuses to ship a tree whose migrations do not resolve
+    to exactly one head, so the head is derived from the repository instead of
+    being pinned to a revision that a later migration silently invalidates.
+    """
+    revision = re.compile(r"^revision(?::[^=]+)?\s*=\s*[\"']([^\"']+)[\"']", re.MULTILINE)
+    down = re.compile(r"^down_revision(?::[^=]+)?\s*=\s*[\"']([^\"']+)[\"']", re.MULTILINE)
+    revisions: set[str] = set()
+    parents: set[str] = set()
+    for path in sorted(ALEMBIC_VERSIONS.glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        found = revision.search(text)
+        if found:
+            revisions.add(found.group(1))
+        parent = down.search(text)
+        if parent:
+            parents.add(parent.group(1))
+    heads = sorted(revisions - parents)
+    if len(heads) != 1:
+        raise RuntimeError(
+            f"expected exactly one Alembic head in {ALEMBIC_VERSIONS}, found {heads}"
+        )
+    return heads[0]
 SECRET_KEYS = {
     "authorization",
     "cookie",
@@ -1058,7 +1088,10 @@ class Acceptance:
                     timeline.setdefault("metadata", {})["director_suggestion_applied"] = advice[
                         "suggestion"
                     ]["base_session_version"]
-                return {"timeline": timeline}
+                return {
+                    "timeline": timeline,
+                    "expected_session_version": edit["version"],
+                }
 
             saved = self.once(
                 label + ":timeline-save",
@@ -1181,7 +1214,10 @@ class Acceptance:
             prefix + ":timeline-save",
             "PATCH",
             f"/projects/{project_id}/edit-sessions/{edit['id']}/timeline",
-            {"timeline": saved_step["response"]["timeline"]},
+            {
+                "timeline": saved_step["response"]["timeline"],
+                "expected_session_version": edit["version"],
+            },
         )
         prepared = self.once(
             prefix + ":tail",
@@ -1481,7 +1517,10 @@ class Acceptance:
                 str(timeline["clips"][0].get("subtitle") or "") + " · 复核版"
             )
             timeline.setdefault("metadata", {})["r7_editing_only_rerender"] = self.state["run_key"]
-            return {"timeline": timeline}
+            return {
+                "timeline": timeline,
+                "expected_session_version": free_edit["version"],
+            }
 
         saved = self.once(
             "free_assist:rerender-save",
@@ -1608,7 +1647,7 @@ class Acceptance:
         self.state["assertions"]["final_mp4_srt_download"] = "PASS"
         self.save()
 
-    def import_external_proof(self, kind, path):
+    def import_external_proof(self, kind, path, *, entry_port, migration_head):
         proof = json.loads(path.read_text(encoding="utf-8"))
         if proof.get("candidate_sha") != self.state.get("candidate_sha"):
             raise RuntimeError(f"{kind} proof belongs to another candidate")
@@ -1637,7 +1676,7 @@ class Acceptance:
             }
             assertions = proof.get("assertions")
             if (
-                proof.get("entry_port") != 8080
+                proof.get("entry_port") != entry_port
                 or proof.get("project_ids") != expected
                 or not isinstance(assertions, dict)
                 or not assertions
@@ -1649,8 +1688,8 @@ class Acceptance:
         elif kind == "runtime":
             services = proof.get("services")
             if (
-                proof.get("entry_port") != 8080
-                or proof.get("migration_head") != "20260908_0060"
+                proof.get("entry_port") != entry_port
+                or proof.get("migration_head") != migration_head
                 or not isinstance(services, dict)
                 or set(services)
                 != {"api", "dispatcher", "worker_default", "worker_heavy", "frontend"}
@@ -1954,13 +1993,19 @@ def main():
                     raise RuntimeError("Candidate promotion target already matches the checkpoint")
                 run.state["candidate_sha"] = args.candidate
                 run.save()
+        expected_migration_head = repository_migration_head()
         for kind, proof_path in (
             ("recovery", args.recovery_proof),
             ("browser", args.browser_proof),
             ("runtime", args.runtime_proof),
         ):
             if proof_path is not None:
-                run.import_external_proof(kind, proof_path)
+                run.import_external_proof(
+                    kind,
+                    proof_path,
+                    entry_port=ENTRY_PORT,
+                    migration_head=expected_migration_head,
+                )
         if args.phase != "promote-candidate":
             getattr(run, args.phase.replace("-", "_"))()
         print(

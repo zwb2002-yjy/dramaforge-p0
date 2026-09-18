@@ -1,0 +1,38 @@
+.creative-capabilities-panel .creative-capability-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--df-space-4);
+}
+.creative-capability-form > details {
+  grid-column: 1 / -1;
+}
+.creative-capability-form select {
+  width: 100%;
+  min-width: 0;
+}
+.creative-capability-form .creative-skill-list {
+  margin-top: var(--df-space-4);
+  gap: var(--df-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--df-form-field-min)), 1fr));
+}
+.creative-capability-form .creative-skill-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-2);
+}
+.creative-capability-form .creative-skill-list > small {
+  grid-column: 1 / -1;
+}
+[data-testid="production-mode"] > [role="tabpanel"] {
+  padding-top: var(--df-space-5);
+}
+[data-testid="production-mode"] > [role="tabpanel"][hidden] {
+  display: none;
+}
+[data-testid="production-mode"] > .df-tabs {
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .creative-capabilities-panel .creative-capability-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

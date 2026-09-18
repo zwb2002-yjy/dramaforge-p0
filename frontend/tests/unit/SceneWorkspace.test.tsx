@@ -116,7 +116,9 @@ describe("SceneWorkspace", () => {
     expect(screen.getByTestId("shot-strip")).toBeInTheDocument();
     expect(screen.getByText("#1")).toBeInTheDocument();
     expect(screen.getByTestId("shot-placeholder")).toHaveTextContent("A turns");
-    expect(screen.getByTestId("no-formal-result")).toHaveTextContent("尚未选择正式结果");
+    expect(screen.getByTestId("no-formal-result")).toHaveTextContent(
+      "还没有画面，点击下方“生成”开始",
+    );
     expect(screen.getByTestId("scene-stage")).toContainElement(screen.getByTestId("shot-strip"));
     const canvas = screen.getByTestId("cinematic-canvas");
     expect(within(canvas).queryByRole("textbox")).not.toBeInTheDocument();

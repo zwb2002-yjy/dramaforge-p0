@@ -75,6 +75,28 @@ class CompiledImageRequest(BaseModel):
     reference_fingerprints: list[str] = Field(default_factory=list)
 
 
+def validate_compiled_submission(
+    request: CompiledImageRequest | CompiledVideoRequest,
+    *,
+    provider_type: str,
+    protocol_profile: str,
+    operation: Literal["image.generate", "video.generate"],
+) -> None:
+    """Check the existing JSON media seam before credentials reach the network.
+
+    This is not payload compilation or model selection. The compiler's chosen
+    wire model must match its envelope, and the envelope must target this runtime.
+    Never repair a mismatch by substituting a configured default or rebuilding
+    the body. Errors intentionally omit payloads and credential values.
+    """
+    if (request.provider_type, request.protocol_profile, request.operation) != (
+        provider_type, protocol_profile, operation
+    ):
+        raise ValueError("compiled request does not match runtime provider/profile/operation")
+    if not request.model_id.strip() or request.wire_request.get("model") != request.model_id:
+        raise ValueError("compiled wire model does not match request model_id")
+
+
 class SubmissionResult(BaseModel):
     """One create attempt outcome. ``status`` mirrors the provider_operation
     status vocabulary so the caller can persist it directly. Synchronous image

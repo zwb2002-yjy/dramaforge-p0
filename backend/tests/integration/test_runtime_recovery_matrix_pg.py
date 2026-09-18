@@ -219,7 +219,7 @@ async def test_cancel_restart_never_recreates_remote_task(
                     raise httpx.ReadTimeout("controlled download timeout")
 
                 monkeypatch.setattr(
-                    "app.execution.product_path._download_provider_media", fail_download
+                    "app.execution.media_io._download_provider_media", fail_download
                 )
             if outcome == "missing_media":
                 import app.config as config
@@ -575,7 +575,7 @@ async def test_concurrent_cancel_consumers_send_at_most_one_remote_request(
 ):
     from datetime import UTC, datetime
 
-    from app.execution.product_path import _request_remote_cancellation_once
+    from app.execution.provider_execution import _request_remote_cancellation_once
     from test_phase5_restart_recovery_pg import _seed_graph_and_run
 
     session = pg_session

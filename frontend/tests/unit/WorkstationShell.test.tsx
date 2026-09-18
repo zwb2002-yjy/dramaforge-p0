@@ -237,45 +237,33 @@ describe("Workstation shell", () => {
     const shell = await screen.findByTestId("workstation-shell");
     const navigation = screen.getByRole("complementary", { name: "二级导航" });
     expect(shell).toHaveClass("secondary-open");
-    fireEvent.click(screen.getByRole("button", { name: "收起二级导航" }));
-    const toggle = screen.getByRole("button", { name: "展开二级导航" });
+    fireEvent.click(screen.getByRole("link", { name: "创作" }));
+    const toggle = screen.getByRole("link", { name: "创作" });
 
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(shell).not.toHaveClass("secondary-open");
     fireEvent.click(toggle);
-    expect(screen.getByRole("button", { name: "收起二级导航" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    expect(screen.getByRole("link", { name: "创作" })).toHaveAttribute("aria-expanded", "true");
     expect(shell).toHaveClass("secondary-open");
     expect(navigation).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭二级导航" }));
-    expect(screen.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
+    expect(screen.getByRole("link", { name: "创作" })).toHaveAttribute("aria-expanded", "false");
 
-    fireEvent.click(screen.getByRole("button", { name: "展开二级导航" }));
+    fireEvent.click(screen.getByRole("link", { name: "创作" }));
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
+    expect(screen.getByRole("link", { name: "创作" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("closes mobile L2 after switching creative routes", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     const { router } = renderApp("/projects/demo/production");
 
-    fireEvent.click(await screen.findByRole("button", { name: "展开二级导航" }));
+    fireEvent.click(await screen.findByRole("link", { name: "创作" }));
     fireEvent.click(screen.getByRole("link", { name: "剧本" }));
 
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/projects/demo/script"));
-    expect(screen.getByRole("button", { name: "展开二级导航" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
+    expect(screen.getByRole("link", { name: "创作" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("keeps the permanent Settings entry stable across Project routes", async () => {
@@ -285,7 +273,7 @@ describe("Workstation shell", () => {
     renderApp("/projects/demo/production");
 
     const settingsLink = await screen.findByRole("link", { name: "设置" });
-    expect(settingsLink.getAttribute("href")).toContain("/settings/account?returnTo=");
+    expect(settingsLink.getAttribute("href")).toContain("/settings/models?returnTo=");
 
     // The shell contract is the stable cross-route Settings entry and its
     // destination. jsdom does not carry this route change through (the router
@@ -298,7 +286,7 @@ describe("Workstation shell", () => {
     renderApp("/settings/account");
 
     expect(await screen.findByTestId("account-settings-page")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "账号与实例" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "账号" })).toBeInTheDocument();
   });
 
   it("shows a blank login form after the single Owner is initialized", async () => {
@@ -369,7 +357,7 @@ describe("Workstation shell", () => {
     renderApp("/projects/demo/production");
     const panel = await screen.findByTestId("production-mode");
     expect(panel).toBeInTheDocument();
-    expect(panel).toHaveTextContent("跨场景生产监控");
+    expect(panel).toHaveTextContent("制作进度");
     const projectShell = screen.getByTestId("project-workspace-shell");
     expect(projectShell).toBeInTheDocument();
     expect(projectShell).toHaveTextContent("演示项目");
@@ -394,20 +382,13 @@ describe("Workstation shell", () => {
     expect(screen.getByRole("link", { name: "场景" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("gives Settings its own L2 and page responsibility", async () => {
-    renderApp("/settings/defaults");
-
-    expect(await screen.findByTestId("default-settings-page")).toBeInTheDocument();
-    expect(screen.getByTestId("workstation-shell")).toHaveAttribute(
-      "data-primary-section",
-      "settings",
-    );
-    expect(screen.getByRole("link", { name: "设置" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("navigation", { name: "设置导航" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "新项目默认偏好" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+  it("redirects the obsolete preferences page to the actual create form", async () => {
+    mockAuthenticatedHome();
+    const { router } = renderApp("/settings/defaults");
+    expect(await screen.findByRole("region", { name: "新建项目" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/");
+    expect(router.state.location.search.create).toBe(true);
+    expect(screen.queryByTestId("default-settings-page")).not.toBeInTheDocument();
   });
 
   it("renders current Project settings inside Settings L2", async () => {
@@ -472,10 +453,37 @@ describe("Workstation shell", () => {
 
     const workbench = await screen.findByTestId("professional-workbench");
     expect(workbench).toBeInTheDocument();
-    expect(workbench).toHaveTextContent("正式线与实验线");
-    expect(workbench).toHaveTextContent("剪辑交接");
+    expect(workbench).toHaveTextContent("尝试不同版本");
+    expect(workbench).not.toHaveTextContent("场景与镜头");
+    expect(workbench).not.toHaveTextContent("剪辑交接");
     expect(workbench).not.toHaveTextContent("预算");
     expect(workbench).not.toHaveTextContent("计费");
     expect(workbench).not.toHaveTextContent("费用");
   });
+});
+
+it("uses the active primary entry as the only sidebar toggle", async () => {
+  renderApp("/projects/demo/production");
+  const creation = await screen.findByRole("link", { name: "创作" });
+  expect(creation).toHaveAttribute("aria-expanded", "true");
+  fireEvent.click(creation, { detail: 1 });
+  expect(creation).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(creation, { detail: 2 });
+  expect(creation).toHaveAttribute("aria-expanded", "true");
+  fireEvent.click(creation, { detail: 3 });
+  expect(creation).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(creation, { detail: 4 });
+  expect(creation).toHaveAttribute("aria-expanded", "true");
+  expect(screen.queryByRole("button", { name: /^(收起|展开)二级导航$/ })).not.toBeInTheDocument();
+});
+
+it("limits global settings navigation to models and account", async () => {
+  mockAuthenticatedHome();
+  renderApp("/settings/models?returnTo=%2Fprojects%2Fproject-1%2Fproduction");
+  const navigation = await screen.findByRole("navigation", { name: "设置导航" });
+  expect(within(navigation).getAllByRole("link")).toHaveLength(2);
+  expect(navigation).toHaveTextContent("模型连接");
+  expect(navigation).toHaveTextContent("账号");
+  expect(navigation).not.toHaveTextContent("新项目默认偏好");
+  expect(navigation).not.toHaveTextContent("项目设置");
 });

@@ -660,107 +660,6 @@ class AgnesHubClient:
         return {"amount": 0.0, "currency": "USD", "units": 1.0}
 
 
-class AgnesImageAdapter:
-    provider = "agnes"
-    protocol_profile = AGNES_CN_PROFILE
-
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-        host: str | None = None,
-    ) -> None:
-        self._client = AgnesHubClient(settings, transport=transport, host=host)
-        self.model = self._client._image_model
-
-    async def create(self, request: dict[str, Any]) -> dict[str, Any]:
-        image_bytes = request.get("canonical_image_bytes")
-        if image_bytes is not None and not isinstance(image_bytes, bytes):
-            raise TypeError("canonical_image_bytes must be bytes")
-        return await self._client.create_image(
-            prompt=str(request.get("prompt") or ""),
-            size=str(request.get("size") or _AGNES_IMAGE_SIZE),
-            ratio=str(request.get("ratio") or _AGNES_IMAGE_RATIO),
-            canonical_image_bytes=image_bytes,
-            canonical_image_mime=str(request.get("canonical_image_mime") or "image/png"),
-            reference_artifact_id=(
-                str(request["canonical_artifact_id"])
-                if request.get("canonical_artifact_id")
-                else None
-            ),
-        )
-
-    async def poll(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.poll(remote_task_id)
-
-    async def cancel(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.cancel(remote_task_id)
-
-    async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.fetch_cost(remote_task_id)
-
-
-class AgnesVideoAdapter:
-    provider = "agnes"
-    protocol_profile = AGNES_CN_PROFILE
-
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-        host: str | None = None,
-    ) -> None:
-        self._client = AgnesHubClient(settings, transport=transport, host=host)
-        self.model = self._client._video_model
-
-    async def create(self, request: dict[str, Any]) -> dict[str, Any]:
-        keyframe_urls = request.get("keyframe_urls")
-        if keyframe_urls is not None and not isinstance(keyframe_urls, list):
-            raise TypeError("keyframe_urls must be a list")
-        return await self._client.create_video(
-            prompt=str(request.get("prompt") or ""),
-            image_url=(str(request["image_url"]) if request.get("image_url") else None),
-            image_bytes=request.get("image_bytes"),
-            image_mime=str(request.get("image_mime") or "image/png"),
-            num_frames=int(request.get("num_frames", 121)),
-            frame_rate=int(request.get("frame_rate", 24)),
-            keyframe_urls=[str(item) for item in keyframe_urls] if keyframe_urls else None,
-            reference_artifact_ids=[
-                str(item) for item in request.get("reference_artifact_ids", [])
-            ],
-            reference_fingerprints=[
-                str(item) for item in request.get("reference_fingerprints", [])
-            ],
-        )
-
-    async def poll(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.poll(remote_task_id)
-
-    async def poll_persisted(
-        self,
-        remote_task_id: str,
-        *,
-        query_kind: str | None,
-    ) -> dict[str, Any]:
-        if query_kind not in {"video_id", "task_id"}:
-            raise ValueError("persisted Agnes video query kind is required")
-        selected_kind: Literal["video_id", "task_id"] = (
-            "video_id" if query_kind == "video_id" else "task_id"
-        )
-        return await self._client.poll_video(
-            remote_task_id,
-            query_kind=selected_kind,
-        )
-
-    async def cancel(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.cancel(remote_task_id)
-
-    async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.fetch_cost(remote_task_id)
-
-
 # ---------------------------------------------------------------------------
 # Stage B2: unified Compiler + Runtime (single wire owner).
 # Compilers validate against the catalog manifest and reuse the same body
@@ -1069,8 +968,18 @@ class AgnesRuntime:
         return bool(self._key and self._enabled)
 
     async def submit_image(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="image.generate",
+        )
         if not self._configured():
             raise RuntimeError("Agnes China connection is not configured")
         try:
@@ -1123,8 +1032,18 @@ class AgnesRuntime:
         )
 
     async def submit_video(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="video.generate",
+        )
         if not self._configured():
             raise RuntimeError("Agnes China connection is not configured")
         try:

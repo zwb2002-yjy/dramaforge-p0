@@ -33,7 +33,9 @@ const SLOT_LABELS: Record<string, string> = {
 
 export function slotLabel(slotId: string): string {
   const value = (slotId ?? "").trim();
-  return SLOT_LABELS[value] ?? value;
+  // Slot ids are contract keys, so an unrecognised one must not be printed on an
+  // ordinary surface; the stored id stays available in the diagnostics views.
+  return SLOT_LABELS[value] ?? "其他环节";
 }
 
 export type SimpleModeSelection = {

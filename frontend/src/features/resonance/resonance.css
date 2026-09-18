@@ -489,10 +489,6 @@
   border-color: var(--df-danger);
   color: var(--df-danger-text);
 }
-.rs-scene-world .qc-page-heading h1 {
-  font-family: var(--df-font-display);
-  font-weight: 400;
-}
 .rs-scene-world .qc-scene-card {
   padding: 12px;
   border-radius: 24px;

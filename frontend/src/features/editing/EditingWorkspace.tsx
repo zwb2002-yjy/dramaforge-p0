@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/ui";
 import { FinalFilmPlayback } from "./FinalFilmPlayback";
 import "./editing-recovery.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -8,8 +9,10 @@ import { EditingSessionPicker } from "./EditingSessionPicker";
 import { queryKeys } from "../../lib/queryKeys";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import {
+  ApiError,
   artifactContentUrl,
   fetchOpenCutManifest,
+  fetchProjectAssets,
   fetchSnapshot,
   type OpenCutManifestRead,
 } from "../../lib/api";
@@ -138,6 +141,25 @@ function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+/**
+ * Short human reference for a server identity.
+ *
+ * Raw UUIDs and hashes are development/diagnostic facts: the creative surface
+ * shows a short reference and keeps the full identifier in the collapsed
+ * diagnostics block below it.
+ */
+function shortReference(value: unknown): string {
+  const text = typeof value === "string" ? value : String(value ?? "");
+  return text ? text.slice(0, 8) : "—";
+}
+
+/** Human label for one clip, e.g. "镜头 #4". */
+function clipLabel(shotNumberById: Map<string, number>, shotId: unknown, index: number): string {
+  const text = typeof shotId === "string" ? shotId : "";
+  const number = text ? shotNumberById.get(text) : undefined;
+  return number === undefined ? `片段 ${index + 1}` : `镜头 #${number}`;
+}
+
 function isSessionVersion(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1;
 }
@@ -224,6 +246,7 @@ export function EditingWorkspace({
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<EditableTimeline | null>(null);
   const [baseline, setBaseline] = useState<EditableTimeline | null>(null);
+  const [baselineVersion, setBaselineVersion] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [exported, setExported] = useState<EditExportRead | null>(null);
   const [finalFilm, setFinalFilm] = useState<FinalFilmRead | null>(null);
@@ -260,6 +283,20 @@ export function EditingWorkspace({
     queryFn: () => fetchEditSession(projectId, sessionId!),
     enabled: Boolean(projectId) && projectId !== "demo" && hasSession,
   });
+  // Clip audio is chosen by name, never by pasting an Artifact id into a field:
+  // the raw identifier stays in the collapsed diagnostics block.
+  const projectAssets = useQuery({
+    queryKey: queryKeys.asset.root(projectId),
+    queryFn: () => fetchProjectAssets(projectId),
+    enabled: Boolean(projectId) && projectId !== "demo" && hasSession,
+  });
+  const audioOptions = useMemo(
+    () =>
+      (Array.isArray(projectAssets.data) ? projectAssets.data : [])
+        .filter((asset) => asset.kind === "audio")
+        .map((asset) => ({ id: asset.id, label: asset.name || "未命名配音" })),
+    [projectAssets.data],
+  );
 
   const currentSessionVersion = persistedSession.data?.version;
   const filmHistory = useQuery({
@@ -315,6 +352,7 @@ export function EditingWorkspace({
     // or export result from session A into session B or the manifest preview.
     setDraft(null);
     setBaseline(null);
+    setBaselineVersion(null);
     setFeedback(null);
     setExported(null);
     setFinalFilm(null);
@@ -342,6 +380,7 @@ export function EditingWorkspace({
     const next = editableTimeline(persistedSession.data);
     setDraft(next);
     setBaseline(next);
+    setBaselineVersion(persistedSession.data.version);
   }, [dirty, persistedSession.data]);
 
   const create = useMutation({
@@ -359,12 +398,16 @@ export function EditingWorkspace({
   const save = useMutation({
     mutationFn: () => {
       if (!sessionId || !draft) throw new Error("没有可保存的剪辑会话草稿");
-      return saveEditTimeline(projectId, sessionId, timelineForSave(draft));
+      if (!isSessionVersion(baselineVersion)) {
+        throw new Error("当前 EditSession 版本尚未加载，无法安全保存。");
+      }
+      return saveEditTimeline(projectId, sessionId, timelineForSave(draft), baselineVersion);
     },
     onSuccess: (saved) => {
       const next = editableTimeline(saved);
       setDraft(next);
       setBaseline(next);
+      setBaselineVersion(saved.version);
       setFeedback("时间线已保存。");
       setExported(null);
       setSuggestionPreview(null);
@@ -377,7 +420,11 @@ export function EditingWorkspace({
     },
     onError: (error: unknown) => {
       // Keep draft/baseline untouched so failed saves leave the editor dirty.
-      setFeedback(`保存时间线失败：${errorMessage(error)}`);
+      setFeedback(
+        error instanceof ApiError && error.status === 409
+          ? "保存时间线失败：服务器时间线已更新；本地未保存草稿已保留。请重新加载后手动合并，再次保存。"
+          : `保存时间线失败：${errorMessage(error)}`,
+      );
     },
   });
 
@@ -808,13 +855,11 @@ export function EditingWorkspace({
           onSelect={onSessionSelected}
         />
 
-        <header className="qc-page-heading">
-          <h1>剪辑会话</h1>
-          <span>编辑层只保存时间线，不会反向修改镜头或生产事实。</span>
+        <PageHeader title="剪辑会话" description="安排画面与声音的节奏，保留原始镜头。">
           <p className="callout" data-testid="editing-session-read-only">
             生产血缘只读 · 不渲染媒体、不调用模型。
           </p>
-        </header>
+        </PageHeader>
 
         {persistedSession.isLoading && (
           <p className="muted" data-testid="editing-session-loading">
@@ -833,7 +878,9 @@ export function EditingWorkspace({
               <h2>{persistedSession.data.name}</h2>
               <dl>
                 <dt>会话编号</dt>
-                <dd>{persistedSession.data.id}</dd>
+                <dd data-testid="edit-session-reference">
+                  {shortReference(persistedSession.data.id)}
+                </dd>
                 <dt>状态</dt>
                 <dd>
                   {EDIT_SESSION_STATUS_LABEL[persistedSession.data.status] ??
@@ -848,10 +895,18 @@ export function EditingWorkspace({
                 <dt>镜头数量</dt>
                 <dd>{draft.clips.length}</dd>
               </dl>
-              <h3>生产血缘（只读）</h3>
-              <pre data-testid="edit-session-lineage">
-                {formatJson(persistedSession.data.production_lineage)}
-              </pre>
+              <details className="editing-diagnostics" data-testid="edit-session-diagnostics">
+                <summary>开发 / 诊断详情（只读）</summary>
+                <p className="muted">完整编号、生产血缘与内部字段；仅供排障，不参与创作操作。</p>
+                <dl>
+                  <dt>剪辑会话编号</dt>
+                  <dd>{persistedSession.data.id}</dd>
+                </dl>
+                <h4>生产血缘（只读）</h4>
+                <pre data-testid="edit-session-lineage">
+                  {formatJson(persistedSession.data.production_lineage)}
+                </pre>
+              </details>
             </section>
 
             <section
@@ -1163,13 +1218,25 @@ export function EditingWorkspace({
                     <li key={`${clipValue(clip, "id")}-${index}`} data-testid="edit-session-clip">
                       <div>
                         <strong>
-                          {index + 1}. 镜头 {clipValue(clip, "shot_id")} · Artifact{" "}
-                          {clipValue(clip, "artifact_id")}
+                          {index + 1}.{" "}
+                          {clipLabel(shotNumberById, clipValue(clip, "shot_id"), index)}
                         </strong>
                         <small>
-                          {clipValue(clip, "episode_id")} · {clipValue(clip, "scene_id")} ·
-                          保留其它片段字段
+                          {clipValue(clip, "artifact_id") ? "正式素材已绑定" : "未绑定正式素材"}
                         </small>
+                        <details
+                          className="editing-diagnostics"
+                          data-testid={`clip-diagnostics-${index}`}
+                        >
+                          <summary>开发 / 诊断详情（只读）</summary>
+                          <small>
+                            片段 {clipValue(clip, "id")} · 素材 {clipValue(clip, "artifact_id")}
+                          </small>
+                          <small>
+                            集 {clipValue(clip, "episode_id")} · 场景 {clipValue(clip, "scene_id")}{" "}
+                            · 镜头 {clipValue(clip, "shot_id")}
+                          </small>
+                        </details>
                       </div>
                       <label>
                         时长（秒）
@@ -1209,16 +1276,32 @@ export function EditingWorkspace({
                         />
                       </label>
                       <label>
-                        音频 Artifact ID（可选）
-                        <input
-                          type="text"
+                        配音
+                        <select
                           data-testid={`clip-audio-${index}`}
-                          aria-label={`镜头 ${index + 1} 音频 Artifact ID`}
+                          aria-label={`镜头 ${index + 1} 配音`}
                           value={editableValue(clip, "audio_id")}
                           onChange={(event) =>
                             updateClipField(index, "audio_id", event.target.value)
                           }
-                        />
+                        >
+                          <option value="">无配音</option>
+                          {audioOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                          {/* A value that is not in the offered list stays selectable
+                              instead of being silently rewritten to none. */}
+                          {editableValue(clip, "audio_id") &&
+                            !audioOptions.some(
+                              (option) => option.id === editableValue(clip, "audio_id"),
+                            ) && (
+                              <option value={editableValue(clip, "audio_id")}>
+                                当前已绑定配音
+                              </option>
+                            )}
+                        </select>
                       </label>
                       <label>
                         转场
@@ -1370,35 +1453,57 @@ export function EditingWorkspace({
                 </p>
                 <dl>
                   <dt>剪辑会话</dt>
-                  <dd>{displayedFilm.edit_session_id}</dd>
+                  <dd data-testid="final-film-session-reference">
+                    {shortReference(displayedFilm.edit_session_id)}
+                  </dd>
                   <dt>时间线版本</dt>
                   <dd>{displayedFilm.timeline_version}</dd>
-                  <dt>素材编号</dt>
-                  <dd>{displayedFilm.artifact_id}</dd>
                   <dt>时长（秒）</dt>
                   <dd>{displayedFilm.duration_seconds}</dd>
                   <dt>格式</dt>
                   <dd>{displayedFilm.mime_type}</dd>
                   <dt>文件大小（字节）</dt>
                   <dd>{displayedFilm.byte_size}</dd>
-                  <dt>内容校验值</dt>
-                  <dd>{displayedFilm.content_hash}</dd>
                   <dt>存储状态</dt>
                   <dd>
                     {STORAGE_STATE_LABEL[displayedFilm.storage_state] ??
                       displayedFilm.storage_state}
                   </dd>
-                  <dt>可播放性断言</dt>
-                  <dd>
-                    {displayedFilm.ffprobe?.assertions &&
-                    typeof displayedFilm.ffprobe.assertions === "object" &&
-                    !Array.isArray(displayedFilm.ffprobe.assertions)
-                      ? Object.entries(displayedFilm.ffprobe.assertions as Record<string, unknown>)
-                          .map(([key, value]) => `${key}=${String(value)}`)
-                          .join(" · ")
-                      : "未提供"}
-                  </dd>
                 </dl>
+                <details className="editing-diagnostics" data-testid="final-film-diagnostics">
+                  <summary>开发 / 诊断详情（只读）</summary>
+                  <p className="muted">
+                    素材编号、内容校验值与可播放性断言；仅供排障，不参与创作操作。
+                  </p>
+                  <dl>
+                    <dt>剪辑会话编号</dt>
+                    <dd>{displayedFilm.edit_session_id}</dd>
+                    <dt>素材编号</dt>
+                    <dd>{displayedFilm.artifact_id}</dd>
+                    <dt>内容校验值</dt>
+                    <dd>{displayedFilm.content_hash}</dd>
+                    {displayedFilm.subtitle_artifact_id && (
+                      <>
+                        <dt>字幕素材编号</dt>
+                        <dd>{displayedFilm.subtitle_artifact_id}</dd>
+                        <dt>字幕内容校验值</dt>
+                        <dd>{displayedFilm.subtitle_content_hash ?? "未提供"}</dd>
+                      </>
+                    )}
+                    <dt>可播放性断言</dt>
+                    <dd>
+                      {displayedFilm.ffprobe?.assertions &&
+                      typeof displayedFilm.ffprobe.assertions === "object" &&
+                      !Array.isArray(displayedFilm.ffprobe.assertions)
+                        ? Object.entries(
+                            displayedFilm.ffprobe.assertions as Record<string, unknown>,
+                          )
+                            .map(([key, value]) => `${key}=${String(value)}`)
+                            .join(" · ")
+                        : "未提供"}
+                    </dd>
+                  </dl>
+                </details>
                 <FinalFilmPlayback
                   key={`${projectId}:${displayedFilm.artifact_id}`}
                   projectId={projectId}
@@ -1461,13 +1566,11 @@ export function EditingWorkspace({
     <div className="qc-project-page" data-testid="editing-workspace">
       <EditingSessionPicker projectId={projectId} onSelect={onSessionSelected} />
 
-      <header className="qc-page-heading">
-        <h1>剪辑交接</h1>
-        <span>当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。</span>
+      <PageHeader title="剪辑交接" description="只读预览已完成的镜头，继续剪辑或新建会话。">
         <p className="callout" data-testid="editing-read-only">
           只读预览 · 仅展示已确认的正式视频，不会触发生成或写回生产事实。
         </p>
-      </header>
+      </PageHeader>
       {manifest.isLoading && (
         <p className="muted" data-testid="editing-loading">
           正在读取正式剪辑时间线…

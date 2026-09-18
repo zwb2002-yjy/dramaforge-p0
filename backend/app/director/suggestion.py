@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Scene, Shot
+from app.assets.schemas import ShotDirectorState
 from app.config import get_settings
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
@@ -304,7 +305,11 @@ class ShotDirectorSuggestionService:
                     task_name="shot_director_suggestion",
                     system_instruction=(
                         "Act as a film Director. Preserve explicit user constraints and existing "
-                        "design extensions. Propose a bounded Shot design diff only."
+                        "design extensions. Propose a bounded Shot design diff only. "
+                        "suggested_director_state must use the canonical shot design shape the "
+                        "design save endpoint accepts: continuity_constraints is a list of "
+                        'objects (for example {"constraint": "身份跨镜头稳定"}), never plain '
+                        "strings."
                     ),
                     input_versions={
                         "project": project.version,
@@ -365,6 +370,27 @@ class ShotDirectorSuggestionService:
             raise ValidationAppError(
                 f"director suggestion failed: {exc}",
                 details={"code": "DIRECTOR_SUGGESTION_FAILED", "manual_ok": True},
+            ) from exc
+
+        # The proposal must be savable.  Design extensions the model preserves
+        # (workflow participation, creative-capability provenance) stay, but the
+        # canonical keys are checked against the shape the design save endpoint
+        # accepts, so a malformed suggestion fails here instead of stranding the
+        # user with a draft the server refuses.
+        try:
+            ShotDirectorState.model_validate(dict(candidate.suggested_director_state.root))
+        except ValidationError as exc:
+            if text_result is not None:
+                await self._text_transport.mark_failed(
+                    text_result.turn,
+                    reason="model director state did not match the canonical shot design shape",
+                )
+            raise ValidationAppError(
+                "director suggestion state does not match the canonical shot design",
+                details={
+                    "code": "INVALID_DIRECTOR_SUGGESTION_STATE",
+                    "errors": exc.errors(),
+                },
             ) from exc
 
         if candidate.base_shot_version != shot.version:

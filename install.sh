@@ -26,10 +26,10 @@ esac
 [ "${#source_commit}" -eq 40 ] || { echo "release.env has an invalid source commit." >&2; exit 2; }
 
 if [ "$offline" = true ]; then
-    [ -f images.tar ] || {
-        echo "images.tar is missing. Use the complete offline release bundle." >&2; exit 2;
+    [ -f images.tar.gz ] || {
+        echo "images.tar.gz is missing. Use the complete offline release bundle." >&2; exit 2;
     }
-    docker load --input images.tar
+    docker load --input images.tar.gz
 fi
 
 if [ ! -f .env ]; then

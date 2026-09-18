@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.config import clear_settings_cache, get_settings
@@ -49,6 +49,15 @@ def api() -> Iterator[tuple[TestClient, Any]]:
         yield client, factory
     app.dependency_overrides.clear()
     _run(engine.dispose())
+
+
+def _run_create(coro: Any) -> Any:
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _csrf(client: TestClient) -> str:
@@ -142,6 +151,24 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
     assert conflict.json()["details"]["code"] == "MODEL_PROFILE_VERSION_CONFLICT"
 
 
+def test_workspace_profile_path_must_match_selected_workspace(
+    api: tuple[TestClient, Any],
+) -> None:
+    client, _ = api
+    workspace_id = _register(client)
+    other = client.post(
+        "/api/v1/workspaces",
+        json={"name": "Other workspace"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert other.status_code == 201, other.text
+    response = client.get(
+        f"/api/v1/workspaces/{other.json()['id']}/model-profiles",
+        headers={"X-Workspace-Id": workspace_id},
+    )
+    assert response.status_code == 404, response.text
+
+
 def test_workspace_profile_validation_rejects_capability_mismatch(
     api: tuple[TestClient, Any],
 ) -> None:
@@ -163,9 +190,9 @@ def test_workspace_profile_validation_rejects_capability_mismatch(
 
 
 def test_effective_bindings_and_generation_slot_resolution(
-    api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
+    api: tuple[TestClient, Any],
 ) -> None:
-    client, _ = api
+    client, factory = api
     workspace_id = _register(client)
     project_id = _create_project(client, workspace_id)
     client.post(
@@ -185,22 +212,39 @@ def test_effective_bindings_and_generation_slot_resolution(
     assert keyframe["source"] == "workspace_profile"
 
     # Standalone image.generate without model_id resolves the visual.keyframe
-    # slot. Patch the Arq enqueue (no Redis in CI unit job) like the generation
-    # API tests do.
-    async def fake_enqueue(self: object, node_run_id: Any) -> str:
-        return f"fake-{node_run_id}"
+    # slot through the GenerationService domain call (media generation has no
+    # second HTTP writer; the workbench execution path owns that surface).
+    async def _create() -> str:
+        from app.access.models import Project, User
+        from app.providers.bootstrap import default_v3_registry
+        from app.providers.capabilities import Capability
+        from app.providers.generation_service import GenerationService
+        from app.providers.router import CapabilityRouter
+        from sqlalchemy import select
 
-    monkeypatch.setattr(
-        "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
-        fake_enqueue,
-    )
-    gen = client.post(
-        f"/api/v1/projects/{project_id}/generations",
-        json={"capability": "image.generate", "input": {"prompt": "雨夜"}},
-        headers={CSRF_HEADER: _csrf(client)},
-    )
-    assert gen.status_code == 201, gen.text
-    assert gen.json()["requested_model"] == "agnes/agnes-image-2.1-flash"
+        async with factory() as session:
+            user = (await session.execute(select(User).limit(1))).scalar_one()
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            service = GenerationService(
+                session, CapabilityRouter(registry=default_v3_registry()[0])
+            )
+            run = await service.create_generation(
+                project=project,
+                actor=user,
+                capability=Capability.IMAGE_GENERATE,
+                model_id=None,
+                input_data={"prompt": "雨夜"},
+                options={},
+                native_options={},
+                idempotency_key=None,
+            )
+            snapshot = dict(run.input_snapshot or {})
+            generation = snapshot.get("generation") or {}
+            assert isinstance(generation, dict)
+            return str(generation.get("requested_model") or "")
+
+    assert _run_create(_create()) == "agnes/agnes-image-2.1-flash"
 
 
 def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) -> None:

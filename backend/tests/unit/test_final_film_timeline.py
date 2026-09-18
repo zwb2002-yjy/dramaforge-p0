@@ -695,7 +695,6 @@ async def test_history_uses_frozen_timeline_and_survives_unavailable_media(
     )
     run = await session.get(NodeRun, job.node_run_id)
     assert run is not None
-    run.status = "completed"
     artifact = Artifact(
         project_id=project.id,
         artifact_type="video",
@@ -705,8 +704,12 @@ async def test_history_uses_frozen_timeline_and_survives_unavailable_media(
         mime_type="video/mp4",
         byte_size=32,
         duration_seconds=Decimal("5"),
+        produced_by_run_id=run.id,
     )
     session.add(artifact)
+    await session.flush()
+    run.result_artifact_id = artifact.id
+    run.status = "completed"
     await session.flush()
     exported = Export(
         project_id=project.id,
@@ -829,6 +832,55 @@ async def test_subtitle_export_is_frozen_and_rerender_never_creates_media(sessio
         shot.formal_video_artifact_id == video.id
         for shot, video in zip(shots, _videos, strict=True)
     )
+
+
+@pytest.mark.asyncio
+async def test_reexporting_an_unchanged_timeline_keeps_its_result(session, monkeypatch):
+    """Re-exporting identical bytes must still return a readable Final Film.
+
+    Rendering the same frozen timeline twice produces identical media on purpose,
+    so the second export reuses the first run's Artifacts.  The read model then
+    saw a subtitle Artifact owned by the earlier run and reported the film as
+    unavailable, which dropped the newest export out of the history and left the
+    editing page showing the older one.
+    """
+    from app.production.final_film import get_final_film_status
+
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session, shot_count=2)
+    clips = [dict(clip) for clip in edit.timeline["clips"]]
+    for index, clip in enumerate(clips):
+        clip["subtitle"] = f"字幕 {index + 1}"
+    edit.timeline = {"clips": clips, "metadata": {}}
+    await session.commit()
+
+    async def render(key):
+        queued = await queue_final_film_render(
+            session,
+            project_id=project.id,
+            edit_session_id=edit.id,
+            expected_timeline_version=edit.version,
+            actor_id=user.id,
+            idempotency_key=key,
+            name="Re-export",
+        )
+        run = await session.get(NodeRun, queued.node_run_id)
+        run.status = "running"
+        await session.commit()
+        node = await session.get(GraphNode, run.graph_node_id)
+        await execute_final_film_node_run(session, run=run, node=node, obj_store=get_object_store())
+        return await get_final_film_status(session, project_id=project.id, node_run_id=run.id)
+
+    first = await render("reexport:first")
+    assert first.result.subtitle_artifact_id is not None
+    assert first.result.subtitle_cue_count > 0
+
+    # Same timeline version, deliberately exported again.
+    second = await render("reexport:second")
+    assert second.result is not None, "a re-export must stay readable"
+    assert second.result.artifact_id == first.result.artifact_id
+    assert second.result.subtitle_artifact_id == first.result.subtitle_artifact_id
+    assert second.result.subtitle_cue_count == first.result.subtitle_cue_count
 
 
 @pytest.mark.asyncio

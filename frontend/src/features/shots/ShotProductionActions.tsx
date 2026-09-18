@@ -2,7 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { queryKeys } from "../../lib/queryKeys";
-import { ApiError } from "../../lib/api";
+import { ApiError, listModels } from "../../lib/api";
+import {
+  capabilityGapReason,
+  capabilityGapSeverityLabel,
+  executionModelLabel,
+  referenceDeliveryLabel,
+} from "../../lib/executionPlanLabels";
 import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { activeStageStatus, stageOutcomeUnknown } from "../production/sceneRunState";
@@ -152,6 +158,14 @@ export function ShotProductionActions({
     retry: false,
   });
   const directorCapabilities = capabilities.data ?? null;
+  // Display names for execution models come from the backend catalogue; the raw
+  // `provider/model` id is contract data and never rendered on this surface.
+  const models = useQuery({
+    queryKey: queryKeys.model.catalog(),
+    queryFn: () => listModels(),
+    enabled: Boolean(projectId) && projectId !== "demo",
+    retry: false,
+  });
   // Only an explicit `runtime_turns_available === false` closes the AUTO entry
   // point. A failed, in-flight or malformed read must not disable it: the server
   // re-validates every submission anyway, and a read model must never remove a
@@ -439,7 +453,12 @@ export function ShotProductionActions({
   const videoOutcomeUnknown = stageOutcomeUnknown(trace, "video");
   const delivery = displayedPlan ? planDelivery(displayedPlan) : planFailure;
   const plannedReferences = displayedPlan?.plan.planned_references ?? [];
-  const resolvedModel = displayedPlan?.plan.resolved_model?.resolved_model_id ?? "未解析";
+  // The stored id stays a contract value; the surface shows the catalogue's
+  // display name and keeps the id in the collapsed diagnostics block.
+  const planModel = executionModelLabel(
+    displayedPlan?.plan.resolved_model?.resolved_model_id,
+    Array.isArray(models.data) ? models.data : undefined,
+  );
 
   const buttonLabel = (stage: ShotExecutionStage, serverStatus: string | null) => {
     const label = STAGE_LABEL[stage];
@@ -595,23 +614,42 @@ export function ShotProductionActions({
           data-testid="shot-execution-plan-preview"
           data-delivery={delivery}
         >
-          <strong>模型适配：{delivery}</strong>
+          <strong>模型适配：{referenceDeliveryLabel(delivery)}</strong>
           {displayedPlan && (
             <>
-              <p data-testid="shot-execution-plan-model">模型：{resolvedModel}</p>
+              <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
               <p data-testid="shot-execution-plan-references">
-                引用 exact {plannedReferences.filter((row) => row.delivery === "exact").length} ·
-                approximate
-                {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
-                unsupported
+                引用：完全支持 {plannedReferences.filter((row) => row.delivery === "exact").length}{" "}
+                · 近似支持{" "}
+                {plannedReferences.filter((row) => row.delivery === "approximate").length} · 不支持{" "}
                 {plannedReferences.filter((row) => row.delivery === "unsupported").length}
               </p>
-              {(displayedPlan.plan.capability_gaps ?? []).map((gap, index) => (
-                <p key={`${gap.severity}-${index}`} className="qc-shot-production-hint">
-                  {gap.severity}：{gap.reason}
-                  {(gap.controls ?? []).length ? `（${(gap.controls ?? []).join("、")}）` : ""}
-                </p>
-              ))}
+              {(displayedPlan.plan.capability_gaps ?? []).map((gap, index) => {
+                const gapReason = capabilityGapReason(gap.reason);
+                return (
+                  <p key={`${gap.severity}-${index}`} className="qc-shot-production-hint">
+                    {capabilityGapSeverityLabel(gap.severity)}：{gapReason.label}
+                    {(gap.controls ?? []).length ? `（${(gap.controls ?? []).join("、")}）` : ""}
+                  </p>
+                );
+              })}
+              <details
+                className="editing-diagnostics"
+                data-testid="shot-execution-plan-diagnostics"
+              >
+                <summary>开发 / 诊断详情（只读）</summary>
+                <small>
+                  适配 {delivery} · 模型 {planModel.raw || "无"}
+                  {(displayedPlan.plan.capability_gaps ?? [])
+                    .map(
+                      (gap) =>
+                        ` · ${gap.severity} ${gap.capability ?? ""}${
+                          gap.reason ? ` ${gap.reason}` : ""
+                        }`,
+                    )
+                    .join("")}
+                </small>
+              </details>
               {(displayedPlan.plan.pending_suggestions ?? []).length > 0 && (
                 <div
                   className="qc-shot-production-hint"

@@ -7,17 +7,17 @@
 
 :root {
   /* ---- Color: Core Palette ---- */
-  --df-obsidian: #0d111c;
-  --df-ink: #1b2232;
-  --df-ink-light: #242e41;
-  --df-verdigris: #9cc8c7;
-  --df-verdigris-dim: #3d7f70;
-  --df-verdigris-tint: rgba(79, 159, 140, 0.12);
-  --df-brass: #e2bd88;
-  --df-brass-dim: #a77c3f;
-  --df-brass-tint: rgba(198, 154, 87, 0.12);
-  --df-ivory: #eee7db;
-  --df-ivory-dim: #c4bcae;
+  --df-obsidian: #17171c;
+  --df-ink: #23232b;
+  --df-ink-light: #33323f;
+  --df-verdigris: #c4b5fd;
+  --df-verdigris-dim: #b3a1ef;
+  --df-verdigris-tint: rgba(196, 181, 253, 0.12);
+  --df-brass: #f1bb9c;
+  --df-brass-dim: #dfa382;
+  --df-brass-tint: rgba(241, 187, 156, 0.12);
+  --df-ivory: #f4f1f8;
+  --df-ivory-dim: #ccc6d4;
 
   /* ---- Color: Semantic ---- */
   --df-success: #4f9f8c;
@@ -34,36 +34,36 @@
   --df-info: #6f91a8;
   --df-info-dim: rgba(111, 145, 168, 0.15);
   --df-info-border: rgba(111, 145, 168, 0.38);
-  --df-focus-ring: rgba(79, 159, 140, 0.18);
-  --df-selection: rgba(79, 159, 140, 0.3);
+  --df-focus-ring: rgba(196, 181, 253, 0.32);
+  --df-selection: rgba(196, 181, 253, 0.28);
 
   /* ---- Color: Surface ---- */
-  --df-surface-0: #0d111c;
-  --df-surface-1: #121925;
+  --df-surface-0: #17171c;
+  --df-surface-1: #1d1d24;
   /* Secondary ink surface: first raised step above the page background.
      Exists so container-tier elements never need a hardcoded surface value. */
-  --df-surface-1b: #151d2a;
-  --df-surface-2: #192130;
-  --df-surface-3: #222c3e;
-  --df-surface-raised: #2c374a;
-  --df-surface-overlay: rgba(13, 17, 28, 0.94);
+  --df-surface-1b: #23232b;
+  --df-surface-2: #292932;
+  --df-surface-3: #32313c;
+  --df-surface-raised: #3e3b4b;
+  --df-surface-overlay: rgba(29, 29, 36, 0.98);
   /* Neutral media backdrop for 9:16 stage frames, storyboard thumbs and previews.
      Not a surface level: it must stay darker than every --df-surface-* step. */
   --df-surface-screen: #000000;
 
   /* ---- Color: Border ---- */
-  --df-border: #30394a;
-  --df-border-strong: #536075;
-  --df-border-subtle: #242c3c;
+  --df-border: rgba(220, 213, 238, 0.13);
+  --df-border-strong: rgba(220, 213, 238, 0.28);
+  --df-border-subtle: rgba(220, 213, 238, 0.065);
 
   /* ---- Color: Text ---- */
-  --df-text-primary: #eee7db;
-  --df-text-secondary: #b8bdc7;
-  --df-text-muted: #929aab;
-  --df-text-inverse: #0d111c;
+  --df-text-primary: #f4f1f8;
+  --df-text-secondary: #c4bfce;
+  --df-text-muted: #a29bab;
+  --df-text-inverse: #17171c;
 
   /* ---- Typography ---- */
-  --df-font-display: Georgia, "Noto Serif SC", "Songti SC", serif;
+  --df-font-display: var(--df-font-sans);
   --df-font-sans:
     "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --df-font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -103,14 +103,26 @@
   --df-space-10: 2.5rem; /* 40px */
   --df-space-12: 3rem; /* 48px */
 
+  /* Shared control geometry: one recipe for native and component controls. */
+  --df-control-height: 2.5rem;
+  --df-control-padding-y: var(--df-space-2);
+  --df-control-padding-x: var(--df-space-3);
+  --df-control-line-height: 1.25rem;
+  --df-checkbox-size: 1rem;
+  --df-focus-width: 2px;
+  --df-focus-offset: 2px;
+  --df-textarea-min-height: 8rem;
+  --df-page-title-size: var(--df-text-3xl);
+  --df-page-description-width: 44rem;
+
   /* ---- Radius ----
      Radius is fixed by CONTROL TYPE, not by nesting depth and not by preference.
      New code uses the semantic names; the legacy sm/md/lg/xl scale is kept only
      so existing declarations keep working. */
   --df-radius-legacy-sm: 4px;
-  --df-radius-control: 8px; /* buttons, inputs, tabs, selectable rows */
-  --df-radius-container: 10px; /* panels, cards, tables, drawers, stage frames */
-  --df-radius-container-lg: 14px; /* top-level workbench shells only */
+  --df-radius-control: 12px; /* buttons, inputs, tabs, selectable rows */
+  --df-radius-container: 20px; /* panels, cards, tables, drawers, stage frames */
+  --df-radius-container-lg: 24px; /* top-level workbench shells only */
   --df-radius-chip: 9999px; /* pills, badges, dots, avatars */
   --df-radius-sm: var(--df-radius-legacy-sm);
   --df-radius-md: var(--df-radius-control);
@@ -119,10 +131,10 @@
   --df-radius-full: var(--df-radius-chip);
 
   /* ---- Shadow ---- */
-  --df-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --df-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
-  --df-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --df-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --df-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --df-shadow-md: 0 8px 28px rgba(0, 0, 0, 0.16);
+  --df-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.22);
+  --df-shadow-xl: 0 24px 64px rgba(0, 0, 0, 0.36);
 
   /* ---- Surface tiers (flat / raised / overlay) ----
      Exactly three elevation tiers. Every surface element picks one; a tier is a
@@ -132,7 +144,7 @@
   --df-surface-tier-flat-border: var(--df-border);
   --df-surface-tier-flat-shadow: none;
   --df-surface-tier-raised-bg: var(--df-surface-1b);
-  --df-surface-tier-raised-border: var(--df-border);
+  --df-surface-tier-raised-border: var(--df-border-subtle);
   --df-surface-tier-raised-shadow: var(--df-shadow-md);
   --df-surface-tier-overlay-bg: var(--df-surface-2);
   --df-surface-tier-overlay-border: var(--df-border-strong);
@@ -162,8 +174,30 @@
   --df-z-overlay: 40;
   --df-z-modal: 50;
 
+  /* Studio treatments: static, low-contrast; never applied to media pixels. */
+  --df-canvas-background:
+    radial-gradient(ellipse at 12% 0%, rgba(196, 181, 253, 0.075), transparent 48%),
+    var(--df-surface-0);
+  --df-cover-background:
+    radial-gradient(ellipse at 80% 10%, rgba(196, 181, 253, 0.22), transparent 65%),
+    linear-gradient(145deg, var(--df-surface-3), var(--df-surface-1));
+  --df-cover-warm-background:
+    radial-gradient(ellipse at 15% 20%, rgba(241, 187, 156, 0.22), transparent 65%),
+    linear-gradient(145deg, var(--df-surface-3), var(--df-surface-1));
+  --df-nav-active-background: linear-gradient(
+    110deg,
+    var(--df-verdigris-tint),
+    var(--df-brass-tint)
+  );
+  --df-control-background: rgba(220, 213, 238, 0.055);
+  --df-hover-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  --df-asset-card-min: 17rem;
+  --df-empty-min-height: 16rem;
+  --df-icon-display-size: 3rem;
+
   /* ---- Layout ---- */
   --df-topbar-h: 52px;
+  --df-form-field-min: 14rem; /* model/settings form column minimum */
   --df-sidebar-w: 216px;
   --df-inspector-w: 320px;
 }

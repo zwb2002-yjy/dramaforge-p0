@@ -5,7 +5,7 @@ Covers the Phase 5 Gate items that need persistence proof:
 - Worker restart recovery: ``recover_interrupted_provider_jobs`` re-queues a
   running unified NodeRun through the real PG SQL function
   ``app.resumable_provider_node_run_contexts`` and the RLS scope path.
-- API restart no task loss: ``dispatch_outbox`` re-enqueues a pending NodeRun
+- API restart no task loss: the resident dispatcher re-enqueues a pending NodeRun
   from a durable Outbox row.
 - 旧任务不会读取新的 Binding: a NodeRun created by ``queue_branch_nodes`` freezes
   ``model_binding_id`` at dispatch; when the project later re-points at a second
@@ -523,7 +523,7 @@ async def test_worker_restart_requeues_resumable_unified_run_pg(
 
 
 # ---------------------------------------------------------------------------
-# Test 2: API restart no task loss — durable Outbox re-enqueues
+# Test 2: API restart no task loss — resident dispatcher re-enqueues
 # ---------------------------------------------------------------------------
 
 
@@ -532,7 +532,7 @@ async def test_api_restart_outbox_reenqueues_pending_node_run_pg(
     pg_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.workers.jobs import dispatch_outbox
+    from app.workers.dispatcher import dispatch_once
 
     user, project_id, workspace_id = await _project(pg_session)
     run = await _seed_graph_and_run(
@@ -560,10 +560,7 @@ async def test_api_restart_outbox_reenqueues_pending_node_run_pg(
 
     factory_engine = create_async_engine(database_url(), pool_pre_ping=True)
     factory = async_sessionmaker(factory_engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr(
-        "app.workers.jobs.get_session_factory",
-        lambda: factory,
-    )
+    monkeypatch.setattr("app.workers.dispatcher.get_session_factory", lambda: factory)
     drain = AsyncMock(return_value="p5-drain-job")
     monkeypatch.setattr(
         NodeRunScheduler,
@@ -571,7 +568,7 @@ async def test_api_restart_outbox_reenqueues_pending_node_run_pg(
         drain,
     )
 
-    await dispatch_outbox({})
+    await dispatch_once(worker_id="phase5-test-dispatcher")
 
     async with factory() as observer:
         await set_rls_context(
@@ -613,7 +610,7 @@ async def test_old_task_never_reads_new_binding_pg(
     p5_plugin: ProviderPlugin,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.execution.product_path as pp
+    import app.execution.provider_execution as provider_execution
     from app.assets.models import Episode, Scene, Shot
     from app.providers.models import ProjectProviderBinding
 
@@ -706,7 +703,7 @@ async def test_old_task_never_reads_new_binding_pg(
 
     # Execute the OLD run. It must submit against B1 (frozen at dispatch), not B2.
     monkeypatch.setattr(
-        pp,
+        provider_execution,
         "get_settings",
         lambda: Settings(
             app_env="test",

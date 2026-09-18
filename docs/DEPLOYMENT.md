@@ -47,10 +47,17 @@ image identities in `.env`. It preserves database credentials,
 before an upgrade; replacing the Fernet key makes saved Provider credentials
 unreadable.
 
+PostgreSQL connections use `DATABASE_SSL=false` for the local Compose network.
+Set it to `true` when the database endpoint requires TLS; the setting is passed
+to the API, dispatcher and Workers and is not encoded in application code.
+
 ## Complete offline install
 
 Use the architecture-specific offline release bundle, not the online bundle.
-It contains `images.tar` with the complete runtime image set. After extracting:
+It contains `images.tar.gz` with the complete runtime image set. Extract it into
+a directory and run the installer from that same directory (the archive holds the
+installer, `release.env`, the Compose files and the image archive at its top
+level):
 
 ```text
 .\install.ps1 -Offline
@@ -62,7 +69,7 @@ or:
 ./install.sh --offline
 ```
 
-The installer imports `images.tar` and layers `docker-compose.offline.yml`,
+The installer imports `images.tar.gz` and layers `docker-compose.offline.yml`,
 whose `pull_policy: never` contract covers every service. Offline installation
 means no registry access during installation. Cloud media Providers still need
 network access and user credentials; this release does not claim that the full
@@ -116,8 +123,8 @@ entrypoint is `scripts/p0_backup_restore.py` (see
 `DIRECTOR_RUNTIME_ENGINE` selects the engine for **newly started** Director
 turns and defaults to `legacy`. It is passed to both the API (which starts
 turns) and `worker-director` (which executes them); the `langgraph` value also
-requires `DIRECTOR_CHECKPOINT_DATABASE_URL`, which only `worker-director`
-receives, plus the private `director_runtime_checkpoints` schema created by
+requires `DIRECTOR_CHECKPOINT_DATABASE_URL`, which both processes receive,
+plus the private `director_runtime_checkpoints` schema created by
 migration `20260910_0066` (role `dramaforge_director_checkpoint`, provisioned by
 `database-bootstrap`). Selecting one engine never runs the other, and the manual
 production path must still complete with the director worker stopped.

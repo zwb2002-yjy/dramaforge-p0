@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
+import { reviewTargetHref } from "./reviewTarget";
 import { queryKeys } from "../../lib/queryKeys";
+import { nodeRunStatusLabel } from "../../lib/runLabels";
 import {
   REPAIR_OPTION_LABEL,
   createRepair,
@@ -24,7 +26,8 @@ type RepairPlanPanelProps = {
 
 function stepSummary(step: RepairStepRead): string {
   const parts = [`第 ${step.ordinal} 步 · ${repairStageLabel(step.stage)}`];
-  if (step.node_run_status) parts.push(`运行状态 ${step.node_run_status}`);
+  // The stored run status is a contract token; the surface states it in Chinese.
+  if (step.node_run_status) parts.push(`运行状态 ${nodeRunStatusLabel(step.node_run_status)}`);
   parts.push(repairStepActionLabel(step.next_action));
   return parts.join(" · ");
 }
@@ -140,7 +143,7 @@ export function RepairPlanPanel({ projectId, shotId, onClose }: RepairPlanPanelP
                   onChange={() => setOption(value as RepairOption)}
                   disabled={Boolean(active)}
                 />
-                {REPAIR_OPTION_LABEL[value as RepairOption] ?? value}
+                {REPAIR_OPTION_LABEL[value as RepairOption] ?? "修复方式待同步"}
               </label>
             ))}
           </fieldset>
@@ -170,12 +173,32 @@ export function RepairPlanPanel({ projectId, shotId, onClose }: RepairPlanPanelP
             {active.steps.map((step) => (
               <li key={step.id} data-testid={`repair-step-${step.ordinal}`}>
                 {stepSummary(step)}
+                {step.result_artifact_id &&
+                  ["completed", "cached", "completed_after_cancel"].includes(
+                    step.node_run_status ?? "",
+                  ) &&
+                  (step.stage === "keyframe_regenerate" || step.stage === "video_rerun") && (
+                    <a
+                      href={reviewTargetHref(projectId, {
+                        shotId,
+                        artifactId: step.result_artifact_id,
+                        stage:
+                          step.stage === "keyframe_regenerate" ? "formal_keyframe" : "formal_video",
+                        reviewKind:
+                          step.stage === "keyframe_regenerate" ? "identity" : "video_drift",
+                        repairRequestId: active.id,
+                        repairStepId: step.id,
+                      })}
+                    >
+                      审查本步候选
+                    </a>
+                  )}
               </li>
             ))}
           </ol>
           {active.next_action === "human_decision" && (
             <p className="flash" data-testid="repair-review-hint" role="status">
-              本步候选已产出：请在上方“人工判断”中审查并确认后，再继续下一步。修复尚未完成。
+              请等待本步生成完成，再通过“审查本步候选”检查对应结果。修复尚未完成。
             </p>
           )}
           {active.next_action === "execute_step" && (

@@ -204,7 +204,7 @@ async def _add_source_media(
         attempt_no=attempt_no,
         idempotency_key=f"{key}:{attempt_no}:{uuid4()}",
         input_hash=key * 16,
-        status="completed",
+        status="queued",
         input_snapshot={"shot_id": str(shot_id), "node_key": key},
         created_by=user_id,
     )
@@ -232,6 +232,7 @@ async def _add_source_media(
     session.add(artifact)
     await session.flush()
     source_run.result_artifact_id = artifact.id
+    source_run.status = "completed"
     await session.flush()
     return SourceMedia(run=source_run, artifact=artifact, data=data)
 

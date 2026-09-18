@@ -6,18 +6,20 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
 - `main` 是受保护的稳定发布分支，禁止直接 push（本地 pre-push hook 与
   GitHub ruleset 双重拦截）。
-- `dev` 是常规集成分支；根 worktree 正常跟踪 `dev`，日常 commit 直接推送
-  `origin/dev`。每次 push 到 `dev` 都运行完整 CI 与 Security workflow。
-- 发布的唯一正常方向：`dev -> main` PR。合并后本地 `main` fast-forward，
-  并在历史分叉时把 `main` 合回 `dev`。
-- 短生命周期 `agent/<task-id>` 分支 + `.worktrees/<task-id>` 只用于并行隔离
-  工作：从 `dev` 出发、PR 目标 `dev`。生产 hotfix 可从 `main` 出发、目标
-  `main`，事后同步回 `dev`。
+- `dev` 是常规集成分支。日常修改通过短生命周期
+  `agent/<task-id> -> dev` PR 集成；普通 PR 使用按变更风险分层的 CI，
+  merge 到 `dev` 后不再原样重复同一套全量质量门。
+- 发布的唯一正常方向：`dev -> main` PR。该 PR 必须执行完整质量与安全
+  required checks；合并后本地 `main` fast-forward，并在历史分叉时把
+  `main` 合回 `dev`。
+- 短生命周期 `agent/<task-id>` 分支 + `.worktrees/<task-id>` 用于并行隔离
+  工作：从 `dev` 出发、PR 目标 `dev`。生产 hotfix 可从 `main` 出发、
+  目标 `main`，事后同步回 `dev`。
 - Dependabot 常规版本更新当前暂停（各 ecosystem 的
   `open-pull-requests-limit: 0`）；安全告警保留人工分诊，自动安全修复关闭。
   恢复常规更新时只允许直接依赖、忽略 major 更新、使用
-  `dependabot/* -> dev` PR，并在 CI 和安全检查后由 Owner 决定是否集成；不直接
-  作为稳定版本更新合入 `main`。
+  `dependabot/* -> dev` PR，并在对应依赖审计与受影响质量门通过后由 Owner
+  决定是否集成；不直接作为稳定版本更新合入 `main`。
 - 只有 `@zwb2002-yjy` 批准 / 合并 PR；Agent 不自批、不自合、不记录 MERGED。
 
 ### 合并提交说明检查
@@ -30,19 +32,30 @@ Squash 必须显式传入审阅过的标题和正文，不使用自动拼接的�
 
 ## Required GitHub ruleset（main）
 
-1. 合并前必须 PR；
-2. 至少一个 approval；
-3. 需要 Code Owners review；
-4. 新 commit 使过期 approval 失效；
-5. 合并前必须解决所有 conversation；
-6. 禁止 force push 与分支删除；
-7. 要求精确状态检查：`policy`、`container-gates`；
-8. 管理员与 automation 不绕过 ruleset。
+当前 `main` ruleset 要求：
 
-`dev` 分支 ruleset 保留删除与 force-push 保护，同时允许正常直接 push 工作流。
+1. 禁止 force push 与分支删除；
+2. required status checks 使用 strict 模式；
+3. 精确要求：
+   - `policy`
+   - `container-gates`
+   - `secret-scan`
+   - `python-dependencies`
+   - `frontend-dependencies`
+   - `filesystem-scan`
+
+`dev` ruleset 当前保留删除与 non-fast-forward 保护，不配置 required status
+checks；`agent/* -> dev` 仍通过 CI workflow 做按风险分层验证。
+
+PR CI 的分层规则见 [DEVELOPMENT.md](DEVELOPMENT.md)。`dev -> main` 不走
+Fast Gate：上述六个 required checks 全部执行，其中 `container-gates`
+包含 backend/frontend、PostgreSQL migration/integration、Playwright 与 LiteLLM
+完整质量门。
+
 Dependency Review 由仓库变量 `DEPENDENCY_REVIEW_ENABLED=true` 能力门控；
-不可用时显式跳过而非报假失败——`pip-audit`、`npm audit`、secret scan 与
-Trivy filesystem scan 始终阻断。
+不可用时显式跳过。Python/Node 依赖审计、secret scan 与 Trivy filesystem scan
+在 `dev -> main` 必须执行；周度完整安全扫描由
+`.github/workflows/security.yml` 执行。
 
 ## 发布步骤
 

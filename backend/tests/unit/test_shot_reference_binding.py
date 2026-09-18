@@ -54,6 +54,54 @@ def _project_with_shot_and_asset(client: TestClient) -> tuple[str, str, str]:
     return project_id, shot_id, str(asset.json()["id"])
 
 
+def test_recycled_asset_cannot_become_a_reference(client: TestClient) -> None:
+    """A recycled asset is retired from production and must not re-enter it.
+
+    The picker no longer offers it, but the server is the boundary: creating a
+    binding for a discarded asset used to succeed and only failed closed much
+    later, at generation time.
+    """
+    project_id, shot_id, asset_id = _project_with_shot_and_asset(client)
+    recycled = client.post(
+        f"/api/v1/projects/{project_id}/assets/{asset_id}/recycle",
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert recycled.status_code in {200, 201, 204}, recycled.text
+
+    refused = client.post(
+        f"/api/v1/projects/{project_id}/shots/{shot_id}/references",
+        json={
+            "purpose": "identity",
+            "asset_id": asset_id,
+            "resolution_mode": "current_formal",
+            "label": "@林墨",
+            "stage": "both",
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["details"]["code"] == "REFERENCE_ASSET_RECYCLED"
+
+    # Restoring the asset makes the same write legal again.
+    restored = client.post(
+        f"/api/v1/projects/{project_id}/assets/{asset_id}/restore",
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert restored.status_code in {200, 201}, restored.text
+    allowed = client.post(
+        f"/api/v1/projects/{project_id}/shots/{shot_id}/references",
+        json={
+            "purpose": "identity",
+            "asset_id": asset_id,
+            "resolution_mode": "current_formal",
+            "label": "@林墨",
+            "stage": "both",
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert allowed.status_code == 201, allowed.text
+
+
 def test_binding_create_list_update_and_delete(client: TestClient) -> None:
     project_id, shot_id, asset_id = _project_with_shot_and_asset(client)
     created = client.post(

@@ -5,14 +5,16 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.events.models import OutboxDeadLetter, OutboxEvent
+from app.events.sse import SseHub, default_sse_hub
 from app.shared.enums import OutboxStatus
 from app.shared.errors import NotFoundError, ValidationAppError
 from app.shared.observability import (
     OUTBOX_DEAD_LETTER_TOTAL,
+    OUTBOX_OLDEST_WAIT_SECONDS,
     OUTBOX_PENDING,
     OUTBOX_PUBLISHED_TOTAL,
     OUTBOX_REPLAY_TOTAL,
@@ -39,11 +41,13 @@ class OutboxDispatcher:
         *,
         max_attempts: int = 3,
         lease_seconds: int = 30,
+        sse_hub: SseHub | None = default_sse_hub,
     ) -> None:
         self._session = session
         self._publisher = publisher or StreamPublisher()
         self._max_attempts = max_attempts
         self._lease_seconds = lease_seconds
+        self._sse_hub = sse_hub
 
     async def reclaim_expired_leases(self, *, now: datetime | None = None) -> int:
         """Return expired LEASED rows to PENDING for retry."""
@@ -129,18 +133,26 @@ class OutboxDispatcher:
         await self._session.flush()
         return row
 
-    async def publish_leased(self, event: OutboxEvent) -> None:
+    async def publish_leased(
+        self,
+        event: OutboxEvent,
+        *,
+        workspace_id: UUID | None = None,
+    ) -> None:
         if event.status == OutboxStatus.PUBLISHED.value:
             return
         if event.status != OutboxStatus.LEASED.value:
             raise ValidationAppError("only leased outbox events can be published")
+        stream_payload: dict[str, object] = {
+            "event_id": str(event.event_id),
+            "payload": event.payload,
+            "schema_version": event.schema_version,
+        }
+        if workspace_id is not None:
+            stream_payload["workspace_id"] = str(workspace_id)
         stream_id = await self._publisher.publish(
             event.topic,
-            {
-                "event_id": str(event.event_id),
-                "payload": event.payload,
-                "schema_version": event.schema_version,
-            },
+            stream_payload,
         )
         event.status = OutboxStatus.PUBLISHED.value
         event.published_at = datetime.now(UTC)
@@ -148,6 +160,18 @@ class OutboxDispatcher:
         event.leased_until = None
         event.last_error_summary = f"stream_id={stream_id}"
         OUTBOX_PUBLISHED_TOTAL.inc()
+        if self._sse_hub is not None and workspace_id is not None:
+            self._sse_hub.publish(
+                event=event.topic,
+                data={
+                    "event_id": str(event.event_id),
+                    "topic": event.topic,
+                    "schema_version": event.schema_version,
+                    "workspace_id": str(workspace_id),
+                    "project_id": str(event.project_id) if event.project_id else None,
+                    "payload": event.payload,
+                },
+            )
         await self._session.flush()
 
     async def fail_leased(self, event: OutboxEvent, *, error: str) -> OutboxDeadLetter | None:
@@ -158,16 +182,31 @@ class OutboxDispatcher:
             event.status = OutboxStatus.DEAD_LETTER.value
             event.locked_by = None
             event.leased_until = None
-            dl = OutboxDeadLetter(
-                outbox_event_id=event.id,
-                event_id=event.event_id,
-                project_id=event.project_id,
-                topic=event.topic,
-                payload=event.payload,
-                attempt_count=event.attempt_count,
-                last_error_summary=error[:500],
+            # A replayed event that fails again updates its one dead-letter row
+            # instead of inserting a duplicate (outbox_event_id is unique). The
+            # refreshed dead_lettered_at is the new failure identity, so a page
+            # holding the old one cannot replay blind.
+            dl = await self._session.scalar(
+                select(OutboxDeadLetter)
+                .where(OutboxDeadLetter.outbox_event_id == event.id)
+                .with_for_update()
             )
-            self._session.add(dl)
+            if dl is None:
+                dl = OutboxDeadLetter(
+                    outbox_event_id=event.id,
+                    event_id=event.event_id,
+                    project_id=event.project_id,
+                    topic=event.topic,
+                    payload=event.payload,
+                    attempt_count=event.attempt_count,
+                    last_error_summary=error[:500],
+                )
+                self._session.add(dl)
+            else:
+                dl.payload = event.payload
+                dl.attempt_count = event.attempt_count
+                dl.last_error_summary = error[:500]
+                dl.dead_lettered_at = datetime.now(UTC)
             OUTBOX_DEAD_LETTER_TOTAL.inc()
             await self._session.flush()
             return dl
@@ -274,9 +313,39 @@ class OutboxDispatcher:
         return row
 
     async def pending_count(self) -> int:
-        result = await self._session.execute(
-            select(OutboxEvent).where(OutboxEvent.status == OutboxStatus.PENDING.value)
-        )
-        n = len(list(result.scalars().all()))
-        OUTBOX_PENDING.set(n)
-        return n
+        bind = self._session.get_bind()
+        dialect = bind.dialect.name if bind is not None else ""
+        if dialect == "postgresql":
+            row = (
+                await self._session.execute(
+                    text("SELECT pending_count, oldest_created_at FROM app.outbox_metrics()")
+                )
+            ).one()
+            pending = int(row.pending_count)
+            oldest = row.oldest_created_at
+        else:
+            pending = int(
+                (
+                    await self._session.scalar(
+                        select(func.count())
+                        .select_from(OutboxEvent)
+                        .where(OutboxEvent.status == OutboxStatus.PENDING.value)
+                    )
+                )
+                or 0
+            )
+            oldest = await self._session.scalar(
+                select(func.min(OutboxEvent.created_at)).where(
+                    OutboxEvent.status == OutboxStatus.PENDING.value
+                )
+            )
+
+        OUTBOX_PENDING.set(pending)
+        if oldest is None:
+            OUTBOX_OLDEST_WAIT_SECONDS.set(0)
+        else:
+            now = datetime.now(UTC)
+            if oldest.tzinfo is None:
+                oldest = oldest.replace(tzinfo=UTC)
+            OUTBOX_OLDEST_WAIT_SECONDS.set(max(0.0, (now - oldest).total_seconds()))
+        return pending

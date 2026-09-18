@@ -1,8 +1,21 @@
+import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SceneStoryboardWall } from "../../src/features/scenes/SceneStoryboardWall";
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    to,
+    params,
+    children,
+  }: {
+    to: string;
+    params: { projectId: string };
+    children: ReactNode;
+  }) => <a href={to.replace("$projectId", params.projectId)}>{children}</a>,
+}));
 
 function json(body: unknown, status = 200) {
   return Promise.resolve(
@@ -96,15 +109,15 @@ describe("SceneStoryboardWall", () => {
     );
 
     expect(screen.getByTestId("scene-wall-loading")).toHaveTextContent("正在读取场景");
-    expect(
-      screen.queryByText("暂无场景。导入剧本后会在这里生成故事板墙。"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("先写下你的故事")).not.toBeInTheDocument();
 
     resolveFetch?.(await json([]));
-    expect(
-      await screen.findByText("暂无场景。导入剧本后会在这里生成故事板墙。"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("先写下你的故事")).toBeInTheDocument();
     expect(screen.queryByTestId("scene-wall-loading")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "去写剧本" })).toHaveAttribute(
+      "href",
+      "/projects/project-1/script",
+    );
   });
 
   it("copies a scene on demand", async () => {

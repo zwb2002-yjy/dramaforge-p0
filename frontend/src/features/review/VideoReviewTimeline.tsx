@@ -11,9 +11,11 @@ export interface VideoReviewTimelineProps {
   durationSeconds: number;
   annotations: VideoAnnotation[];
   videoUrl?: string;
+  mediaLabel?: string;
   note?: string;
   pending?: boolean;
   onAddAnnotation?: (startSeconds: number, endSeconds: number | null) => Promise<void>;
+  seekToSeconds?: number | null;
 }
 
 /** Playback and selection are local; only the explicit Save button persists a note. */
@@ -21,6 +23,8 @@ export function VideoReviewTimeline({
   durationSeconds,
   annotations,
   videoUrl,
+  mediaLabel = "正式视频",
+  seekToSeconds = null,
   note = "",
   pending = false,
   onAddAnnotation,
@@ -55,6 +59,12 @@ export function VideoReviewTimeline({
     endValue >= startValue &&
     endValue <= duration;
   const ready = mediaDuration !== null && !mediaError;
+  useEffect(() => {
+    if (seekToSeconds === null || !ready || !video.current) return;
+    const next = Math.max(0, Math.min(seekToSeconds, duration));
+    video.current.currentTime = next;
+    setPosition(next);
+  }, [duration, ready, seekToSeconds]);
   function seek(value: number) {
     if (!video.current || !ready) return;
     const next = Math.max(0, Math.min(value, duration));
@@ -69,7 +79,7 @@ export function VideoReviewTimeline({
             key={videoUrl}
             ref={video}
             src={videoUrl}
-            aria-label="正式视频审片播放器"
+            aria-label={`${mediaLabel}审片播放器`}
             className="review-video-player"
             controls
             playsInline
@@ -91,7 +101,7 @@ export function VideoReviewTimeline({
             }}
           />
           {mediaError && (
-            <p role="alert">无法加载正式视频，不能保存时间批注。请确认产物是否可用。</p>
+            <p role="alert">无法加载{mediaLabel}，不能保存时间批注。请确认产物是否可用。</p>
           )}
           <div className="video-playback-actions">
             <button

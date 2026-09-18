@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any
 from uuid import UUID
 
@@ -79,7 +80,14 @@ class RedisStreamPublisher(StreamPublisher):
     async def publish(self, topic: str, payload: dict[str, object]) -> str:
         try:
             client = self._client()
-            fields = {k: str(v) if not isinstance(v, str) else v for k, v in payload.items()}
+            fields = {
+                key: (
+                    json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+                    if isinstance(value, (dict, list))
+                    else str(value)
+                )
+                for key, value in payload.items()
+            }
             msg_id = await client.xadd(f"dramaforge:stream:{topic}", fields)
             self.messages.append((topic, {**payload, "_stream_id": msg_id}))
             return str(msg_id)
@@ -140,7 +148,10 @@ class NodeRunScheduler:
                 await self._session.rollback()
                 continue
             try:
-                await self._dispatcher.publish_leased(event)
+                await self._dispatcher.publish_leased(
+                    event,
+                    workspace_id=event_scope.workspace_id,
+                )
                 await self._session.commit()
                 count += 1
             except Exception as exc:  # noqa: BLE001
@@ -177,6 +188,7 @@ class NodeRunScheduler:
                     project_id=node_run_scope.project_id,
                 )
                 await self._mark_queue_failed(run_id, error=str(exc))
+        await self._dispatcher.pending_count()
         return count
 
     async def enqueue_node_run_only(self, node_run_id: UUID) -> str:

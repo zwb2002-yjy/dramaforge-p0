@@ -59,13 +59,14 @@ export async function saveEditTimeline(
   projectId: string,
   sessionId: string,
   timeline: Pick<EditTimelinePayload, "clips" | "metadata">,
+  expectedSessionVersion: number,
 ): Promise<EditSessionRead> {
   const csrf = await fetchCsrf();
   const { clips = [], metadata = {} } = timeline;
   return apiSend<EditSessionRead>(
     "PATCH",
     editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/timeline`),
-    { timeline: { clips, metadata } },
+    { timeline: { clips, metadata }, expected_session_version: expectedSessionVersion },
     csrf,
   );
 }

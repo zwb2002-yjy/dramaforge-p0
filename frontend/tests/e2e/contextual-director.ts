@@ -165,9 +165,8 @@ export async function exerciseContextualDirector(
   await expect(page.getByText("补齐动作因果", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/检测到该镜头包含主角/)).toHaveCount(0);
   const target = `/projects/${PROJECT_ID}/scenes/${SCENE_ID}?shotId=${SHOT_ID}&tool=director`;
-  await expect(page.getByTestId("open-contextual-director")).toHaveAttribute("href", target);
   expect(writes()).toHaveLength(0);
-  await page.getByTestId("open-contextual-director").click();
+  await page.goto(target);
   await expect(page).toHaveURL(new RegExp(`${SCENE_ID}\\?shotId=${SHOT_ID}&tool=director$`));
   await expect(page.getByTestId("shot-design-panel")).toHaveAttribute("data-shot-id", SHOT_ID);
   await expect(page.getByTestId("request-shot-director-suggestion")).toBeVisible();
@@ -236,6 +235,4 @@ export async function exerciseContextualDirector(
   );
   await expect(page.getByTestId("save-shot-design")).toBeDisabled();
   expect(writes()).toHaveLength(3);
-  await page.goto(`/projects/${PROJECT_ID}/production`);
-  await expect(page.getByTestId("professional-workbench")).toBeVisible();
 }

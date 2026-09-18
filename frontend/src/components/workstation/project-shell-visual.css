@@ -1,4 +1,4 @@
-﻿/* ========================================================================
+/* ========================================================================
    Visual 2.1 workstation refinement
    ------------------------------------------------------------------------
    This layer consumes the existing Visual 2.0 tokens and intentionally sits
@@ -8,7 +8,7 @@
 @scope (.qc-project-shell) {
   :scope {
     min-width: 0;
-    background: var(--df-surface-0);
+    background: transparent;
   }
 
   .qc-preview-shell {
@@ -74,9 +74,9 @@
     z-index: var(--df-z-sticky);
     height: 56px;
     padding: 0 clamp(var(--df-space-4), 2.4vw, var(--df-space-8));
-    border-bottom-color: var(--df-border-subtle);
-    background: var(--df-surface-overlay);
-    box-shadow: 0 1px 0 var(--df-surface-screen);
+    border-bottom-color: transparent;
+    background: transparent;
+    box-shadow: none;
   }
 
   .qc-project-name {
@@ -104,7 +104,7 @@
   .qc-content-grid {
     grid-template-columns: minmax(0, 1fr) minmax(300px, 320px);
     min-height: calc(100vh - 56px);
-    background: var(--df-surface-0);
+    background: transparent;
   }
 
   .director-collapsed .qc-content-grid {
@@ -133,11 +133,6 @@
       var(--df-space-10);
   }
 
-  .qc-page-heading {
-    padding: var(--df-space-3) 0 var(--df-space-5);
-  }
-
-  .qc-page-heading > p:not(.callout),
   .qc-section-heading p,
   .qc-constraints > p,
   .qc-director-kicker,
@@ -146,21 +141,6 @@
     font-size: var(--df-font-size-meta);
     font-weight: var(--df-weight-semibold);
     letter-spacing: 0.08em;
-  }
-
-  .qc-page-heading h1 {
-    margin: var(--df-space-1) 0 var(--df-space-2);
-    font-family: var(--df-font-display);
-    font-size: clamp(1.7rem, 2.2vw, 2.15rem);
-    font-weight: var(--df-weight-semibold);
-    line-height: 1.2;
-  }
-
-  .qc-page-heading > span {
-    max-width: 54rem;
-    color: var(--df-text-secondary);
-    font-size: var(--df-text-sm);
-    line-height: var(--df-leading-normal);
   }
 
   .qc-director-panel {
@@ -650,11 +630,10 @@
     min-width: 0;
   }
 
-  .qc-project-page > .qc-page-heading {
+  .qc-project-page > .df-page-header {
     margin-bottom: 0;
   }
 
-  .qc-project-page > .qc-page-heading > span,
   .production-monitor > .page-title-row p {
     max-width: 58rem;
     color: var(--df-text-secondary);
@@ -682,184 +661,7 @@
     margin-top: var(--df-space-1);
   }
 
-  .production-detail {
-    min-width: 0;
-    overflow: hidden;
-    border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-  }
-
-  .production-detail > summary {
-    min-height: 56px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--df-space-4);
-    padding: var(--df-space-3) var(--df-space-4);
-    color: var(--df-text-primary);
-    background: var(--df-surface-1);
-    cursor: pointer;
-    list-style: none;
-  }
-
-  .production-detail > summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .production-detail > summary > span {
-    min-width: 0;
-    display: grid;
-    gap: var(--df-space-1);
-  }
-
-  .production-detail > summary strong {
-    font-size: var(--df-text-md);
-  }
-
-  .production-detail > summary small {
-    color: var(--df-text-muted);
-    font-size: var(--df-text-xs);
-  }
-
-  .production-detail > summary svg {
-    flex: 0 0 auto;
-    color: var(--df-text-muted);
-    transition: transform var(--df-duration-fast) var(--df-ease);
-  }
-
-  .production-detail[open] > summary {
-    border-bottom: 1px solid var(--df-border-subtle);
-    background: var(--df-surface-2);
-  }
-
-  .production-detail[open] > summary svg {
-    transform: rotate(180deg);
-  }
-
-  .production-detail-body {
-    min-width: 0;
-    padding: var(--df-space-4);
-  }
-
-  .production-detail-body > .workflow-navigator,
-  .production-detail-body > .creative-capabilities-panel,
-  .production-detail-body > .professional-workbench {
-    margin: 0;
-  }
-
-  .panel {
-    margin: 0;
-    padding: var(--df-space-5);
-    border-color: var(--df-border-subtle);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-    box-shadow: none;
-  }
-
-  .panel-header {
-    margin-bottom: var(--df-space-4);
-    padding-bottom: var(--df-space-3);
-    border-bottom: 1px solid var(--df-border-subtle);
-  }
-
-  .panel-header h1,
-  .panel-header h2,
-  .panel-header h3 {
-    font-size: var(--df-text-lg);
-  }
-
-  .panel h2 {
-    font-size: var(--df-text-xl);
-  }
-
-  .panel h3 {
-    font-size: var(--df-text-md);
-  }
-
-  label {
-    gap: var(--df-space-1);
-    color: var(--df-text-secondary);
-    font-size: var(--df-text-sm);
-    line-height: var(--df-leading-normal);
-  }
-
-  input:not([type="checkbox"]):not([type="radio"]),
-  textarea,
-  select {
-    border-color: var(--df-border);
-    border-radius: var(--df-radius-control);
-    background: var(--df-surface-0);
-    color: var(--df-text-primary);
-    font-size: var(--df-text-sm);
-  }
-
-  input:not([type="checkbox"]):not([type="radio"]),
-  select {
-    min-height: 36px;
-    padding: var(--df-space-2) var(--df-space-3);
-  }
-
-  textarea {
-    min-height: 88px;
-    padding: var(--df-space-2) var(--df-space-3);
-    line-height: var(--df-leading-normal);
-  }
-
-  input:not([type="checkbox"]):not([type="radio"]):focus,
-  textarea:focus,
-  select:focus {
-    border-color: var(--df-verdigris);
-    box-shadow: 0 0 0 2px var(--df-focus-ring);
-    outline: none;
-  }
-
-  .qc-project-shell :where(button:not(.qc-icon-button)) {
-    min-height: 36px;
-    border-radius: var(--df-radius-control);
-    padding: var(--df-space-2) var(--df-space-4);
-    background: var(--df-surface-3);
-    border-color: var(--df-border-strong);
-    color: var(--df-text-primary);
-    font-size: var(--df-text-sm);
-    font-weight: var(--df-weight-medium);
-    line-height: 1.2;
-  }
-
-  .qc-project-shell :where(button:not(.qc-icon-button):not(:disabled)):hover {
-    border-color: var(--df-verdigris);
-    background: var(--df-surface-raised);
-  }
-
-  button.primary:not(:disabled),
-  button.df-btn.primary:not(:disabled) {
-    background: var(--df-verdigris);
-    border-color: var(--df-verdigris);
-    color: var(--df-obsidian);
-  }
-
-  button.accent:not(:disabled),
-  button.df-btn.accent:not(:disabled) {
-    background: var(--df-brass);
-    border-color: var(--df-brass);
-    color: var(--df-obsidian);
-  }
-
-  button.ghost,
-  button.df-btn.ghost {
-    background: transparent;
-    border-color: transparent;
-  }
-
-  button.danger,
-  button.df-btn.danger {
-    border-color: var(--df-danger-border);
-    color: var(--df-danger-text);
-  }
-
-  button:disabled {
-    opacity: 0.42;
-  }
+  /* Shared surfaces and controls are owned by design/components.css. */
 
   .status-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -870,10 +672,10 @@
   .status-card {
     min-width: 0;
     gap: var(--df-space-1);
-    padding: var(--df-space-4);
-    border-color: var(--df-border-subtle);
+    padding: var(--df-space-5);
+    border-color: transparent;
     border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
+    background: var(--df-surface-tier-raised-bg);
   }
 
   .status-card strong {
@@ -976,91 +778,6 @@
   }
 
   /* Asset library */
-  .qc-asset-filters {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: var(--df-space-3);
-    padding: var(--df-space-4);
-    border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-  }
-
-  .qc-asset-filters label {
-    display: grid;
-    min-width: 0;
-  }
-
-  .qc-asset-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: var(--df-space-3);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .qc-asset-card {
-    display: grid;
-    gap: var(--df-space-3);
-    min-width: 0;
-    padding: var(--df-space-4);
-    border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-  }
-
-  .qc-asset-card:hover {
-    border-color: var(--df-border-strong);
-  }
-
-  .qc-asset-card header,
-  .qc-asset-card footer {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--df-space-2);
-    min-width: 0;
-  }
-
-  .qc-asset-card header {
-    justify-content: space-between;
-    padding-bottom: var(--df-space-2);
-    border-bottom: 1px solid var(--df-border-subtle);
-  }
-
-  .qc-asset-card header strong {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .qc-asset-card header span,
-  .qc-asset-card footer,
-  .qc-asset-card .muted {
-    color: var(--df-text-muted);
-    font-size: var(--df-text-xs);
-  }
-
-  .qc-asset-card > p {
-    min-height: 2.8em;
-    margin: 0;
-    line-height: var(--df-leading-normal);
-  }
-
-  .qc-asset-card footer form {
-    display: flex;
-    flex: 1 1 100%;
-    min-width: 0;
-    gap: var(--df-space-1);
-  }
-
-  .qc-asset-card footer form input {
-    min-width: 0;
-    flex: 1;
-  }
-
   .qc-asset-status,
   .fact-source-badge,
   .status-chip {
@@ -1085,44 +802,6 @@
     color: var(--df-text-muted);
   }
 
-  .qc-asset-versions {
-    display: grid;
-    grid-column: 1 / -1;
-    gap: var(--df-space-2);
-    padding-top: var(--df-space-3);
-    border-top: 1px solid var(--df-border-subtle);
-  }
-
-  .qc-asset-versions > form {
-    display: flex;
-    gap: var(--df-space-2);
-  }
-
-  .qc-asset-versions > form input {
-    min-width: 0;
-    flex: 1;
-  }
-
-  .qc-asset-versions ul {
-    display: grid;
-    gap: var(--df-space-1);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .qc-asset-versions li {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--df-space-2);
-    padding: var(--df-space-2) 0;
-    border-bottom: 1px solid var(--df-border-subtle);
-    color: var(--df-text-secondary);
-    font-size: var(--df-text-xs);
-  }
-
-  /* Script / review / editing pages share the same quiet document surfaces. */
   .qc-script-document,
   .qc-script-episode,
   .editing-session-facts,
@@ -1281,19 +960,11 @@
     .status-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
-
-    .qc-asset-filters {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
   }
 
   @media (max-width: 720px) {
     .status-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .qc-asset-filters {
-      grid-template-columns: 1fr;
     }
 
     .qc-project-page,
@@ -1317,10 +988,6 @@
     .monitor-table td {
       padding: var(--df-space-2) var(--df-space-1);
       white-space: normal;
-    }
-
-    .qc-asset-grid {
-      grid-template-columns: 1fr;
     }
 
     .qc-script-scene {

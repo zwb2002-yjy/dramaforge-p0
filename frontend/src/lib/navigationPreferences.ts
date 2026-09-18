@@ -1,5 +1,6 @@
 const SELECTED_WORKSPACE_STORAGE_KEY = "dramaforge.selected-workspace-id";
 const LAST_PROJECT_STORAGE_KEY = "dramaforge.last-project-id";
+export const SELECTED_WORKSPACE_CHANGED_EVENT = "dramaforge:selected-workspace-changed";
 
 export function validateSettingsReturnTo(value: unknown): string | undefined {
   if (typeof value !== "string" || value.includes("\\")) return undefined;
@@ -53,12 +54,29 @@ function writeNavigationPreference(key: string, value: string | null): void {
   writeStorage(window.localStorage, key, value);
 }
 
+export function subscribeSelectedWorkspaceId(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === SELECTED_WORKSPACE_STORAGE_KEY || event.key === null) listener();
+  };
+  const onChanged = () => listener();
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(SELECTED_WORKSPACE_CHANGED_EVENT, onChanged);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(SELECTED_WORKSPACE_CHANGED_EVENT, onChanged);
+  };
+}
+
 export function getSelectedWorkspaceId(): string | null {
   return readNavigationPreference(SELECTED_WORKSPACE_STORAGE_KEY);
 }
 
 export function setSelectedWorkspaceId(workspaceId: string | null): void {
   writeNavigationPreference(SELECTED_WORKSPACE_STORAGE_KEY, workspaceId);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(SELECTED_WORKSPACE_CHANGED_EVENT));
+  }
 }
 
 export function getRememberedProjectId(): string | null {

@@ -19,8 +19,14 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     pip install --no-cache-dir "uv==0.12.0"
 
+# Cache dependency installation independently from source/docs changes.
+COPY backend/pyproject.toml backend/uv.lock backend/README.md /workspace/backend/
+RUN uv sync --locked --extra dev --directory /workspace/backend --no-install-project
+
 COPY . .
 
+# Install the local project after source arrives. The resolved dependencies stay
+# in the earlier image layer while pyproject.toml and uv.lock are unchanged.
 RUN uv sync --locked --extra dev --directory /workspace/backend
 
-CMD ["sh", "-c", "set -eu; python3 scripts/check_directory_compliance.py; python3 scripts/check_canonical_surface.py; uv run --directory backend ruff check app tests alembic/versions; uv run --directory backend mypy app; uv run --directory backend pytest tests/unit -q; uv run --directory backend alembic upgrade head; uv run --directory backend alembic check; uv run --directory backend pytest tests/integration --ignore=tests/integration/test_litellm_real_proxy.py -q -rs --fail-on-skip; mkdir -p /contract; PYTHONPATH=/workspace/backend uv run --directory backend python /workspace/scripts/_export_openapi.py --out /contract/openapi.json"]
+CMD ["sh", "-c", "set -eu; python3 scripts/check_directory_compliance.py; python3 scripts/check_canonical_surface.py; python3 scripts/check_provider_authority.py; uv run --directory backend ruff check app tests alembic/versions; uv run --directory backend mypy app; uv run --directory backend pytest tests/unit -q; uv run --directory backend alembic upgrade head; uv run --directory backend alembic check; uv run --directory backend pytest tests/integration --ignore=tests/integration/test_litellm_real_proxy.py -q -rs --fail-on-skip; mkdir -p /contract; PYTHONPATH=/workspace/backend uv run --directory backend python /workspace/scripts/_export_openapi.py --out /contract/openapi.json"]
