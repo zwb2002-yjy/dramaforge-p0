@@ -473,6 +473,77 @@ async def test_decision_submission_is_retry_safe_and_requires_a_reason(
 
 
 @pytest.mark.asyncio
+async def test_identical_decision_under_a_new_key_does_not_duplicate_history(
+    session: AsyncSession,
+) -> None:
+    """Re-submitting the same judgement on the same evidence is one decision.
+
+    A fresh page load mints a fresh Idempotency-Key, so key-only idempotency
+    would append a second identical approval.  The stored decision history must
+    stay one row per judgement; a later different verdict still appends and
+    supersedes.
+    """
+    user, project, shot = await _env(session)
+    artifact = await _artifact(session, project_id=project.id)
+    evidence = await _artifact(session, project_id=project.id, hash_seed="b")
+    run = await _review_run(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        created_by=user.id,
+        upstream_artifact_id=artifact.id,
+        review_artifact_id=evidence.id,
+    )
+    payload = {
+        "project_id": project.id,
+        "shot_id": shot.id,
+        "artifact_id": artifact.id,
+        "review_node_run_id": run.id,
+        "review_kind": "identity",
+        "decision": "approved",
+        "reason": "Owner 人工审查：构图与风格统一。",
+        "actor_id": user.id,
+        "shot_version": shot.version,
+    }
+    first = await record_human_decision(
+        session, **payload, request_key="review:page-load-one"  # type: ignore[arg-type]
+    )
+    await session.flush()
+    # Same judgement, same evidence, but the client reloaded and minted a new key.
+    again = await record_human_decision(
+        session, **payload, request_key="review:page-load-two"  # type: ignore[arg-type]
+    )
+    await session.flush()
+
+    assert again.id == first.id
+    assert await _count(session, HumanReviewDecision) == 1
+
+    # The Shot version moves on (for example a Formal keyframe selection) between
+    # two submissions of the same judgement.  That is still one decision.
+    shot.version = shot.version + 2
+    await session.flush()
+    after_version_bump = await record_human_decision(
+        session,
+        **{**payload, "shot_version": shot.version},  # type: ignore[arg-type]
+        request_key="review:page-load-after-formal",
+    )
+    await session.flush()
+    assert after_version_bump.id == first.id
+    assert await _count(session, HumanReviewDecision) == 1
+
+    # A different verdict is a new decision that supersedes the first.
+    changed = await record_human_decision(
+        session,
+        **{**payload, "decision": "rejected", "reason": "重看后不通过。"},  # type: ignore[arg-type]
+        request_key="review:page-load-three",
+    )
+    await session.flush()
+    assert changed.id != first.id
+    assert changed.supersedes_id == first.id
+    assert await _count(session, HumanReviewDecision) == 2
+
+
+@pytest.mark.asyncio
 async def test_decision_rejects_a_review_run_for_another_shot_or_artifact(
     session: AsyncSession,
 ) -> None:
