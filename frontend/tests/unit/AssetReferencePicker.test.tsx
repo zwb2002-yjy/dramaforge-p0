@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AssetReferencePicker } from "../../src/components/assets/AssetReferencePicker";
@@ -136,8 +136,11 @@ describe("AssetReferencePicker", () => {
     renderPicker();
     expect(await screen.findByText(/@林墨/)).toBeInTheDocument();
     const list = screen.getByTestId("binding-list");
-    expect(list).toHaveTextContent("identity · current_formal");
-    expect(screen.getByText("asset-linmo")).toBeInTheDocument();
+    // The creative surface names the purpose and how the version is followed;
+    // the stored keys and the asset id stay in the diagnostics block.
+    expect(list).toHaveTextContent("角色身份 · 跟随当前正式版本");
+    expect(list).not.toHaveTextContent("identity · current_formal");
+    expect(within(list).getByText("asset-linmo")).toBeInTheDocument();
   });
 
   it("adds a binding for the selected asset", async () => {
@@ -158,8 +161,9 @@ describe("AssetReferencePicker", () => {
     await screen.findByText(/@林墨/);
     fireEvent.click(screen.getByRole("button", { name: "解析引用" }));
     const resolved = await screen.findByTestId("resolved-references");
-    expect(resolved).toHaveTextContent("identity / front_face / current_formal");
-    expect(resolved).toHaveTextContent("artifact-1");
+    expect(resolved).toHaveTextContent("角色身份 · 跟随正式版本");
+    expect(resolved).toHaveTextContent("正面");
+    expect(within(resolved).getByText("artifact-1")).toBeInTheDocument();
   });
 
   it("removes the binding and clears the execution references", async () => {

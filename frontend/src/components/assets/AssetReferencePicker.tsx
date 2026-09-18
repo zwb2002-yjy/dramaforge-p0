@@ -9,6 +9,7 @@ import {
   fetchAssetCard,
   fetchShotReferences,
   resolveShotReferences,
+  roleLabel,
   updateShotReference,
   type ShotBindingRead,
   type ResolvedReferenceRead,
@@ -40,6 +41,55 @@ const PURPOSES = [
   "last_frame",
   "generic_reference",
 ] as const;
+
+/**
+ * Creative-language labels for stored business purposes.
+ *
+ * The stored value stays the contract key; the creative surface must never show
+ * the raw key, the provider role or the resolution mode.
+ */
+const PURPOSE_LABELS: Record<string, string> = {
+  identity: "角色身份",
+  clothing: "服装造型",
+  scene_layout: "空间布局",
+  scene_lighting: "场景光线",
+  style: "画面风格",
+  action: "动作",
+  pose: "姿态",
+  camera_language: "镜头语言",
+  audio_rhythm: "声音节奏",
+  first_frame: "首帧",
+  last_frame: "尾帧",
+  generic_reference: "通用参考",
+};
+
+const RESOLUTION_MODE_LABELS: Record<string, string> = {
+  current_formal: "跟随当前正式版本",
+  pinned_version: "固定到指定版本",
+  direct_artifact: "直接使用该素材",
+};
+
+const ASSET_KIND_LABELS: Record<string, string> = {
+  character: "角色",
+  scene: "场景",
+  prop: "道具",
+  video: "视频",
+  audio: "音频",
+  image: "图片",
+  subtitle: "字幕",
+};
+
+function purposeLabel(value: string): string {
+  return PURPOSE_LABELS[value] ?? "参考";
+}
+
+function resolutionModeLabel(value: string): string {
+  return RESOLUTION_MODE_LABELS[value] ?? "跟随当前正式版本";
+}
+
+function assetKindLabel(value: string): string {
+  return ASSET_KIND_LABELS[value] ?? "素材";
+}
 
 /**
  * Phase 2 shot reference picker: shows the shot's business-purpose bindings,
@@ -234,7 +284,7 @@ export function AssetReferencePicker({
           <option value="">选择资产…</option>
           {assetOptions.map((asset) => (
             <option key={asset.id} value={asset.id}>
-              {asset.name}（{asset.kind}）
+              {asset.name}（{assetKindLabel(asset.kind)}）
             </option>
           ))}
         </select>
@@ -245,7 +295,7 @@ export function AssetReferencePicker({
         >
           {PURPOSES.map((item) => (
             <option key={item} value={item}>
-              {item}
+              {purposeLabel(item)}
             </option>
           ))}
         </select>
@@ -280,7 +330,7 @@ export function AssetReferencePicker({
                   <option value="">选择资产…</option>
                   {assetOptions.map((asset) => (
                     <option key={asset.id} value={asset.id}>
-                      {asset.name}（{asset.kind}）
+                      {asset.name}（{assetKindLabel(asset.kind)}）
                     </option>
                   ))}
                 </select>
@@ -291,7 +341,7 @@ export function AssetReferencePicker({
                 >
                   {PURPOSES.map((item) => (
                     <option key={item} value={item}>
-                      {item}
+                      {purposeLabel(item)}
                     </option>
                   ))}
                 </select>
@@ -329,9 +379,15 @@ export function AssetReferencePicker({
             ) : (
               <>
                 <span>
-                  {binding.label || "（无标签）"} · {binding.purpose} · {binding.resolution_mode}
+                  {binding.label || "（无标签）"} · {purposeLabel(binding.purpose)} ·{" "}
+                  {resolutionModeLabel(binding.resolution_mode)}
                 </span>
-                {binding.asset_id && <code>{binding.asset_id}</code>}
+                {binding.asset_id && (
+                  <details className="editing-diagnostics">
+                    <summary>开发 / 诊断详情（只读）</summary>
+                    <code>{binding.asset_id}</code>
+                  </details>
+                )}
                 <button
                   type="button"
                   aria-label={`编辑引用 ${binding.label || binding.id}`}
@@ -355,14 +411,19 @@ export function AssetReferencePicker({
 
       {resolution.isSuccess && (
         <div className="qc-resolved-references" data-testid="resolved-references">
-          <h4>解析结果（冻结为 artifact_id）</h4>
+          <h4>本次生成将使用的参考素材</h4>
           <ul>
             {resolved.map((item, index) => (
               <li key={`${item.artifact_id}-${index}`}>
                 <span>
-                  {item.purpose} / {item.role} / {item.source}
+                  {purposeLabel(item.purpose)} ·{" "}
+                  {item.source === "pinned_version" ? "固定版本" : "跟随正式版本"}
                 </span>
-                <code>{item.artifact_id}</code>
+                {item.role ? <small className="muted">{roleLabel(item.role)}</small> : null}
+                <details className="editing-diagnostics">
+                  <summary>开发 / 诊断详情（只读）</summary>
+                  <code>{item.artifact_id}</code>
+                </details>
               </li>
             ))}
           </ul>
