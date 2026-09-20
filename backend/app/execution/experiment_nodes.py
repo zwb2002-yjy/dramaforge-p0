@@ -190,6 +190,7 @@ async def queue_branch_nodes(
     force: bool = False,
     include_missing_dependencies: bool = False,
     voice_silent: bool = False,
+    formal_video_artifact_id: UUID | None = None,
     experiment_id: UUID | None = None,
     model_binding_id: UUID | None = None,
     model_binding_node_key: str | None = None,
@@ -208,6 +209,8 @@ async def queue_branch_nodes(
             raise ValidationAppError(f"unknown node key: {k}")
     if experiment_id is None and (model_binding_id is not None or model_binding_node_key):
         raise ValidationAppError("model override requires an experiment branch")
+    if experiment_id is not None and formal_video_artifact_id is not None:
+        raise ValidationAppError("formal video pin is unavailable for an experiment branch")
     if model_binding_node_key is not None and model_binding_node_key not in {
         "keyframe",
         "video",
@@ -330,8 +333,19 @@ async def queue_branch_nodes(
         node = materialized.nodes[key]
         prior_for_node = [run for run in existing_runs if run.graph_node_id == node.id]
         latest = latest_by_key.get(key)
+        # A completed/active tail for another video must not suppress preparation
+        # of the explicitly selected formal video. Only replace the local composite;
+        # voice, subtitles and paid media keep their existing runs.
+        composite_pin_changed = (
+            key == "composite"
+            and formal_video_artifact_id is not None
+            and latest is not None
+            and str((latest.input_snapshot or {}).get("formal_video_artifact_id") or "")
+            != str(formal_video_artifact_id)
+        )
         if (
             not force
+            and not composite_pin_changed
             and latest is not None
             and latest.status in {*DONE_STATUSES, "queued", "running"}
         ):
@@ -417,6 +431,8 @@ async def queue_branch_nodes(
         }
         if experiment_id is not None:
             snapshot["experiment_id"] = str(experiment_id)
+        if key == "composite" and formal_video_artifact_id is not None:
+            snapshot["formal_video_artifact_id"] = str(formal_video_artifact_id)
         if model_binding_id is not None and key == model_binding_node_key:
             # Explicit experiment override always wins over the resolver freeze.
             snapshot["model_binding_id"] = str(model_binding_id)

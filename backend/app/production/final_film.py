@@ -475,6 +475,7 @@ async def prepare_formal_tail(
             include_missing_dependencies=True,
             force=refresh_tail,
             voice_silent=not speech_required,
+            formal_video_artifact_id=shot.formal_video_artifact_id,
         )
         all_run_ids.extend(run_ids)
         current_tail = await _current_formal_tail_runs(

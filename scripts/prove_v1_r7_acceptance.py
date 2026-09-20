@@ -1313,18 +1313,39 @@ class Acceptance:
             "video_drift",
             "formal_video",
         )
+        repair_request = self.once(
+            "review:repair-create",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/repairs",
+            {
+                "repair_option": "rerun_video",
+                "plan_hash": plan["plan_hash"],
+                "idempotency_key": self._repair_key("review-video", project_id, shot_id),
+            },
+        )
+        step_plan = self.once(
+            "review:repair-step-plan",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/repairs/{repair_request['id']}"
+            "/step-plan",
+            {"accept_approximations": False},
+        )
         repair = self.once(
             "review:repair-submit",
             "POST",
-            f"/projects/{project_id}/shots/{shot_id}/repair",
+            f"/projects/{project_id}/shots/{shot_id}/repairs/{repair_request['id']}/steps",
             {
-                "repair_option": "rerun_video",
+                "expected_plan_fingerprint": step_plan["plan"]["plan_fingerprint"],
+                "expected_step_ordinal": step_plan["step_ordinal"],
+                "accept_approximations": False,
                 # A repair request whose first step already ran is at its human
                 # gate, so re-submitting the same operation key would be answered
                 # with REPAIR_STEP_REQUIRES_REVIEW (correctly). Each explicit
                 # attempt therefore carries its own key, chosen once and kept in
                 # the state so a resume reuses it.
-                "idempotency_key": self._repair_key("review-video", project_id, shot_id),
+                "idempotency_key": self._repair_key(
+                    "review-video-step", project_id, shot_id
+                ),
             },
             paid=True,
         )
@@ -1332,6 +1353,7 @@ class Acceptance:
             "project_id": project_id,
             "shot_id": shot_id,
             "annotation_id": annotation["id"],
+            "repair_id": repair_request["id"],
             "repair_plan": sanitized(plan),
             "repair_run_id": repair["node_run_id"],
             "formal_video_before": shot["formal_video_artifact_id"],
@@ -1713,25 +1735,55 @@ class Acceptance:
             raise RuntimeError("Candidate promotion requires a source-equivalence proof")
         proof = json.loads(proof_path.read_text(encoding="utf-8"))
         previous = self.state.get("candidate_sha")
-        allowed_paths = {
+        artifact_identity_paths = {
             "backend/app/execution/artifact_lineage.py",
             "backend/tests/integration/test_artifact_lineage_pg.py",
             "backend/tests/unit/test_r7_acceptance_driver.py",
             "frontend/tests/live/v1-r7-real-acceptance.spec.ts",
             "scripts/prove_v1_r7_acceptance.py",
         }
+        formal_composite_paths = {
+            "backend/app/execution/composite_media.py",
+            "backend/app/execution/experiment_nodes.py",
+            "backend/app/execution/local_nodes.py",
+            "backend/app/production/final_film.py",
+            "backend/tests/unit/test_composite_media.py",
+            "backend/tests/unit/test_final_film_timeline.py",
+            "backend/tests/unit/test_r7_acceptance_driver.py",
+            "scripts/prove_v1_r7_acceptance.py",
+        }
         changed_paths = set(proof.get("changed_paths") or [])
-        if (
-            not previous
-            or proof.get("previous_candidate") != previous
-            or proof.get("candidate_sha") != candidate_sha
-            or not changed_paths
-            or not changed_paths <= allowed_paths
-            or "backend/app/execution/artifact_lineage.py" not in changed_paths
-            or proof.get("provider_submission_diff_empty") is not True
-            or proof.get("full_quality_gate") != "PASS"
-            or proof.get("concurrent_artifact_pg_regression") != "PASS"
-        ):
+        common_valid = bool(previous) and (
+            proof.get("previous_candidate") == previous
+            and proof.get("candidate_sha") == candidate_sha
+            and bool(changed_paths)
+            and proof.get("provider_submission_diff_empty") is True
+            and proof.get("full_quality_gate") == "PASS"
+        )
+        kind = proof.get("equivalence_kind", "artifact_identity_concurrency")
+        if kind == "artifact_identity_concurrency":
+            kind_valid = (
+                changed_paths <= artifact_identity_paths
+                and "backend/app/execution/artifact_lineage.py" in changed_paths
+                and proof.get("concurrent_artifact_pg_regression") == "PASS"
+            )
+        elif kind == "formal_composite_repair_isolation":
+            required_paths = {
+                "backend/app/execution/composite_media.py",
+                "backend/app/execution/experiment_nodes.py",
+                "backend/app/execution/local_nodes.py",
+                "backend/app/production/final_film.py",
+                "scripts/prove_v1_r7_acceptance.py",
+            }
+            kind_valid = (
+                changed_paths <= formal_composite_paths
+                and required_paths <= changed_paths
+                and proof.get("formal_composite_pin_regression") == "PASS"
+                and proof.get("staged_repair_api_regression") == "PASS"
+            )
+        else:
+            kind_valid = False
+        if not common_valid or not kind_valid:
             raise RuntimeError("Candidate source-equivalence proof is incomplete")
         if self.state["assertions"].get("template_auto:formal_media") != "PASS" or self.state[
             "assertions"
@@ -1744,7 +1796,7 @@ class Acceptance:
                     label: self.state["assertions"].get(label + ":formal_media")
                     for label in ("template_auto", "free_assist")
                 },
-                "reason": "acceptance_discovered_artifact_identity_concurrency_fix",
+                "reason": kind,
             }
         )
         self.state["candidate_sha"] = candidate_sha

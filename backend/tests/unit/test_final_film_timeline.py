@@ -961,6 +961,8 @@ async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_
     )
     assert first_runs
     assert not any(run.input_snapshot.get("node_key") == "video" for run in first_runs)
+    composite = next(run for run in first_runs if run.input_snapshot["node_key"] == "composite")
+    assert composite.input_snapshot["formal_video_artifact_id"] == str(videos[0].id)
     voice = next(run for run in first_runs if run.input_snapshot["node_key"] == "voice")
     assert voice.input_snapshot["voice_execution"] == freeze_voice_execution(
         {}, silent=not shot.dialogue.strip()
@@ -1156,3 +1158,49 @@ async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
     assert operation.status == ("succeeded" if valid_wav else "failed")
     if valid_wav:
         assert operation.response_summary["local"] is False
+
+
+async def test_prepare_replaces_unpinned_composite_without_repeating_voice_or_video(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.production.final_film import prepare_formal_tail
+
+    project, user, edit, shots, videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+    first = await prepare_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    runs = list(
+        (await session.execute(select(NodeRun).where(NodeRun.id.in_(first.node_run_ids)))).scalars()
+    )
+    stale = next(run for run in runs if run.input_snapshot["node_key"] == "composite")
+    stale.input_snapshot = {
+        key: value
+        for key, value in stale.input_snapshot.items()
+        if key != "formal_video_artifact_id"
+    }
+    stale.status = "completed"
+    stale.result_artifact_id = videos[0].id
+    shots[0].formal_composite_artifact_id = None
+    await session.flush()
+    prepared = await prepare_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    replacements = list(
+        (
+            await session.execute(select(NodeRun).where(NodeRun.id.in_(prepared.node_run_ids)))
+        ).scalars()
+    )
+    assert [run.input_snapshot["node_key"] for run in replacements] == ["composite"]
+    assert replacements[0].input_snapshot["formal_video_artifact_id"] == str(videos[0].id)
