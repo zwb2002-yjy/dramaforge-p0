@@ -52,9 +52,9 @@ jobs:
           fi
           if [ "$BASE_REF" = "dev" ]; then
             case "$HEAD_REF" in
-              agent/*|dependabot/*) ;;
+              agent/*|codex/*|dependabot/*) ;;
               *)
-                echo "Only short-lived agent/<task-id> or dependabot/* branches may target dev through a pull request."
+                echo "Only short-lived agent/<task-id>, codex/<task-id> or dependabot/* branches may target dev through a pull request."
                 exit 1
                 ;;
             esac
