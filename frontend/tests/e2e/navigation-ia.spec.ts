@@ -514,7 +514,23 @@ test("model settings disclose instance configuration without discarding connecti
   page,
 }) => {
   const state = await installProfessionalMock(page);
-  await page.route("**/api/v1/provider-plugins", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/provider-plugins", (route) =>
+    route.fulfill({
+      json: [
+        {
+          provider_type: "fixture",
+          protocol_profile: "fixture-v1",
+          display_name: "Fixture Provider",
+          default_base_url: "https://fixture.invalid",
+          implemented: true,
+          paid_capabilities: [],
+          capabilities: ["auth_models"],
+          model_list_path: "/models",
+          models: [],
+        },
+      ],
+    }),
+  );
   await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections`, (route) =>
     route.fulfill({ json: [] }),
   );

@@ -747,7 +747,7 @@ class RepairService:
             elif status in {"queued", "running", "cancel_requested"}:
                 action = "wait"
             elif (
-                status not in {"completed", "cached", "completed_after_cancel", "succeeded"}
+                status not in {"completed", "cached", "completed_after_cancel"}
                 or artifact_id is None
             ):
                 action = "close_or_replan"
@@ -874,7 +874,7 @@ async def record_repair_adoption(
                 RepairRequest.closed_at.is_(None),
                 NodeRun.project_id == project_id,
                 NodeRun.result_artifact_id == artifact_id,
-                NodeRun.status.in_(("completed", "cached", "completed_after_cancel", "succeeded")),
+                NodeRun.status.in_(("completed", "cached", "completed_after_cancel")),
             )
         )
     ).all()

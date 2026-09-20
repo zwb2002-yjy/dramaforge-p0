@@ -148,7 +148,8 @@ test("project model fields fit a narrow window without overlapping or overflowin
   // Close the small-window navigation through its single active control.
   await page.getByRole("link", { name: "设置", exact: true }).click();
   const controls = page.getByTestId("model-profile-settings").locator("select");
-  await expect(controls).toHaveCount(4);
+  await expect(controls).toHaveCount(3);
+  await expect(page.getByTestId("model-picker-audio.tts")).toHaveCount(0);
   const bounds = await controls.evaluateAll((elements) =>
     elements.map((element) => {
       const parent = element.closest("label")!.getBoundingClientRect();

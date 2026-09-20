@@ -320,6 +320,11 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                             "type": "video_review",
                             "display_name": "Video drift review",
                         },
+                        {
+                            "key": "identity_review",
+                            "type": "identity_review",
+                            "display_name": "Keyframe identity review",
+                        },
                         {"key": "composite", "type": "composite"},
                     ],
                     "edges": [],
@@ -587,11 +592,20 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 request_key=f"manual-offline:repair:{uuid4().hex}",
             )
             await session.commit()
-            repair_request, repair_step, repair_run = await RepairService(session).execute_step(
+            repair_service = RepairService(session)
+            repair_preview = await repair_service.build_step_plan(
                 project=project,
                 user=actor,
                 shot_id=shot.id,
                 repair_id=repair_request.id,
+            )
+            repair_request, repair_step, repair_run = await repair_service.execute_step(
+                project=project,
+                user=actor,
+                shot_id=shot.id,
+                repair_id=repair_request.id,
+                expected_plan_fingerprint=repair_preview.plan.plan_fingerprint,
+                expected_step_ordinal=repair_preview.step_ordinal,
                 idempotency_key=f"manual-offline:repair-step:{uuid4().hex}",
             )
             await session.commit()
@@ -600,8 +614,7 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
             state = await RepairService(session).read_repair(
                 project=project, shot_id=shot.id, repair_id=repair_request.id,
             )
-            # The chain stops at the human gate; the repair is not "done".
-            assert state.next_action == "human_decision"
+            assert state.next_action == "wait"
 
             # The worker produces the repaired keyframe candidate.
             repaired_bytes = image_bytes + b"\x00repaired"
@@ -619,22 +632,74 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
             repair_run.status = "completed"
             repair_run.finished_at = datetime.now(UTC)
             await session.commit()
+            state = await RepairService(session).read_repair(
+                project=project, shot_id=shot.id, repair_id=repair_request.id,
+            )
+            # A completed candidate stops at the human gate; the repair is not "done".
+            assert state.next_action == "human_decision"
+            assert shot.formal_keyframe_artifact_id == keyframe.id
 
-            # Adopting the candidate links it back to the step that produced it.
+            repair_review_run = await session.scalar(
+                select(NodeRun)
+                .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                .where(
+                    NodeRun.graph_version_id == repair_run.graph_version_id,
+                    GraphNode.node_key == "identity_review",
+                )
+            )
+            assert repair_review_run is not None
+            repair_review_run.input_snapshot = {
+                **repair_review_run.input_snapshot,
+                "upstream_artifact_id": str(repaired_artifact.id),
+            }
+            repair_review_evidence = await _store_artifact(
+                project_id=project.id,
+                object_key=f"projects/{project.id}/offline/repaired-keyframe-review.json",
+                data=b'{"status":"needs_human"}',
+                artifact_type="document",
+                mime_type="application/json",
+                produced_by_run_id=repair_review_run.id,
+            )
+            session.add(repair_review_evidence)
+            await session.flush()
+            repair_review_run.status = "completed"
+            repair_review_run.result_artifact_id = repair_review_evidence.id
+            repair_review_run.finished_at = datetime.now(UTC)
+            decision = await record_human_decision(
+                session,
+                project_id=project.id,
+                shot_id=shot.id,
+                artifact_id=repaired_artifact.id,
+                review_node_run_id=repair_review_run.id,
+                review_kind="identity",
+                decision="approved",
+                reason="MANUAL 路径下人工确认返修关键帧可用。",
+                actor_id=actor.id,
+                shot_version=shot.version,
+                request_key=f"manual-repair-review:{uuid4().hex}",
+            )
+            await set_formal_keyframe(
+                session,
+                project_id=project.id,
+                shot_id=shot.id,
+                artifact_id=repaired_artifact.id,
+                expected_shot_version=shot.version,
+                require_review_approval=True,
+            )
+            # The explicit Review + Formal gates link the candidate back to its repair step.
             adopted = await record_repair_adoption(
                 session,
                 project_id=project.id,
                 shot_id=shot.id,
                 artifact_id=repaired_artifact.id,
+                review_decision_id=decision.id,
             )
             await session.commit()
             assert adopted == 1
             refreshed_step = await session.get(RepairStep, repair_step.id)
             assert refreshed_step is not None
             assert refreshed_step.adopted_artifact_id == repaired_artifact.id
-            # The repair never replaced Formal by itself.
-            assert shot.formal_keyframe_artifact_id == keyframe.id
-            assert shot.formal_keyframe_artifact_id == keyframe.id
+            assert shot.formal_keyframe_artifact_id == repaired_artifact.id
             assert shot.formal_video_artifact_id == video.id
             assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 0
             assert await session.scalar(

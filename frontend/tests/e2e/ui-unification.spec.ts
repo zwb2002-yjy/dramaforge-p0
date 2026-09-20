@@ -39,6 +39,23 @@ test("real creation, model and script forms use one control recipe across lazy r
       json: { genres: [], styles: [], shot_languages: [], quality_policies: [], skills: [] },
     }),
   );
+  await page.route("**/api/v1/provider-plugins", (route) =>
+    route.fulfill({
+      json: [
+        {
+          provider_type: "fixture",
+          protocol_profile: "fixture-v1",
+          display_name: "Fixture Provider",
+          default_base_url: "https://fixture.invalid",
+          implemented: true,
+          paid_capabilities: [],
+          capabilities: ["auth_models"],
+          model_list_path: "/models",
+          models: [],
+        },
+      ],
+    }),
+  );
   await page.goto("/design-preview");
   const cardRecipe = await surfaceStyle(page.locator(".df-card").first());
   await page.goto("/?create=true");
