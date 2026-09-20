@@ -46,6 +46,7 @@ type ShotProductionActionsProps = {
   trace?: unknown[];
   onExecuted?: (result: ShotExecutionRead) => void | Promise<void>;
   onDirectorDelegated?: () => void;
+  onOpenDetails?: () => void;
 };
 
 type ActionFeedback = {
@@ -147,6 +148,7 @@ export function ShotProductionActions({
   trace = [],
   onExecuted,
   onDirectorDelegated,
+  onOpenDetails,
 }: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
   const delegationDecisionIds = useRef(new Map<string, string>());
@@ -599,8 +601,13 @@ export function ShotProductionActions({
           data-testid="shot-production-outcome-unknown"
           role="status"
         >
-          服务端未能确认上一次提交是否已被 Provider 接受，该阶段已暂停提交。请先按原操作键对账，
-          确认结果前不要创建新的生成请求。
+          上次提交结果不明，已暂停本阶段，避免重复计费。请按原操作键对账并核对供应商原任务回执；没有远端任务
+          ID 时，需要供应商协助查单，不能直接重试。
+          {onOpenDetails && (
+            <button type="button" className="secondary" onClick={onOpenDetails}>
+              查看待对账执行记录
+            </button>
+          )}
         </p>
       )}
       {dirty && (

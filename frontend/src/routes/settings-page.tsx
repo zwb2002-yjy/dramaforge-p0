@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
-import { Button, Disclosure, Field, Input, Select, PageHeader } from "../components/ui";
+import { Button, Disclosure, Field, Input, Select, PageHeader, Tabs, Tab } from "../components/ui";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import {
   ProjectModelSourceSummary,
@@ -270,6 +270,7 @@ export function WorkspaceSettingsPage({
         <form className="inline-form" onSubmit={submit}>
           <Input
             aria-label="新空间名"
+            autoFocus
             value={workspaceName}
             onChange={(event) => setWorkspaceName(event.target.value)}
             placeholder="新空间名"
@@ -343,6 +344,13 @@ export function WorkspaceSettingsPage({
 }
 
 export function ModelConnectionSettingsPage() {
+  const [section, setSection] = useState("connection");
+  const sections = [
+    { id: "connection", label: "连接" },
+    { id: "defaults", label: "默认模型" },
+    { id: "project", label: "项目模型" },
+    { id: "advanced", label: "高级" },
+  ];
   const { workspaces, projects, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
   const returnTo = useRouterState({
     select: (state) => validateSettingsReturnTo(state.location.search.returnTo),
@@ -360,25 +368,43 @@ export function ModelConnectionSettingsPage() {
   return (
     <main className="df-page df-settings-page" data-testid="model-settings-page">
       <SettingsHeader title="模型连接" />
-      <section aria-label="图像与视频连接">
-        <div className="df-settings-section">
-          {workspaces.isError ? (
-            <p className="flash err" role="alert">
-              无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
-            </p>
-          ) : workspaces.isPending ? (
-            <p role="status">正在读取工作空间…</p>
-          ) : (
-            <WorkspaceSelector
-              workspaces={workspaces.data ?? []}
-              selectedWorkspaceId={selectedWorkspaceId}
-              onChange={(id) => {
-                selectWorkspace(id);
-                setProjectSelection(null);
-              }}
-            />
-          )}
-        </div>
+      <div className="df-settings-section">
+        {workspaces.isError ? (
+          <p className="flash err" role="alert">
+            无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
+          </p>
+        ) : workspaces.isPending ? (
+          <p role="status">正在读取工作空间…</p>
+        ) : (
+          <WorkspaceSelector
+            workspaces={workspaces.data ?? []}
+            selectedWorkspaceId={selectedWorkspaceId}
+            onChange={(id) => {
+              selectWorkspace(id);
+              setProjectSelection(null);
+            }}
+          />
+        )}
+      </div>
+      <Tabs label="模型设置分区" className="df-section-tabs">
+        {sections.map((item) => (
+          <Tab
+            key={item.id}
+            id={`settings-tab-${item.id}`}
+            aria-controls={`settings-panel-${item.id}`}
+            active={section === item.id}
+            onClick={() => setSection(item.id)}
+          >
+            {item.label}
+          </Tab>
+        ))}
+      </Tabs>
+      <section
+        role="tabpanel"
+        id="settings-panel-connection"
+        aria-labelledby="settings-tab-connection"
+        hidden={section !== "connection"}
+      >
         <ProviderConnectionPanel
           key={selectedWorkspaceId ?? "no-workspace"}
           workspaceId={selectedWorkspaceId}
@@ -399,19 +425,27 @@ export function ModelConnectionSettingsPage() {
           projectName={selectedProject.name}
         />
       )}
-      <Disclosure title="默认模型方案" testId="default-models-disclosure">
+      <section
+        role="tabpanel"
+        id="settings-panel-defaults"
+        aria-labelledby="settings-tab-defaults"
+        hidden={section !== "defaults"}
+        data-testid="default-models-disclosure"
+      >
         <WorkspaceModelProfileSettings
           key={selectedWorkspaceId ?? "no-workspace"}
           workspaceId={selectedWorkspaceId}
         />
-      </Disclosure>
-      <Disclosure
-        title="项目模型覆盖"
-        description={
-          selectedProject ? `当前选择：${selectedProject.name}` : "仅影响所选项目，不更改其他作品"
-        }
-        testId="project-models-disclosure"
+      </section>
+      <section
+        role="tabpanel"
+        id="settings-panel-project"
+        aria-labelledby="settings-tab-project"
+        hidden={section !== "project"}
+        data-testid="project-models-disclosure"
       >
+        <h2>项目模型覆盖</h2>
+        <p className="muted">仅影响所选项目。</p>
         <Field>
           项目
           <Select
@@ -440,10 +474,16 @@ export function ModelConnectionSettingsPage() {
             配置项目模型
           </Link>
         )}
-      </Disclosure>
-      <Disclosure title="文本服务（实例级）" testId="text-service-disclosure">
+      </section>
+      <section
+        role="tabpanel"
+        id="settings-panel-advanced"
+        aria-labelledby="settings-tab-advanced"
+        hidden={section !== "advanced"}
+        data-testid="text-service-disclosure"
+      >
         <TextGatewaySettings />
-      </Disclosure>
+      </section>
     </main>
   );
 }

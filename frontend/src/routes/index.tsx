@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createRoute, useNavigate, redirect } from "@tanstack/react-router";
 import { ArrowUpRight, Clapperboard, Plus, Search } from "lucide-react";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   ApiError,
@@ -17,7 +17,7 @@ import {
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
 import { getRememberedProjectId } from "../lib/navigationPreferences";
-import { Button, Disclosure, Field, Input, Select, PageHeader } from "../components/ui";
+import { Button, Field, Input, Select, PageHeader } from "../components/ui";
 import { CreateProjectForm } from "../features/project/CreateProjectForm";
 import { LazyWorkspaceSettingsPage } from "./pages";
 import { rootRoute } from "./__root";
@@ -64,7 +64,6 @@ const PROJECT_PAGE_SIZE = 12;
 function HomePage() {
   const navigate = useNavigate();
   const search = indexRoute.useSearch();
-  const workspaceFilter = useRef<HTMLSelectElement>(null);
   const queryClient = useQueryClient();
   const health = useQuery({
     queryKey: queryKeys.health(),
@@ -182,13 +181,6 @@ function HomePage() {
   const rememberedProjectId = getRememberedProjectId();
   const recentProject =
     (projects.data ?? []).find((project) => project.id === rememberedProjectId) ?? null;
-  useEffect(() => {
-    if (search.panel !== "workspace") return;
-    const frame = requestAnimationFrame(() =>
-      workspaceFilter.current?.focus({ preventScroll: true }),
-    );
-    return () => cancelAnimationFrame(frame);
-  }, [search.panel, workspaces.data, currentUser.data]);
   const queryError =
     workspaces.error instanceof Error
       ? workspaces.error.message
@@ -203,11 +195,21 @@ function HomePage() {
   return (
     <main className="df-page df-project-lobby" data-testid="home-panel">
       <PageHeader
-        title={search.panel === "select" ? "选择项目开始创作" : "项目大厅"}
+        title={
+          createOpen
+            ? "新建项目"
+            : search.panel === "workspace"
+              ? "工作空间"
+              : search.panel === "recent"
+                ? "最近打开"
+                : search.panel === "select"
+                  ? "选择项目开始创作"
+                  : "项目大厅"
+        }
         actions={
           <>
             {!apiLive && <span className="status-bad">服务未就绪</span>}
-            {currentUser.data && !createOpen && (
+            {currentUser.data && !createOpen && search.panel !== "workspace" && (
               <Button tone="primary" onClick={() => setCreateOpen(true)}>
                 <Plus size={16} aria-hidden="true" />
                 新建项目
@@ -317,14 +319,14 @@ function HomePage() {
               void navigate({ to: "/projects/$projectId/script", params: { projectId } })
             }
           />
-          {search.panel === "workspace" && (
-            <Disclosure title="管理工作空间" testId="workspace-management-disclosure">
+          {!createOpen && search.panel === "workspace" && (
+            <section aria-label="管理工作空间" data-testid="workspace-management-disclosure">
               <Suspense fallback={<p role="status">正在读取工作空间…</p>}>
                 <LazyWorkspaceSettingsPage onWorkspaceChange={selectWorkspace} />
               </Suspense>
-            </Disclosure>
+            </section>
           )}
-          {recentProject && search.panel !== "workspace" && (
+          {!createOpen && recentProject && search.panel !== "workspace" && (
             <section className="df-lobby-section" id="recent-projects">
               <header>
                 <h2>继续创作</h2>
@@ -351,7 +353,7 @@ function HomePage() {
             <p role="status">当前空间还没有最近打开的项目。</p>
           )}
           <section
-            hidden={search.panel === "recent"}
+            hidden={createOpen || search.panel === "recent" || search.panel === "workspace"}
             className="df-lobby-section"
             aria-labelledby="all-projects-title"
           >
@@ -362,7 +364,6 @@ function HomePage() {
               <Field>
                 <span className="sr-only">工作空间</span>
                 <Select
-                  ref={workspaceFilter}
                   aria-label="工作空间筛选"
                   value={selectedWorkspaceId ?? ""}
                   onChange={(event) => selectWorkspace(event.target.value || null)}
@@ -423,14 +424,14 @@ function HomePage() {
                       onClick={() => openProject(project.id)}
                     >
                       <span className="df-project-cover" aria-hidden="true">
-                        <span className="df-cover-letter">{project.name.trim().slice(0, 1)}</span>
-                        <span className="df-cover-format">
-                          {project.aspect_ratio === "16:9" ? "横屏作品" : "竖屏作品"}
-                        </span>
+                        <Clapperboard size={24} />
                       </span>
                       <span className="df-project-card-body">
                         <strong title={project.name}>{project.name}</strong>
-                        <p>画幅 {project.aspect_ratio}</p>
+                        <span className="df-project-card-meta">
+                          {project.aspect_ratio === "16:9" ? "横屏" : "竖屏"} ·{" "}
+                          {project.aspect_ratio}
+                        </span>
                         <span className="df-project-card-enter">
                           打开作品 <ArrowUpRight size={16} aria-hidden="true" />
                         </span>
@@ -441,7 +442,12 @@ function HomePage() {
               </div>
             ) : (
               <div className="panel muted">
-                {projectFilter.trim() ? "没有符合搜索条件的项目。" : "当前空间暂无项目。"}
+                <p>{projectFilter.trim() ? "没有符合搜索条件的项目。" : "当前空间暂无项目。"}</p>
+                {!projectFilter.trim() && (
+                  <Button tone="primary" onClick={() => setCreateOpen(true)}>
+                    创建第一个项目
+                  </Button>
+                )}
               </div>
             )}
 

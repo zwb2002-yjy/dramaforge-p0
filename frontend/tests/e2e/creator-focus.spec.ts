@@ -51,8 +51,10 @@ test("project cards have equal frames and creation asks for type and style", asy
   expect(boxes[0].height).toBeCloseTo(boxes[1].height, 0);
   expect(
     (await page.locator(".df-project-card .df-project-cover").last().boundingBox())!.width,
-  ).toBeCloseTo(boxes[1].width - 2, 1);
+  ).toBeLessThan(boxes[1].width / 3);
   await page.goto("/?create=true");
+  await expect(page.getByRole("combobox", { name: "创作起点", exact: true })).toBeVisible();
+  await page.getByText("风格与类型（可选）", { exact: true }).click();
   await expect(page.getByRole("combobox", { name: "创作类型", exact: true })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "画面风格", exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "创作类型", exact: true }).selectOption("drama");

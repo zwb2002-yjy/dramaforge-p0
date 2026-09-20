@@ -113,7 +113,7 @@ function mockAuthenticatedHome(projectCount = 1) {
 
 afterEach(() => vi.restoreAllMocks());
 beforeEach(() => {
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
   window.sessionStorage.clear();
   window.localStorage.clear();
   useUiStore.setState({ leftNavOpen: true, selectedShotId: null });
@@ -200,7 +200,7 @@ describe("Workstation shell", () => {
 
       renderApp("/projects/project-2/script");
 
-      expect(await screen.findByRole("heading", { name: "剧本工作区" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "故事剧本" })).toBeInTheDocument();
       expect(screen.getAllByText("重新打开的项目")).toHaveLength(2);
       expect(projectHeaders.slice(0, 2)).toEqual(["workspace-stale", "workspace-2"]);
       expect(projectHeaders.slice(1).every((workspaceId) => workspaceId === "workspace-2")).toBe(

@@ -142,15 +142,19 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const pathname = location.pathname;
   const primary = primarySectionFromPath(pathname, location.search.panel);
   const projectId = projectIdFromPath(pathname);
-  const [secondaryOpen, setSecondaryOpen] = useState(
-    () => window.innerWidth >= 720 || primary === "settings",
-  );
+  const [secondaryOpen, setSecondaryOpen] = useState(() => window.innerWidth >= 1100);
+  useEffect(() => {
+    const wide = window.matchMedia("(min-width: 1100px)");
+    const syncNavigation = () => setSecondaryOpen(wide.matches);
+    wide.addEventListener("change", syncNavigation);
+    return () => wide.removeEventListener("change", syncNavigation);
+  }, []);
   const previousLocation = useRef(location.href);
   const previousPrimary = useRef(primary);
   useEffect(() => {
     if (previousPrimary.current !== primary) {
-      setSecondaryOpen(window.innerWidth >= 720 || primary === "settings");
-    } else if (previousLocation.current !== location.href && window.innerWidth < 720) {
+      setSecondaryOpen(window.innerWidth >= 1100);
+    } else if (previousLocation.current !== location.href && window.innerWidth < 1100) {
       setSecondaryOpen(false);
     }
     previousPrimary.current = primary;
@@ -348,7 +352,6 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
               <ContextLink
                 active={creationView === "production"}
                 label="作品总览"
-                description="进度 · 下一步 · 阻塞"
                 to={`/projects/${projectId}/production`}
                 icon={Clapperboard}
               />
@@ -356,7 +359,6 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 active={creationView === "script"}
                 label="故事剧本"
                 step="01"
-                description="从想法到分场"
                 to={`/projects/${projectId}/script`}
                 icon={FileText}
               />
@@ -364,7 +366,6 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 active={creationView === "assets"}
                 label="角色素材"
                 step="02"
-                description="角色 · 场景 · 道具"
                 to={`/projects/${projectId}/assets`}
                 icon={Package}
               />
@@ -372,7 +373,6 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 active={creationView === "scenes"}
                 label="分镜制作"
                 step="03"
-                description="画面与视频候选"
                 to={`/projects/${projectId}/scenes`}
                 icon={Film}
               />
@@ -380,7 +380,6 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 active={creationView === "review"}
                 label="审片确认"
                 step="04"
-                description="检查 · 修复 · 采用"
                 to={`/projects/${projectId}/review`}
                 icon={CheckCheck}
               />
@@ -388,7 +387,6 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 active={creationView === "edit"}
                 label="剪辑成片"
                 step="05"
-                description="时间线 · 导出作品"
                 to={`/projects/${projectId}/edit`}
                 icon={Scissors}
               />

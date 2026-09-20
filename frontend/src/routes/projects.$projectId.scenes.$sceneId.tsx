@@ -10,7 +10,7 @@ export const projectSceneWorkspaceRoute = createRoute({
   path: "/scenes/$sceneId",
   validateSearch: (search: Record<string, unknown>) => ({
     shotId: typeof search.shotId === "string" ? search.shotId : undefined,
-    tool: search.tool === "director" ? "director" : undefined,
+    tool: search.tool === "director" || search.tool === "prompts" ? search.tool : undefined,
   }),
   component: SceneWorkspacePage,
 });
@@ -33,6 +33,7 @@ function SceneWorkspacePage() {
         sceneId={sceneId}
         initialShotId={shotId}
         openDirector={tool === "director"}
+        openPrompts={tool === "prompts"}
         onDirtyStateChange={setHasUnsavedDesign}
         onOpenEditing={() =>
           void navigate({

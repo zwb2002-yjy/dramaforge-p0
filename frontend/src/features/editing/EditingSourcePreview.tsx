@@ -19,8 +19,8 @@ export function EditingSourcePreview({
   return (
     <section className="editing-source-preview" aria-label="剪辑素材预览">
       <header>
-        <h2>画面预览</h2>
-        <p>播放原始片段。时长、字幕与转场以保存后导出的成片为准。</p>
+        <h2>素材预览</h2>
+        <p>原始片段 · 剪辑效果以导出成片为准</p>
       </header>
       {artifactId ? (
         <video

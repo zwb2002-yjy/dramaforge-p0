@@ -35,6 +35,7 @@ type DirectorSidebarProps = {
   open?: boolean;
   requestedTool?: ContextTool | null;
   onClose?: () => void;
+  onOpenDetails?: () => void;
   /** Shared draft state lives in SceneWorkspace so a sheet close keeps it. */
   designDirty?: boolean;
   onDesignDirtyChange?: (dirty: boolean) => void;
@@ -53,6 +54,7 @@ const TABS: Array<{ id: DirectorTab; label: string; testId: string }> = [
 ];
 
 const TOOL_TAB: Record<ContextTool, DirectorTab> = {
+  prompts: "shot",
   character: "shot",
   camera: "shot",
   motion: "shot",
@@ -62,6 +64,7 @@ const TOOL_TAB: Record<ContextTool, DirectorTab> = {
 };
 
 const TOOL_FOCUS: Record<ContextTool, ShotDesignFocus> = {
+  prompts: "prompts",
   character: "character",
   camera: "camera",
   motion: "motion",
@@ -91,6 +94,7 @@ export function DirectorSidebar({
   open = true,
   requestedTool = null,
   onClose,
+  onOpenDetails,
   designDirty,
   onDesignDirtyChange,
   designDraft,
@@ -247,6 +251,7 @@ export function DirectorSidebar({
           dirty={dirty}
           trace={trace}
           onExecuted={onWorkspaceRefresh}
+          onOpenDetails={onOpenDetails}
           onDirectorDelegated={() => {
             setActiveTab("shot");
             setTabOverride(true);

@@ -74,7 +74,7 @@ export function ShotCandidateTray({
   }, [shot?.id]);
 
   const parsedCandidates = useMemo(
-    () => parseShotCandidates(candidates).filter(isConfirmableShotCandidate).slice(0, 4),
+    () => parseShotCandidates(candidates).filter(isConfirmableShotCandidate),
     [candidates],
   );
 
@@ -179,6 +179,9 @@ export function ShotCandidateTray({
         )}
       </header>
 
+      <a href={`/projects/${projectId}/production?view=experiments&shotId=${shot.id}`}>
+        创建多个候选版本 →
+      </a>
       {parsedCandidates.length > 0 && (
         <p className="muted">
           使用顺序：预览候选 → 审查并通过 → 设为正式。只有正式视频可以用于成片。

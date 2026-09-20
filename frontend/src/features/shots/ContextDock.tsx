@@ -9,7 +9,8 @@ import {
   Users,
 } from "lucide-react";
 
-export type ContextTool = "character" | "camera" | "motion" | "look" | "generate" | "director";
+export type ContextTool =
+  "prompts" | "character" | "camera" | "motion" | "look" | "generate" | "director";
 
 type ContextDockProps = {
   activeTool: ContextTool | null;
@@ -27,6 +28,7 @@ const TOOLS: Array<{
   label: string;
   testId: string;
 }> = [
+  { id: "prompts", label: "提示词", testId: "context-dock-prompts" },
   { id: "character", label: "角色", testId: "context-dock-character" },
   { id: "camera", label: "机位", testId: "context-dock-camera" },
   { id: "motion", label: "运动", testId: "context-dock-motion" },
@@ -36,6 +38,7 @@ const TOOLS: Array<{
 ];
 
 const TOOL_ICONS = {
+  prompts: Info,
   character: Users,
   camera: Camera,
   motion: MoveUpRight,

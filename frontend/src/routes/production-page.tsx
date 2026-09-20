@@ -9,8 +9,11 @@ import { ExperimentBranchPanel } from "../features/production/ExperimentBranchPa
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
 import { listModelCandidates } from "../features/production/modelCandidatesApi";
+import { fetchShotWorkbench } from "../features/shots/api";
+import { stageOutcomeUnknown } from "../features/production/sceneRunState";
 import { fetchScenes } from "../features/scenes/api";
 import {
+  ApiError,
   createExperiment,
   decideExperiment,
   fetchExperiments,
@@ -20,9 +23,17 @@ import {
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
 
-export function ProductionPage({ projectId }: { projectId: string }) {
+export function ProductionPage({
+  projectId,
+  initialView,
+  initialShotId,
+}: {
+  projectId: string;
+  initialView?: "experiments";
+  initialShotId?: string;
+}) {
   const qc = useQueryClient();
-  const [view, setView] = useState("progress");
+  const [view, setView] = useState(initialView ?? "progress");
   const [overrideScope, setOverrideScope] = useState<"scene" | "shot">("scene");
   const views = [
     { id: "progress", label: "作品进度" },
@@ -30,7 +41,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
     { id: "experiments", label: "版本尝试" },
     { id: "advanced", label: "导演手法" },
   ];
-  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(initialShotId ?? null);
 
   const summary = useQuery({
     queryKey: queryKeys.production.summary(projectId),
@@ -85,7 +96,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
 
   return (
     <div data-testid="production-mode">
-      <PageHeader title="作品总览" description="查看作品现状，从下一步继续创作。" />
+      <PageHeader title="作品总览" />
 
       <Tabs label="制作内容">
         {views.map((item) => (
@@ -228,8 +239,13 @@ export function ProductionPage({ projectId }: { projectId: string }) {
           </Select>
         </Field>
         <ExperimentBranchPanel
+          key={revisionShotId ?? "no-shot"}
           projectId={projectId}
-          experiments={Array.isArray(experiments.data) ? experiments.data : []}
+          experiments={
+            Array.isArray(experiments.data)
+              ? experiments.data.filter((item) => item.source_shot_id === revisionShotId)
+              : []
+          }
           models={Array.isArray(availableModels.data) ? availableModels.data : []}
           modelCandidates={{
             // `undefined` keeps "not loaded yet" distinct from "no binding".
@@ -260,6 +276,19 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
           }}
           onStartExperiment={async (experimentId, targetNodeKey) => {
+            const experiment = experiments.data?.find((item) => item.id === experimentId);
+            if (!experiment?.source_shot_id) throw new Error("实验目标镜头不可用");
+            // A new variant is not a way around an unresolved paid submission.
+            // Re-read immediately before dispatch; a failed read fails closed.
+            const workbench = await fetchShotWorkbench(projectId, experiment.source_shot_id);
+            if (
+              stageOutcomeUnknown(
+                workbench.trace,
+                targetNodeKey === "keyframe" ? "image_keyframe" : "video",
+              )
+            ) {
+              throw new ApiError("该阶段提交结果待对账", 409, "SUBMISSION_OUTCOME_UNKNOWN");
+            }
             await startExperiment(projectId, experimentId, targetNodeKey);
             await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
             await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });

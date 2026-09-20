@@ -56,7 +56,7 @@ test("project model drilldown preserves the exact saved editing session without 
   await page.goto(origin);
   await expect(page.getByTestId("edit-session-editor")).toBeVisible();
   await page.getByRole("link", { name: "设置", exact: true }).click();
-  await page.getByTestId("project-models-disclosure").locator("summary").click();
+  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "项目模型覆盖", exact: true })).toHaveValue(
     PROJECT_ID,
   );
@@ -91,7 +91,7 @@ test("an origin project is never selected outside the currently listed workspace
   const { writes } = await setup(page);
   const origin = `/projects/${PROJECT_ID}/production`;
   await page.goto(`/settings/models?returnTo=${encodeURIComponent(origin)}`);
-  await page.getByTestId("project-models-disclosure").locator("summary").click();
+  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "项目模型覆盖", exact: true })).toHaveValue(
     PROJECT_ID,
   );

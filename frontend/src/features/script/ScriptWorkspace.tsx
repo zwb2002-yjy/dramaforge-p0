@@ -181,7 +181,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
 
   return (
     <div data-testid="project-script-page" className="qc-project-page">
-      <PageHeader title="剧本工作区" description="写下故事，预览修改，确认后保存。" />
+      <PageHeader title="故事剧本" />
 
       {workspace.isError && (
         <div className="flash err" role="alert">
@@ -191,10 +191,12 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
 
       {data?.document ? (
         <>
-          <section className="qc-script-document" data-testid="script-document">
-            <h2>{data.document.filename}</h2>
-            <code className="qc-script-raw">{data.document.raw_text}</code>
-          </section>
+          <Disclosure title="查看原始剧本">
+            <section className="qc-script-document" data-testid="script-document">
+              <h2>{data.document.filename}</h2>
+              <code className="qc-script-raw">{data.document.raw_text}</code>
+            </section>
+          </Disclosure>
           <section data-testid="script-episodes">
             {data.episodes.map((episode) => (
               <article key={episode.id} className="qc-script-episode">

@@ -70,7 +70,7 @@ export function ProviderConnectionPanel(props: ProviderConnectionPanelProps) {
     <section className="panel provider-config" data-testid="provider-config">
       <h2>图像与视频</h2>
       <p className="muted">
-        连接保存服务地址；凭证只写入、不回显。插件目录是接入合同，不代表你的账号已获模型权限。模型绑定固定具体模型与合同；项目选择决定后续生成使用谁。人工质量认证是独立证据，不是首次生成的门槛。
+        连接供应商后，在「默认模型」中选择生成模型。密钥仅保存，不回显。
       </p>
       {plugins.isPending && <p role="status">正在读取供应商插件…</p>}
       {plugins.isError && (

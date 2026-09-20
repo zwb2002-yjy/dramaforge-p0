@@ -315,7 +315,8 @@ export function EditingWorkspace({
   if (hasSession) {
     return (
       <div className="qc-project-page" data-testid="editing-workspace" data-session-id={sessionId}>
-        <Disclosure title="切换已有剪辑" description="恢复已有时间线，不创建或重新生成">
+        <PageHeader title="剪辑成片" />
+        <Disclosure title="切换已有剪辑">
           <EditingSessionPicker
             projectId={projectId}
             sessionId={sessionId}
@@ -325,11 +326,9 @@ export function EditingWorkspace({
             onSelect={onSessionSelected}
           />
         </Disclosure>
-        <PageHeader title="剪辑会话" description="安排画面与声音的节奏，保留原始镜头。">
-          <p className="callout" data-testid="editing-session-read-only">
-            时间线编辑不会重做源素材；保存修改后，再明确导出成片。
-          </p>
-        </PageHeader>
+        <p className="muted" data-testid="editing-session-read-only">
+          保存时间线后导出，不重做源素材。
+        </p>
 
         {persistedSession.isLoading && (
           <p className="muted" data-testid="editing-session-loading">
@@ -344,539 +343,555 @@ export function EditingWorkspace({
 
         {persistedSession.data && draft && baseline && (
           <>
-            <EditingSourcePreview projectId={projectId} clips={draft.clips} />
-            <Disclosure title="剪辑会话信息" description="版本、状态与来源记录">
-              <section className="editing-session-facts" data-testid="edit-session-facts">
-                <h2>{persistedSession.data.name}</h2>
-                <dl>
-                  <dt>会话编号</dt>
-                  <dd data-testid="edit-session-reference">
-                    {shortReference(persistedSession.data.id)}
-                  </dd>
-                  <dt>状态</dt>
-                  <dd>
-                    {EDIT_SESSION_STATUS_LABEL[persistedSession.data.status] ??
-                      persistedSession.data.status}
-                  </dd>
-                  <dt>版本</dt>
-                  <dd data-testid="edit-session-version">
-                    {isSessionVersion(persistedSession.data.version)
-                      ? `v${persistedSession.data.version}`
-                      : "尚未加载"}
-                  </dd>
-                  <dt>镜头数量</dt>
-                  <dd>{draft.clips.length}</dd>
-                </dl>
-                <details className="editing-diagnostics" data-testid="edit-session-diagnostics">
-                  <summary>开发 / 诊断详情（只读）</summary>
-                  <p className="muted">完整编号、生产血缘与内部字段；仅供排障，不参与创作操作。</p>
-                  <dl>
-                    <dt>剪辑会话编号</dt>
-                    <dd>{persistedSession.data.id}</dd>
-                  </dl>
-                  <h4>生产血缘（只读）</h4>
-                  <pre data-testid="edit-session-lineage">
-                    {formatJson(persistedSession.data.production_lineage)}
-                  </pre>
-                </details>
-              </section>
-            </Disclosure>
-            <Disclosure title="导演剪辑建议" description="按需分析节奏，建议不会自动保存或生成">
-              <section
-                className="editing-director-suggestion"
-                data-testid="editing-director-suggestion"
-                data-project-id={projectId}
-                data-session-id={sessionId}
-              >
-                <header>
-                  <div>
-                    <p className="editing-director-suggestion-kicker">Director suggestion</p>
-                    <h2>剪辑建议预览</h2>
-                  </div>
-                  <span data-testid="editing-suggestion-current-version">
-                    当前 EditSession v
-                    {isSessionVersion(currentSessionVersion) ? currentSessionVersion : "—"}
-                  </span>
-                </header>
-                <p className="editing-director-suggestion-note">
-                  建议只形成待审核
-                  Proposal，不会应用到时间线；应用后的时间线仍由下方手动编辑和显式保存控制。
-                </p>
-                <button
-                  type="button"
-                  data-testid="request-proactive-editing-suggestion"
-                  onClick={submitProactiveSuggestion}
-                  disabled={suggestionPending || !isSessionVersion(currentSessionVersion)}
-                >
-                  {suggestionPending ? "正在分析…" : "主动分析剪辑节奏"}
-                </button>
-                <label htmlFor="editing-director-suggestion-instruction">
-                  导演要求
-                  <textarea
-                    id="editing-director-suggestion-instruction"
-                    data-testid="editing-director-suggestion-instruction"
-                    aria-label="剪辑导演要求"
-                    value={suggestionInstruction}
-                    onChange={(event) => setSuggestionInstruction(event.target.value)}
-                    placeholder="例如：让前两个镜头之间多留一点停顿"
-                    disabled={suggestionPending}
-                  />
-                </label>
-                <button
-                  type="button"
-                  data-testid="request-editing-director-suggestion"
-                  onClick={submitSuggestion}
-                  disabled={
-                    suggestionPending ||
-                    !suggestionInstruction.trim() ||
-                    !isSessionVersion(currentSessionVersion)
-                  }
-                >
-                  {suggestionPending ? "正在请求建议…" : "请求剪辑建议"}
-                </button>
-
-                {suggestionPending && (
-                  <p
-                    className="editing-director-suggestion-status"
-                    data-testid="editing-suggestion-pending"
-                    role="status"
-                  >
-                    正在基于当前 EditSession v{currentSessionVersion} 生成建议…
-                  </p>
-                )}
-                {suggestionError && (
-                  <p
-                    className="editing-director-suggestion-error"
-                    data-testid="editing-suggestion-error"
-                    role="alert"
-                  >
-                    {suggestionError}
-                  </p>
-                )}
-
-                <button
-                  type="button"
-                  data-testid="request-repair-routing"
-                  onClick={submitRepairRouting}
-                  disabled={repairPending || !isSessionVersion(currentSessionVersion)}
-                >
-                  {repairPending ? "正在判定…" : "判断是否需要生产 Repair"}
-                </button>
-                {repairError && (
-                  <p
-                    className="editing-repair-routing-error"
-                    data-testid="editing-repair-routing-error"
-                    role="alert"
-                  >
-                    {repairError}
-                  </p>
-                )}
-                {repairRouting && (
-                  <article
-                    className="editing-repair-routing-result"
-                    data-testid="editing-repair-routing-result"
-                    data-can-fix={repairRouting.can_fix_in_timeline}
-                    data-proposal-id={repairRouting.proposal_id ?? ""}
-                    data-session-version={repairRouting.session_version}
-                  >
-                    <h3>
-                      {repairRouting.can_fix_in_timeline
-                        ? "可以在时间线内修复"
-                        : "需要 Production Repair"}
-                    </h3>
-                    <p data-testid="editing-repair-routing-reason">{repairRouting.reason}</p>
-                    {!repairRouting.can_fix_in_timeline && (
-                      <>
-                        <p className="callout" data-testid="editing-repair-routing-notice">
-                          Repair Proposal 已创建但不会自动执行；请到审片/镜头生产层打开 Repair Plan
-                          人工确认后执行。
-                        </p>
-                        <dl>
-                          <dt>proposal_id</dt>
-                          <dd>{repairRouting.proposal_id}</dd>
-                          <dt>item_id</dt>
-                          <dd>{repairRouting.item_id}</dd>
-                          <dt>需要修复的镜头</dt>
-                          <dd>{repairRouting.shot_ids?.join(", ") || "—"}</dd>
-                        </dl>
-                      </>
-                    )}
-                  </article>
-                )}
-
-                {suggestionPreview && (
-                  <article
-                    className="editing-director-suggestion-preview"
-                    data-testid="editing-suggestion-preview"
-                    data-proposal-id={suggestionPreview.proposal_id}
-                    data-item-id={suggestionPreview.item_id}
-                    data-base-session-version={suggestionPreview.suggestion.base_session_version}
+            <div className="editing-cut-layout">
+              <EditingSourcePreview projectId={projectId} clips={draft.clips} />
+              <div className="editing-cut-controls">
+                <Disclosure title="版本与来源">
+                  <section className="editing-session-facts" data-testid="edit-session-facts">
+                    <h2>{persistedSession.data.name}</h2>
+                    <dl>
+                      <dt>会话编号</dt>
+                      <dd data-testid="edit-session-reference">
+                        {shortReference(persistedSession.data.id)}
+                      </dd>
+                      <dt>状态</dt>
+                      <dd>
+                        {EDIT_SESSION_STATUS_LABEL[persistedSession.data.status] ??
+                          persistedSession.data.status}
+                      </dd>
+                      <dt>版本</dt>
+                      <dd data-testid="edit-session-version">
+                        {isSessionVersion(persistedSession.data.version)
+                          ? `v${persistedSession.data.version}`
+                          : "尚未加载"}
+                      </dd>
+                      <dt>镜头数量</dt>
+                      <dd>{draft.clips.length}</dd>
+                    </dl>
+                    <details className="editing-diagnostics" data-testid="edit-session-diagnostics">
+                      <summary>开发 / 诊断详情（只读）</summary>
+                      <p className="muted">
+                        完整编号、生产血缘与内部字段；仅供排障，不参与创作操作。
+                      </p>
+                      <dl>
+                        <dt>剪辑会话编号</dt>
+                        <dd>{persistedSession.data.id}</dd>
+                      </dl>
+                      <h4>生产血缘（只读）</h4>
+                      <pre data-testid="edit-session-lineage">
+                        {formatJson(persistedSession.data.production_lineage)}
+                      </pre>
+                    </details>
+                  </section>
+                </Disclosure>
+                <Disclosure title="导演剪辑建议">
+                  <section
+                    className="editing-director-suggestion"
+                    data-testid="editing-director-suggestion"
+                    data-project-id={projectId}
+                    data-session-id={sessionId}
                   >
                     <header>
                       <div>
-                        <h3>Pending proposal（未应用）</h3>
-                        <p>这是待审核建议预览，不是已应用的时间线事件。</p>
+                        <p className="editing-director-suggestion-kicker">Director suggestion</p>
+                        <h2>剪辑建议预览</h2>
                       </div>
-                      <span data-testid="editing-suggestion-pending-status">pending</span>
+                      <span data-testid="editing-suggestion-current-version">
+                        当前 EditSession v
+                        {isSessionVersion(currentSessionVersion) ? currentSessionVersion : "—"}
+                      </span>
                     </header>
-                    <dl className="editing-director-suggestion-identities">
-                      <dt>proposal_id</dt>
-                      <dd data-testid="editing-suggestion-proposal-id">
-                        {suggestionPreview.proposal_id}
-                      </dd>
-                      <dt>item_id</dt>
-                      <dd data-testid="editing-suggestion-item-id">{suggestionPreview.item_id}</dd>
-                      <dt>基于版本</dt>
-                      <dd data-testid="editing-suggestion-base-version">
-                        v{suggestionPreview.suggestion.base_session_version}
-                      </dd>
-                      {suggestionPreview.director_evidence && (
-                        <>
-                          <dt>文本模型</dt>
-                          <dd data-testid="editing-suggestion-model-evidence">
-                            {suggestionPreview.director_evidence.actual_model ??
-                              suggestionPreview.director_evidence.model_id}
-                            · {suggestionPreview.director_evidence.turn_id.slice(0, 8)}
-                          </dd>
-                        </>
-                      )}
-                    </dl>
-
-                    <section
-                      className="editing-director-suggestion-operations"
-                      data-testid="editing-suggestion-operations"
+                    <p className="editing-director-suggestion-note">
+                      建议只形成待审核
+                      Proposal，不会应用到时间线；应用后的时间线仍由下方手动编辑和显式保存控制。
+                    </p>
+                    <button
+                      type="button"
+                      data-testid="request-proactive-editing-suggestion"
+                      onClick={submitProactiveSuggestion}
+                      disabled={suggestionPending || !isSessionVersion(currentSessionVersion)}
                     >
-                      <h4>Typed operations</h4>
-                      {suggestionPreview.suggestion.plan.operations.length === 0 ? (
-                        <p className="muted">没有可展示的 typed operation。</p>
-                      ) : (
-                        <ol>
-                          {suggestionPreview.suggestion.plan.operations.map((operation, index) => (
-                            <li
-                              key={`${operation.operation}-${index}`}
-                              data-testid="editing-suggestion-operation"
-                              data-operation={operation.operation}
-                            >
-                              <label>
-                                <input
-                                  type="checkbox"
-                                  data-testid={`editing-suggestion-op-select-${index}`}
-                                  aria-label={`采用第 ${index + 1} 条剪辑操作`}
-                                  checked={selectedSuggestionOps[index] === true}
-                                  disabled={suggestionIsStale || rejectionPending}
-                                  onChange={(event) =>
-                                    setSelectedSuggestionOps((current) => ({
-                                      ...current,
-                                      [index]: event.target.checked,
-                                    }))
-                                  }
-                                />
-                                采用
-                              </label>
-                              <strong>{operation.operation}</strong>
-                              {operation.operation === "reorder_clips" ? (
-                                <span>顺序：{operation.clip_ids.join(" → ")}</span>
-                              ) : operation.operation === "set_clip_duration" ? (
-                                <span>
-                                  片段 {operation.clip_id} · 时长 {operation.duration_seconds}s
-                                </span>
-                              ) : (
-                                <span>
-                                  片段 {operation.clip_id} · 字幕 {operation.subtitle || "（关闭）"}
-                                </span>
-                              )}
-                            </li>
-                          ))}
-                        </ol>
-                      )}
-                      <div className="editing-suggestion-apply-actions">
-                        <button
-                          type="button"
-                          data-testid="editing-suggestion-apply-all"
-                          onClick={() => applySuggestionToDraft(null)}
-                          disabled={
-                            suggestionIsStale ||
-                            rejectionPending ||
-                            suggestionPreview.suggestion.plan.operations.length === 0
-                          }
-                        >
-                          全部采用到草稿
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="editing-suggestion-apply-selected"
-                          onClick={() =>
-                            applySuggestionToDraft(
-                              Object.entries(selectedSuggestionOps)
-                                .filter(([, selected]) => selected)
-                                .map(([index]) => Number(index)),
-                            )
-                          }
-                          disabled={
-                            suggestionIsStale ||
-                            rejectionPending ||
-                            !Object.values(selectedSuggestionOps).some(Boolean)
-                          }
-                        >
-                          采用所选到草稿
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="editing-suggestion-reject"
-                          onClick={rejectSuggestion}
-                          disabled={suggestionIsStale || rejectionPending}
-                        >
-                          拒绝建议
-                        </button>
-                      </div>
-                    </section>
+                      {suggestionPending ? "正在分析…" : "主动分析剪辑节奏"}
+                    </button>
+                    <label htmlFor="editing-director-suggestion-instruction">
+                      导演要求
+                      <textarea
+                        id="editing-director-suggestion-instruction"
+                        data-testid="editing-director-suggestion-instruction"
+                        aria-label="剪辑导演要求"
+                        value={suggestionInstruction}
+                        onChange={(event) => setSuggestionInstruction(event.target.value)}
+                        placeholder="例如：让前两个镜头之间多留一点停顿"
+                        disabled={suggestionPending}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      data-testid="request-editing-director-suggestion"
+                      onClick={submitSuggestion}
+                      disabled={
+                        suggestionPending ||
+                        !suggestionInstruction.trim() ||
+                        !isSessionVersion(currentSessionVersion)
+                      }
+                    >
+                      {suggestionPending ? "正在请求建议…" : "请求剪辑建议"}
+                    </button>
 
-                    <dl className="editing-director-suggestion-explanations">
-                      <dt>rationale / 原因</dt>
-                      <dd data-testid="editing-suggestion-rationale">
-                        {suggestionPreview.suggestion.rationale}
-                      </dd>
-                      <dt>benefit / 收益</dt>
-                      <dd data-testid="editing-suggestion-benefit">
-                        {suggestionPreview.suggestion.benefit}
-                      </dd>
-                      <dt>cost / 创作代价</dt>
-                      <dd data-testid="editing-suggestion-cost">
-                        {suggestionPreview.suggestion.cost}
-                      </dd>
-                      <dt>risk / 风险</dt>
-                      <dd data-testid="editing-suggestion-risk">
-                        {suggestionPreview.suggestion.risk}
-                      </dd>
-                      <dt>impact / 影响范围</dt>
-                      <dd data-testid="editing-suggestion-impact">
-                        {suggestionPreview.suggestion.impact}
-                      </dd>
-                    </dl>
-                    {suggestionIsStale && (
+                    {suggestionPending && (
                       <p
-                        className="editing-director-suggestion-stale"
-                        data-testid="editing-suggestion-stale"
-                        role="alert"
+                        className="editing-director-suggestion-status"
+                        data-testid="editing-suggestion-pending"
+                        role="status"
                       >
-                        当前 EditSession
-                        版本已变化，这条建议已过期；请重新请求。它不会自动重试、保存或修改时间线。
+                        正在基于当前 EditSession v{currentSessionVersion} 生成建议…
                       </p>
                     )}
-                    <p className="editing-director-suggestion-footer">
-                      采用操作会写入时间线草稿；必须显式保存后才会成为新时间线版本。
-                    </p>
-                  </article>
-                )}
-              </section>
-            </Disclosure>
-            <section className="editing-session-editor" data-testid="edit-session-editor">
-              <header>
-                <h2>时间线草稿</h2>
-                {dirty && (
-                  <span data-testid="edit-session-dirty" role="status">
-                    有未保存修改
-                  </span>
-                )}
-              </header>
-              {draft.clips.length === 0 ? (
-                <p className="muted" data-testid="edit-session-no-clips">
-                  当前 EditSession 没有正式视频片段。
-                </p>
-              ) : (
-                <ol>
-                  {draft.clips.map((clip, index) => (
-                    <li key={`${clipValue(clip, "id")}-${index}`} data-testid="edit-session-clip">
-                      <div>
-                        <strong>
-                          {index + 1}.{" "}
-                          {clipLabel(shotNumberById, clipValue(clip, "shot_id"), index)}
-                        </strong>
-                        <small>
-                          {clipValue(clip, "artifact_id") ? "正式素材已绑定" : "未绑定正式素材"}
-                        </small>
-                        <details
-                          className="editing-diagnostics"
-                          data-testid={`clip-diagnostics-${index}`}
+                    {suggestionError && (
+                      <p
+                        className="editing-director-suggestion-error"
+                        data-testid="editing-suggestion-error"
+                        role="alert"
+                      >
+                        {suggestionError}
+                      </p>
+                    )}
+
+                    <button
+                      type="button"
+                      data-testid="request-repair-routing"
+                      onClick={submitRepairRouting}
+                      disabled={repairPending || !isSessionVersion(currentSessionVersion)}
+                    >
+                      {repairPending ? "正在判定…" : "判断是否需要生产 Repair"}
+                    </button>
+                    {repairError && (
+                      <p
+                        className="editing-repair-routing-error"
+                        data-testid="editing-repair-routing-error"
+                        role="alert"
+                      >
+                        {repairError}
+                      </p>
+                    )}
+                    {repairRouting && (
+                      <article
+                        className="editing-repair-routing-result"
+                        data-testid="editing-repair-routing-result"
+                        data-can-fix={repairRouting.can_fix_in_timeline}
+                        data-proposal-id={repairRouting.proposal_id ?? ""}
+                        data-session-version={repairRouting.session_version}
+                      >
+                        <h3>
+                          {repairRouting.can_fix_in_timeline
+                            ? "可以在时间线内修复"
+                            : "需要 Production Repair"}
+                        </h3>
+                        <p data-testid="editing-repair-routing-reason">{repairRouting.reason}</p>
+                        {!repairRouting.can_fix_in_timeline && (
+                          <>
+                            <p className="callout" data-testid="editing-repair-routing-notice">
+                              Repair Proposal 已创建但不会自动执行；请到审片/镜头生产层打开 Repair
+                              Plan 人工确认后执行。
+                            </p>
+                            <dl>
+                              <dt>proposal_id</dt>
+                              <dd>{repairRouting.proposal_id}</dd>
+                              <dt>item_id</dt>
+                              <dd>{repairRouting.item_id}</dd>
+                              <dt>需要修复的镜头</dt>
+                              <dd>{repairRouting.shot_ids?.join(", ") || "—"}</dd>
+                            </dl>
+                          </>
+                        )}
+                      </article>
+                    )}
+
+                    {suggestionPreview && (
+                      <article
+                        className="editing-director-suggestion-preview"
+                        data-testid="editing-suggestion-preview"
+                        data-proposal-id={suggestionPreview.proposal_id}
+                        data-item-id={suggestionPreview.item_id}
+                        data-base-session-version={
+                          suggestionPreview.suggestion.base_session_version
+                        }
+                      >
+                        <header>
+                          <div>
+                            <h3>Pending proposal（未应用）</h3>
+                            <p>这是待审核建议预览，不是已应用的时间线事件。</p>
+                          </div>
+                          <span data-testid="editing-suggestion-pending-status">pending</span>
+                        </header>
+                        <dl className="editing-director-suggestion-identities">
+                          <dt>proposal_id</dt>
+                          <dd data-testid="editing-suggestion-proposal-id">
+                            {suggestionPreview.proposal_id}
+                          </dd>
+                          <dt>item_id</dt>
+                          <dd data-testid="editing-suggestion-item-id">
+                            {suggestionPreview.item_id}
+                          </dd>
+                          <dt>基于版本</dt>
+                          <dd data-testid="editing-suggestion-base-version">
+                            v{suggestionPreview.suggestion.base_session_version}
+                          </dd>
+                          {suggestionPreview.director_evidence && (
+                            <>
+                              <dt>文本模型</dt>
+                              <dd data-testid="editing-suggestion-model-evidence">
+                                {suggestionPreview.director_evidence.actual_model ??
+                                  suggestionPreview.director_evidence.model_id}
+                                · {suggestionPreview.director_evidence.turn_id.slice(0, 8)}
+                              </dd>
+                            </>
+                          )}
+                        </dl>
+
+                        <section
+                          className="editing-director-suggestion-operations"
+                          data-testid="editing-suggestion-operations"
                         >
-                          <summary>开发 / 诊断详情（只读）</summary>
-                          <small>
-                            片段 {clipValue(clip, "id")} · 素材 {clipValue(clip, "artifact_id")}
-                          </small>
-                          <small>
-                            集 {clipValue(clip, "episode_id")} · 场景 {clipValue(clip, "scene_id")}{" "}
-                            · 镜头 {clipValue(clip, "shot_id")}
-                          </small>
-                        </details>
-                      </div>
-                      <label>
-                        时长（秒）
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.001"
-                          aria-label={`镜头 ${index + 1} 时长`}
-                          value={clipDuration(clip)}
-                          onChange={(event) => updateClipDuration(index, event.target.value)}
-                        />
-                      </label>
-                      <label>
-                        入点（秒）
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.001"
-                          data-testid={`clip-source-in-${index}`}
-                          aria-label={`镜头 ${index + 1} 入点`}
-                          value={editableValue(clip, "source_in_seconds", "0")}
-                          onChange={(event) =>
-                            updateClipField(index, "source_in_seconds", event.target.value)
-                          }
-                        />
-                      </label>
-                      <label>
-                        字幕文本
-                        <textarea
-                          rows={2}
-                          data-testid={`clip-subtitle-${index}`}
-                          aria-label={`镜头 ${index + 1} 字幕`}
-                          value={editableValue(clip, "subtitle")}
-                          onChange={(event) =>
-                            updateClipField(index, "subtitle", event.target.value)
-                          }
-                        />
-                      </label>
+                          <h4>Typed operations</h4>
+                          {suggestionPreview.suggestion.plan.operations.length === 0 ? (
+                            <p className="muted">没有可展示的 typed operation。</p>
+                          ) : (
+                            <ol>
+                              {suggestionPreview.suggestion.plan.operations.map(
+                                (operation, index) => (
+                                  <li
+                                    key={`${operation.operation}-${index}`}
+                                    data-testid="editing-suggestion-operation"
+                                    data-operation={operation.operation}
+                                  >
+                                    <label>
+                                      <input
+                                        type="checkbox"
+                                        data-testid={`editing-suggestion-op-select-${index}`}
+                                        aria-label={`采用第 ${index + 1} 条剪辑操作`}
+                                        checked={selectedSuggestionOps[index] === true}
+                                        disabled={suggestionIsStale || rejectionPending}
+                                        onChange={(event) =>
+                                          setSelectedSuggestionOps((current) => ({
+                                            ...current,
+                                            [index]: event.target.checked,
+                                          }))
+                                        }
+                                      />
+                                      采用
+                                    </label>
+                                    <strong>{operation.operation}</strong>
+                                    {operation.operation === "reorder_clips" ? (
+                                      <span>顺序：{operation.clip_ids.join(" → ")}</span>
+                                    ) : operation.operation === "set_clip_duration" ? (
+                                      <span>
+                                        片段 {operation.clip_id} · 时长 {operation.duration_seconds}
+                                        s
+                                      </span>
+                                    ) : (
+                                      <span>
+                                        片段 {operation.clip_id} · 字幕{" "}
+                                        {operation.subtitle || "（关闭）"}
+                                      </span>
+                                    )}
+                                  </li>
+                                ),
+                              )}
+                            </ol>
+                          )}
+                          <div className="editing-suggestion-apply-actions">
+                            <button
+                              type="button"
+                              data-testid="editing-suggestion-apply-all"
+                              onClick={() => applySuggestionToDraft(null)}
+                              disabled={
+                                suggestionIsStale ||
+                                rejectionPending ||
+                                suggestionPreview.suggestion.plan.operations.length === 0
+                              }
+                            >
+                              全部采用到草稿
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="editing-suggestion-apply-selected"
+                              onClick={() =>
+                                applySuggestionToDraft(
+                                  Object.entries(selectedSuggestionOps)
+                                    .filter(([, selected]) => selected)
+                                    .map(([index]) => Number(index)),
+                                )
+                              }
+                              disabled={
+                                suggestionIsStale ||
+                                rejectionPending ||
+                                !Object.values(selectedSuggestionOps).some(Boolean)
+                              }
+                            >
+                              采用所选到草稿
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="editing-suggestion-reject"
+                              onClick={rejectSuggestion}
+                              disabled={suggestionIsStale || rejectionPending}
+                            >
+                              拒绝建议
+                            </button>
+                          </div>
+                        </section>
+
+                        <dl className="editing-director-suggestion-explanations">
+                          <dt>rationale / 原因</dt>
+                          <dd data-testid="editing-suggestion-rationale">
+                            {suggestionPreview.suggestion.rationale}
+                          </dd>
+                          <dt>benefit / 收益</dt>
+                          <dd data-testid="editing-suggestion-benefit">
+                            {suggestionPreview.suggestion.benefit}
+                          </dd>
+                          <dt>cost / 创作代价</dt>
+                          <dd data-testid="editing-suggestion-cost">
+                            {suggestionPreview.suggestion.cost}
+                          </dd>
+                          <dt>risk / 风险</dt>
+                          <dd data-testid="editing-suggestion-risk">
+                            {suggestionPreview.suggestion.risk}
+                          </dd>
+                          <dt>impact / 影响范围</dt>
+                          <dd data-testid="editing-suggestion-impact">
+                            {suggestionPreview.suggestion.impact}
+                          </dd>
+                        </dl>
+                        {suggestionIsStale && (
+                          <p
+                            className="editing-director-suggestion-stale"
+                            data-testid="editing-suggestion-stale"
+                            role="alert"
+                          >
+                            当前 EditSession
+                            版本已变化，这条建议已过期；请重新请求。它不会自动重试、保存或修改时间线。
+                          </p>
+                        )}
+                        <p className="editing-director-suggestion-footer">
+                          采用操作会写入时间线草稿；必须显式保存后才会成为新时间线版本。
+                        </p>
+                      </article>
+                    )}
+                  </section>
+                </Disclosure>
+                <section className="editing-session-editor" data-testid="edit-session-editor">
+                  <header>
+                    <h2>时间线草稿</h2>
+                    {dirty && (
+                      <span data-testid="edit-session-dirty" role="status">
+                        有未保存修改
+                      </span>
+                    )}
+                  </header>
+                  {draft.clips.length === 0 ? (
+                    <p className="muted" data-testid="edit-session-no-clips">
+                      当前 EditSession 没有正式视频片段。
+                    </p>
+                  ) : (
+                    <ol>
+                      {draft.clips.map((clip, index) => (
+                        <li
+                          key={`${clipValue(clip, "id")}-${index}`}
+                          data-testid="edit-session-clip"
+                        >
+                          <div>
+                            <strong>
+                              {index + 1}.{" "}
+                              {clipLabel(shotNumberById, clipValue(clip, "shot_id"), index)}
+                            </strong>
+                            <small>
+                              {clipValue(clip, "artifact_id") ? "正式素材已绑定" : "未绑定正式素材"}
+                            </small>
+                            <details
+                              className="editing-diagnostics"
+                              data-testid={`clip-diagnostics-${index}`}
+                            >
+                              <summary>开发 / 诊断详情（只读）</summary>
+                              <small>
+                                片段 {clipValue(clip, "id")} · 素材 {clipValue(clip, "artifact_id")}
+                              </small>
+                              <small>
+                                集 {clipValue(clip, "episode_id")} · 场景{" "}
+                                {clipValue(clip, "scene_id")} · 镜头 {clipValue(clip, "shot_id")}
+                              </small>
+                            </details>
+                          </div>
+                          <label>
+                            时长（秒）
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.001"
+                              aria-label={`镜头 ${index + 1} 时长`}
+                              value={clipDuration(clip)}
+                              onChange={(event) => updateClipDuration(index, event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            入点（秒）
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.001"
+                              data-testid={`clip-source-in-${index}`}
+                              aria-label={`镜头 ${index + 1} 入点`}
+                              value={editableValue(clip, "source_in_seconds", "0")}
+                              onChange={(event) =>
+                                updateClipField(index, "source_in_seconds", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label>
+                            字幕文本
+                            <textarea
+                              rows={2}
+                              data-testid={`clip-subtitle-${index}`}
+                              aria-label={`镜头 ${index + 1} 字幕`}
+                              value={editableValue(clip, "subtitle")}
+                              onChange={(event) =>
+                                updateClipField(index, "subtitle", event.target.value)
+                              }
+                            />
+                          </label>
+                          <AudioArtifactPicker
+                            key={`${projectId}:${sessionId}:${String(clip.id ?? index)}:audio`}
+                            projectId={projectId}
+                            label={`镜头 ${index + 1} 配音`}
+                            testId={`clip-audio-${index}`}
+                            value={editableValue(clip, "audio_id")}
+                            defaultLabel="沿用镜头对白"
+                            allowMute
+                            muted={clip.muted === true}
+                            onChange={(artifactId, muted) => {
+                              updateClipField(index, "audio_id", artifactId);
+                              updateClipField(index, "muted", muted);
+                            }}
+                          />
+                          <label>
+                            转场
+                            <select
+                              data-testid={`clip-transition-${index}`}
+                              aria-label={`镜头 ${index + 1} 转场`}
+                              value={transitionKind(clip)}
+                              onChange={(event) =>
+                                updateClipField(
+                                  index,
+                                  "transition",
+                                  event.target.value === "crossfade"
+                                    ? { kind: "crossfade", duration_seconds: 0.25 }
+                                    : { kind: "cut" },
+                                )
+                              }
+                            >
+                              <option value="cut">直接切换</option>
+                              <option value="crossfade">交叉淡化</option>
+                            </select>
+                          </label>
+                          <div className="editing-session-clip-actions">
+                            <button
+                              type="button"
+                              data-testid={`move-clip-up-${index}`}
+                              onClick={() => moveClip(index, -1)}
+                              disabled={index === 0}
+                            >
+                              上移
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`move-clip-down-${index}`}
+                              onClick={() => moveClip(index, 1)}
+                              disabled={index === draft.clips.length - 1}
+                            >
+                              下移
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  <Disclosure title="背景音乐（可选）">
+                    <div className="editing-session-music" data-testid="timeline-music-controls">
                       <AudioArtifactPicker
-                        key={`${projectId}:${sessionId}:${String(clip.id ?? index)}:audio`}
+                        key={`${projectId}:${sessionId}:music`}
                         projectId={projectId}
-                        label={`镜头 ${index + 1} 配音`}
-                        testId={`clip-audio-${index}`}
-                        value={editableValue(clip, "audio_id")}
-                        defaultLabel="沿用镜头对白"
-                        allowMute
-                        muted={clip.muted === true}
-                        onChange={(artifactId, muted) => {
-                          updateClipField(index, "audio_id", artifactId);
-                          updateClipField(index, "muted", muted);
-                        }}
+                        label="背景音乐"
+                        testId="timeline-music-artifact"
+                        value={metadataValue(draft.metadata, "music_artifact_id")}
+                        defaultLabel="不使用背景音乐"
+                        onChange={(artifactId) =>
+                          updateTimelineMetadata("music_artifact_id", artifactId)
+                        }
                       />
                       <label>
-                        转场
-                        <select
-                          data-testid={`clip-transition-${index}`}
-                          aria-label={`镜头 ${index + 1} 转场`}
-                          value={transitionKind(clip)}
-                          onChange={(event) =>
-                            updateClipField(
-                              index,
-                              "transition",
-                              event.target.value === "crossfade"
-                                ? { kind: "crossfade", duration_seconds: 0.25 }
-                                : { kind: "cut" },
-                            )
+                        音乐音量
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          data-testid="timeline-music-volume"
+                          value={
+                            draft.metadata.music_volume === undefined
+                              ? "0.12"
+                              : String(draft.metadata.music_volume)
                           }
-                        >
-                          <option value="cut">直接切换</option>
-                          <option value="crossfade">交叉淡化</option>
-                        </select>
+                          onChange={(event) =>
+                            updateTimelineMetadata("music_volume", event.target.value)
+                          }
+                        />
                       </label>
-                      <div className="editing-session-clip-actions">
-                        <button
-                          type="button"
-                          data-testid={`move-clip-up-${index}`}
-                          onClick={() => moveClip(index, -1)}
-                          disabled={index === 0}
-                        >
-                          上移
-                        </button>
-                        <button
-                          type="button"
-                          data-testid={`move-clip-down-${index}`}
-                          onClick={() => moveClip(index, 1)}
-                          disabled={index === draft.clips.length - 1}
-                        >
-                          下移
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              )}
-              <Disclosure
-                title="背景音乐（可选）"
-                description="从当前项目音频中选择并试听；不加配乐也可导出"
-              >
-                <div className="editing-session-music" data-testid="timeline-music-controls">
-                  <AudioArtifactPicker
-                    key={`${projectId}:${sessionId}:music`}
-                    projectId={projectId}
-                    label="背景音乐"
-                    testId="timeline-music-artifact"
-                    value={metadataValue(draft.metadata, "music_artifact_id")}
-                    defaultLabel="不使用背景音乐"
-                    onChange={(artifactId) =>
-                      updateTimelineMetadata("music_artifact_id", artifactId)
-                    }
-                  />
-                  <label>
-                    音乐音量
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      data-testid="timeline-music-volume"
-                      value={
-                        draft.metadata.music_volume === undefined
-                          ? "0.12"
-                          : String(draft.metadata.music_volume)
-                      }
-                      onChange={(event) =>
-                        updateTimelineMetadata("music_volume", event.target.value)
-                      }
-                    />
-                  </label>
-                </div>
-              </Disclosure>
-              <div className="editing-session-actions">
-                <button
-                  type="button"
-                  data-testid="save-edit-timeline"
-                  onClick={submitSave}
-                  disabled={!dirty || save.isPending}
-                >
-                  {save.isPending ? "保存中…" : "保存时间线"}
-                </button>
-                <button
-                  type="button"
-                  data-testid="export-edit-session"
-                  onClick={() => exportMutation.mutate()}
-                  disabled={exportMutation.isPending}
-                >
-                  {exportMutation.isPending ? "正在导出…" : "导出时间线"}
-                </button>
-                <button
-                  type="button"
-                  data-testid="export-final-film"
-                  onClick={() => void runFinalFilmExport()}
-                  disabled={dirty || finalFilmPending !== null || save.isPending}
-                >
-                  {finalFilmPending === "prepare"
-                    ? "准备素材…"
-                    : finalFilmPending === "tail"
-                      ? "等待成片任务…"
-                      : finalFilmPending === "render"
-                        ? "正在生成成片…"
-                        : "导出成片 MP4"}
-                </button>
+                    </div>
+                  </Disclosure>
+                  <div className="editing-session-actions">
+                    <button
+                      type="button"
+                      data-testid="save-edit-timeline"
+                      onClick={submitSave}
+                      disabled={!dirty || save.isPending}
+                    >
+                      {save.isPending ? "保存中…" : "保存时间线"}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="export-edit-session"
+                      onClick={() => exportMutation.mutate()}
+                      disabled={exportMutation.isPending}
+                    >
+                      {exportMutation.isPending ? "正在导出…" : "导出时间线"}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="export-final-film"
+                      onClick={() => void runFinalFilmExport()}
+                      disabled={dirty || finalFilmPending !== null || save.isPending}
+                    >
+                      {finalFilmPending === "prepare"
+                        ? "准备素材…"
+                        : finalFilmPending === "tail"
+                          ? "等待成片任务…"
+                          : finalFilmPending === "render"
+                            ? "正在生成成片…"
+                            : "导出成片 MP4"}
+                    </button>
+                  </div>
+                  {dirty && (
+                    <p
+                      className="editing-final-film-dirty-gate"
+                      data-testid="final-film-dirty-gate"
+                    >
+                      时间线有未保存修改；保存后才能导出成片，避免导出旧的服务器版本。
+                    </p>
+                  )}
+                </section>
               </div>
-              {dirty && (
-                <p className="editing-final-film-dirty-gate" data-testid="final-film-dirty-gate">
-                  时间线有未保存修改；保存后才能导出成片，避免导出旧的服务器版本。
-                </p>
-              )}
-            </section>
-
+            </div>
             <section aria-label="历史成片与导出状态">
               <h2>成片历史</h2>
               <p>这些是已经生成的成片；查看不会重新生成。</p>
@@ -1029,7 +1044,7 @@ export function EditingWorkspace({
     <div className="qc-project-page" data-testid="editing-workspace">
       <EditingSessionPicker projectId={projectId} onSelect={onSessionSelected} />
 
-      <PageHeader title="剪辑交接" description="只读预览已完成的镜头，继续剪辑或新建会话。">
+      <PageHeader title="剪辑成片" description="选择已有剪辑，或用正式镜头创建时间线。">
         <p className="callout" data-testid="editing-read-only">
           只读预览 · 仅展示已确认的正式视频，不会触发生成或写回生产事实。
         </p>

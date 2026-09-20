@@ -150,3 +150,50 @@ describe("exact review target", () => {
     ).toContain("artifactId=b");
   });
 });
+
+it("shows loading instead of missing formal media while the selected shot is unresolved", async () => {
+  let resolveWorkbench!: (value: Response) => void;
+  const pending = new Promise<Response>((resolve) => {
+    resolveWorkbench = resolve;
+  });
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = String(input);
+    if (url.endsWith("/shots")) return json([shot]);
+    if (url.endsWith("/workbench")) return pending;
+    if (url.endsWith("/annotations")) return json([]);
+    return json({});
+  });
+  show({});
+  expect(await screen.findByTestId("review-media-loading")).toBeInTheDocument();
+  expect(screen.queryByTestId("review-keyframe-missing")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("review-open-repair")).not.toBeInTheDocument();
+  resolveWorkbench(
+    new Response(JSON.stringify({ shot, candidates: [] }), {
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  expect(await screen.findByLabelText("正式视频审片播放器")).toHaveAttribute(
+    "src",
+    "/api/v1/projects/p1/artifacts/formal-A/content",
+  );
+  expect(screen.queryByTestId("review-media-loading")).not.toBeInTheDocument();
+});
+it("shows a read error, not an empty-material claim, when workbench fails", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = String(input);
+    if (url.endsWith("/shots")) return json([shot]);
+    if (url.endsWith("/workbench"))
+      return Promise.resolve(
+        new Response(JSON.stringify({ detail: "unavailable" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    if (url.endsWith("/annotations")) return json([]);
+    return json({});
+  });
+  show({});
+  expect(await screen.findByRole("alert")).toHaveTextContent("不代表素材缺失");
+  expect(screen.queryByTestId("review-keyframe-missing")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "重新读取素材" })).toBeEnabled();
+});

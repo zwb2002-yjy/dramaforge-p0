@@ -109,7 +109,7 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
     /项目.*创作.*设置/s,
   );
   await expect(page.getByRole("navigation", { name: "设置导航" })).toContainText(/模型连接.*账号/s);
-  await page.getByTestId("project-models-disclosure").locator(":scope > summary").click();
+  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
   await page.getByRole("combobox", { name: "项目模型覆盖" }).selectOption(PROJECT_ID);
   await page.getByRole("link", { name: "配置项目模型", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/settings/projects/${PROJECT_ID}(?:\\?|$)`));
@@ -126,7 +126,7 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
 test("Project navigation survives losing tab-scoped context", async ({ page }) => {
   await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/script`);
-  await expect(page.getByRole("heading", { name: "剧本工作区" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "故事剧本" })).toBeVisible();
 
   await page.evaluate(() => sessionStorage.clear());
   await page.getByRole("link", { name: "设置" }).click();
@@ -134,7 +134,7 @@ test("Project navigation survives losing tab-scoped context", async ({ page }) =
   await page.getByRole("link", { name: "创作", exact: true }).click();
 
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/script`);
-  await expect(page.getByRole("heading", { name: "剧本工作区" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "故事剧本" })).toBeVisible();
   await expect(page.getByText(/workspace context required/)).toHaveCount(0);
 });
 
@@ -169,8 +169,8 @@ test("lobby filters are a focused view rather than a scroll anchor", async ({ pa
   await page.getByRole("link", { name: "工作空间", exact: true }).click();
   await expect(page).toHaveURL(/panel=workspace/);
   expect(new URL(page.url()).hash).toBe("");
-  await expect(page.getByRole("combobox", { name: "工作空间筛选" })).toBeFocused();
-  const box = await page.getByRole("combobox", { name: "工作空间筛选" }).boundingBox();
+  await expect(page.getByRole("textbox", { name: "新空间名" })).toBeFocused();
+  const box = await page.getByRole("textbox", { name: "新空间名" }).boundingBox();
   expect(box!.y).toBeLessThan(400);
   await page.getByRole("link", { name: "最近打开", exact: true }).click();
   await expect(page.getByText("当前空间还没有最近打开的项目。")).toBeVisible();
@@ -179,7 +179,7 @@ test("lobby filters are a focused view rather than a scroll anchor", async ({ pa
   await expect(page.getByRole("list", { name: "项目列表" })).toBeVisible();
   await page.goto("/?create=false#project-filters");
   await expect(page).toHaveURL(/panel=workspace$/);
-  await expect(page.getByRole("combobox", { name: "工作空间筛选" })).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "新空间名" })).toBeFocused();
   expect(await page.evaluate(() => scrollY)).toBe(0);
   await page.getByRole("link", { name: "新建项目", exact: true }).click();
   await expect(page.getByRole("region", { name: "新建项目" })).toBeVisible();
@@ -204,7 +204,7 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 
-  await page.getByRole("link", { name: "故事剧本" }).click();
+  await page.getByRole("navigation",{name:"创作导航"}).getByRole("link", { name: "故事剧本", exact: true }).click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/script`);
   await expect(page.getByRole("link", { name: "创作", exact: true })).toHaveAttribute(
     "aria-expanded",
@@ -229,7 +229,8 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
 
   await page.getByRole("link", { name: "设置" }).click();
   await expect(page).toHaveURL(/\/settings\/models(?:\?|$)/);
-  await expect(page.getByRole("navigation", { name: "设置导航" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "设置导航" })).not.toBeVisible();
+  await page.getByRole("link", { name: "设置", exact: true }).click();
   await page.getByRole("link", { name: "账号", exact: true }).click();
   await expect(page).toHaveURL(/settings\/account/);
   await expect(page.getByRole("link", { name: "设置", exact: true })).toHaveAttribute(
@@ -341,7 +342,7 @@ test("mobile Review keeps the keyframe and normalized annotation surface inside 
     .click();
 
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/review`);
-  await expect(page.getByRole("heading", { level: 1, name: "镜头审片与批注" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "审片确认" })).toBeVisible();
   const canvas = page.getByTestId("media-review-canvas");
   const image = page.getByRole("img", { name: "review target" });
   const region = page.getByTestId("review-region");
@@ -491,7 +492,7 @@ test("new project keeps essentials visible and retains collapsed options without
   await expect(page.getByRole("region", { name: "新建项目" })).toBeVisible();
   await expect(page.getByLabel("项目名", { exact: true })).toBeFocused();
   await expect(page.getByLabel("新项目工作空间")).toHaveValue(WORKSPACE_ID);
-  await expect(page.getByLabel("创作起点", { exact: true })).not.toBeVisible();
+  await expect(page.getByLabel("创作起点", { exact: true })).toBeVisible();
   await page.getByLabel("项目名", { exact: true }).fill("未提交的作品");
   const options = page.getByRole("region", { name: "新建项目" }).locator("summary");
   await options.focus();
@@ -500,7 +501,8 @@ test("new project keeps essentials visible and retains collapsed options without
   await page.getByLabel("创作模板", { exact: true }).selectOption("single_monologue_v1");
   await page.getByLabel("导演参与度", { exact: true }).selectOption("MANUAL");
   await options.click();
-  await expect(options).toContainText("从模板开始 · 手动控制");
+  await expect(page.getByLabel("创作模板", {exact: true})).toHaveValue("single_monologue_v1");
+  await expect(page.getByLabel("导演参与度", {exact: true})).toHaveValue("MANUAL");
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await expect(page.getByRole("region", { name: "新建项目" })).not.toBeVisible();
   await page.getByRole("button", { name: "新建项目", exact: true }).click();
@@ -535,15 +537,14 @@ test("model settings disclose instance configuration without discarding connecti
     route.fulfill({ json: [] }),
   );
   await page.goto("/settings/models");
-  await expect(page.getByRole("region", { name: "图像与视频连接" })).toBeVisible();
+  await expect(page.getByRole("tabpanel", { name: "连接", exact: true })).toBeVisible();
   await expect(page.getByTestId("text-gateway-settings")).not.toBeVisible();
   await expect(page.getByTestId("workspace-model-profile-settings")).not.toBeVisible();
   await page.getByLabel("供应商服务地址").fill("https://example.invalid/unsaved");
-  const disclosure = page.getByTestId("text-service-disclosure").locator(":scope > summary");
-  await disclosure.click();
+  await page.getByRole("tab", { name: "高级", exact: true }).click();
   await expect(page.getByTestId("text-gateway-settings")).toBeVisible();
   await expect(page.getByTestId("text-gateway-settings")).toContainText("作用于整个实例");
-  await disclosure.click();
+  await page.getByRole("tab", { name: "连接", exact: true }).click();
   await expect(page.getByTestId("text-gateway-settings")).not.toBeVisible();
   await expect(page.getByLabel("设置工作空间")).toHaveValue(WORKSPACE_ID);
   await expect(page.getByLabel("供应商服务地址")).toHaveValue("https://example.invalid/unsaved");

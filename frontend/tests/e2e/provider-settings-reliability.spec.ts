@@ -146,7 +146,7 @@ test("supplier configuration stays read-only, distinguishes partial/failed evide
   await expect(page.getByLabel("供应商服务地址")).toHaveValue("");
   await expect(page.getByRole("button", { name: "保存连接地址" })).toBeDisabled();
   await page.getByRole("button", { name: "放弃连接草稿" }).click();
-  await page.getByTestId("project-models-disclosure").locator("summary").click();
+  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
   await page.getByRole("link", { name: "配置项目模型", exact: true }).click();
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(origin);

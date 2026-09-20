@@ -11,7 +11,6 @@ const TEMPLATES = [
   { key: "dual_character_conflict_v1", name: "双人对白反转" },
   { key: "single_monologue_v1", name: "单人情绪独白" },
 ] as const;
-const AUTONOMY_LABELS = { AUTO: "导演自动", ASSIST: "导演辅助", MANUAL: "手动控制" };
 
 type Props = {
   open: boolean;
@@ -77,7 +76,7 @@ export function CreateProjectForm({
   return (
     <section className="panel df-create-panel" aria-label="新建项目" hidden={!open}>
       <header className="panel-header">
-        <h2>新建项目</h2>
+        <h2>项目信息</h2>
       </header>
       <form className="df-project-create-form" onSubmit={submit}>
         <fieldset disabled={create.isPending || !hasWorkspace}>
@@ -104,48 +103,6 @@ export function CreateProjectForm({
               </Select>
             </Field>
           </div>
-          <div className="df-project-create-basics">
-            <Field>
-              创作类型
-              <Select
-                aria-label="创作类型"
-                value={genre}
-                onChange={(event) => setGenre(event.target.value)}
-                disabled={options.isPending || options.isError}
-              >
-                <option value="">{startType === "TEMPLATE" ? "沿用模板建议" : "暂不指定"}</option>
-                {(options.data?.genres ?? []).map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.display_name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field>
-              画面风格
-              <Select
-                aria-label="画面风格"
-                value={style}
-                onChange={(event) => setStyle(event.target.value)}
-                disabled={options.isPending || options.isError}
-              >
-                <option value="">{startType === "TEMPLATE" ? "沿用模板建议" : "暂不指定"}</option>
-                {(options.data?.styles ?? []).map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.display_name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          {options.isError && (
-            <p role="alert">
-              无法读取类型与风格。
-              <Button type="button" onClick={() => void options.refetch()}>
-                重试
-              </Button>
-            </p>
-          )}
           <Field>
             保存到工作空间
             <Select
@@ -160,10 +117,7 @@ export function CreateProjectForm({
               ))}
             </Select>
           </Field>
-          <Disclosure
-            title="创作选项"
-            description={`${startType === "TEMPLATE" ? "从模板开始" : "自由创建"} · ${AUTONOMY_LABELS[autonomy]}`}
-          >
+          <section aria-label="创作选项">
             <div className="df-project-create-options">
               <Field>
                 创作起点
@@ -210,6 +164,50 @@ export function CreateProjectForm({
                 导演参与度不替代你的确认；正式应用、付费执行与导出仍需明确授权。
               </p>
             </div>
+          </section>
+          <Disclosure title="风格与类型（可选）">
+            <div className="df-project-create-basics">
+              <Field>
+                创作类型
+                <Select
+                  aria-label="创作类型"
+                  value={genre}
+                  onChange={(event) => setGenre(event.target.value)}
+                  disabled={options.isPending || options.isError}
+                >
+                  <option value="">{startType === "TEMPLATE" ? "沿用模板建议" : "暂不指定"}</option>
+                  {(options.data?.genres ?? []).map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.display_name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field>
+                画面风格
+                <Select
+                  aria-label="画面风格"
+                  value={style}
+                  onChange={(event) => setStyle(event.target.value)}
+                  disabled={options.isPending || options.isError}
+                >
+                  <option value="">{startType === "TEMPLATE" ? "沿用模板建议" : "暂不指定"}</option>
+                  {(options.data?.styles ?? []).map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.display_name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            {options.isError && (
+              <p role="alert">
+                无法读取类型与风格。
+                <Button type="button" onClick={() => void options.refetch()}>
+                  重试
+                </Button>
+              </p>
+            )}
           </Disclosure>
         </fieldset>
         {!hasWorkspace && (

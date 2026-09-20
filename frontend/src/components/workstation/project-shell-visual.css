@@ -1097,3 +1097,65 @@
     padding-inline: var(--df-space-4);
   }
 }
+
+/* Domain workspace density follows the same web shell geometry. */
+.qc-project-canvas .df-page-header {
+  margin-bottom: var(--df-space-4);
+}
+.qc-project-canvas h2 {
+  font-size: var(--df-section-title-size);
+}
+.qc-project-canvas h3 {
+  font-size: var(--df-text-lg);
+}
+.qc-project-canvas [data-testid="review-workspace"] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--df-space-4);
+  align-items: start;
+}
+.qc-project-canvas [data-testid="review-workspace"] > * {
+  min-width: 0;
+}
+.qc-project-canvas [data-testid="review-workspace"] > .df-page-header,
+.qc-project-canvas [data-testid="review-workspace"] > [data-testid="review-annotation-list"],
+.qc-project-canvas [data-testid="review-workspace"] > [role="alert"] {
+  grid-column: 1 / -1;
+}
+.review-media,
+.review-decisions,
+.review-repair {
+  padding: var(--df-space-4);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-container);
+}
+@media (max-width: 1099px) {
+  .qc-project-canvas [data-testid="review-workspace"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Operation sheets remain a single editing column at every shell breakpoint. */
+.qc-project-shell .qc-director-context-sheet {
+  width: min(var(--df-operation-sheet-width), 100%);
+}
+.qc-project-shell .qc-director-context-sheet .qc-director-sidebar-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.qc-project-shell .qc-director-context-sheet .qc-director-tab-panel {
+  flex: 1;
+}
+.qc-director-context-sheet .qc-shot-design-panel textarea {
+  min-height: var(--df-textarea-min-height);
+  resize: vertical;
+}
+
+.experiment-row .qc-shot-candidate-card > img,
+.experiment-row .qc-shot-candidate-card > video {
+  width: 100%;
+  height: var(--df-storyboard-thumb-height);
+  object-fit: contain;
+  background: var(--df-surface-screen);
+}

@@ -337,3 +337,85 @@ describe("ExperimentBranchPanel", () => {
     });
   });
 });
+
+it("creates separate candidate drafts without submitting paid generation", async () => {
+  const create = vi
+    .fn<
+      (input: {
+        name: string;
+        selected_model: string;
+        targetNodeKey: "keyframe" | "video";
+      }) => Promise<void>
+    >()
+    .mockResolvedValue(undefined);
+  const start = vi.fn(async () => {});
+  renderPanel({
+    modelCandidates: { keyframe: [candidate({})] },
+    onCreateExperiment: create,
+    onStartExperiment: start,
+  });
+  fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "多图比较" } });
+  fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: MODELS[0].id } });
+  fireEvent.change(screen.getByLabelText("候选任务数量"), { target: { value: "3" } });
+  fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+  expect(create.mock.calls.map((args) => args[0].name)).toEqual([
+    "多图比较 · 1/3",
+    "多图比较 · 2/3",
+    "多图比较 · 3/3",
+  ]);
+  expect(start).not.toHaveBeenCalled();
+  expect(await screen.findByTestId("experiment-message")).toHaveTextContent("本次创建不调用模型");
+});
+it("requires a visible selection when an experiment has multiple artifacts", async () => {
+  const decide = vi.fn(async () => {});
+  render(
+    <ExperimentBranchPanel
+      projectId="project-1"
+      experiments={[experiment({ candidate_artifact_ids: ["first", "best"] })]}
+      onDecideExperiment={decide}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "采纳候选" })).toBeDisabled();
+  expect(screen.getAllByRole("img")).toHaveLength(2);
+  fireEvent.click(screen.getByRole("radio", { name: "候选 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "采纳候选" }));
+  await waitFor(() =>
+    expect(decide).toHaveBeenCalledWith(
+      "exp-1",
+      expect.objectContaining({ candidate_artifact_id: "best" }),
+    ),
+  );
+});
+
+it("stops a partially created group and preserves the same identities for recovery", async () => {
+  const create = vi
+    .fn<
+      (input: {
+        name: string;
+        selected_model: string;
+        targetNodeKey: "keyframe" | "video";
+      }) => Promise<void>
+    >()
+    .mockResolvedValue(undefined)
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(new Error("network"));
+  const start = vi.fn(async () => {});
+  renderPanel({
+    modelCandidates: { keyframe: [candidate({})] },
+    onCreateExperiment: create,
+    onStartExperiment: start,
+  });
+  fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "稳定候选" } });
+  fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: MODELS[0].id } });
+  fireEvent.change(screen.getByLabelText("候选任务数量"), { target: { value: "3" } });
+  fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
+  await waitFor(() => expect(screen.getByTestId("experiment-message")).toHaveClass("status-bad"));
+  expect(create).toHaveBeenCalledTimes(2);
+  expect(screen.getByLabelText("实验名称")).toHaveValue("稳定候选");
+  fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(5));
+  expect(create.mock.calls[0][0]).toEqual(create.mock.calls[2][0]);
+  expect(create.mock.calls[1][0]).toEqual(create.mock.calls[3][0]);
+  expect(start).not.toHaveBeenCalled();
+});

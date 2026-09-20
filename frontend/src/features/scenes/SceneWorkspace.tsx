@@ -27,6 +27,7 @@ type SceneWorkspaceProps = {
   sceneId: string;
   initialShotId?: string;
   openDirector?: boolean;
+  openPrompts?: boolean;
   onOpenEditing?: () => void;
   onDirtyStateChange?: (dirty: boolean) => void;
 };
@@ -68,6 +69,7 @@ export function SceneWorkspace({
   sceneId,
   initialShotId,
   openDirector = false,
+  openPrompts = false,
   onOpenEditing,
   onDirtyStateChange,
 }: SceneWorkspaceProps) {
@@ -76,7 +78,7 @@ export function SceneWorkspace({
   const [referenceDrafts, setReferenceDrafts] = useState<Record<string, ShotReferenceContext>>({});
   // Context Dock / sheet / tray / strip / details are pure UI state.
   const [activeTool, setActiveTool] = useState<ContextTool | null>(
-    openDirector ? "director" : null,
+    openPrompts ? "prompts" : openDirector ? "director" : null,
   );
   const [trayExpanded, setTrayExpanded] = useState(false);
   const [stripExpanded, setStripExpanded] = useState(false);
@@ -105,7 +107,7 @@ export function SceneWorkspace({
     setSelectedShotId(initialShotId ?? null);
     setPreviewCandidate(null);
     setReferenceDrafts({});
-    setActiveTool(openDirector ? "director" : null);
+    setActiveTool(openPrompts ? "prompts" : openDirector ? "director" : null);
     setTrayExpanded(false);
     setStripExpanded(false);
     setDetailsOpen(false);
@@ -114,7 +116,7 @@ export function SceneWorkspace({
     setDesignDrafts({});
     setSuggestionDraft(null);
     setPendingShotId(null);
-  }, [projectId, sceneId, initialShotId, openDirector]);
+  }, [projectId, sceneId, initialShotId, openDirector, openPrompts]);
 
   useEffect(() => {
     onDirtyStateChange?.(designDirty);
@@ -404,6 +406,10 @@ export function SceneWorkspace({
             requestedTool={activeTool}
             intentSeed={intentSeed?.shotId === selectedShotKey ? intentSeed : null}
             onClose={() => setActiveTool(null)}
+            onOpenDetails={() => {
+              setActiveTool(null);
+              setDetailsOpen(true);
+            }}
             designDirty={designDirty}
             onDesignDirtyChange={updateDesignDirty}
             designDraft={designDraft}

@@ -201,3 +201,21 @@ describe("ShotCandidateTray", () => {
     );
   });
 });
+
+it("shows every completed candidate, including the fifth and sixth", () => {
+  const client = new QueryClient();
+  render(
+    <QueryClientProvider client={client}>
+      <ShotCandidateTray
+        projectId={SHOT.project_id}
+        shot={SHOT}
+        candidates={Array.from({ length: 6 }, (_, i) => ({
+          ...CANDIDATES[0],
+          artifact_id: "candidate-" + i,
+        }))}
+      />
+    </QueryClientProvider>,
+  );
+  for (let i = 0; i < 6; i++)
+    expect(screen.getByTestId("shot-candidate-candidate-" + i)).toBeInTheDocument();
+});

@@ -112,7 +112,8 @@
   --df-focus-width: 2px;
   --df-focus-offset: 2px;
   --df-textarea-min-height: 8rem;
-  --df-page-title-size: var(--df-text-3xl);
+  --df-operation-sheet-width: 30rem;
+  --df-page-title-size: var(--df-text-2xl);
   --df-page-description-width: 44rem;
 
   /* ---- Radius ----
@@ -186,8 +187,16 @@
   --df-icon-display-size: 3rem;
 
   /* ---- Layout ---- */
+  --df-section-title-size: 18px;
+  --df-project-card-icon-size: 48px;
+  --df-project-card-min: 18rem;
+  --df-content-page-max: 1240px;
+  --df-form-page-max: 720px;
   --df-global-rail-width: 56px;
   --df-project-nav-width: 220px;
+  --df-storyboard-card-min: 15rem;
+  --df-storyboard-thumb-height: 10rem;
+  --df-storyboard-preview-height: 40rem;
   --df-edit-preview-height: 22rem;
   --df-scene-compact-media-height: 32svh;
   --df-stage-guide-width: 52rem;

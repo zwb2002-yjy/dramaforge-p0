@@ -24,8 +24,12 @@ test("every creative workspace explains its outcome and next destination without
     await page.goto(`/projects/${PROJECT_ID}/${view}`);
     const guide = page.getByTestId("project-stage-guide");
     await expect(guide).toBeVisible();
-    await expect(guide).toContainText("本步产物");
-    await expect(guide.getByRole("link")).toHaveCount(1);
+    await expect(guide.getByRole("navigation", { name: "创作流程" }).getByRole("link")).toHaveCount(
+      5,
+    );
+    await expect(guide.getByText(/本步产物/)).not.toBeVisible();
+    await guide.getByText("操作指引", { exact: true }).click();
+    await expect(guide.getByText(/本步产物/)).toBeVisible();
   }
   expect(state.editing.requests.filter((request) => request.method === "POST")).toEqual([]);
 });

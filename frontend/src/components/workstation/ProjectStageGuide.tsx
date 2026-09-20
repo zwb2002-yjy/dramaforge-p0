@@ -5,6 +5,7 @@ import "./project-stage-guide.css";
 
 const guides = {
   script: {
+    path: "/projects/$projectId/script",
     step: "01",
     title: "故事剧本",
     outcome: "已保存的故事、分场与镜头安排",
@@ -17,6 +18,7 @@ const guides = {
     ],
   },
   assets: {
+    path: "/projects/$projectId/assets",
     step: "02",
     title: "角色素材",
     outcome: "可复用的角色、场景与道具参考",
@@ -29,6 +31,7 @@ const guides = {
     ],
   },
   scenes: {
+    path: "/projects/$projectId/scenes",
     step: "03",
     title: "分镜制作",
     outcome: "每个镜头的画面与视频候选",
@@ -41,6 +44,7 @@ const guides = {
     ],
   },
   review: {
+    path: "/projects/$projectId/review",
     step: "04",
     title: "审片确认",
     outcome: "完成检查、明确采用的镜头版本",
@@ -53,6 +57,7 @@ const guides = {
     ],
   },
   edit: {
+    path: "/projects/$projectId/edit",
     step: "05",
     title: "剪辑成片",
     outcome: "可下载的 MP4 成片与 SRT 字幕",
@@ -73,35 +78,43 @@ export function ProjectStageGuide({
   projectId: string;
   view: ProjectWorkspaceView;
 }) {
-  if (view === "production" || view === "overview") return null;
-  const guide = guides[view];
+  const guide = view === "production" || view === "overview" ? null : guides[view];
   return (
     <aside
       className="project-stage-guide"
       aria-label="本步创作指引"
       data-testid="project-stage-guide"
     >
-      <span className="project-stage-guide-index" aria-hidden="true">
-        {guide.step}
-      </span>
-      <div className="project-stage-guide-copy">
-        <strong>{guide.title}</strong>
-        <p>本步产物：{guide.outcome}</p>
-      </div>
-      <div className="project-stage-guide-actions">
-        <Disclosure title="操作指引">
-          <p>本步产物：{guide.outcome}</p>
-          <ol>
-            {guide.instructions.map((instruction) => (
-              <li key={instruction}>{instruction}</li>
-            ))}
-          </ol>
-        </Disclosure>
-        <Link to={guide.to} params={{ projectId }}>
-          {guide.next}
-          <span aria-hidden="true"> →</span>
-        </Link>
-      </div>
+      <nav className="project-stage-steps" aria-label="创作流程">
+        {Object.entries(guides).map(([key, item]) => (
+          <Link
+            key={key}
+            to={item.path}
+            params={{ projectId }}
+            aria-current={view === key ? "page" : undefined}
+            aria-label={`${item.step} ${item.title}`}
+          >
+            <span aria-hidden="true">{item.step}</span>
+            {item.title}
+          </Link>
+        ))}
+      </nav>
+      {guide && (
+        <div className="project-stage-guide-actions">
+          <Disclosure title="操作指引">
+            <p>本步产物：{guide.outcome}</p>
+            <ol>
+              {guide.instructions.map((instruction) => (
+                <li key={instruction}>{instruction}</li>
+              ))}
+            </ol>
+          </Disclosure>
+          <Link className="project-stage-next" to={guide.to} params={{ projectId }}>
+            {guide.next}
+            <span aria-hidden="true"> →</span>
+          </Link>
+        </div>
+      )}
     </aside>
   );
 }

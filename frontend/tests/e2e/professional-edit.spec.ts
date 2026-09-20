@@ -34,15 +34,15 @@ test("professional edit: formal manifest → persisted session → proposal-only
   // The production monitor consumes the current formal OpenCut v2 contract.
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("production-monitor")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "剪辑交接" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "剪辑成片" })).toHaveCount(0);
 
   // No session yet: the edit page is a read-only formal manifest preview.
   await page.goto(`/projects/${PROJECT_ID}/edit`);
   await expect(page.getByTestId("editing-workspace")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "剪辑交接" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "剪辑成片" })).toBeVisible();
   await expect(page.getByTestId("editing-read-only")).toBeVisible();
   await expect(page.getByRole("heading", { name: "正式时间线" })).toBeVisible();
-  await expect(page.getByText("只读预览已完成的镜头，继续剪辑或新建会话。")).toBeVisible();
+  await expect(page.getByText("选择已有剪辑，或用正式镜头创建时间线。")).toBeVisible();
   const formalPreviewClip = page.getByTestId("editing-clip").first();
   await expect(formalPreviewClip).toContainText("正式视频 · 0–5 秒 · 片段 1 · 镜头 #1");
   await expect(formalPreviewClip).toContainText("正式素材已交付");
