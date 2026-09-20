@@ -541,3 +541,57 @@ def test_renderer_prevents_model_text_from_injecting_story_headings() -> None:
     assert "\n## Scene 99" not in rendered
     assert "\n### Shot 99" not in rendered
     assert "Station ／ fake-time / night" in rendered
+
+
+@pytest.mark.asyncio
+async def test_generate_route_rebinds_transaction_scope_before_reading_items(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api.v1 import story as route
+
+    project, user = await _seed(session)
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(_candidate())}}]}
+        )
+
+    service = StoryGenerationService(
+        session,
+        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+    )
+    monkeypatch.setattr(route, "StoryGenerationService", lambda _session: service)
+
+    async def get_project(_self, **_kwargs):
+        return project
+
+    monkeypatch.setattr(route.ProjectService, "get_project_for_owner", get_project)
+    scope = {}
+
+    async def bind(_session, **kwargs):
+        scope.update(kwargs)
+
+    monkeypatch.setattr(route, "set_rls_context", bind)
+    original_read = route._proposal_read
+
+    async def scoped_read(_session, **kwargs):
+        # generate_proposal commits. PostgreSQL SET LOCAL has ended here,
+        # so the response query must explicitly restore the Owner scope.
+        assert scope == {
+            "user_id": user.id,
+            "workspace_id": project.workspace_id,
+            "project_id": project.id,
+        }
+        return await original_read(_session, **kwargs)
+
+    monkeypatch.setattr(route, "_proposal_read", scoped_read)
+    result = await route.generate_project_story_proposal(
+        project_id=project.id,
+        body=_request(key="story-route:scope"),
+        user=user,
+        session=session,
+        _csrf=None,
+    )
+    assert len(result.proposal.operations) >= 4
+    assert (await _counts(session, project.id))["shots"] == 0

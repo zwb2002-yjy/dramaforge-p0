@@ -2026,13 +2026,13 @@ code {
   color: var(--df-warning-text);
   font-size: 0.75rem;
 }
-.editing-session-editor ol {
+.editing-session-editor > ol {
   display: grid;
   gap: 0.5rem;
   margin: 0;
   padding-left: 1.3rem;
 }
-.editing-session-editor li {
+.editing-session-editor > ol > li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content auto;
   gap: 0.55rem;
@@ -2042,16 +2042,16 @@ code {
   border-radius: var(--df-radius-control);
   background: var(--df-surface-2);
 }
-.editing-session-editor li > div:first-child {
+.editing-session-editor > ol > li > div:first-child {
   display: grid;
   gap: 0.2rem;
   min-width: 0;
 }
-.editing-session-editor li small {
+.editing-session-editor > ol > li small {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
-.editing-session-editor li label {
+.editing-session-editor > ol > li label {
   display: grid;
   gap: 0.2rem;
   color: var(--muted);
@@ -2079,7 +2079,7 @@ code {
   color: var(--df-danger-text);
 }
 @media (max-width: 720px) {
-  .editing-session-editor li {
+  .editing-session-editor > ol > li {
     grid-template-columns: 1fr;
   }
   .editing-session-editor input {

@@ -244,7 +244,9 @@ describe("ShotDesignPanel canvas write gate", () => {
       image_prompt: "local draft prompt",
     });
     await waitFor(() =>
-      expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已保存画布版本与提示词"),
+      expect(screen.getByTestId("shot-design-message")).toHaveTextContent(
+        "已保存画布版本与设计设置",
+      ),
     );
   });
 

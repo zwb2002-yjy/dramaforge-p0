@@ -1,0 +1,29 @@
+.editing-source-preview {
+  display: grid;
+  gap: var(--df-space-3);
+  margin-block: var(--df-space-5);
+}
+.editing-source-preview h2,
+.editing-source-preview p {
+  margin: 0;
+}
+.editing-source-preview p {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-sm);
+}
+.editing-source-preview video {
+  width: 100%;
+  max-height: var(--df-edit-preview-height);
+  background: var(--df-surface-screen);
+  border-radius: var(--df-radius-container);
+  object-fit: contain;
+}
+.editing-source-preview nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+}
+.editing-source-preview [aria-pressed="true"] {
+  color: var(--df-verdigris);
+  border-color: var(--df-verdigris);
+}

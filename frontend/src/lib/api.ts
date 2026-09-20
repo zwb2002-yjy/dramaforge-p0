@@ -60,8 +60,13 @@ async function parseError(response: Response): Promise<ApiError> {
   return new ApiError(detail, response.status, code, details);
 }
 
-export async function apiGet<T>(path: string, workspaceIdOverride?: string | null): Promise<T> {
+export async function apiGet<T>(
+  path: string,
+  workspaceIdOverride?: string | null,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
+    signal,
     credentials: "include",
     headers: { Accept: "application/json", ...workspaceHeaders(workspaceIdOverride) },
   });
@@ -73,8 +78,9 @@ export async function apiGet<T>(path: string, workspaceIdOverride?: string | nul
 export async function apiGetList<T>(
   path: string,
   workspaceIdOverride?: string | null,
+  signal?: AbortSignal,
 ): Promise<T[]> {
-  const body = await apiGet<unknown>(path, workspaceIdOverride);
+  const body = await apiGet<unknown>(path, workspaceIdOverride, signal);
   if (Array.isArray(body)) return body as T[];
 
   const actual = body === null ? "null" : Array.isArray(body) ? "array" : typeof body;

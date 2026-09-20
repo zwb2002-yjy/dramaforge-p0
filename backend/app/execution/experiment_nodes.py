@@ -27,6 +27,7 @@ from app.execution.shot_pipeline import (
     SHOT_PIPELINE_TEMPLATE_KEY,
     shot_pipeline_definition,
 )
+from app.providers.voice_config import freeze_voice_execution
 from app.shared.errors import NotFoundError, ValidationAppError
 
 DONE_STATUSES: frozenset[str] = frozenset({"completed", "cached", "completed_after_cancel"})
@@ -166,16 +167,12 @@ async def _freeze_execution_model_resolution(
     except Exception as exc:  # noqa: BLE001 - audit path, never block dispatch
         return {
             "model_binding_id": None,
-            "model_resolution_unavailable_reason": (
-                f"{type(exc).__name__}: {str(exc)[:120]}"
-            ),
+            "model_resolution_unavailable_reason": (f"{type(exc).__name__}: {str(exc)[:120]}"),
         }
     if resolution.status != "RESOLVED" or resolution.provider_model_binding_id is None:
         return {
             "model_binding_id": None,
-            "model_resolution_unavailable_reason": (
-                resolution.reason or resolution.status
-            ),
+            "model_resolution_unavailable_reason": (resolution.reason or resolution.status),
         }
     return {
         "model_binding_id": str(resolution.provider_model_binding_id),
@@ -192,6 +189,7 @@ async def queue_branch_nodes(
     node_keys: list[str] | None = None,
     force: bool = False,
     include_missing_dependencies: bool = False,
+    voice_silent: bool = False,
     experiment_id: UUID | None = None,
     model_binding_id: UUID | None = None,
     model_binding_node_key: str | None = None,
@@ -267,7 +265,8 @@ async def queue_branch_nodes(
     visual = str(
         shot_plan.get("visual_description") or shot.visual_description or f"Shot {shot.shot_number}"
     ).strip()
-    dialogue = str(shot_plan.get("dialogue") or shot.dialogue or "").strip()
+    # The saved Shot dialogue is authoritative, including an explicitly cleared value.
+    dialogue = str(shot.dialogue or "").strip()
     keyframe_prompt = str(
         shot_plan.get("keyframe_prompt") or shot_plan.get("prompt") or visual
     ).strip()
@@ -345,7 +344,7 @@ async def queue_branch_nodes(
             else f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}"
         )
         if key == "voice":
-            prompt = dialogue or "（静默段落）"
+            prompt = dialogue
         lead_identity_value = shot_plan.get("lead_identity_required")
         lead_identity_required = lead_identity_value is True
         # A project with a registered lead canonical is single-lead in P0. Script
@@ -390,7 +389,11 @@ async def queue_branch_nodes(
                 project=project,
                 node_key=key,
             )
-        voice_prompt = (dialogue or "（静默段落）") if key == "voice" else prompt
+        if key == "voice":
+            execution_freeze["voice_execution"] = freeze_voice_execution(
+                dict(shot.director_state or {}), silent=voice_silent or not dialogue
+            ).model_dump(mode="json")
+        voice_prompt = ("" if voice_silent else dialogue) if key == "voice" else prompt
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),
             "node_key": key,

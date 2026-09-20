@@ -70,11 +70,16 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
   await expect(page.getByText("正在恢复上次创作位置…")).toHaveCount(0);
 
   const creationNavigation = page.getByRole("navigation", { name: "创作导航" });
-  await expect(creationNavigation.getByRole("link")).toHaveCount(5);
-  await expect(creationNavigation).toContainText(/剧本.*资产.*场景.*制作.*剪辑/s);
-  await expect(creationNavigation).not.toContainText("审片");
+  await expect(creationNavigation.getByRole("link")).toHaveCount(6);
+  await expect(creationNavigation).toContainText(
+    /作品总览.*故事剧本.*角色素材.*分镜制作.*审片确认.*剪辑成片/s,
+  );
+  await expect(creationNavigation).toContainText("审片确认");
   await expect(creationNavigation).not.toContainText("专业");
-  await expect(page.getByRole("link", { name: "制作" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("link", { name: "作品总览" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
   await expect(page.getByText("已连接项目事实")).toHaveCount(0);
   await expect
@@ -147,9 +152,9 @@ test("project reentry preserves the scene and exposes production and editing at 
   await expect(page.getByRole("heading", { name: "选择项目开始创作" })).toBeVisible();
   await page.getByRole("list", { name: "项目列表" }).getByRole("button").first().click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
-  await page.getByRole("link", { name: "制作", exact: true }).click();
+  await page.getByRole("link", { name: "作品总览", exact: true }).click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/production`);
-  await page.getByRole("link", { name: "剪辑", exact: true }).click();
+  await page.getByRole("link", { name: "剪辑成片", exact: true }).click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/edit`);
   await page.getByRole("link", { name: "创作", exact: true }).click();
   await page.getByRole("link", { name: "创作", exact: true }).click();
@@ -199,7 +204,7 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 
-  await page.getByRole("link", { name: "剧本" }).click();
+  await page.getByRole("link", { name: "故事剧本" }).click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/script`);
   await expect(page.getByRole("link", { name: "创作", exact: true })).toHaveAttribute(
     "aria-expanded",
@@ -244,10 +249,10 @@ test("mobile Production prioritizes the cross-scene overview and progressively d
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/projects/${PROJECT_ID}/production`);
 
-  await expect(page.getByRole("heading", { level: 1, name: "制作进度" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "作品总览" })).toBeVisible();
   const monitor = page.getByTestId("production-monitor");
   await expect(monitor).toBeVisible();
-  await expect(page.getByRole("tab", { name: "进度", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("tab", { name: "作品进度", exact: true })).toHaveAttribute(
     "aria-selected",
     "true",
   );
@@ -327,8 +332,12 @@ test("mobile Review keeps the keyframe and normalized annotation surface inside 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await page
-    .getByRole("navigation", { name: "制作视图" })
-    .getByRole("link", { name: "待审内容", exact: true })
+    .getByRole("navigation", { name: "一级导航" })
+    .getByRole("link", { name: "创作", exact: true })
+    .click();
+  await page
+    .getByRole("navigation", { name: "创作导航" })
+    .getByRole("link", { name: "审片确认", exact: true })
     .click();
 
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/review`);
@@ -449,12 +458,12 @@ for (const width of [910, 1440]) {
     await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
     await expect(page.getByTestId("professional-workbench")).toBeVisible();
     await page.getByLabel("实验名称", { exact: true }).fill("还没有提交的版本尝试");
-    await page.getByRole("tab", { name: "进度", exact: true }).click();
+    await page.getByRole("tab", { name: "作品进度", exact: true }).click();
     await page.setViewportSize({ width: 700, height: 900 });
     await page.setViewportSize({ width, height: 900 });
     await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
     await expect(page.getByLabel("实验名称", { exact: true })).toHaveValue("还没有提交的版本尝试");
-    await page.getByRole("tab", { name: "进度", exact: true }).click();
+    await page.getByRole("tab", { name: "作品进度", exact: true }).click();
     await page.getByRole("button", { name: "仅看风险" }).click();
     await expect(page.getByRole("button", { name: "仅看风险" })).toHaveAttribute(
       "aria-pressed",

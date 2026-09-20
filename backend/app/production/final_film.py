@@ -26,10 +26,12 @@ from app.config import get_settings
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
 from app.execution.artifact_lineage import get_or_create_artifact
+from app.execution.branches import branch_priority
 from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.models import GraphVersion, ProductionGraph
 from app.production.service import GraphService
+from app.providers.voice_config import freeze_voice_execution
 from app.runtime.scheduler import NodeRunScheduler
 from app.shared.errors import NotFoundError, ProviderTaskPendingError, ValidationAppError
 from app.storage.minio_store import ObjectStore
@@ -65,6 +67,7 @@ class FinalFilmPrepareRead(BaseModel):
     timeline_version: int
     shot_ids: list[UUID]
     node_run_ids: list[UUID]
+    preparation_fingerprint: str = Field(min_length=64, max_length=64)
     status: str = "queued"
 
 
@@ -381,6 +384,32 @@ async def _formal_shots_for_refs(
     return shots
 
 
+async def _current_formal_tail_runs(
+    session: AsyncSession, *, project_id: UUID, shot_id: UUID
+) -> dict[str, NodeRun]:
+    rows = (
+        (
+            await session.execute(
+                select(NodeRun, GraphNode.node_key)
+                .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                .where(
+                    NodeRun.project_id == project_id,
+                    NodeRun.input_snapshot["shot_id"].as_string() == str(shot_id),
+                    GraphNode.node_key.in_(_TAIL_NODE_KEYS),
+                )
+                .order_by(NodeRun.created_at.desc(), NodeRun.attempt_no.desc(), NodeRun.id.desc())
+            )
+        )
+        .tuples()
+        .all()
+    )
+    selected: dict[str, NodeRun] = {}
+    for run, key in rows:
+        if branch_priority(run.input_snapshot, {"execution_branch": "formal"}) is not None:
+            selected.setdefault(key, run)
+    return selected
+
+
 async def prepare_formal_tail(
     session: AsyncSession,
     *,
@@ -402,8 +431,25 @@ async def prepare_formal_tail(
         )
     shots = await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
     all_run_ids: list[UUID] = []
+    prepared_sources: list[dict[str, object]] = []
     for shot in shots:
-        refresh_tail = False
+        # Muted clips and explicit audio overrides must not send dialogue to any TTS.
+        speech_required = any(
+            ref.shot_id == shot.id and not bool(ref.raw_clip.get("muted")) and not ref.audio_id
+            for ref in refs
+        )
+        desired_voice = freeze_voice_execution(
+            dict(shot.director_state or {}), silent=not speech_required or not shot.dialogue.strip()
+        ).model_dump(mode="json")
+        prior_tail = await _current_formal_tail_runs(
+            session, project_id=project_id, shot_id=shot.id
+        )
+        prior_voice = prior_tail.get("voice")
+        prior_snapshot = (prior_voice.input_snapshot or {}) if prior_voice else {}
+        refresh_tail = (
+            prior_snapshot.get("voice_execution") != desired_voice
+            or prior_snapshot.get("dialogue") != shot.dialogue.strip()
+        )
         if shot.formal_composite_artifact_id is not None:
             composite_artifact = await session.get(Artifact, shot.formal_composite_artifact_id)
             composite_run = (
@@ -416,7 +462,7 @@ async def prepare_formal_tail(
                 (composite_run.input_snapshot or {}).get("media_inputs") if composite_run else None
             )
             video_input = media_inputs.get("video") if isinstance(media_inputs, dict) else None
-            refresh_tail = not (
+            refresh_tail = refresh_tail or not (
                 isinstance(video_input, dict)
                 and str(video_input.get("artifact_id")) == str(shot.formal_video_artifact_id)
             )
@@ -428,8 +474,20 @@ async def prepare_formal_tail(
             node_keys=list(_TAIL_NODE_KEYS),
             include_missing_dependencies=True,
             force=refresh_tail,
+            voice_silent=not speech_required,
         )
         all_run_ids.extend(run_ids)
+        current_tail = await _current_formal_tail_runs(
+            session, project_id=project_id, shot_id=shot.id
+        )
+        prepared_sources.append(
+            {
+                "shot_id": str(shot.id),
+                "formal_video": str(shot.formal_video_artifact_id),
+                "voice_execution": desired_voice,
+                "tail_runs": {key: str(run.id) for key, run in sorted(current_tail.items())},
+            }
+        )
     await session.commit()
     return FinalFilmPrepareRead(
         project_id=project_id,
@@ -437,6 +495,9 @@ async def prepare_formal_tail(
         timeline_version=edit_session.version,
         shot_ids=[ref.shot_id for ref in refs],
         node_run_ids=all_run_ids,
+        preparation_fingerprint=hashlib.sha256(
+            json.dumps(prepared_sources, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
         status="queued",
     )
 

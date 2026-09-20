@@ -1,4 +1,5 @@
 import { reviewTargetHref } from "../review/reviewTarget";
+import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -115,7 +116,12 @@ export function ShotCandidateTray({
     onError: (error) => {
       // Stale-version conflicts remain visible and fail closed.  We do not
       // mark a candidate formal or alter the local canvas on error.
-      setFeedback({ kind: "error", message: errorMessage(error) });
+      setFeedback({
+        kind: "error",
+        message: /has not been approved by a human review decision/.test(errorMessage(error))
+          ? "请先点击此候选的‘审查此候选’，记录人工通过，再返回设为正式版本。"
+          : errorMessage(error),
+      });
     },
   });
 
@@ -173,6 +179,11 @@ export function ShotCandidateTray({
         )}
       </header>
 
+      {parsedCandidates.length > 0 && (
+        <p className="muted">
+          使用顺序：预览候选 → 审查并通过 → 设为正式。只有正式视频可以用于成片。
+        </p>
+      )}
       {parsedCandidates.length === 0 ? (
         <p className="muted" data-testid="shot-candidate-empty">
           生产链完成后，候选媒体会出现在这里；实验分支不会混入正式候选。
@@ -226,7 +237,7 @@ export function ShotCandidateTray({
                   审查此候选
                 </a>
                 <div className="qc-shot-candidate-meta">
-                  <span>{candidate.status}</span>
+                  <span>{nodeRunStatusLabel(candidate.status)}</span>
                   {candidate.nodeRunId && <small>Run {candidate.nodeRunId.slice(0, 8)}</small>}
                   <code>{candidate.artifactId}</code>
                 </div>

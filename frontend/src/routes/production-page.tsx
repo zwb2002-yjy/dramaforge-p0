@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { Field, Select, Tab, Tabs, PageHeader } from "../components/ui";
 import { useState } from "react";
 
+import { fetchProductionSummary } from "../features/production/api";
+import { ProductionHistoryPanel } from "../features/production/ProductionHistoryPanel";
 import { ProductionMonitor } from "../features/production/ProductionMonitor";
 import { ExperimentBranchPanel } from "../features/production/ExperimentBranchPanel";
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
@@ -14,7 +15,6 @@ import {
   decideExperiment,
   fetchExperiments,
   fetchProjectShots,
-  fetchSnapshot,
   listModels,
   startExperiment,
 } from "../lib/api";
@@ -25,30 +25,30 @@ export function ProductionPage({ projectId }: { projectId: string }) {
   const [view, setView] = useState("progress");
   const [overrideScope, setOverrideScope] = useState<"scene" | "shot">("scene");
   const views = [
-    { id: "progress", label: "进度" },
+    { id: "progress", label: "作品进度" },
     { id: "workflow", label: "生成任务" },
     { id: "experiments", label: "版本尝试" },
-    { id: "advanced", label: "高级设置" },
+    { id: "advanced", label: "导演手法" },
   ];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
 
-  const snapshot = useQuery({
-    queryKey: queryKeys.production.snapshot(projectId),
-    queryFn: () => fetchSnapshot(projectId),
+  const summary = useQuery({
+    queryKey: queryKeys.production.summary(projectId),
+    queryFn: ({ signal }) => fetchProductionSummary(projectId, signal),
     enabled: projectId !== "demo",
-    refetchInterval: 4000,
+    refetchInterval: (query) => ((query.state.data?.running_runs ?? 0) > 0 ? 4000 : 30000),
   });
   const shots = useQuery({
     queryKey: queryKeys.shot.list(projectId),
     queryFn: () => fetchProjectShots(projectId),
     enabled: projectId !== "demo",
-    refetchInterval: 4000,
+    refetchInterval: 30000,
   });
   const scenes = useQuery({
     queryKey: queryKeys.scene.list(projectId),
     queryFn: () => fetchScenes(projectId),
     enabled: projectId !== "demo",
-    refetchInterval: 4000,
+    refetchInterval: 30000,
   });
 
   const revisionShotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
@@ -85,15 +85,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
 
   return (
     <div data-testid="production-mode">
-      <nav className="qc-local-tabs" aria-label="制作视图">
-        <Link to="/projects/$projectId/production" params={{ projectId }} aria-current="page">
-          生产概览
-        </Link>
-        <Link to="/projects/$projectId/review" params={{ projectId }}>
-          待审内容
-        </Link>
-      </nav>
-      <PageHeader title="制作进度" />
+      <PageHeader title="作品总览" description="查看作品现状，从下一步继续创作。" />
 
       <Tabs label="制作内容">
         {views.map((item) => (
@@ -119,19 +111,21 @@ export function ProductionPage({ projectId }: { projectId: string }) {
           projectId={projectId}
           scenes={Array.isArray(scenes.data) ? scenes.data : []}
           shots={shots.data ?? []}
-          snapshot={snapshot.data}
+          summary={summary.data}
           experimentCount={experiments.data?.length}
           scenesLoading={scenes.isPending}
           scenesError={scenes.isError}
           shotsLoading={shots.isPending}
           shotsError={shots.isError}
-          snapshotError={snapshot.isError}
+          summaryError={summary.isError}
+          summaryFailure={summary.error}
           onRetry={() => {
             void scenes.refetch();
             void shots.refetch();
-            void snapshot.refetch();
+            void summary.refetch();
           }}
         />
+        <ProductionHistoryPanel projectId={projectId} />
       </section>
       <section
         id="production-panel-workflow"
@@ -269,11 +263,13 @@ export function ProductionPage({ projectId }: { projectId: string }) {
             await startExperiment(projectId, experimentId, targetNodeKey);
             await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
             await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
+            await qc.invalidateQueries({ queryKey: queryKeys.production.summary(projectId) });
           }}
           onDecideExperiment={async (experimentId, input) => {
             await decideExperiment(projectId, experimentId, input);
             await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
             await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
+            await qc.invalidateQueries({ queryKey: queryKeys.production.summary(projectId) });
             await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
           }}
         />

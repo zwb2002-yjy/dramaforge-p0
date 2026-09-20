@@ -1,63 +1,58 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import {
+  parseProductionChange,
+  productionQueryAffected,
+  type ProductionChange,
+} from "./productionInvalidation";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const PRODUCTION_FACTS_TOPIC = "production.facts.v1";
+export const PRODUCTION_EVENT_BATCH_MS = 150;
 
-type JsonRecord = Record<string, unknown>;
+export type ProductionFactsSseProps = { workspaceId: string | null };
 
-function asRecord(value: unknown): JsonRecord | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : null;
-}
-
-function projectIdFromEvent(data: unknown): string | null {
-  const envelope = asRecord(data);
-  if (!envelope || envelope.topic !== PRODUCTION_FACTS_TOPIC) return null;
-  if (typeof envelope.project_id === "string") return envelope.project_id;
-  const payload = asRecord(envelope.payload);
-  return payload && typeof payload.project_id === "string" ? payload.project_id : null;
-}
-
-function eventStreamUrl(workspaceId: string): string {
-  return `${API_BASE}/api/v1/events/stream?workspace_id=${encodeURIComponent(workspaceId)}`;
-}
-
-export type ProductionFactsSseProps = {
-  workspaceId: string | null;
-};
-
-/** Keep active project queries fresh when a committed production fact arrives. */
+/** Coalesce bursts and re-read only affected committed production projections. */
 export function ProductionFactsSse({ workspaceId }: ProductionFactsSseProps) {
   const queryClient = useQueryClient();
-
   useEffect(() => {
     if (!workspaceId || typeof EventSource === "undefined") return;
-
-    const source = new EventSource(eventStreamUrl(workspaceId), { withCredentials: true });
+    const source = new EventSource(
+      API_BASE + "/api/v1/events/stream?workspace_id=" + encodeURIComponent(workspaceId),
+      { withCredentials: true },
+    );
+    const pending = new Map<string, ProductionChange>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const flush = () => {
+      timer = undefined;
+      const changes = [...pending.values()];
+      pending.clear();
+      void queryClient.invalidateQueries(
+        { predicate: (query) => productionQueryAffected(query, changes) },
+        // A busy stream must not repeatedly abort an in-flight fact read.
+        { cancelRefetch: false },
+      );
+    };
     const onProductionFacts = (event: Event) => {
-      const message = event as MessageEvent<string>;
       let data: unknown;
       try {
-        data = JSON.parse(message.data) as unknown;
+        data = JSON.parse((event as MessageEvent<string>).data) as unknown;
       } catch {
         return;
       }
-      const projectId = projectIdFromEvent(data);
-      if (!projectId) return;
-
-      void queryClient.invalidateQueries({
-        predicate: (query) => query.queryKey.some((part) => part === projectId),
-      });
+      const change = parseProductionChange(data, workspaceId);
+      if (!change) return;
+      pending.set(JSON.stringify([change.projectId, change.kind, change.shotId]), change);
+      // A fixed window (not a resetting debounce) cannot starve a busy project.
+      timer ??= setTimeout(flush, PRODUCTION_EVENT_BATCH_MS);
     };
-
     source.addEventListener(PRODUCTION_FACTS_TOPIC, onProductionFacts);
     return () => {
+      if (timer !== undefined) clearTimeout(timer);
+      pending.clear();
       source.removeEventListener(PRODUCTION_FACTS_TOPIC, onProductionFacts);
       source.close();
     };
   }, [queryClient, workspaceId]);
-
   return null;
 }

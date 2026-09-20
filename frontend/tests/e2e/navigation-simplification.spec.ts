@@ -101,7 +101,7 @@ test("director policy follows creation, not project model settings", async ({ pa
       body: { expected_version: 1, director_autonomy: "MANUAL" },
     },
   ]);
-  await page.getByRole("link", { name: "场景", exact: true }).click();
+  await page.getByRole("link", { name: "分镜制作", exact: true }).click();
   await expect(policy).toHaveValue("MANUAL");
   await page.goto(`/settings/projects/${PROJECT_ID}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
@@ -280,7 +280,7 @@ test("return links respect production and model parents instead of relying on br
   const { writes, errors } = await setup(page);
   for (const [path, label, target] of [
     [`/projects/${PROJECT_ID}/production`, "返回项目大厅", "/"],
-    [`/projects/${PROJECT_ID}/review`, "返回制作", `/projects/${PROJECT_ID}/production`],
+    [`/projects/${PROJECT_ID}/review`, "返回作品总览", `/projects/${PROJECT_ID}/production`],
     [`/settings/projects/${PROJECT_ID}`, "返回模型连接", "/settings/models"],
   ]) {
     await page.goto(path);

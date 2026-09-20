@@ -15,10 +15,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from fnmatch import fnmatch
 from typing import Final
-from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
+from app.contracts.shot_reference import ShotReferenceIntent as ShotReferenceIntent
 from app.production.execution_plan import (
     CapabilityGap,
     PlanDelivery,
@@ -59,23 +59,6 @@ _SLOT_NOT_DECLARED = "model does not declare input slot for this reference role"
 _MEDIA_MISMATCH = "reference media type does not match the declared input slot"
 _EXCEEDS_CARDINALITY = "reference count exceeds the declared input slot maximum"
 _EXCLUSIVE_GROUP = "references occupy mutually exclusive input-slot groups"
-
-
-class ShotReferenceIntent(BaseModel):
-    """One shot reference before capability translation (P4-02 input).
-
-    Carries business purpose + artifact identity; never carries bytes/URLs.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    binding_id: UUID | None = None
-    purpose: str = Field(min_length=1, max_length=80)
-    asset_version_id: UUID | None = None
-    artifact_id: UUID | None = None
-    resolution_mode: str = Field(default="current_formal", max_length=24)
-    mime_type: str = Field(default="image/png", max_length=120)
-    fingerprint: str | None = Field(default=None, max_length=128)
 
 
 class ReferenceCompileResult(BaseModel):
@@ -195,7 +178,7 @@ def compile_references(
         slot = slots.get(role)
         if slot is None or slot.maximum is None:
             continue
-        for index in indexes[slot.maximum:]:
+        for index in indexes[slot.maximum :]:
             planned[index] = planned[index].model_copy(
                 update={"delivery": "unsupported", "reason": _EXCEEDS_CARDINALITY}
             )

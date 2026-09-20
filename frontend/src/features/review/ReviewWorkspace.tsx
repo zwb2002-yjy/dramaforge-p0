@@ -204,15 +204,22 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
 
   return (
     <div className="qc-project-page" data-testid="review-workspace">
-      <nav className="qc-local-tabs" aria-label="制作视图">
-        <Link to="/projects/$projectId/production" params={{ projectId }}>
-          生产概览
-        </Link>
-        <Link to="/projects/$projectId/review" params={{ projectId }} aria-current="page">
-          待审内容
-        </Link>
-      </nav>
-      <PageHeader title="镜头审片与批注" description="标出想调整的画面，留下修改建议。" />
+      <PageHeader
+        title="镜头审片与批注"
+        description="先检查候选并记录判断，再回到镜头明确设为正式版本。"
+        actions={
+          shot && (
+            <Link
+              className="df-btn"
+              to="/projects/$projectId/scenes/$sceneId"
+              params={{ projectId, sceneId: shot.scene_id }}
+              search={{ shotId: shot.id, tool: undefined }}
+            >
+              返回此镜头选择正式版本
+            </Link>
+          )
+        }
+      />
 
       {shots.isError && <div className="flash err">无法读取镜头：{String(shots.error)}</div>}
       <Field>
@@ -262,10 +269,50 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
             }}
           />
         </section>
-      ) : (
+      ) : !explicitTarget ? (
         <p className="muted">尚未选择正式关键帧，当前没有可供图片批注的正式产物。</p>
-      )}
+      ) : null}
 
+      {(!explicitTarget || videoId) && (
+        <section>
+          <h2>视频时间线</h2>
+          {shot && videoId ? (
+            <>
+              <ReviewEvidenceStrip
+                projectId={projectId}
+                shotId={shot.id}
+                artifactId={videoId}
+                reviewKind="video_drift"
+                stage="formal_video"
+                onSelectTime={setEvidenceTime}
+              />
+              <VideoReviewTimeline
+                key={`${shot.id}:${videoId}`}
+                videoUrl={artifactContentUrl(projectId, videoId)}
+                seekToSeconds={evidenceTime}
+                mediaLabel={explicitTarget ? "指定视频" : "正式视频"}
+                durationSeconds={durationSeconds}
+                annotations={videoRows}
+                note={note}
+                pending={addAnnotation.isPending}
+                onAddAnnotation={async (startSeconds, endSeconds) => {
+                  if (!shotId || !note.trim() || addAnnotation.isPending) return;
+                  await addAnnotation.mutateAsync({
+                    shotId,
+                    artifact_id: videoId,
+                    target_kind: "video_time",
+                    note: note.trim(),
+                    time_start: String(startSeconds),
+                    time_end: endSeconds === null ? null : String(endSeconds),
+                  });
+                }}
+              />
+            </>
+          ) : (
+            <p className="muted">尚未选择正式视频，当前没有可供时间批注的正式产物。</p>
+          )}
+        </section>
+      )}
       <section>
         <h2>人工判断</h2>
         <p className="muted">
@@ -281,11 +328,11 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
             shotVersion={shot.version}
             title="关键帧身份审查"
           />
-        ) : (
+        ) : !explicitTarget ? (
           <p className="muted" data-testid="review-keyframe-missing">
             尚未选择正式关键帧，暂时没有可判断的素材。
           </p>
-        )}
+        ) : null}
         {shot && videoId && (
           <HumanReviewDecisionPanel
             projectId={projectId}
@@ -318,44 +365,6 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
         )}
       </section>
 
-      <section>
-        <h2>视频时间线</h2>
-        {shot && videoId ? (
-          <>
-            <ReviewEvidenceStrip
-              projectId={projectId}
-              shotId={shot.id}
-              artifactId={videoId}
-              reviewKind="video_drift"
-              stage="formal_video"
-              onSelectTime={setEvidenceTime}
-            />
-            <VideoReviewTimeline
-              key={`${shot.id}:${videoId}`}
-              videoUrl={artifactContentUrl(projectId, videoId)}
-              seekToSeconds={evidenceTime}
-              mediaLabel={explicitTarget ? "指定视频" : "正式视频"}
-              durationSeconds={durationSeconds}
-              annotations={videoRows}
-              note={note}
-              pending={addAnnotation.isPending}
-              onAddAnnotation={async (startSeconds, endSeconds) => {
-                if (!shotId || !note.trim() || addAnnotation.isPending) return;
-                await addAnnotation.mutateAsync({
-                  shotId,
-                  artifact_id: videoId,
-                  target_kind: "video_time",
-                  note: note.trim(),
-                  time_start: String(startSeconds),
-                  time_end: endSeconds === null ? null : String(endSeconds),
-                });
-              }}
-            />
-          </>
-        ) : (
-          <p className="muted">尚未选择正式视频，当前没有可供时间批注的正式产物。</p>
-        )}
-      </section>
       <section data-testid="review-annotation-list">
         <h2>批注清单</h2>
         <p className="muted">

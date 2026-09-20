@@ -164,8 +164,9 @@ services:
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
-      TTS_VOICE: ${TTS_VOICE:-zh}
+      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
@@ -343,8 +344,9 @@ services:
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
-      TTS_VOICE: ${TTS_VOICE:-zh}
+      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
@@ -396,7 +398,7 @@ services:
       - ALL
     command: ["arq", "app.workers.director.WorkerSettings"]
     healthcheck:
-      test: ["CMD", "arq", "app.workers.director.WorkerSettings", "--check"]
+      test: ["CMD", "python", "-m", "app.workers.healthcheck"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -445,8 +447,9 @@ services:
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
-      TTS_VOICE: ${TTS_VOICE:-zh}
+      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully

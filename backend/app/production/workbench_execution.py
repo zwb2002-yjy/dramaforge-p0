@@ -764,7 +764,7 @@ class WorkbenchExecutionService:
         request_tags = {
             key: value
             for key, value in execution_input.semantic_intent.items()
-            if key in {"repair"}
+            if key in {"repair", "repair_request_id", "repair_step"}
         }
         semantic: dict[str, JsonValue] = {
             "intent": (
@@ -796,7 +796,7 @@ class WorkbenchExecutionService:
             ),
             "request_tags": cast(JsonValue, request_tags),
         }
-        # Repair is the sole allow-listed caller tag. Keep its historical
+        # Only repair provenance is allow-listed caller metadata. Keep its historical
         # top-level shape for Worker/trace compatibility while also grouping
         # all caller tags under request_tags for inspection.
         semantic.update(request_tags)
@@ -890,6 +890,65 @@ class WorkbenchExecutionService:
                 )
             )
         return suggestions
+
+    async def saved_shot_references(
+        self, *, project: Project, shot_id: UUID, stage: PlanStage,
+    ) -> list[ShotReferenceIntent]:
+        """Resolve the saved, non-experiment references for a repair preview.
+
+        The same build_plan lineage validator/compiler admits these identities.
+        Unresolved bindings fail closed instead of silently disappearing from
+        the repaired shot. The resulting plan freezes each concrete artifact.
+        """
+        bindings = (await self._session.scalars(
+            select(ShotReferenceBinding).where(
+                ShotReferenceBinding.project_id == project.id,
+                ShotReferenceBinding.shot_id == shot_id,
+                ShotReferenceBinding.shot_experiment_id.is_(None),
+                ShotReferenceBinding.stage.in_(("both", "image" if stage == "image_keyframe"
+                                               else "video")),
+            ).order_by(ShotReferenceBinding.sort_order, ShotReferenceBinding.id)
+            .execution_options(populate_existing=True)
+        )).all()
+        references: list[ShotReferenceIntent] = []
+        for binding in bindings:
+            version_id = binding.asset_version_id
+            if binding.resolution_mode == "current_formal":
+                asset = await self._session.scalar(select(Asset).where(
+                    Asset.id == binding.asset_id, Asset.project_id == project.id,
+                ).execution_options(populate_existing=True))
+                version_id = asset.current_version_id if asset else None
+            if binding.resolution_mode == "direct_artifact":
+                artifact_ids = [binding.artifact_id] if binding.artifact_id else []
+            elif version_id is not None:
+                artifact_ids = list(await self._session.scalars(
+                    select(AssetVersionReference.artifact_id).where(
+                        AssetVersionReference.project_id == project.id,
+                        AssetVersionReference.asset_version_id == version_id,
+                    ).order_by(AssetVersionReference.sort_order, AssetVersionReference.id)
+                ))
+            else:
+                artifact_ids = []
+            if not artifact_ids:
+                raise WorkbenchExecutionError(
+                    "saved reference is unresolved; select its formal asset/version first",
+                    details={"code": "REFERENCE_NOT_RESOLVED", "binding_id": str(binding.id)},
+                )
+            for artifact_id in artifact_ids:
+                artifact = await self._session.get(Artifact, artifact_id, populate_existing=True)
+                if (artifact is None or artifact.project_id != project.id
+                        or artifact.deleted_at is not None
+                        or artifact.storage_state not in {"available", "stored"}):
+                    raise WorkbenchExecutionError(
+                        "saved reference media is unavailable",
+                        details={"code": "REFERENCE_NOT_RESOLVED", "binding_id": str(binding.id)},
+                    )
+                references.append(ShotReferenceIntent(
+                    binding_id=binding.id, purpose=binding.purpose,
+                    asset_version_id=version_id, artifact_id=artifact_id,
+                    resolution_mode=binding.resolution_mode,
+                ))
+        return references
 
     async def build_plan(
         self,

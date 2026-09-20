@@ -67,7 +67,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("shot-details-sheet")).toHaveCount(0);
   await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("场景");
+  await expect(page.locator(".qc-project-mode")).toHaveText("分镜制作");
   await expect(
     page.locator("[data-testid='scene-stage'] > [data-testid='shot-candidate-tray']"),
   ).toHaveCount(1);
@@ -92,6 +92,11 @@ test("manual professional production: Scene Workbench design → candidate previ
   expect(desktopLayout.columns).toBe(1);
   expect(desktopLayout.noPageOverflow).toBe(true);
 
+  await page.getByTestId("context-dock-camera").click();
+  await expect(page.getByLabel("导演状态", { exact: true })).not.toBeVisible();
+  await page.locator("summary").filter({ hasText: "高级导演参数（可选）" }).click();
+  await expect(page.getByLabel("导演状态", { exact: true })).toBeVisible();
+  await page.locator("summary").filter({ hasText: "高级导演参数（可选）" }).click();
   await page.getByTestId("context-dock-motion").click();
   const operationBox = await page.getByTestId("director-sidebar").boundingBox();
   const canvasBox = await page.getByTestId("cinematic-canvas").boundingBox();
@@ -202,7 +207,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("场景");
+  await expect(page.locator(".qc-project-mode")).toHaveText("分镜制作");
   await expect(page.getByTestId("scene-stage")).toBeVisible();
   await expect(page.getByTestId("cinematic-canvas")).toBeVisible();
   await expect(page.getByTestId("context-dock")).toBeVisible();
@@ -233,7 +238,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
 
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("制作");
+  await expect(page.locator(".qc-project-mode")).toHaveText("作品总览");
   await expect(page.locator(".qc-content-grid")).toHaveClass(/no-inspector/);
 
   // Keep the Asset page's own data requests isolated while asserting that the
@@ -247,7 +252,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await page.goto(`/projects/${PROJECT_ID}/assets`);
   await expect(page.getByTestId("asset-cards-panel")).toBeVisible();
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("资产");
+  await expect(page.locator(".qc-project-mode")).toHaveText("角色素材");
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);

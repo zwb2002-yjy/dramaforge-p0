@@ -12,6 +12,7 @@ from app.assets.models import Episode, Scene, Shot
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
+from app.execution.shot_pipeline import shot_pipeline_definition
 from app.production.final_film import (
     _load_timeline_refs,
     execute_final_film_node_run,
@@ -74,6 +75,7 @@ async def _seed_renderable_final_film(
     session: AsyncSession,
     *,
     shot_count: int = 1,
+    canonical_graph: bool = False,
 ) -> tuple[Project, User, EditSession, list[Shot], list[Artifact]]:
     project, user = await _seed_project(session)
     episode = Episode(project_id=project.id, episode_number=1, title="Episode 1", synopsis="")
@@ -110,7 +112,9 @@ async def _seed_renderable_final_film(
             scope_entity_id=shot.id,
             template_key="shot-p0-v1",
             created_by=user.id,
-            definition={
+            definition=shot_pipeline_definition()
+            if canonical_graph
+            else {
                 "nodes": [
                     {"key": "video", "type": "video"},
                     {"key": "composite", "type": "composite"},
@@ -339,9 +343,7 @@ async def test_delivery_requires_a_human_decision_for_every_clip(
     project, user, edit, shots, videos = await _seed_renderable_final_film(session)
     decision = (
         await session.execute(
-            select(HumanReviewDecision).where(
-                HumanReviewDecision.artifact_id == videos[0].id
-            )
+            select(HumanReviewDecision).where(HumanReviewDecision.artifact_id == videos[0].id)
         )
     ).scalar_one()
     await session.delete(decision)
@@ -362,10 +364,10 @@ async def test_delivery_requires_a_human_decision_for_every_clip(
     assert blocked.value.details.get("artifact_id") == str(videos[0].id)
     # Nothing was queued for a clip that was never approved.
     runs = (
-        await session.execute(
-            select(NodeRun).where(NodeRun.project_id == project.id)
-        )
-    ).scalars().all()
+        (await session.execute(select(NodeRun).where(NodeRun.project_id == project.id)))
+        .scalars()
+        .all()
+    )
     assert not any(
         str((run.input_snapshot or {}).get("idempotency_key") or "").startswith("auto-")
         or (run.input_snapshot or {}).get("node_key") == "final_film"
@@ -932,3 +934,225 @@ async def test_subtitle_store_failure_does_not_publish_half_an_export(session, m
         )
         == []
     )
+
+
+async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_identity(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.production.final_film import prepare_formal_tail
+    from app.providers.voice_config import freeze_voice_execution
+
+    project, user, edit, shots, videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    shot = shots[0]
+    await _canonicalize_tail_fixture(session, project, user)
+    await session.flush()
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+    first = await prepare_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    first_runs = list(
+        (await session.execute(select(NodeRun).where(NodeRun.id.in_(first.node_run_ids)))).scalars()
+    )
+    assert first_runs
+    assert not any(run.input_snapshot.get("node_key") == "video" for run in first_runs)
+    voice = next(run for run in first_runs if run.input_snapshot["node_key"] == "voice")
+    assert voice.input_snapshot["voice_execution"] == freeze_voice_execution(
+        {}, silent=not shot.dialogue.strip()
+    ).model_dump(mode="json")
+    repeated = await prepare_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    assert not repeated.node_run_ids
+    assert repeated.preparation_fingerprint == first.preparation_fingerprint
+    shot.director_state = {"voice": {"voice_id": "zh-CN-YunxiNeural", "rate_percent": -10}}
+    await session.flush()
+    changed = await prepare_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    changed_runs = list(
+        (
+            await session.execute(select(NodeRun).where(NodeRun.id.in_(changed.node_run_ids)))
+        ).scalars()
+    )
+    assert changed.preparation_fingerprint != first.preparation_fingerprint
+    assert changed.node_run_ids
+    assert not any(run.input_snapshot.get("node_key") == "video" for run in changed_runs)
+    new_voice = next(run for run in changed_runs if run.input_snapshot["node_key"] == "voice")
+    assert new_voice.input_snapshot["voice_execution"]["voice"] == "zh-CN-YunxiNeural"
+    assert shot.formal_video_artifact_id == videos[0].id
+
+
+async def test_muted_clip_preparation_freezes_local_silence_not_remote_tts(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.production.final_film import prepare_formal_tail
+
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    edit.timeline = {**edit.timeline, "clips": [{**edit.timeline["clips"][0], "muted": True}]}
+    await session.flush()
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+    prepared = await prepare_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    runs = list(
+        (
+            await session.execute(select(NodeRun).where(NodeRun.id.in_(prepared.node_run_ids)))
+        ).scalars()
+    )
+    voice = next(run for run in runs if run.input_snapshot["node_key"] == "voice")
+    assert voice.input_snapshot["voice_execution"]["engine"] == "pcm-silence"
+    assert voice.input_snapshot["plan"]["prompt"] == ""
+
+
+async def _canonicalize_tail_fixture(session: AsyncSession, project: Project, user: User) -> None:
+    from app.production.models import GraphVersion
+
+    node = (
+        (
+            await session.execute(
+                select(GraphNode)
+                .join(NodeRun, NodeRun.graph_node_id == GraphNode.id)
+                .where(NodeRun.project_id == project.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert node is not None
+    version = await session.get(GraphVersion, node.graph_version_id)
+    assert version is not None
+    video_node = (
+        await session.execute(
+            select(GraphNode).where(
+                GraphNode.graph_version_id == version.id, GraphNode.node_key == "video"
+            )
+        )
+    ).scalar_one()
+    shot = (await session.execute(select(Shot).where(Shot.project_id == project.id))).scalar_one()
+    session.add(
+        NodeRun(
+            project_id=project.id,
+            graph_version_id=version.id,
+            graph_node_id=video_node.id,
+            attempt_no=2,
+            idempotency_key=f"formal-video-source-{uuid4()}",
+            input_hash="e" * 64,
+            status="completed",
+            result_artifact_id=shot.formal_video_artifact_id,
+            created_by=user.id,
+            input_snapshot={
+                "shot_id": str(shot.id),
+                "node_key": "video",
+                "execution_branch": "formal",
+            },
+        )
+    )
+    await session.flush()
+
+
+@pytest.mark.parametrize("valid_wav", [True, False])
+async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch, valid_wav: bool
+) -> None:
+    from app.execution.voice_path import execute_voice_node_run
+    from app.production.final_film import prepare_formal_tail
+    from app.providers.voice_config import freeze_voice_execution
+    from app.providers.voice_runtime import SilentVoiceAdapter
+
+    project, user, edit, shots, _videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+    prepared = await prepare_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    runs = list(
+        (
+            await session.execute(select(NodeRun).where(NodeRun.id.in_(prepared.node_run_ids)))
+        ).scalars()
+    )
+    run = next(item for item in runs if item.input_snapshot["node_key"] == "voice")
+    node = await session.get(GraphNode, run.graph_node_id)
+    assert node is not None
+    adapter = SilentVoiceAdapter()
+    original_create = adapter.create
+
+    async def create(request):
+        assert request["prompt"] == shots[0].dialogue
+        response = await original_create(request)
+        if not valid_wav:
+            adapter.blobs[response["remote_task_id"]] = b"RIFF-this-is-not-a-wave-file"
+        return response
+
+    adapter.create = create
+    received = []
+
+    def fake_adapter(spec):
+        received.append(spec)
+        return adapter
+
+    monkeypatch.setattr("app.execution.voice_path.get_voice_adapter", fake_adapter)
+    run.status = "running"
+    if valid_wav:
+        result = await execute_voice_node_run(
+            session,
+            run=run,
+            node=node,
+            snapshot=run.input_snapshot,
+            store=get_object_store(),
+            prompt=shots[0].dialogue,
+        )
+        artifact = await session.get(Artifact, result.artifact_id)
+        assert artifact is not None
+        assert artifact.mime_type == "audio/wav"
+        assert artifact.duration_seconds == Decimal("0.25")
+    else:
+        with pytest.raises(ValidationAppError, match="VOICE_OUTPUT_INVALID"):
+            await execute_voice_node_run(
+                session,
+                run=run,
+                node=node,
+                snapshot=run.input_snapshot,
+                store=get_object_store(),
+                prompt=shots[0].dialogue,
+            )
+        assert run.status == "failed"
+        assert run.result_artifact_id is None
+    assert received == [freeze_voice_execution({})]
+    operation = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalar_one()
+    assert operation.actual_provider == "edge_tts"
+    assert operation.actual_model == "zh-CN-XiaoxiaoNeural"
+    assert operation.execution_path_version == "edge-voice-v1"
+    assert operation.status == ("succeeded" if valid_wav else "failed")
+    if valid_wav:
+        assert operation.response_summary["local"] is False

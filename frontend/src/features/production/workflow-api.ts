@@ -91,7 +91,16 @@ export type WorkflowOverviewRead = {
 export function fetchWorkflowOverview(projectId: string): Promise<WorkflowOverviewRead> {
   return apiGet<{ overview: WorkflowOverviewRead }>(
     `/api/v1/projects/${projectId}/workflow-overview`,
-  ).then((body) => body.overview);
+  ).then((body) => {
+    if (
+      !body.overview ||
+      !Array.isArray(body.overview.episodes) ||
+      !Array.isArray(body.overview.scenes)
+    ) {
+      throw new Error("生成任务回执不完整，请重新读取。");
+    }
+    return body.overview;
+  });
 }
 
 export function fetchShotWorkflowState(

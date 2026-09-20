@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
 
 import { queryKeys } from "../../lib/queryKeys";
 import { ApiError, listModels } from "../../lib/api";
@@ -718,7 +719,25 @@ export function ShotProductionActions({
       )}
       {feedback?.kind === "error" && (
         <p className="qc-shot-production-error" data-testid="shot-production-error" role="alert">
-          {STAGE_LABEL[feedback.stage]}生成失败：{feedback.message}
+          {/MODEL_BINDING_MISSING/.test(feedback.message) ? (
+            <>
+              尚未为此项目选择{STAGE_LABEL[feedback.stage]}模型。
+              <Link
+                to="/settings/projects/$projectId"
+                params={{ projectId }}
+                search={{
+                  returnTo: `/projects/${projectId}/scenes/${shot.scene_id}?shotId=${shot.id}`,
+                }}
+              >
+                配置本项目模型
+              </Link>
+              。保存后返回这里继续，刚才的检查没有提交生成。
+            </>
+          ) : (
+            <>
+              {STAGE_LABEL[feedback.stage]}生成失败：{feedback.message}
+            </>
+          )}
         </p>
       )}
     </section>

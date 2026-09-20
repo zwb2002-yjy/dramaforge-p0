@@ -146,6 +146,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
   // it is not an implicit timeline apply or save.
   const timelineBeforeSuggestion = clone(state.editing.session.timeline);
   const lineageBeforeSuggestion = clone(state.editing.session.production_lineage);
+  await page.locator("summary").filter({ hasText: "导演剪辑建议" }).click();
   await page.getByTestId("editing-director-suggestion-instruction").fill("让开场更快进入冲突");
   await page.getByTestId("request-editing-director-suggestion").click();
   const preview = page.getByTestId("editing-suggestion-preview");
