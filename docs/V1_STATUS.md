@@ -1,29 +1,29 @@
 # V1_STATUS — 当前 V1 / 发布状态
 
 Status: current  
-本地状态核对日期：2026-09-20；远端候选与检查记录仍以表中 2026-09-19 的核对为准。
+本地运行与远端分支状态核对日期：2026-09-20。
 
 ## 当前结论
 
-**首版尚未正式发布完成。** 发布候选、当前运行实例和后续源码优化必须分开看，不能用旧测试数字或健康检查替代发布验收。
+**首版尚未正式发布完成。** 运行候选、集成 PR 和发布基线必须分开看；本地质量门通过不等于真实双路径验收或正式发布完成。
 
 | 对象 | 当前事实 |
 |---|---|
-| 冻结的运行候选 | 2026-09-19 核对：`8354198`；`dev` / PR #90 HEAD 为 `ca8f8b7555768b958fd372608aaf34c2ac430f3d`。两提交之间只有本状态文档变化，运行内容未变 |
-| PR #90 | 2026-09-19 核对：`dev -> main` 为 OPEN、未合并；`main` 基线为 `c12c3dfb`。仅 Owner 可审阅并合并 |
-| GitHub 检查 | 2026-09-19 读取 PR 检查结果：`policy`、`container-gates`、`secret-scan`、Python/前端依赖审计、`filesystem-scan` 均为 SUCCESS。旧的 hosted runner 阻塞不再是当前结论 |
-| 当前 8080 实例 | 运行此前基于 dirty 工作区构建的本地优化版：API/workers 为 `dramaforge-ui-runtime:20260919-tts`，前端为 `dramaforge-ui-frontend:20260919-tts-r3`。只读 `GET /health` 返回 `env=development`、`source_commit=local-ui-ca8f8b7-dirty-tts-927700584c54`、`db=up`；不是冻结候选的正式 production 身份 |
-| 后续源码优化 | 保存在 `codex/workbench-optimization` 开发分支，未并入 `dev`，不是当前 8080 镜像内容。TTS、供应商与相关 UI 已有定向回归和单镜头配音/成片验证；后续返修与恢复改动仍需本候选完整质量门、真实多镜头旅程及异常恢复验收。旧候选的 GitHub 成绩不覆盖这些改动；由 Owner 决定新的发布候选 |
+| 发布基线 | `main` 为 `c12c3dfb89cca92a45de99a6db4ade2f0c5f19e7`；`dev` / PR #90 HEAD 为 `ca8f8b7555768b958fd372608aaf34c2ac430f3d`。PR #90 (`dev -> main`) 仍 OPEN、未合并 |
+| 当前 8080 实例 | API、dispatcher、三个 worker 与 frontend 已切换到 `dc3056e99caf1a20484e39058a5d3d8d6a40cba7` 运行候选；`GET /health` 返回 `env=production`、`db=up`，服务健康。数据库迁移头为 `20260919_0073` |
+| 优化分支集成 | `codex/workbench-optimization -> dev` 已建立 PR #94，保持 Draft，未合并。运行候选之后的 CI 分支策略与状态文档变更不属于当前运行镜像内容；最终 HEAD/checks 以该 PR 为准 |
+| 本地质量门 | 运行候选已通过完整 backend/PostgreSQL/migration、frontend（含完整未分片 Playwright）与固定 LiteLLM mock-proxy 容器门。并行重负载下的前端超时未计为通过；通过记录来自原配置的独立完整重跑 |
+| 真实制作验收 | 两个项目已有正式媒体与视频返修记录；旧候选的中断恢复证据保留其原始来源，额外 create=0。新候选修复正式合成输入隔离，并用已有媒体完成模板路径 MP4/SRT、刷新和跨登录状态验证；这些不等于完整双路径验收，driver 仍为 `complete=false` |
 
-CI workflow 仅监听指向 `dev` / `main` 的 PR 与手动 dispatch；push 本身不是质量门通过证明。
-上述 GitHub 成功记录属于所列 HEAD，不自动覆盖新的分支改动，也不等同于 Release workflow 成功。
+CI 仅监听指向 `dev` / `main` 的 PR 与手动 dispatch；push 本身不是质量门证明。
+PR #94 的远端检查不能替代 Owner 审查，PR #90 的旧检查也不覆盖优化分支。
 
-## 当前开发暂停边界
+## 当前继续边界
 
-当前授权仅收口三个稳定性问题并保存开发分支：Provider 恢复扫描不再排入繁忙的媒体队列；
-轮询超时主动让出时释放执行租约，使取消能接续核对同一远端任务；返修读取刷新跨会话的任务事实。
-定向回归不等于完整候选验收。本轮不更新 8080、不执行业务数据库迁移、不进行新的付费生成，
-也不合并或发布。完整质量门、更新实例和真实 UI 制作验收留待下一次明确继续。
+本次已继续完整质量门、候选部署和无需新增付费媒体的验收。自由创作路径尚需
+Editing 文本建议的独立正数预算与 Owner 授权，再继续建议采用、成片、重导出及最终双路径取证。
+不重跑已有图像/视频，不重试历史 `unknown_submission`；也不将部分浏览器验证标为完整验收。
+Agent 不批准或合并 PR，不发布。
 
 ## 已确定的首版产品边界
 
