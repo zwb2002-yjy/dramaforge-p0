@@ -7,12 +7,14 @@ import logging
 import os
 import socket
 
+from app.runtime.provider_recovery import recover_interrupted_provider_jobs
 from app.runtime.scheduler import NodeRunScheduler, RedisStreamPublisher
 from app.shared.db import get_session_factory
 from app.shared.model_registry import load_all_models
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = float(os.getenv("OUTBOX_DISPATCH_INTERVAL_SECONDS", "1"))
+PROVIDER_RECOVERY_POLL_SECONDS = 60.0
 
 # This resident process writes OutboxEvent rows directly. Register every ORM
 # model before SQLAlchemy compiles the cross-domain foreign keys during flush.
@@ -34,9 +36,8 @@ async def dispatch_once(*, worker_id: str) -> int:
             await publisher.close()
 
 
-async def run_forever() -> None:
+async def _dispatch_forever(*, worker_id: str) -> None:
     """Keep dispatching after temporary infrastructure failures."""
-    worker_id = f"outbox-dispatcher:{socket.gethostname()}"
     while True:
         try:
             dispatched = await dispatch_once(worker_id=worker_id)
@@ -47,6 +48,31 @@ async def run_forever() -> None:
         except Exception:  # noqa: BLE001
             logger.exception("outbox_dispatcher iteration failed")
         await asyncio.sleep(POLL_SECONDS)
+
+
+async def _recover_providers_forever() -> None:
+    """Scan independently of both media capacity and a blocked Outbox iteration."""
+    state: dict[str, object] = {}
+    loop = asyncio.get_running_loop()
+    while True:
+        tick_started = loop.time()
+        try:
+            counts = await recover_interrupted_provider_jobs(state)
+            if any(counts.values()):
+                logger.info("provider_recovery %s", counts)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - infrastructure failure must not stop later ticks
+            logger.exception("provider_recovery iteration failed")
+        await asyncio.sleep(max(0, PROVIDER_RECOVERY_POLL_SECONDS - (loop.time() - tick_started)))
+
+
+async def run_forever() -> None:
+    """Own both bounded scheduling loops in the existing resident dispatcher."""
+    worker_id = f"outbox-dispatcher:{socket.gethostname()}"
+    async with asyncio.TaskGroup() as tasks:
+        tasks.create_task(_dispatch_forever(worker_id=worker_id), name="outbox-dispatch")
+        tasks.create_task(_recover_providers_forever(), name="provider-recovery")
 
 
 def main() -> int:

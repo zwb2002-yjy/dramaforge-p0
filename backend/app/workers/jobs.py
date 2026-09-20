@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from arq import Retry
 
+from app.runtime.provider_recovery import provider_attempt_is_active
+from app.runtime.provider_recovery import (
+    recover_interrupted_provider_jobs as _recover_provider_jobs,
+)
 from app.shared.db import get_session_factory, set_node_run_rls_context
 from app.shared.errors import (
     AppError,
@@ -49,95 +54,9 @@ def _worker_failure_code(exc: Exception) -> str:
     return "WORKER_ERROR"
 
 
-async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
-    """Resume polling persisted remote tasks after a Heavy Worker restart."""
-    from datetime import UTC, datetime, timedelta
-
-    from sqlalchemy import select
-
-    from app.execution.models import NodeRun, ProviderOperation
-    from app.runtime.scheduler import NodeRunScheduler
-    from app.shared.db import (
-        list_resumable_provider_node_run_rls_scopes,
-        set_rls_context,
-    )
-
-    _ = ctx
-    factory = get_session_factory()
-    async with factory() as session:
-        # Persisted remote identity is authoritative across candidate upgrades.
-        candidates = await list_resumable_provider_node_run_rls_scopes(
-            session,
-            limit=50,
-            source_commit=None,
-        )
-        for node_run_id, scope in candidates:
-            await set_rls_context(
-                session,
-                user_id=scope.user_id,
-                workspace_id=scope.workspace_id,
-                project_id=scope.project_id,
-            )
-            run = await session.scalar(
-                select(NodeRun).where(NodeRun.id == node_run_id).with_for_update()
-            )
-            operation = await session.scalar(
-                select(ProviderOperation)
-                .where(
-                    ProviderOperation.node_run_id == node_run_id,
-                    ProviderOperation.execution_path_version == "unified-v1",
-                )
-                .order_by(ProviderOperation.attempt_no.desc())
-                .limit(1)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            if (
-                run is None
-                or run.status not in {"running", "cancel_requested"}
-                or operation is None
-            ):
-                await session.rollback()
-                continue
-            if operation.provider_operation_id is None:
-                started = operation.created_at
-                if started.tzinfo is None:
-                    started = started.replace(tzinfo=UTC)
-                if operation.status == "submission_started" and started < datetime.now(
-                    UTC
-                ) - timedelta(minutes=30):
-                    operation.status = "unknown_submission"
-                    operation.error_code = "PROVIDER_SUBMISSION_UNKNOWN"
-                    operation.error_summary = (
-                        "Interrupted submission has no remote identity; do not resubmit."
-                    )
-                    run.status = "failed"
-                    run.error_code = operation.error_code
-                    run.error_summary = operation.error_summary
-                    run.finished_at = operation.completed_at = datetime.now(UTC)
-                    await session.commit()
-                else:
-                    await session.rollback()
-                continue
-            if operation.status not in {"submitted", "running", "timed_out", "cancel_requested"}:
-                await session.rollback()
-                continue
-            snapshot = dict(run.input_snapshot or {})
-            raw_resume_count = snapshot.get("provider_poll_resume_count")
-            resume_count = (raw_resume_count if isinstance(raw_resume_count, int) else 0) + 1
-            snapshot["provider_poll_resume_count"] = resume_count
-            snapshot["dispatch_generation"] = (
-                f"provider-resume-{str(operation.id)[:12]}-{resume_count}"
-            )
-            run.input_snapshot = snapshot
-            # The queued status makes the existing claim path reusable, while
-            # cancellation_requested_at remains the authoritative instruction
-            # to cancel/observe the same remote operation after restart.
-            run.status = "queued"
-            run.error_code = None
-            run.error_summary = None
-            await session.commit()
-            await NodeRunScheduler(session).enqueue_node_run_only(node_run_id)
+async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> dict[str, int]:
+    """Compatibility startup entry; the resident dispatcher owns periodic scans."""
+    return await _recover_provider_jobs(ctx, session_factory=get_session_factory())
 
 
 async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, int]:
@@ -267,6 +186,8 @@ async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int
 
 async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, Any]:
     """Worker job: execute media NodeRun via product_path (Adapter OK here)."""
+    from sqlalchemy import select
+
     from app.execution.composite_media import composite_inputs_pending
     from app.execution.models import NodeRun
     from app.execution.product_path import claim_media_node_run, execute_media_node_run
@@ -284,9 +205,22 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             scope = await set_node_run_rls_context(session, node_run_id=run_uuid)
             if scope is None:
                 return {"status": "failed", "error": "node_run not found"}
-            run = await session.get(NodeRun, run_uuid)
+            # Serialize admission with recovery and other queue generations.
+            # A running attempt owns started_at for at most the heavy timeout
+            # (1800s) plus a 60s margin. Do not steal it, even when its last
+            # Provider poll is old or an old queue delivers the same NodeRun.
+            run = await session.scalar(
+                select(NodeRun)
+                .where(NodeRun.id == run_uuid)
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
             if run is None:
-                return {"status": "failed", "error": "node_run not visible under RLS"}
+                raise NodeRunAlreadyClaimedError()
+            resuming = run.status in {"running", "cancel_requested"}
+            if resuming and provider_attempt_is_active(run.started_at, now=datetime.now(UTC)):
+                raise NodeRunAlreadyClaimedError()
+
             if run.status == "cancelled":
                 return {"status": "cancelled", "node_run_id": node_run_id}
             dependency = await evaluate_required_dependencies(session, run=run)
@@ -307,6 +241,13 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             if await composite_inputs_pending(session, run=run):
                 raise Retry(defer=5)
             await claim_media_node_run(session, node_run_id=run_uuid)
+            if resuming:
+                # claim_media_node_run already timestamps queued claims, but
+                # historically returned resumable running rows without a new
+                # timestamp. Persist this attempt's lease before polling/I/O.
+                run.started_at = datetime.now(UTC)
+                await session.commit()
+                await set_node_run_rls_context(session, node_run_id=run_uuid)
             result = await execute_media_node_run(
                 session,
                 node_run_id=run_uuid,
@@ -378,8 +319,6 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                         run2.error_summary = (
                             message[:500] if message else f"{type(exc).__name__} (no message)"
                         )
-                        from datetime import UTC, datetime
-
                         run2.finished_at = datetime.now(UTC)
                         run2.output_summary = {
                             "status": "failed",

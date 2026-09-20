@@ -260,7 +260,11 @@ describe("Workstation shell", () => {
     const { router } = renderApp("/projects/demo/production");
 
     fireEvent.click(await screen.findByRole("link", { name: "创作" }));
-    fireEvent.click(screen.getByRole("link", { name: "剧本" }));
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "创作导航" })).getByRole("link", {
+        name: "故事剧本",
+      }),
+    );
 
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/projects/demo/script"));
     expect(screen.getByRole("link", { name: "创作" })).toHaveAttribute("aria-expanded", "false");
@@ -357,29 +361,29 @@ describe("Workstation shell", () => {
     renderApp("/projects/demo/production");
     const panel = await screen.findByTestId("production-mode");
     expect(panel).toBeInTheDocument();
-    expect(panel).toHaveTextContent("制作进度");
+    expect(panel).toHaveTextContent("作品总览");
     const projectShell = screen.getByTestId("project-workspace-shell");
     expect(projectShell).toBeInTheDocument();
     expect(projectShell).toHaveTextContent("演示项目");
-    expect(screen.getByRole("link", { name: "制作" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("navigation", { name: "创作导航" })).not.toHaveTextContent("审片");
+    expect(screen.getByRole("link", { name: "作品总览" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("navigation", { name: "创作导航" })).toHaveTextContent("审片确认");
   });
 
-  it("keeps Review reachable inside Production instead of making it a peer workspace", async () => {
+  it("makes Review a discoverable creative stage with its own active navigation", async () => {
     renderApp("/projects/demo/review");
 
     expect(await screen.findByTestId("review-workspace")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "制作" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("navigation", { name: "创作导航" })).not.toHaveTextContent("审片");
-    expect(screen.getByRole("link", { name: "待审内容" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "审片确认" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("navigation", { name: "创作导航" })).toHaveTextContent("审片确认");
+    expect(screen.queryByRole("navigation", { name: "制作视图" })).not.toBeInTheDocument();
   });
 
   it("falls back from a project root to the Scene storyboard wall", async () => {
     const { router } = renderApp("/projects/demo");
 
-    await screen.findByRole("link", { name: "场景" });
+    await screen.findByRole("link", { name: "分镜制作" });
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/projects/demo/scenes"));
-    expect(screen.getByRole("link", { name: "场景" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "分镜制作" })).toHaveAttribute("aria-current", "page");
   });
 
   it("redirects the obsolete preferences page to the actual create form", async () => {
@@ -425,11 +429,11 @@ describe("Workstation shell", () => {
     renderApp("/projects/project-1/edit");
 
     expect(await screen.findByTestId("editing-workspace")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "剪辑" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "剪辑成片" })).toHaveAttribute(
       "href",
       "/projects/project-1/edit",
     );
-    expect(screen.getByRole("link", { name: "剪辑" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "剪辑成片" })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows the professional facts without reviving the legacy Director budget surface", async () => {
@@ -444,6 +448,18 @@ describe("Workstation shell", () => {
         return json({ schema_version: "opencut-manifest-v2", tracks: [], shots: [] });
       if (url.includes("/annotations")) return json([]);
       if (url.includes("/director-board")) return json(null);
+      if (url.includes("/production-summary"))
+        return json({
+          project_id: "project-1",
+          total_runs: 0,
+          completed_runs: 0,
+          running_runs: 0,
+          failed_runs: 0,
+          artifact_count: 0,
+          recent_failures: [],
+          has_more_failures: false,
+          stages: [],
+        });
       if (url.includes("/snapshot"))
         return json({ project_id: "project-1", name: "共源作品", node_runs: [], artifacts: [] });
       return json({});

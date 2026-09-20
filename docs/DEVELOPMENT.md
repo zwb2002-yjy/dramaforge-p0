@@ -27,7 +27,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 该门构建 backend 质量容器（Python 3.14.x / Debian Bookworm）与 frontend 质量容器
 （Node 24 LTS + Chromium），执行：
 
-- 目录合规与 canonical-surface 扫描、ruff、mypy；
+- 目录合规、canonical-surface 与增量架构依赖门（`arch_import_scan.py --check`）、ruff、mypy；
 - backend 单测；
 - PostgreSQL `alembic upgrade head` / `alembic check` 与集成测试；
 - OpenAPI 导出与 generated client 检查；

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ProjectStageGuide } from "./ProjectStageGuide";
 
 import "./project-shell.css";
 import "./project-shell-visual.css";
@@ -18,12 +19,12 @@ type ProjectWorkspaceShellProps = {
 
 const VIEW_LABELS: Record<ProjectWorkspaceView, string> = {
   overview: "场景总览",
-  script: "剧本",
-  assets: "资产",
-  scenes: "场景",
-  production: "制作",
-  review: "制作 · 待审内容",
-  edit: "剪辑",
+  script: "故事剧本",
+  assets: "角色素材",
+  scenes: "分镜制作",
+  production: "作品总览",
+  review: "审片确认",
+  edit: "剪辑成片",
 };
 
 export function ProjectWorkspaceShell({
@@ -49,7 +50,10 @@ export function ProjectWorkspaceShell({
       </header>
 
       <div className="qc-content-grid no-inspector">
-        <main className="qc-main-canvas qc-project-canvas">{children}</main>
+        <main className="qc-main-canvas qc-project-canvas">
+          <ProjectStageGuide projectId={projectId} view={activeView} />
+          {children}
+        </main>
       </div>
     </div>
   );

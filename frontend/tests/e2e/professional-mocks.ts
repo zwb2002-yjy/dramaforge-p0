@@ -678,6 +678,18 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         version: state.shotVersion,
       });
     }
+    if (path.endsWith("/production-summary"))
+      return json(route, {
+        project_id: PROJECT_ID,
+        total_runs: 0,
+        completed_runs: 0,
+        running_runs: 0,
+        failed_runs: 0,
+        artifact_count: 0,
+        recent_failures: [],
+        has_more_failures: false,
+        stages: [],
+      });
     if (path.endsWith("/snapshot")) {
       return json(route, {
         project_id: PROJECT_ID,

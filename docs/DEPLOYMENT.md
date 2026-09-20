@@ -110,6 +110,18 @@ checked from service status and worker logs: `worker-default` consumes
 (Director turns, event intake and wakeup replay), and `worker-heavy` consumes
 `dramaforge:heavy`. Recoverable work is republished by the resident
 `dispatcher` and by the Director worker's startup recovery.
+Provider reconciliation runs in an independent dispatcher loop, not a heavy-queue cron job;
+media execution still uses the existing queue. Apply migration `20260919_0073` before
+updating the dispatcher and media workers. This rollout is not implied by a source-only push.
+
+Director health uses `python -m app.workers.healthcheck` rather than importing
+all WorkerSettings/jobs for the Arq CLI. It checks the configured queue's nonempty
+Redis heartbeat plus a positive TTL of at most 3,601,000ms (not Redis PING), with
+no retries and a 3-second total probe deadline; Docker's timeout remains 5 seconds.
+Arq's existing 3600-second refresh / 3601-second expiry window is unchanged. This
+is **queue-level liveness, not per-process readiness**: another worker on the same
+queue can maintain the heartbeat. Check worker logs and actual job progress when
+diagnosing an individual process.
 
 Named volumes `postgres_data`, `minio_data`, and `litellm_db_data` contain
 persistent state. `docker compose down` preserves them; do not use `--volumes`

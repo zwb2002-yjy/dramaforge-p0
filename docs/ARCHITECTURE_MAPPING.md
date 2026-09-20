@@ -59,8 +59,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
   是否拆分物理路径需结合实际调用，不先大搬文件。
 - creative_capabilities 的职责与 director 路径不完全一致；access/projects
   对 creative_templates 的依赖仍需明确是应用层注入还是允许的初始化依赖。
-- ShotReferenceIntent 位于 production，而 contracts 引用它；迁移该契约需
-  同步生产与编排调用，不只是重命名文件。
+- ShotReferenceIntent 已迁至 contracts/shot_reference；production 编译器重新导出同一类型，
+  序列化与既有调用语义保持不变，contract → production 的这条依赖已移除。
 - Provider 对 execution.models 的事实依赖，与对 production/runtime 业务的
   依赖应分别判断；在修改 MODULE_BOUNDARIES 规则前，不把现状自动宣告合规。
 - shared/db 的事务上下文、shared/rls_scopes 的持久归属发现与 model_registry 的全图注册
@@ -78,7 +78,9 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
     docker compose -f docker-compose.quality.yml run --rm --no-deps backend-quality python scripts/arch_import_scan.py --matrix
     docker compose -f docker-compose.quality.yml run --rm --no-deps backend-quality python scripts/arch_import_scan.py --violations
 
-该扫描只报告 import 结构，退出 0 不代表不存在架构违规或产品缺口。
+上述两个模式只报告 import 结构，退出 0 不代表不存在架构违规或产品缺口。
+`arch_import_scan.py --check` 则由 backend full/fast 容器门强制：当前结构与逐边债务基线
+比较，拒绝新增越界依赖和过期豁免。基线不是放宽依赖方向的许可，详见 MODULE_BOUNDARIES §六。
 静态图也不能独自证明反射、注册、HTTP、Worker 或仓库外调用已不存在。
 
 现有硬门分别负责：canonical-surface 禁止已退役入口与归档模型回流；Provider

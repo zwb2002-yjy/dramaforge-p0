@@ -1,9 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { Button, Disclosure, Field, Input, Select, PageHeader } from "../components/ui";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
+import {
+  ProjectModelSourceSummary,
+  ProviderConfigurationBoundaries,
+} from "../components/provider/ProjectModelSourceSummary";
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
 import { WorkspaceModelProfileSettings } from "../components/provider/WorkspaceModelProfileSettings";
 import { TextGatewaySettings } from "../components/provider/TextGatewaySettings";
@@ -24,6 +28,7 @@ import {
   type WorkspaceRead,
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
+import { validateSettingsReturnTo } from "../lib/navigationPreferences";
 
 function SettingsHeader({ title }: { title: string }) {
   return <PageHeader title={title} />;
@@ -339,7 +344,17 @@ export function WorkspaceSettingsPage({
 
 export function ModelConnectionSettingsPage() {
   const { workspaces, projects, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
-  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const returnTo = useRouterState({
+    select: (state) => validateSettingsReturnTo(state.location.search.returnTo),
+  });
+  const originProjectId = returnTo?.match(/^\/projects\/([^/?#]+)/)?.[1];
+  const selectionScope = JSON.stringify([selectedWorkspaceId, returnTo]);
+  const [projectSelection, setProjectSelection] = useState<{ scope: string; id: string } | null>(
+    null,
+  );
+  const selectedProjectId =
+    projectSelection?.scope === selectionScope ? projectSelection.id : originProjectId;
+  // Only a project returned for this workspace may become the selected target.
   const selectedProject = projects.data?.find((project) => project.id === selectedProjectId);
 
   return (
@@ -359,7 +374,7 @@ export function ModelConnectionSettingsPage() {
               selectedWorkspaceId={selectedWorkspaceId}
               onChange={(id) => {
                 selectWorkspace(id);
-                setSelectedProjectId("");
+                setProjectSelection(null);
               }}
             />
           )}
@@ -367,22 +382,44 @@ export function ModelConnectionSettingsPage() {
         <ProviderConnectionPanel
           key={selectedWorkspaceId ?? "no-workspace"}
           workspaceId={selectedWorkspaceId}
-          projects={projects.data ?? []}
+          projects={projects.isSuccess ? projects.data : []}
+          initialProjectId={selectedProject?.id}
         />
       </section>
+      {projects.isError && (
+        <p role="alert">
+          无法确认当前空间的作品列表。
+          <Button onClick={() => void projects.refetch()}>重新读取作品列表</Button>
+        </p>
+      )}
+      {projects.isSuccess && selectedProject && (
+        <ProjectModelSourceSummary
+          key={selectedProject.id}
+          projectId={selectedProject.id}
+          projectName={selectedProject.name}
+        />
+      )}
       <Disclosure title="默认模型方案" testId="default-models-disclosure">
         <WorkspaceModelProfileSettings
           key={selectedWorkspaceId ?? "no-workspace"}
           workspaceId={selectedWorkspaceId}
         />
       </Disclosure>
-      <Disclosure title="项目模型覆盖" testId="project-models-disclosure">
+      <Disclosure
+        title="项目模型覆盖"
+        description={
+          selectedProject ? `当前选择：${selectedProject.name}` : "仅影响所选项目，不更改其他作品"
+        }
+        testId="project-models-disclosure"
+      >
         <Field>
           项目
           <Select
             aria-label="项目模型覆盖"
             value={selectedProject?.id ?? ""}
-            onChange={(event) => setSelectedProjectId(event.target.value)}
+            onChange={(event) =>
+              setProjectSelection({ scope: selectionScope, id: event.target.value })
+            }
           >
             <option value="">选择项目</option>
             {(projects.data ?? []).map((project) => (
@@ -398,6 +435,7 @@ export function ModelConnectionSettingsPage() {
             className="df-btn"
             to="/settings/projects/$projectId"
             params={{ projectId: selectedProject.id }}
+            search={returnTo ? { returnTo } : {}}
           >
             配置项目模型
           </Link>
@@ -432,6 +470,7 @@ export function ProjectSettingsPage() {
       ) : (
         <>
           <section className="df-settings-section">
+            <ProviderConfigurationBoundaries />
             <ModelProfileSettings projectId={projectId} workspaceId={project.data.workspace_id} />
           </section>
         </>

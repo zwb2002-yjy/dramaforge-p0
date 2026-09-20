@@ -2,6 +2,27 @@ import { expect, test, type Page } from "@playwright/test";
 import { installProfessionalMock, PROJECT_ID, SCENE_ID, SHOT_ID } from "./professional-mocks";
 
 async function installProgressMock(page: Page) {
+  await page.addInitScript(() => {
+    const sources: EventTarget[] = [];
+    class TestEventSource extends EventTarget {
+      constructor() {
+        super();
+        sources.push(this);
+      }
+      close() {
+        sources.splice(sources.indexOf(this), 1);
+      }
+    }
+    Object.defineProperty(window, "EventSource", { value: TestEventSource });
+    (
+      window as typeof window & { emitProductionNotice?: (data: unknown) => void }
+    ).emitProductionNotice = (data: unknown) =>
+      sources.forEach((source) =>
+        source.dispatchEvent(
+          new MessageEvent("production.facts.v1", { data: JSON.stringify(data) }),
+        ),
+      );
+  });
   const state = await installProfessionalMock(page);
   state.formalKeyframeArtifactId = "artifact-keyframe-1";
   state.formalVideoArtifactId = "artifact-video-1";
@@ -91,7 +112,7 @@ test("narrow desktop exposes incomplete scenes without production writes", async
   expect(errors).toEqual([]);
 });
 
-test("polling refreshes formal counts and next step while retaining the read-only filter", async ({
+test("production notices refresh formal counts and next step while retaining the read-only filter", async ({
   page,
 }) => {
   const { progress, writes, errors } = await installProgressMock(page);
@@ -99,6 +120,18 @@ test("polling refreshes formal counts and next step while retaining the read-onl
   await expect(page.getByTestId("production-next-step")).toContainText("未确认正式视频");
   await page.getByRole("button", { name: "未完成", exact: true }).click();
   progress.videos = 2;
+  await page.evaluate(
+    ({ projectId, shotId }) => {
+      (
+        window as typeof window & { emitProductionNotice?: (data: unknown) => void }
+      ).emitProductionNotice?.({
+        topic: "production.facts.v1",
+        project_id: projectId,
+        payload: { notice: { kind: "formal_selected", shot_id: shotId } },
+      });
+    },
+    { projectId: PROJECT_ID, shotId: SHOT_ID },
+  );
   await expect(page.getByTestId("stat-formal-videos")).toHaveText("2", { timeout: 10000 });
   await expect(page.getByRole("button", { name: "未完成", exact: true })).toHaveAttribute(
     "aria-pressed",
@@ -121,21 +154,31 @@ test("failed executions expand on demand and locate the shot without retrying", 
 }) => {
   const { writes, errors } = await installProgressMock(page);
   await page.route(
-    (url) => url.pathname === `/api/v1/projects/${PROJECT_ID}/snapshot`,
+    (url) => url.pathname === `/api/v1/projects/${PROJECT_ID}/production-summary`,
     (route) =>
       route.fulfill({
         json: {
           project_id: PROJECT_ID,
-          name: "执行记录验收",
-          artifacts: [],
-          provider_operations: [],
-          node_runs: [
+          total_runs: 1,
+          completed_runs: 0,
+          running_runs: 0,
+          failed_runs: 1,
+          artifact_count: 0,
+          has_more_failures: false,
+          stages: [],
+          recent_failures: [
             {
               id: "failed-video",
               node_key: "video",
               status: "failed",
               attempt_no: 1,
-              input_snapshot: { shot_id: SHOT_ID, execution_branch: "formal" },
+              shot_id: SHOT_ID,
+              execution_branch: "formal",
+              experiment_id: null,
+              result_artifact_id: null,
+              created_at: "2026-09-19T00:00:00Z",
+              error_code: null,
+              error_summary: null,
             },
           ],
         },

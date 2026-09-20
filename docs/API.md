@@ -31,7 +31,7 @@ Migration head: 20260916_0070
 | Assets | assets.py | Asset, AssetVersion, AssetVersionReference, asset cards and tags |
 | References | references.py | explicit ShotReferenceBinding CRUD and `@Asset` resolution |
 | Scenes | scenes.py, workflow_overview.py | scene structure, workspace snapshot, structural commands, read-only project workflow view |
-| Workbench | workbench.py | workspace state, Shot design, execution-plan preview, execution dispatch, formal selection, trace, staged repair (`repair-plan`, `repairs`, `repairs/{id}`, `repairs/{id}/steps`) |
+| Workbench | workbench.py | workspace state, Shot design, execution-plan preview, execution dispatch, formal selection, trace, staged repair (`repair-plan`, `repairs`, `repairs/{id}`, `repairs/{id}/step-plan`, `repairs/{id}/steps`, `repairs/{id}/close`) |
 | Director Assistant | director.py | proposal-only Shot suggestion and recommendation (`/director/shots/{shot_id}/...`), bounded Director turns, runtime start/control/resume signals, read-only runtime capabilities |
 | Director board | director_board.py | per-shot 2D and rough-3D director board state — the only authoritative director-board writer |
 | Review | review.py | evidence annotations and annotation decisions, plus the human review decision (`review-summary`, `review-decisions`) that admits an exact Artifact |
@@ -85,7 +85,8 @@ validated server-side; a disabled button is never the only guard.
 |---|---|---|
 | `POST …/formal-keyframe`, `POST …/formal-video` | a stored human `approved` decision for that exact Artifact (`human_review_decisions`) | 422 `REVIEW_APPROVAL_REQUIRED` with `reason` (`REVIEW_AWAITING_HUMAN`, `REVIEW_DECISION_MISSING`, `REVIEW_DECISION_REJECTED`, `REVIEW_DECISION_STALE`) |
 | `POST …/final-film/render` | the same decision for every clip Artifact on the frozen Timeline | 422 `DELIVERY_REVIEW_REQUIRED` with the offending `artifact_id` and `reason` |
-| `POST …/repairs/{id}/steps` | the step being dispatched is a media step, not a human decision | 422 `REPAIR_STEP_REQUIRES_REVIEW` |
+| `POST …/repairs/{id}/steps` | mandatory displayed `expected_plan_fingerprint`, `expected_step_ordinal` and `idempotency_key`; previous exact candidate must pass human review and explicit Formal adoption | 409 stale plan/step or reused command; 422 `REPAIR_STEP_REQUIRES_REVIEW` |
+| `POST …/repairs/{id}/close` | `completed` requires final reviewed/Formal candidate; `abandoned` ends only this repair, not remote work; neither closes an active or unknown-submission run | 409 `REPAIR_NOT_COMPLETE` / `REPAIR_RUN_ACTIVE` / `REPAIR_SUBMISSION_UNKNOWN` |
 
 Review steps are human actions: the review page records the decision, and the
 Formal selection stays a separate user action. A machine `needs_human` result is
@@ -208,3 +209,61 @@ review 节点在生成证据时将帧作为不可变派生 Artifact 物化，复
 
 以上是补全设计，不是已上线能力声明；实现时先更新后端 OpenAPI，再生成客户端，
 不能在前端自行发明证据响应或直接调用不存在的接口。
+
+## 生产只读模型：摘要、观察与历史
+
+这些 GET 都要求登录、选中的 workspace 与项目所有权；不会受理或重试生成。
+
+| 路径（项目前缀 `/api/v1/projects/{project_id}`） | 合同 |
+|---|---|
+| `/production-summary` | SQL 按镜头 / node key / 执行分支 / 实验选择有效尝试，返回计数、最多 20 条当前失败、`has_more_failures` 与九个 canonical 环节的 `stages`，不返回冻结提示词或全量产物血缘 |
+| `/node-runs/status?run_id=…` | 1–100 个精确 ID，按请求顺序返回状态与结果 Artifact ID；任一缺失或跨项目即整体拒绝，不返回部分成功 |
+| `/production-history/runs` | 历史尝试的轻量分页，只读定位、状态与错误摘要；包含旧尝试，不能当作当前状态计数 |
+| `/production-history/artifacts` | Artifact 只读分页，不下载媒体内容；回收/不可用状态仍按正式存储事实呈现 |
+
+剪辑音频选择复用 Artifact 分页的 `usable_audio=true` 只读筛选：仅返回同项目、类型为 audio、MIME 为 audio/*、存储 available、未软删除且有非空媒体对象的产物。筛选先于 keyset 分页，limit 仍为 1–100；不把 Asset 身份当作 Artifact，不创建生成或修复任务。省略此参数时，历史页原有的完整存储状态展示保持不变。
+
+`stages` 按 `SHOT_NODES` 顺序固定返回九项，每项为 `node_key`、`status_counts`、
+`latest_failure`。只统计 `execution_branch=formal` 且无 `experiment_id` 的有效尝试；
+实验计入顶部资源总数，但不能补齐主线环节。未知 node key 不做子串匹配。
+没有记录时返回空计数和 null 失败，不表示完成。每个环节最多一条当前有效失败，
+不受全局 20 条失败窗口挤出，错误摘要最多 500 字符。执行完成不是人工 Review 或 Formal 的凭据。
+摘要服务使用固定 4 次 SELECT（计数、产物数、近期失败、各环节失败），不随镜头数增加逐项查询；
+路由权限查询另计。
+
+历史接口 `limit` 默认 25、范围 1–100，游标按 `created_at DESC, id DESC` 稳定分页，
+返回 `items` 与 `next_cursor`，无下一页时为 null；无效游标返回 422。
+原 `/snapshot` 保留供完整诊断/证明工具使用，不再是制作总览或成片等待的轮询接口。
+其依赖读取与 Worker 共用同一失败关闭判定，通过批量读取避免逐 run 查询。
+查询数量回归在 `test_production_bounded_reads.py` 中覆盖不同数据规模；这不是响应时延 SLA。
+
+
+### 镜头配音配置与成片准备身份
+
+- GET /api/v1/projects/{project_id}/voice-options：经过当前工作空间与项目 Owner 授权，只返回实例配置、默认音色、可选音色与服务说明；不探测服务、不发送对白。status=configured 只代表配置有效，不代表已经联网验证。
+- ShotDirectorState.voice 使用 ShotVoiceSettings：voice_id=null 表示沿用实例默认，rate_percent 范围 -30 到 30；经既有镜头 design PATCH 与 expected_version 保存。未知/不兼容音色在写入变更或生成冻结时拒绝，不自动替换。
+- FinalFilmPrepareRead.preparation_fingerprint 表示本次实际准备的尾部素材身份（包含相关 NodeRun）。客户端将该指纹和剪辑会话/时间线版本一起用于显式 render 的幂等键；缺少此回执时不盲目重试或渲染旧素材。
+
+## Resumable repair commands
+
+`step-plan` is read-only: it resolves saved Shot references (excluding experiments),
+the current model/connection/credential revision and saved creative inputs into the
+same WorkbenchExecutionPlan used for dispatch. Unresolved or unsupported references
+fail closed. Approximate references may be previewed as warnings; they are not
+executable until the user explicitly requests a second preview with
+`accept_approximations=true`, then confirms its new fingerprint with the same flag
+in the execution body. They are never silently dropped or auto-accepted. A changed
+input requires another preview and explicit confirmation.
+
+One Shot has at most one active Repair. Progress comes from NodeRun status, the
+exact adopted Artifact and its applicable stored human decision, never step count.
+For keyframe-then-video repairs, media ordinals are 1 and 3; review remains the
+existing Review/Formal UI action, not another provider command. `next_action` is
+`execute_step`, `wait`, `human_decision`, `ready_to_close`, `close_or_replan`,
+`reconcile_submission` or `closed`;
+`next_step_ordinal` is non-null only when a media step can be previewed. A lost-response
+retry with the same key, ordinal and fingerprint returns its original receipt before
+re-resolving mutable settings; it cannot advance to the next step. No blind repair
+retry exists for failed/unknown provider work. `node_run_error_code` exposes
+`PROVIDER_SUBMISSION_UNKNOWN` even though the NodeRun status is `failed`; such a
+repair cannot be abandoned to unlock another submission before reconciliation.

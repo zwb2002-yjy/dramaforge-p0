@@ -339,6 +339,23 @@ export interface paths {
         patch: operations["rename_workspace_api_v1_workspaces__workspace_id__patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/voice-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Voice Options */
+        get: operations["get_voice_options_api_v1_projects__project_id__voice_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/workspace-state": {
         parameters: {
             query?: never;
@@ -594,6 +611,43 @@ export interface paths {
          * @description Dispatch the next confirmed step; review steps are refused here.
          */
         post: operations["execute_repair_step_api_v1_projects__project_id__shots__shot_id__repairs__repair_id__steps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/repairs/{repair_id}/step-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Repair Step
+         * @description Read-only media plan preview; no provider submission or queued run.
+         */
+        post: operations["preview_repair_step_api_v1_projects__project_id__shots__shot_id__repairs__repair_id__step_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/repairs/{repair_id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close Repair */
+        post: operations["close_repair_api_v1_projects__project_id__shots__shot_id__repairs__repair_id__close_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1123,6 +1177,74 @@ export interface paths {
         };
         /** Project Snapshot */
         get: operations["project_snapshot_api_v1_projects__project_id__snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Production Summary */
+        get: operations["production_summary_api_v1_projects__project_id__production_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/node-runs/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Production Run Statuses */
+        get: operations["production_run_statuses_api_v1_projects__project_id__node_runs_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-history/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Production Run History */
+        get: operations["production_run_history_api_v1_projects__project_id__production_history_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-history/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Production Artifact History */
+        get: operations["production_artifact_history_api_v1_projects__project_id__production_history_artifacts_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4203,6 +4325,8 @@ export interface components {
             shot_ids: string[];
             /** Node Run Ids */
             node_run_ids: string[];
+            /** Preparation Fingerprint */
+            preparation_fingerprint: string;
             /**
              * Status
              * @default queued
@@ -4909,6 +5033,100 @@ export interface components {
              */
             paid_request_confirmed: boolean;
         };
+        /** ProductionArtifactPage */
+        ProductionArtifactPage: {
+            /** Items */
+            items: components["schemas"]["ArtifactRead"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** ProductionRunHistoryRead */
+        ProductionRunHistoryRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /** Result Artifact Id */
+            result_artifact_id: string | null;
+            /** Node Key */
+            node_key: string;
+            /** Attempt No */
+            attempt_no: number;
+            /** Shot Id */
+            shot_id: string | null;
+            /** Execution Branch */
+            execution_branch: string;
+            /** Experiment Id */
+            experiment_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Summary */
+            error_summary: string | null;
+        };
+        /** ProductionRunPage */
+        ProductionRunPage: {
+            /** Items */
+            items: components["schemas"]["ProductionRunHistoryRead"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** ProductionRunStatusRead */
+        ProductionRunStatusRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /** Result Artifact Id */
+            result_artifact_id: string | null;
+        };
+        /**
+         * ProductionStageRead
+         * @description Effective mainline attempts, never an inferred Formal or approval state.
+         */
+        ProductionStageRead: {
+            /** Node Key */
+            node_key: string;
+            /** Status Counts */
+            status_counts: {
+                [key: string]: number;
+            };
+            latest_failure: components["schemas"]["ProductionRunHistoryRead"] | null;
+        };
+        /** ProductionSummaryRead */
+        ProductionSummaryRead: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Total Runs */
+            total_runs: number;
+            /** Completed Runs */
+            completed_runs: number;
+            /** Running Runs */
+            running_runs: number;
+            /** Failed Runs */
+            failed_runs: number;
+            /** Artifact Count */
+            artifact_count: number;
+            /** Recent Failures */
+            recent_failures: components["schemas"]["ProductionRunHistoryRead"][];
+            /** Has More Failures */
+            has_more_failures: boolean;
+            /** Stages */
+            stages: components["schemas"]["ProductionStageRead"][];
+        };
         /** ProfileCreate */
         ProfileCreate: {
             /** Name */
@@ -5453,6 +5671,14 @@ export interface components {
             /** Clip Ids */
             clip_ids: string[];
         };
+        /** RepairCloseBody */
+        RepairCloseBody: {
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "completed" | "abandoned";
+        };
         /** RepairCreateBody */
         RepairCreateBody: {
             /**
@@ -5555,13 +5781,43 @@ export interface components {
             steps: components["schemas"]["RepairStepRead"][];
             /** Next Action */
             next_action: string;
+            /** Next Step Ordinal */
+            next_step_ordinal: number | null;
         };
         /** RepairStepExecuteBody */
         RepairStepExecuteBody: {
             /** Expected Plan Fingerprint */
-            expected_plan_fingerprint?: string | null;
+            expected_plan_fingerprint: string;
+            /** Expected Step Ordinal */
+            expected_step_ordinal: number;
+            /**
+             * Accept Approximations
+             * @default false
+             */
+            accept_approximations: boolean;
             /** Idempotency Key */
-            idempotency_key?: string | null;
+            idempotency_key: string;
+        };
+        /** RepairStepPlanBody */
+        RepairStepPlanBody: {
+            /**
+             * Accept Approximations
+             * @default false
+             */
+            accept_approximations: boolean;
+        };
+        /** RepairStepPlanRead */
+        RepairStepPlanRead: {
+            /**
+             * Repair Id
+             * Format: uuid
+             */
+            repair_id: string;
+            /** Step Ordinal */
+            step_ordinal: number;
+            /** Stage */
+            stage: string;
+            plan: components["schemas"]["WorkbenchExecutionPlan"];
         };
         /** RepairStepRead */
         RepairStepRead: {
@@ -5582,6 +5838,8 @@ export interface components {
             node_run_id: string | null;
             /** Node Run Status */
             node_run_status: string | null;
+            /** Node Run Error Code */
+            node_run_error_code?: string | null;
             /** Result Artifact Id */
             result_artifact_id: string | null;
             /** Confirmed At */
@@ -6255,6 +6513,7 @@ export interface components {
                 [key: string]: unknown;
             }[];
             model_overrides?: components["schemas"]["ShotModelOverrides"];
+            voice?: components["schemas"]["ShotVoiceSettings"];
             /** Video Reference Risk */
             video_reference_risk?: {
                 [key: string]: unknown;
@@ -6466,6 +6725,16 @@ export interface components {
             location_name: string;
             /** Time Of Day */
             time_of_day: string;
+        };
+        /** ShotVoiceSettings */
+        ShotVoiceSettings: {
+            /** Voice Id */
+            voice_id?: string | null;
+            /**
+             * Rate Percent
+             * @default 0
+             */
+            rate_percent: number;
         };
         /**
          * ShotWorkbenchRead
@@ -6680,6 +6949,35 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VoiceOptionRead */
+        VoiceOptionRead: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Locale */
+            locale: string;
+        };
+        /** VoiceOptionsRead */
+        VoiceOptionsRead: {
+            /** Engine */
+            engine: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "configured" | "disabled" | "invalid";
+            /** Default Voice */
+            default_voice: string;
+            /** Network */
+            network: boolean;
+            /** Service Notice */
+            service_notice: string;
+            /** Voices */
+            voices: components["schemas"]["VoiceOptionRead"][];
         };
         /**
          * WorkbenchExecutionPlan
@@ -7833,6 +8131,43 @@ export interface operations {
             };
         };
     };
+    get_voice_options_api_v1_projects__project_id__voice_options_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceOptionsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_workspace_state_api_v1_projects__project_id__workspace_state_get: {
         parameters: {
             query?: {
@@ -8441,6 +8776,94 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RepairExecuteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_repair_step_api_v1_projects__project_id__shots__shot_id__repairs__repair_id__step_plan_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+                repair_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RepairStepPlanBody"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairStepPlanRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    close_repair_api_v1_projects__project_id__shots__shot_id__repairs__repair_id__close_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+                repair_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairCloseBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairRequestRead"];
                 };
             };
             /** @description Validation Error */
@@ -9726,6 +10149,160 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    production_summary_api_v1_projects__project_id__production_summary_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionSummaryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    production_run_statuses_api_v1_projects__project_id__node_runs_status_get: {
+        parameters: {
+            query: {
+                run_id: string[];
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionRunStatusRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    production_run_history_api_v1_projects__project_id__production_history_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionRunPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    production_artifact_history_api_v1_projects__project_id__production_history_artifacts_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                usable_audio?: boolean;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionArtifactPage"];
                 };
             };
             /** @description Validation Error */

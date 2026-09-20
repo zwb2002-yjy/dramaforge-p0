@@ -101,7 +101,7 @@ test("director policy follows creation, not project model settings", async ({ pa
       body: { expected_version: 1, director_autonomy: "MANUAL" },
     },
   ]);
-  await page.getByRole("link", { name: "场景", exact: true }).click();
+  await page.getByRole("link", { name: "分镜制作", exact: true }).click();
   await expect(policy).toHaveValue("MANUAL");
   await page.goto(`/settings/projects/${PROJECT_ID}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
@@ -148,7 +148,8 @@ test("project model fields fit a narrow window without overlapping or overflowin
   // Close the small-window navigation through its single active control.
   await page.getByRole("link", { name: "设置", exact: true }).click();
   const controls = page.getByTestId("model-profile-settings").locator("select");
-  await expect(controls).toHaveCount(4);
+  await expect(controls).toHaveCount(3);
+  await expect(page.getByTestId("model-picker-audio.tts")).toHaveCount(0);
   const bounds = await controls.evaluateAll((elements) =>
     elements.map((element) => {
       const parent = element.closest("label")!.getBoundingClientRect();
@@ -280,7 +281,7 @@ test("return links respect production and model parents instead of relying on br
   const { writes, errors } = await setup(page);
   for (const [path, label, target] of [
     [`/projects/${PROJECT_ID}/production`, "返回项目大厅", "/"],
-    [`/projects/${PROJECT_ID}/review`, "返回制作", `/projects/${PROJECT_ID}/production`],
+    [`/projects/${PROJECT_ID}/review`, "返回作品总览", `/projects/${PROJECT_ID}/production`],
     [`/settings/projects/${PROJECT_ID}`, "返回模型连接", "/settings/models"],
   ]) {
     await page.goto(path);

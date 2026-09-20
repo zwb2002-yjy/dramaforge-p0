@@ -11,7 +11,7 @@ from uuid import UUID
 
 import httpx
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
@@ -46,6 +46,12 @@ _CAPABILITIES = frozenset(
         "video_poll_download",
     }
 )
+
+
+# No generation probe may dispatch until the API can carry a positive per-call
+# budget and Owner authorization. Plugin metadata cannot turn generation into a
+# read-only operation by accidentally omitting it from paid_capabilities.
+_READ_ONLY_PROBE_CAPABILITIES = frozenset({"auth_models", "video_poll_download"})
 
 
 def _resolve_plugin(provider_type: str, protocol_profile: str) -> ProviderPlugin:
@@ -345,25 +351,12 @@ class ProviderConnectionService:
         """Invalidate evidence whenever the effective account endpoint changes.
 
         A key rotation and a Base URL change can both point at another account.
-        Capability/quality evidence is therefore tied to both, never retained
-        merely because the connection row keeps the same id.
+        Reset current projections, not immutable historical evidence. Old
+        capability/quality rows remain auditable but do not re-enable bindings
+        merely because the mutable connection keeps the same id.
         """
         connection.verification_status = "unverified"
         connection.verified_at = None
-        await self._session.execute(
-            delete(ProviderCapabilityEvidence).where(
-                ProviderCapabilityEvidence.connection_id == connection.id
-            )
-        )
-        await self._session.execute(
-            delete(ProviderQualityEvidence).where(
-                ProviderQualityEvidence.model_binding_id.in_(
-                    select(ProviderModelBinding.id).where(
-                        ProviderModelBinding.connection_id == connection.id
-                    )
-                )
-            )
-        )
         bindings = list(
             (
                 await self._session.execute(
@@ -410,12 +403,26 @@ class ProviderConnectionService:
         await self._session.flush()
         return connection
 
-    async def _connection_settings(self, connection: ProviderConnection) -> Settings:
-        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+    async def _connection_settings(
+        self,
+        connection: ProviderConnection,
+        *,
+        revision: ProviderConnectionRevision | None = None,
+    ) -> Settings:
+        # Snapshot the endpoint and exact credential before any await. A probe
+        # must not mix the old credential with a concurrently rotated endpoint.
+        provider_type = revision.provider_type if revision else connection.provider_type
+        profile = revision.protocol_profile if revision else connection.protocol_profile
+        credential_id = (
+            revision.credential_revision_id if revision else connection.credential_id
+        )
+        base_url = revision.base_url if revision else connection.base_url
+        enabled = connection.enabled
+        plugin = _resolve_plugin(provider_type, profile)
         secret = await read_credential_by_id(
             self._session,
             workspace_id=connection.workspace_id,
-            credential_id=connection.credential_id,
+            credential_id=credential_id,
             keyring=configured_byok_keyring(),
         )
         if not secret:
@@ -426,9 +433,9 @@ class ProviderConnectionService:
         prefix = plugin.prefix
         return get_settings().model_copy(
             update={
-                f"{prefix}_enabled": connection.enabled,
+                f"{prefix}_enabled": enabled,
                 f"{prefix}_api_key": secret,
-                f"{prefix}_base_url": connection.base_url,
+                f"{prefix}_base_url": base_url,
             }
         )
 
@@ -436,14 +443,19 @@ class ProviderConnectionService:
         self,
         connection: ProviderConnection,
         binding: ProviderModelBinding | None,
+        *,
+        revision: ProviderConnectionRevision | None = None,
     ) -> Settings:
         """Settings whose model fields resolve to the probed binding's
         ``invoke_model_value`` when a binding is given (never Settings defaults
         for a binding-scoped probe)."""
-        cfg = await self._connection_settings(connection)
+        cfg = await self._connection_settings(connection, revision=revision)
         if binding is None:
             return cfg
-        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        plugin = _resolve_plugin(
+            revision.provider_type if revision else connection.provider_type,
+            revision.protocol_profile if revision else connection.protocol_profile,
+        )
         model_field = f"{plugin.prefix}_{binding.media_type}_model"
         return cfg.model_copy(update={model_field: binding.invoke_model_value})
 
@@ -538,14 +550,6 @@ class ProviderConnectionService:
     ) -> ProviderCapabilityEvidence:
         if capability not in _CAPABILITIES:
             raise ValidationAppError("unsupported Provider capability")
-        # Only auth_models is a connection-level probe. Every model capability
-        # probe must name a binding: proving one model must never advance a
-        # sibling binding on the same connection (review gate 5).
-        if capability != "auth_models" and model_binding_id is None:
-            raise ValidationAppError(
-                "model capability Probe requires a model_binding_id",
-                details={"code": "PROBE_BINDING_REQUIRED"},
-            )
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
@@ -555,10 +559,34 @@ class ProviderConnectionService:
                 "provider connection is disabled",
                 details={"code": "PROVIDER_CONNECTION_DISABLED"},
             )
-        if capability in plugin.paid_capabilities and not paid_request_confirmed:
+        if (
+            capability not in _READ_ONLY_PROBE_CAPABILITIES
+            or capability in plugin.paid_capabilities
+        ):
             raise ValidationAppError(
-                "paid Probe requires explicit request confirmation",
-                details={"code": "PAID_REQUEST_CONFIRMATION_REQUIRED"},
+                "paid Provider probes are unavailable without a positive per-call budget and Owner "
+                "authorization contract; a confirmation checkbox is not authorization",
+                details={"code": "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"},
+            )
+        # Only auth_models is a connection-level probe. Every model capability
+        # probe must name a binding: proving one model must never advance a
+        # sibling binding on the same connection (review gate 5).
+        if capability != "auth_models" and model_binding_id is None:
+            raise ValidationAppError(
+                "model capability Probe requires a model_binding_id",
+                details={"code": "PROBE_BINDING_REQUIRED"},
+            )
+        probe_revision = await self.current_connection_revision(connection=connection)
+        probe_credential_revision = connection.credential_revision
+        if (
+            probe_revision.credential_revision_id != connection.credential_id
+            or probe_revision.base_url != connection.base_url
+            or probe_revision.protocol_profile != connection.protocol_profile
+            or probe_revision.provider_type != connection.provider_type
+        ):
+            raise ValidationAppError(
+                "provider connection changed before the probe; reload its current state",
+                details={"code": "PROVIDER_CONNECTION_REVISION_CHANGED"},
             )
         binding = await self._get_probe_binding(
             workspace_id=workspace_id,
@@ -574,6 +602,7 @@ class ProviderConnectionService:
             .where(
                 ProviderCapabilityEvidence.connection_id == connection.id,
                 ProviderCapabilityEvidence.capability == capability,
+                ProviderCapabilityEvidence.credential_revision == probe_credential_revision,
                 ProviderCapabilityEvidence.tested_at > datetime.now(UTC) - timedelta(seconds=30),
             )
             .order_by(ProviderCapabilityEvidence.tested_at.desc())
@@ -583,8 +612,8 @@ class ProviderConnectionService:
                 "probe rate limited; wait before retrying",
                 details={"code": "PROBE_RATE_LIMITED"},
             )
-        cfg = await self._probe_settings(connection, binding)
-        client = plugin.build_client(cfg, host=connection.base_url)
+        cfg = await self._probe_settings(connection, binding, revision=probe_revision)
+        client = plugin.build_client(cfg, host=probe_revision.base_url)
         reference_artifact: Artifact | None = None
         reference_bytes: bytes | None = None
         reference_mime = "image/png"
@@ -622,7 +651,8 @@ class ProviderConnectionService:
                 {
                     "capability": capability,
                     "connection_id": str(connection.id),
-                    "credential_revision": connection.credential_revision,
+                    "credential_revision": probe_credential_revision,
+                    "connection_revision_id": str(probe_revision.id),
                     "reference_artifact_id": (
                         str(reference_artifact_id) if reference_artifact_id else None
                     ),
@@ -645,11 +675,11 @@ class ProviderConnectionService:
             try:
                 async with httpx.AsyncClient(timeout=30.0) as http:
                     response = await http.get(
-                        f"{connection.base_url}{plugin.model_list_path}",
+                        f"{probe_revision.base_url}{plugin.model_list_path}",
                         headers={
                             "Authorization": f"Bearer {getattr(cfg, f'{plugin.prefix}_api_key')}"
                         },
-                )
+                    )
                 http_status = response.status_code
                 status = "passed" if response.status_code < 400 else "failed"
                 if status == "passed":
@@ -804,27 +834,94 @@ class ProviderConnectionService:
             capability_manifest_hash=(
                 binding.capability_manifest_hash if binding is not None else None
             ),
-            credential_revision=connection.credential_revision,
+            credential_revision=probe_credential_revision,
             created_by=actor.id,
         )
         self._session.add(evidence)
-        if capability == "auth_models" and status == "passed":
-            connection.verification_status = "verified"
-            connection.verified_at = datetime.now(UTC)
+        await self._apply_probe_outcome(
+            evidence=evidence,
+            revision=probe_revision,
+            listed_model_ids=listed_model_ids,
+            actor=actor,
+        )
+        await self._session.flush()
+        return evidence
+
+    async def _apply_probe_outcome(
+        self,
+        *,
+        evidence: ProviderCapabilityEvidence,
+        revision: ProviderConnectionRevision,
+        listed_model_ids: set[str],
+        actor: User,
+    ) -> None:
+        """Apply only a current revision's conclusive outcome, keeping history.
+
+        Hold the mutable connection lock only after network completion. Refresh
+        the identity-map instance under that lock: checking the old ORM object
+        alone would allow an old request to revoke a newly verified credential.
+        """
+        passed = evidence.status in {"passed", "succeeded"}
+        credential_rejected = (
+            evidence.capability == "auth_models" and evidence.http_status in {401, 403}
+        )
+        if not passed and not credential_rejected:
+            # Timeouts, network/5xx failures and malformed catalogs are not proof
+            # that the stored credential has been rejected.
+            return
+        current = await self._session.scalar(
+            select(ProviderConnection)
+            .where(
+                ProviderConnection.id == evidence.connection_id,
+                ProviderConnection.workspace_id == evidence.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if current is None:
+            return
+        current_revision = await self.current_connection_revision(connection=current)
+        if (
+            current_revision.id != revision.id
+            or current.credential_id != revision.credential_revision_id
+            or current.credential_revision != evidence.credential_revision
+            or current.provider_type != revision.provider_type
+            or current.protocol_profile != revision.protocol_profile
+            or current.base_url != revision.base_url
+        ):
+            return
+        if credential_rejected:
+            current.verification_status = "failed"
+            current.verified_at = None
+            current.updated_by = actor.id
+            bindings = await self._session.scalars(
+                select(ProviderModelBinding)
+                .where(ProviderModelBinding.connection_id == current.id)
+                .execution_options(populate_existing=True)
+            )
+            for binding in bindings:
+                binding.account_verified = False
+                binding.updated_by = actor.id
+            # Accepted quality evidence remains true historical quality evidence;
+            # account_verified=False is the execution blocker, not quality_gated.
+            return
+        if not current.enabled:
+            return
+        if evidence.capability == "auth_models":
+            current.verification_status = "verified"
+            current.verified_at = datetime.now(UTC)
+            current.updated_by = actor.id
             await self._mark_listed_models_verified(
-                connection_id=connection.id,
+                connection_id=current.id,
                 model_ids=listed_model_ids,
                 actor=actor,
             )
-        if status in {"passed", "succeeded"}:
-            await self._mark_capability_verified(
-                connection_id=connection.id,
-                capability=capability,
-                actor=actor,
-                model_binding_id=binding.id if binding is not None else None,
-            )
-        await self._session.flush()
-        return evidence
+        await self._mark_capability_verified(
+            connection_id=current.id,
+            capability=evidence.capability,
+            actor=actor,
+            model_binding_id=evidence.model_binding_id,
+        )
 
     async def _mark_listed_models_verified(
         self,

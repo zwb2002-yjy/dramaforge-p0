@@ -44,6 +44,7 @@ function sameReferences(left: ShotExecutionReference[], right: ShotExecutionRefe
 
 function draftFromShot(shot: ShotLite): ShotDesignDraft {
   return {
+    dialogue: shot.dialogue ?? "",
     image_prompt: shot.image_prompt,
     video_prompt: shot.video_prompt,
     director_state: { ...shot.director_state },

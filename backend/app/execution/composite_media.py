@@ -100,6 +100,9 @@ async def composite_inputs_pending(
         return False
 
     shot_id = str((run.input_snapshot or {}).get("shot_id") or "").strip()
+    formal_video_artifact_id = str(
+        (run.input_snapshot or {}).get("formal_video_artifact_id") or ""
+    ).strip()
     if not shot_id:
         return False
 
@@ -126,6 +129,12 @@ async def composite_inputs_pending(
         if priority is None:
             continue
         key = source_node.node_key
+        if (
+            key == "video"
+            and formal_video_artifact_id
+            and str(source_run.result_artifact_id or "") != formal_video_artifact_id
+        ):
+            continue
         current = latest_by_key.get(key)
         if current is None or (
             priority,
@@ -151,6 +160,9 @@ async def resolve_composite_inputs(
 ) -> CompositeInputs:
     """Resolve the latest successful video, voice, and subtitle for this shot."""
     shot_id = str((run.input_snapshot or {}).get("shot_id") or "").strip()
+    formal_video_artifact_id = str(
+        (run.input_snapshot or {}).get("formal_video_artifact_id") or ""
+    ).strip()
     if not shot_id:
         raise CompositeInputMissingError("composite run has no shot_id")
 
@@ -178,6 +190,12 @@ async def resolve_composite_inputs(
             continue
         priority = branch_priority(source_run.input_snapshot, run.input_snapshot)
         if priority is None:
+            continue
+        if (
+            key == "video"
+            and formal_video_artifact_id
+            and str(source_run.result_artifact_id or "") != formal_video_artifact_id
+        ):
             continue
         current = selected.get(key)
         if current is None or (

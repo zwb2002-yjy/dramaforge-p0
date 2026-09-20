@@ -386,7 +386,8 @@
   }
   .rs-stage .qc-canvas-media img,
   .rs-stage .qc-canvas-media video {
-    max-height: 38svh;
+    /* Reserve first-screen space for the project guide and intention control. */
+    max-height: var(--df-scene-compact-media-height);
   }
   .rs-intent {
     width: calc(100% - 24px);
