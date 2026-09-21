@@ -101,12 +101,15 @@ test("director policy follows creation, not project model settings", async ({ pa
       body: { expected_version: 1, director_autonomy: "MANUAL" },
     },
   ]);
-  await page.getByRole("navigation", {name:"创作流程"}).getByRole("link", { name: "03 分镜制作", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "创作流程" })
+    .getByRole("link", { name: "03 分镜制作", exact: true })
+    .click();
   await expect(policy).toHaveValue("MANUAL");
   await page.goto(`/settings/projects/${PROJECT_ID}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
   await expect(page.getByRole("combobox", { name: "导演参与度" })).toHaveCount(0);
-  await page.getByRole("link", {name:"设置", exact:true}).click();
+  await page.getByRole("link", { name: "设置", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "设置导航" }).getByRole("link")).toHaveCount(2);
   expect(errors).toEqual([]);
 });
@@ -121,7 +124,7 @@ test("workspace management belongs to Projects and no longer contains model conf
     "aria-current",
     "page",
   );
-  await expect(page.getByRole("heading", {name:"工作空间", level:1})).toBeVisible();
+  await expect(page.getByRole("heading", { name: "工作空间", level: 1 })).toBeVisible();
   await expect(page.getByRole("region", { name: "工作空间管理" })).toBeVisible();
   await expect(page.getByTestId("workspace-model-profile-settings")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "创建空间", exact: true })).toBeVisible();

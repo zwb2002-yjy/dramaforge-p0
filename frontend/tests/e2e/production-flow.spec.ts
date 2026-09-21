@@ -125,7 +125,9 @@ test("a missing production read endpoint shows an actionable version warning, no
   await expect(flow.getByTestId("production-stage-voice")).toContainText("状态暂不可用");
   await expect(flow.getByTestId("production-stage-voice")).not.toContainText("暂无执行记录");
   await expect(
-    page.getByRole("navigation",{name:"创作流程"}).getByRole("link", { name: "01 故事剧本", exact: true }),
+    page
+      .getByRole("navigation", { name: "创作流程" })
+      .getByRole("link", { name: "01 故事剧本", exact: true }),
   ).toBeVisible();
   expect(writes).toEqual([]);
   expect(errors).toEqual([]);

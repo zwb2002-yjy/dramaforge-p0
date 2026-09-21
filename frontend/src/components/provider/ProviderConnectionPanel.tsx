@@ -69,9 +69,7 @@ export function ProviderConnectionPanel(props: ProviderConnectionPanelProps) {
   return (
     <section className="panel provider-config" data-testid="provider-config">
       <h2>图像与视频</h2>
-      <p className="muted">
-        连接供应商后，在「默认模型」中选择生成模型。密钥仅保存，不回显。
-      </p>
+      <p className="muted">连接供应商后，在「默认模型」中选择生成模型。密钥仅保存，不回显。</p>
       {plugins.isPending && <p role="status">正在读取供应商插件…</p>}
       {plugins.isError && (
         <p role="alert">

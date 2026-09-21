@@ -48,7 +48,11 @@ for (const width of [1920, 1440, 1024, 768]) {
     const writes: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("request", (r) => {
-      if (["POST", "PATCH", "PUT", "DELETE"].includes(r.method()) && !new URL(r.url()).pathname.endsWith("/workspace-state")) writes.push(r.url());
+      if (
+        ["POST", "PATCH", "PUT", "DELETE"].includes(r.method()) &&
+        !new URL(r.url()).pathname.endsWith("/workspace-state")
+      )
+        writes.push(r.url());
     });
     for (const [name, url] of scenarios) {
       await test.step(name, async () => {

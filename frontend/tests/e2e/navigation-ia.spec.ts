@@ -204,7 +204,10 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 
-  await page.getByRole("navigation",{name:"创作导航"}).getByRole("link", { name: "故事剧本", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "创作导航" })
+    .getByRole("link", { name: "故事剧本", exact: true })
+    .click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/script`);
   await expect(page.getByRole("link", { name: "创作", exact: true })).toHaveAttribute(
     "aria-expanded",
@@ -501,8 +504,8 @@ test("new project keeps essentials visible and retains collapsed options without
   await page.getByLabel("创作模板", { exact: true }).selectOption("single_monologue_v1");
   await page.getByLabel("导演参与度", { exact: true }).selectOption("MANUAL");
   await options.click();
-  await expect(page.getByLabel("创作模板", {exact: true})).toHaveValue("single_monologue_v1");
-  await expect(page.getByLabel("导演参与度", {exact: true})).toHaveValue("MANUAL");
+  await expect(page.getByLabel("创作模板", { exact: true })).toHaveValue("single_monologue_v1");
+  await expect(page.getByLabel("导演参与度", { exact: true })).toHaveValue("MANUAL");
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await expect(page.getByRole("region", { name: "新建项目" })).not.toBeVisible();
   await page.getByRole("button", { name: "新建项目", exact: true }).click();
