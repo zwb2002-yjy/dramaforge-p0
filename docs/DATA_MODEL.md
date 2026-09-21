@@ -105,6 +105,8 @@ Migration 20260902_0051 removes:
 | 20260910_0065 | Director turn engine binding (`engine_version`, `state_schema_version`, `runtime_execution_id`, `runtime_revision`) and `director_runtime_controls`, `director_runtime_wakeups`, `director_runtime_signal_claims`. |
 | 20260917_0071 | Remove the retired `face_review` node type and unused `export_format` / `export_status` PostgreSQL enum types; `project_stage` now reuses the shared ORM enum definition. |
 | 20260917_0072 | Add a SECURITY DEFINER outbox metrics query for process-wide pending count and oldest pending age. |
+| 20260919_0073 | Add bounded persisted Provider recovery discovery. |
+| 20260921_0074 | Persist the model IDs returned by immutable account catalog probe evidence. |
 | 20260910_0066 | Private `director_runtime_checkpoints` schema and its role. |
 | 20260916_0070 | Canonical Asset/AssetVersion lifecycle constraints, current Formal pointers, and one-time migration of legacy `metadata.tags` into `asset_tags` / `asset_tag_links`. |
 
@@ -114,7 +116,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20260917_0072.
+- Alembic has one head: 20260921_0074.
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.

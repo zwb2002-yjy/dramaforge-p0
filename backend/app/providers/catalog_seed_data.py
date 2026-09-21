@@ -32,6 +32,10 @@ SEEDANCE_2_DOCUMENTED_AT = "2026-08-17"
 
 AGNES_IMAGE_MANIFEST_VERSION = "2026-08-19"
 AGNES_IMAGE_DOCUMENTED_AT = "2026-08-19"
+AGNES_VIDEO_25_MANIFEST_VERSION = "2026-09-21"
+AGNES_VIDEO_25_DOCUMENTED_AT = "2026-09-21"
+OPENAI_MEDIA_MANIFEST_VERSION = "2026-09-21"
+OPENAI_MEDIA_DOCUMENTED_AT = "2026-09-21"
 
 # ---------------------------------------------------------------------------
 # Contract hash: stable canonical JSON sha256. Order- and whitespace-insensitive.
@@ -75,6 +79,7 @@ def _manifest(
     display_name: str,
     operations: dict[str, dict[str, Any]],
     option_schema: dict[str, Any] | None = None,
+    catalog_source: str = "official_static",
     manifest_version: str = MANIFEST_VERSION,
     documented_at: str = DOCUMENTED_AT,
 ) -> dict[str, Any]:
@@ -87,7 +92,7 @@ def _manifest(
         "media_kind": media_kind,
         "display_name": display_name,
         "lifecycle": "active",
-        "catalog_source": "official_static",
+        "catalog_source": catalog_source,
         "documented_at": documented_at,
         "operations": operations,
         "option_schema": option_schema or {"namespace": "", "options": {}},
@@ -127,6 +132,33 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
                 reference_constraints={
                     "reference_image": {"min": 0, "max": 1},
                 },
+            )
+        },
+    ),
+    # Capability-plugin contract for Agnes' modern OpenAI-compatible async
+    # video protocol. The remote model id is discovered and stored on the
+    # binding; this template is reusable by every compatible 2.5 model.
+    _manifest(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="@contract/agnes-video-openai-async-v2",
+        model_revision="v1",
+        media_kind="video",
+        display_name="Agnes Video 2.5 协议插件",
+        manifest_version=AGNES_VIDEO_25_MANIFEST_VERSION,
+        documented_at=AGNES_VIDEO_25_DOCUMENTED_AT,
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.i2v.first_frame"],
+                output_constraints={
+                    "protocol_generation": "2.5",
+                    "resolution": "720P",
+                    "duration_seconds": 5,
+                    "aspect_ratio": "9:16",
+                    "native_audio": False,
+                },
+                reference_constraints={"first_frame": {"min": 1, "max": 1}},
             )
         },
     ),
@@ -276,6 +308,52 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
                     "resolution": "768P",
                     "duration_seconds": 5,
                     "aspect_ratio": "adaptive",
+                    "native_audio": False,
+                },
+                reference_constraints={"first_frame": {"min": 1, "max": 1}},
+            )
+        },
+    ),
+    # Protocol-level contracts. These are deliberately not supplier model
+    # entries: one contract can be reused by every discovered model returned by
+    # an OpenAI-compatible media endpoint.
+    _manifest(
+        provider_type="openai_compatible_media",
+        protocol_profile="openai_media_v1",
+        model_id="@contract/openai-image-v1",
+        model_revision="v1",
+        media_kind="image",
+        display_name="OpenAI 兼容图像协议",
+        catalog_source="protocol_contract",
+        manifest_version=OPENAI_MEDIA_MANIFEST_VERSION,
+        documented_at=OPENAI_MEDIA_DOCUMENTED_AT,
+        operations={
+            "image.generate": _operation(
+                "image.generate",
+                capabilities=["image.t2i", "image.i2i"],
+                output_constraints={"response_format": "url", "size": "1024x1024"},
+                reference_constraints={"reference_image": {"min": 0, "max": 1}},
+            )
+        },
+    ),
+    _manifest(
+        provider_type="openai_compatible_media",
+        protocol_profile="openai_media_v1",
+        model_id="@contract/openai-video-v1",
+        model_revision="v1",
+        media_kind="video",
+        display_name="OpenAI 兼容异步视频协议",
+        catalog_source="protocol_contract",
+        manifest_version=OPENAI_MEDIA_MANIFEST_VERSION,
+        documented_at=OPENAI_MEDIA_DOCUMENTED_AT,
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.i2v.first_frame"],
+                output_constraints={
+                    "duration_seconds": 5,
+                    "resolution": "720x1280",
+                    "aspect_ratio": "9:16",
                     "native_audio": False,
                 },
                 reference_constraints={"first_frame": {"min": 1, "max": 1}},

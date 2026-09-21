@@ -111,7 +111,7 @@ checked from service status and worker logs: `worker-default` consumes
 `dramaforge:heavy`. Recoverable work is republished by the resident
 `dispatcher` and by the Director worker's startup recovery.
 Provider reconciliation runs in an independent dispatcher loop, not a heavy-queue cron job;
-media execution still uses the existing queue. Apply migration `20260919_0073` before
+media execution still uses the existing queue. Apply migration `20260921_0074` before
 updating the dispatcher and media workers. This rollout is not implied by a source-only push.
 
 Director health uses `python -m app.workers.healthcheck` rather than importing

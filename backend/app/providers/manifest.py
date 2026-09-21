@@ -20,7 +20,12 @@ from app.providers.reference_roles import ROLE_MEDIA_TYPES, canonical_reference_
 ManifestVersion = str
 MediaKind = Literal["image", "video", "text", "voice"]
 Lifecycle = Literal["preview", "active", "deprecated", "retired"]
-CatalogSource = Literal["official_static", "account_discovery", "admin_approved"]
+CatalogSource = Literal[
+    "official_static",
+    "account_discovery",
+    "admin_approved",
+    "protocol_contract",
+]
 OperationKind = Literal["image.generate", "video.generate"]
 
 

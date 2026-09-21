@@ -482,7 +482,7 @@ export function ModelConnectionSettingsPage() {
         hidden={section !== "advanced"}
         data-testid="text-service-disclosure"
       >
-        <TextGatewaySettings />
+        <TextGatewaySettings workspaceId={selectedWorkspaceId} />
       </section>
     </main>
   );

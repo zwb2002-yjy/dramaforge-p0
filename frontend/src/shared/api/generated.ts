@@ -5011,6 +5011,8 @@ export interface components {
             tested_at: string;
             /** Error Code */
             error_code: string | null;
+            /** Discovered Model Ids */
+            discovered_model_ids: string[];
         };
         /** ProbeRequest */
         ProbeRequest: {

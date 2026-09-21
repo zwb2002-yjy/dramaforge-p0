@@ -249,7 +249,12 @@ export function listProviderModelBindings(
 export async function createProviderModelBinding(
   workspaceId: string,
   connectionId: string,
-  input: { media_type: "image" | "video"; model_id: string; purpose: "keyframe" | "video" },
+  input: {
+    media_type: "image" | "video";
+    model_id: string;
+    purpose: "keyframe" | "video";
+    capability_contract_id?: string;
+  },
 ): Promise<ProviderModelBindingRead> {
   const csrf = await fetchCsrf();
   return apiSend(

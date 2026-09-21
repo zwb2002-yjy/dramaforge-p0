@@ -69,3 +69,32 @@ async def runtime_connection_settings(
             f"{prefix}_base_url": connection.base_url,
         }
     )
+
+
+async def runtime_text_gateway_settings(
+    session: AsyncSession,
+    *,
+    connection: ProviderConnection,
+    settings: Settings | None = None,
+) -> Settings:
+    """Resolve a workspace text gateway without exposing its stored key."""
+    if (
+        connection.provider_type != "litellm"
+        or connection.protocol_profile != "openai_chat_v1"
+    ):
+        raise WorkspaceCredentialConfigurationError()
+    cfg = settings or get_settings()
+    credential = await read_credential_by_id(
+        session,
+        workspace_id=connection.workspace_id,
+        credential_id=connection.credential_id,
+        keyring=configured_byok_keyring(cfg),
+    )
+    if credential is None:
+        raise WorkspaceCredentialConfigurationError()
+    return cfg.model_copy(
+        update={
+            "litellm_gateway_url": connection.base_url,
+            "litellm_api_key": credential,
+        }
+    )

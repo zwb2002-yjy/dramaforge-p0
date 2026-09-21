@@ -202,6 +202,10 @@ class StoryGenerationService:
                 "current_story": context,
             },
             output_type=StoryDraftCandidate,
+            # Rejecting one generated draft rejects that Proposal, not the
+            # user's reusable Story brief. A new explicit Generate action owns
+            # a new request key and may ask the model for another draft.
+            allow_rejected_context_retry=True,
         )
         _current_context, current_versions = await self._story_context(project)
         if current_versions != versions:
@@ -250,6 +254,7 @@ class StoryGenerationService:
         await self._text_transport.mark_awaiting_user(
             text_result.turn,
             proposal_id=proposal.proposal.id,
+            allow_rejected_context_retry=True,
         )
         await DirectorRuntimeStartService(
             self._session, settings=get_settings(),

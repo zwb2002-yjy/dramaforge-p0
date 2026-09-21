@@ -301,8 +301,6 @@ class ProviderRuntimeResolver:
             reasons.append("BINDING_CONNECTION_WORKSPACE_MISMATCH")
         if binding.catalog_entry_id != entry.id:
             reasons.append("BINDING_CATALOG_MISMATCH")
-        if entry.model_id != binding.model_id:
-            reasons.append("CATALOG_MODEL_MISMATCH")
         if entry.provider_type != connection.provider_type:
             reasons.append("CATALOG_PROVIDER_MISMATCH")
         if entry.protocol_profile != connection.protocol_profile:
@@ -315,6 +313,8 @@ class ProviderRuntimeResolver:
             reasons.append("MANIFEST_HASH_MISMATCH")
         if not binding.invoke_model_value:
             reasons.append("INVOKE_MODEL_VALUE_MISSING")
+        elif binding.invoke_model_value != binding.model_id:
+            reasons.append("INVOKE_MODEL_IDENTITY_MISMATCH")
         if reasons:
             raise ValidationAppError(
                 "concrete provider model runtime identity is invalid",
@@ -476,7 +476,6 @@ class ProviderRuntimeResolver:
             or binding.invoke_model_value != identity.invoke_model_value
             or entry.provider_type != revision.provider_type
             or entry.protocol_profile != revision.protocol_profile
-            or entry.model_id != binding.model_id
             or entry.model_revision != identity.model_revision
             or entry.contract_manifest_hash != identity.manifest_hash
         ):

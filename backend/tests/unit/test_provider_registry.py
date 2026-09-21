@@ -364,7 +364,12 @@ async def test_auth_models_verifies_only_bindings_listed_by_provider(
 
         @staticmethod
         def json() -> dict[str, object]:
-            return {"data": [{"id": "fake-img-listed"}]}
+            return {
+                "data": [
+                    {"id": "fake-img-listed"},
+                    {"id": "fake-img-new-compatible"},
+                ]
+            }
 
     class _ModelsClient:
         async def __aenter__(self) -> _ModelsClient:
@@ -388,9 +393,24 @@ async def test_auth_models_verifies_only_bindings_listed_by_provider(
     )
 
     assert evidence.status == "passed"
+    assert evidence.discovered_model_ids == ["fake-img-listed", "fake-img-new-compatible"]
     assert connection.verification_status == "verified"
     assert bindings[0].account_verified is True
     assert bindings[1].account_verified is False
+    dynamic = await service.create_model_binding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        media_type="image",
+        model_id="fake-img-new-compatible",
+        purpose="keyframe",
+        enabled=True,
+        capability_contract_id=bindings[0].catalog_entry_id,
+    )
+    assert dynamic.model_id == "fake-img-new-compatible"
+    assert dynamic.invoke_model_value == "fake-img-new-compatible"
+    assert dynamic.catalog_entry_id == bindings[0].catalog_entry_id
+    assert dynamic.account_verified is True
 
 
 @pytest.mark.asyncio

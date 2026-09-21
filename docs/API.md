@@ -2,9 +2,9 @@
 
 Status: current
 Source: backend/app/api/v1 and generated OpenAPI
-Date: 2026-09-16
+Date: 2026-09-21
 Base: dev 6555395
-Migration head: 20260916_0070
+Migration head: 20260921_0074
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Contract rules

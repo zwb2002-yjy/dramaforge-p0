@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderConnectionPanel } from "../../src/components/provider/ProviderConnectionPanel";
 import * as api from "../../src/lib/api";
@@ -92,6 +92,7 @@ const probe: api.ProviderProbeRead = {
   request_fingerprint: "fixture-fingerprint",
   tested_at: "2026-09-19T00:00:00Z",
   error_code: "PROVIDER_AUTH_FAILED",
+  discovered_model_ids: [],
 };
 function mount() {
   const client = new QueryClient({
@@ -338,6 +339,65 @@ describe("Provider settings honest state and isolated drafts", () => {
         media_type: "image",
         purpose: "keyframe",
         model_id: secondModel.model_id,
+        capability_contract_id: secondModel.catalog_entry_id,
+      }),
+    );
+  });
+
+  it("lets the user bind a discovered model to an installed capability plugin contract", async () => {
+    const supported = {
+      ...model,
+      catalog_entry_id: "catalog-supported",
+      capability_manifest_hash: "hash-supported",
+      model_id: "remote-supported",
+    };
+    const catalogOnly = {
+      ...model,
+      catalog_entry_id: "catalog-not-on-account",
+      capability_manifest_hash: "hash-not-on-account",
+      model_id: "catalog-only",
+    };
+    vi.mocked(api.listProviderPlugins).mockResolvedValue([
+      { ...plugin, models: [supported, catalogOnly] },
+    ]);
+    vi.mocked(api.listProviderProbes).mockResolvedValue([
+      {
+        ...probe,
+        status: "passed",
+        http_status: 200,
+        error_code: null,
+        discovered_model_ids: ["remote-supported", "remote-unknown"],
+      },
+    ]);
+
+    mount();
+    await diagnostics();
+
+    await waitFor(() => expect(screen.getByLabelText("关键帧模型")).toBeEnabled());
+    const imagePicker = screen.getByLabelText("关键帧模型");
+    expect(within(imagePicker).getByRole("option", { name: /remote-supported/ })).toBeInTheDocument();
+    expect(within(imagePicker).getByRole("option", { name: /remote-unknown/ })).toBeInTheDocument();
+    expect(within(imagePicker).queryByRole("option", { name: /catalog-only/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent("remote-unknown");
+    expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent("尚未匹配能力插件");
+    fireEvent.change(screen.getByLabelText("关键帧模型"), {
+      target: { value: "remote-unknown" },
+    });
+    fireEvent.change(screen.getByLabelText("关键帧能力插件"), {
+      target: { value: supported.catalog_entry_id },
+    });
+    vi.mocked(api.createProviderModelBinding).mockResolvedValue({
+      ...binding,
+      model_id: "remote-unknown",
+      catalog_entry_id: supported.catalog_entry_id,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加关键帧模型绑定" }));
+    await waitFor(() =>
+      expect(api.createProviderModelBinding).toHaveBeenCalledWith("workspace", connection.id, {
+        media_type: "image",
+        purpose: "keyframe",
+        model_id: "remote-unknown",
+        capability_contract_id: supported.catalog_entry_id,
       }),
     );
   });

@@ -546,7 +546,7 @@ test("model settings disclose instance configuration without discarding connecti
   await page.getByLabel("供应商服务地址").fill("https://example.invalid/unsaved");
   await page.getByRole("tab", { name: "高级", exact: true }).click();
   await expect(page.getByTestId("text-gateway-settings")).toBeVisible();
-  await expect(page.getByTestId("text-gateway-settings")).toContainText("作用于整个实例");
+  await expect(page.getByTestId("text-gateway-settings")).toContainText("按工作空间加密保存");
   await page.getByRole("tab", { name: "连接", exact: true }).click();
   await expect(page.getByTestId("text-gateway-settings")).not.toBeVisible();
   await expect(page.getByLabel("设置工作空间")).toHaveValue(WORKSPACE_ID);

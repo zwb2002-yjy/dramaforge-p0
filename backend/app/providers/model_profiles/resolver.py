@@ -40,6 +40,8 @@ class ModelBindingResolver:
         registry: ModelRegistry | None = None,
     ) -> None:
         self._session = session
+        self._workspace_dynamic = registry is None
+        self._loaded_workspace_id: UUID | None = None
         if registry is None:
             from app.providers.model_profiles.service import default_model_registry
 
@@ -47,6 +49,19 @@ class ModelBindingResolver:
         else:
             self._registry = registry
         self._selector = DefaultModelSelector()
+
+    async def _ensure_workspace_registry(self, workspace_id: UUID) -> None:
+        if not self._workspace_dynamic or self._loaded_workspace_id == workspace_id:
+            return
+        from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+        from app.providers.model_profiles.service import default_model_registry
+
+        self._registry = await workspace_model_registry(
+            self._session,
+            workspace_id=workspace_id,
+            base_registry=default_model_registry(),
+        )
+        self._loaded_workspace_id = workspace_id
 
     async def resolve(
         self,
@@ -60,6 +75,7 @@ class ModelBindingResolver:
         """Return the effective binding. Raises a stable model-profile error when
         the requested model is unknown, a bound model cannot serve the
         capability, or no model is available anywhere."""
+        await self._ensure_workspace_registry(workspace_id)
         # 1. Request explicit override (spec §15 top priority).
         if requested_model_id is not None:
             model = self._require_model(requested_model_id)

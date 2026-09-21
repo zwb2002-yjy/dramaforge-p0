@@ -39,19 +39,33 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
 - Runtime 负责从连接修订读取配置、认证头、请求发送、poll/cancel/resume；发送时
   不重编译、不改变 Compiler body。已有持久 request/resume 格式不因该分层变化。
 - 文本仍走专用 LiteLLM 通道；不要把文本协议声明强行套到媒体 submit/poll 之上。
+### 协议级发现与能力合同
+
+- 连接扩展的单位是**协议**，不是「供应商 × 模型」：同一个协议适配器可以服务
+  Agnes、企业网关或其他兼容端点返回的任意模型 ID。模型 ID 只在工作空间的
+  `ProviderModelBinding` 中保存并冻结，不能写死在 Compiler 或 Runtime 的默认配置里。
+- `auth_models` 是不付费的显式探测：使用当前连接 revision 的 URL / 加密 Key 读取
+  `/v1/models`，把账号实际返回的 ID 保存在不可变 evidence。探测不会猜测模型是图片、
+  视频还是文本，也不会因为 ID 相似而自动绑定。
+- `openai_media_v1` 是当前通用媒体协议合同：图像使用 `/images/generations` /
+  `/images/edits`，视频使用异步 `/videos` + `/videos/{id}` 轮询。设置页让用户先选
+  账号发现的模型，再显式选择图像或视频能力合同；合同描述请求形状与参考槽位，
+  远端模型 ID 由 Compiler 写入最终 wire request。
+- 不符合该协议的原生端点仍按**协议**增加一个 Adapter（例如 `agnes_cn_v1`、
+  `ark_cn_v1`），而不是为每个新模型复制一套适配代码。未声明的协议或能力继续
+  fail-closed，不能仅凭 `/v1/models` 的返回值执行。
 
 ## 文本凭证边界
 
-文本通道采用**实例级 LiteLLM 网关配置**：DramaForge 仅以
-LITELLM_GATEWAY_URL / LITELLM_API_KEY 连接网关；上游供应商
-Key 与模型路由由 LiteLLM 部署管理。设置页仅说明配置位置，不宣称网关就绪。
-工作空间 provider-name 文本 Key 表单、通用 provider-credentials API 和旧
-Settings 覆盖 resolver 已退役；历史加密记录保留，不读取、不迁成网关 Key。
-旧 TEXT_LLM_* Settings / 环境变量入口及其就绪检查已删除；遗留环境变量不再被读取，
-不迁移为网关凭证，也不能启用文本执行。通用单元测试、backend-quality 与禁止直接
-调用 Provider 的 worker-director 显式清空 LITELLM_GATEWAY_URL / LITELLM_API_KEY。
-现有 litellm/text-llm 引导桥、legacy-text 与其他逻辑别名及模型选择保持不变。
-媒体 BYOK 仍使用 ProviderConnection 及其不可变 credential revision，不受文本表面退役影响。
+文本通道使用工作空间级 `litellm/openai_chat_v1` 连接：设置页保存 URL / Key 的
+加密 revision，显式运行 `auth_models` 后把账号返回的模型 ID 注册为当前工作空间的
+`litellm/<model>` 动态文本模型。用户再在工作空间 / 项目模型方案中选择默认模型；
+解析和执行身份冻结该具体模型，不从当前环境变量静默替换。
+
+LiteLLM 仍负责把 OpenAI Chat 请求路由到上游供应商，因此 DramaForge 不为每个文本
+供应商复制适配器。`LITELLM_GATEWAY_URL` / `LITELLM_API_KEY` 只属于部署级网关或
+集成测试配置，不会替代工作空间连接的 Key，也不会让页面在未保存连接时声称就绪。
+媒体 BYOK 同样使用 `ProviderConnection` 及其不可变 credential revision。
 
 ## 不可绕过的规则
 
@@ -83,6 +97,9 @@ Settings 覆盖 resolver 已退役；历史加密记录保留，不读取、不�
 
 - 连接、凭证、目录、模型绑定与人工质量认证分开解释：保存地址 / Key 不代表
   认证通过，插件目录不代表账号可见，某模型证据不连带其他模型。
+- 「认证 / 模型目录」探测会把供应商返回的模型 ID 保存在不可变证据中。设置页据此
+  只让用户选择账号可见且已有本地执行合同的模型；账号返回但尚无能力合同的模型会
+  单独显示，不能仅凭 ID 推断图片 / 视频能力、参考槽位或参数协议。
 - 服务地址使用独立草稿，空输入不回弹为旧地址；轮换 Key 不保存地址草稿。
   切换供应商 / 工作空间清除未提交凭证与旧操作反馈；凭证从不回读。
 - 选择目录模型只更新本地选择，点击「添加模型绑定」才写入；绑定所选项目

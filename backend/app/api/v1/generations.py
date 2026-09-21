@@ -101,6 +101,14 @@ async def list_models(
     settings: SettingsDep = None,  # type: ignore[assignment]
 ) -> list[ModelRead]:
     registry = _registry()
+    if session is not None and workspace is not None:
+        from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+
+        registry = await workspace_model_registry(
+            session,
+            workspace_id=workspace.id,
+            base_registry=registry,
+        )
     if capability is not None:
         try:
             selected = registry.find_by_capability(Capability(capability))
@@ -140,12 +148,12 @@ async def list_models(
             display_name=model.manifest.display_name,
             enabled=True,
             configured=(
-                litellm_configured
+                ("litellm" in configured or litellm_configured)
                 if model.manifest.provider_id == "litellm"
                 else model.manifest.provider_id in configured
             ),
             available=(
-                litellm_configured
+                ("litellm" in configured or litellm_configured)
                 if model.manifest.provider_id == "litellm"
                 else model.manifest.provider_id in configured
             ),

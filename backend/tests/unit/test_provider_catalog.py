@@ -53,12 +53,12 @@ def _load_frozen() -> object:
 
 
 def test_all_seed_manifests_parse() -> None:
-    assert len(SEED_MANIFESTS) == 7
+    assert len(SEED_MANIFESTS) == 10
     for manifest in SEED_MANIFESTS:
         parsed = ModelCapabilityManifest.model_validate(manifest)
         expected_revision = "v2" if parsed.model_id == "agnes-image-2.1-flash" else "v1"
         assert parsed.model_revision == expected_revision
-        assert parsed.catalog_source == "official_static"
+        assert parsed.catalog_source in {"official_static", "protocol_contract"}
 
 
 def test_contract_hash_is_deterministic_and_order_insensitive() -> None:
@@ -78,7 +78,11 @@ def test_seed_manifests_match_registry_plugins() -> None:
     agnes_ids = [m["model_id"] for m in agnes.catalog_manifests]
     ark_ids = [m["model_id"] for m in ark.catalog_manifests]
     minimax_ids = [m["model_id"] for m in minimax.catalog_manifests]
-    assert agnes_ids == ["agnes-image-2.1-flash", "agnes-video-v2.0"]
+    assert agnes_ids == [
+        "agnes-image-2.1-flash",
+        "@contract/agnes-video-openai-async-v2",
+        "agnes-video-v2.0",
+    ]
     assert ark_ids == [
         "doubao-seedream-4-0-250828",
         "doubao-seedance-1-0-pro-250528",
@@ -91,7 +95,7 @@ def test_seed_manifests_match_registry_plugins() -> None:
 
 def test_contract_fixtures_match_current_seed_hash() -> None:
     fixture_files = sorted(CONTRACTS_DIR.glob("*.json"))
-    assert len(fixture_files) == 7
+    assert len(fixture_files) == 9
     manifest_by_id = {m["model_id"]: m for m in SEED_MANIFESTS}
     for fixture_path in fixture_files:
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))

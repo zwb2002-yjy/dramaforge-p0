@@ -842,6 +842,82 @@
     line-height: var(--df-leading-normal);
   }
 
+  .qc-story-draft-preview {
+    display: grid;
+    gap: var(--df-space-4);
+  }
+
+  .qc-proposal-gate-note {
+    padding: var(--df-space-3);
+    border: 1px solid var(--df-warning-border);
+    border-radius: var(--df-radius-container);
+    background: var(--df-warning-dim);
+  }
+
+  .qc-proposal-operation-list {
+    display: grid;
+    gap: var(--df-space-2);
+  }
+
+  .qc-proposal-operation-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: var(--df-space-3);
+    padding: var(--df-space-3);
+    border: 1px solid var(--df-border-subtle);
+    border-radius: var(--df-radius-container);
+    background: var(--df-surface-1);
+  }
+
+  .qc-proposal-operation-copy,
+  .qc-proposal-operation-details {
+    display: grid;
+    min-width: 0;
+    gap: var(--df-space-1);
+  }
+
+  .qc-proposal-operation-copy > strong {
+    color: var(--df-text-primary);
+  }
+
+  .qc-proposal-operation-details p,
+  .qc-proposal-operation-details small {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .qc-proposal-operation-details small {
+    display: block;
+    color: var(--df-text-secondary);
+    line-height: var(--df-leading-normal);
+  }
+
+  .qc-proposal-operation-details .status-chip {
+    margin-left: var(--df-space-1);
+  }
+
+  .qc-proposal-operation-details details,
+  .qc-proposal-technical-details {
+    margin-top: var(--df-space-2);
+  }
+
+  .qc-proposal-operation-details summary,
+  .qc-proposal-technical-details summary {
+    width: fit-content;
+    cursor: pointer;
+    color: var(--df-text-secondary);
+    font-size: var(--df-text-sm);
+  }
+
+  .qc-proposal-technical-details code,
+  .qc-proposal-technical-details small {
+    display: block;
+    margin-top: var(--df-space-2);
+    color: var(--df-text-muted);
+    overflow-wrap: anywhere;
+  }
+
   .qc-script-episode > ul {
     display: grid;
     gap: var(--df-space-2);

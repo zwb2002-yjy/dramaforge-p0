@@ -136,6 +136,8 @@ function ProviderConnectionEditor({
   const [probeBindingId, setProbeBindingId] = useState("");
   const [imageModelId, setImageModelId] = useState("");
   const [videoModelId, setVideoModelId] = useState("");
+  const [imageContractId, setImageContractId] = useState("");
+  const [videoContractId, setVideoContractId] = useState("");
   const [referenceArtifactId, setReferenceArtifactId] = useState("");
   const [remoteTaskId, setRemoteTaskId] = useState("");
   const [remoteQueryKind, setRemoteQueryKind] = useState("video_id");
@@ -308,6 +310,7 @@ function ProviderConnectionEditor({
       media_type: "image" | "video";
       model_id: string;
       purpose: "keyframe" | "video";
+      capability_contract_id: string;
     }) => {
       if (!workspaceId || !connection) throw new Error("请先创建当前供应商连接");
       if (!bindingReady) throw new Error("请先确认连接与绑定状态");
@@ -317,6 +320,8 @@ function ProviderConnectionEditor({
     onSuccess: async (result) => {
       setImageModelId("");
       setVideoModelId("");
+      setImageContractId("");
+      setVideoContractId("");
       setMessage(`模型绑定已创建：${result.model_id}；尚未绑定项目。`);
       await queryClient.invalidateQueries({
         queryKey: queryKeys.provider.bindings(workspaceId, connection?.id),
@@ -402,8 +407,26 @@ function ProviderConnectionEditor({
 
   const pluginCapabilities = selectedPlugin?.capabilities ?? ["auth_models"];
   const pluginModels = selectedPlugin?.models ?? [];
-  const imageModels = pluginModels.filter((model) => model.media_type === "image");
-  const videoModels = pluginModels.filter((model) => model.media_type === "video");
+  const discoveredModelIds = useMemo(() => {
+    if (connection?.verification_status !== "verified" || !probes.isSuccess) return null;
+    const latestSuccessfulCatalog = probes.data.find(
+      (probe) => probe.capability === "auth_models" && probe.status === "passed",
+    );
+    const ids = latestSuccessfulCatalog?.discovered_model_ids ?? [];
+    // Pre-0074 evidence was backfilled with an empty list. Treat it as unknown
+    // so an existing verified installation does not lose all choices merely
+    // because its historical proof predates persisted discovery.
+    return ids.length ? new Set(ids) : null;
+  }, [connection?.verification_status, probes.data, probes.isSuccess]);
+  const supportedModelIds = new Set(pluginModels.map((model) => model.model_id));
+  const unsupportedDiscoveredModels = discoveredModelIds
+    ? [...discoveredModelIds].filter((modelId) => !supportedModelIds.has(modelId)).sort()
+    : [];
+  const imageContracts = pluginModels.filter((model) => model.media_type === "image");
+  const videoContracts = pluginModels.filter((model) => model.media_type === "video");
+  const selectableModelIds = discoveredModelIds
+    ? [...discoveredModelIds].sort()
+    : pluginModels.map((model) => model.model_id);
   const activeModelsByContract = useMemo(
     () =>
       new Map(
@@ -794,19 +817,31 @@ function ProviderConnectionEditor({
             <div>
               <h3>模型与项目绑定</h3>
               <p className="muted">
-                先添加固定合同的模型绑定，再显式绑定项目。创建绑定不代表账号或质量已通过；每个模型的证据独立。
+                认证后只列出当前地址与账号实际返回、且已有执行合同的模型。创建绑定不代表质量已通过；每个模型的证据独立。
               </p>
+              {discoveredModelIds && (
+                <div data-testid="provider-discovered-models">
+                  <p className="muted">
+                    账号发现 {discoveredModelIds.size} 个模型。选择模型后，再为其指定能力插件合同。
+                  </p>
+                  {unsupportedDiscoveredModels.length > 0 && (
+                    <p className="status-pending">
+                      尚未匹配能力插件：{unsupportedDiscoveredModels.join("、")}
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="toolbar">
                 {(["image", "video"] as const).map((mediaType) => {
                   const purpose = mediaType === "image" ? "keyframe" : "video";
                   const value = mediaType === "image" ? imageModelId : videoModelId;
-                  const available = (mediaType === "image" ? imageModels : videoModels).filter(
-                    (model) =>
+                  const contractId = mediaType === "image" ? imageContractId : videoContractId;
+                  const contracts = mediaType === "image" ? imageContracts : videoContracts;
+                  const available = selectableModelIds.filter(
+                    (modelId) =>
                       !(bindings.data ?? []).some(
                         (binding) =>
-                          binding.purpose === purpose &&
-                          binding.catalog_entry_id === model.catalog_entry_id &&
-                          binding.capability_manifest_hash === model.capability_manifest_hash,
+                          binding.purpose === purpose && binding.model_id === modelId,
                       ),
                   );
                   return (
@@ -816,31 +851,57 @@ function ProviderConnectionEditor({
                         value={value}
                         disabled={!canManageBindings || !available.length}
                         onChange={(event) => {
-                          (mediaType === "image" ? setImageModelId : setVideoModelId)(
-                            event.target.value,
+                          const modelId = event.target.value;
+                          (mediaType === "image" ? setImageModelId : setVideoModelId)(modelId);
+                          const exact = contracts.find((contract) => contract.model_id === modelId);
+                          (mediaType === "image" ? setImageContractId : setVideoContractId)(
+                            exact?.catalog_entry_id ??
+                              (contracts.length === 1 ? contracts[0].catalog_entry_id : ""),
                           );
                           resetFeedback();
                         }}
                       >
                         <option value="">
-                          {available.length ? "选择要添加的模型…" : "没有可新增的当前合同模型"}
+                          {available.length ? "选择探测到的模型…" : "没有可新增模型"}
                         </option>
-                        {available.map((model) => (
-                          <option key={model.catalog_entry_id} value={model.model_id}>
-                            {model.display_name} · {model.model_id}
+                        {available.map((modelId) => (
+                          <option key={modelId} value={modelId}>
+                            {pluginModels.find((model) => model.model_id === modelId)?.display_name ??
+                              modelId}
+                            {supportedModelIds.has(modelId) ? ` · ${modelId}` : " · 探测发现"}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        aria-label={
+                          mediaType === "image" ? "关键帧能力插件" : "视频能力插件"
+                        }
+                        value={contractId}
+                        disabled={!canManageBindings || !value || !contracts.length}
+                        onChange={(event) =>
+                          (mediaType === "image" ? setImageContractId : setVideoContractId)(
+                            event.target.value,
+                          )
+                        }
+                      >
+                        <option value="">选择能力插件合同…</option>
+                        {contracts.map((contract) => (
+                          <option key={contract.catalog_entry_id} value={contract.catalog_entry_id}>
+                            {contract.display_name} · {contract.capabilities.join(" / ")}
                           </option>
                         ))}
                       </Select>
                       <Button
                         type="button"
                         disabled={
-                          !canManageBindings || !available.some((model) => model.model_id === value)
+                          !canManageBindings || !available.includes(value) || !contractId
                         }
                         onClick={() =>
                           bindingMutation.mutate({
                             media_type: mediaType,
                             purpose,
                             model_id: value,
+                            capability_contract_id: contractId,
                           })
                         }
                       >
