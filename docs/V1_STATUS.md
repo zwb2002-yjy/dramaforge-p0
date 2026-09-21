@@ -11,7 +11,7 @@ Status: current
 |---|---|
 | 发布基线 | `main` 为 `c12c3dfb89cca92a45de99a6db4ade2f0c5f19e7`；`dev` / PR #90 HEAD 为 `ca8f8b7555768b958fd372608aaf34c2ac430f3d`。PR #90 (`dev -> main`) 仍 OPEN、未合并 |
 | 当前 8080 实例 | API、dispatcher、三个 worker 与 frontend 已切换到 `dc3056e99caf1a20484e39058a5d3d8d6a40cba7` 运行候选；`GET /health` 返回 `env=production`、`db=up`，服务健康。数据库迁移头为 `20260919_0073` |
-| 最新 UI 候选 | `codex/web-workbench-redesign` 为 `b038dd3d5c2c4770fcc9fd585f302d5d8f4fbea4`，Draft PR #95 指向 `dev`，包含尚未合入的 #94。该候选的完整本地容器浏览器回归为 102/102 通过，远端最终 HEAD/checks 以 PR 为准；尚未替换 8080 生产实例 |
+| 最新 UI 候选 | `codex/web-workbench-redesign` 的最新运行相关提交为 `b038dd3d5c2c4770fcc9fd585f302d5d8f4fbea4`；Draft PR #95 指向 `dev`，包含尚未合入的 #94 及后续状态文档。该候选的完整本地容器浏览器回归为 102/102 通过，远端最终 HEAD/checks 以 PR 为准；尚未替换 8080 生产实例 |
 | 优化分支集成 | `codex/workbench-optimization -> dev` 已建立 PR #94，保持 Draft，未合并。运行候选之后的 CI 分支策略与状态文档变更不属于当前运行镜像内容；最终 HEAD/checks 以该 PR 为准 |
 | 本地质量门 | 运行候选已通过完整 backend/PostgreSQL/migration、frontend（含完整未分片 Playwright）与固定 LiteLLM mock-proxy 容器门。最新 UI 候选在同款前端质量镜像中完成 102/102 浏览器回归；并行重负载下的超时未计为通过 |
 | 真实制作验收 | 双路径真实验收 driver 已为 `complete=true`：模板和自由创作均完成 MP4/SRT；自由路径的一次授权 Editing 文本建议已显式采用、保存并导出，再完成仅剪辑重导出。双路径浏览器、刷新和独立登录恢复通过，重导出未新增远程图像/视频操作。既有媒体与中断恢复沿用有边界的候选等价证明并保留原始 SHA 归属，不宣称在新 SHA 重新生成全部媒体 |
