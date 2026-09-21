@@ -500,6 +500,16 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         },
       ]);
     }
+    if (path.endsWith("/workbench") && method === "GET") {
+      const shotId = path.split("/").at(-2) ?? SHOT_ID;
+      return json(route, {
+        shot: workspaceShot(state, state.shotVersion, shotId, shotId === SHOT_ID ? 1 : 2),
+        references: [],
+        candidates: shotId === SHOT_ID ? clone(state.candidates) : [],
+        trace: [],
+        old_version_warnings: [],
+      });
+    }
     if (path.endsWith("/workspace") && method === "GET") {
       return json(route, {
         scene: {

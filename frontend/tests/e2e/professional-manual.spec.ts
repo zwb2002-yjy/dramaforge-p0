@@ -102,7 +102,16 @@ test("manual professional production: Scene Workbench design → candidate previ
   const canvasBox = await page.getByTestId("cinematic-canvas").boundingBox();
   expect(canvasBox?.width ?? 0).toBeGreaterThan(operationBox?.width ?? 0);
   expect(operationBox?.width ?? 0).toBeGreaterThanOrEqual(300);
-  expect(operationBox?.width ?? 0).toBeLessThanOrEqual(380);
+  // The redesign intentionally widens the single-column prompt editor. Keep
+  // the canvas dominant and bind the upper bound to the canonical 30rem token.
+  const operationMaxWidth = await page.evaluate(() => {
+    const rootStyle = getComputedStyle(document.documentElement);
+    return (
+      Number.parseFloat(rootStyle.getPropertyValue("--df-operation-sheet-width")) *
+      Number.parseFloat(rootStyle.fontSize)
+    );
+  });
+  expect(operationBox?.width ?? 0).toBeLessThanOrEqual(operationMaxWidth);
   await expect(page.getByTestId("shot-design-panel")).toBeVisible();
   await page.getByLabel("视频提示词").fill("slow push-in, locked frame");
   await page.getByRole("button", { name: "保存设计" }).click();
