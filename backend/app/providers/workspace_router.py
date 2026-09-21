@@ -33,11 +33,17 @@ def select_seed_manifest(
     """Pick the manifest for one media kind (HIGH-4).
 
     Never rely on the seed list's array position — a provider may ship several
-    image/video models. Deterministic first match by ``media_kind``; fail closed
-    when the provider has no manifest for the requested media kind.
+    image/video models. Protocol contracts are not concrete runtime models and
+    must be resolved through an explicit discovered-model binding, so this
+    legacy path skips them. Deterministic first concrete match by ``media_kind``;
+    fail closed when the provider has no eligible manifest for the requested
+    media kind.
     """
     for item in manifests:
-        if item.get("media_kind") == media_kind:
+        if (
+            item.get("media_kind") == media_kind
+            and item.get("catalog_source") != "protocol_contract"
+        ):
             return ModelCapabilityManifest.model_validate(item)
     raise ValidationAppError(
         f"no {media_kind} catalog manifest for provider",

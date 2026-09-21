@@ -80,8 +80,8 @@ def test_seed_manifests_match_registry_plugins() -> None:
     minimax_ids = [m["model_id"] for m in minimax.catalog_manifests]
     assert agnes_ids == [
         "agnes-image-2.1-flash",
-        "@contract/agnes-video-openai-async-v2",
         "agnes-video-v2.0",
+        "@contract/agnes-video-openai-async-v2",
     ]
     assert ark_ids == [
         "doubao-seedream-4-0-250828",

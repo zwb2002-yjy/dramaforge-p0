@@ -262,14 +262,18 @@ def build_v3_registry(
     transport_registry = TransportRegistry()
     _register_transports(transport_registry)
 
-    manifests = seed_manifests or [
-        ModelCapabilityManifest.model_validate(item)
-        for item in (
-            list(seed_manifests_for(provider_type="agnes"))
-            + list(seed_manifests_for(provider_type="volcengine"))
-            + list(seed_manifests_for(provider_type="minimax"))
-        )
-    ]
+    if seed_manifests is None:
+        manifests = [
+            ModelCapabilityManifest.model_validate(item)
+            for item in (
+                list(seed_manifests_for(provider_type="agnes"))
+                + list(seed_manifests_for(provider_type="volcengine"))
+                + list(seed_manifests_for(provider_type="minimax"))
+            )
+            if item.get("catalog_source") != "protocol_contract"
+        ]
+    else:
+        manifests = seed_manifests
     for manifest in manifests:
         v3_id = f"{manifest.provider_type}/{manifest.model_id}"
         factory = (adapter_factories or {}).get(v3_id)

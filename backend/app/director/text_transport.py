@@ -250,22 +250,19 @@ class DirectorTextRuntimeAdapter:
 
         runtime_registry = self._registry
         runtime_text_model = self._text_model
-        if self._workspace_dynamic:
-            from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
-
-            runtime_registry = await workspace_model_registry(
-                self._session,
-                workspace_id=project.workspace_id,
-                base_registry=self._registry,
-            )
-            runtime_text_model = CapabilityTextModel(runtime_registry)
+        resolver = ModelBindingResolver(
+            self._session,
+            None if self._workspace_dynamic else runtime_registry,
+        )
         try:
-            resolved = await ModelBindingResolver(self._session, runtime_registry).resolve(
+            resolved, runtime_registry = await resolver.resolve_with_registry(
                 workspace_id=project.workspace_id,
                 project_id=project.id,
                 slot=slot,
                 capability=Capability.TEXT_GENERATE,
             )
+            if self._workspace_dynamic:
+                runtime_text_model = CapabilityTextModel(runtime_registry)
             registered = runtime_registry.get(resolved.model_id)
             binding_ref = _model_binding_ref(slot=slot, resolved=resolved)
             backend = registered.manifest.metadata.get("backend")

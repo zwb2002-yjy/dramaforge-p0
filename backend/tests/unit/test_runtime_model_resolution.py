@@ -155,6 +155,39 @@ async def test_binding_runtime_resolution_uses_requested_model_b_not_seed_order(
 
 
 @pytest.mark.asyncio
+async def test_protocol_contract_keeps_discovered_model_as_runtime_identity(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _connection, _binding_a, binding_b = await _seed_two_models(session)
+    entry = await session.get(ModelCatalogEntry, binding_b.catalog_entry_id)
+    assert entry is not None
+    entry.model_id = "@contract/video-v1"
+    entry.catalog_source = "protocol_contract"
+    binding_b.model_id = "discovered-video-model"
+    binding_b.remote_resource_id = "discovered-video-model"
+    binding_b.invoke_model_value = "discovered-video-model"
+    await session.flush()
+
+    runtime_calls: list[dict[str, object]] = []
+    plugin = _plugin(runtime_calls)
+    monkeypatch.setattr(
+        "app.providers.registry.get_plugin",
+        lambda provider_type, protocol_profile: plugin,
+    )
+
+    resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_model_binding(
+        model_binding_id=binding_b.id,
+    )
+
+    assert resolved.catalog_entry is not None
+    assert resolved.catalog_entry.model_id == "@contract/video-v1"
+    assert resolved.model_id == "same-provider/discovered-video-model"
+    assert resolved.invoke_model_value == "discovered-video-model"
+    assert len(runtime_calls) == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "invalid_field",
     ["catalog", "model", "provider", "profile", "hash", "lifecycle", "invoke"],

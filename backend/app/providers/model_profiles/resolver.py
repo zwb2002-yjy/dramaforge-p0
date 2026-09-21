@@ -109,6 +109,29 @@ class ModelBindingResolver:
         # 4. System default: first registered model satisfying the capability.
         return self._resolve_system_default(slot=slot, capability=capability)
 
+    async def resolve_with_registry(
+        self,
+        *,
+        workspace_id: UUID,
+        project_id: UUID | None,
+        slot: ModelSlot,
+        capability: Capability,
+        requested_model_id: str | None = None,
+    ) -> tuple[ResolvedModelBinding, ModelRegistry]:
+        """Resolve a binding and return the registry that supplied it.
+
+        Workspace-backed registries are loaded inside this module so callers do
+        not need to cross the provider-gateway architecture boundary directly.
+        """
+        resolved = await self.resolve(
+            workspace_id=workspace_id,
+            project_id=project_id,
+            slot=slot,
+            capability=capability,
+            requested_model_id=requested_model_id,
+        )
+        return resolved, self._registry
+
     async def _project_or_workspace_profile(
         self, *, workspace_id: UUID, project_id: UUID | None
     ) -> ProductionModelProfile | None:

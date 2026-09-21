@@ -135,33 +135,6 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
             )
         },
     ),
-    # Capability-plugin contract for Agnes' modern OpenAI-compatible async
-    # video protocol. The remote model id is discovered and stored on the
-    # binding; this template is reusable by every compatible 2.5 model.
-    _manifest(
-        provider_type="agnes",
-        protocol_profile="agnes_cn_v1",
-        model_id="@contract/agnes-video-openai-async-v2",
-        model_revision="v1",
-        media_kind="video",
-        display_name="Agnes Video 2.5 协议插件",
-        manifest_version=AGNES_VIDEO_25_MANIFEST_VERSION,
-        documented_at=AGNES_VIDEO_25_DOCUMENTED_AT,
-        operations={
-            "video.generate": _operation(
-                "video.generate",
-                capabilities=["video.i2v.first_frame"],
-                output_constraints={
-                    "protocol_generation": "2.5",
-                    "resolution": "720P",
-                    "duration_seconds": 5,
-                    "aspect_ratio": "9:16",
-                    "native_audio": False,
-                },
-                reference_constraints={"first_frame": {"min": 1, "max": 1}},
-            )
-        },
-    ),
     # Agnes China video (Video V2.0). Wire: POST /v1/videos
     #   {model, prompt, num_frames, frame_rate, height, width, image|extra_body}.
     # Only first-frame I2V is declared (capability name matches the intent
@@ -188,6 +161,34 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
                 reference_constraints={
                     "first_frame": {"min": 1, "max": 1},
                 },
+            )
+        },
+    ),
+    # Capability-plugin contract for Agnes' modern OpenAI-compatible async
+    # video protocol. The remote model id is discovered and stored on the
+    # binding; this template is reusable by every compatible 2.5 model.
+    _manifest(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="@contract/agnes-video-openai-async-v2",
+        model_revision="v1",
+        media_kind="video",
+        display_name="Agnes Video 2.5 协议插件",
+        catalog_source="protocol_contract",
+        manifest_version=AGNES_VIDEO_25_MANIFEST_VERSION,
+        documented_at=AGNES_VIDEO_25_DOCUMENTED_AT,
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.i2v.first_frame"],
+                output_constraints={
+                    "protocol_generation": "2.5",
+                    "resolution": "720P",
+                    "duration_seconds": 5,
+                    "aspect_ratio": "9:16",
+                    "native_audio": False,
+                },
+                reference_constraints={"first_frame": {"min": 1, "max": 1}},
             )
         },
     ),
