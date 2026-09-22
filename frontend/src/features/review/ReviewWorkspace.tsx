@@ -131,7 +131,7 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
 
   const shot = workbench.data?.shot ?? null;
   const repair = useQuery({
-    queryKey: ["review-target-repair", projectId, target?.shotId, target?.repairRequestId],
+    queryKey: queryKeys.review.targetRepair(projectId, target?.shotId, target?.repairRequestId),
     queryFn: () => readRepair(projectId, target!.shotId, target!.repairRequestId!),
     enabled: Boolean(target?.repairRequestId),
   });

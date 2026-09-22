@@ -58,6 +58,27 @@ function renderDialog(props: Partial<React.ComponentProps<typeof AddArtifactToAs
 describe("AddArtifactToAssetDialog", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("keeps keyboard focus inside the modal and closes on Escape", () => {
+    const { onClose } = renderDialog();
+    const dialog = screen.getByRole("dialog", { name: "将生成结果加入资产" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)",
+      ),
+    );
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    last.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(first).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("offers only the asset kinds a video Artifact may become", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);

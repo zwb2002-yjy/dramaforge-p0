@@ -12,8 +12,9 @@ Migration head: 20260922_0077
 - Frontend types are generated into frontend/src/shared/api/generated.ts.
 - Frontend modules consume those schemas as `components["schemas"][...]`; they
   never re-declare a generated schema by hand. `npm run --prefix frontend
-  api:authority` (CI `frontend-fast` and the container gate) fails when a
-  frontend file re-declares a schema name that the generated contract owns.
+  api:authority` (CI `frontend-fast` and the container gate) rejects both
+  same-name schema copies and differently named hand-written DTOs exported by
+  API client modules. Its narrow allowlist contains only composed frontend state.
 - User-facing access is the frontend gateway at port 8080; the API process is
   an internal Compose service on port 8000.
 - No compatibility endpoint is kept for retired product concepts.
@@ -227,7 +228,7 @@ review 节点在生成证据时将帧作为不可变派生 Artifact 物化，复
 | 路径（项目前缀 `/api/v1/projects/{project_id}`） | 合同 |
 |---|---|
 | `/production-summary` | SQL 按镜头 / node key / 执行分支 / 实验选择有效尝试，返回计数、最多 20 条当前失败、`has_more_failures` 与九个 canonical 环节的 `stages`，不返回冻结提示词或全量产物血缘 |
-| `/node-runs/status?run_id=…` | 1–100 个精确 ID，按请求顺序返回状态与结果 Artifact ID；任一缺失或跨项目即整体拒绝，不返回部分成功 |
+| `/node-runs/status?run_id=…` | 1–100 个精确 ID，按请求顺序返回状态、结果 Artifact ID 与 `error_code`；任一缺失或跨项目即整体拒绝，不返回部分成功。调用方用 `PROVIDER_SUBMISSION_UNKNOWN` 区分需人工对账的未知提交，不按普通失败重试 |
 | `/production-history/runs` | 历史尝试的轻量分页，只读定位、状态与错误摘要；包含旧尝试，不能当作当前状态计数 |
 | `/production-history/artifacts` | Artifact 只读分页，不下载媒体内容；回收/不可用状态仍按正式存储事实呈现 |
 

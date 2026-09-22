@@ -103,7 +103,7 @@ function SceneWorkflowGroup({ scene }: { scene: SceneWorkflowViewRead }) {
         {status.formal_shots}/{status.total_shots}
       </p>
       <ul className="workflow-shot-list">
-        {scene.shots.map((shot) => (
+        {(scene.shots ?? []).map((shot) => (
           <ShotWorkflowRow key={shot.shot_id} shot={shot} />
         ))}
       </ul>

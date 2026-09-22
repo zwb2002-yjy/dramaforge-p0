@@ -33,7 +33,8 @@ frontend/src/
 - `frontend/src/shared/api/generated.ts` 由 OpenAPI 生成，不手改
   （`npm run api:generate` / `api:check`）。
 - HTTP response/request 形状一律用 `components["schemas"][...]` 引用生成类型；
-  `npm run api:authority` 拒绝在 feature 模块里重新手写同名 schema。
+  `npm run api:authority` 拒绝在 API client 中重新手写同名或异名 HTTP DTO；
+  仅前端组合状态可进入脚本内的窄 allowlist。
 - Candidate 预览是零写入的本地 UI 状态；Formal 确认才触发服务端写入。
 - NodeRun / 执行状态只从 `frontend/src/lib/runLabels.ts` 取中文词表；页面不得再维护
   自己的状态映射，未知状态也不直接显示原始 token。

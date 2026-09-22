@@ -17,6 +17,41 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+test("Final Film export prepares and renders the exact persisted timeline", async ({ page }) => {
+  const state = await installProfessionalMock(page);
+  await page.goto(`/projects/${PROJECT_ID}/edit`);
+  await page.getByTestId("create-edit-session").click();
+  await expect(page.getByTestId("edit-session-editor")).toBeVisible();
+
+  await page.getByTestId("export-final-film").click();
+
+  const result = page.getByTestId("final-film-result");
+  await expect(result).toContainText("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+  await expect(page.getByTestId("final-film-player")).toHaveAttribute(
+    "src",
+    `/api/v1/projects/${PROJECT_ID}/artifacts/cccccccc-cccc-4ccc-8ccc-cccccccccccc/content?workspace_id=workspace-professional`,
+  );
+  const finalFilmWrites = state.editing.requests.filter((request) =>
+    request.path.includes("/final-film/"),
+  );
+  expect(finalFilmWrites).toEqual([
+    {
+      method: "POST",
+      path: `/api/v1/projects/${PROJECT_ID}/final-film/prepare`,
+      body: { edit_session_id: EDIT_SESSION_ID, expected_timeline_version: 1 },
+    },
+    {
+      method: "POST",
+      path: `/api/v1/projects/${PROJECT_ID}/final-film/render`,
+      body: {
+        edit_session_id: EDIT_SESSION_ID,
+        expected_timeline_version: 1,
+        name: "V1 Final Film",
+      },
+    },
+  ]);
+});
+
 test("professional edit: formal manifest → persisted session → proposal-only suggestion", async ({
   page,
 }) => {

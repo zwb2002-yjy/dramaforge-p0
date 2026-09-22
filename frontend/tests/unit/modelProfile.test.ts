@@ -25,14 +25,14 @@ describe("simpleModeToBindings", () => {
       video: "test/video-a",
       voice: "test/voice-a",
     });
-    expect(bindings["planning.brief"]).toEqual({ model_id: "test/text-a" });
-    expect(bindings["planning.script"]).toEqual({ model_id: "test/text-a" });
-    expect(bindings["planning.storyboard"]).toEqual({ model_id: "test/text-a" });
-    expect(bindings["visual.character"]).toEqual({ model_id: "test/image-a" });
-    expect(bindings["visual.storyboard"]).toEqual({ model_id: "test/image-a" });
-    expect(bindings["visual.keyframe"]).toEqual({ model_id: "test/image-a" });
-    expect(bindings["video.shot"]).toEqual({ model_id: "test/video-a" });
-    expect(bindings["audio.tts"]).toEqual({ model_id: "test/voice-a" });
+    expect(bindings["planning.brief"]).toEqual({ model_id: "test/text-a", enabled: true });
+    expect(bindings["planning.script"]).toEqual({ model_id: "test/text-a", enabled: true });
+    expect(bindings["planning.storyboard"]).toEqual({ model_id: "test/text-a", enabled: true });
+    expect(bindings["visual.character"]).toEqual({ model_id: "test/image-a", enabled: true });
+    expect(bindings["visual.storyboard"]).toEqual({ model_id: "test/image-a", enabled: true });
+    expect(bindings["visual.keyframe"]).toEqual({ model_id: "test/image-a", enabled: true });
+    expect(bindings["video.shot"]).toEqual({ model_id: "test/video-a", enabled: true });
+    expect(bindings["audio.tts"]).toEqual({ model_id: "test/voice-a", enabled: true });
   });
 
   it("skips groups the user left unset", () => {

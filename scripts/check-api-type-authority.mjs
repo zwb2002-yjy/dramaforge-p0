@@ -1,8 +1,7 @@
-// Contract authority gate: the OpenAPI-generated schema names are the single
-// source for HTTP response/request shapes. A frontend module that re-declares
-// one of those names as a hand-written object type is drifting from the
-// generated contract, so the duplication fails here instead of silently
-// compiling.
+// Contract authority gate: OpenAPI-generated schemas are the single source for
+// HTTP response/request shapes. Besides exact-name redeclarations, API client
+// modules may not export hand-written object DTOs under different names. The
+// small allowlist below is reserved for frontend-only composed state.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -42,7 +41,21 @@ if (schemaNames.size === 0) {
 }
 
 const SKIPPED_DIRS = new Set(["node_modules", "dist", ".git"]);
-const handWritten = /^export\s+(?:type\s+([A-Za-z_$][\w$]*)\s*=\s*\{|interface\s+([A-Za-z_$][\w$]*)\s*\{)/gm;
+const exportedType = /^export\s+type\s+([A-Za-z_$][\w$]*)\s*=\s*([^\r\n;]+)/gm;
+const exportedInterface =
+  /^export\s+interface\s+([A-Za-z_$][\w$]*)(?:\s+extends\s+[^\{]+)?\s*\{/gm;
+const localApiObjectTypes = new Map([
+  ["frontend/src/lib/api.ts", new Set(["HealthResponse", "ResolvedProjectWorkspace"])],
+  ["frontend/src/features/review/repairApi.ts", new Set(["RepairSubmission"])],
+  ["frontend/src/features/shots/api.ts", new Set(["PreparedShotExecution"])],
+]);
+
+function isApiClient(relativePath) {
+  return (
+    relativePath === "frontend/src/lib/api.ts" ||
+    /\/(?:api|[^/]*Api|[^/]*-api)\.ts$/.test(relativePath)
+  );
+}
 
 function* walk(dir) {
   for (const entry of readdirSync(dir)) {
@@ -58,10 +71,44 @@ const failures = [];
 for (const file of walk(frontendSrc)) {
   if (path.resolve(file) === generatedPath) continue;
   const source = readFileSync(file, "utf8");
-  for (const match of source.matchAll(handWritten)) {
-    const name = match[1] ?? match[2];
+  const relativePath = path.relative(repoRoot, file).replaceAll(path.sep, "/");
+  const generatedAliases = new Set();
+  for (const match of source.matchAll(exportedType)) {
+    const name = match[1];
+    const declaration = match[2].trim();
+    const referencedAlias = /^([A-Za-z_$][\w$]*)\b/.exec(declaration)?.[1];
+    const generatedDerived =
+      /\bcomponents\s*\[\s*["']schemas["']\s*\]/.test(declaration) ||
+      (referencedAlias !== undefined && generatedAliases.has(referencedAlias));
+    if (generatedDerived) generatedAliases.add(name);
+    let objectPrefix = declaration;
+    while (/^(?:Readonly|Partial|Required)\s*</.test(objectPrefix)) {
+      objectPrefix = objectPrefix.replace(/^(?:Readonly|Partial|Required)\s*<\s*/, "");
+    }
+    const handWrittenObject = objectPrefix.startsWith("{") || objectPrefix.startsWith("Record<");
+    if (schemaNames.has(name) && !generatedDerived) {
+      failures.push(`${relativePath} redeclares generated schema ${name}`);
+    } else if (
+      isApiClient(relativePath) &&
+      handWrittenObject &&
+      !localApiObjectTypes.get(relativePath)?.has(name)
+    ) {
+      failures.push(
+        `${relativePath} exports hand-written API object ${name}; alias or derive a generated schema`,
+      );
+    }
+  }
+  for (const match of source.matchAll(exportedInterface)) {
+    const name = match[1];
     if (schemaNames.has(name)) {
-      failures.push(`${path.relative(repoRoot, file)} redeclares generated schema ${name}`);
+      failures.push(`${relativePath} redeclares generated schema ${name}`);
+    } else if (
+      isApiClient(relativePath) &&
+      !localApiObjectTypes.get(relativePath)?.has(name)
+    ) {
+      failures.push(
+        `${relativePath} exports hand-written API object ${name}; alias or derive a generated schema`,
+      );
     }
   }
 }
@@ -70,7 +117,7 @@ if (failures.length > 0) {
   console.error("API type authority check FAILED:");
   for (const failure of failures.sort()) console.error(`  - ${failure}`);
   console.error(
-    "Use components[\"schemas\"][\"<Name>\"] from frontend/src/shared/api/generated.ts instead.",
+    "Use or derive components[\"schemas\"][\"<Name>\"] from frontend/src/shared/api/generated.ts instead.",
   );
   process.exit(1);
 }

@@ -34,7 +34,7 @@ export function CreateProjectForm({
   const [genre, setGenre] = useState("");
   const [style, setStyle] = useState("");
   const options = useQuery({
-    queryKey: ["project-creative-options", workspaceId],
+    queryKey: queryKeys.project.creativeOptions(workspaceId),
     queryFn: fetchProjectCreativeOptions,
     enabled: open && Boolean(workspaceId),
     staleTime: 60_000,

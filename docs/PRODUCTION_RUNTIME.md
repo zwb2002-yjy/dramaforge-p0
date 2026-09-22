@@ -81,6 +81,10 @@ NodeRun 快照持久化，不能继承到下一批，也不能绕过 unknown-sub
 
 ## 恢复与重试
 
+- Outbox 投递失败在进入死信前按尝试次数使用 5 秒起步、最多 300 秒的指数退避与稳定有界 jitter；
+  `next_attempt_at` 到期前 dispatcher 不重新租赁该事件。人工死信重放是显式操作，
+  仍会立即尝试一次。
+
 - 迁移 20260908_0057–0060 提供恢复函数/授权：可恢复导演轮次、事实对账、
   Formal 检查点、cancellation-requested Provider 工作。
 - 真实远端任务重启恢复：同一远端任务恢复时零额外 create。

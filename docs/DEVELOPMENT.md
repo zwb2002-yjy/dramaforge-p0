@@ -108,5 +108,5 @@ docker compose --profile maintenance run --rm maintenance restore-verify \
   router，并在 Chromium 读取 `routesByPath`；必须保留核心业务路由且不得注册
   `/design-preview`。它不以 UI 隐藏或开发服务器的 404 作为生产证据。
 - 完整门先从当前后端导出 OpenAPI，再运行 `api:check`，重生成并逐字节比较
-  `frontend/src/shared/api/generated.ts`；`api:authority` 同时拒绝手写重声明生成的
+  `frontend/src/shared/api/generated.ts`；`api:authority` 同时拒绝 API client 中同名或异名手写的
   API schema。检查不会改写提交中的 generated.ts。

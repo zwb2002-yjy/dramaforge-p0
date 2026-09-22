@@ -52,8 +52,8 @@ Fast Gate：上述六个 required checks 全部执行，其中 `container-gates`
 包含 backend/frontend、PostgreSQL migration/integration、Playwright 与 LiteLLM
 完整质量门。
 
-Dependency Review 由仓库变量 `DEPENDENCY_REVIEW_ENABLED=true` 能力门控；
-不可用时显式跳过。Python/Node 依赖审计、secret scan 与 Trivy filesystem scan
+Dependency Review 对 Python / frontend 依赖文件变更和所有 `dev -> main` PR
+自动执行，不依赖仓库变量开关。Python/Node 依赖审计、secret scan 与 Trivy filesystem scan
 在 `dev -> main` 必须执行；周度完整安全扫描由
 `.github/workflows/security.yml` 执行。
 

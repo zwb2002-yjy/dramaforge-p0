@@ -83,6 +83,7 @@ class ProductionRunStatusRead(BaseModel):
     id: UUID
     status: str
     result_artifact_id: UUID | None
+    error_code: str | None
 
 
 class ProductionRunHistoryRead(ProductionRunStatusRead):

@@ -396,13 +396,13 @@ describe("Workstation shell", () => {
     expect(screen.getByRole("link", { name: "分镜制作" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("redirects the obsolete preferences page to the actual create form", async () => {
+  it("opens the default-model settings section at its stable route", async () => {
     mockAuthenticatedHome();
     const { router } = renderApp("/settings/defaults");
-    expect(await screen.findByRole("region", { name: "新建项目" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/");
-    expect(router.state.location.search.create).toBe(true);
-    expect(screen.queryByTestId("default-settings-page")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("model-settings-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings/defaults");
+    expect(screen.getByRole("tab", { name: "默认模型" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("default-models-disclosure")).not.toHaveAttribute("hidden");
   });
 
   it("renders current Project settings inside Settings L2", async () => {

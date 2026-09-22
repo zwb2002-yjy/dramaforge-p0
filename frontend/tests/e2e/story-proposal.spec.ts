@@ -192,7 +192,7 @@ test("Story proposal: create typed diff, partial accept only the episode", async
   await shotCheckbox.uncheck();
   await page.getByTestId("story-proposal-apply-selected").click();
 
-  await expect(page.getByRole("status")).toContainText("Story 更新完成");
+  await expect(page.getByRole("status")).toContainText("故事更新完成");
   await expect(page.getByTestId("script-episodes")).toContainText("双人冲突");
   await expect(page.getByTestId("script-episodes")).not.toContainText("咖啡厅");
 });

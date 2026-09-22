@@ -243,7 +243,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
       const rejected = result.rejected?.length ?? 0;
       const failed = result.failed?.length ?? 0;
       setApplyMessage(
-        `Story 更新完成：采用 ${accepted}，拒绝 ${rejected}${failed ? `，失败 ${failed}` : ""}`,
+        `故事更新完成：采用 ${accepted}，拒绝 ${rejected}${failed ? `，失败 ${failed}` : ""}`,
       );
       setActiveProposal(null);
       setSelected({});

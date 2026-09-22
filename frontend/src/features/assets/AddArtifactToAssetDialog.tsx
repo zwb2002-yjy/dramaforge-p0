@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
+import { useModalDialog } from "../../components/ui/useModalDialog";
 import {
   assetKindsForArtifactType,
   createAssetFromArtifact,
@@ -71,6 +72,7 @@ export function AddArtifactToAssetDialog({
   // One explicit operation keeps one request key across retries; a second,
   // deliberate creation must start a new operation (and a new key).
   const requestKey = useRef(`asset-from-artifact:${globalThis.crypto.randomUUID()}`);
+  const dialogRef = useModalDialog<HTMLElement>(true, onClose);
 
   const createMut = useMutation({
     mutationFn: async () =>
@@ -123,10 +125,12 @@ export function AddArtifactToAssetDialog({
   return (
     <div className="qc-unsaved-backdrop" data-testid="add-artifact-to-asset-dialog">
       <section
+        ref={dialogRef}
         className="qc-unsaved-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-asset-title"
+        tabIndex={-1}
       >
         <span className="director-stage-kicker">显式动作</span>
         <h2 id="add-asset-title">将生成结果加入资产</h2>

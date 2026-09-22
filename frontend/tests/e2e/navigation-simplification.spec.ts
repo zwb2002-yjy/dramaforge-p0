@@ -59,10 +59,11 @@ test("create=false is normalized without logging out; only explicit logout chang
   await expect(page.getByRole("region", { name: "新建项目" })).not.toBeVisible();
   expect(writes).toEqual([]);
   await page.goto("/settings/defaults");
-  await expect(page).toHaveURL(/\/?create=true$/);
-  await expect(page.getByRole("region", { name: "新建项目" })).toBeVisible();
-  await page.getByRole("button", { name: "取消", exact: true }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL("/settings/defaults");
+  await expect(page.getByRole("tab", { name: "默认模型" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   expect(writes).toEqual([]);
   await page.goto("/settings/account");
   await expect(page.getByText("owner@example.com")).toBeVisible();

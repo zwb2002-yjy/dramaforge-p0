@@ -150,4 +150,23 @@ describe("CinematicCanvas", () => {
     expect(screen.getByTestId("shot-execution-state")).not.toHaveTextContent("keyframe");
     expect(screen.queryByTestId("shot-placeholder")).not.toBeInTheDocument();
   });
+
+  it("keeps an ambiguous provider submission separate from an ordinary failure", () => {
+    render(
+      <CinematicCanvas
+        projectId="project-1"
+        shot={SHOT}
+        trace={[
+          {
+            node_key: "video",
+            status: "failed",
+            error_code: "PROVIDER_SUBMISSION_UNKNOWN",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId("shot-execution-state")).toHaveTextContent("提交结果未知");
+    expect(screen.getByRole("status")).toHaveTextContent("不要盲目重试");
+  });
 });

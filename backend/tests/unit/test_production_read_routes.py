@@ -100,10 +100,11 @@ async def test_read_routes_validate_bounds_and_never_return_partial_statuses(htt
     response = await client.get(status_url, params={"run_id": str(run.id)})
     assert response.json() == [
         {
-            "id": str(run.id),
-            "status": "completed",
-            "result_artifact_id": str(run.result_artifact_id),
-        }
+                "id": str(run.id),
+                "status": "completed",
+                "result_artifact_id": str(run.result_artifact_id),
+                "error_code": None,
+            }
     ]
     for kind in ["runs", "artifacts"]:
         url = root + "/production-history/" + kind

@@ -26,6 +26,8 @@ export const queryKeys = {
   project: {
     detail: (projectId: string) => ["project", projectId] as const,
     workspaceContext: (projectId: string) => ["project-workspace-context", projectId] as const,
+    creativeOptions: (workspaceId: string | null) =>
+      ["project-creative-options", workspaceId] as const,
   },
 
   scene: {
@@ -115,6 +117,15 @@ export const queryKeys = {
       ["repair-plan", projectId, shotId] as const,
     repairs: (projectId: string, shotId: string | null | undefined) =>
       ["repairs", projectId, shotId] as const,
+    targetRepair: (
+      projectId: string,
+      shotId: string | null | undefined,
+      repairRequestId: string | null | undefined,
+    ) => ["review-target-repair", projectId, shotId, repairRequestId] as const,
+  },
+
+  maintenance: {
+    recovery: () => ["maintenance", "recovery"] as const,
   },
 
   editing: {

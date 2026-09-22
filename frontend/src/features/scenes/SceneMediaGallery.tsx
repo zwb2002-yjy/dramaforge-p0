@@ -203,7 +203,7 @@ function MediaPreview({
     >
       <header>
         <h2>{title}</h2>
-        <Button onClick={onClose} autoFocus>
+        <Button onClick={() => dialog.current?.close()} autoFocus>
           关闭预览
         </Button>
       </header>

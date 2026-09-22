@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { queryKeys } from "../../lib/queryKeys";
+import { nodeRunStatusKind } from "../../lib/runLabels";
 import { fetchRunStatuses } from "../production/api";
 import { deliveryGateMessage } from "./deliveryGate";
 import {
@@ -11,9 +12,6 @@ import {
   type FinalFilmRead,
   type FinalFilmJobRead,
 } from "./api";
-
-const SUCCEEDED = new Set(["completed", "cached", "completed_after_cancel"]);
-const FAILED = new Set(["failed", "blocked", "cancelled"]);
 
 function wait(signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
@@ -36,10 +34,15 @@ async function waitForTail(projectId: string, ids: string[], signal: AbortSignal
   while (Date.now() < deadline) {
     signal.throwIfAborted();
     const rows = await fetchRunStatuses(projectId, ids, signal);
-    if (rows.some((run) => FAILED.has(run.status))) {
+    if (
+      rows.some((run) => nodeRunStatusKind(run.status, run.error_code) === "unknown_submission")
+    ) {
+      throw new Error("成片尾链存在提交结果未知的任务，请先对账，不要盲目重试。");
+    }
+    if (rows.some((run) => nodeRunStatusKind(run.status) === "failed")) {
       throw new Error("成片尾链有任务失败，请先处理生产错误。");
     }
-    if (rows.every((run) => SUCCEEDED.has(run.status))) return;
+    if (rows.every((run) => nodeRunStatusKind(run.status) === "succeeded")) return;
     await wait(signal);
   }
   throw new Error("等待成片尾链超时，请到制作页查看任务状态。");
@@ -50,8 +53,12 @@ async function waitForFilm(projectId: string, initial: FinalFilmJobRead, signal:
   let current = initial;
   while (Date.now() < deadline) {
     signal.throwIfAborted();
-    if (FAILED.has(current.status)) throw new Error(current.error_summary || "成片渲染失败。");
-    if (current.result && SUCCEEDED.has(current.status)) return current.result;
+    const kind = nodeRunStatusKind(current.status);
+    if (kind === "unknown_submission") {
+      throw new Error("成片渲染提交结果未知，请先对账，不要盲目重试。");
+    }
+    if (kind === "failed") throw new Error(current.error_summary || "成片渲染失败。");
+    if (current.result && kind === "succeeded") return current.result;
     await wait(signal);
     current = await fetchFinalFilmStatus(projectId, initial.node_run_id, signal);
   }

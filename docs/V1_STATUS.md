@@ -49,7 +49,7 @@ Agent 不批准或合并 PR，不发布。
 | 4 | **Owner 合并**：Owner 审阅并合并受保护的 `dev -> main` | 合并提交 SHA：`________` | ☐ |
 | 5 | **发布与安装**：生成版本化 Release 制品，并用该版本 online/offline bundle 在干净目录安装验证。源码测试不能替代制品安装验证 | Release tag：`________`；安装验证日志路径：`________` | ☐ |
 
-当前尚无版本化 GitHub Release。默认分支仍有 3 条开发依赖安全告警（`js-yaml` high、`vitest` / `@vitest/mocker` moderate）；生产 `npm audit --omit=dev --audit-level=high` 为零漏洞不等于这些告警已关闭。依赖策略：优先兼容升级关闭；无安全兼容版本时记有期限例外并写明到期日。仓库变量 `DEPENDENCY_REVIEW_ENABLED` 必须为 true；Dependabot 恢复 direct + 非 major + 月度 + 限流。
+当前尚无版本化 GitHub Release。默认分支仍有 3 条开发依赖安全告警（`js-yaml` high、`vitest` / `@vitest/mocker` moderate）；生产 `npm audit --omit=dev --audit-level=high` 为零漏洞不等于这些告警已关闭。依赖策略：优先兼容升级关闭；无安全兼容版本时记有期限例外并写明到期日。依赖文件变化或目标为 `main` 的 PR 自动运行 dependency-review，不依赖仓库变量开关；Dependabot 使用 direct + 非 major + 月度 + 限流。
 
 真实 Provider probe/production/repair 每次都需要本任务明确的正数预算与 Owner 授权。历史预算不延续；可能已计费或 `unknown_submission` 的调用不能盲重试。
 

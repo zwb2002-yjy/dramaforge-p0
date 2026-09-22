@@ -43,6 +43,7 @@ describe("ShotDetailsPanel", () => {
 
     const sheet = screen.getByTestId("shot-details-sheet");
     expect(sheet).toHaveAttribute("data-shot-id", "shot-1");
+    expect(sheet).toHaveAttribute("aria-modal", "true");
     expect(sheet).toHaveTextContent("#3 · v7");
     // Status and confirmed artifacts speak product vocabulary; the stored tokens
     // and artifact ids stay in the collapsed diagnostics block.
@@ -73,5 +74,8 @@ describe("ShotDetailsPanel", () => {
 
     fireEvent.click(screen.getByTestId("shot-details-close"));
     expect(onClose).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });

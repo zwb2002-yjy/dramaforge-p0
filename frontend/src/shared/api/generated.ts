@@ -3210,6 +3210,22 @@ export interface components {
          */
         Capability: "text.generate" | "image.generate" | "image.edit" | "video.text_to_video" | "video.image_to_video" | "video.first_last_frame" | "video.reference_to_video" | "audio.tts";
         /**
+         * CapabilityAssessmentSummary
+         * @description Assessed multi-subject capability of the keyframe model for a shot.
+         */
+        CapabilityAssessmentSummary: {
+            /** Status */
+            status: string;
+            /** Required Subject References */
+            required_subject_references: number;
+            /** Max Subject References */
+            max_subject_references: number;
+            /** Reason */
+            reason: string;
+            /** Approximate Strategy Id */
+            approximate_strategy_id?: string | null;
+        };
+        /**
          * CapabilityCatalogBody
          * @description The resolvable creative capability catalog (read-only).
          */
@@ -3266,6 +3282,55 @@ export interface components {
             id: string;
             /** Display Name */
             display_name: string;
+        };
+        /**
+         * CapabilitySpec
+         * @description What one concrete model supports for one capability (spec §14).
+         */
+        CapabilitySpec: {
+            capability: components["schemas"]["Capability"];
+            /** Input Slots */
+            input_slots?: {
+                [key: string]: components["schemas"]["InputSlotSpec"];
+            };
+            /** Common Options */
+            common_options?: {
+                [key: string]: components["schemas"]["ParameterSpec"];
+            };
+            /** Native Options */
+            native_options?: {
+                [key: string]: components["schemas"]["ParameterSpec"];
+            };
+            constraints?: components["schemas"]["ConstraintSpec"];
+            /** Modes */
+            modes?: {
+                [key: string]: components["schemas"]["InputModeSpec"];
+            };
+            /** Default Mode */
+            default_mode?: string | null;
+            /** Transport Profile Id */
+            transport_profile_id: string;
+        };
+        /**
+         * ConditionalConstraint
+         * @description When ``when`` matches, ``require`` must be present, ``forbid`` must be
+         *     absent, and any key in ``allowed`` must take one of the listed values
+         *     (spec §17). E.g. ``when={"duration_seconds": 10}`` + ``allowed={
+         *     "resolution": ["720p"]}`` expresses a duration-resolution matrix (§18).
+         */
+        ConditionalConstraint: {
+            /** When */
+            when: {
+                [key: string]: unknown;
+            };
+            /** Require */
+            require?: string[];
+            /** Forbid */
+            forbid?: string[];
+            /** Allowed */
+            allowed?: {
+                [key: string]: unknown[];
+            };
         };
         /** ConnectionCreate */
         ConnectionCreate: {
@@ -3357,6 +3422,20 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+        };
+        /**
+         * ConstraintSpec
+         * @description Cross-field constraint set for one capability (spec §17/§18).
+         */
+        ConstraintSpec: {
+            /** Mutually Exclusive */
+            mutually_exclusive?: string[][];
+            /** Requires */
+            requires?: {
+                [key: string]: string[];
+            };
+            /** Conditional */
+            conditional?: components["schemas"]["ConditionalConstraint"][];
         };
         /**
          * ControlTranslation
@@ -4157,6 +4236,27 @@ export interface components {
             /** Version */
             version: number;
         };
+        /**
+         * EpisodeWorkflowSummary
+         * @description Episode totals shown by the project workflow overview.
+         */
+        EpisodeWorkflowSummary: {
+            /**
+             * Episode Id
+             * Format: uuid
+             */
+            episode_id: string;
+            /** Episode Number */
+            episode_number: number;
+            /** Title */
+            title: string;
+            /** Synopsis */
+            synopsis: string;
+            /** Scene Count */
+            scene_count: number;
+            /** Total Shots */
+            total_shots: number;
+        };
         /** ExecutionBody */
         ExecutionBody: {
             /**
@@ -4752,6 +4852,54 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * InputModeSpec
+         * @description Mode-specific input contract inside one capability (MS4-LITE).
+         */
+        InputModeSpec: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description?: string | null;
+            /** Input Slots */
+            input_slots?: {
+                [key: string]: components["schemas"]["InputSlotSpec"];
+            };
+            /** Common Options */
+            common_options?: {
+                [key: string]: components["schemas"]["ParameterSpec"];
+            };
+            /** Native Options */
+            native_options?: {
+                [key: string]: components["schemas"]["ParameterSpec"];
+            };
+            constraints?: components["schemas"]["ConstraintSpec"];
+        };
+        /**
+         * InputSlotSpec
+         * @description One artifact input role for a capability (spec §15). Absent roles are
+         *     forbidden. ``minimum``/``maximum`` bound the number of artifacts accepted.
+         */
+        InputSlotSpec: {
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+            /**
+             * Minimum
+             * @default 0
+             */
+            minimum: number;
+            /** Maximum */
+            maximum?: number | null;
+            /** Media Types */
+            media_types?: string[];
+            /** Description */
+            description?: string | null;
+        };
         JsonValue: unknown;
         /** LoginRequest */
         LoginRequest: {
@@ -4779,7 +4927,7 @@ export interface components {
             supports_cancel: boolean;
             /** Capability Specs */
             capability_specs: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["CapabilitySpec"];
             };
         };
         /** MediaNodeRunReplayRequest */
@@ -5125,6 +5273,50 @@ export interface components {
              */
             expected_dead_lettered_at: string;
         };
+        /**
+         * ParameterSpec
+         * @description One validated option (common or native) in a capability (spec §16).
+         */
+        ParameterSpec: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "boolean" | "array" | "object";
+            /** Title */
+            title?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+            /** Default */
+            default?: unknown | null;
+            /** Enum */
+            enum?: unknown[] | null;
+            /** Minimum */
+            minimum?: number | null;
+            /** Maximum */
+            maximum?: number | null;
+            /** Min Items */
+            min_items?: number | null;
+            /** Max Items */
+            max_items?: number | null;
+            /** Ui Component */
+            ui_component?: ("switch" | "select" | "number" | "slider" | "input" | "textarea" | "multi_select") | null;
+            /**
+             * Deprecated
+             * @default false
+             */
+            deprecated: boolean;
+            /**
+             * Sensitive
+             * @default false
+             */
+            sensitive: boolean;
+        };
         /** PartialApplyInput */
         PartialApplyInput: {
             /** Decisions */
@@ -5140,6 +5332,55 @@ export interface components {
             failed?: {
                 [key: string]: unknown;
             }[];
+        };
+        /**
+         * ParticipationEntry
+         * @description One character's frozen participation, as stored in ``director_state``.
+         */
+        ParticipationEntry: {
+            /** Asset Id */
+            asset_id: string;
+            /** Asset Version Id */
+            asset_version_id?: string | null;
+            /** Screen Role */
+            screen_role: string;
+            /**
+             * Importance
+             * @default 50
+             */
+            importance: number;
+            /** Wardrobe Asset Version Id */
+            wardrobe_asset_version_id?: string | null;
+            /**
+             * Position
+             * @default
+             */
+            position: string;
+            /**
+             * Pose
+             * @default
+             */
+            pose: string;
+            /**
+             * Gaze Target
+             * @default
+             */
+            gaze_target: string;
+            /**
+             * Action
+             * @default
+             */
+            action: string;
+            /**
+             * Expression
+             * @default
+             */
+            expression: string;
+            /**
+             * Dialogue Role
+             * @default none
+             */
+            dialogue_role: string;
         };
         /**
          * PendingSuggestion
@@ -5278,6 +5519,8 @@ export interface components {
             status: string;
             /** Result Artifact Id */
             result_artifact_id: string | null;
+            /** Error Code */
+            error_code: string | null;
             /** Node Key */
             node_key: string;
             /** Attempt No */
@@ -5293,8 +5536,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Error Code */
-            error_code: string | null;
             /** Error Summary */
             error_summary: string | null;
         };
@@ -5316,6 +5557,8 @@ export interface components {
             status: string;
             /** Result Artifact Id */
             result_artifact_id: string | null;
+            /** Error Code */
+            error_code: string | null;
         };
         /**
          * ProductionStageRead
@@ -6422,6 +6665,43 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * SceneProductionState
+         * @enum {string}
+         */
+        SceneProductionState: "draft" | "ready" | "producing" | "review" | "complete" | "blocked";
+        /**
+         * SceneProductionStatus
+         * @description Read model for one scene, aggregated from Shot formal artifacts only.
+         *
+         *     This is a read aggregation of the existing execution truth (Shot formal
+         *     artifacts / NodeRun), never a second execution truth.
+         */
+        SceneProductionStatus: {
+            /**
+             * Scene Id
+             * Format: uuid
+             */
+            scene_id: string;
+            /**
+             * Episode Id
+             * Format: uuid
+             */
+            episode_id: string;
+            state: components["schemas"]["SceneProductionState"];
+            /** Total Shots */
+            total_shots: number;
+            /** Formal Shots */
+            formal_shots: number;
+            /** Failed Shots */
+            failed_shots: number;
+            /** Review Required */
+            review_required: number;
+            /** Blocked Shots */
+            blocked_shots: number;
+            /** Reasons */
+            reasons?: string[];
+        };
         /** SceneRead */
         SceneRead: {
             /**
@@ -6491,6 +6771,35 @@ export interface components {
             /** Risk Count */
             risk_count: number;
             representative_artifact: components["schemas"]["ArtifactSummaryRead"] | null;
+        };
+        /**
+         * SceneWorkflowView
+         * @description Scene-level view: production status + per-shot workflow states.
+         */
+        SceneWorkflowView: {
+            /**
+             * Scene Id
+             * Format: uuid
+             */
+            scene_id: string;
+            /**
+             * Episode Id
+             * Format: uuid
+             */
+            episode_id: string;
+            /** Episode Number */
+            episode_number: number;
+            /** Scene Number */
+            scene_number: number;
+            /** Location Name */
+            location_name: string;
+            /** Time Of Day */
+            time_of_day: string;
+            /** Synopsis */
+            synopsis: string;
+            production_status: components["schemas"]["SceneProductionStatus"];
+            /** Shots */
+            shots?: components["schemas"]["ShotWorkflowState"][];
         };
         /**
          * SceneWorkspaceRead
@@ -7055,6 +7364,56 @@ export interface components {
             }[];
         };
         /**
+         * ShotWorkflowState
+         * @description Wire-visible workflow state for one shot (planning + frozen identity).
+         */
+        ShotWorkflowState: {
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /**
+             * Scene Id
+             * Format: uuid
+             */
+            scene_id: string;
+            /**
+             * Episode Id
+             * Format: uuid
+             */
+            episode_id: string;
+            /** Shot Number */
+            shot_number: number;
+            /** Status */
+            status: string;
+            /** Workflow Template Key */
+            workflow_template_key: string | null;
+            /** Template Version */
+            template_version: string | null;
+            /** Template Contract Hash */
+            template_contract_hash: string | null;
+            /** Template Resolution Status */
+            template_resolution_status: string;
+            /** Quality Policy Id */
+            quality_policy_id: string | null;
+            /** Repair Policy Id */
+            repair_policy_id: string | null;
+            /** Required Reference Roles */
+            required_reference_roles?: string[];
+            /** Supported Character Count */
+            supported_character_count?: number[];
+            /** Intent Tags */
+            intent_tags?: string[];
+            /** Participations */
+            participations?: components["schemas"]["ParticipationEntry"][];
+            capability_assessment?: components["schemas"]["CapabilityAssessmentSummary"] | null;
+        };
+        /** ShotWorkflowStateResponse */
+        ShotWorkflowStateResponse: {
+            workflow_state: components["schemas"]["ShotWorkflowState"];
+        };
+        /**
          * SimpleModeApply
          * @description Simple-mode batch patch (spec §30/§77). ``bindings`` stays the truth.
          */
@@ -7334,12 +7693,51 @@ export interface components {
              */
             role: string;
         };
+        /**
+         * WorkflowOverview
+         * @description Project-wide wire-visible workflow overview (episodes → scenes → shots).
+         */
+        WorkflowOverview: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Episodes */
+            episodes?: components["schemas"]["EpisodeWorkflowSummary"][];
+            /** Scenes */
+            scenes?: components["schemas"]["SceneWorkflowView"][];
+            /**
+             * Total Shots
+             * @default 0
+             */
+            total_shots: number;
+            /**
+             * Formal Shots
+             * @default 0
+             */
+            formal_shots: number;
+            /**
+             * Blocked Scenes
+             * @default 0
+             */
+            blocked_scenes: number;
+            /**
+             * Review Required Scenes
+             * @default 0
+             */
+            review_required_scenes: number;
+            /**
+             * Unsupported Capability Shots
+             * @default 0
+             */
+            unsupported_capability_shots: number;
+            /** Available Staged Strategies */
+            available_staged_strategies?: string[];
+        };
         /** WorkflowOverviewResponse */
         WorkflowOverviewResponse: {
-            /** Overview */
-            overview: {
-                [key: string]: unknown;
-            };
+            overview: components["schemas"]["WorkflowOverview"];
         };
         /** WorkspaceCreate */
         WorkspaceCreate: {
@@ -13796,9 +14194,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ShotWorkflowStateResponse"];
                 };
             };
             /** @description Validation Error */

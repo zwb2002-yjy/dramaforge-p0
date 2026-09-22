@@ -344,7 +344,10 @@ export function WorkspaceSettingsPage({
 }
 
 export function ModelConnectionSettingsPage() {
-  const [section, setSection] = useState("connection");
+  const initialSection = useRouterState({
+    select: (state) => (state.location.pathname.endsWith("/defaults") ? "defaults" : "connection"),
+  });
+  const [section, setSection] = useState(initialSection);
   const sections = [
     { id: "connection", label: "连接" },
     { id: "defaults", label: "默认模型" },

@@ -197,6 +197,27 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("shot-formal-output")).toBeVisible();
   await expect(page.getByTestId("shot-keyframe")).toBeVisible();
 
+  // Video has the same explicit candidate → review → formal gate. It may use
+  // only the already confirmed keyframe and must persist the exact candidate.
+  await page.getByTestId("context-dock-generate").click();
+  await page.getByRole("button", { name: "生成视频", exact: true }).click();
+  await expect.poll(() => state.candidates[0]?.artifact_id).toBe("candidate-video-1");
+  await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
+  await page.getByTestId("shot-candidate-select-candidate-video-1").click();
+  await expect(page.getByTestId("shot-candidate-preview-candidate-video-1")).toBeVisible();
+  await page.getByTestId("shot-candidate-confirm-candidate-video-1").click();
+  await expect(page.getByTestId("shot-candidate-success")).toContainText("已设为正式视频");
+  await expect.poll(() => state.formalVideoArtifactId).toBe("candidate-video-1");
+  expect(state.shotVersion).toBe(4);
+  const formalVideoRequest = state.editing.requests.find(
+    (request) => request.path.endsWith("/formal-video") && request.method === "POST",
+  );
+  expect(formalVideoRequest).toEqual({
+    method: "POST",
+    path: `/api/v1/projects/${PROJECT_ID}/shots/${SHOT_ID}/formal-video`,
+    body: { artifact_id: "candidate-video-1", expected_shot_version: 3 },
+  });
+
   // Production monitor: cross-scene stats + scene row.
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("production-monitor")).toBeVisible();

@@ -1,12 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { eventStreamUrl } from "../../lib/api";
 import {
   parseProductionChange,
   productionQueryAffected,
   type ProductionChange,
 } from "./productionInvalidation";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const PRODUCTION_FACTS_TOPIC = "production.facts.v1";
 export const PRODUCTION_EVENT_BATCH_MS = 150;
 
@@ -17,10 +17,7 @@ export function ProductionFactsSse({ workspaceId }: ProductionFactsSseProps) {
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!workspaceId || typeof EventSource === "undefined") return;
-    const source = new EventSource(
-      API_BASE + "/api/v1/events/stream?workspace_id=" + encodeURIComponent(workspaceId),
-      { withCredentials: true },
-    );
+    const source = new EventSource(eventStreamUrl(workspaceId), { withCredentials: true });
     const pending = new Map<string, ProductionChange>();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const flush = () => {
