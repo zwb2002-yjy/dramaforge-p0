@@ -51,24 +51,39 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
 ## 4. 尚未解决的结构问题
 
-以下是有真实调用链的结构债务，不是本轮自动获准的大重构：
+以下是有真实调用链的结构债务，不是本轮自动获准的大重构。编号与
+[MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) / [PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md)
+的交叉引用一致。
 
-- Director 文本推理仍直接接触 Provider adapter；若收敛为 contract 端口，必须
-  保留精确模型身份、冻结上下文、错误语义和测试 seam，不能用空壳转发掩盖依赖。
-- workflows 中的执行模板、参与计划与引用能力跨 creative/production 职责；
-  是否拆分物理路径需结合实际调用，不先大搬文件。
-- creative_capabilities 的职责与 director 路径不完全一致；access/projects
-  对 creative_templates 的依赖仍需明确是应用层注入还是允许的初始化依赖。
-- ShotReferenceIntent 已迁至 contracts/shot_reference；production 编译器重新导出同一类型，
-  序列化与既有调用语义保持不变，contract → production 的这条依赖已移除。
-- Provider 对 execution.models 的事实依赖，与对 production/runtime 业务的
-  依赖应分别判断；在修改 MODULE_BOUNDARIES 规则前，不把现状自动宣告合规。
-- shared/db 的事务上下文、shared/rls_scopes 的持久归属发现与 model_registry 的全图注册
-  是组合根性质；拆分职责没有消除 scope discovery 的域模型依赖，不能因为
-  shared 理想上是叶子层，就删除这些有消费者的基础设施。
-- golden_project 是证明/测试种子而非产品入口；迁出前要核对证明脚本，不因
-  位置看起来旧就删除测试资产。
-- 历史 shot_experiment_id 字段与冻结计划序列化仍需做兼容审计，再设计前向迁移。
+1. **（预留）** 宏观依赖方向与组合根边界总述；新债务先归入下条之一再开新号。
+2. **production → director 越界**：`execution.media_submission → director.workflows`、
+   `workbench.shot_service → director.turn_service` 等约 4 条边仍由 Production/Workbench
+   编排 Director 业务，违反 MODULE_BOUNDARIES §4.4。收敛顺序中应最先处理。
+3. **Director 文本推理直连 Provider adapter**：`director/text_transport.py` 仍直接接触
+   Provider adapter；若收敛为 contract 端口，必须保留精确模型身份、冻结上下文、
+   错误语义和测试 seam，不能用空壳转发掩盖依赖。
+4. **workflows 跨 creative/production 职责**：执行模板、参与计划与引用能力跨域；
+   是否拆分物理路径需结合实际调用，不先大搬文件。
+5. **模板目录分散**：`execution/shot_pipeline.py`、`production/templates.py` 与
+   `director/workflows/template_nodes.py` 三处 Graph/Workflow 模板来源需要统一发现
+   路径（概念上仍是单一 ProductionGraph 世界观）。
+6. **creative_capabilities 与 access → creative 初始化依赖**：职责与 director 路径
+   不完全一致；`access/projects` 对 creative_templates 的依赖仍需明确是应用层注入
+   还是允许的初始化依赖。
+7. **ShotReferenceIntent 已迁至 contracts/shot_reference**：production 编译器重新导出
+   同一类型，序列化与既有调用语义保持不变，contract → production 的这条依赖已移除。
+8. **Provider 对 execution/models 的事实依赖**：与对 production/runtime 业务的
+   依赖应分别判断；在修改 MODULE_BOUNDARIES 规则前，不把现状自动宣告合规。
+9. **shared 组合根**：shared/db 的事务上下文、shared/rls_scopes 的持久归属发现与
+   model_registry 的全图注册是组合根性质；拆分职责没有消除 scope discovery 的域模型
+   依赖，不能因为 shared 理想上是叶子层，就删除这些有消费者的基础设施。
+10. **golden_project 是证明/测试种子**：迁出前要核对证明脚本，不因位置看起来旧就
+    删除测试资产。
+11. **历史 shot_experiment_id 字段**：与冻结计划序列化仍需做兼容审计，再设计前向迁移。
+
+收敛优先级（Owner 已定）：问题 2 → 问题 3（text_transport 端口化）→ 问题 9（shared
+组合根分类）→ 问题 6（domain→creative 初始化依赖）→ 再逐步清剩余
+`architecture-baseline.json` 豁免。
 
 ## 5. 可重复核查与门禁
 

@@ -91,7 +91,7 @@ export function useFinalFilmExport({
   const filmHistory = useQuery({
     queryKey: queryKeys.editing.films(projectId, sessionId, version),
     queryFn: ({ signal }) => fetchEditFinalFilms(projectId, sessionId!, signal),
-    enabled: projectId !== "demo" && Boolean(sessionId) && version !== undefined,
+    enabled: Boolean(projectId) && Boolean(sessionId) && version !== undefined,
     retry: false,
     refetchInterval: (query) =>
       query.state.data?.some((job) =>

@@ -56,7 +56,7 @@ export function useProjectWorkspaceState(projectId: string) {
   const query = useQuery({
     queryKey: queryKeys.workspace.state(projectId),
     queryFn: () => fetchWorkspaceState(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
     staleTime: 30_000,
   });
 

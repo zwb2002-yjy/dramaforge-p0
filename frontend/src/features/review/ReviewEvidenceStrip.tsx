@@ -36,7 +36,7 @@ export function ReviewEvidenceStrip({
   const summary = useQuery({
     queryKey: queryKeys.review.summary(projectId, shotId, artifactId, reviewKind, stage),
     queryFn: () => fetchReviewSummary(projectId, shotId, artifactId, reviewKind, stage),
-    enabled: projectId !== "demo" && Boolean(shotId) && Boolean(artifactId),
+    enabled: Boolean(projectId) && Boolean(shotId) && Boolean(artifactId),
     refetchInterval: (query) =>
       regenerate.isSuccess && !(query.state.data?.evidence?.frames?.length ?? 0) ? 3000 : false,
   });

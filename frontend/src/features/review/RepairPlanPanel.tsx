@@ -632,7 +632,7 @@ function RepairPanelContent({ projectId, shotId, onClose }: RepairPlanPanelProps
   const [option, setOption] = useState<RepairOption | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const confirmKey = useRef(`repair:${globalThis.crypto.randomUUID()}`);
-  const enabled = projectId !== "demo" && Boolean(shotId);
+  const enabled = Boolean(projectId) && Boolean(shotId);
   const repairs = useQuery({
     queryKey: queryKeys.review.repairs(projectId, shotId),
     queryFn: () => listRepairs(projectId, shotId),

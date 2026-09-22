@@ -6,7 +6,8 @@ Golden/验收流水和一次性执行记录不留在当前树中，只通过 Git
 
 ## 当前产品
 
-DramaForge 是面向专业个人创作者的 AI 短剧 / 漫剧导演工作台。首版主链为：
+DramaForge 是面向专业个人创作者的 AI 短剧 / 漫剧导演工作台。首版主链为
+（**摘要**；canonical 定义见 [CREATION_FLOW.md](CREATION_FLOW.md)）：
 
 ```text
 故事 / 剧本 → 资产 → Scene / Shot → 关键帧 → 视频生成
@@ -42,6 +43,12 @@ Director Runtime 负责提案和编排；Production Runtime 负责真实生产�
 
 文档发生冲突时，以代码、迁移、自动化测试和实际运行结果为当前事实；
 目标架构冲突记录在 `ARCHITECTURE_MAPPING.md`，不要重新引入第二套方案文档。
+
+## 历史 Phase / 「本轮」标记
+
+文档中出现的 “Phase 2/3/4/5/7”、「本轮」等是**历史推进批次标记**，不是仍然有效的
+路线图索引。没有单独的 Phase 路线图文件。若条款与 Status: current 的权威文档冲突，
+以权威文档和代码为准；不要按 Phase 编号启动新工作。
 
 ## 历史资料规则
 

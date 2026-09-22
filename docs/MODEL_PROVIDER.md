@@ -81,6 +81,11 @@ LiteLLM 仍负责把 OpenAI Chat 请求路由到上游供应商，因此 DramaFo
    Artifact ID/哈希、提交状态和远端任务 ID，但绝不记录 Key、签名 URL
    或原始私密素材。
 
+## 首版延期（deferred）
+
+- **Provider Connection 删除**：连接可启用/停用；删除操作延期到后续版本，
+  首版只提供停用。项目 Provider Binding 保持只读回显。
+
 ## 质量认证不是执行准入
 
 `ProviderModelBinding.quality_gated` 表示**已有人工验收过该绑定的代表产物**

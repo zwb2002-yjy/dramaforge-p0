@@ -1,9 +1,9 @@
 # DATA_MODEL — 数据模型权威
 
 Status: current
-Date: 2026-09-17
-Alembic head: 20260917_0072
-Revisions: 72
+Date: 2026-09-22
+Alembic head: 20260922_0077
+Revisions: 77
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Canonical relational graph
@@ -99,17 +99,19 @@ Migration 20260902_0051 removes:
 | 20260907_0056 | Bounded Director turns and text invocation evidence. |
 | 20260908_0057–0060 | Recovery functions/grants for recoverable Director turns, fact reconciliation, Formal checkpoints and cancellation-requested Provider work. |
 | 20260909_0061 | `production_command_authorizations`: exact user-approved commands persisted before Director submission. |
-| 20260922_0077 | `human_review_decisions.decision` adds `demo_confirmed`; it records walkthrough confirmation but does not admit Formal media. |
 | 20260909_0062 | `director_inbox`, `director_wakeups`: atomic receipt/wakeup retention across process loss. |
 | 20260910_0063 | `app.emit_workbench_terminal_notice()` trigger on every `node_runs.status` write. |
 | 20260910_0064 | `director_invocations`: individual Director text invocation identity and validated output. |
 | 20260910_0065 | Director turn engine binding (`engine_version`, `state_schema_version`, `runtime_execution_id`, `runtime_revision`) and `director_runtime_controls`, `director_runtime_wakeups`, `director_runtime_signal_claims`. |
+| 20260910_0066 | Private `director_runtime_checkpoints` schema and its role. |
+| 20260916_0070 | Canonical Asset/AssetVersion lifecycle constraints, current Formal pointers, and one-time migration of legacy `metadata.tags` into `asset_tags` / `asset_tag_links`. |
 | 20260917_0071 | Remove the retired `face_review` node type and unused `export_format` / `export_status` PostgreSQL enum types; `project_stage` now reuses the shared ORM enum definition. |
 | 20260917_0072 | Add a SECURITY DEFINER outbox metrics query for process-wide pending count and oldest pending age. |
 | 20260919_0073 | Add bounded persisted Provider recovery discovery. |
 | 20260921_0074 | Persist the model IDs returned by immutable account catalog probe evidence. |
-| 20260910_0066 | Private `director_runtime_checkpoints` schema and its role. |
-| 20260916_0070 | Canonical Asset/AssetVersion lifecycle constraints, current Formal pointers, and one-time migration of legacy `metadata.tags` into `asset_tags` / `asset_tag_links`. |
+| 20260921_0075 | Bind `provider_capability_evidence` to immutable `provider_connection_revisions` identity. |
+| 20260921_0076 | Seed protocol-level OpenAI-compatible image/video capability contracts (contracts, not concrete supplier models). |
+| 20260922_0077 | `human_review_decisions.decision` adds `demo_confirmed`; it records walkthrough confirmation but does not admit Formal media. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
 deleted by these revisions. Revision 0070 backfills legacy Asset lifecycle and
@@ -117,7 +119,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20260921_0074.
+- Alembic has one head: 20260922_0077 (verify with `alembic heads` on the candidate).
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.

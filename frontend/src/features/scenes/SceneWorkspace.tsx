@@ -101,7 +101,7 @@ export function SceneWorkspace({
   const workspace = useQuery({
     queryKey: queryKeys.scene.workspace(projectId, sceneId),
     queryFn: () => fetchSceneWorkspace(projectId, sceneId),
-    enabled: Boolean(projectId) && Boolean(sceneId) && projectId !== "demo",
+    enabled: Boolean(projectId) && Boolean(sceneId),
     refetchInterval: (query) =>
       hasActiveSceneRuns(query.state.data?.trace as Record<string, unknown[]> | undefined)
         ? SCENE_ACTIVE_REFETCH_MS

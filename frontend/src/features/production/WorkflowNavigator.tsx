@@ -126,7 +126,7 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
   const overview = useQuery({
     queryKey: queryKeys.production.workflowOverview(projectId),
     queryFn: () => fetchWorkflowOverview(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const data = overview.data as WorkflowOverviewRead | undefined;
   const episodes = data?.episodes ?? [];

@@ -111,7 +111,8 @@ checked from service status and worker logs: `worker-default` consumes
 `dramaforge:heavy`. Recoverable work is republished by the resident
 `dispatcher` and by the Director worker's startup recovery.
 Provider reconciliation runs in an independent dispatcher loop, not a heavy-queue cron job;
-media execution still uses the existing queue. Apply migration `20260921_0074` before
+media execution still uses the existing queue. Apply migrations through the
+candidate head (currently `20260922_0077`; confirm with `alembic heads`) before
 updating the dispatcher and media workers. This rollout is not implied by a source-only push.
 
 PostgreSQL, Redis, MinIO and the LiteLLM database use `restart: unless-stopped` plus bounded

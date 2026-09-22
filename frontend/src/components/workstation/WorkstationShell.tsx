@@ -181,7 +181,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
       queryClient.setQueryData(queryKeys.project.detail(projectId!), resolved.project);
       return resolved;
     },
-    enabled: Boolean(projectId && projectId !== "demo"),
+    enabled: Boolean(projectId),
     retry: false,
     staleTime: 60_000,
   });
@@ -190,9 +190,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const navigationProjectId =
     projectId ?? (returnTo ? projectIdFromPath(returnTo.split(/[?#]/)[0]) : null);
   const projectName =
-    navigationProjectId === "demo"
-      ? "演示项目"
-      : (projectContext.data?.project.name ?? (navigationProjectId ? "当前项目" : null));
+    projectContext.data?.project.name ?? (navigationProjectId ? "当前项目" : null);
   const settingsOrigin = primary === "settings" ? returnTo : location.href;
   const settingsSearch = settingsOrigin ? { returnTo: settingsOrigin } : {};
   const returnUrl = new URL(returnTo ?? "/", window.location.origin);
@@ -224,7 +222,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
           : projectId || location.search.panel || location.search.create
             ? { to: "/", search: {}, label: "返回项目大厅" }
             : null;
-  const needsProjectContext = Boolean(projectId && projectId !== "demo");
+  const needsProjectContext = Boolean(projectId);
   const projectContent = needsProjectContext ? (
     projectContext.isPending ? (
       <main className="df-page">

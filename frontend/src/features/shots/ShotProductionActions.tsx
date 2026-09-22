@@ -166,7 +166,7 @@ export function ShotProductionActions({
   const capabilities = useQuery({
     queryKey: queryKeys.director.capabilities(projectId),
     queryFn: () => fetchDirectorCapabilities(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
     retry: false,
   });
   const directorCapabilities = capabilities.data ?? null;
@@ -175,13 +175,13 @@ export function ShotProductionActions({
   const models = useQuery({
     queryKey: queryKeys.model.catalog(),
     queryFn: () => listModels(),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
     retry: false,
   });
   const modelPreflight = useQuery({
     queryKey: queryKeys.model.executionPreflight(projectId),
     queryFn: () => getExecutionModelPreflight(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
     retry: false,
   });
   // Only an explicit `runtime_turns_available === false` closes the AUTO entry
@@ -501,7 +501,6 @@ export function ShotProductionActions({
   const keyframePreflight = preflightStage("image_keyframe");
   const videoPreflight = preflightStage("video");
   const preflightBlocks = (stage: ShotExecutionStage) => {
-    if (projectId === "demo") return false;
     if (modelPreflight.isPending || modelPreflight.isError) return true;
     return preflightStage(stage)?.ready !== true;
   };

@@ -57,7 +57,7 @@ export function ProductionTodoQueue({ projectId }: { projectId: string }) {
   const query = useQuery({
     queryKey: queryKeys.production.todos(projectId),
     queryFn: () => fetchProductionTodos(projectId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
     refetchInterval: 10_000,
   });
   const items = Array.isArray(query.data?.items) ? query.data.items : [];

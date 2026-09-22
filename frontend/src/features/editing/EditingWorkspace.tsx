@@ -155,12 +155,12 @@ export function EditingWorkspace({
   const manifest = useQuery({
     queryKey: queryKeys.production.opencutManifest(projectId),
     queryFn: () => fetchOpenCutManifest(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo" && !hasSession,
+    enabled: Boolean(projectId) && !hasSession,
   });
   const persistedSession = useQuery({
     queryKey: queryKeys.editing.session(projectId, sessionId),
     queryFn: () => fetchEditSession(projectId, sessionId!),
-    enabled: Boolean(projectId) && projectId !== "demo" && hasSession,
+    enabled: Boolean(projectId) && hasSession,
   });
   const currentSessionVersion = persistedSession.data?.version;
   const timeline = useTimelineDraft(projectId, sessionId, persistedSession.data);
@@ -1059,9 +1059,7 @@ export function EditingWorkspace({
       )}
       {!manifest.isLoading && !manifest.isError && !manifest.data && (
         <p className="muted" data-testid="editing-empty-project">
-          {projectId === "demo"
-            ? "演示项目没有真实 OpenCut manifest。"
-            : "项目暂无可交接的正式视频。"}
+          项目暂无可交接的正式视频。
         </p>
       )}
       {!manifest.isError && (
@@ -1069,9 +1067,7 @@ export function EditingWorkspace({
           type="button"
           data-testid="create-edit-session"
           onClick={() => create.mutate()}
-          disabled={
-            create.isPending || manifest.isLoading || projectId === "demo" || !manifest.data
-          }
+          disabled={create.isPending || manifest.isLoading || !manifest.data}
         >
           {create.isPending ? "正在创建剪辑会话…" : "创建可编辑剪辑会话"}
         </button>

@@ -153,13 +153,13 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
   const workspace = useQuery({
     queryKey: queryKeys.script.workspace(projectId),
     queryFn: () => fetchScriptWorkspace(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const data = workspace.data as ScriptWorkspaceRead | undefined;
   const proposals = useQuery({
     queryKey: queryKeys.script.proposals(projectId),
     queryFn: () => listStoryProposals(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const pendingProposals = (Array.isArray(proposals.data) ? proposals.data : []).filter(
     (proposal) => proposal.status === "pending",
@@ -252,14 +252,6 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
     },
     onError: (error: Error) => setApplyError(error.message),
   });
-
-  if (projectId === "demo") {
-    return (
-      <div data-testid="project-script-page" className="qc-project-page">
-        <PageHeader title="剧本工作区" description="演示项目不读取真实剧本数据。" />
-      </div>
-    );
-  }
 
   const proposalOperations = activeProposal?.operations ?? [];
   const normalizedFilename = filename.trim() || "story-draft.md";

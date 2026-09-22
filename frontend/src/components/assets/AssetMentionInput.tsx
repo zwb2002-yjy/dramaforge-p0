@@ -43,7 +43,7 @@ export function AssetMentionInput({
   const assets = useQuery({
     queryKey: queryKeys.asset.mentions(projectId),
     queryFn: () => fetchProjectAssets(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
   });
 
   const currentMention = useMemo(() => {

@@ -6,6 +6,8 @@ import pytest
 from app.providers.bootstrap import build_v3_registry
 from app.providers.capabilities import Capability
 from app.providers.catalog_seed_data import seed_manifests_for
+from app.providers.contracts.common import ExecutionContext
+from app.providers.errors import ProviderError
 from app.providers.manifest import (
     ModelCapabilityManifest,
     to_v3_model_manifest,
@@ -152,6 +154,25 @@ class TestDefaultRegistryQueryable:
         # Phase 3 wires real adapters; until then capability queries work
         models = model_registry.find_by_capability(Capability.VIDEO_IMAGE_TO_VIDEO)
         assert len(models) == 4
+
+    async def test_query_only_adapter_fails_with_typed_unsupported_error(self) -> None:
+        model_registry, _ = build_v3_registry()
+        registered = model_registry.get("agnes/agnes-video-v2.0")
+
+        with pytest.raises(ProviderError) as unsupported:
+            await registered.adapter.create(
+                Capability.VIDEO_IMAGE_TO_VIDEO,
+                object(),
+                ExecutionContext(trace_id="test-query-only"),
+            )
+
+        assert unsupported.value.code == "unsupported_capability"
+        assert unsupported.value.status_code == 422
+        assert unsupported.value.details == {
+            "adapter": "bootstrap",
+            "model_id": "agnes/agnes-video-v2.0",
+            "operation": "create",
+        }
 
 
 class TestDefaultRegistryRealAdapters:

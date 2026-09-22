@@ -22,6 +22,17 @@ function mockFetch(): void {
       return json({ id: "owner-1", display_name: "创作者", email: "owner@example.com" });
     }
     if (url.endsWith("/api/v1/workspaces")) return json([{ id: "workspace-1", name: "空间" }]);
+    if (url.endsWith("/api/v1/workspaces/workspace-1/projects")) {
+      return json([
+        {
+          id: "project-1",
+          workspace_id: "workspace-1",
+          name: "作品",
+          stage: "planning",
+          aspect_ratio: "16:9",
+        },
+      ]);
+    }
     if (/\/(provider-plugins|provider-connections|model-profiles|projects)$/.test(url))
       return json([]);
     if (url.includes("/workspace-state")) return json({ state: { last_view: "production" } });

@@ -1,49 +1,57 @@
 # V1_STATUS — 当前 V1 / 发布状态
 
 Status: current  
-本地运行与远端分支状态核对日期：2026-09-21。
+本地运行与远端分支状态核对日期：2026-09-22。Owner 拍板同日落盘（架构债顺序、死代码、demo、ADR/依赖、条件 3）。
+迁移头以候选上 `alembic heads` 为准；当前树对应 **`20260922_0077`**（见
+[DATA_MODEL.md](DATA_MODEL.md)）。
 
 ## 当前结论
 
 **首版尚未正式发布完成。** 运行候选、集成 PR 和发布基线必须分开看；本地质量门通过不等于真实双路径验收或正式发布完成。
 
+本文件**不钉死** PR 编号、测试计数或 Base SHA 作为长期事实（与 CURRENT.md「计数/SHA 不作当前事实」一致）。下表只描述**状态性质**；最终候选 SHA、门结果与证据路径在发布条件勾选表中由 Owner 落笔。
+
 | 对象 | 当前事实 |
 |---|---|
-| 发布基线 | `main` 为 `c12c3dfb89cca92a45de99a6db4ade2f0c5f19e7`；`dev` / PR #90 HEAD 为 `ca8f8b7555768b958fd372608aaf34c2ac430f3d`。PR #90 (`dev -> main`) 仍 OPEN、未合并 |
-| 当前 8080 实例 | API、dispatcher、三个 worker 与 frontend 已切换到 `dc3056e99caf1a20484e39058a5d3d8d6a40cba7` 运行候选；`GET /health` 返回 `env=production`、`db=up`，服务健康。数据库迁移头为 `20260919_0073` |
-| 最新 UI 候选 | `codex/web-workbench-redesign` 的最新运行相关提交为 `b038dd3d5c2c4770fcc9fd585f302d5d8f4fbea4`；Draft PR #95 指向 `dev`，包含尚未合入的 #94 及后续状态文档。该候选的完整本地容器浏览器回归为 102/102 通过，远端最终 HEAD/checks 以 PR 为准；尚未替换 8080 生产实例 |
-| 优化分支集成 | `codex/workbench-optimization -> dev` 已建立 PR #94，保持 Draft，未合并。运行候选之后的 CI 分支策略与状态文档变更不属于当前运行镜像内容；最终 HEAD/checks 以该 PR 为准 |
-| 本地质量门 | 运行候选已通过完整 backend/PostgreSQL/migration、frontend（含完整未分片 Playwright）与固定 LiteLLM mock-proxy 容器门。最新 UI 候选在同款前端质量镜像中完成 102/102 浏览器回归；并行重负载下的超时未计为通过 |
-| 真实制作验收 | 双路径真实验收 driver 已为 `complete=true`：模板和自由创作均完成 MP4/SRT；自由路径的一次授权 Editing 文本建议已显式采用、保存并导出，再完成仅剪辑重导出。双路径浏览器、刷新和独立登录恢复通过，重导出未新增远程图像/视频操作。既有媒体与中断恢复沿用有边界的候选等价证明并保留原始 SHA 归属，不宣称在新 SHA 重新生成全部媒体 |
+| 发布基线 | `main` 仅通过受保护的 `dev -> main` PR 前进；当前 tip 以远端为准 |
+| 运行实例 | 8080 上的 gateway/API/workers 与迁移头构成「当前运行候选」；健康状态不证明创作链完成。实例身份、迁移头与源码 SHA 必须分别核对 |
+| UI 候选 | 存在尚未合入的 UI/优化分支与 Draft PR；最终 HEAD/checks 以 PR 为准，不得把 Draft 检查计数写成已发布事实 |
+| 本地质量门 | 完整 backend/PostgreSQL/migration、frontend（含完整 Playwright）与固定 LiteLLM mock-proxy 容器门可重复执行；命令见 [DEVELOPMENT.md](DEVELOPMENT.md) |
+| 真实制作验收 | 双路径真实验收 driver 可达 `complete=true`（模板与自由创作 MP4/SRT；一次授权 Editing 文本建议显式采用/保存/导出）。历史媒体/恢复证据仅在「候选等价边界」内复用（见条件 3） |
 
 CI 仅监听指向 `dev` / `main` 的 PR 与手动 dispatch；push 本身不是质量门证明。
-PR #94 / #95 的远端检查不能替代 Owner 审查，PR #90 的旧检查也不覆盖优化分支或最新 UI。#95 包含 #94 的提交；Owner 须确定集成顺序，不能将两者当作互相独立、均已集成的改动。
+Agent 不批准或合并 PR，不发布。
 
 ## 当前继续边界
 
-既有运行候选 `dc3056e` 已完成质量门、部署及双路径制作验收；这不表示最新 UI 候选已正式发布。Owner 授权的至多 ¥10、一次 Editing 文本建议已消费；没有额外文本重试或图像/视频生成授权。
-既有运行候选 UI 已验证建议采用不等于保存、显式保存/导出、播放和刷新恢复，原始验收 driver 的 17 项 required assertions 均 PASS、complete=true；保留其 SHA 归属。
-不重跑已有图像/视频，不重试历史 `unknown_submission`。后续进入 Owner 候选审阅与发布流程；Agent 不批准或合并 PR，不发布。
+- 质量门、部署与双路径制作验收的完成，不表示最新 UI 候选已正式发布。
+- Owner 授权的历史付费预算不延续；没有新的正数预算与逐操作授权时不得扩大 probe/production/repair。
+- 不重跑已有图像/视频，不重试历史 `unknown_submission`。新的用户重生成意图必须作为新操作独立授权。
+- 后续进入 Owner 候选审阅与发布流程。
 
 ## 已确定的首版产品边界
 
 - `quality_gated` 表示质量认证/正式支持证据，不是普通执行与实验的硬准入；绑定、连接、能力不匹配仍失败关闭。
 - 项目 Provider Binding 有只读回显；Provider Connection 可启用/停用，连接删除延期。
-- 无生产者的旧 Shot Change Proposal 面板、不可达的 ProfessionalWorkbench 非实验分支和未消费的 ExperimentCompare 已移除；现行 Director Turn / Shot Suggestion 与 ExperimentBranch 路径保留。
-- 镜头 6 的旧视频提交仍须按 `unknown_submission` 保留证据，禁止技术盲重试。新的用户重生成意图必须作为新操作独立授权。
+- 无生产者旧表面已清退：Shot Change Proposal 面板和前端客户端已删除；服务端 `change-proposals` API 暂保留且无前端消费者。ModelPicker/uiStore/DirectorBoard 前端死代码删除；video-frames 保留；DirectorBoard 后端暂保留；V2 bootstrap stub fail-closed 为类型化 `unsupported_capability`（HTTP 422），不再以 500 暴露。产品运行时无 demo Project ID 特判，测试使用普通 Project fixture。
+- 镜头旧视频提交仍须按 `unknown_submission` 保留证据，禁止技术盲重试。
 
-## 尚需闭合的发布条件
+## 尚需闭合的发布条件（Owner 勾选表）
 
-1. **候选一致性**：由 Owner 确定最终候选；其运行相关内容需通过对应完整容器门和远端 required checks。后续优化不能夹带进旧候选验收。
-2. **正式入口**：在明确安排现有实例交接后，让 8080 的 gateway/API/workers 都运行该候选的 production 身份。健康状态本身不证明创作链完成。
-3. **REL-01 证据绑定**：当前运行候选的验收 driver 已为 `complete=true`，旧媒体/恢复证据通过明确的候选等价边界保留来源。Owner 仍需确认最终发布候选；若运行相关代码变化，须重新评估受影响证据，不能直接挪用当前结论。
-4. **Owner 合并**：Owner 审阅并合并受保护的 `dev -> main`；agent 不批准、不合并。
-5. **发布与安装**：成功生成版本化 Release 制品，并用该版本的 online/offline bundle 在干净目录安装验证。源码测试不能替代制品安装验证。
+每条必须能落到：**最终候选 SHA + 可执行门命令 + 证据路径 + Owner 勾选**。
+未勾选不得宣称 V1 发布完成。
 
-当前尚无版本化 GitHub Release。默认分支仍有 3 条开发依赖安全告警（`js-yaml` high、`vitest` / `@vitest/mocker` moderate）；当前候选 `npm audit --omit=dev --audit-level=high` 为零漏洞，不等于这些开发依赖告警已关闭。发布审查须保留此区别，不凭生产依赖审计宣称全部依赖安全。
+| # | 条件 | 门命令 / 证据 | Owner 确认 |
+|---|---|---|---|
+| 1 | **候选一致性**：确定最终候选 SHA；其运行相关内容通过完整容器门与远端 required checks。后续优化不得夹带进旧候选验收 | 候选 SHA：`________`；`scripts/run_quality_in_docker.ps1`；远端 required checks 截图或 API 结果路径：`________` | ☐ |
+| 2 | **正式入口**：在明确安排现有实例交接后，8080 的 gateway/API/workers 都运行该候选的 production 身份；`alembic heads` 单一且与候选一致 | 实例源码 commit：`________`；`GET /health` 证据路径：`________`；`alembic heads` 输出：`________` | ☐ |
+| 3 | **候选验收证据绑定**：针对**最终候选 SHA** 记录质量门命令、运行结果和证据路径。历史媒体/恢复证据只有在明确列出「候选等价边界」（哪些文件/路径自证据 SHA 起未变化）并确认相关代码未变化时才允许复用；运行相关代码一旦变化须重新评估受影响证据，不能直接挪用 | 最终候选 SHA 的验收 driver / 门日志路径：`________`；候选等价边界清单路径：`________` | ☐ |
+| 4 | **Owner 合并**：Owner 审阅并合并受保护的 `dev -> main` | 合并提交 SHA：`________` | ☐ |
+| 5 | **发布与安装**：生成版本化 Release 制品，并用该版本 online/offline bundle 在干净目录安装验证。源码测试不能替代制品安装验证 | Release tag：`________`；安装验证日志路径：`________` | ☐ |
 
-真实 Provider probe/production/repair 每次都需要本任务明确的正数预算与 Owner 授权。历史预算不延续，
-可能已计费或 `unknown_submission` 的调用不能盲重试；当前正在运行的其他实例也不属于可自动清理的资源。
+当前尚无版本化 GitHub Release。默认分支仍有 3 条开发依赖安全告警（`js-yaml` high、`vitest` / `@vitest/mocker` moderate）；生产 `npm audit --omit=dev --audit-level=high` 为零漏洞不等于这些告警已关闭。依赖策略：优先兼容升级关闭；无安全兼容版本时记有期限例外并写明到期日。仓库变量 `DEPENDENCY_REVIEW_ENABLED` 必须为 true；Dependabot 恢复 direct + 非 major + 月度 + 限流。
+
+真实 Provider probe/production/repair 每次都需要本任务明确的正数预算与 Owner 授权。历史预算不延续；可能已计费或 `unknown_submission` 的调用不能盲重试。
 
 ## 权威与历史
 

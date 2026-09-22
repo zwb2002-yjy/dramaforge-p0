@@ -5,9 +5,7 @@ updates:
     target-branch: dev
     schedule:
       interval: monthly
-    # Temporarily pause version-update PRs. Security alerts remain enabled for
-    # manual triage; automated security fixes remain disabled at repository level.
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 3
     allow:
       - dependency-type: direct
     ignore:
@@ -19,7 +17,7 @@ updates:
     target-branch: dev
     schedule:
       interval: monthly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 3
     allow:
       - dependency-type: direct
     ignore:
@@ -31,7 +29,7 @@ updates:
     target-branch: dev
     schedule:
       interval: monthly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 2
     ignore:
       - dependency-name: "*"
         update-types:
@@ -41,7 +39,7 @@ updates:
     target-branch: dev
     schedule:
       interval: monthly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 1
     # Python 3.14.x is the runtime baseline; 3.15 is a minor SemVer update.
     ignore:
       - dependency-name: python
@@ -53,7 +51,7 @@ updates:
     target-branch: dev
     schedule:
       interval: monthly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 1
     # Stay on Node 24 LTS; continue receiving 24.x maintenance updates.
     ignore:
       - dependency-name: node

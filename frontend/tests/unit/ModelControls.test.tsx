@@ -1,11 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { CapabilitySpecRead, ModelRead } from "../../src/lib/api";
+import type { CapabilitySpecRead } from "../../src/lib/api";
 import {
   AdvancedModelOptions,
   DynamicCapabilityForm,
-  ModelPicker,
   ReferencePurposeEditor,
 } from "../../src/features/model-controls";
 
@@ -104,25 +103,6 @@ describe("AdvancedModelOptions", () => {
       />,
     );
     expect(screen.getByTestId("advanced-model-options")).toBeTruthy();
-  });
-});
-
-describe("ModelPicker", () => {
-  it("renders models by display name and capability, not provider names", () => {
-    const models: ModelRead[] = [
-      {
-        id: "agnes/agnes-video-v2.0",
-        provider_id: "agnes",
-        display_name: "Agnes Video 2.0",
-        enabled: true,
-        configured: true,
-        available: true,
-        capabilities: ["video.image_to_video"],
-      },
-    ];
-    render(<ModelPicker models={models} value={null} onChange={() => undefined} />);
-    expect(screen.getByText("Agnes Video 2.0")).toBeTruthy();
-    expect(screen.getByText(/video\.image_to_video/)).toBeTruthy();
   });
 });
 

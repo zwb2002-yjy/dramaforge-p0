@@ -47,19 +47,19 @@ export function ProductionPage({
   const summary = useQuery({
     queryKey: queryKeys.production.summary(projectId),
     queryFn: ({ signal }) => fetchProductionSummary(projectId, signal),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
     refetchInterval: (query) => ((query.state.data?.running_runs ?? 0) > 0 ? 4000 : 30000),
   });
   const shots = useQuery({
     queryKey: queryKeys.shot.list(projectId),
     queryFn: () => fetchProjectShots(projectId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
     refetchInterval: 30000,
   });
   const scenes = useQuery({
     queryKey: queryKeys.scene.list(projectId),
     queryFn: () => fetchScenes(projectId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
     refetchInterval: 30000,
   });
 
@@ -70,12 +70,11 @@ export function ProductionPage({
   // the first Scene so the Owner can configure it before any Shot exists.
   const [chosenSceneId, setChosenSceneId] = useState<string | null>(null);
   const firstSceneId = scenes.data?.[0]?.id ?? null;
-  const sceneCapabilityId =
-    projectId === "demo" ? null : (chosenSceneId ?? selectedSceneId ?? firstSceneId ?? null);
+  const sceneCapabilityId = chosenSceneId ?? selectedSceneId ?? firstSceneId ?? null;
   const experiments = useQuery({
     queryKey: queryKeys.experiment.list(projectId),
     queryFn: () => fetchExperiments(projectId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const availableModels = useQuery({
     queryKey: queryKeys.model.catalog(),
@@ -87,12 +86,12 @@ export function ProductionPage({
   const keyframeCandidates = useQuery({
     queryKey: queryKeys.model.candidates(projectId, "image.generate"),
     queryFn: () => listModelCandidates(projectId, "image.generate"),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const videoCandidates = useQuery({
     queryKey: queryKeys.model.candidates(projectId, "video.generate"),
     queryFn: () => listModelCandidates(projectId, "video.generate"),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
   });
 
   return (

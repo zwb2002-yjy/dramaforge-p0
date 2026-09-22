@@ -41,7 +41,7 @@ export function AudioArtifactPicker({
   const audio = useQuery({
     queryKey: queryKeys.editing.audioLibrary(projectId, cursor),
     queryFn: ({ signal }) => fetchEditingAudioArtifacts(projectId, cursor, signal),
-    enabled: open && Boolean(projectId) && projectId !== "demo",
+    enabled: open && Boolean(projectId),
     staleTime: 60_000,
     retry: false,
   });

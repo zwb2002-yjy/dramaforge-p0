@@ -215,13 +215,13 @@ export function BatchProductionPanel({
   const keyframes = useQuery({
     queryKey: queryKeys.production.batchPreview(projectId, sceneId ?? null, "image_keyframe"),
     queryFn: () => fetchBatchProductionPreview(projectId, "image_keyframe", sceneId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
     retry: false,
   });
   const videos = useQuery({
     queryKey: queryKeys.production.batchPreview(projectId, sceneId ?? null, "video"),
     queryFn: () => fetchBatchProductionPreview(projectId, "video", sceneId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
     retry: false,
   });
   const keyframePreview = isUsablePreview(keyframes.data) ? keyframes.data : undefined;

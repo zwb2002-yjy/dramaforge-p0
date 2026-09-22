@@ -26,7 +26,7 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   const scenes = useQuery({
     queryKey: queryKeys.scene.summaries(projectId),
     queryFn: () => fetchScenes(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
   });
 
   const invalidate = () => {

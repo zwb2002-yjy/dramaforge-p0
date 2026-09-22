@@ -1,7 +1,10 @@
 # CREATION_FLOW — 唯一创作主链权威
 
-Status: current / Updated: 2026-09-19（发布与运行身份另见 V1_STATUS.md）
+Status: current / Updated: 2026-09-22（发布与运行身份另见 V1_STATUS.md）
 （入口见 [CURRENT.md](CURRENT.md)）
+
+本文件是**产品路径的唯一 canonical 定义**。CURRENT / CANONICAL_ARCHITECTURE /
+PRODUCT / RELEASE 中的主链句子均为摘要，不得与本文件冲突后另立第二套路径。
 
 ## Product chain
 

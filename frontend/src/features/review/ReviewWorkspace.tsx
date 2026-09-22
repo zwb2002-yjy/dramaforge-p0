@@ -81,7 +81,7 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
   const shots = useQuery({
     queryKey: queryKeys.shot.review(projectId),
     queryFn: () => fetchProjectShots(projectId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const shotId = explicitTarget
     ? (target?.shotId ?? null)
@@ -97,12 +97,12 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
   const workbench = useQuery({
     queryKey: queryKeys.shot.reviewWorkbench(projectId, shotId),
     queryFn: () => fetchShotWorkbench(projectId, shotId!),
-    enabled: projectId !== "demo" && Boolean(shotId),
+    enabled: Boolean(projectId) && Boolean(shotId),
   });
   const annotations = useQuery({
     queryKey: queryKeys.review.annotations(projectId, shotId),
     queryFn: () => fetchReviewAnnotations(projectId, shotId!),
-    enabled: projectId !== "demo" && Boolean(shotId),
+    enabled: Boolean(projectId) && Boolean(shotId),
   });
   const addAnnotation = useMutation({
     mutationFn: (input: Parameters<typeof createReviewAnnotation>[2] & { shotId: string }) => {
@@ -236,7 +236,7 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
           ))}
         </Select>
       </Field>
-      {projectId !== "demo" && (shots.isPending || (shotId && workbench.isPending)) ? (
+      {shots.isPending || (shotId && workbench.isPending) ? (
         <p role="status" data-testid="review-media-loading">
           正在读取当前镜头的素材与审查状态…
         </p>

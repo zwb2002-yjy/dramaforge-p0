@@ -2,9 +2,8 @@
 
 Status: current
 Source: backend/app/api/v1 and generated OpenAPI
-Date: 2026-09-21
-Base: dev 6555395
-Migration head: 20260921_0074
+Date: 2026-09-22
+Migration head: 20260922_0077
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Contract rules
@@ -18,7 +17,7 @@ Migration head: 20260921_0074
 - User-facing access is the frontend gateway at port 8080; the API process is
   an internal Compose service on port 8000.
 - No compatibility endpoint is kept for retired product concepts.
-- `backend/app/api/v1/router.py` registers 26 routers and exposes `/status`.
+- `backend/app/api/v1/router.py` registers 27 routers and exposes `/status`.
 
 ## Route ownership
 
@@ -85,6 +84,9 @@ validated server-side; a disabled button is never the only guard.
 | Write path | Requirement | Refusal |
 |---|---|---|
 | `POST …/formal-keyframe`, `POST …/formal-video` | a stored human `approved` decision for that exact Artifact (`human_review_decisions`) | 422 `REVIEW_APPROVAL_REQUIRED` with `reason` (`REVIEW_AWAITING_HUMAN`, `REVIEW_DECISION_MISSING`, `REVIEW_DECISION_REJECTED`, `REVIEW_DECISION_STALE`) |
+| `POST …/final-film/render` | the same decision for every clip Artifact on the frozen Timeline | 422 `DELIVERY_REVIEW_REQUIRED` with the offending `artifact_id` and `reason` |
+| `POST …/repairs/{id}/steps` | mandatory displayed `expected_plan_fingerprint`, `expected_step_ordinal` and `idempotency_key`; previous exact candidate must pass human review and explicit Formal adoption | 409 stale plan/step or reused command; 422 `REPAIR_STEP_REQUIRES_REVIEW` |
+| `POST …/repairs/{id}/close` | `completed` requires final reviewed/Formal candidate; `abandoned` ends only this repair, not remote work; neither closes an active or unknown-submission run | 409 `REPAIR_NOT_COMPLETE` / `REPAIR_RUN_ACTIVE` / `REPAIR_SUBMISSION_UNKNOWN` |
 
 `demo_confirmed` is a stored review decision for walkthrough confirmation only. It remains
 blocked by the Formal gate and never aliases `approved`.
@@ -92,9 +94,6 @@ blocked by the Formal gate and never aliases `approved`.
 `GET …/batch-production/preview` is side-effect free. `POST …/batch-production` requires the
 exact preview fingerprint, a positive call ceiling, `owner_authorized=true`, currency and a
 positive per-operation cost ceiling; each accepted NodeRun stores that concrete authorization.
-| `POST …/final-film/render` | the same decision for every clip Artifact on the frozen Timeline | 422 `DELIVERY_REVIEW_REQUIRED` with the offending `artifact_id` and `reason` |
-| `POST …/repairs/{id}/steps` | mandatory displayed `expected_plan_fingerprint`, `expected_step_ordinal` and `idempotency_key`; previous exact candidate must pass human review and explicit Formal adoption | 409 stale plan/step or reused command; 422 `REPAIR_STEP_REQUIRES_REVIEW` |
-| `POST …/repairs/{id}/close` | `completed` requires final reviewed/Formal candidate; `abandoned` ends only this repair, not remote work; neither closes an active or unknown-submission run | 409 `REPAIR_NOT_COMPLETE` / `REPAIR_RUN_ACTIVE` / `REPAIR_SUBMISSION_UNKNOWN` |
 
 Review steps are human actions: the review page records the decision, and the
 Formal selection stays a separate user action. A machine `needs_human` result is
@@ -162,14 +161,16 @@ Node installation for development or release evidence.
 报错，绝不回退成“当前正式视频”。stage=formal_video 是准入用途，不表示目标
 已经 Formal。服务端仍校验工作空间、Project、Shot、Artifact 血缘和对应审查记录。
 
-**当前实现**：候选托盘与修复步骤提供携带精确目标的审查入口。Review 摘要同时返回视频证据清单（来源 Artifact / 哈希、审查运行与证据 Artifact、采样版本、参考图哈希、逐帧时间 / 角色 / 哈希 / 可用状态），桌面证据条仅做读取和播放器定位，不触发生成。ReviewWorkspace
+**已实现（current）**：候选托盘与修复步骤提供携带精确目标的审查入口。ReviewWorkspace
 使用工作台返回的镜头候选 / 正式结果校验目标；修复入口额外核对请求、步骤和结果。
 显式目标无效时显示错误，不回退正式版本。播放器、批注与人工决定绑定同一 Artifact；
 切换目标会隔离本地草稿、幂等键及迟到提交反馈。RepairStepRead 只读投影本步
 NodeRun.result_artifact_id，不另存可修改副本，也不以 adopted_artifact_id 猜测候选。
 
-**尚待验证和实现**：服务端全链血缘 / 错 Shot 拒绝审计、候选正式采用按钮的资格、
-下述视频证据清单与交付、当前 8080 端到端验收仍未完成，不能据此前端验证宣称阶段通过。
+**设计未实现（not current）**：服务端全链血缘 / 错 Shot 拒绝审计、候选正式采用按钮的
+资格、下述视频证据清单与交付，以及对应 8080 端到端验收尚未完成。下列「合同与证据
+来源」「单一桌面组件」「避免重复解码与伪证据」「操作与状态」「验收切片」均为待实现
+设计，不得当作已上线能力引用。
 
 **单一桌面组件**：复用 VideoReviewTimeline，加一条按时间排序的视频证据条与可选
 参考对照区。展示首/中/尾帧及已有的 scene-change 采样；每帧显示准确时间和角色，
@@ -215,8 +216,9 @@ review 节点在生成证据时将帧作为不可变派生 Artifact 物化，复
    Formal 仍可准确审查；跨工作空间/错 Shot/错 review ID 拒绝；损坏证据不冒充
    通过；浏览帧不产生 mutation/Provider 请求；人工决定不自动改 Formal；409 保稿。
 
-以上是补全设计，不是已上线能力声明；实现时先更新后端 OpenAPI，再生成客户端，
-不能在前端自行发明证据响应或直接调用不存在的接口。
+以上设计实现时先更新后端 OpenAPI，再生成客户端；不能在前端自行发明证据响应或
+直接调用不存在的接口。在标注「已实现（current）」之外的段落完成并改标之前，
+本节整体不得作为发布完成证据。
 
 ## 生产只读模型：摘要、观察与历史
 
