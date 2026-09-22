@@ -59,11 +59,17 @@ describe("BatchProductionPanel", () => {
 
     const card = await screen.findByTestId("batch-production-image_keyframe");
     const submit = await within(card).findByRole("button", { name: "确认并入队 1 个镜头" });
+    const authorization = within(card).getByRole("checkbox");
     expect(submit).toBeDisabled();
+    expect(authorization).toBeDisabled();
+    expect(
+      within(card).getByText("先输入大于 0 的单次预算上限，再勾选 Owner 逐次授权。"),
+    ).toBeVisible();
     fireEvent.change(within(card).getByLabelText("单次 Provider 调用预算上限（人民币）"), {
       target: { value: "2.50" },
     });
-    fireEvent.click(within(card).getByRole("checkbox"));
+    expect(authorization).toBeEnabled();
+    fireEvent.click(authorization);
     fireEvent.click(submit);
 
     await waitFor(() => expect(writes).toHaveLength(1));
@@ -73,5 +79,66 @@ describe("BatchProductionPanel", () => {
       currency: "CNY",
       owner_authorized: true,
     });
+  });
+
+  it("lets the Owner open every blocked shot to inspect, edit, and generate", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/batch-production/preview")) {
+        const stage = new URL(url, "http://localhost").searchParams.get("stage");
+        return json({
+          project_id: PROJECT_ID,
+          scene_id: null,
+          stage,
+          fingerprint: stage === "image_keyframe" ? "a".repeat(64) : "b".repeat(64),
+          estimated_provider_calls: 0,
+          blocked_count: stage === "video" ? 2 : 0,
+          currently_queued: 0,
+          estimated_queue_seconds: 0,
+          items:
+            stage === "video"
+              ? [
+                  {
+                    shot_id: "11111111-1111-4111-8111-111111111111",
+                    scene_id: "22222222-2222-4222-8222-222222222222",
+                    shot_number: 1,
+                    ready: false,
+                    blocker: "NO_FORMAL_KEYFRAME",
+                  },
+                  {
+                    shot_id: "33333333-3333-4333-8333-333333333333",
+                    scene_id: "22222222-2222-4222-8222-222222222222",
+                    shot_number: 3,
+                    ready: false,
+                    blocker: "NO_FORMAL_KEYFRAME",
+                  },
+                ]
+              : [],
+        });
+      }
+      return json({});
+    });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <BatchProductionPanel projectId={PROJECT_ID} />
+      </QueryClientProvider>,
+    );
+
+    const card = await screen.findByTestId("batch-production-video");
+    fireEvent.click(await within(card).findByText("查看 2 个阻塞镜头"));
+
+    const first = within(card).getByRole("link", {
+      name: "打开镜头 1：查看、编辑与生成",
+    });
+    expect(first).toBeVisible();
+    expect(first).toHaveAttribute(
+      "href",
+      `/projects/${PROJECT_ID}/scenes/22222222-2222-4222-8222-222222222222?shotId=11111111-1111-4111-8111-111111111111&tool=generate`,
+    );
+    expect(within(card).getAllByText(/请先审查并设置正式关键帧/)).toHaveLength(2);
+    expect(within(card).getByRole("link", { name: "打开镜头 3：查看、编辑与生成" })).toBeVisible();
   });
 });

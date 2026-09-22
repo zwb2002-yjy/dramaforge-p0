@@ -21,6 +21,11 @@ function durationLabel(seconds: number | null): string {
   return `约 ${Math.ceil(seconds / 60)} 分钟`;
 }
 
+function shotWorkbenchHref(projectId: string, sceneId: string, shotId: string): string {
+  const query = new URLSearchParams({ shotId, tool: "generate" });
+  return `/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}?${query.toString()}`;
+}
+
 function isUsablePreview(value: unknown): value is BatchProductionPreview {
   if (!value || typeof value !== "object") return false;
   const preview = value as Partial<BatchProductionPreview>;
@@ -59,6 +64,10 @@ function BatchStageCard({
   onMaxCostPerCallChange: (value: string) => void;
   onSubmitted: () => Promise<void>;
 }) {
+  const parsedBudget = Number(maxCostPerCall);
+  const hasPositiveBudget = Number.isFinite(parsedBudget) && parsedBudget > 0;
+  const hasEligibleShots = (preview?.estimated_provider_calls ?? 0) > 0;
+  const authorizationHintId = `batch-authorization-hint-${stage}`;
   const dispatch = useMutation({
     mutationFn: async () => {
       if (!preview || preview.estimated_provider_calls < 1) throw new Error("当前没有可入队镜头");
@@ -110,7 +119,15 @@ function BatchStageCard({
                   .filter((item) => !item.ready)
                   .map((item) => (
                     <li key={item.shot_id}>
-                      镜头 {item.shot_number}：{batchBlockerLabel(item.blocker)}
+                      <span>
+                        镜头 {item.shot_number}：{batchBlockerLabel(item.blocker)}
+                      </span>
+                      <a
+                        href={shotWorkbenchHref(projectId, item.scene_id, item.shot_id)}
+                        aria-label={`打开镜头 ${item.shot_number}：查看、编辑与生成`}
+                      >
+                        查看、编辑与生成
+                      </a>
                     </li>
                   ))}
               </ul>
@@ -123,6 +140,8 @@ function BatchStageCard({
               min="0.01"
               step="0.01"
               inputMode="decimal"
+              placeholder="例如 2.00"
+              aria-describedby={authorizationHintId}
               value={maxCostPerCall}
               onChange={(event) => {
                 onMaxCostPerCallChange(event.target.value);
@@ -134,6 +153,8 @@ function BatchStageCard({
             <input
               type="checkbox"
               checked={authorized}
+              disabled={!hasPositiveBudget || !hasEligibleShots || dispatch.isPending}
+              aria-describedby={authorizationHintId}
               onChange={(event) => onAuthorizedChange(event.target.checked)}
             />
             我是 Owner，并逐次授权本批 {preview.estimated_provider_calls} 个操作；每次最多 ¥
@@ -141,20 +162,22 @@ function BatchStageCard({
           </label>
           <p className="muted">
             本批总授权上限：¥
-            {Number(maxCostPerCall) > 0
-              ? (Number(maxCostPerCall) * preview.estimated_provider_calls).toFixed(2)
-              : "—"}
+            {hasPositiveBudget ? (parsedBudget * preview.estimated_provider_calls).toFixed(2) : "—"}
             。服务端记录调用次数与每次授权上限，并写入每个任务快照；这不是 Provider 报价，实际费用以
             Provider 账单为准。
           </p>
+          <p className="muted" id={authorizationHintId} role="status">
+            {!hasEligibleShots
+              ? "当前没有可入队镜头；请先打开上方阻塞镜头处理前置条件。"
+              : !hasPositiveBudget
+                ? "先输入大于 0 的单次预算上限，再勾选 Owner 逐次授权。"
+                : !authorized
+                  ? "预算上限有效；勾选 Owner 逐次授权后即可整批入队。"
+                  : "预算与 Owner 授权已就绪，可以确认整批入队。"}
+          </p>
           <button
             type="button"
-            disabled={
-              !authorized ||
-              !(Number(maxCostPerCall) > 0) ||
-              preview.estimated_provider_calls < 1 ||
-              dispatch.isPending
-            }
+            disabled={!authorized || !hasPositiveBudget || !hasEligibleShots || dispatch.isPending}
             onClick={() => dispatch.mutate()}
           >
             {dispatch.isPending

@@ -7,6 +7,7 @@ const BATCH_BLOCKER_LABELS: Record<string, string> = {
   SHOT_PROMPT_REQUIRED: "镜头尚未填写生成提示词",
   MODEL_BINDING_MISSING: "尚未选择可执行的供应商模型绑定",
   MODEL_BINDING_UNAVAILABLE: "已选模型绑定当前不可用",
+  NO_FORMAL_KEYFRAME: "请先审查并设置正式关键帧",
   FORMAL_KEYFRAME_REQUIRED: "请先审查并设置正式关键帧",
   BATCH_PREFLIGHT_UNAVAILABLE: "预检暂时不可用，请稍后重新读取",
 };
