@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ShotProductionActions } from "../../src/features/shots/ShotProductionActions";
+import { queryKeys } from "../../src/lib/queryKeys";
 import {
   productionOperationScope,
   readProductionOperation,
@@ -121,7 +122,35 @@ function renderActions(
   onDirectorDelegated?: () => void,
 ) {
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
+  });
+  queryClient.setQueryData(queryKeys.model.executionPreflight(SHOT.project_id), {
+    project_id: SHOT.project_id,
+    ready: true,
+    stages: [
+      {
+        stage: "image_keyframe",
+        slot: "visual.keyframe",
+        purpose: "keyframe",
+        ready: true,
+        source: "system_default",
+        requested_model_id: "agnes/agnes-image-2.1-flash",
+        resolved_model_id: "agnes/agnes-image-2.1-flash",
+        provider_model_binding_id: "33333333-3333-4333-8333-333333333333",
+        reason: null,
+      },
+      {
+        stage: "video",
+        slot: "video.shot",
+        purpose: "video",
+        ready: true,
+        source: "system_default",
+        requested_model_id: "agnes/agnes-video-v2.0",
+        resolved_model_id: "agnes/agnes-video-v2.0",
+        provider_model_binding_id: "44444444-4444-4444-8444-444444444444",
+        reason: null,
+      },
+    ],
   });
   render(
     <QueryClientProvider client={queryClient}>
@@ -287,39 +316,15 @@ describe("ShotProductionActions", () => {
     expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已排队");
   });
 
-  it("sends video through the backend formal-keyframe gate and surfaces its error", async () => {
-    const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
-      calls.push({ url, method, body });
-      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      if (url.endsWith("/execution-plan")) {
-        return json(
-          {
-            code: "VALIDATION_ERROR",
-            detail:
-              "shot has no formal keyframe artifact; select a formal keyframe before video generation",
-          },
-          422,
-        );
-      }
-      return json({});
-    });
-
+  it("disables video before a formal keyframe exists", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成视频" }));
-
-    const error = await screen.findByTestId("shot-production-error");
-    expect(error).toHaveTextContent("shot has no formal keyframe artifact");
-    expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
-    expect(calls.find((call) => call.url.endsWith("/execution-plan"))?.body).toMatchObject({
-      stage: "video",
-      prompt: SHOT.video_prompt,
-      mode_id: "first_frame",
-      expected_shot_version: SHOT.version,
-    });
+    expect(screen.getByRole("button", { name: "生成视频" })).toBeDisabled();
+    expect(screen.getByText("生成视频已暂停：请先审查候选并设置正式关键帧。")).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/execution-plan"),
+      expect.anything(),
+    );
   });
 
   it("carries the same concrete references through plan and execution", async () => {
@@ -705,8 +710,8 @@ describe("ShotProductionActions", () => {
     expect(screen.getByTestId("shot-production-outcome-unknown")).toHaveTextContent(
       "按原操作键对账",
     );
-    // The other stage is unaffected.
-    expect(screen.getByTestId("generate-video")).toBeEnabled();
+    // Video remains blocked by the independent formal-keyframe prerequisite.
+    expect(screen.getByTestId("generate-video")).toBeDisabled();
     expect(screen.queryByTestId("shot-production-running")).not.toBeInTheDocument();
   });
 
@@ -734,7 +739,7 @@ describe("ShotProductionActions", () => {
     expect(screen.getByTestId("shot-production-director-blocked")).toHaveTextContent("legacy");
     // Manual generation stays available: MANUAL never depends on the Director.
     expect(screen.getByTestId("generate-keyframe")).toBeEnabled();
-    expect(screen.getByTestId("generate-video")).toBeEnabled();
+    expect(screen.getByTestId("generate-video")).toBeDisabled();
   });
 
   it("keeps the AUTO path open when the runtime reports itself available", async () => {
@@ -868,7 +873,7 @@ describe("ShotProductionActions", () => {
 
     expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
     expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("关键帧生成中");
-    expect(screen.getByTestId("generate-video")).toBeEnabled();
+    expect(screen.getByTestId("generate-video")).toBeDisabled();
     expect(screen.getByTestId("shot-production-running")).toHaveTextContent("不会重复提交");
   });
 

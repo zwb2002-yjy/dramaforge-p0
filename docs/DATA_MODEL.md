@@ -99,6 +99,7 @@ Migration 20260902_0051 removes:
 | 20260907_0056 | Bounded Director turns and text invocation evidence. |
 | 20260908_0057–0060 | Recovery functions/grants for recoverable Director turns, fact reconciliation, Formal checkpoints and cancellation-requested Provider work. |
 | 20260909_0061 | `production_command_authorizations`: exact user-approved commands persisted before Director submission. |
+| 20260922_0077 | `human_review_decisions.decision` adds `demo_confirmed`; it records walkthrough confirmation but does not admit Formal media. |
 | 20260909_0062 | `director_inbox`, `director_wakeups`: atomic receipt/wakeup retention across process loss. |
 | 20260910_0063 | `app.emit_workbench_terminal_notice()` trigger on every `node_runs.status` write. |
 | 20260910_0064 | `director_invocations`: individual Director text invocation identity and validated output. |

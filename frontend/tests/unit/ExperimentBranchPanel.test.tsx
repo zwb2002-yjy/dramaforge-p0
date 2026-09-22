@@ -2,7 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ExperimentBranchPanel } from "../../src/features/production/ExperimentBranchPanel";
+import {
+  ExperimentBranchPanel,
+  type ExperimentBranchPanelProps,
+} from "../../src/features/production/ExperimentBranchPanel";
 import { ApiError } from "../../src/lib/api";
 import type { ExperimentRead, ModelRead } from "../../src/lib/api";
 import type { ModelCandidateRead } from "../../src/features/production/modelCandidatesApi";
@@ -366,6 +369,28 @@ it("creates separate candidate drafts without submitting paid generation", async
   ]);
   expect(start).not.toHaveBeenCalled();
   expect(await screen.findByTestId("experiment-message")).toHaveTextContent("本次创建不调用模型");
+});
+
+it("freezes one independent prompt per candidate line", async () => {
+  type CreateInput = Parameters<NonNullable<ExperimentBranchPanelProps["onCreateExperiment"]>>[0];
+  const create = vi.fn(async (input: CreateInput) => {
+    void input;
+  });
+  renderPanel({
+    modelCandidates: { keyframe: [candidate({})] },
+    onCreateExperiment: create,
+  });
+  fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "提示词比较" } });
+  fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: MODELS[0].id } });
+  fireEvent.change(screen.getByLabelText("候选提示词"), {
+    target: { value: "冷色低机位\n暖色平视中景" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+  expect(create.mock.calls.map(([input]) => input.promptOverride)).toEqual([
+    "冷色低机位",
+    "暖色平视中景",
+  ]);
 });
 it("requires a visible selection when an experiment has multiple artifacts", async () => {
   const decide = vi.fn(async () => {});

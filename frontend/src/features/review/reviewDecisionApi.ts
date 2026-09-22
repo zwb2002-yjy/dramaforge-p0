@@ -18,7 +18,7 @@ export type ReviewDecisionWrite = {
   artifact_id: string;
   review_node_run_id: string;
   review_kind: ReviewDecisionKind;
-  decision: "approved" | "rejected";
+  decision: "approved" | "rejected" | "demo_confirmed";
   reason: string;
   expected_shot_version?: number | null;
 };
@@ -72,7 +72,7 @@ export async function createReviewDecision(
 export async function createReviewEvidence(
   projectId: string,
   shotId: string,
-  input: { artifact_id: string; stage: ReviewStage },
+  input: { artifact_id: string; stage: ReviewStage; force?: boolean },
 ): Promise<components["schemas"]["ReviewEvidenceRequestRead"]> {
   const csrf = await fetchCsrf();
   return apiSend<components["schemas"]["ReviewEvidenceRequestRead"]>(

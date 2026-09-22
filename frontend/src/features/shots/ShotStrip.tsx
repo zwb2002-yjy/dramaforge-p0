@@ -83,7 +83,7 @@ export function ShotStrip({
               <button
                 type="button"
                 className={selected ? "active" : undefined}
-                aria-pressed={selected}
+                aria-current={selected ? "true" : undefined}
                 aria-label={`#${shot.shot_number} ${shotTypeLabel(shot.shot_type)} ${durationLabel(shot.duration_seconds)}`}
                 onClick={() => onSelectShot(shot.id)}
                 data-testid={`shot-strip-card-${shot.id}`}

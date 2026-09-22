@@ -10,7 +10,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 本文件受架构宪法 [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) 约束。
 
 统一生产 Runtime 拥有媒体执行的全部事实：NodeRun、ProviderOperation、
-Artifact。没有第二套 Generation 真相，没有预算/批次前置，没有历史路径分支。
+Artifact。没有第二套 Generation 真相；批量与逐操作授权只编排同一命令入口，
+不进入 Worker 形成第二套预算 / 批次 Runtime，也没有历史路径分支。
 编排侧见 [DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
 
 ## 执行链
@@ -64,6 +65,12 @@ Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
 | Repair | 有证据的显式修复计划（`repair_service.py`），不静默重跑。 |
 | Final Film | 绑定 timeline 版本的 MP4 + SRT 交付（`final_film.py`、`timeline_renderer.py`、`timeline_subtitles.py`）。 |
 
+项目 / 场景批量生成只是同一命令入口的显式编排：preview 为每个 Shot 重建正式
+Workbench plan，dispatch 核对 preview fingerprint 后逐项调用
+`ProductionCommands.submit_user_execution`。它不创建第二套队列或执行事实。批量付费提交
+要求 Owner 为本批每一个具体操作给出正数单次金额上限、币种和调用数上限；授权随每个
+NodeRun 快照持久化，不能继承到下一批，也不能绕过 unknown-submission 防重。
+
 ## Workers 与队列
 
 | 服务 | 队列 | 职责 |
@@ -96,13 +103,27 @@ Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
   单行恢复失败不阻塞尾部任务，超时后后续扫描仍会覆盖未完成项。
 - submit-unknown 或可能已计费的调用不盲目重试（幂等键由
   `providers/idempotency.py` 管理）。
+- `ShotExecutionTrace` 对媒体 queued NodeRun 返回本作品内可观察的待执行序位、前方数量和
+  基于本作品近期完成样本的等待估算；它不声称覆盖跨作品 / Provider 全局队列。没有足够
+  历史样本时明确返回未知，不伪造 ETA。
 
 ## 边界
 
 - Review/Repair/EditSession 只读取生产事实并显式提案，不反写 Production。
 - 媒体执行不依赖导演服务存活；MANUAL 路径在 worker-director 停止时完成
   全流程。
-- 无预算前置（budget gate 已随受控导演表面一并删除）。
+- 单次手工主链没有旧 Director budget gate；批量 API 的逐操作正数金额授权是 Owner
+  授权上限与审计事实，不冒充 Provider 报价或最终账单，也不进入 Worker 内部另建预算状态机。
+
+## 审片与候选事实
+
+- Candidate 投影携带服务端重新计算的 review gate 结果；“设为正式”按钮只由
+  `review_allowed` 驱动，不由前端根据任务文案猜测。
+- `demo_confirmed` 表示只确认演示链路，保留为审片事实但永不满足 Formal admission；
+  只有同一 Artifact / evidence 的 `approved` 决定可以放行。
+- 视频证据可显式强制重建 review run，以重新抽取首 / 中 / 尾帧；旧证据不被覆盖。
+- 实验分支可冻结各自的 `prompt_override`。多个候选若内容哈希相同会显式标记重复，
+  不把同图冒充成可比较的不同结果。
 
 ## 分阶段 Repair 的接续
 

@@ -382,12 +382,12 @@
     border-radius: 18px;
   }
   .rs-stage .qc-cinematic-canvas {
-    min-height: 310px;
+    min-height: min(210px, 25vh);
   }
   .rs-stage .qc-canvas-media img,
   .rs-stage .qc-canvas-media video {
     /* Reserve first-screen space for the project guide and intention control. */
-    max-height: var(--df-scene-compact-media-height);
+    max-height: min(var(--df-scene-compact-media-height), 20svh);
   }
   .rs-intent {
     width: calc(100% - 24px);

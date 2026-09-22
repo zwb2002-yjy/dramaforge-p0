@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     assets,
     auth,
+    batch_production,
     creative_capabilities,
     director,
     director_board,
@@ -35,6 +36,7 @@ api_router = APIRouter()
 
 api_router.include_router(assets.router)
 api_router.include_router(auth.router)
+api_router.include_router(batch_production.router)
 api_router.include_router(projects.router)
 api_router.include_router(director.router)
 api_router.include_router(director_board.router)

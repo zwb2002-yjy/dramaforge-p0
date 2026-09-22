@@ -455,6 +455,10 @@
     background: var(--df-surface-1);
   }
 
+  .qc-context-dock-tabs {
+    display: contents;
+  }
+
   .qc-context-dock button {
     min-height: 32px;
     padding: var(--df-space-1) var(--df-space-3);

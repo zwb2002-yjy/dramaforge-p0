@@ -120,12 +120,18 @@ def test_experiment_stage_selects_the_model_purpose(client: TestClient) -> None:
             "name": "Keyframe model experiment",
             "source_shot_id": shot_id,
             "selected_model": "agnes/agnes-image-2.1-flash",
-            "parameters": {"target_node_key": "keyframe"},
+            "parameters": {
+                "target_node_key": "keyframe",
+                "prompt_override": "low angle, cold backlight",
+            },
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert keyframe.status_code == 201, keyframe.text
     assert keyframe.json()["parameters"]["target_node_key"] == "keyframe"
+    assert keyframe.json()["parameters"]["prompt_override"] == (
+        "low angle, cold backlight"
+    )
 
     # No binding exists in this workspace, so start fails closed and names the
     # stage it resolved instead of blaming the stage the client did not send.

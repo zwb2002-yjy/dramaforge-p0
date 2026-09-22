@@ -375,9 +375,13 @@ describe("Provider settings honest state and isolated drafts", () => {
 
     await waitFor(() => expect(screen.getByLabelText("关键帧模型")).toBeEnabled());
     const imagePicker = screen.getByLabelText("关键帧模型");
-    expect(within(imagePicker).getByRole("option", { name: /remote-supported/ })).toBeInTheDocument();
+    expect(
+      within(imagePicker).getByRole("option", { name: /remote-supported/ }),
+    ).toBeInTheDocument();
     expect(within(imagePicker).getByRole("option", { name: /remote-unknown/ })).toBeInTheDocument();
-    expect(within(imagePicker).queryByRole("option", { name: /catalog-only/ })).not.toBeInTheDocument();
+    expect(
+      within(imagePicker).queryByRole("option", { name: /catalog-only/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent("remote-unknown");
     expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent("尚未匹配能力插件");
     fireEvent.change(screen.getByLabelText("关键帧模型"), {

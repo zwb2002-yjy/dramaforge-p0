@@ -472,6 +472,11 @@ async def start_experiment(
         experiment_id=row.id,
         model_binding_id=binding.id,
         model_binding_node_key=body.target_node_key,
+        prompt_override=(
+            str(row.parameters.get("prompt_override")).strip()
+            if row.parameters.get("prompt_override") is not None
+            else None
+        ),
     )
     row.status = "active"
     row.parameters = {

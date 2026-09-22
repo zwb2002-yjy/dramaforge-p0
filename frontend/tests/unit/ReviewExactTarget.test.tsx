@@ -77,6 +77,7 @@ function mockApi() {
       return json({
         artifact_id: "candidate-B",
         review_node_run_id: "review-B",
+        review_artifact_id: "review-evidence-B",
         machine_status: "needs_human",
       });
     }

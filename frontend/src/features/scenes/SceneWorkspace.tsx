@@ -21,6 +21,7 @@ import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ResonanceStage } from "../resonance/ResonanceStage";
+import { BatchProductionPanel } from "../production";
 
 type SceneWorkspaceProps = {
   projectId: string;
@@ -28,6 +29,8 @@ type SceneWorkspaceProps = {
   initialShotId?: string;
   openDirector?: boolean;
   openPrompts?: boolean;
+  openGenerate?: boolean;
+  openCandidates?: boolean;
   onOpenEditing?: () => void;
   onDirtyStateChange?: (dirty: boolean) => void;
 };
@@ -70,6 +73,8 @@ export function SceneWorkspace({
   initialShotId,
   openDirector = false,
   openPrompts = false,
+  openGenerate = false,
+  openCandidates = false,
   onOpenEditing,
   onDirtyStateChange,
 }: SceneWorkspaceProps) {
@@ -78,9 +83,9 @@ export function SceneWorkspace({
   const [referenceDrafts, setReferenceDrafts] = useState<Record<string, ShotReferenceContext>>({});
   // Context Dock / sheet / tray / strip / details are pure UI state.
   const [activeTool, setActiveTool] = useState<ContextTool | null>(
-    openPrompts ? "prompts" : openDirector ? "director" : null,
+    openGenerate ? "generate" : openPrompts ? "prompts" : openDirector ? "director" : null,
   );
-  const [trayExpanded, setTrayExpanded] = useState(false);
+  const [trayExpanded, setTrayExpanded] = useState(openCandidates);
   const [stripExpanded, setStripExpanded] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [intentSeed, setIntentSeed] = useState<{
@@ -107,8 +112,10 @@ export function SceneWorkspace({
     setSelectedShotId(initialShotId ?? null);
     setPreviewCandidate(null);
     setReferenceDrafts({});
-    setActiveTool(openPrompts ? "prompts" : openDirector ? "director" : null);
-    setTrayExpanded(false);
+    setActiveTool(
+      openGenerate ? "generate" : openPrompts ? "prompts" : openDirector ? "director" : null,
+    );
+    setTrayExpanded(openCandidates);
     setStripExpanded(false);
     setDetailsOpen(false);
     setIntentSeed(null);
@@ -116,7 +123,7 @@ export function SceneWorkspace({
     setDesignDrafts({});
     setSuggestionDraft(null);
     setPendingShotId(null);
-  }, [projectId, sceneId, initialShotId, openDirector, openPrompts]);
+  }, [projectId, sceneId, initialShotId, openDirector, openPrompts, openGenerate, openCandidates]);
 
   useEffect(() => {
     onDirtyStateChange?.(designDirty);
@@ -308,6 +315,11 @@ export function SceneWorkspace({
           </a>
         </div>
       </header>
+
+      <details className="panel batch-production-disclosure">
+        <summary>按场景批量生成</summary>
+        <BatchProductionPanel projectId={projectId} sceneId={sceneId} />
+      </details>
 
       {data && selectedShotId !== null && !selected && (
         <p role="alert">目标镜头不在此场景，请重新选择镜头。</p>

@@ -30,8 +30,7 @@ export function TextGatewaySettings({ workspaceId }: { workspaceId: string | nul
   });
   const connection =
     connections.data?.find(
-      (item) =>
-        item.provider_type === PROVIDER_TYPE && item.protocol_profile === PROTOCOL_PROFILE,
+      (item) => item.provider_type === PROVIDER_TYPE && item.protocol_profile === PROTOCOL_PROFILE,
     ) ?? null;
   const probes = useQuery({
     queryKey: queryKeys.provider.probes(workspaceId, connection?.id),
@@ -146,7 +145,9 @@ export function TextGatewaySettings({ workspaceId }: { workspaceId: string | nul
               autoComplete="new-password"
               value={keyDraft}
               disabled={busy || !connections.isSuccess}
-              placeholder={connection?.credential_configured ? "已保存；输入新 Key 可轮换" : "输入 Key"}
+              placeholder={
+                connection?.credential_configured ? "已保存；输入新 Key 可轮换" : "输入 Key"
+              }
               onChange={(event) => {
                 setKeyDraft(event.target.value);
                 resetFeedback();

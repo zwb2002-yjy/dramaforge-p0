@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 
 import { queryKeys } from "../../lib/queryKeys";
-import { ApiError, listModels } from "../../lib/api";
+import { ApiError, getExecutionModelPreflight, listModels } from "../../lib/api";
 import {
   capabilityGapReason,
   capabilityGapSeverityLabel,
@@ -11,8 +11,16 @@ import {
   referenceDeliveryLabel,
 } from "../../lib/executionPlanLabels";
 import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
+import {
+  executionModelBlockerLabel,
+  executionModelSourceLabel,
+} from "../../lib/modelResolutionLabels";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
-import { activeStageStatus, stageOutcomeUnknown } from "../production/sceneRunState";
+import {
+  activeStageStatus,
+  stageOutcomeUnknown,
+  stageQueueEstimate,
+} from "../production/sceneRunState";
 import { fetchDirectorCapabilities } from "../director/api";
 import {
   delegateShotExecutionToDirector,
@@ -53,6 +61,7 @@ type ActionFeedback = {
   kind: "success" | "error" | "plan";
   stage: ShotExecutionStage;
   message: string;
+  nodeRunId?: string;
 };
 
 type PrepareOutcome = {
@@ -169,6 +178,12 @@ export function ShotProductionActions({
     enabled: Boolean(projectId) && projectId !== "demo",
     retry: false,
   });
+  const modelPreflight = useQuery({
+    queryKey: queryKeys.model.executionPreflight(projectId),
+    queryFn: () => getExecutionModelPreflight(projectId),
+    enabled: Boolean(projectId) && projectId !== "demo",
+    retry: false,
+  });
   // Only an explicit `runtime_turns_available === false` closes the AUTO entry
   // point. A failed, in-flight or malformed read must not disable it: the server
   // re-validates every submission anyway, and a read model must never remove a
@@ -210,7 +225,12 @@ export function ShotProductionActions({
           if (TERMINAL_EXECUTION_STATUSES.has(receipt.status)) {
             clearProductionOperation(scope);
           }
-          setFeedback({ kind: "success", stage, message: receipt.status });
+          setFeedback({
+            kind: "success",
+            stage,
+            message: receipt.status,
+            nodeRunId: receipt.node_run_id,
+          });
         })
         .catch(() => {
           // Recovery stays best effort; the action buttons surface real errors.
@@ -312,7 +332,12 @@ export function ShotProductionActions({
           productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
         );
       }
-      setFeedback({ kind: "success", stage, message: execution.status });
+      setFeedback({
+        kind: "success",
+        stage,
+        message: execution.status,
+        nodeRunId: execution.node_run_id,
+      });
       await refreshAfterExecution(execution);
     },
     onError: (error, stage) => {
@@ -384,7 +409,12 @@ export function ShotProductionActions({
           ),
         );
       }
-      setFeedback({ kind: "success", stage: prepared.input.stage, message: execution.status });
+      setFeedback({
+        kind: "success",
+        stage: prepared.input.stage,
+        message: execution.status,
+        nodeRunId: execution.node_run_id,
+      });
       await refreshAfterExecution(execution);
     },
     onError: (error) => {
@@ -454,6 +484,8 @@ export function ShotProductionActions({
   const videoStatus = activeStageStatus(trace, "video");
   const keyframeOutcomeUnknown = stageOutcomeUnknown(trace, "image_keyframe");
   const videoOutcomeUnknown = stageOutcomeUnknown(trace, "video");
+  const keyframeQueue = stageQueueEstimate(trace, "image_keyframe");
+  const videoQueue = stageQueueEstimate(trace, "video");
   const delivery = displayedPlan ? planDelivery(displayedPlan) : planFailure;
   const plannedReferences = displayedPlan?.plan.planned_references ?? [];
   // The stored id stays a contract value; the surface shows the catalogue's
@@ -462,6 +494,17 @@ export function ShotProductionActions({
     displayedPlan?.plan.resolved_model?.resolved_model_id,
     Array.isArray(models.data) ? models.data : undefined,
   );
+  const preflightStage = (stage: ShotExecutionStage) =>
+    (Array.isArray(modelPreflight.data?.stages)
+      ? modelPreflight.data.stages.find((item) => item.stage === stage)
+      : null) ?? null;
+  const keyframePreflight = preflightStage("image_keyframe");
+  const videoPreflight = preflightStage("video");
+  const preflightBlocks = (stage: ShotExecutionStage) => {
+    if (projectId === "demo") return false;
+    if (modelPreflight.isPending || modelPreflight.isError) return true;
+    return preflightStage(stage)?.ready !== true;
+  };
 
   const buttonLabel = (stage: ShotExecutionStage, serverStatus: string | null) => {
     const label = STAGE_LABEL[stage];
@@ -494,6 +537,47 @@ export function ShotProductionActions({
         <dd>{shot.formal_video_artifact_id ? "已选择" : "未选择"}</dd>
       </dl>
 
+      <section
+        className="qc-shot-production-plan"
+        data-testid="shot-production-preflight"
+        aria-label="生产模型预检"
+      >
+        <strong>生产前预检</strong>
+        {modelPreflight.isPending ? (
+          <p role="status">正在解析实际执行模型…</p>
+        ) : modelPreflight.isError ? (
+          <p role="alert">无法读取生产模型预检；为避免错误提交，生成入口已暂停。</p>
+        ) : (
+          <dl className="qc-shot-production-lineage">
+            {(
+              [
+                ["关键帧", keyframePreflight],
+                ["视频", videoPreflight],
+              ] as const
+            ).map(([label, item]) => (
+              <div key={label} data-testid={`production-preflight-${item?.stage ?? label}`}>
+                <dt>{label}</dt>
+                <dd>
+                  {item?.ready && item.resolved_model_id ? (
+                    <>
+                      {
+                        executionModelLabel(
+                          item.resolved_model_id,
+                          Array.isArray(models.data) ? models.data : undefined,
+                        ).label
+                      }
+                      {` · ${executionModelSourceLabel(item.source)}`}
+                    </>
+                  ) : (
+                    <>不可执行 · {executionModelBlockerLabel(item?.reason)}</>
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </section>
+
       <div className="qc-shot-production-buttons">
         <button
           type="button"
@@ -507,7 +591,8 @@ export function ShotProductionActions({
             Boolean(keyframeStatus) ||
             keyframeOutcomeUnknown ||
             !referencesReady ||
-            dirty
+            dirty ||
+            preflightBlocks("image_keyframe")
           }
         >
           {buttonLabel("image_keyframe", keyframeStatus)}
@@ -524,7 +609,9 @@ export function ShotProductionActions({
             Boolean(videoStatus) ||
             videoOutcomeUnknown ||
             !referencesReady ||
-            dirty
+            dirty ||
+            !shot.formal_keyframe_artifact_id ||
+            preflightBlocks("video")
           }
         >
           {buttonLabel("video", videoStatus)}
@@ -546,7 +633,8 @@ export function ShotProductionActions({
             keyframeOutcomeUnknown ||
             directorDelegateBlocked ||
             !referencesReady ||
-            dirty
+            dirty ||
+            preflightBlocks("image_keyframe")
           }
         >
           导演执行关键帧（AUTO）
@@ -565,7 +653,9 @@ export function ShotProductionActions({
             videoOutcomeUnknown ||
             directorDelegateBlocked ||
             !referencesReady ||
-            dirty
+            dirty ||
+            !shot.formal_keyframe_artifact_id ||
+            preflightBlocks("video")
           }
         >
           导演执行视频（AUTO）
@@ -583,7 +673,9 @@ export function ShotProductionActions({
       )}
 
       <p className="qc-shot-production-hint">
-        视频只使用后端确认的正式关键帧；未选择时由后端拒绝，不会自动改用其他图片。
+        {shot.formal_keyframe_artifact_id
+          ? "视频只使用后端确认的正式关键帧，不会自动改用其他图片。"
+          : "生成视频已暂停：请先审查候选并设置正式关键帧。"}
       </p>
       {!referencesReady && (
         <p className="qc-shot-production-hint" role="status">
@@ -593,6 +685,25 @@ export function ShotProductionActions({
       {(keyframeStatus || videoStatus) && (
         <p className="qc-shot-production-hint" data-testid="shot-production-running" role="status">
           服务端任务仍在执行；页面会自动同步，当前阶段不会重复提交。
+        </p>
+      )}
+      {(keyframeQueue || videoQueue) && (
+        <p className="qc-shot-production-hint" data-testid="shot-production-queue" role="status">
+          {(
+            [
+              keyframeQueue ? (["关键帧", keyframeQueue] as const) : null,
+              videoQueue ? (["视频", videoQueue] as const) : null,
+            ].filter(Boolean) as Array<readonly [string, NonNullable<typeof keyframeQueue>]>
+          )
+            .map(([label, queue]) => {
+              const wait =
+                queue.estimatedWaitSeconds === null
+                  ? "等待时间仍在学习"
+                  : `预计等待约 ${Math.max(1, Math.ceil(queue.estimatedWaitSeconds / 60))} 分钟`;
+              return `${label}在本作品待执行序位第 ${queue.position} 位，前方 ${queue.ahead} 项，${wait}`;
+            })
+            .join("；")}
+          。仅按本作品服务端记录估算，不代表 Provider 全局队列。
         </p>
       )}
       {(keyframeOutcomeUnknown || videoOutcomeUnknown) && (
@@ -719,7 +830,8 @@ export function ShotProductionActions({
           ) : (
             <>
               {STAGE_LABEL[feedback.stage]}请求已提交，服务器状态：
-              {serverStatusLabel(feedback.message)}
+              {serverStatusLabel(feedback.message)}。镜头 {shot.id}
+              {feedback.nodeRunId ? `，任务 ${feedback.nodeRunId}` : ""}。完成后请比较候选并审查。
             </>
           )}
         </p>

@@ -1,14 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "../ui";
-import { getEffectiveBindings, listModelSlots, listProjectProviderBindings } from "../../lib/api";
+import {
+  getEffectiveBindings,
+  getExecutionModelPreflight,
+  listModelSlots,
+  listProjectProviderBindings,
+} from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
-
-const SOURCE_LABELS: Record<string, string> = {
-  project_profile: "项目模型方案",
-  workspace_profile: "工作空间默认方案",
-  system_default: "系统指定来源",
-  request_override: "本次请求显式指定",
-};
+import {
+  executionModelBlockerLabel,
+  executionModelSourceLabel,
+} from "../../lib/modelResolutionLabels";
 
 /** Configuration channels do not all use the media A+B binding resolver. */
 export function ProviderConfigurationBoundaries() {
@@ -49,10 +51,16 @@ export function ProjectModelSourceSummary({
     queryFn: () => listProjectProviderBindings(projectId),
     retry: false,
   });
+  const preflight = useQuery({
+    queryKey: queryKeys.model.executionPreflight(projectId),
+    queryFn: () => getExecutionModelPreflight(projectId),
+    retry: false,
+  });
   const retry = () => {
     void slots.refetch();
     void effective.refetch();
     void bindings.refetch();
+    void preflight.refetch();
   };
   // The legacy profile slot is not consumed by the current voice worker.
   // Keep this display boundary out of the execution resolver and do not infer
@@ -79,6 +87,33 @@ export function ProjectModelSourceSummary({
         视频的项目方案优先于工作空间默认方案；两者未覆盖时才使用显式项目供应商绑定。指定模型不可用时停止，不偷偷换模型。
       </p>
       <ProviderConfigurationBoundaries />
+      <h3>实际生产解析结果</h3>
+      <p className="muted">
+        这是生成按钮真正使用的解析器结果；必须同时存在可执行的工作空间模型绑定，才会显示为就绪。
+      </p>
+      {preflight.isPending ? (
+        <p role="status">正在运行只读预检…</p>
+      ) : preflight.isError ? (
+        <p role="alert">生产预检读取失败；当前不能确认生成是否就绪。</p>
+      ) : (
+        <ul className="dense" data-testid="project-execution-model-preflight">
+          {preflight.data.stages.map((stage) => (
+            <li key={stage.stage} data-testid={`execution-model-${stage.stage}`}>
+              <strong>{stage.stage === "image_keyframe" ? "关键帧" : "视频"}：</strong>
+              {stage.ready && stage.resolved_model_id ? (
+                <>
+                  <code>{stage.resolved_model_id}</code>
+                  <span> · 来源：{executionModelSourceLabel(stage.source)} · 可执行</span>
+                </>
+              ) : (
+                <span className="status-pending">
+                  不可执行 · {executionModelBlockerLabel(stage.reason)}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
       <h3>已保存方案解析预览（不含配音派发）</h3>
       {slots.isPending || effective.isPending ? (
         <p role="status">正在读取方案解析预览…</p>
@@ -102,7 +137,7 @@ export function ProjectModelSourceSummary({
                       <code>{binding.model_id}</code>
                       <span>
                         {" "}
-                        · 来源：{SOURCE_LABELS[binding.source] ?? "来源未确认"}
+                        · 来源：{executionModelSourceLabel(binding.source)}
                         {binding.profile_version != null
                           ? ` · 方案 v${binding.profile_version}`
                           : ""}

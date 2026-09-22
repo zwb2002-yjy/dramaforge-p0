@@ -48,6 +48,7 @@ export type ExperimentBranchPanelProps = {
     name: string;
     selected_model: string;
     targetNodeKey: ExperimentStage;
+    promptOverride?: string;
   }) => Promise<void>;
   onStartExperiment?: (experimentId: string, targetNodeKey: ExperimentStage) => Promise<void>;
   onDecideExperiment?: (
@@ -80,6 +81,7 @@ export function ExperimentBranchPanel({
 }: ExperimentBranchPanelProps) {
   const [experimentName, setExperimentName] = useState("");
   const [candidateCount, setCandidateCount] = useState(1);
+  const [promptVariants, setPromptVariants] = useState("");
   const [selectedArtifacts, setSelectedArtifacts] = useState<Record<string, string>>({});
   const [experimentModel, setExperimentModel] = useState("");
   // Keyframe is the default because it is the stage whose adoption scopes
@@ -141,25 +143,34 @@ export function ExperimentBranchPanel({
   }
   async function createExperimentBranch() {
     if (!onCreateExperiment) return;
+    const variants = promptVariants
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const planned = variants.length ? variants : Array.from({ length: candidateCount }, () => "");
     await runExperimentAction(
       experimentStage,
       async () => {
         // Drafts only: each retains the canonical experiment identity. A partial
         // failure keeps the form intact; repeating it recovers the same drafts.
-        for (let index = 0; index < candidateCount; index++) {
+        for (let index = 0; index < planned.length; index++) {
           await onCreateExperiment({
             name:
-              candidateCount === 1
+              planned.length === 1
                 ? experimentName.trim()
-                : `${experimentName.trim()} · ${index + 1}/${candidateCount}`,
+                : `${experimentName.trim()} · ${index + 1}/${planned.length}`,
             selected_model: experimentModel.trim(),
             targetNodeKey: experimentStage,
+            ...(planned[index] ? { promptOverride: planned[index] } : {}),
           });
         }
         setExperimentName("");
         setExperimentModel("");
+        setPromptVariants("");
       },
-      `已创建 ${candidateCount} 个${EXPERIMENT_STAGE_SHORT_LABEL[experimentStage]}候选任务（同名任务会恢复）。本次创建不调用模型，生成状态见各任务。`,
+      `已创建 ${planned.length} 个${EXPERIMENT_STAGE_SHORT_LABEL[experimentStage]}候选任务${
+        variants.length ? "，每个任务冻结了独立提示词" : ""
+      }（同名同提示词任务会恢复）。本次创建不调用模型，生成状态见各任务。`,
     );
   }
 
@@ -210,6 +221,11 @@ export function ExperimentBranchPanel({
                         {candidates.length}
                       </small>
                       {runStates.length > 0 && <small>执行证据：{runStates.length} 次运行</small>}
+                      {typeof item.parameters.prompt_override === "string" && (
+                        <small data-testid={`experiment-prompt-${item.id}`}>
+                          提示词：{item.parameters.prompt_override}
+                        </small>
+                      )}
                     </div>
                     {candidates.length > 0 && (
                       <fieldset
@@ -368,6 +384,20 @@ export function ExperimentBranchPanel({
               </label>
               <small>
                 创建仅保存任务；逐个运行才会调用模型。采用前先查看候选，正式版本不会自动替换。
+              </small>
+              <label>
+                候选提示词（可选，每行一个版本）
+                <textarea
+                  aria-label="候选提示词"
+                  rows={5}
+                  value={promptVariants}
+                  disabled={experimentBusy}
+                  onChange={(event) => setPromptVariants(event.target.value)}
+                  placeholder={"低机位，冷色逆光，强调孤独感\n平视中景，暖色窗光，强调人物表情"}
+                />
+              </label>
+              <small>
+                填写后按非空行数创建候选，并把每行作为独立冻结输入；不再让多个候选复用同一提示词。
               </small>
               <input
                 disabled={experimentBusy}

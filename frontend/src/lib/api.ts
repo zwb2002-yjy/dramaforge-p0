@@ -355,6 +355,9 @@ export type ModelProfileSummary = {
 };
 
 export type EffectiveBindingRead = components["schemas"]["EffectiveBindingRead"];
+export type ExecutionModelPreflightStageRead =
+  components["schemas"]["ExecutionModelPreflightStageRead"];
+export type ExecutionModelPreflightRead = components["schemas"]["ExecutionModelPreflightRead"];
 export function listModelSlots(): Promise<ModelSlotRead[]> {
   return apiGetList<ModelSlotRead>("/api/v1/model-slots");
 }
@@ -452,6 +455,13 @@ export async function putProjectModelProfile(
 
 export function getEffectiveBindings(projectId: string): Promise<EffectiveBindingRead[]> {
   return apiGet(`/api/v1/projects/${projectId}/model-bindings/effective`);
+}
+
+/** Exact production resolver result; read-only and never contacts a Provider. */
+export function getExecutionModelPreflight(
+  projectId: string,
+): Promise<ExecutionModelPreflightRead> {
+  return apiGet(`/api/v1/projects/${projectId}/execution-models/preflight`);
 }
 
 export type ProjectRead = components["schemas"]["ProjectRead"];

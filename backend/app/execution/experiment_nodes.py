@@ -194,6 +194,7 @@ async def queue_branch_nodes(
     experiment_id: UUID | None = None,
     model_binding_id: UUID | None = None,
     model_binding_node_key: str | None = None,
+    prompt_override: str | None = None,
 ) -> list[UUID]:
     """Queue branch NodeRuns with persisted Workbench context.
 
@@ -217,6 +218,8 @@ async def queue_branch_nodes(
         "voice",
     }:
         raise ValidationAppError("model override node must be keyframe, video, or voice")
+    if prompt_override is not None and (not prompt_override.strip() or len(prompt_override) > 8000):
+        raise ValidationAppError("experiment prompt override must be 1 to 8000 characters")
 
     from app.access.models import Project
     from app.production.models import GraphVersion, ProductionGraph
@@ -353,9 +356,13 @@ async def queue_branch_nodes(
         ih = hashlib.sha256(f"{shot_id}:{key}:{uuid4()}".encode()).hexdigest()
         attempt = len(prior_for_node) + 1
         prompt = (
-            keyframe_prompt
+            (prompt_override.strip() if prompt_override else None)
+            if key == model_binding_node_key
+            else None
+        ) or (
+            (shot.image_prompt or keyframe_prompt)
             if key == "keyframe"
-            else f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}"
+            else (shot.video_prompt or f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}")
         )
         if key == "voice":
             prompt = dialogue
@@ -431,6 +438,8 @@ async def queue_branch_nodes(
         }
         if experiment_id is not None:
             snapshot["experiment_id"] = str(experiment_id)
+            if prompt_override and key == model_binding_node_key:
+                snapshot["experiment_prompt_override"] = prompt_override.strip()
         if key == "composite" and formal_video_artifact_id is not None:
             snapshot["formal_video_artifact_id"] = str(formal_video_artifact_id)
         if model_binding_id is not None and key == model_binding_node_key:

@@ -637,6 +637,10 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
             status: "completed",
             artifact_type: "image",
             mime_type: "image/png",
+            review_allowed: true,
+            review_decision_id: "88888888-8888-4888-8888-888888888888",
+            review_node_run_id: "99999999-8888-4777-8666-555555555555",
+            review_artifact_id: "aaaaaaaa-8888-4777-8666-555555555555",
           },
         ];
       }
@@ -738,6 +742,36 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       return json(route, []);
     if (path === "/api/v1/model-slots") return json(route, []);
     if (path.endsWith("/model-bindings/effective")) return json(route, []);
+    if (path.endsWith("/execution-models/preflight")) {
+      return json(route, {
+        project_id: PROJECT_ID,
+        ready: true,
+        stages: [
+          {
+            stage: "image_keyframe",
+            slot: "visual.keyframe",
+            purpose: "keyframe",
+            ready: true,
+            source: "project_profile",
+            requested_model_id: "provider/model-b",
+            resolved_model_id: "provider/model-b",
+            provider_model_binding_id: "77777777-7777-4777-8777-777777777777",
+            reason: null,
+          },
+          {
+            stage: "video",
+            slot: "video.shot",
+            purpose: "video",
+            ready: true,
+            source: "project_profile",
+            requested_model_id: "provider/model-b",
+            resolved_model_id: "provider/model-b",
+            provider_model_binding_id: "77777777-7777-4777-8777-777777777777",
+            reason: null,
+          },
+        ],
+      });
+    }
     if (path.endsWith("/model-profile") && method === "GET") {
       return json(route, { id: "project-profile", name: "当前项目", bindings: {}, version: 1 });
     }

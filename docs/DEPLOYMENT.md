@@ -114,6 +114,12 @@ Provider reconciliation runs in an independent dispatcher loop, not a heavy-queu
 media execution still uses the existing queue. Apply migration `20260921_0074` before
 updating the dispatcher and media workers. This rollout is not implied by a source-only push.
 
+PostgreSQL, Redis, MinIO and the LiteLLM database use `restart: unless-stopped` plus bounded
+startup health periods. The API, dispatcher and every Worker wait for PostgreSQL health and
+the completed database bootstrap, then also restart unless explicitly stopped. The frontend
+waits for API health. This ordering prevents a surviving gateway from presenting an API that
+started before its DNS/database dependencies recovered after a Docker restart.
+
 Director health uses `python -m app.workers.healthcheck` rather than importing
 all WorkerSettings/jobs for the Arq CLI. It checks the configured queue's nonempty
 Redis heartbeat plus a positive TTL of at most 3,601,000ms (not Redis PING), with

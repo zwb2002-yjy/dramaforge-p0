@@ -329,7 +329,9 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
           )}
           <section className="review-decisions">
             <h2>人工判断</h2>
-            <p className="muted">人工通过不会自动设为正式版本。</p>
+            <p className="muted">
+              可直接“通过并设为正式”继续流水审片；单独判断保留为高级模式。自动检查结果只作初筛。
+            </p>
             {shot && keyframeId ? (
               <HumanReviewDecisionPanel
                 projectId={projectId}

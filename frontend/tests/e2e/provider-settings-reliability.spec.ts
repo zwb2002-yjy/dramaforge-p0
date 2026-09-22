@@ -211,7 +211,13 @@ test("selecting a catalog model is only a draft and persists the exact identity 
     `模型绑定已创建：${model.model_id}`,
   );
   expect(saved).toEqual([
-    { model_id: model.model_id, media_type: "image", purpose: "keyframe", enabled: true },
+    {
+      model_id: model.model_id,
+      media_type: "image",
+      purpose: "keyframe",
+      enabled: true,
+      capability_contract_id: model.catalog_entry_id,
+    },
   ]);
   await expect(page.getByRole("button", { name: "绑定所选项目" })).toBeDisabled();
   expect(writes.filter((path) => path.includes("/probes"))).toEqual([]);

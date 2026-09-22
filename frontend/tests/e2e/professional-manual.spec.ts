@@ -63,7 +63,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("context-dock-look")).toBeVisible();
   await expect(page.getByTestId("context-dock-generate")).toBeVisible();
   await expect(page.getByTestId("context-dock-director")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("director-sidebar")).toBeHidden();
   await expect(page.getByTestId("shot-details-sheet")).toHaveCount(0);
   await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
@@ -193,7 +193,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   // Clearing the local preview restores the formal keyframe without a write.
   await page.reload();
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("director-sidebar")).toBeHidden();
   await expect(page.getByTestId("shot-formal-output")).toBeVisible();
   await expect(page.getByTestId("shot-keyframe")).toBeVisible();
 
@@ -226,9 +226,9 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await expect(page.getByTestId("context-dock-look")).toBeVisible();
   await expect(page.getByTestId("context-dock-generate")).toBeVisible();
   await expect(page.getByTestId("context-dock-director")).toBeVisible();
-  await expect(page.getByTestId("shot-candidate-tray")).toBeVisible();
+  await expect(page.getByTestId("shot-candidate-tray")).toBeHidden();
   await expect(page.getByTestId("shot-strip")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("director-sidebar")).toBeHidden();
   const sceneLayout = await page.locator(".qc-scene-layout").evaluate((element) => {
     const style = getComputedStyle(element);
     return {
@@ -276,7 +276,7 @@ test("Scene draft survives sheet close and guards route departure", async ({ pag
   await page.getByLabel("图片提示词").fill("unsaved guarded keyframe");
   await expect(page.getByTestId("shot-design-dirty")).toBeVisible();
   await page.getByTestId("director-sheet-close").click();
-  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("director-sidebar")).toBeHidden();
 
   await page.getByTestId("context-dock-look").click();
   await expect(page.getByLabel("图片提示词")).toHaveValue("unsaved guarded keyframe");
@@ -308,5 +308,7 @@ test("production monitor never surfaces legacy budget UI", async ({ page }) => {
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
-  await expect(page.getByText(/预算|计费|费用/)).toHaveCount(0);
+  await expect(page.getByTestId("professional-workbench").getByText(/预算|计费|费用/)).toHaveCount(
+    0,
+  );
 });

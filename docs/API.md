@@ -35,6 +35,7 @@ Migration head: 20260921_0074
 | Director Assistant | director.py | proposal-only Shot suggestion and recommendation (`/director/shots/{shot_id}/...`), bounded Director turns, runtime start/control/resume signals, read-only runtime capabilities |
 | Director board | director_board.py | per-shot 2D and rough-3D director board state — the only authoritative director-board writer |
 | Review | review.py | evidence annotations and annotation decisions, plus the human review decision (`review-summary`, `review-decisions`) that admits an exact Artifact |
+| Batch production / todo | batch_production.py | read-only per-Shot plan preview, explicit bounded Owner dispatch through the canonical command path, and server-fact-driven production todo / consistency risk projection |
 | Production monitor | production.py | Artifact bytes/frames and project snapshot; queue dispatch belongs to Workers, not a second user command |
 | Providers | provider_connections.py, provider_references.py, generations.py, model_profiles.py, model_candidates.py | read-only model catalog/capabilities/manifest, connection/credential revisions, capability probe, reference delivery, model profiles (binding validation is an invariant of the save path, not a separate endpoint) and read-only candidates; media generation has no second write surface |
 | Experiments | experiments.py | isolated Shot experiment branches; adoption is the ExperimentBranch decision, never a second adopt endpoint |
@@ -84,6 +85,13 @@ validated server-side; a disabled button is never the only guard.
 | Write path | Requirement | Refusal |
 |---|---|---|
 | `POST …/formal-keyframe`, `POST …/formal-video` | a stored human `approved` decision for that exact Artifact (`human_review_decisions`) | 422 `REVIEW_APPROVAL_REQUIRED` with `reason` (`REVIEW_AWAITING_HUMAN`, `REVIEW_DECISION_MISSING`, `REVIEW_DECISION_REJECTED`, `REVIEW_DECISION_STALE`) |
+
+`demo_confirmed` is a stored review decision for walkthrough confirmation only. It remains
+blocked by the Formal gate and never aliases `approved`.
+
+`GET …/batch-production/preview` is side-effect free. `POST …/batch-production` requires the
+exact preview fingerprint, a positive call ceiling, `owner_authorized=true`, currency and a
+positive per-operation cost ceiling; each accepted NodeRun stores that concrete authorization.
 | `POST …/final-film/render` | the same decision for every clip Artifact on the frozen Timeline | 422 `DELIVERY_REVIEW_REQUIRED` with the offending `artifact_id` and `reason` |
 | `POST …/repairs/{id}/steps` | mandatory displayed `expected_plan_fingerprint`, `expected_step_ordinal` and `idempotency_key`; previous exact candidate must pass human review and explicit Formal adoption | 409 stale plan/step or reused command; 422 `REPAIR_STEP_REQUIRES_REVIEW` |
 | `POST …/repairs/{id}/close` | `completed` requires final reviewed/Formal candidate; `abandoned` ends only this repair, not remote work; neither closes an active or unknown-submission run | 409 `REPAIR_NOT_COMPLETE` / `REPAIR_RUN_ACTIVE` / `REPAIR_SUBMISSION_UNKNOWN` |

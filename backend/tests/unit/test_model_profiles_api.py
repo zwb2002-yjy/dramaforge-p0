@@ -179,9 +179,7 @@ def test_workspace_profile_validation_rejects_capability_mismatch(
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "错误方案",
-            "bindings": {
-                "planning.script": {"model_id": "agnes/agnes-video-v2.0"}
-            },
+            "bindings": {"planning.script": {"model_id": "agnes/agnes-video-v2.0"}},
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
@@ -210,6 +208,19 @@ def test_effective_bindings_and_generation_slot_resolution(
     keyframe = next(b for b in effective.json() if b["slot"] == "visual.keyframe")
     assert keyframe["model_id"] == "agnes/agnes-image-2.1-flash"
     assert keyframe["source"] == "workspace_profile"
+
+    # A logical profile selection is not yet an executable provider binding.
+    # The production preflight uses the concrete resolver and reports that
+    # difference before the first paid action is attempted.
+    preflight = client.get(f"/api/v1/projects/{project_id}/execution-models/preflight")
+    assert preflight.status_code == 200, preflight.text
+    keyframe_execution = next(
+        stage for stage in preflight.json()["stages"] if stage["stage"] == "image_keyframe"
+    )
+    assert keyframe_execution["ready"] is False
+    assert keyframe_execution["requested_model_id"] == "agnes/agnes-image-2.1-flash"
+    assert keyframe_execution["resolved_model_id"] is None
+    assert keyframe_execution["reason"] == "MODEL_BINDING_UNAVAILABLE"
 
     # Standalone image.generate without model_id resolves the visual.keyframe
     # slot through the GenerationService domain call (media generation has no
@@ -245,6 +256,114 @@ def test_effective_bindings_and_generation_slot_resolution(
             return str(generation.get("requested_model") or "")
 
     assert _run_create(_create()) == "agnes/agnes-image-2.1-flash"
+
+
+def test_execution_preflight_requires_immutable_connection_revision(
+    api: tuple[TestClient, Any],
+) -> None:
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _create_project(client, workspace_id)
+
+    async def _seed_without_revision() -> None:
+        from app.access.models import Project, User
+        from app.providers.models import ProviderConnectionRevision
+        from model_infra_fixture import seed_model_infra
+        from sqlalchemy import delete, select
+
+        async with factory() as session:
+            user = (await session.execute(select(User).limit(1))).scalar_one()
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            await seed_model_infra(session, project=project, user=user)
+            await session.execute(delete(ProviderConnectionRevision))
+            await session.commit()
+
+    _run_create(_seed_without_revision())
+    response = client.get(f"/api/v1/projects/{project_id}/execution-models/preflight")
+    assert response.status_code == 200, response.text
+    assert response.json()["ready"] is False
+    assert {stage["reason"] for stage in response.json()["stages"]} == {
+        "PROVIDER_CONNECTION_REVISION_MISSING"
+    }
+
+
+def test_batch_preview_and_todo_fail_closed_before_dispatch(
+    api: tuple[TestClient, Any],
+) -> None:
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _create_project(client, workspace_id)
+
+    async def _seed_shot() -> tuple[str, str]:
+        from app.assets.models import Episode, Scene, Shot
+
+        async with factory() as session:
+            episode = Episode(
+                project_id=UUID(project_id), episode_number=1, title="E1", synopsis=""
+            )
+            session.add(episode)
+            await session.flush()
+            scene = Scene(
+                episode_id=episode.id,
+                scene_number=1,
+                location_name="Studio",
+                time_of_day="day",
+                synopsis="",
+            )
+            session.add(scene)
+            await session.flush()
+            shot = Shot(
+                project_id=UUID(project_id),
+                scene_id=scene.id,
+                shot_number=1,
+                visual_description="Lead enters the room",
+                image_prompt="cinematic entrance",
+            )
+            session.add(shot)
+            await session.commit()
+            return str(scene.id), str(shot.id)
+
+    scene_id, shot_id = _run_create(_seed_shot())
+    preview = client.get(
+        f"/api/v1/projects/{project_id}/batch-production/preview",
+        params={"stage": "image_keyframe", "scene_id": scene_id},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["estimated_provider_calls"] == 0
+    assert preview.json()["blocked_count"] == 1
+    assert preview.json()["items"][0]["blocker"] == "MODEL_BINDING_MISSING"
+
+    todos = client.get(f"/api/v1/projects/{project_id}/production-todos")
+    assert todos.status_code == 200, todos.text
+    assert todos.json()["counts"] == {"not_generated": 1}
+    assert todos.json()["items"][0] == {
+        "shot_id": shot_id,
+        "scene_id": scene_id,
+        "shot_number": 1,
+        "category": "not_generated",
+        "stage": "image_keyframe",
+        "detail": "NO_CANDIDATE",
+        "artifact_id": None,
+    }
+
+
+def test_batch_dispatch_contract_requires_positive_per_operation_budget() -> None:
+    from app.api.v1.batch_production import BatchProductionDispatchBody
+    from pydantic import ValidationError
+
+    common = {
+        "stage": "image_keyframe",
+        "preview_fingerprint": "a" * 64,
+        "batch_key": "batch:keyframes",
+        "max_provider_calls": 2,
+        "currency": "CNY",
+        "owner_authorized": True,
+    }
+    with pytest.raises(ValidationError):
+        BatchProductionDispatchBody(**common, max_cost_per_call="0")
+    accepted = BatchProductionDispatchBody(**common, max_cost_per_call="1.25")
+    assert str(accepted.max_cost_per_call) == "1.25"
 
 
 def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) -> None:

@@ -90,10 +90,13 @@ export function ShotCandidateTray({
       return setShotFormalVideo(projectId, shot.id, candidate.artifactId, shot.version);
     },
     onMutate: () => setFeedback(null),
-    onSuccess: async (result) => {
+    onSuccess: async (result, candidate) => {
       setFeedback({
         kind: "success",
-        message: "formal_keyframe_artifact_id" in result ? "已设为正式关键帧" : "已设为正式视频",
+        message:
+          ("formal_keyframe_artifact_id" in result ? "已设为正式关键帧" : "已设为正式视频") +
+          `：镜头 ${shot?.id ?? "未知"}，素材 ${candidate.artifactId}。` +
+          (candidate.stage === "image_keyframe" ? "下一步可生成视频。" : "下一步可进入剪辑。"),
       });
       // Keep the existing cache aliases coherent.  No browser-side Shot or
       // formal id is manufactured; the follow-up workspace read is the truth.
@@ -133,30 +136,15 @@ export function ShotCandidateTray({
     );
   }
 
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        className="qc-shot-candidate-tray is-collapsed"
-        data-testid="shot-candidate-tray"
-        data-shot-id={shot.id}
-        data-expanded="false"
-        aria-expanded="false"
-        onClick={onToggleExpanded}
-      >
-        <strong>备选画面 · {parsedCandidates.length}</strong>
-      </button>
-    );
-  }
-
   const activeArtifactId = confirm.isPending ? confirm.variables?.artifactId : null;
   return (
     <section
       className="qc-shot-candidate-tray"
       data-testid="shot-candidate-tray"
       data-shot-id={shot.id}
-      data-expanded="true"
+      data-expanded={expanded ? "true" : "false"}
       aria-label="候选结果"
+      hidden={!expanded}
     >
       <header className="qc-shot-candidate-tray-header">
         <div>
@@ -241,6 +229,23 @@ export function ShotCandidateTray({
                 </a>
                 <div className="qc-shot-candidate-meta">
                   <span>{nodeRunStatusLabel(candidate.status)}</span>
+                  <span data-testid={`shot-candidate-review-${candidate.artifactId}`}>
+                    {candidate.reviewAllowed
+                      ? "人工审查已通过，可设为正式"
+                      : candidate.reviewDecision === "rejected"
+                        ? "人工审查已拒绝"
+                        : candidate.reviewNodeRunId
+                          ? "已有检查证据，等待人工判断"
+                          : "等待生成检查证据"}
+                  </span>
+                  {candidate.duplicateContent && (
+                    <span
+                      className="status-bad"
+                      data-testid={`shot-candidate-duplicate-${candidate.artifactId}`}
+                    >
+                      与同阶段另一候选内容完全相同；请改用独立提示词重新生成
+                    </span>
+                  )}
                   {candidate.nodeRunId && <small>Run {candidate.nodeRunId.slice(0, 8)}</small>}
                   <code>{candidate.artifactId}</code>
                 </div>
@@ -249,9 +254,13 @@ export function ShotCandidateTray({
                   className="qc-shot-candidate-confirm"
                   data-testid={`shot-candidate-confirm-${candidate.artifactId}`}
                   onClick={() => confirm.mutate(candidate)}
-                  disabled={confirm.isPending}
+                  disabled={confirm.isPending || !candidate.reviewAllowed}
                 >
-                  {activeArtifactId === candidate.artifactId ? "确认中…" : `设为正式${label}`}
+                  {activeArtifactId === candidate.artifactId
+                    ? "确认中…"
+                    : candidate.reviewAllowed
+                      ? `设为正式${label}`
+                      : "审查通过后可设为正式"}
                 </button>
                 <button
                   type="button"

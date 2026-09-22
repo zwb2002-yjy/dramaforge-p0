@@ -840,8 +840,7 @@ function ProviderConnectionEditor({
                   const available = selectableModelIds.filter(
                     (modelId) =>
                       !(bindings.data ?? []).some(
-                        (binding) =>
-                          binding.purpose === purpose && binding.model_id === modelId,
+                        (binding) => binding.purpose === purpose && binding.model_id === modelId,
                       ),
                   );
                   return (
@@ -866,16 +865,14 @@ function ProviderConnectionEditor({
                         </option>
                         {available.map((modelId) => (
                           <option key={modelId} value={modelId}>
-                            {pluginModels.find((model) => model.model_id === modelId)?.display_name ??
-                              modelId}
+                            {pluginModels.find((model) => model.model_id === modelId)
+                              ?.display_name ?? modelId}
                             {supportedModelIds.has(modelId) ? ` · ${modelId}` : " · 探测发现"}
                           </option>
                         ))}
                       </Select>
                       <Select
-                        aria-label={
-                          mediaType === "image" ? "关键帧能力插件" : "视频能力插件"
-                        }
+                        aria-label={mediaType === "image" ? "关键帧能力插件" : "视频能力插件"}
                         value={contractId}
                         disabled={!canManageBindings || !value || !contracts.length}
                         onChange={(event) =>
@@ -893,9 +890,7 @@ function ProviderConnectionEditor({
                       </Select>
                       <Button
                         type="button"
-                        disabled={
-                          !canManageBindings || !available.includes(value) || !contractId
-                        }
+                        disabled={!canManageBindings || !available.includes(value) || !contractId}
                         onClick={() =>
                           bindingMutation.mutate({
                             media_type: mediaType,
