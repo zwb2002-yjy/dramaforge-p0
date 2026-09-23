@@ -9,6 +9,11 @@ Status: current
 
 **首版尚未正式发布完成。** 运行候选、集成 PR 和发布基线必须分开看；本地质量门通过不等于真实双路径验收或正式发布完成。
 
+创作体验改进见 [开发合同](ARCHITECTURE_MAPPING.md#creation-improvement-contract)。
+PR/MP/UI/RT 与 AC-01–AC-18 是目标要求，文档完成不代表开发、制作验收或发布完成。
+新目标不能直接复用历史 `complete=true` 结论；最终候选须覆盖实际改动及新增验收。
+该开发合同不自动扩张已有发布候选，纳入哪一个发布版本须在该候选范围中明确。
+
 本文件**不钉死** PR 编号、测试计数或 Base SHA 作为长期事实（与 CURRENT.md「计数/SHA 不作当前事实」一致）。下表只描述**状态性质**；最终候选 SHA、门结果与证据路径在发布条件勾选表中由 Owner 落笔。
 
 | 对象 | 当前事实 |
@@ -32,7 +37,7 @@ Agent 不批准或合并 PR，不发布。
 ## 已确定的首版产品边界
 
 - `quality_gated` 表示质量认证/正式支持证据，不是普通执行与实验的硬准入；绑定、连接、能力不匹配仍失败关闭。
-- 项目 Provider Binding 有只读回显；Provider Connection 可启用/停用，连接删除延期。
+- 项目 Provider Binding 已有显式绑定与来源回显；Provider Connection 可启用/停用，连接删除延期。多连接与来源隔离的目标改造见 MODEL_PROVIDER。
 - 无生产者旧表面已清退：Shot Change Proposal 面板和前端客户端已删除；服务端 `change-proposals` API 暂保留且无前端消费者。ModelPicker/uiStore/DirectorBoard 前端死代码删除；video-frames 保留；DirectorBoard 后端暂保留；V2 bootstrap stub fail-closed 为类型化 `unsupported_capability`（HTTP 422），不再以 500 暴露。产品运行时无 demo Project ID 特判，测试使用普通 Project fixture。
 - 镜头旧视频提交仍须按 `unknown_submission` 保留证据，禁止技术盲重试。
 

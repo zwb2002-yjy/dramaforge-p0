@@ -53,7 +53,7 @@ internal caller still needs it:
 
 | Retired surface | Kept as the sole authority |
 |---|---|
-| `PUT/GET …/provider-credentials` | instance-level LiteLLM configuration for text; immutable ProviderConnection credential revisions for media |
+| `PUT/GET …/provider-credentials` | the current ProviderConnection credential revision path, plus explicitly configured deployment-level LiteLLM text sources; no retired credential writer |
 | legacy `shot_ids` experiment creation DTO | `ExperimentCreateBody` -> shared ExperimentBranch draft service (also used by Director); no old creation response union |
 | `POST …/dispatch`, `POST …/node-runs/{id}/enqueue` | Workbench executions / staged Repair for user intent; dispatcher, Worker and qualified maintenance recovery for delivery/recovery |
 | `POST …/experiments/{experiment_id}/adopt` | the `ExperimentBranch` `decision` endpoint |
@@ -129,6 +129,8 @@ Retries must not create a second operation:
 
 ## Required checks
 
+这些检查在下述质量容器内执行，片段不是宿主安装指令。
+
 npm run api:check
 frontend: npm run format:check
 backend: alembic check
@@ -140,6 +142,69 @@ docker-compose.quality.yml (backend/Dockerfile.quality and
 frontend/Dockerfile.quality). The repository does not require a host Python or
 Node installation for development or release evidence.
 
+## 创作体验改进：目标 API 扩展
+
+**状态：待实现/待验收。** 本节是开发约束，不是当前 OpenAPI；语义字段清单不预先
+宣称具体 DTO 或 endpoint 已存在。需求来源见 [开发合同](ARCHITECTURE_MAPPING.md#creation-improvement-contract)、
+MODEL_PROVIDER 的 MP-01–MP-12 和 FRONTEND_WORKBENCH 的 UI-01–UI-12。
+优先演进 Route ownership 中的现有领域入口，禁止另建通用生成/任务/模型代理 API。
+
+### 连接、发现与默认模型
+
+| 现有入口族 | 目标请求/响应语义 | 副作用与拒绝边界 |
+|---|---|---|
+| Provider plugins/catalog | 协议、发现策略、能力/参数/UI schema、官方或协议来源、版本与 hash | 只读；不返回 Key 或可执行代码；目录不等于实测可用 |
+| Connection create/update/credential | 具名连接、明确协议与 base URL；响应返回规范化来源、connection/credential revision 及非秘密状态 | 保存与换 Key 是显式写入；同协议多连接共存；不自动 probe/create；Key 只写不读 |
+| Probes | 分开表达认证、目录读取及已支持模式的受控验证；返回范围、revision、时间、结果/错误 | 用户明确触发；读取目录不调用生成；付费合同未实现前保持现有拒绝 |
+| Model bindings | 精确远端 ID、连接修订、已知合同/模式；目录选择或手动登记的来源 | 手动登记不提升认证/实测状态；未知能力不产生可执行绑定 |
+| Model profiles/effective/preflight | 默认与项目/镜头覆盖、继承来源、解析出的完整身份及字段级阻塞原因 | 保存与执行使用同一 resolver；不能按模型名静默选择连接或更换模型 |
+
+URL+Key 可以在同一向导提交，但 UI 必须明确各写入结果。若实现沿用“创建连接→保存凭证”
+的多请求流程，第二步失败要保留并返回原 connection ID，可继续保存，不能提示整体成功或
+重试时制造重复连接。新增原子请求应仍调用现有领域服务并验证事务，不创建另一套凭证存储。
+
+无目录接口按 MP-04 区分“未提供目录”与“认证拒绝”。首次计费验证须绑定精确合同、模型、
+输入、授权和幂等命令，走既有生产事实；明确 401/403、无合同、无权限/授权仍拒绝。
+普通生成不因手动输入 ID 自动获得首次验证豁免。该演进必须补齐 ADR 0005 的适用说明。
+
+### 最终请求预览、提交与回执
+
+扩展现有 `execution-plan`，由同一 Compiler 产生以下**非秘密投影**：
+
+- 输入来源：已保存对象/版本、原始 prompt、显式采用的优化版本；
+- 解析结果：connection/credential revision ID、远端模型、模式、合同/compiler/prompt 策略版本；
+- 最终请求：转换后 prompt、有效参数及单位、有序 Artifact ID/hash/角色和交付类型；
+- 转换说明：默认、映射、近似、未支持项及字段级错误；不得省略字段却声称已生效；
+- 确认身份：编译 fingerprint、输入版本、允许晚绑定的传输字段名、可提交状态和阻塞原因。
+
+预览不调用 LLM、上传素材到供应商、获取收费结果或创建执行事实；需要 LLM 优化时走显式
+提案入口。返回的 JSON 不含鉴权头、Key、签名 URL、base64 或可复用下载凭证。
+服务端保存/重建的不可变编译内容与其 UI 投影必须可核对，具体持久化位置见 DATA_MODEL。
+
+`executions` 只受理该预览对应的保存版本与 hash，原子检查权限、模型/凭证修订、引用、
+合同、授权和幂等命令。旧预览以类型化冲突拒绝，且零排队、零 create；不能先受理后再
+解释“参数已经更新”。同命令重试返回原 receipt；用户明确“再生成一次”产生新的命令身份，
+不能把等同的 prompt/hash 当作永久去重键。Worker 消费同一冻结语义请求，见 MP-07/RT。
+
+错误合同复用已有稳定 code，新增内容通过 Pydantic/OpenAPI 生成。最少包含非秘密的
+correlation ID、字段/引用定位、是否需新预览及明确恢复动作；区分查询原任务与新提交。
+HTTP 状态与业务状态须一致解释，`unknown_submission` 不返回引导自动 create 的重试提示。
+
+### 预演、审片与剪辑
+
+动态分镜读取现有 Shot、Artifact、保存时长/字幕/音频的播放投影，不新建服务端生产入口。
+缺媒体返回可定位的缺失信息；前端不得为补齐播放自动生成。相邻镜头与审片证据读取验证
+同项目的对象、版本、采样与血缘，复用本文件的视频证据合同。
+
+审片中的“通过并设为正式”可把两个现有显式动作组织在一个明确标名的交互中；不能改变
+`approved` 与 Formal 的领域区别。批准成功而 Formal 冲突时保留批准事实、回显冲突及最新
+候选，不提前展示正式成功，也不发第二条生产请求。
+
+Editing 继续使用既有 EditSession timeline 和乐观版本。预览和导出共享顺序、trim、时长、
+片段配音音量、现有配音与字幕的时间映射；不把只播源片段当作编辑效果预览。不支持预览的高级效果
+明确标识，保留数据与现有导出。保存 409 返回冲突语义，前端保留草稿；Export 绑定已保存
+版本，不能偷偷 Save。验收采用 AC-11–AC-15，新增类型统一从后端生成。
+
 ## 无前端消费者的能力：先判用途，再决定清退
 
 | 对象 | 用户是否需要该能力 | 当前处置与权威替代 |
@@ -147,7 +212,7 @@ Node installation for development or release evidence.
 | video-frames / 视频采样证据 | 需要，人工审片需比较时间上的变化 | KEEP + DESIGN；接口暂保留，下节是完整消费设计，尚未实现 |
 | 项目 dispatch / NodeRun enqueue HTTP | 需要生成/修复/恢复，不需要控制队列 | 退役这两个 HTTP helper；保留内部 scheduler 与 Worker 调用，使用既有 executions/receipt、repairs、maintenance recovery |
 | worker/tick、provider-reference token、status/metrics | Worker、Provider、运维需要，不是创作页面 | 保留；不为了制造消费者而增加前端按钮 |
-| TEXT_LLM_* 与旧文本凭证写面 | 需要文本模型，不需要旧直连配置 | 已确认实例 LiteLLM 网关取代；模型选择与有效网关合同保留 |
+| TEXT_LLM_* 与旧文本凭证写面 | 需要文本模型，不需要旧凭证入口 | 当前文本 HTTP adapter 消费部署配置或空间连接；沿用 ProviderConnection 与模型选择，不恢复旧环境变量/写面；来源隔离缺口见 MODEL_PROVIDER |
 | 旧实验 ORM / DTO | 需要隔离实验，但不需要旧生产轨 | 当前 ExperimentBranch；旧表仅历史映射，不重新给 UI 提供旧入口 |
 
 ### 视频证据与候选审核：精确目标入口与待完成证据设计
