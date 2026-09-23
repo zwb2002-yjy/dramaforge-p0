@@ -20,8 +20,13 @@ export const settingsRoute = createRoute({
 export const settingsIndexRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/",
-  component: () => <Navigate to="/settings/models" replace />,
+  component: SettingsIndexRedirect,
 });
+
+function SettingsIndexRedirect() {
+  const { returnTo } = settingsRoute.useSearch();
+  return <Navigate to="/settings/models" search={{ returnTo }} replace />;
+}
 
 export const settingsAccountRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -44,7 +49,7 @@ export const settingsModelsRoute = createRoute({
 export const settingsDefaultsRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/defaults",
-  component: () => <Navigate to="/" search={{ create: true }} replace />,
+  component: LazyModelConnectionSettingsPage,
 });
 
 export const settingsProjectRoute = createRoute({

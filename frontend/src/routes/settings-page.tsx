@@ -1,9 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
-import { Button, Disclosure, Field, Input, Select, PageHeader } from "../components/ui";
+import { Button, Disclosure, Field, Input, Select, PageHeader, Tabs, Tab } from "../components/ui";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
+import {
+  ProjectModelSourceSummary,
+  ProviderConfigurationBoundaries,
+} from "../components/provider/ProjectModelSourceSummary";
 import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
 import { WorkspaceModelProfileSettings } from "../components/provider/WorkspaceModelProfileSettings";
 import { TextGatewaySettings } from "../components/provider/TextGatewaySettings";
@@ -24,6 +28,7 @@ import {
   type WorkspaceRead,
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
+import { validateSettingsReturnTo } from "../lib/navigationPreferences";
 
 function SettingsHeader({ title }: { title: string }) {
   return <PageHeader title={title} />;
@@ -265,6 +270,7 @@ export function WorkspaceSettingsPage({
         <form className="inline-form" onSubmit={submit}>
           <Input
             aria-label="新空间名"
+            autoFocus
             value={workspaceName}
             onChange={(event) => setWorkspaceName(event.target.value)}
             placeholder="新空间名"
@@ -338,51 +344,119 @@ export function WorkspaceSettingsPage({
 }
 
 export function ModelConnectionSettingsPage() {
+  const initialSection = useRouterState({
+    select: (state) => (state.location.pathname.endsWith("/defaults") ? "defaults" : "connection"),
+  });
+  const [section, setSection] = useState(initialSection);
+  const sections = [
+    { id: "connection", label: "连接" },
+    { id: "defaults", label: "默认模型" },
+    { id: "project", label: "项目模型" },
+    { id: "advanced", label: "高级" },
+  ];
   const { workspaces, projects, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
-  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const returnTo = useRouterState({
+    select: (state) => validateSettingsReturnTo(state.location.search.returnTo),
+  });
+  const originProjectId = returnTo?.match(/^\/projects\/([^/?#]+)/)?.[1];
+  const selectionScope = JSON.stringify([selectedWorkspaceId, returnTo]);
+  const [projectSelection, setProjectSelection] = useState<{ scope: string; id: string } | null>(
+    null,
+  );
+  const selectedProjectId =
+    projectSelection?.scope === selectionScope ? projectSelection.id : originProjectId;
+  // Only a project returned for this workspace may become the selected target.
   const selectedProject = projects.data?.find((project) => project.id === selectedProjectId);
 
   return (
     <main className="df-page df-settings-page" data-testid="model-settings-page">
       <SettingsHeader title="模型连接" />
-      <section aria-label="图像与视频连接">
-        <div className="df-settings-section">
-          {workspaces.isError ? (
-            <p className="flash err" role="alert">
-              无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
-            </p>
-          ) : workspaces.isPending ? (
-            <p role="status">正在读取工作空间…</p>
-          ) : (
-            <WorkspaceSelector
-              workspaces={workspaces.data ?? []}
-              selectedWorkspaceId={selectedWorkspaceId}
-              onChange={(id) => {
-                selectWorkspace(id);
-                setSelectedProjectId("");
-              }}
-            />
-          )}
-        </div>
+      <div className="df-settings-section">
+        {workspaces.isError ? (
+          <p className="flash err" role="alert">
+            无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
+          </p>
+        ) : workspaces.isPending ? (
+          <p role="status">正在读取工作空间…</p>
+        ) : (
+          <WorkspaceSelector
+            workspaces={workspaces.data ?? []}
+            selectedWorkspaceId={selectedWorkspaceId}
+            onChange={(id) => {
+              selectWorkspace(id);
+              setProjectSelection(null);
+            }}
+          />
+        )}
+      </div>
+      <Tabs label="模型设置分区" className="df-section-tabs">
+        {sections.map((item) => (
+          <Tab
+            key={item.id}
+            id={`settings-tab-${item.id}`}
+            aria-controls={`settings-panel-${item.id}`}
+            active={section === item.id}
+            onClick={() => setSection(item.id)}
+          >
+            {item.label}
+          </Tab>
+        ))}
+      </Tabs>
+      <section
+        role="tabpanel"
+        id="settings-panel-connection"
+        aria-labelledby="settings-tab-connection"
+        hidden={section !== "connection"}
+      >
         <ProviderConnectionPanel
           key={selectedWorkspaceId ?? "no-workspace"}
           workspaceId={selectedWorkspaceId}
-          projects={projects.data ?? []}
+          projects={projects.isSuccess ? projects.data : []}
+          initialProjectId={selectedProject?.id}
         />
       </section>
-      <Disclosure title="默认模型方案" testId="default-models-disclosure">
+      {projects.isError && (
+        <p role="alert">
+          无法确认当前空间的作品列表。
+          <Button onClick={() => void projects.refetch()}>重新读取作品列表</Button>
+        </p>
+      )}
+      {projects.isSuccess && selectedProject && (
+        <ProjectModelSourceSummary
+          key={selectedProject.id}
+          projectId={selectedProject.id}
+          projectName={selectedProject.name}
+        />
+      )}
+      <section
+        role="tabpanel"
+        id="settings-panel-defaults"
+        aria-labelledby="settings-tab-defaults"
+        hidden={section !== "defaults"}
+        data-testid="default-models-disclosure"
+      >
         <WorkspaceModelProfileSettings
           key={selectedWorkspaceId ?? "no-workspace"}
           workspaceId={selectedWorkspaceId}
         />
-      </Disclosure>
-      <Disclosure title="项目模型覆盖" testId="project-models-disclosure">
+      </section>
+      <section
+        role="tabpanel"
+        id="settings-panel-project"
+        aria-labelledby="settings-tab-project"
+        hidden={section !== "project"}
+        data-testid="project-models-disclosure"
+      >
+        <h2>项目模型覆盖</h2>
+        <p className="muted">仅影响所选项目。</p>
         <Field>
           项目
           <Select
             aria-label="项目模型覆盖"
             value={selectedProject?.id ?? ""}
-            onChange={(event) => setSelectedProjectId(event.target.value)}
+            onChange={(event) =>
+              setProjectSelection({ scope: selectionScope, id: event.target.value })
+            }
           >
             <option value="">选择项目</option>
             {(projects.data ?? []).map((project) => (
@@ -398,14 +472,21 @@ export function ModelConnectionSettingsPage() {
             className="df-btn"
             to="/settings/projects/$projectId"
             params={{ projectId: selectedProject.id }}
+            search={returnTo ? { returnTo } : {}}
           >
             配置项目模型
           </Link>
         )}
-      </Disclosure>
-      <Disclosure title="文本服务（实例级）" testId="text-service-disclosure">
-        <TextGatewaySettings />
-      </Disclosure>
+      </section>
+      <section
+        role="tabpanel"
+        id="settings-panel-advanced"
+        aria-labelledby="settings-tab-advanced"
+        hidden={section !== "advanced"}
+        data-testid="text-service-disclosure"
+      >
+        <TextGatewaySettings workspaceId={selectedWorkspaceId} />
+      </section>
     </main>
   );
 }
@@ -432,6 +513,7 @@ export function ProjectSettingsPage() {
       ) : (
         <>
           <section className="df-settings-section">
+            <ProviderConfigurationBoundaries />
             <ModelProfileSettings projectId={projectId} workspaceId={project.data.workspace_id} />
           </section>
         </>

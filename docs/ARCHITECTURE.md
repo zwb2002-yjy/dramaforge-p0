@@ -1,7 +1,7 @@
 # ARCHITECTURE — 架构与代码归属权威
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-14 / Base: dev 070faa3 / Alembic head: 20260910_0066
+Date: 2026-09-22 / Alembic head: 20260922_0077
 
 本文件描述**当前项目实际怎么组成**。它受架构宪法
 [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) 约束：宪法定义目标世界观，

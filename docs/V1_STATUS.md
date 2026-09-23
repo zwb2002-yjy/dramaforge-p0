@@ -1,179 +1,65 @@
 # V1_STATUS — 当前 V1 / 发布状态
 
 Status: current  
-Date: 2026-09-18（本节为最新实测；下方"当前结论"及历史小节保留其原始日期与语境）  
-Branch: `dev` = `9456f6c999ed661e3585b6f578563dbebf9dea40`（= `origin/dev`）；`main` 基线仍为 `c12c3dfb`
-
-> 2026-09-18 重要更正：本文件此前记录的"当前候选"是 `b96a5216` / PR #90 HEAD `d2c7655b`
-> 时期的状态。当前 `dev` 已推进到 `9456f6c`，且**工作区有大量未提交改动**（139 个路径，
-> 含另一 agent 正在进行的前端/导航/设置重构）；本文件的验证数字与"正式 8080 实例身份"
-> 两处已与实际不符，见文末「2026-09-18 工作区实测」。发布完成条件本身未变。
+本地运行与远端分支状态核对日期：2026-09-22。Owner 拍板同日落盘（架构债顺序、死代码、demo、ADR/依赖、条件 3）。
+迁移头以候选上 `alembic heads` 为准；当前树对应 **`20260922_0077`**（见
+[DATA_MODEL.md](DATA_MODEL.md)）。
 
 ## 当前结论
 
-第一版创作主链和发布打包修复已经进入 `dev`，但**当前不能标记为正式发布完成**。
+**首版尚未正式发布完成。** 运行候选、集成 PR 和发布基线必须分开看；本地质量门通过不等于真实双路径验收或正式发布完成。
 
-当前发布 PR 为 **#90：`dev -> main`**，HEAD 为 `d2c7655b`，GitHub 返回
-`mergeable=true`；`main` 基线仍为 `c12c3dfb`。Owner 仍是唯一合并人。
-（该 PR 事实来自 2026-09-17 记录，本轮未复核远端 PR 状态。）
+创作体验改进见 [开发合同](ARCHITECTURE_MAPPING.md#creation-improvement-contract)。
+PR/MP/UI/RT 与 AC-01–AC-18 是目标要求，文档完成不代表开发、制作验收或发布完成。
+新目标不能直接复用历史 `complete=true` 结论；最终候选须覆盖实际改动及新增验收。
+该开发合同不自动扩张已有发布候选，纳入哪一个发布版本须在该候选范围中明确。
 
+本文件**不钉死** PR 编号、测试计数或 Base SHA 作为长期事实（与 CURRENT.md「计数/SHA 不作当前事实」一致）。下表只描述**状态性质**；最终候选 SHA、门结果与证据路径在发布条件勾选表中由 Owner 落笔。
 
-
-### 8080 当前候选运行事实
-
-- 从 `0a38ce9` 构建的本地正式拓扑已在 8080 启动；gateway / API / 数据库健康检查通过，运行环境为 `production`，运行身份与提交一致。
-- 在该全新实例中通过界面初始化 Owner，并通过规范剧本导入链导入“乌镇宣传短片”：1 集、1 场景、6 镜头，剧本文档版本 1，内容哈希保持一致。
-- 方案授权范围内已完成 Agnes 账户模型绑定和非付费 `auth_models` 验证。一次真实关键帧提交已按唯一幂等键发送并最终失败；真实错误为当前项目 16:9 与 Agnes 冻结模型清单要求 9:16 不一致。未盲目重试或伪造成功。
-- 因此 8080 健康与脚本闭环已验证，但 REL-01 的真实媒体、恢复、安装和最终发布条件仍未满足。
-### 本轮已验证的当前候选事实
-
-- 当前 `dev` 已实现精确候选审查目标：普通候选与修复步骤都绑定不可变 Artifact，错误目标失败关闭，不回退 Formal。
-- Review 摘要已返回视频证据清单：来源 Artifact / 哈希、审查 NodeRun / Artifact、采样版本、参考图哈希和逐帧可用状态；桌面证据条只读并定位播放器。
-- 当前候选质量镜像已通过 1228 单元测试、84 PostgreSQL 集成测试；前端通过 268 单元测试、45 Playwright 测试。
-  （**历史数字**，属上述旧候选；当前工作区的实测数字见文末「2026-09-18 工作区实测」。）
-- 已从当前提交启动正式 8080 拓扑并验证 gateway/API/数据库身份；在该实例初始化 Owner、创建“乌镇宣传短片”并导入 1 集 / 1 场景 / 6 镜头剧本。
-- 上述运行验证没有发起付费 Provider 生成；因此不能替代真实模型 Golden、异常恢复全矩阵和发布物安装验证。
-## 还差什么
-
-### 1. GitHub required checks 需要真正跑起来
-
-`d2c7655b` 上最新 CI 与 Security workflow 都以 failure 结束，而且所有实际 job
-都没有执行 step。当前问题发生在 hosted runner 分配/账号层，而不是某个测试命令失败。
-
-本地 Docker 质量门仍可用于开发验证，但不能把“本地通过”写成“GitHub required checks
-已通过”。如果改用其他 runner，需在单独变更中明确 runner 环境和发布适配边界。
-
-### 2. REL-01 需要在正式 8080 入口闭合
-
-此前真实 Provider 验收在隔离候选栈完成了主要阶段，但验收 driver 没有形成最终
-`complete=true`：16 条必需断言中记录了 10 条，另外 6 条外部/跨阶段断言未导入。
-
-当前 `dev` 已修正两个会阻止闭合的问题：
-
-- migration head 从候选仓库自身推导，不再写死旧 revision；
-- 验收入口端口可配置，默认正式入口为 **8080**。
-
-发布验收应以 8080 为正式入口；8088 只适合作为隔离候选/测试端口，5173 只用于前端
-开发。最终需要在同一候选 SHA 上完成浏览器、runtime、recovery 等外部证明并执行
-`collect`，直到 required assertions 全部满足。
-
-### 3. 发布物还需要最终安装验证
-
-Release workflow 已包含以下修复：打包前回收 runner 磁盘、离线包扁平化、
-`images.tar.gz` 单趟压缩，以及 `worker-director` 的生产必需环境变量。
-
-这些改动仍需在可运行的 release workflow 上重新生成正式制品，并用生成出来的
-online/offline bundle 做一次干净目录安装验证。只有源码测试通过不能替代发布物验证。
-
-## 发布完成条件
-
-V1 发布完成至少同时满足：
-
-1. 当前候选的 CI / Security required checks 真实执行并通过；
-2. 同一候选在正式 8080 入口完成 REL-01，最终 `complete=true`；
-3. Owner 审阅并合并 `dev -> main`；
-4. Release workflow 成功生成并发布版本化制品；
-5. 对实际生成的安装包完成在线/离线安装、启动与健康检查验证。
-
-## 证据和历史记录放哪里
-
-当前树只保留可重复执行的验证逻辑，例如 CI、单测、E2E、release contract 和
-`scripts/prove_v1_r7_acceptance.py`。真实 Provider 调用明细、阶段报告、旧候选审计和
-一次性修复过程不再写入长期文档；需要追溯时查看 Git 历史，临时运行证据写入 `tmp/`。
-
-### 乌镇 9:16 真实关键帧进展
-
-- 在“乌镇宣传短片（首版竖屏）”中，六个镜头均已完成设计保存、执行计划冻结和 Agnes 真实关键帧生成；每次提交使用独立幂等键并完成回执对账。
-- 六个候选 Artifact 已进入候选托盘，正式版本指针仍为空。系统停在逐候选人工审查与 Formal 的显式用户门，没有替用户自动通过。
-- 16:9 原项目的能力不匹配失败保持为真实失败证据，没有被静默改画幅或重复提交。
-### 安装包本地烟测
-
-当前候选已在临时隔离目录完成离线安装烟测：本地构建的运行镜像集单趟压缩、gzip 完整性、`docker load`、`install.ps1 -Offline` 和全 Compose 健康检查均通过。该证据仅证明本地安装路径，不能替代 Release workflow 产物、CI required checks 或最终发布身份。
-
-## 2026-09-18 工作区实测（第 26 轮更正，第 29 轮更新）
-
-口径：本节描述的是**当日工作区**的实测事实；第 29 轮已把该工作区整体冻结为提交
-**`a5d5851`**（见下「候选已冻结」），因此本节的门禁结果现可作为该候选的提交级证据读取。
-
-**身份**
-
-- 运行相关内容的候选提交：**`a5d585199…`**（`dev`，已推送 `origin/dev`）；其后的提交只改本文档，
-  未触及运行相关文件，按阶段 16 的口径可继承该候选的运行证据。
-  该候选含三个提交：`581071c` 本次修复、`14e40df` 并行进行的导航/创建选项/设计系统工作、
-  `a5d5851` 用户方案文档。
-- `main` 仍为 `c12c3dfb`；`origin/main` 未前进。
-- 提交时（同一棵工作树）实测门禁全绿：后端 ruff/mypy + **1246** 单测；前端 format/lint/typecheck
-  + **323** 单测 + build + routes:check + **76** e2e。
-- **CI 触发条件注意**：`.github/workflows/ci.yml` 只监听 `pull_request`（到 `dev`/`main`）
-  与 `workflow_dispatch`，**push 到 `dev` 不会自动触发 CI**。要让 required checks 真实执行，
-  需要打开/更新指向 `dev` 或 `main` 的 PR，或手动 dispatch。
-
-**本工作区实测通过的门禁**
-
-| 门禁 | 结果 |
+| 对象 | 当前事实 |
 |---|---|
-| 后端单测 | 1246 passed |
-| 后端集成（真实 Postgres + Redis） | 84/84 passed |
-| `ruff` / `mypy` | 全通过 / 286 源文件无问题 |
-| `alembic check` | No new upgrade operations detected（模型与迁移一致） |
-| 前端单测 | 323 passed / 64 文件 |
-| 前端 e2e（Playwright，含 v1 主链旅程） | 76 passed |
-| 前端 `format:check` / `lint` / `typecheck` / `build` / `routes:check` | 全通过 |
-| `api:check`（生成类型 vs OpenAPI） | generated.ts is up to date |
-| 后端集成环境注意 | 在 `dramaforge-v1-release-quality_default` 网络上必须用容器名 `dramaforge-redis-quality-1`；别名 `redis-quality` 只存在于 `dramaforge_default`，用错会得到 4 个假失败 |
+| 发布基线 | `main` 仅通过受保护的 `dev -> main` PR 前进；当前 tip 以远端为准 |
+| 运行实例 | 8080 上的 gateway/API/workers 与迁移头构成「当前运行候选」；健康状态不证明创作链完成。实例身份、迁移头与源码 SHA 必须分别核对 |
+| UI 候选 | 存在尚未合入的 UI/优化分支与 Draft PR；最终 HEAD/checks 以 PR 为准，不得把 Draft 检查计数写成已发布事实 |
+| 本地质量门 | 完整 backend/PostgreSQL/migration、frontend（含完整 Playwright）与固定 LiteLLM mock-proxy 容器门可重复执行；命令见 [DEVELOPMENT.md](DEVELOPMENT.md) |
+| 真实制作验收 | 双路径真实验收 driver 可达 `complete=true`（模板与自由创作 MP4/SRT；一次授权 Editing 文本建议显式采用/保存/导出）。历史媒体/恢复证据仅在「候选等价边界」内复用（见条件 3） |
 
-**当前 8080 运行实例的真实身份（与上文历史记录不同）**
+CI 仅监听指向 `dev` / `main` 的 PR 与手动 dispatch；push 本身不是质量门证明。
+Agent 不批准或合并 PR，不发布。
 
-- `GET /health` 报告 `env=development`、`source_commit=9456f6c`；
-  API 容器 `APP_ENV=development`、`SESSION_SECRET=dev-only-change-me-…`。
-  这是**本会话用于实时验证的开发环境实例**，不是发布身份实例。
-- 前端镜像是 **2026-09-02 构建的 `c44df24` 版本**（`org.opencontainers.image.revision`），
-  落后于 `9456f6c`：本会话修复的前端行为（镜头画布四项可写、失败原因中文呈现、
-  词表兜底与泄漏清理）**在 8080 上尚不可见**，只在 5173 开发服务器可见。
+## 当前继续边界
 
-**已知限制（首版范围）**
+- 质量门、部署与双路径制作验收的完成，不表示最新 UI 候选已正式发布。
+- Owner 授权的历史付费预算不延续；没有新的正数预算与逐操作授权时不得扩大 probe/production/repair。
+- 不重跑已有图像/视频，不重试历史 `unknown_submission`。新的用户重生成意图必须作为新操作独立授权。
+- 后续进入 Owner 候选审阅与发布流程。
 
-- 镜头 6 没有正式视频：其视频提交处于 `unknown_submission`（远端任务编号缺失，
-  禁止盲目重试）。Owner 已确认未找到可对账的远端任务；该镜头按已知限制处理，
-  待 Owner 决定"重提"或"记录为首版限制"。
+## 已确定的首版产品边界
 
-**剩余待决策项（阻塞继续推进的不是代码，而是决策）**
+- `quality_gated` 表示质量认证/正式支持证据，不是普通执行与实验的硬准入；绑定、连接、能力不匹配仍失败关闭。
+- 项目 Provider Binding 已有显式绑定与来源回显；Provider Connection 可启用/停用，连接删除延期。多连接与来源隔离的目标改造见 MODEL_PROVIDER。
+- 无生产者旧表面已清退：Shot Change Proposal 面板和前端客户端已删除；服务端 `change-proposals` API 暂保留且无前端消费者。ModelPicker/uiStore/DirectorBoard 前端死代码删除；video-frames 保留；DirectorBoard 后端暂保留；V2 bootstrap stub fail-closed 为类型化 `unsupported_capability`（HTTP 422），不再以 500 暴露。产品运行时无 demo Project ID 特判，测试使用普通 Project fixture。
+- 镜头旧视频提交仍须按 `unknown_submission` 保留证据，禁止技术盲重试。
 
-1. 资格门禁语义：`quality_gated` 是硬准入门禁还是质量认证信息（两条最小方案与影响见
-   `tmp/p0-evidence/eligibility-gate-audit/ELIGIBILITY_GATE_AUDIT.md`）；
-2. 死表面处置：#13 制作工作台非实验部分（应用内不可达）、#15 `ExperimentCompare`
-   无消费者、#6 导演提案路径无生产者——删除或接线属产品决策；
-3. 跨 agent 协调项：#9 项目级绑定读取接口、#10 供应商连接启停/删除（消费端都在
-   另一 agent 正在修改的文件里）。
+## 尚需闭合的发布条件（Owner 勾选表）
 
-## 2026-09-19 发布决策与收口（第 30 轮）
+每条必须能落到：**最终候选 SHA + 可执行门命令 + 证据路径 + Owner 勾选**。
+未勾选不得宣称 V1 发布完成。
 
-Owner 决策（本轮全部落地并验证）：
+| # | 条件 | 门命令 / 证据 | Owner 确认 |
+|---|---|---|---|
+| 1 | **候选一致性**：确定最终候选 SHA；其运行相关内容通过完整容器门与远端 required checks。后续优化不得夹带进旧候选验收 | 候选 SHA：`________`；`scripts/run_quality_in_docker.ps1`；远端 required checks 截图或 API 结果路径：`________` | ☐ |
+| 2 | **正式入口**：在明确安排现有实例交接后，8080 的 gateway/API/workers 都运行该候选的 production 身份；`alembic heads` 单一且与候选一致 | 实例源码 commit：`________`；`GET /health` 证据路径：`________`；`alembic heads` 输出：`________` | ☐ |
+| 3 | **候选验收证据绑定**：针对**最终候选 SHA** 记录质量门命令、运行结果和证据路径。历史媒体/恢复证据只有在明确列出「候选等价边界」（哪些文件/路径自证据 SHA 起未变化）并确认相关代码未变化时才允许复用；运行相关代码一旦变化须重新评估受影响证据，不能直接挪用 | 最终候选 SHA 的验收 driver / 门日志路径：`________`；候选等价边界清单路径：`________` | ☐ |
+| 4 | **Owner 合并**：Owner 审阅并合并受保护的 `dev -> main` | 合并提交 SHA：`________` | ☐ |
+| 5 | **发布与安装**：生成版本化 Release 制品，并用该版本 online/offline bundle 在干净目录安装验证。源码测试不能替代制品安装验证 | Release tag：`________`；安装验证日志路径：`________` | ☐ |
 
-| 决策 | 落地 |
-|---|---|
-| `quality_gated` = 质量认证 / 正式支持证据，**不是**普通执行与实验线硬准入 | `eligibility.evaluate_candidate` 不再把它当 blocking issue，改由 `CandidateEvaluation.certified` / `ModelCandidateRead.certified` 呈现；实验表单对"已绑定但未认证"的模型可选中并显示「尚未通过质量验收（可用于生成，正式支持证据待补齐）」；ADR 0005、`MODEL_PROVIDER.md`、`FRONTEND_WORKBENCH.md` 同步改写 |
-| 镜头 6：不对 `unknown_submission` 做技术重试，保留原证据，按新的用户重生成意图重新提交 | 待在该候选上执行（需付费授权，随 D 组进行） |
-| #6 删除无生产者的旧导演提案死面板，保留现行 Director Turn / Shot Suggestion 路径 | 删除 `ShotChangeProposalsPanel` / `changeProposalsApi` 及其测试与 query key；服务端 `…/change-proposals` 端点保留但无前端消费者；`FRONTEND_WORKBENCH.md` 已改写 |
-| #9 增加项目 Provider Binding 只读接口并让设置页正确回显 | 新增 `GET /projects/{id}/provider-bindings`（含模型 display_name / provider / 绑定启用状态）+ 设置页「当前绑定」区块；前端类型已重新生成 |
-| #10 首版接通 Provider Connection 启用/停用，删除能力延期 | 设置页新增「停用连接 / 启用连接」并显示「已停用：不会参与生成」；连接**删除**仍延期（不在首版） |
-| #13 删除不可达的 ProfessionalWorkbench 非实验旧分支 | 旧 `ProfessionalWorkbench.tsx` 删除，实验功能迁至 `ExperimentBranchPanel.tsx`（保留 `professional-workbench` testid 供导航与 e2e 断言）；画布/资产/审片分支与 3 条死测试一并删除 |
-| #15 删除未消费的 `ExperimentCompare`，不扩展 API | 组件与测试删除 |
-| #14 不改 CI 类型门禁 | 未改动 |
-| 两份 20260918 方案文档不作为正式发布文档 | 已从最终树删除，内容留在 Git 历史（`a5d5851`） |
+当前尚无版本化 GitHub Release。默认分支仍有 3 条开发依赖安全告警（`js-yaml` high、`vitest` / `@vitest/mocker` moderate）；生产 `npm audit --omit=dev --audit-level=high` 为零漏洞不等于这些告警已关闭。依赖策略：优先兼容升级关闭；无安全兼容版本时记有期限例外并写明到期日。依赖文件变化或目标为 `main` 的 PR 自动运行 dependency-review，不依赖仓库变量开关；Dependabot 使用 direct + 非 major + 月度 + 限流。
 
-**本候选（唯一 runtime candidate）**
+真实 Provider probe/production/repair 每次都需要本任务明确的正数预算与 Owner 授权。历史预算不延续；可能已计费或 `unknown_submission` 的调用不能盲重试。
 
-- `8354198`（`dev`，已推送 `origin/dev`）；运行相关内容的候选即该提交本身，
-  其后只允许文档类提交。
-- 门禁（同一棵树实测）：后端 ruff/mypy + **1249** 单测；前端 format/lint/typecheck +
-  **317** 单测 + build + routes:check + **76** e2e；`api:check` 与 `alembic check` 通过。
-- 授权 D1–D4：先以本候选完成 CI、production 8080、Recovery 与 GPT + Computer Use 完整旅程，
-  全部通过后再 `dev→main`、tag、Release workflow，最后用实际 Release 产物做在线/离线安装验证。
-  **新候选冻结后不再夹带非发布阻塞代码。**
+## 权威与历史
 
-**阶段 12 一致性审计**（方案 1498-1594 行要求）已完成：用户动作清单（53 条，机械提取）、
-四域链路追踪、技术信息泄漏审计 7 问、16 条明确问题与逐条可达性分类，见
-`tmp/p0-evidence/stage12-consistency-audit/STAGE12_CONSISTENCY_AUDIT.md`。
-其中本会话已修复并现场验证：镜头画布四项不可写、失败原因不可见、参考静默失效、
-回收素材可被绑定、实验创建幂等键非确定、以及三类界面词表/错误消息泄漏。
+产品与技术合同见 [CURRENT.md](CURRENT.md)；可重复验证命令见 [DEVELOPMENT.md](DEVELOPMENT.md)、
+[DEPLOYMENT.md](DEPLOYMENT.md) 与 [RELEASE.md](RELEASE.md)。先前工作区快照、旧测试计数、旧候选运行身份和逐轮执行记录
+只通过 Git 历史追溯，不在本文件继续累积互相矛盾的“当前结论”。

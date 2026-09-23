@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import type { ExperimentRead, ModelRead } from "../../lib/api";
+import { artifactContentUrl, type ExperimentRead, type ModelRead } from "../../lib/api";
 import { Button } from "../../components/ui";
 import { candidateModelKey, type ModelCandidateRead } from "./modelCandidatesApi";
 import {
@@ -48,6 +48,7 @@ export type ExperimentBranchPanelProps = {
     name: string;
     selected_model: string;
     targetNodeKey: ExperimentStage;
+    promptOverride?: string;
   }) => Promise<void>;
   onStartExperiment?: (experimentId: string, targetNodeKey: ExperimentStage) => Promise<void>;
   onDecideExperiment?: (
@@ -79,6 +80,9 @@ export function ExperimentBranchPanel({
   onDecideExperiment,
 }: ExperimentBranchPanelProps) {
   const [experimentName, setExperimentName] = useState("");
+  const [candidateCount, setCandidateCount] = useState(1);
+  const [promptVariants, setPromptVariants] = useState("");
+  const [selectedArtifacts, setSelectedArtifacts] = useState<Record<string, string>>({});
   const [experimentModel, setExperimentModel] = useState("");
   // Keyframe is the default because it is the stage whose adoption scopes
   // (keep video / rerun downstream) the product offers beyond "replace this
@@ -139,18 +143,34 @@ export function ExperimentBranchPanel({
   }
   async function createExperimentBranch() {
     if (!onCreateExperiment) return;
+    const variants = promptVariants
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const planned = variants.length ? variants : Array.from({ length: candidateCount }, () => "");
     await runExperimentAction(
       experimentStage,
       async () => {
-        await onCreateExperiment({
-          name: experimentName.trim(),
-          selected_model: experimentModel.trim(),
-          targetNodeKey: experimentStage,
-        });
+        // Drafts only: each retains the canonical experiment identity. A partial
+        // failure keeps the form intact; repeating it recovers the same drafts.
+        for (let index = 0; index < planned.length; index++) {
+          await onCreateExperiment({
+            name:
+              planned.length === 1
+                ? experimentName.trim()
+                : `${experimentName.trim()} · ${index + 1}/${planned.length}`,
+            selected_model: experimentModel.trim(),
+            targetNodeKey: experimentStage,
+            ...(planned[index] ? { promptOverride: planned[index] } : {}),
+          });
+        }
         setExperimentName("");
         setExperimentModel("");
+        setPromptVariants("");
       },
-      `实验分支已创建：${EXPERIMENT_STAGE_SHORT_LABEL[experimentStage]}阶段，运行后生成对照候选。`,
+      `已创建 ${planned.length} 个${EXPERIMENT_STAGE_SHORT_LABEL[experimentStage]}候选任务${
+        variants.length ? "，每个任务冻结了独立提示词" : ""
+      }（同名同提示词任务会恢复）。本次创建不调用模型，生成状态见各任务。`,
     );
   }
 
@@ -182,7 +202,11 @@ export function ExperimentBranchPanel({
               {experiments.map((item) => {
                 const candidates = candidateArtifactIds(item);
                 const targetNodeKey = experimentStageOf(item.parameters.target_node_key);
-                const firstCandidate = candidates[0] ?? null;
+                const selectedCandidate = candidates.includes(selectedArtifacts[item.id])
+                  ? selectedArtifacts[item.id]
+                  : candidates.length === 1
+                    ? candidates[0]
+                    : null;
                 const runStates = Array.isArray(item.comparison?.run_states)
                   ? item.comparison.run_states
                   : [];
@@ -197,7 +221,53 @@ export function ExperimentBranchPanel({
                         {candidates.length}
                       </small>
                       {runStates.length > 0 && <small>执行证据：{runStates.length} 次运行</small>}
+                      {typeof item.parameters.prompt_override === "string" && (
+                        <small data-testid={`experiment-prompt-${item.id}`}>
+                          提示词：{item.parameters.prompt_override}
+                        </small>
+                      )}
                     </div>
+                    {candidates.length > 0 && (
+                      <fieldset
+                        className="qc-shot-candidate-list"
+                        aria-label={`${item.name}的候选素材`}
+                      >
+                        <legend>查看并选择候选</legend>
+                        {candidates.map((artifactId, index) => (
+                          <label key={artifactId} className="qc-shot-candidate-card">
+                            {targetNodeKey === "keyframe" ? (
+                              <img
+                                src={artifactContentUrl(projectId, artifactId)}
+                                alt={`${item.name} · 候选 ${index + 1}`}
+                                loading="lazy"
+                              />
+                            ) : (
+                              <video
+                                src={artifactContentUrl(projectId, artifactId)}
+                                controls
+                                preload="metadata"
+                                aria-label={`${item.name} · 候选 ${index + 1}`}
+                              />
+                            )}
+                            <span>
+                              <input
+                                type="radio"
+                                aria-label={`候选 ${index + 1}`}
+                                name={`candidate-${item.id}`}
+                                checked={selectedCandidate === artifactId}
+                                onChange={() =>
+                                  setSelectedArtifacts((current) => ({
+                                    ...current,
+                                    [item.id]: artifactId,
+                                  }))
+                                }
+                              />
+                              候选 {index + 1}
+                            </span>
+                          </label>
+                        ))}
+                      </fieldset>
+                    )}
                     <div className="suggestion-actions">
                       <Button
                         tone="ghost"
@@ -224,7 +294,7 @@ export function ExperimentBranchPanel({
                         disabled={
                           experimentBusy ||
                           !onDecideExperiment ||
-                          !firstCandidate ||
+                          !selectedCandidate ||
                           item.status === "accepted" ||
                           item.status === "rejected"
                         }
@@ -238,7 +308,7 @@ export function ExperimentBranchPanel({
                                   targetNodeKey === "keyframe"
                                     ? "keyframe_rerun_downstream"
                                     : "current_node",
-                                candidate_artifact_id: firstCandidate,
+                                candidate_artifact_id: selectedCandidate,
                               });
                             },
                             "已采用该候选；后续生成会以它为新的事实源。",
@@ -297,13 +367,47 @@ export function ExperimentBranchPanel({
           <section>
             <h4>创建模型实验</h4>
             <div className="asset-create-form">
+              <label>
+                候选任务数量
+                <select
+                  aria-label="候选任务数量"
+                  value={candidateCount}
+                  disabled={experimentBusy}
+                  onChange={(event) => setCandidateCount(Number(event.target.value))}
+                >
+                  {[1, 2, 3, 4].map((count) => (
+                    <option key={count} value={count}>
+                      {count} 个版本
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <small>
+                创建仅保存任务；逐个运行才会调用模型。采用前先查看候选，正式版本不会自动替换。
+              </small>
+              <label>
+                候选提示词（可选，每行一个版本）
+                <textarea
+                  aria-label="候选提示词"
+                  rows={5}
+                  value={promptVariants}
+                  disabled={experimentBusy}
+                  onChange={(event) => setPromptVariants(event.target.value)}
+                  placeholder={"低机位，冷色逆光，强调孤独感\n平视中景，暖色窗光，强调人物表情"}
+                />
+              </label>
+              <small>
+                填写后按非空行数创建候选，并把每行作为独立冻结输入；不再让多个候选复用同一提示词。
+              </small>
               <input
+                disabled={experimentBusy}
                 aria-label="实验名称"
                 value={experimentName}
                 onChange={(event) => setExperimentName(event.target.value)}
                 placeholder="例如：换模型验证转头稳定性"
               />
               <select
+                disabled={experimentBusy}
                 aria-label="实验阶段"
                 value={experimentStage}
                 onChange={(event) => setExperimentStage(experimentStageOf(event.target.value))}
@@ -315,6 +419,7 @@ export function ExperimentBranchPanel({
                 ))}
               </select>
               <select
+                disabled={experimentBusy}
                 aria-label="实验模型"
                 value={experimentModel}
                 onChange={(event) => setExperimentModel(event.target.value)}

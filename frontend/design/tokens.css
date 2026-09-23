@@ -7,17 +7,17 @@
 
 :root {
   /* ---- Color: Core Palette ---- */
-  --df-obsidian: #17171c;
-  --df-ink: #23232b;
-  --df-ink-light: #33323f;
-  --df-verdigris: #c4b5fd;
-  --df-verdigris-dim: #b3a1ef;
-  --df-verdigris-tint: rgba(196, 181, 253, 0.12);
-  --df-brass: #f1bb9c;
-  --df-brass-dim: #dfa382;
-  --df-brass-tint: rgba(241, 187, 156, 0.12);
-  --df-ivory: #f4f1f8;
-  --df-ivory-dim: #ccc6d4;
+  --df-obsidian: #111315;
+  --df-ink: #1b1e22;
+  --df-ink-light: #30363d;
+  --df-verdigris: #64dbe3;
+  --df-verdigris-dim: #46c4ce;
+  --df-verdigris-tint: rgba(100, 219, 227, 0.1);
+  --df-brass: #dcc18a;
+  --df-brass-dim: #c5a76e;
+  --df-brass-tint: rgba(220, 193, 138, 0.1);
+  --df-ivory: #f2f4f7;
+  --df-ivory-dim: #c6ccd3;
 
   /* ---- Color: Semantic ---- */
   --df-success: #4f9f8c;
@@ -34,33 +34,33 @@
   --df-info: #6f91a8;
   --df-info-dim: rgba(111, 145, 168, 0.15);
   --df-info-border: rgba(111, 145, 168, 0.38);
-  --df-focus-ring: rgba(196, 181, 253, 0.32);
-  --df-selection: rgba(196, 181, 253, 0.28);
+  --df-focus-ring: rgba(100, 219, 227, 0.45);
+  --df-selection: rgba(100, 219, 227, 0.24);
 
   /* ---- Color: Surface ---- */
-  --df-surface-0: #17171c;
-  --df-surface-1: #1d1d24;
+  --df-surface-0: #111315;
+  --df-surface-1: #16191c;
   /* Secondary ink surface: first raised step above the page background.
      Exists so container-tier elements never need a hardcoded surface value. */
-  --df-surface-1b: #23232b;
-  --df-surface-2: #292932;
-  --df-surface-3: #32313c;
-  --df-surface-raised: #3e3b4b;
-  --df-surface-overlay: rgba(29, 29, 36, 0.98);
+  --df-surface-1b: #1b1e22;
+  --df-surface-2: #23282e;
+  --df-surface-3: #2b3138;
+  --df-surface-raised: #353d46;
+  --df-surface-overlay: rgba(22, 25, 28, 0.98);
   /* Neutral media backdrop for 9:16 stage frames, storyboard thumbs and previews.
      Not a surface level: it must stay darker than every --df-surface-* step. */
   --df-surface-screen: #000000;
 
   /* ---- Color: Border ---- */
-  --df-border: rgba(220, 213, 238, 0.13);
-  --df-border-strong: rgba(220, 213, 238, 0.28);
-  --df-border-subtle: rgba(220, 213, 238, 0.065);
+  --df-border: rgba(214, 223, 231, 0.13);
+  --df-border-strong: rgba(214, 223, 231, 0.28);
+  --df-border-subtle: rgba(214, 223, 231, 0.09);
 
   /* ---- Color: Text ---- */
-  --df-text-primary: #f4f1f8;
-  --df-text-secondary: #c4bfce;
-  --df-text-muted: #a29bab;
-  --df-text-inverse: #17171c;
+  --df-text-primary: #f2f4f7;
+  --df-text-secondary: #b9c1ca;
+  --df-text-muted: #929da9;
+  --df-text-inverse: #111315;
 
   /* ---- Typography ---- */
   --df-font-display: var(--df-font-sans);
@@ -68,14 +68,14 @@
     "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --df-font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Consolas, monospace;
 
-  --df-text-xs: 0.6875rem; /* 11px */
-  --df-text-sm: 0.75rem; /* 12px */
-  --df-text-base: 0.8125rem; /* 13px */
-  --df-text-md: 0.875rem; /* 14px */
+  --df-text-xs: 0.75rem; /* 12px */
+  --df-text-sm: 0.8125rem; /* 13px */
+  --df-text-base: 0.875rem; /* 14px */
+  --df-text-md: 0.9375rem; /* 15px */
   --df-text-lg: 1rem; /* 16px */
-  --df-text-xl: 1.125rem; /* 18px */
-  --df-text-2xl: 1.375rem; /* 22px */
-  --df-text-3xl: 1.75rem; /* 28px */
+  --df-text-xl: 1.25rem; /* 20px */
+  --df-text-2xl: 1.5rem; /* 24px */
+  --df-text-3xl: 1.875rem; /* 30px */
 
   --df-leading-tight: 1.3;
   --df-leading-normal: 1.5;
@@ -112,7 +112,8 @@
   --df-focus-width: 2px;
   --df-focus-offset: 2px;
   --df-textarea-min-height: 8rem;
-  --df-page-title-size: var(--df-text-3xl);
+  --df-operation-sheet-width: 30rem;
+  --df-page-title-size: var(--df-text-2xl);
   --df-page-description-width: 44rem;
 
   /* ---- Radius ----
@@ -120,9 +121,9 @@
      New code uses the semantic names; the legacy sm/md/lg/xl scale is kept only
      so existing declarations keep working. */
   --df-radius-legacy-sm: 4px;
-  --df-radius-control: 12px; /* buttons, inputs, tabs, selectable rows */
-  --df-radius-container: 20px; /* panels, cards, tables, drawers, stage frames */
-  --df-radius-container-lg: 24px; /* top-level workbench shells only */
+  --df-radius-control: 6px; /* buttons, inputs, tabs, selectable rows */
+  --df-radius-container: 10px; /* panels, cards, tables, drawers, stage frames */
+  --df-radius-container-lg: 12px; /* top-level workbench shells only */
   --df-radius-chip: 9999px; /* pills, badges, dots, avatars */
   --df-radius-sm: var(--df-radius-legacy-sm);
   --df-radius-md: var(--df-radius-control);
@@ -145,21 +146,21 @@
   --df-surface-tier-flat-shadow: none;
   --df-surface-tier-raised-bg: var(--df-surface-1b);
   --df-surface-tier-raised-border: var(--df-border-subtle);
-  --df-surface-tier-raised-shadow: var(--df-shadow-md);
+  --df-surface-tier-raised-shadow: var(--df-shadow-flat);
   --df-surface-tier-overlay-bg: var(--df-surface-2);
   --df-surface-tier-overlay-border: var(--df-border-strong);
   --df-surface-tier-overlay-shadow: var(--df-shadow-xl);
   --df-shadow-flat: none;
 
   /* ---- Type scale (Workbench main steps) ----
-     11 / 12 / 13 / 14 is the Workbench ramp. Intermediate micro sizes
+     12 / 13 / 14 / 15 is the Workbench ramp. Intermediate micro sizes
      (0.6–0.72rem) and 0.78/0.82/0.85/0.88/0.9/0.95/0.98rem are not allowed in
      Workbench CSS: pick the nearest step. These names alias the legacy
      --df-text-xs/sm/base/md steps so there is exactly one implementation. */
-  --df-font-size-meta: var(--df-text-xs); /* 11px — technical ids, timestamps, kickers */
-  --df-font-size-caption: var(--df-text-sm); /* 12px — secondary labels and hints */
-  --df-font-size-body: var(--df-text-base); /* 13px — default body and controls */
-  --df-font-size-body-lg: var(--df-text-md); /* 14px — emphasized body, page-level text */
+  --df-font-size-meta: var(--df-text-xs); /* 12px — technical ids, timestamps, kickers */
+  --df-font-size-caption: var(--df-text-sm); /* 13px — secondary labels and hints */
+  --df-font-size-body: var(--df-text-base); /* 14px — default body and controls */
+  --df-font-size-body-lg: var(--df-text-md); /* 15px — emphasized body, page-level text */
 
   /* ---- Transition ---- */
   --df-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
@@ -175,27 +176,31 @@
   --df-z-modal: 50;
 
   /* Studio treatments: static, low-contrast; never applied to media pixels. */
-  --df-canvas-background:
-    radial-gradient(ellipse at 12% 0%, rgba(196, 181, 253, 0.075), transparent 48%),
-    var(--df-surface-0);
-  --df-cover-background:
-    radial-gradient(ellipse at 80% 10%, rgba(196, 181, 253, 0.22), transparent 65%),
-    linear-gradient(145deg, var(--df-surface-3), var(--df-surface-1));
-  --df-cover-warm-background:
-    radial-gradient(ellipse at 15% 20%, rgba(241, 187, 156, 0.22), transparent 65%),
-    linear-gradient(145deg, var(--df-surface-3), var(--df-surface-1));
-  --df-nav-active-background: linear-gradient(
-    110deg,
-    var(--df-verdigris-tint),
-    var(--df-brass-tint)
-  );
-  --df-control-background: rgba(220, 213, 238, 0.055);
-  --df-hover-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  --df-canvas-background: var(--df-surface-0);
+  --df-cover-background: linear-gradient(145deg, var(--df-surface-3), var(--df-surface-1));
+  --df-cover-warm-background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-0));
+  --df-nav-active-background: var(--df-verdigris-tint);
+  --df-control-background: rgba(214, 223, 231, 0.045);
+  --df-hover-shadow: var(--df-shadow-sm);
   --df-asset-card-min: 17rem;
   --df-empty-min-height: 16rem;
   --df-icon-display-size: 3rem;
 
   /* ---- Layout ---- */
+  --df-section-title-size: 18px;
+  --df-project-card-icon-size: 48px;
+  --df-project-card-min: 18rem;
+  --df-content-page-max: 1240px;
+  --df-form-page-max: 720px;
+  --df-global-rail-width: 56px;
+  --df-project-nav-width: 220px;
+  --df-storyboard-card-min: 15rem;
+  --df-storyboard-thumb-height: 10rem;
+  --df-storyboard-preview-height: 40rem;
+  --df-edit-preview-height: 22rem;
+  --df-scene-compact-media-height: 32svh;
+  --df-stage-guide-width: 52rem;
+  --df-journey-step-size: 2rem;
   --df-topbar-h: 52px;
   --df-form-field-min: 14rem; /* model/settings form column minimum */
   --df-sidebar-w: 216px;

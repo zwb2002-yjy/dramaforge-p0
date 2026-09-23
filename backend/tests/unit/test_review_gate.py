@@ -336,6 +336,49 @@ async def test_a_rejection_blocks_and_a_later_approval_supersedes_it(
 
 
 @pytest.mark.asyncio
+async def test_demo_confirmation_is_recorded_but_never_admits_formal_media(
+    session: AsyncSession,
+) -> None:
+    user, project, shot = await _env(session)
+    artifact = await _artifact(session, project_id=project.id)
+    evidence = await _artifact(session, project_id=project.id, hash_seed="demo")
+    run = await _review_run(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        created_by=user.id,
+        upstream_artifact_id=artifact.id,
+        review_artifact_id=evidence.id,
+    )
+    saved = await record_human_decision(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        artifact_id=artifact.id,
+        review_node_run_id=run.id,
+        review_kind="identity",
+        decision="demo_confirmed",
+        reason="只验证演示流程，不代表完成视觉质检。",
+        actor_id=user.id,
+        shot_version=shot.version,
+        request_key="review:demo",
+    )
+    await session.flush()
+
+    admission = await evaluate_artifact_admission(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        artifact_id=artifact.id,
+        stage="formal_keyframe",
+    )
+    assert saved.decision == "demo_confirmed"
+    assert admission.allowed is False
+    assert admission.requirements[0].decision == "demo_confirmed"
+    assert admission.blocked_reason_codes == ["REVIEW_AWAITING_HUMAN"]
+
+
+@pytest.mark.asyncio
 async def test_confirming_formal_does_not_invalidate_the_same_decision(
     session: AsyncSession,
 ) -> None:

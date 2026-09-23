@@ -186,6 +186,7 @@ it("does not show a late Final Film error in a different session", async () => {
         timeline_version: 2,
         shot_ids: [],
         node_run_ids: [],
+        preparation_fingerprint: "a".repeat(64),
         status: "queued",
       });
     if (url.endsWith("/final-film/render") && init?.method === "POST") {

@@ -1,7 +1,7 @@
 # DOMAIN_VOCABULARY — 术语唯一解
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
+Date: 2026-09-22 / Alembic head: 20260922_0077
 
 本文件是 DramaForge 的**唯一词典**。任何模块、PR、Review、文档只能使用这里的词。
 
@@ -39,7 +39,10 @@ Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
 | **Repair** | 有证据的显式修复计划，绝不静默重跑 | `production/repair_service.py` |
 | **EditSession** | 剪辑会话及其 timeline 版本（成片领域） | `editing/models.py::EditSession`、`editing/timeline_builder.py` |
 | **FinalFilm** | 绑定 timeline 版本渲染出的成片交付（MP4 + SRT）。**不是独立持久化实体**，是 `final-film-v1` ProductionGraph 的渲染结果读模型 | `production/final_film.py`（`FinalFilmRead`、`queue_final_film_render`）、`production/timeline_renderer.py`、`production/timeline_subtitles.py` |
+| **OpenCut** | 剪辑时间线的开放清单/交换格式能力：把 EditSession timeline 投影为可检视清单，**不是第二条剪辑主链或独立 Runtime** | `api/v1/opencut.py`、`editing` 相关投影 |
 | **Export** | 对外导出记录与条目 | `delivery/models.py::Export`、`delivery/models.py::ExportItem` |
+| **Delivery** | 交付域：人工审片决定、导出与交付读模型（Review/Delivery）。**不是独立主链终点之外的第二产品路径**；Final Film 经 Export 完成交付 | `delivery/models.py`（`ReviewAnnotation`、`HumanReviewDecision`、`Export`、`ExportItem`） |
+| **Resonance** | 前端表现层的受控视觉例外（共鸣舞台），**不是产品实体或第二主链**；仅允许在既定局部范围内偏离全局 Visual System | 见 [frontend/design/README.md](../frontend/design/README.md) §5.5 |
 
 ---
 

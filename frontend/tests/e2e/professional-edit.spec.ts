@@ -17,6 +17,41 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+test("Final Film export prepares and renders the exact persisted timeline", async ({ page }) => {
+  const state = await installProfessionalMock(page);
+  await page.goto(`/projects/${PROJECT_ID}/edit`);
+  await page.getByTestId("create-edit-session").click();
+  await expect(page.getByTestId("edit-session-editor")).toBeVisible();
+
+  await page.getByTestId("export-final-film").click();
+
+  const result = page.getByTestId("final-film-result");
+  await expect(result).toContainText("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+  await expect(page.getByTestId("final-film-player")).toHaveAttribute(
+    "src",
+    `/api/v1/projects/${PROJECT_ID}/artifacts/cccccccc-cccc-4ccc-8ccc-cccccccccccc/content?workspace_id=workspace-professional`,
+  );
+  const finalFilmWrites = state.editing.requests.filter((request) =>
+    request.path.includes("/final-film/"),
+  );
+  expect(finalFilmWrites).toEqual([
+    {
+      method: "POST",
+      path: `/api/v1/projects/${PROJECT_ID}/final-film/prepare`,
+      body: { edit_session_id: EDIT_SESSION_ID, expected_timeline_version: 1 },
+    },
+    {
+      method: "POST",
+      path: `/api/v1/projects/${PROJECT_ID}/final-film/render`,
+      body: {
+        edit_session_id: EDIT_SESSION_ID,
+        expected_timeline_version: 1,
+        name: "V1 Final Film",
+      },
+    },
+  ]);
+});
+
 test("professional edit: formal manifest → persisted session → proposal-only suggestion", async ({
   page,
 }) => {
@@ -34,15 +69,15 @@ test("professional edit: formal manifest → persisted session → proposal-only
   // The production monitor consumes the current formal OpenCut v2 contract.
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("production-monitor")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "剪辑交接" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "剪辑成片" })).toHaveCount(0);
 
   // No session yet: the edit page is a read-only formal manifest preview.
   await page.goto(`/projects/${PROJECT_ID}/edit`);
   await expect(page.getByTestId("editing-workspace")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "剪辑交接" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "剪辑成片" })).toBeVisible();
   await expect(page.getByTestId("editing-read-only")).toBeVisible();
   await expect(page.getByRole("heading", { name: "正式时间线" })).toBeVisible();
-  await expect(page.getByText("只读预览已完成的镜头，继续剪辑或新建会话。")).toBeVisible();
+  await expect(page.getByText("选择已有剪辑，或用正式镜头创建时间线。")).toBeVisible();
   const formalPreviewClip = page.getByTestId("editing-clip").first();
   await expect(formalPreviewClip).toContainText("正式视频 · 0–5 秒 · 片段 1 · 镜头 #1");
   await expect(formalPreviewClip).toContainText("正式素材已交付");
@@ -146,6 +181,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
   // it is not an implicit timeline apply or save.
   const timelineBeforeSuggestion = clone(state.editing.session.timeline);
   const lineageBeforeSuggestion = clone(state.editing.session.production_lineage);
+  await page.locator("summary").filter({ hasText: "导演剪辑建议" }).click();
   await page.getByTestId("editing-director-suggestion-instruction").fill("让开场更快进入冲突");
   await page.getByTestId("request-editing-director-suggestion").click();
   const preview = page.getByTestId("editing-suggestion-preview");

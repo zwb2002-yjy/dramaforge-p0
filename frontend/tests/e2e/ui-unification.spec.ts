@@ -39,6 +39,23 @@ test("real creation, model and script forms use one control recipe across lazy r
       json: { genres: [], styles: [], shot_languages: [], quality_policies: [], skills: [] },
     }),
   );
+  await page.route("**/api/v1/provider-plugins", (route) =>
+    route.fulfill({
+      json: [
+        {
+          provider_type: "fixture",
+          protocol_profile: "fixture-v1",
+          display_name: "Fixture Provider",
+          default_base_url: "https://fixture.invalid",
+          implemented: true,
+          paid_capabilities: [],
+          capabilities: ["auth_models"],
+          model_list_path: "/models",
+          models: [],
+        },
+      ],
+    }),
+  );
   await page.goto("/design-preview");
   const cardRecipe = await surfaceStyle(page.locator(".df-card").first());
   await page.goto("/?create=true");
@@ -62,8 +79,8 @@ test("real creation, model and script forms use one control recipe across lazy r
   await expect(address).toHaveClass(/df-input/);
   expect(await controlStyle(address)).toEqual(expected);
   await page.goto(`/projects/${PROJECT_ID}/script`);
-  await expect(page.getByLabel("剧本文件名")).toHaveClass(/df-input/);
-  expect(await controlStyle(page.getByLabel("剧本文件名"))).toEqual(expected);
+  await expect(page.getByLabel("剧本文档名")).toHaveClass(/df-input/);
+  expect(await controlStyle(page.getByLabel("剧本文档名"))).toEqual(expected);
   await expect(page.getByLabel("剧本文本")).toHaveClass(/df-input/);
   await expect(page.getByTestId("story-proposal-generate")).toHaveClass(/df-btn/);
   await page.route(`**/api/v1/projects/${PROJECT_ID}/creative-capabilities/catalog`, (route) =>
@@ -78,10 +95,10 @@ test("real creation, model and script forms use one control recipe across lazy r
     }),
   );
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await page.getByRole("tab", { name: "高级设置", exact: true }).click();
+  await page.getByRole("tab", { name: "导演手法", exact: true }).click();
   const advanced = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
   expect(await controlStyle(advanced.getByLabel("风格", { exact: true }))).toEqual(expected);
-  await advanced.getByText("更多生成设置", { exact: true }).click();
+  await advanced.getByText("镜头语言、质量与创作手法", { exact: true }).click();
   const checkbox = advanced.getByRole("checkbox", { name: "角色一致性", exact: true });
   await expect(checkbox).toHaveCSS("width", "16px");
   await expect(checkbox).toHaveCSS("height", "16px");
@@ -125,7 +142,7 @@ test("page headings retain the same typography and navigation tabs retain drafts
     expect(style).toEqual(expected);
   }
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  const first = page.getByRole("tab", { name: "进度", exact: true });
+  const first = page.getByRole("tab", { name: "作品进度", exact: true });
   await first.focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "生成任务", exact: true })).toBeFocused();

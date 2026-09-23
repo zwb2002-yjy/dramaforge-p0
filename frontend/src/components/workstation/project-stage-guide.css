@@ -1,0 +1,103 @@
+/* One compact, persistent route map. Help never pushes the work off screen. */
+.project-stage-guide {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--df-space-3);
+  padding-block: var(--df-space-3);
+  margin-bottom: var(--df-space-4);
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+.project-stage-steps {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: var(--df-space-1);
+  min-width: 0;
+}
+.project-stage-steps a {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-2);
+  padding: var(--df-space-2) var(--df-space-3);
+  color: var(--df-text-muted);
+  border-radius: var(--df-radius-control);
+  font-size: var(--df-text-sm);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.project-stage-steps a:hover {
+  background: var(--df-surface-2);
+  color: var(--df-text-primary);
+}
+.project-stage-steps a[aria-current="page"] {
+  color: var(--df-verdigris);
+  background: var(--df-nav-active-background);
+}
+.project-stage-steps a > span {
+  font-family: var(--df-font-mono);
+  font-size: var(--df-text-xs);
+}
+.project-stage-guide-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-3);
+}
+.project-stage-guide-actions .df-disclosure {
+  margin: 0;
+  background: transparent;
+  border: 0;
+}
+.project-stage-guide-actions .df-disclosure > summary {
+  padding: var(--df-space-2);
+  font-size: var(--df-text-sm);
+}
+.project-stage-guide-actions .df-disclosure[open] .df-disclosure-body {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--df-z-dropdown);
+  width: min(var(--df-stage-guide-width), calc(100vw - var(--df-space-12)));
+  max-width: var(--df-form-page-max);
+  padding: var(--df-space-4);
+  border: 1px solid var(--df-border);
+  background: var(--df-surface-2);
+  border-radius: var(--df-radius-container);
+  box-shadow: var(--df-surface-tier-overlay-shadow);
+}
+.project-stage-guide-actions ol {
+  margin-top: var(--df-space-2);
+  padding-left: var(--df-space-5);
+}
+.project-stage-guide-actions li + li {
+  margin-top: var(--df-space-2);
+}
+.project-stage-next {
+  font-size: var(--df-text-sm);
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .project-stage-guide {
+    flex-wrap: nowrap;
+    gap: var(--df-space-1);
+    padding-block: var(--df-space-1);
+    margin-bottom: var(--df-space-2);
+  }
+  .project-stage-steps {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .project-stage-steps a > span,
+  .project-stage-next {
+    display: none;
+  }
+  .project-stage-steps a {
+    padding: var(--df-space-2) var(--df-space-1);
+    font-size: var(--df-text-xs);
+    gap: var(--df-space-1);
+  }
+  .project-stage-guide-actions {
+    flex-shrink: 0;
+  }
+}

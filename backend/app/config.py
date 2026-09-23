@@ -152,6 +152,17 @@ class Settings(BaseSettings):
     )
     reference_token_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
 
+    # Generic OpenAI-compatible media protocol. This is a protocol connection,
+    # not a supplier-specific plugin: the workspace supplies URL + key and picks
+    # discovered image/video model ids from the UI.
+    openai_compatible_media_enabled: bool = False
+    openai_compatible_media_api_key: str = Field(
+        default="", description="Workspace BYOK for OpenAI-compatible image/video APIs"
+    )
+    openai_compatible_media_base_url: str = Field(default="https://api.openai.com/v1")
+    openai_compatible_media_image_model: str = Field(default="")
+    openai_compatible_media_video_model: str = Field(default="")
+    openai_compatible_media_timeout_seconds: float = Field(default=300.0, ge=30.0, le=900.0)
     # LiteLLM Gateway backend (spec §24–§26, §113; fix spec §3/§22). Text models
     # registered in the V3 registry with ``backend.kind="litellm"`` submit
     # through this OpenAI-compatible gateway. ``LITELLM_API_KEY`` is the
@@ -179,11 +190,11 @@ class Settings(BaseSettings):
         default_factory=lambda: ["script-quality", "script-fast"],
         description="Comma-separated LiteLLM logical aliases registered at bootstrap",
     )
-    # Local TTS is opt-in for formal development verification.
+    # Speech is explicit and opt-in; network speech never falls back to local speech.
     tts_enabled: bool = False
-    tts_engine: str = "espeak-ng"
-    tts_voice: str = "zh"
-
+    tts_engine: str = "edge-tts"
+    tts_voice: str = "zh-CN-XiaoxiaoNeural"
+    tts_proxy: str | None = Field(default=None, repr=False, exclude=True)
 
     @field_validator("cors_origins", "litellm_logical_models", mode="before")
     @classmethod

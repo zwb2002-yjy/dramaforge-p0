@@ -26,6 +26,7 @@ from app.providers.contracts.common import (
     ProviderPollResult,
     ResolvedArtifact,
 )
+from app.providers.errors import ProviderError, ProviderErrorCode
 from app.providers.manifest import (
     CapabilitySpec,
     ModelCapabilityManifest,
@@ -161,13 +162,25 @@ class UnavailableAdapter:
     def manifest(self) -> ModelManifest:
         return self._manifest
 
+    def _unsupported(self, operation: str) -> ProviderError:
+        return ProviderError(
+            ProviderErrorCode.UNSUPPORTED_CAPABILITY,
+            f"bootstrap adapter is query-only: {operation} is not supported",
+            status_code=422,
+            details={
+                "adapter": "bootstrap",
+                "model_id": self.model_id,
+                "operation": operation,
+            },
+        )
+
     async def translate(
         self,
         capability: Capability,
         request: Any,
         resolved_artifacts: dict[str, ResolvedArtifact],
     ) -> TranslationResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3); registry is query-only")
+        raise self._unsupported("translation")
 
     async def create(
         self,
@@ -175,28 +188,28 @@ class UnavailableAdapter:
         request: Any,
         context: ExecutionContext,
     ) -> ProviderCreateResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3); registry is query-only")
+        raise self._unsupported("create")
 
     async def poll(
         self,
         remote_task_id: str,
         context: ExecutionContext,
     ) -> ProviderPollResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3)")
+        raise self._unsupported("poll")
 
     async def cancel(
         self,
         remote_task_id: str,
         context: ExecutionContext,
     ) -> ProviderCancelResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3)")
+        raise self._unsupported("cancel")
 
     async def fetch_cost(
         self,
         remote_task_id: str,
         context: ExecutionContext,
     ) -> ProviderCostResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3)")
+        raise self._unsupported("fetch_cost")
 
 
 LITELLM_CHAT_TRANSPORT = TransportProfile(
@@ -262,14 +275,18 @@ def build_v3_registry(
     transport_registry = TransportRegistry()
     _register_transports(transport_registry)
 
-    manifests = seed_manifests or [
-        ModelCapabilityManifest.model_validate(item)
-        for item in (
-            list(seed_manifests_for(provider_type="agnes"))
-            + list(seed_manifests_for(provider_type="volcengine"))
-            + list(seed_manifests_for(provider_type="minimax"))
-        )
-    ]
+    if seed_manifests is None:
+        manifests = [
+            ModelCapabilityManifest.model_validate(item)
+            for item in (
+                list(seed_manifests_for(provider_type="agnes"))
+                + list(seed_manifests_for(provider_type="volcengine"))
+                + list(seed_manifests_for(provider_type="minimax"))
+            )
+            if item.get("catalog_source") != "protocol_contract"
+        ]
+    else:
+        manifests = seed_manifests
     for manifest in manifests:
         v3_id = f"{manifest.provider_type}/{manifest.model_id}"
         factory = (adapter_factories or {}).get(v3_id)

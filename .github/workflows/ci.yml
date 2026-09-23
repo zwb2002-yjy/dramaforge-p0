@@ -52,9 +52,9 @@ jobs:
           fi
           if [ "$BASE_REF" = "dev" ]; then
             case "$HEAD_REF" in
-              agent/*|dependabot/*) ;;
+              agent/*|codex/*|dependabot/*) ;;
               *)
-                echo "Only short-lived agent/<task-id> or dependabot/* branches may target dev through a pull request."
+                echo "Only short-lived agent/<task-id>, codex/<task-id> or dependabot/* branches may target dev through a pull request."
                 exit 1
                 ;;
             esac
@@ -125,7 +125,7 @@ jobs:
             esac
 
             case "$path" in
-              .github/workflows/*|docker-compose*.yml|.dockerignore|infra/*|deploy/*|backend/Dockerfile*|frontend/Dockerfile*|scripts/run_quality*|scripts/repo_guardrails.py|scripts/check_*|scripts/release_contract.py|install.sh|install.ps1)
+              .github/workflows/*|docker-compose*.yml|.dockerignore|infra/*|deploy/*|backend/Dockerfile*|frontend/Dockerfile*|scripts/run_quality*|scripts/repo_guardrails.py|scripts/check_*|scripts/arch_import_scan.py|scripts/architecture-baseline.json|scripts/release_contract.py|install.sh|install.ps1)
                 infra=true
                 ;;
             esac
@@ -210,6 +210,7 @@ jobs:
             sh -ec '
               set -eu
               python3 scripts/check_canonical_surface.py
+              python3 scripts/arch_import_scan.py --check
               uv run --directory backend ruff check app tests alembic/versions
               uv run --directory backend mypy app
               uv run --directory backend pytest tests/unit -q
@@ -287,7 +288,6 @@ jobs:
     needs: policy
     if: >-
       github.event_name == 'pull_request' &&
-      vars.DEPENDENCY_REVIEW_ENABLED == 'true' &&
       (
         github.base_ref == 'main' ||
         needs.policy.outputs.python_deps == 'true' ||

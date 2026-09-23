@@ -31,16 +31,7 @@ export async function fetchScriptWorkspace(projectId: string): Promise<ScriptWor
   return apiGet<ScriptWorkspaceRead>(`/api/v1/projects/${projectId}/script`);
 }
 
-export type StoryProposalOperation = {
-  id: string;
-  command: string;
-  action: string;
-  key: string;
-  expected_target_version: number | null;
-  rationale: string;
-  impact: string;
-  payload: Record<string, unknown>;
-};
+export type StoryProposalOperation = components["schemas"]["StoryOperationRead"];
 
 export type StoryProposalRead = components["schemas"]["StoryProposalRead"];
 export type PartialApplyResult = components["schemas"]["PartialApplyResult"];
@@ -90,15 +81,7 @@ export async function applyStoryProposal(
 }
 
 /** Outcome of one canonical script import (POST /scripts/import). */
-export type ScriptImportOutcome = {
-  script_document_id: string;
-  episode_id: string;
-  scene_count: number;
-  shot_count: number;
-  shot_ids: string[];
-  content_hash: string;
-  import_outcome: "created" | "reused";
-};
+export type ScriptImportOutcome = components["schemas"]["ScriptImportResponse"];
 
 export async function importScript(
   projectId: string,

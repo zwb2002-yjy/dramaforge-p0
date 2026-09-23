@@ -27,6 +27,7 @@ from app.execution.shot_pipeline import (
     SHOT_PIPELINE_TEMPLATE_KEY,
     shot_pipeline_definition,
 )
+from app.providers.voice_config import freeze_voice_execution
 from app.shared.errors import NotFoundError, ValidationAppError
 
 DONE_STATUSES: frozenset[str] = frozenset({"completed", "cached", "completed_after_cancel"})
@@ -166,16 +167,12 @@ async def _freeze_execution_model_resolution(
     except Exception as exc:  # noqa: BLE001 - audit path, never block dispatch
         return {
             "model_binding_id": None,
-            "model_resolution_unavailable_reason": (
-                f"{type(exc).__name__}: {str(exc)[:120]}"
-            ),
+            "model_resolution_unavailable_reason": (f"{type(exc).__name__}: {str(exc)[:120]}"),
         }
     if resolution.status != "RESOLVED" or resolution.provider_model_binding_id is None:
         return {
             "model_binding_id": None,
-            "model_resolution_unavailable_reason": (
-                resolution.reason or resolution.status
-            ),
+            "model_resolution_unavailable_reason": (resolution.reason or resolution.status),
         }
     return {
         "model_binding_id": str(resolution.provider_model_binding_id),
@@ -192,9 +189,12 @@ async def queue_branch_nodes(
     node_keys: list[str] | None = None,
     force: bool = False,
     include_missing_dependencies: bool = False,
+    voice_silent: bool = False,
+    formal_video_artifact_id: UUID | None = None,
     experiment_id: UUID | None = None,
     model_binding_id: UUID | None = None,
     model_binding_node_key: str | None = None,
+    prompt_override: str | None = None,
 ) -> list[UUID]:
     """Queue branch NodeRuns with persisted Workbench context.
 
@@ -210,12 +210,16 @@ async def queue_branch_nodes(
             raise ValidationAppError(f"unknown node key: {k}")
     if experiment_id is None and (model_binding_id is not None or model_binding_node_key):
         raise ValidationAppError("model override requires an experiment branch")
+    if experiment_id is not None and formal_video_artifact_id is not None:
+        raise ValidationAppError("formal video pin is unavailable for an experiment branch")
     if model_binding_node_key is not None and model_binding_node_key not in {
         "keyframe",
         "video",
         "voice",
     }:
         raise ValidationAppError("model override node must be keyframe, video, or voice")
+    if prompt_override is not None and (not prompt_override.strip() or len(prompt_override) > 8000):
+        raise ValidationAppError("experiment prompt override must be 1 to 8000 characters")
 
     from app.access.models import Project
     from app.production.models import GraphVersion, ProductionGraph
@@ -267,7 +271,8 @@ async def queue_branch_nodes(
     visual = str(
         shot_plan.get("visual_description") or shot.visual_description or f"Shot {shot.shot_number}"
     ).strip()
-    dialogue = str(shot_plan.get("dialogue") or shot.dialogue or "").strip()
+    # The saved Shot dialogue is authoritative, including an explicitly cleared value.
+    dialogue = str(shot.dialogue or "").strip()
     keyframe_prompt = str(
         shot_plan.get("keyframe_prompt") or shot_plan.get("prompt") or visual
     ).strip()
@@ -331,8 +336,19 @@ async def queue_branch_nodes(
         node = materialized.nodes[key]
         prior_for_node = [run for run in existing_runs if run.graph_node_id == node.id]
         latest = latest_by_key.get(key)
+        # A completed/active tail for another video must not suppress preparation
+        # of the explicitly selected formal video. Only replace the local composite;
+        # voice, subtitles and paid media keep their existing runs.
+        composite_pin_changed = (
+            key == "composite"
+            and formal_video_artifact_id is not None
+            and latest is not None
+            and str((latest.input_snapshot or {}).get("formal_video_artifact_id") or "")
+            != str(formal_video_artifact_id)
+        )
         if (
             not force
+            and not composite_pin_changed
             and latest is not None
             and latest.status in {*DONE_STATUSES, "queued", "running"}
         ):
@@ -340,12 +356,16 @@ async def queue_branch_nodes(
         ih = hashlib.sha256(f"{shot_id}:{key}:{uuid4()}".encode()).hexdigest()
         attempt = len(prior_for_node) + 1
         prompt = (
-            keyframe_prompt
+            (prompt_override.strip() if prompt_override else None)
+            if key == model_binding_node_key
+            else None
+        ) or (
+            (shot.image_prompt or keyframe_prompt)
             if key == "keyframe"
-            else f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}"
+            else (shot.video_prompt or f"{key}: {visual}\nDialogue: {dialogue}\nShot: {shot_id}")
         )
         if key == "voice":
-            prompt = dialogue or "（静默段落）"
+            prompt = dialogue
         lead_identity_value = shot_plan.get("lead_identity_required")
         lead_identity_required = lead_identity_value is True
         # A project with a registered lead canonical is single-lead in P0. Script
@@ -390,7 +410,11 @@ async def queue_branch_nodes(
                 project=project,
                 node_key=key,
             )
-        voice_prompt = (dialogue or "（静默段落）") if key == "voice" else prompt
+        if key == "voice":
+            execution_freeze["voice_execution"] = freeze_voice_execution(
+                dict(shot.director_state or {}), silent=voice_silent or not dialogue
+            ).model_dump(mode="json")
+        voice_prompt = ("" if voice_silent else dialogue) if key == "voice" else prompt
         snapshot: dict[str, object] = {
             "shot_id": str(shot_id),
             "node_key": key,
@@ -414,6 +438,10 @@ async def queue_branch_nodes(
         }
         if experiment_id is not None:
             snapshot["experiment_id"] = str(experiment_id)
+            if prompt_override and key == model_binding_node_key:
+                snapshot["experiment_prompt_override"] = prompt_override.strip()
+        if key == "composite" and formal_video_artifact_id is not None:
+            snapshot["formal_video_artifact_id"] = str(formal_video_artifact_id)
         if model_binding_id is not None and key == model_binding_node_key:
             # Explicit experiment override always wins over the resolver freeze.
             snapshot["model_binding_id"] = str(model_binding_id)

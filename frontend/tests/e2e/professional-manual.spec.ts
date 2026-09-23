@@ -63,11 +63,11 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("context-dock-look")).toBeVisible();
   await expect(page.getByTestId("context-dock-generate")).toBeVisible();
   await expect(page.getByTestId("context-dock-director")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("director-sidebar")).toBeHidden();
   await expect(page.getByTestId("shot-details-sheet")).toHaveCount(0);
   await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("场景");
+  await expect(page.locator(".qc-project-mode")).toHaveText("分镜制作");
   await expect(
     page.locator("[data-testid='scene-stage'] > [data-testid='shot-candidate-tray']"),
   ).toHaveCount(1);
@@ -92,12 +92,26 @@ test("manual professional production: Scene Workbench design → candidate previ
   expect(desktopLayout.columns).toBe(1);
   expect(desktopLayout.noPageOverflow).toBe(true);
 
+  await page.getByTestId("context-dock-camera").click();
+  await expect(page.getByLabel("导演状态", { exact: true })).not.toBeVisible();
+  await page.locator("summary").filter({ hasText: "高级导演参数（可选）" }).click();
+  await expect(page.getByLabel("导演状态", { exact: true })).toBeVisible();
+  await page.locator("summary").filter({ hasText: "高级导演参数（可选）" }).click();
   await page.getByTestId("context-dock-motion").click();
   const operationBox = await page.getByTestId("director-sidebar").boundingBox();
   const canvasBox = await page.getByTestId("cinematic-canvas").boundingBox();
   expect(canvasBox?.width ?? 0).toBeGreaterThan(operationBox?.width ?? 0);
   expect(operationBox?.width ?? 0).toBeGreaterThanOrEqual(300);
-  expect(operationBox?.width ?? 0).toBeLessThanOrEqual(380);
+  // The redesign intentionally widens the single-column prompt editor. Keep
+  // the canvas dominant and bind the upper bound to the canonical 30rem token.
+  const operationMaxWidth = await page.evaluate(() => {
+    const rootStyle = getComputedStyle(document.documentElement);
+    return (
+      Number.parseFloat(rootStyle.getPropertyValue("--df-operation-sheet-width")) *
+      Number.parseFloat(rootStyle.fontSize)
+    );
+  });
+  expect(operationBox?.width ?? 0).toBeLessThanOrEqual(operationMaxWidth);
   await expect(page.getByTestId("shot-design-panel")).toBeVisible();
   await page.getByLabel("视频提示词").fill("slow push-in, locked frame");
   await page.getByRole("button", { name: "保存设计" }).click();
@@ -179,9 +193,30 @@ test("manual professional production: Scene Workbench design → candidate previ
   // Clearing the local preview restores the formal keyframe without a write.
   await page.reload();
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("director-sidebar")).toBeHidden();
   await expect(page.getByTestId("shot-formal-output")).toBeVisible();
   await expect(page.getByTestId("shot-keyframe")).toBeVisible();
+
+  // Video has the same explicit candidate → review → formal gate. It may use
+  // only the already confirmed keyframe and must persist the exact candidate.
+  await page.getByTestId("context-dock-generate").click();
+  await page.getByRole("button", { name: "生成视频", exact: true }).click();
+  await expect.poll(() => state.candidates[0]?.artifact_id).toBe("candidate-video-1");
+  await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
+  await page.getByTestId("shot-candidate-select-candidate-video-1").click();
+  await expect(page.getByTestId("shot-candidate-preview-candidate-video-1")).toBeVisible();
+  await page.getByTestId("shot-candidate-confirm-candidate-video-1").click();
+  await expect(page.getByTestId("shot-candidate-success")).toContainText("已设为正式视频");
+  await expect.poll(() => state.formalVideoArtifactId).toBe("candidate-video-1");
+  expect(state.shotVersion).toBe(4);
+  const formalVideoRequest = state.editing.requests.find(
+    (request) => request.path.endsWith("/formal-video") && request.method === "POST",
+  );
+  expect(formalVideoRequest).toEqual({
+    method: "POST",
+    path: `/api/v1/projects/${PROJECT_ID}/shots/${SHOT_ID}/formal-video`,
+    body: { artifact_id: "candidate-video-1", expected_shot_version: 3 },
+  });
 
   // Production monitor: cross-scene stats + scene row.
   await page.goto(`/projects/${PROJECT_ID}/production`);
@@ -202,7 +237,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("场景");
+  await expect(page.locator(".qc-project-mode")).toHaveText("分镜制作");
   await expect(page.getByTestId("scene-stage")).toBeVisible();
   await expect(page.getByTestId("cinematic-canvas")).toBeVisible();
   await expect(page.getByTestId("context-dock")).toBeVisible();
@@ -212,9 +247,9 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await expect(page.getByTestId("context-dock-look")).toBeVisible();
   await expect(page.getByTestId("context-dock-generate")).toBeVisible();
   await expect(page.getByTestId("context-dock-director")).toBeVisible();
-  await expect(page.getByTestId("shot-candidate-tray")).toBeVisible();
+  await expect(page.getByTestId("shot-candidate-tray")).toBeHidden();
   await expect(page.getByTestId("shot-strip")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("director-sidebar")).toBeHidden();
   const sceneLayout = await page.locator(".qc-scene-layout").evaluate((element) => {
     const style = getComputedStyle(element);
     return {
@@ -233,7 +268,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
 
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("制作");
+  await expect(page.locator(".qc-project-mode")).toHaveText("作品总览");
   await expect(page.locator(".qc-content-grid")).toHaveClass(/no-inspector/);
 
   // Keep the Asset page's own data requests isolated while asserting that the
@@ -247,7 +282,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await page.goto(`/projects/${PROJECT_ID}/assets`);
   await expect(page.getByTestId("asset-cards-panel")).toBeVisible();
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("资产");
+  await expect(page.locator(".qc-project-mode")).toHaveText("角色素材");
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
@@ -262,7 +297,7 @@ test("Scene draft survives sheet close and guards route departure", async ({ pag
   await page.getByLabel("图片提示词").fill("unsaved guarded keyframe");
   await expect(page.getByTestId("shot-design-dirty")).toBeVisible();
   await page.getByTestId("director-sheet-close").click();
-  await expect(page.getByTestId("director-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("director-sidebar")).toBeHidden();
 
   await page.getByTestId("context-dock-look").click();
   await expect(page.getByLabel("图片提示词")).toHaveValue("unsaved guarded keyframe");
@@ -294,5 +329,7 @@ test("production monitor never surfaces legacy budget UI", async ({ page }) => {
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
-  await expect(page.getByText(/预算|计费|费用/)).toHaveCount(0);
+  await expect(page.getByTestId("professional-workbench").getByText(/预算|计费|费用/)).toHaveCount(
+    0,
+  );
 });

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncGenerator
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock
@@ -457,6 +457,10 @@ async def test_worker_restart_requeues_resumable_unified_run_pg(
     )
     await pg_session.flush()
     remote_id = f"p5-remote-{uuid4().hex[:8]}"
+    # Recovery cannot steal an attempt inside the hard timeout + safety margin.
+    old = datetime.now(UTC) - timedelta(minutes=32)
+    run.started_at = old
+    snapshot_before = dict(run.input_snapshot)
     op = ProviderOperation(
         node_run_id=run.id,
         attempt_no=1,
@@ -464,6 +468,8 @@ async def test_worker_restart_requeues_resumable_unified_run_pg(
         operation_kind="keyframe.generate",
         actual_provider=FAKE_PROVIDER,
         actual_model="p5-img-model",
+        created_at=old,
+        submitted_at=old,
         protocol_profile=FAKE_PROFILE,
         request_fingerprint="f" * 64,
         status="submitted",
@@ -494,7 +500,7 @@ async def test_worker_restart_requeues_resumable_unified_run_pg(
 
     await recover_interrupted_provider_jobs({})
 
-    # Re-open a fresh session to observe the committed re-queue.
+    # Re-open a fresh session: admission must preserve the running facts and identity.
     async with factory() as observer:
         await set_rls_context(
             observer,
@@ -504,10 +510,8 @@ async def test_worker_restart_requeues_resumable_unified_run_pg(
         )
         observed_run = await observer.get(NodeRun, run.id)
         assert observed_run is not None
-        assert observed_run.status == "queued"
-        snap = observed_run.input_snapshot or {}
-        assert snap["provider_poll_resume_count"] == 1
-        assert str(snap["dispatch_generation"]).startswith("provider-resume-")
+        assert observed_run.status == "running"
+        assert observed_run.input_snapshot == snapshot_before
         observed_op = await observer.get(ProviderOperation, op.id)
         assert observed_op is not None
         assert observed_op.provider_operation_id == remote_id

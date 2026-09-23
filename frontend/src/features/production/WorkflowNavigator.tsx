@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { Button } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
+import { shotStatusLabel } from "../../lib/shotLabels";
 import {
   fetchWorkflowOverview,
   type SceneWorkflowViewRead,
@@ -24,7 +26,7 @@ const CAPABILITY_TONE: Record<string, string> = {
 const RESOLUTION_LABEL: Record<string, string> = {
   RESOLVED: "已冻结",
   UNAVAILABLE: "模板失效",
-  NONE: "未选模板",
+  NONE: "未使用模板",
 };
 
 function productionStateLabel(state: string): string {
@@ -67,9 +69,7 @@ function ShotWorkflowRow({ shot }: { shot: ShotWorkflowStateRead }) {
     <li className="workflow-shot-row" data-testid={`workflow-shot-${shot.shot_number}`}>
       <span className="shot-index">{String(shot.shot_number).padStart(2, "0")}</span>
       <span className="workflow-shot-main">
-        <span className="workflow-shot-template">
-          {productionStateLabel(shot.status ?? "draft")}
-        </span>
+        <span className="workflow-shot-template">创作：{shotStatusLabel(shot.status)}</span>
         <small>
           {RESOLUTION_LABEL[shot.template_resolution_status] ?? shot.template_resolution_status}
           {shot.template_version ? ` · v${shot.template_version}` : ""}
@@ -103,7 +103,7 @@ function SceneWorkflowGroup({ scene }: { scene: SceneWorkflowViewRead }) {
         {status.formal_shots}/{status.total_shots}
       </p>
       <ul className="workflow-shot-list">
-        {scene.shots.map((shot) => (
+        {(scene.shots ?? []).map((shot) => (
           <ShotWorkflowRow key={shot.shot_id} shot={shot} />
         ))}
       </ul>
@@ -126,7 +126,7 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
   const overview = useQuery({
     queryKey: queryKeys.production.workflowOverview(projectId),
     queryFn: () => fetchWorkflowOverview(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const data = overview.data as WorkflowOverviewRead | undefined;
   const episodes = data?.episodes ?? [];
@@ -142,8 +142,16 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
             : "…"}
         </small>
       </div>
+      {data && <p className="muted">场景完成按正式视频统计；镜头创作状态不代表有任务正在运行。</p>}
+      {overview.isPending && <p role="status">正在读取生成任务…</p>}
+      {overview.isError && (
+        <div className="flash err" role="alert">
+          生成任务读取失败，不能据此判断项目没有任务。
+          <Button onClick={() => void overview.refetch()}>重新读取生成任务</Button>
+        </div>
+      )}
       <div className="workflow-episode-list">
-        {episodes.length === 0 && (
+        {overview.isSuccess && episodes.length === 0 && (
           <p className="muted">还没有生成任务。先到剧本页准备故事，再选择镜头生成画面。</p>
         )}
         {episodes.map((episode) => (

@@ -9,8 +9,6 @@ URLs, raw payloads or credentials (spec §24/§64).
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -23,7 +21,7 @@ from app.api.deps import (
 )
 from app.providers.bootstrap import default_v3_registry
 from app.providers.capabilities import Capability
-from app.providers.manifest import ModelManifest
+from app.providers.manifest import CapabilitySpec, ModelManifest
 from app.providers.models import ProviderConnection
 from app.providers.registry import ModelRegistry
 from app.shared.errors import NotFoundError, ValidationAppError
@@ -55,7 +53,7 @@ class ManifestRead(BaseModel):
     display_name: str
     execution_mode: str
     supports_cancel: bool
-    capability_specs: dict[str, Any]
+    capability_specs: dict[str, CapabilitySpec]
 
 
 _CAPABILITY_DISPLAY_NAMES: dict[Capability, str] = {
@@ -95,12 +93,19 @@ async def list_capabilities() -> list[CapabilityRead]:
     dependencies=[Depends(require_selected_workspace)],
 )
 async def list_models(
+    workspace: SelectedWorkspace,
+    session: SessionDep,
+    settings: SettingsDep,
     capability: str | None = None,
-    workspace: SelectedWorkspace = None,  # type: ignore[assignment]
-    session: SessionDep = None,  # type: ignore[assignment]
-    settings: SettingsDep = None,  # type: ignore[assignment]
 ) -> list[ModelRead]:
     registry = _registry()
+    from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+
+    registry = await workspace_model_registry(
+        session,
+        workspace_id=workspace.id,
+        base_registry=registry,
+    )
     if capability is not None:
         try:
             selected = registry.find_by_capability(Capability(capability))
@@ -112,25 +117,23 @@ async def list_models(
     else:
         selected = registry.list_models()
     configured: set[str] = set()
-    if session is not None and workspace is not None:
-        rows = list(
-            (
-                await session.execute(
-                    select(ProviderConnection).where(
-                        ProviderConnection.workspace_id == workspace.id,
-                        ProviderConnection.enabled.is_(True),
-                    )
+    rows = list(
+        (
+            await session.execute(
+                select(ProviderConnection).where(
+                    ProviderConnection.workspace_id == workspace.id,
+                    ProviderConnection.enabled.is_(True),
                 )
             )
-            .scalars()
-            .all()
         )
-        configured = {row.provider_type for row in rows}
+        .scalars()
+        .all()
+    )
+    configured = {row.provider_type for row in rows}
     # The LiteLLM gateway is process-level configuration, not a workspace
     # ProviderConnection. Keep this read surface aligned with ModelProfile reads.
     litellm_configured = bool(
-        settings is not None
-        and settings.litellm_gateway_url.strip()
+        settings.litellm_gateway_url.strip()
         and settings.litellm_api_key.strip()
     )
     return [
@@ -140,12 +143,12 @@ async def list_models(
             display_name=model.manifest.display_name,
             enabled=True,
             configured=(
-                litellm_configured
+                ("litellm" in configured or litellm_configured)
                 if model.manifest.provider_id == "litellm"
                 else model.manifest.provider_id in configured
             ),
             available=(
-                litellm_configured
+                ("litellm" in configured or litellm_configured)
                 if model.manifest.provider_id == "litellm"
                 else model.manifest.provider_id in configured
             ),
@@ -173,7 +176,7 @@ async def get_model_manifest(model_id: str) -> ManifestRead:
         execution_mode=str(manifest.execution_mode),
         supports_cancel=manifest.supports_cancel,
         capability_specs={
-            str(capability): spec.model_dump(mode="json")
+            str(capability): spec
             for capability, spec in manifest.capability_specs.items()
         },
     )

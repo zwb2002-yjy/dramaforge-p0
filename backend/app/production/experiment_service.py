@@ -82,6 +82,13 @@ async def create_experiment_branch(
 ) -> ExperimentBranch:
     if any(key.startswith("_creation_") for key in body.parameters):
         raise ValidationAppError("reserved experiment parameter")
+    prompt_override = body.parameters.get("prompt_override")
+    if prompt_override is not None and (
+        not isinstance(prompt_override, str)
+        or not prompt_override.strip()
+        or len(prompt_override) > 8000
+    ):
+        raise ValidationAppError("experiment prompt_override must be 1 to 8000 characters")
     request_data = body.model_dump(mode="json")
     request_data["parameters"] = {
         **body.parameters,

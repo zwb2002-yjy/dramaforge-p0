@@ -51,8 +51,10 @@ test("project cards have equal frames and creation asks for type and style", asy
   expect(boxes[0].height).toBeCloseTo(boxes[1].height, 0);
   expect(
     (await page.locator(".df-project-card .df-project-cover").last().boundingBox())!.width,
-  ).toBeCloseTo(boxes[1].width - 2, 1);
+  ).toBeLessThan(boxes[1].width / 3);
   await page.goto("/?create=true");
+  await expect(page.getByRole("combobox", { name: "创作起点", exact: true })).toBeVisible();
+  await page.getByText("风格与类型（可选）", { exact: true }).click();
   await expect(page.getByRole("combobox", { name: "创作类型", exact: true })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "画面风格", exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "创作类型", exact: true }).selectOption("drama");
@@ -80,19 +82,19 @@ test("production separates progress from settings and has no duplicate scene can
     }),
   );
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await expect(page.getByRole("tab", { name: "进度", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "作品进度", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "场景与镜头", exact: true })).toHaveCount(0);
   await expect(page.getByRole("combobox", { name: "风格", exact: true })).not.toBeVisible();
-  await page.getByRole("tab", { name: "高级设置", exact: true }).click();
+  await page.getByRole("tab", { name: "导演手法", exact: true }).click();
   await expect(page.getByTestId("monitor-stats")).not.toBeVisible();
   await expect(page.getByRole("checkbox", { name: "角色一致性", exact: true })).not.toBeVisible();
-  await page.getByText("更多生成设置", { exact: true }).first().click();
+  await page.getByText("镜头语言、质量与创作手法", { exact: true }).first().click();
   await expect(page.getByRole("checkbox", { name: "角色一致性", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   // A desktop-expanded sidebar becomes a mobile drawer on resize. Dismiss it
   // through the same Escape interaction available to the creator.
   await page.keyboard.press("Escape");
-  await page.getByRole("tab", { name: "进度", exact: true }).click();
+  await page.getByRole("tab", { name: "作品进度", exact: true }).click();
   await expect(page.getByTestId("monitor-stats")).toBeVisible();
 });

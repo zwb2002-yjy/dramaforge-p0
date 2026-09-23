@@ -83,7 +83,7 @@ it("preserves the draft on cancel/reopen and prevents whitespace-only submission
 
 it("submits the selected template and autonomy, not hidden defaults", async () => {
   const { writes, props } = setup();
-  fireEvent.click(screen.getByText("创作选项"));
+  expect(screen.getByRole("combobox", { name: "创作起点" })).toBeVisible();
   fireEvent.change(screen.getByLabelText("创作起点"), { target: { value: "TEMPLATE" } });
   fireEvent.change(screen.getByLabelText("创作模板"), { target: { value: "single_monologue_v1" } });
   fireEvent.change(screen.getByLabelText("导演参与度"), { target: { value: "MANUAL" } });

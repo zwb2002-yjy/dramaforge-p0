@@ -1,7 +1,7 @@
 # MODULE_BOUNDARIES — 模块边界与依赖方向
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
+Date: 2026-09-22 / Alembic head: 20260922_0077
 
 本文件只回答一件事：**哪一层可以依赖哪一层。**
 
@@ -98,7 +98,7 @@ Director 需要文本 LLM 才能工作，因此存在受限例外：
 - **禁止**：Director 直接调用媒体 Provider；Director 逻辑内写死 Provider 参数。
 - 现状 `director/text_transport.py` 直接 import `providers.registry` /
   `providers.model_profiles.*` / `providers.contracts.*`，属**待收敛例外**，
-  见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) 问题 3。
+  见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) §4 问题 3。
 
 ### 4.4 Production 不得依赖 Director 业务
 
@@ -107,13 +107,13 @@ Director 需要文本 LLM 才能工作，因此存在受限例外：
   `app.director.turn_service` 等 Director 业务模块。
 - 允许 `production → creative.contracts`：Production 可以消费 Creative 的**契约**
   （如引用意图、参与计划），但不得消费 Director Runtime 的会话/提案状态。
-- 现状有 4 条越界边，见映射文档问题 2。
+- 现状有 4 条越界边，见映射文档 §4 问题 2。
 
 ### 4.5 Contract 层必须保持中立
 
 - `app/contracts/**` 不得 import `app.production.*` 等实现包。
 - 被契约引用的模型**必须定义在契约层内**，由实现层反向 import。
-- 现状有 1 条越界边（`ShotReferenceIntent`），见映射文档问题 2 / 违规 V-1。
+- `ShotReferenceIntent` 已归 `app/contracts/shot_reference.py`；生产编译器旧导入路径仅重新导出同一类型，不再由 contract 依赖 production。
 
 ### 4.6 前端只有一个入口族
 
@@ -180,4 +180,14 @@ facade / compatibility import 过渡；**不要一次移动大量文件**。
 | 仓库目录与敏感文件规则 | `scripts/check_directory_compliance.py` |
 | generated OpenAPI 一致性 | `scripts/check-generated-api.mjs` |
 | 容器质量门 | `docker-compose.quality.yml`、[DEVELOPMENT.md](DEVELOPMENT.md) |
-| 依赖方向静态检查 `[未落地]` | Phase 7 任务：实现 §三/§四 的规则 |
+| 增量依赖方向门禁 | `scripts/arch_import_scan.py --check`，由 backend full/fast 容器门执行 |
+
+### 增量依赖门禁合同
+
+- §二/§四 的允许方向是规则；不能通过放宽规则把现状宣告合规。
+- `scripts/architecture-baseline.json` 逐条登记既有越界 module edge、原因和初始源码基线。
+  新增越界边、已消失却未移除的豁免、无原因/重复豁免、解析失败均使 `--check` 失败。
+- `--matrix` / `--violations` 保留信息性输出；增量门通过只表示债务未增加，
+  不表示所有依赖已经符合目标架构。新增豁免必须作为显式架构决策审阅，不能自动重建基线来过门。
+- 检查覆盖 backend 的绝对/相对 import、package re-export 与字符串字面量动态导入；
+  不证明反射/计算式导入、前端 HTTP 路径或业务调用语义合规，这些仍由专门测试和 Review 验证。

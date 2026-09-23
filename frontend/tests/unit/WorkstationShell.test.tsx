@@ -4,7 +4,6 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeTree } from "../../src/routeTree.gen";
-import { useUiStore } from "../../src/stores/uiStore";
 import { getSelectedWorkspaceId, setSelectedWorkspaceId } from "../../src/lib/api";
 
 function renderApp(initialPath = "/") {
@@ -113,10 +112,9 @@ function mockAuthenticatedHome(projectCount = 1) {
 
 afterEach(() => vi.restoreAllMocks());
 beforeEach(() => {
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
   window.sessionStorage.clear();
   window.localStorage.clear();
-  useUiStore.setState({ leftNavOpen: true, selectedShotId: null });
 });
 
 describe("Workstation shell", () => {
@@ -200,7 +198,7 @@ describe("Workstation shell", () => {
 
       renderApp("/projects/project-2/script");
 
-      expect(await screen.findByRole("heading", { name: "剧本工作区" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "故事剧本" })).toBeInTheDocument();
       expect(screen.getAllByText("重新打开的项目")).toHaveLength(2);
       expect(projectHeaders.slice(0, 2)).toEqual(["workspace-stale", "workspace-2"]);
       expect(projectHeaders.slice(1).every((workspaceId) => workspaceId === "workspace-2")).toBe(
@@ -213,18 +211,20 @@ describe("Workstation shell", () => {
   );
 
   it("keeps repeated clicks on the active Creation entry in the current workspace", async () => {
-    const { router } = renderApp("/projects/demo/production");
+    mockAuthenticatedHome();
+    const { router } = renderApp("/projects/project-1/production");
     await screen.findByTestId("production-mode");
 
     const creationLink = screen.getByRole("link", { name: "创作" });
     expect(fireEvent.click(creationLink)).toBe(false);
     expect(fireEvent.click(creationLink)).toBe(false);
-    expect(router.state.location.pathname).toBe("/projects/demo/production");
+    expect(router.state.location.pathname).toBe("/projects/project-1/production");
     expect(screen.queryByText("正在恢复上次创作位置…")).not.toBeInTheDocument();
   });
 
   it("gives Scene Workbench one right operation panel without the outer evidence inspector", async () => {
-    renderApp("/projects/demo/scenes/scene-1");
+    mockAuthenticatedHome();
+    renderApp("/projects/project-1/scenes/scene-1");
 
     const shell = await screen.findByTestId("project-workspace-shell");
     expect(shell).toHaveClass("scene-view");
@@ -233,7 +233,8 @@ describe("Workstation shell", () => {
   });
 
   it("toggles the contextual second-level navigation without replacing L1", async () => {
-    renderApp("/projects/demo/production");
+    mockAuthenticatedHome();
+    renderApp("/projects/project-1/production");
     const shell = await screen.findByTestId("workstation-shell");
     const navigation = screen.getByRole("complementary", { name: "二级导航" });
     expect(shell).toHaveClass("secondary-open");
@@ -257,12 +258,19 @@ describe("Workstation shell", () => {
 
   it("closes mobile L2 after switching creative routes", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
-    const { router } = renderApp("/projects/demo/production");
+    mockAuthenticatedHome();
+    const { router } = renderApp("/projects/project-1/production");
 
     fireEvent.click(await screen.findByRole("link", { name: "创作" }));
-    fireEvent.click(screen.getByRole("link", { name: "剧本" }));
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "创作导航" })).getByRole("link", {
+        name: "故事剧本",
+      }),
+    );
 
-    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/projects/demo/script"));
+    await vi.waitFor(() =>
+      expect(router.state.location.pathname).toBe("/projects/project-1/script"),
+    );
     expect(screen.getByRole("link", { name: "创作" })).toHaveAttribute("aria-expanded", "false");
   });
 
@@ -270,7 +278,8 @@ describe("Workstation shell", () => {
     // This test asserts desktop shell behaviour; the previous mobile case leaves
     // the viewport override in place, so restore it explicitly.
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    renderApp("/projects/demo/production");
+    mockAuthenticatedHome();
+    renderApp("/projects/project-1/production");
 
     const settingsLink = await screen.findByRole("link", { name: "设置" });
     expect(settingsLink.getAttribute("href")).toContain("/settings/models?returnTo=");
@@ -354,45 +363,51 @@ describe("Workstation shell", () => {
   });
 
   it("opens the production route for a project", async () => {
-    renderApp("/projects/demo/production");
+    mockAuthenticatedHome();
+    renderApp("/projects/project-1/production");
     const panel = await screen.findByTestId("production-mode");
     expect(panel).toBeInTheDocument();
-    expect(panel).toHaveTextContent("制作进度");
+    expect(panel).toHaveTextContent("作品总览");
     const projectShell = screen.getByTestId("project-workspace-shell");
     expect(projectShell).toBeInTheDocument();
-    expect(projectShell).toHaveTextContent("演示项目");
-    expect(screen.getByRole("link", { name: "制作" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("navigation", { name: "创作导航" })).not.toHaveTextContent("审片");
+    expect(projectShell).toHaveTextContent("乌镇宣传片");
+    expect(screen.getByRole("link", { name: "作品总览" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("navigation", { name: "创作导航" })).toHaveTextContent("审片确认");
   });
 
-  it("keeps Review reachable inside Production instead of making it a peer workspace", async () => {
-    renderApp("/projects/demo/review");
+  it("makes Review a discoverable creative stage with its own active navigation", async () => {
+    mockAuthenticatedHome();
+    renderApp("/projects/project-1/review");
 
     expect(await screen.findByTestId("review-workspace")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "制作" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("navigation", { name: "创作导航" })).not.toHaveTextContent("审片");
-    expect(screen.getByRole("link", { name: "待审内容" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "审片确认" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("navigation", { name: "创作导航" })).toHaveTextContent("审片确认");
+    expect(screen.queryByRole("navigation", { name: "制作视图" })).not.toBeInTheDocument();
   });
 
   it("falls back from a project root to the Scene storyboard wall", async () => {
-    const { router } = renderApp("/projects/demo");
+    mockAuthenticatedHome();
+    const { router } = renderApp("/projects/project-1");
 
-    await screen.findByRole("link", { name: "场景" });
-    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/projects/demo/scenes"));
-    expect(screen.getByRole("link", { name: "场景" })).toHaveAttribute("aria-current", "page");
+    await screen.findByRole("link", { name: "分镜制作" });
+    await vi.waitFor(() =>
+      expect(router.state.location.pathname).toBe("/projects/project-1/scenes"),
+    );
+    expect(screen.getByRole("link", { name: "分镜制作" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("redirects the obsolete preferences page to the actual create form", async () => {
+  it("opens the default-model settings section at its stable route", async () => {
     mockAuthenticatedHome();
     const { router } = renderApp("/settings/defaults");
-    expect(await screen.findByRole("region", { name: "新建项目" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/");
-    expect(router.state.location.search.create).toBe(true);
-    expect(screen.queryByTestId("default-settings-page")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("model-settings-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings/defaults");
+    expect(screen.getByRole("tab", { name: "默认模型" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("default-models-disclosure")).not.toHaveAttribute("hidden");
   });
 
   it("renders current Project settings inside Settings L2", async () => {
-    renderApp("/settings/projects/demo");
+    mockAuthenticatedHome();
+    renderApp("/settings/projects/project-1");
 
     expect(await screen.findByTestId("project-settings-page")).toBeInTheDocument();
     expect(screen.getByTestId("workstation-shell")).toHaveAttribute(
@@ -425,11 +440,11 @@ describe("Workstation shell", () => {
     renderApp("/projects/project-1/edit");
 
     expect(await screen.findByTestId("editing-workspace")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "剪辑" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "剪辑成片" })).toHaveAttribute(
       "href",
       "/projects/project-1/edit",
     );
-    expect(screen.getByRole("link", { name: "剪辑" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "剪辑成片" })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows the professional facts without reviving the legacy Director budget surface", async () => {
@@ -444,6 +459,18 @@ describe("Workstation shell", () => {
         return json({ schema_version: "opencut-manifest-v2", tracks: [], shots: [] });
       if (url.includes("/annotations")) return json([]);
       if (url.includes("/director-board")) return json(null);
+      if (url.includes("/production-summary"))
+        return json({
+          project_id: "project-1",
+          total_runs: 0,
+          completed_runs: 0,
+          running_runs: 0,
+          failed_runs: 0,
+          artifact_count: 0,
+          recent_failures: [],
+          has_more_failures: false,
+          stages: [],
+        });
       if (url.includes("/snapshot"))
         return json({ project_id: "project-1", name: "共源作品", node_runs: [], artifacts: [] });
       return json({});
@@ -463,7 +490,8 @@ describe("Workstation shell", () => {
 });
 
 it("uses the active primary entry as the only sidebar toggle", async () => {
-  renderApp("/projects/demo/production");
+  mockAuthenticatedHome();
+  renderApp("/projects/project-1/production");
   const creation = await screen.findByRole("link", { name: "创作" });
   expect(creation).toHaveAttribute("aria-expanded", "true");
   fireEvent.click(creation, { detail: 1 });

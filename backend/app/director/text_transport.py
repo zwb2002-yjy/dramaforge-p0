@@ -115,7 +115,22 @@ def _response_format(output_type: type[BaseModel], task_name: str) -> dict[str, 
 
 def _parse_output[OutputT: BaseModel](text: str, output_type: type[OutputT]) -> OutputT:
     value = json.loads(text)
-    return output_type.model_validate(value)
+    try:
+        return output_type.model_validate(value)
+    except ValidationError:
+        # Some OpenAI-compatible structured-output bridges serialize the
+        # schema value as the sole string argument of a synthetic tool call.
+        # Normalize only that exact transport wrapper, then keep the business
+        # model's strict validation as the authority. Extra wrapper fields are
+        # deliberately rejected instead of being silently discarded.
+        if (
+            isinstance(value, dict)
+            and set(value) == {"parameter"}
+            and isinstance(value["parameter"], str)
+        ):
+            unwrapped = json.loads(value["parameter"])
+            return output_type.model_validate(unwrapped)
+        raise
 
 
 def _aggregate_usage(attempts: list[dict[str, object]]) -> dict[str, object]:
@@ -170,6 +185,7 @@ class DirectorTextRuntimeAdapter:
     ) -> None:
         self._session = session
         self._turns = DirectorTurnService(session)
+        self._workspace_dynamic = registry is None and text_model is None
         if registry is None:
             from app.providers.model_profiles.service import default_model_registry
 
@@ -192,6 +208,7 @@ class DirectorTextRuntimeAdapter:
         intent_snapshot: dict[str, object],
         context_payload: dict[str, object],
         output_type: type[OutputT],
+        allow_rejected_context_retry: bool = False,
     ) -> StructuredDirectorTextResult[OutputT]:
         context_snapshot = DirectorContextBuilder.build(
             workspace_id=project.workspace_id,
@@ -213,6 +230,7 @@ class DirectorTextRuntimeAdapter:
             input_versions=input_versions,
             intent_snapshot=intent_snapshot,
             max_steps=4,
+            allow_rejected_context_retry=allow_rejected_context_retry,
         )
         context_fingerprint = turn.context_hash
         if not created:
@@ -230,14 +248,22 @@ class DirectorTextRuntimeAdapter:
                 expected_revision=turn.revision,
             )
 
+        runtime_registry = self._registry
+        runtime_text_model = self._text_model
+        resolver = ModelBindingResolver(
+            self._session,
+            None if self._workspace_dynamic else runtime_registry,
+        )
         try:
-            resolved = await ModelBindingResolver(self._session, self._registry).resolve(
+            resolved, runtime_registry = await resolver.resolve_with_registry(
                 workspace_id=project.workspace_id,
                 project_id=project.id,
                 slot=slot,
                 capability=Capability.TEXT_GENERATE,
             )
-            registered = self._registry.get(resolved.model_id)
+            if self._workspace_dynamic:
+                runtime_text_model = CapabilityTextModel(runtime_registry)
+            registered = runtime_registry.get(resolved.model_id)
             binding_ref = _model_binding_ref(slot=slot, resolved=resolved)
             backend = registered.manifest.metadata.get("backend")
             model_resolution: dict[str, object] = {
@@ -334,6 +360,7 @@ class DirectorTextRuntimeAdapter:
                 actor=actor,
                 turn=turn,
                 model_id=resolved.model_id,
+                text_model=runtime_text_model,
                 purpose="primary", output_type=output_type,
             )
             first_text = self._record_attempt(attempts, result=first, purpose="primary")
@@ -372,6 +399,7 @@ class DirectorTextRuntimeAdapter:
                     actor=actor,
                     turn=turn,
                     model_id=resolved.model_id,
+                    text_model=runtime_text_model,
                     purpose="schema_repair", output_type=output_type,
                 )
                 repaired_text = self._record_attempt(
@@ -515,14 +543,16 @@ class DirectorTextRuntimeAdapter:
         turn: DirectorTurn,
         *,
         proposal_id: UUID | None = None,
+        allow_rejected_context_retry: bool = False,
     ) -> None:
-        try:
-            await self._turns.assert_context_not_rejected(
-                project_id=turn.project_id, context_hash=turn.context_hash,
-            )
-        except ConflictError:
-            await self.mark_stale(turn, reason="The user rejected this suggestion context.")
-            raise
+        if not allow_rejected_context_retry:
+            try:
+                await self._turns.assert_context_not_rejected(
+                    project_id=turn.project_id, context_hash=turn.context_hash,
+                )
+            except ConflictError:
+                await self.mark_stale(turn, reason="The user rejected this suggestion context.")
+                raise
         if turn.status == "awaiting_user" and (
             proposal_id is None or proposal_id == turn.proposal_id
         ):
@@ -576,6 +606,7 @@ class DirectorTextRuntimeAdapter:
         actor: User,
         turn: DirectorTurn,
         model_id: str,
+        text_model: TextModelPort,
         purpose: str,
         output_type: type[BaseModel],
     ) -> ProviderCreateResult:
@@ -610,7 +641,7 @@ class DirectorTextRuntimeAdapter:
                 provider_metadata={"error_code": saved.error_code},
             )
         try:
-            result = await self._text_model.generate(
+            result = await text_model.generate(
                 request=request, model_id=model_id,
                 context=ExecutionContext(
                     trace_id=str(turn.id), operation_id=f"director-invocation:{invocation_id}",

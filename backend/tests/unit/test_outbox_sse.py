@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 import pytest
 from app.access import models as _a  # noqa: F401
@@ -26,6 +27,19 @@ async def engine_factory():
         await conn.run_sync(Base.metadata.create_all)
     yield engine, factory
     await engine.dispose()
+
+
+def test_outbox_retry_delay_is_exponential_jittered_and_capped() -> None:
+    event_id = UUID(int=5)
+    dispatcher = OutboxDispatcher(
+        AsyncSession(),
+        retry_base_seconds=5,
+        retry_max_seconds=30,
+    )
+
+    assert dispatcher._retry_delay(event_id, 1) == timedelta(seconds=6)
+    assert dispatcher._retry_delay(event_id, 2) == timedelta(seconds=12)
+    assert dispatcher._retry_delay(event_id, 20) == timedelta(seconds=30)
 
 
 @pytest.mark.asyncio
@@ -52,8 +66,12 @@ async def test_outbox_publish_and_dead_letter_then_idempotent_replay_across_inst
         assert len(claimed) == 1
         dl = await dispatcher.fail_leased(claimed[0], error="stream down")
         assert dl is None
+        assert claimed[0].next_attempt_at > datetime.now(UTC)
         await session.commit()
 
+        assert await dispatcher.claim_pending(worker_id="w1", limit=5) == []
+        claimed[0].next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.flush()
         claimed2 = await dispatcher.claim_pending(worker_id="w1", limit=5)
         assert len(claimed2) == 1
         dl = await dispatcher.fail_leased(claimed2[0], error="stream still down")

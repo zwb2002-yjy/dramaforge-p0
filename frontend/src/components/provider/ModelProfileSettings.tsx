@@ -133,7 +133,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
     }
     const bindings = existingInputs();
     for (const [slot, modelId] of Object.entries(advancedChoices)) {
-      if (modelId) bindings[slot] = { model_id: modelId };
+      if (modelId) bindings[slot] = { model_id: modelId, enabled: true };
       else delete bindings[slot];
     }
     save.mutate(bindings);
@@ -192,7 +192,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
       {!advanced ? (
         <>
           <div className="status-grid">
-            {(["llm", "image", "video", "voice"] as const).map((group) => {
+            {(["llm", "image", "video"] as const).map((group) => {
               const slotsInGroup = SIMPLE_MODE_SLOT_GROUPS[group];
               const current =
                 slotsInGroup.map((s) => currentBindings[s]?.model_id).find((m) => m) ?? "";
@@ -203,9 +203,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
                       ? "默认语言模型"
                       : group === "image"
                         ? "默认图片模型"
-                        : group === "video"
-                          ? "默认视频模型"
-                          : "默认声音模型"}
+                        : "默认视频模型"}
                   </span>
                   {renderModelSelect(slotsInGroup[0], simple[group] ?? current, (v) =>
                     setSimple((prev) => ({ ...prev, [group]: v })),
@@ -226,21 +224,23 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
       ) : (
         <>
           <div className="status-grid">
-            {(slots.data ?? []).map((slot) => {
-              const value = advancedChoices[slot.id] ?? currentBindings[slot.id]?.model_id ?? "";
-              return (
-                <Field key={slot.id} className="status-card">
-                  <span className="status-label">
-                    {slot.display_name}
-                    {slot.p0_scope ? "" : " · 扩展"}
-                  </span>
-                  {renderModelSelect(slot.id, value, (v) =>
-                    setAdvancedChoices((prev) => ({ ...prev, [slot.id]: v })),
-                  )}
-                  <span className="muted">{slot.description}</span>
-                </Field>
-              );
-            })}
+            {(slots.data ?? [])
+              .filter((slot) => slot.id !== "audio.tts")
+              .map((slot) => {
+                const value = advancedChoices[slot.id] ?? currentBindings[slot.id]?.model_id ?? "";
+                return (
+                  <Field key={slot.id} className="status-card">
+                    <span className="status-label">
+                      {slot.display_name}
+                      {slot.p0_scope ? "" : " · 扩展"}
+                    </span>
+                    {renderModelSelect(slot.id, value, (v) =>
+                      setAdvancedChoices((prev) => ({ ...prev, [slot.id]: v })),
+                    )}
+                    <span className="muted">{slot.description}</span>
+                  </Field>
+                );
+              })}
           </div>
           <div className="toolbar">
             <Button type="button" className="primary" onClick={saveAdvanced} disabled={!canSave}>

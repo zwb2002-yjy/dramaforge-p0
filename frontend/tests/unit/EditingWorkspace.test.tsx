@@ -304,7 +304,7 @@ describe("EditingWorkspace", () => {
     expect(clip).not.toHaveTextContent(SCENE_ID);
     expect(clip).not.toHaveTextContent(SHOT_ID);
     expect(clip).not.toHaveTextContent("artifact-formal");
-    expect(screen.getByText("只读预览已完成的镜头，继续剪辑或新建会话。")).toBeInTheDocument();
+    expect(screen.getByText("选择已有剪辑，或用正式镜头创建时间线。")).toBeInTheDocument();
     expect(calls).toEqual([{ method: "GET", url: "/api/v1/projects/project-1/opencut-manifest" }]);
     expect(screen.getByTestId("editing-read-only")).toHaveTextContent("只读");
     expect(screen.getByTestId("create-edit-session")).toBeEnabled();
@@ -395,7 +395,7 @@ describe("EditingWorkspace", () => {
     // Clip audio is chosen by name, not by pasting an Artifact id.
     const audioControl = screen.getByTestId("clip-audio-0");
     expect(audioControl.tagName).toBe("SELECT");
-    expect(within(audioControl as HTMLElement).getByText("无配音")).toBeInTheDocument();
+    expect(within(audioControl as HTMLElement).getByText("沿用镜头对白")).toBeInTheDocument();
     expect(screen.getByTestId("clip-diagnostics-0")).not.toHaveAttribute("open");
   });
 
@@ -897,6 +897,7 @@ describe("EditingWorkspace", () => {
           timeline_version: 1,
           shot_ids: ["shot-1", "shot-2"],
           node_run_ids: [],
+          preparation_fingerprint: "a".repeat(64),
           status: "queued",
         });
       }
@@ -930,7 +931,9 @@ describe("EditingWorkspace", () => {
     expect(result).toHaveTextContent("15.233");
     const renderCall = calls.find((call) => call.url.endsWith("/final-film/render"));
     expect(renderCall?.method).toBe("POST");
-    expect(renderCall?.headers?.["Idempotency-Key"]).toBe(`final-${PROJECT_ID}-${SESSION_ID}-1`);
+    expect(renderCall?.headers?.["Idempotency-Key"]).toBe(
+      `final-${SESSION_ID}-1-${"a".repeat(64)}`,
+    );
     expect(screen.getByTestId("final-film-player")).toHaveAttribute(
       "src",
       `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-final-1/content`,
@@ -1225,5 +1228,94 @@ describe("EditingWorkspace", () => {
     await waitFor(() => expect(screen.getByText("正式素材已交付")).toBeInTheDocument());
     expect(screen.queryByText("正式素材待交付")).not.toBeInTheDocument();
     expect(requestCount).toBe(2);
+  });
+});
+
+it("does not offer an Asset identity where the renderer requires an audio Artifact", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = String(input);
+    if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+    if (url.endsWith("/assets"))
+      return json([{ id: "asset-not-an-audio-artifact", kind: "audio", name: "声音设定" }]);
+    if (url.endsWith("/edit-sessions") || url.endsWith("/final-films")) return json([]);
+    return json({});
+  });
+  renderPersistedSession();
+  const control = await screen.findByTestId("clip-audio-0");
+  await waitFor(() => expect(screen.getByTestId("edit-session-editor")).toBeInTheDocument());
+  expect(within(control).queryByRole("option", { name: "声音设定" })).not.toBeInTheDocument();
+  expect(within(control).getByRole("option", { name: "沿用镜头对白" })).toBeInTheDocument();
+});
+
+it("saves chosen audio Artifacts and an explicit mute only through timeline Save", async () => {
+  let saved = persistedSession();
+  const patches: Array<Record<string, unknown>> = [];
+  const requests: string[] = [];
+  mockEditingFetch((input, init) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(saved);
+    if (url.includes("/production-history/artifacts?"))
+      return json({
+        items: [
+          {
+            id: "artifact-real-audio",
+            object_key: "audio/result.wav",
+            content_hash: "h",
+            byte_size: 16000,
+            mime_type: "audio/wav",
+            storage_state: "available",
+            duration_seconds: "2.5",
+            produced_by_run_id: null,
+            width: null,
+            height: null,
+          },
+        ],
+        next_cursor: null,
+      });
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-audio" });
+    if (url.endsWith("/timeline")) {
+      const body = JSON.parse(String(init?.body));
+      patches.push(body);
+      saved = persistedSession(body.timeline, saved.version + 1);
+      return json(saved);
+    }
+    return json({});
+  });
+  renderPersistedSession();
+  await screen.findByTestId("edit-session-editor");
+  expect(requests.some((url) => url.includes("/production-history/artifacts"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "选择镜头 1 配音" }));
+  fireEvent.click(await screen.findByRole("button", { name: "使用音频 1" }));
+  expect(screen.getByTestId("clip-audio-0")).toHaveValue("artifact-real-audio");
+  fireEvent.click(screen.getByText("背景音乐（可选）"));
+  fireEvent.click(screen.getByRole("button", { name: "选择背景音乐" }));
+  fireEvent.click(await screen.findByRole("button", { name: "使用音频 1" }));
+  expect(patches).toEqual([]);
+  expect(screen.getByTestId("export-final-film")).toBeDisabled();
+  fireEvent.click(screen.getByTestId("save-edit-timeline"));
+  await waitFor(() => expect(patches).toHaveLength(1));
+  expect(patches[0]).toMatchObject({
+    expected_session_version: 1,
+    timeline: { metadata: { music_artifact_id: "artifact-real-audio" } },
+  });
+  expect(saved.timeline).toMatchObject({
+    clips: [
+      expect.objectContaining({ audio_id: "artifact-real-audio", muted: false }),
+      expect.objectContaining({ audio_id: "audio-2" }),
+    ],
+  });
+  expect(patches[0]).not.toHaveProperty("production_lineage");
+  await waitFor(() => expect(screen.getByTestId("save-edit-timeline")).toBeDisabled());
+  fireEvent.change(screen.getByTestId("clip-audio-0"), { target: { value: "__muted__" } });
+  expect(patches).toHaveLength(1);
+  fireEvent.click(screen.getByTestId("save-edit-timeline"));
+  await waitFor(() => expect(patches).toHaveLength(2));
+  expect(patches[1]).toMatchObject({ expected_session_version: 2 });
+  expect(saved.timeline).toMatchObject({
+    clips: [
+      expect.objectContaining({ audio_id: "", muted: true }),
+      expect.objectContaining({ audio_id: "audio-2" }),
+    ],
   });
 });

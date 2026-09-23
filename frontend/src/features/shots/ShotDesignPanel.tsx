@@ -1,13 +1,15 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { Disclosure, Field, Textarea } from "../../components/ui";
 import { ApiError, updateShotCanvas } from "../../lib/api";
 import { shotTypeOptionsFor } from "../../lib/shotLabels";
 import { updateShotDesign } from "./api";
 import { fetchShotWorkbench } from "./api";
-import type { ShotLite } from "./api";
+import type { ShotLite, ShotVoiceSettings as ShotVoiceSettingsValue } from "./api";
+import { ShotVoiceSettings } from "./ShotVoiceSettings";
 
-export type ShotDesignFocus = "character" | "camera" | "motion" | "look" | "all";
+export type ShotDesignFocus = "prompts" | "character" | "camera" | "motion" | "look" | "all";
 
 type ShotDesignPanelProps = {
   projectId: string;
@@ -28,6 +30,8 @@ type ShotDesignPanelProps = {
 };
 
 export type ShotDesignDraft = {
+  /** Scene-owned canvas draft; omitted by visual-only Director suggestions. */
+  dialogue?: string;
   image_prompt: string;
   video_prompt: string;
   director_state: Record<string, unknown>;
@@ -45,6 +49,24 @@ function parseDirectorState(text: string): Record<string, unknown> {
     throw new Error("导演状态必须是 JSON 对象");
   }
   return value as Record<string, unknown>;
+}
+
+function readVoiceSettings(state: Record<string, unknown>): ShotVoiceSettingsValue {
+  const value = state.voice;
+  if (value === undefined) return { voice_id: null, rate_percent: 0 };
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("配音设置必须是对象");
+  }
+  const settings = value as Record<string, unknown>;
+  const voiceId = settings.voice_id === undefined ? null : settings.voice_id;
+  const rate = settings.rate_percent === undefined ? 0 : settings.rate_percent;
+  if (voiceId !== null && typeof voiceId !== "string") {
+    throw new Error("配音音色必须是音色标识或 null");
+  }
+  if (typeof rate !== "number" || !Number.isInteger(rate) || rate < -30 || rate > 30) {
+    throw new Error("配音语速必须是 -30 到 30 之间的整数");
+  }
+  return { voice_id: voiceId, rate_percent: rate };
 }
 
 function errorMessage(error: unknown): string {
@@ -76,12 +98,14 @@ function conflictOf(error: unknown, attemptedVersion: number): SaveConflict | nu
 }
 
 function serverDesign(shot: {
+  dialogue?: string | null;
   image_prompt?: string | null;
   video_prompt?: string | null;
   director_state?: Record<string, unknown> | null;
 }): ShotDesignDraft {
   const directorState = { ...(shot.director_state ?? {}) };
   return {
+    dialogue: shot.dialogue ?? "",
     image_prompt: shot.image_prompt ?? "",
     video_prompt: shot.video_prompt ?? "",
     director_state: directorState,
@@ -109,8 +133,8 @@ export function ShotDesignPanel({
 }: ShotDesignPanelProps) {
   const showCharacter = focus === "all" || focus === "character";
   const showCamera = focus === "all" || focus === "camera";
-  const showMotion = focus === "all" || focus === "motion";
-  const showLook = focus === "all" || focus === "look";
+  const showMotion = focus === "all" || focus === "motion" || focus === "prompts";
+  const showLook = focus === "all" || focus === "look" || focus === "prompts";
   const [visual, setVisual] = useState(shot.visual_description);
   // Canvas facts: stored on the Shot itself and written through the CanvasRevision
   // gate (`PATCH /shots/{id}/canvas`), which is the only endpoint that advances
@@ -118,19 +142,11 @@ export function ShotDesignPanel({
   const [shotType, setShotType] = useState(shot.shot_type);
   const [cameraMove, setCameraMove] = useState(shot.camera_move ?? "");
   const [durationSeconds, setDurationSeconds] = useState(shot.duration_seconds ?? "");
-  const [localDraft, setLocalDraft] = useState<ShotDesignDraft>(() => ({
-    image_prompt: shot.image_prompt,
-    video_prompt: shot.video_prompt,
-    director_state: { ...shot.director_state },
-    director_state_text: serializeDirectorState(shot.director_state),
-  }));
+  const [localDraft, setLocalDraft] = useState<ShotDesignDraft>(() => serverDesign(shot));
   const [message, setMessage] = useState("");
   const [conflict, setConflict] = useState<SaveConflict | null>(null);
-  // Bumping this key re-seeds the local draft from the server read model after
-  // the user explicitly chooses to reload.
-  const [reloadKey, setReloadKey] = useState(0);
-
   const draft = controlledDraft ?? localDraft;
+  const dialogue = draft.dialogue ?? shot.dialogue ?? "";
   const directorStateText =
     draft.director_state_text ?? serializeDirectorState(draft.director_state);
   const updateDraft = (next: ShotDesignDraft) => {
@@ -141,12 +157,31 @@ export function ShotDesignPanel({
     setLocalDraft(next);
   };
 
+  let parsedDirectorState: Record<string, unknown> | null = null;
+  let voiceSettings: ShotVoiceSettingsValue | null = null;
+  try {
+    parsedDirectorState = parseDirectorState(directorStateText);
+    voiceSettings = readVoiceSettings(parsedDirectorState);
+  } catch {
+    // Keep invalid advanced JSON intact; structured controls must not erase it.
+  }
+  const updateVoice = (voice: ShotVoiceSettingsValue) => {
+    if (!parsedDirectorState) return;
+    const state = { ...parsedDirectorState, voice };
+    updateDraft({
+      ...draft,
+      director_state: state,
+      director_state_text: serializeDirectorState(state),
+    });
+  };
+
   const serverDirectorStateText = serializeDirectorState(shot.director_state);
   const designDirty =
     draft.image_prompt !== shot.image_prompt ||
     draft.video_prompt !== shot.video_prompt ||
     directorStateText !== serverDirectorStateText;
   const canvasDirty =
+    dialogue !== (shot.dialogue ?? "") ||
     visual !== shot.visual_description ||
     shotType !== shot.shot_type ||
     cameraMove !== (shot.camera_move ?? "") ||
@@ -164,6 +199,7 @@ export function ShotDesignPanel({
     setDurationSeconds(shot.duration_seconds ?? "");
     if (!onDraftChange) {
       setLocalDraft({
+        dialogue: shot.dialogue ?? "",
         image_prompt: shot.image_prompt,
         video_prompt: shot.video_prompt,
         director_state: { ...shot.director_state },
@@ -177,11 +213,11 @@ export function ShotDesignPanel({
     shot.shot_type,
     shot.camera_move,
     shot.duration_seconds,
+    shot.dialogue,
     shot.image_prompt,
     shot.video_prompt,
     shot.director_state,
     onDraftChange,
-    reloadKey,
   ]);
 
   useEffect(() => {
@@ -191,11 +227,17 @@ export function ShotDesignPanel({
 
   useEffect(() => {
     if (!applyDraft) return;
+    const state = { ...applyDraft.director_state };
+    // A visual-only suggestion must not reset the creator's voice or dialogue.
+    if (!("voice" in state) && parsedDirectorState?.voice !== undefined) {
+      state.voice = parsedDirectorState.voice;
+    }
     updateDraft({
+      dialogue: applyDraft.dialogue ?? dialogue,
       image_prompt: applyDraft.image_prompt,
       video_prompt: applyDraft.video_prompt,
-      director_state: { ...applyDraft.director_state },
-      director_state_text: serializeDirectorState(applyDraft.director_state),
+      director_state: state,
+      director_state_text: serializeDirectorState(state),
     });
     setMessage("建议已应用到草稿；请保存镜头设计后才会成为服务器事实");
   }, [applyDraft]); // eslint-disable-line react-hooks/exhaustive-deps -- apply is one-shot
@@ -210,6 +252,7 @@ export function ShotDesignPanel({
   const save = useMutation({
     mutationFn: async () => {
       const directorState = parseDirectorState(directorStateText);
+      readVoiceSettings(directorState);
       // Two explicit server gates, in the order that keeps the version chain
       // honest: the CanvasRevision gate owns the Shot's canvas facts and is the
       // only writer of a new Shot version, so the design write that follows must
@@ -221,7 +264,7 @@ export function ShotDesignPanel({
           visual_description: visual,
           shot_type: shotType,
           camera_move: cameraMove,
-          dialogue: shot.dialogue ?? "",
+          dialogue,
           duration_seconds: durationSeconds,
         });
         expectedVersion = canvas?.shot?.version ?? expectedVersion;
@@ -244,7 +287,7 @@ export function ShotDesignPanel({
       await onSaved?.();
       setMessage(
         result.canvasChanged && result.designChanged
-          ? "已保存画布版本与提示词（版本已递增）"
+          ? "已保存画布版本与设计设置（版本已递增）"
           : result.canvasChanged
             ? "已保存画布版本（版本已递增）"
             : "已保存设计（版本已递增）",
@@ -267,12 +310,14 @@ export function ShotDesignPanel({
       const freshShot = workbench.shot;
       if (!freshShot) throw new Error("服务器未返回该镜头的当前设计");
       setVisual(freshShot.visual_description);
+      setShotType(freshShot.shot_type);
+      setCameraMove(freshShot.camera_move ?? "");
+      setDurationSeconds(freshShot.duration_seconds ?? "");
       updateDraft(serverDesign(freshShot));
       return freshShot;
     },
     onSuccess: async () => {
       setConflict(null);
-      setReloadKey((value) => value + 1);
       await onSaved?.();
       setMessage("已载入服务器最新设计；请检查后再保存。");
     },
@@ -282,15 +327,17 @@ export function ShotDesignPanel({
   });
 
   const focusTitle =
-    focus === "character"
-      ? "角色"
-      : focus === "camera"
-        ? "机位"
-        : focus === "motion"
-          ? "运动"
-          : focus === "look"
-            ? "画面"
-            : "镜头设计";
+    focus === "prompts"
+      ? "提示词"
+      : focus === "character"
+        ? "角色"
+        : focus === "camera"
+          ? "机位"
+          : focus === "motion"
+            ? "运动"
+            : focus === "look"
+              ? "画面"
+              : "镜头设计";
 
   return (
     <div
@@ -313,6 +360,32 @@ export function ShotDesignPanel({
             onChange={(event) => setVisual(event.target.value)}
           />
         </label>
+      ) : null}
+      {showCharacter ? (
+        <section className="shot-voice-settings" aria-label="对白与配音">
+          <strong>对白与配音</strong>
+          <Field>
+            对白／旁白文本
+            <Textarea
+              aria-label="对白／旁白文本"
+              rows={3}
+              value={dialogue}
+              onChange={(event) => updateDraft({ ...draft, dialogue: event.target.value })}
+              placeholder="填写实际需要朗读的台词或旁白"
+            />
+          </Field>
+          {voiceSettings ? (
+            <ShotVoiceSettings projectId={projectId} value={voiceSettings} onChange={updateVoice} />
+          ) : (
+            <p role="alert">
+              高级导演参数中的配音设置暂时无效；原文已保留，请修正后再调整音色和语速。
+            </p>
+          )}
+          <p className="muted">
+            保存只更新本镜头设置，不会生成或试听。保存后，到剪辑页显式「导出成片 MP4」时生成配音；
+            沿用实例默认的音色会在生成时确定并记录。已有成片不会因修改设置而自动重做。
+          </p>
+        </section>
       ) : null}
       {showCamera ? (
         <div className="qc-shot-design-canvas-fields" data-testid="shot-design-camera-facts">
@@ -373,16 +446,20 @@ export function ShotDesignPanel({
           />
         </label>
       ) : null}
-      {focus === "all" || focus === "camera" ? (
-        <label>
-          导演状态（JSON）
-          <textarea
-            aria-label="导演状态"
-            value={directorStateText}
-            onChange={(event) => updateDraft({ ...draft, director_state_text: event.target.value })}
-            spellCheck={false}
-          />
-        </label>
+      {focus === "all" || focus === "camera" || !voiceSettings ? (
+        <Disclosure title="高级导演参数（可选）" description="普通创作不需要修改这些参数">
+          <label>
+            导演状态（JSON）
+            <textarea
+              aria-label="导演状态"
+              value={directorStateText}
+              onChange={(event) =>
+                updateDraft({ ...draft, director_state_text: event.target.value })
+              }
+              spellCheck={false}
+            />
+          </label>
+        </Disclosure>
       ) : null}
       <button
         type="button"
@@ -415,7 +492,7 @@ export function ShotDesignPanel({
       )}
       {canvasDirty && (
         <p className="muted" data-testid="shot-design-canvas-note">
-          画面描述、镜头类型、机位运动与时长会作为新的画布版本保存，并成为后续执行的事实源。
+          对白、画面描述、镜头类型、机位运动与时长会作为新的画布版本保存，并成为后续执行的事实源。
         </p>
       )}
       {dirty ? (

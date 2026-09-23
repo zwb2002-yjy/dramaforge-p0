@@ -155,3 +155,29 @@
   font-size: var(--df-text-sm);
   color: var(--df-danger-text);
 }
+
+/* Avoid poster-sized placeholders when an asset has no media cover. */
+.qc-asset-grid {
+  gap: var(--df-space-4);
+}
+.qc-asset-cover {
+  aspect-ratio: auto;
+  display: flex;
+  justify-content: flex-start;
+  padding: var(--df-space-3) var(--df-space-4);
+  gap: var(--df-space-2);
+}
+.qc-asset-cover svg {
+  width: var(--df-space-6);
+  height: var(--df-space-6);
+}
+.qc-asset-card-body {
+  padding: var(--df-space-4);
+  gap: var(--df-space-3);
+}
+@media (max-width: 900px) {
+  .qc-asset-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--df-space-3);
+  }
+}

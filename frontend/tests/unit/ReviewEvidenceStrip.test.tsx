@@ -105,6 +105,16 @@ describe("ReviewEvidenceStrip", () => {
     fireEvent.click(screen.getByRole("button", { name: "定位mid 1秒" }));
     expect(seeks).toHaveBeenCalledWith(1);
   });
+  it("distinguishes missing automatic frame samples from a missing video", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => json(summary([])));
+    renderStrip();
+    expect(await screen.findByTestId("review-evidence-empty")).toHaveTextContent(
+      "暂无自动抽帧检查结果，可直接播放下方视频并进行人工审片。",
+    );
+    expect(screen.queryByText("当前没有可用的视频证据。")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
   it("shows unavailable evidence without manufacturing a frame or request", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
       json(

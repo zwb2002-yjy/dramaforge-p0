@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { CapabilitySpecRead } from "../../src/lib/api";
+import type { CapabilitySpecRead, ParameterSpecRead } from "../../src/lib/api";
 import {
   allowedValuesFor,
   constraintViolations,
@@ -12,22 +12,28 @@ import {
   uiComponentFor,
 } from "../../src/lib/manifestOptions";
 
+function parameter(
+  value: Omit<ParameterSpecRead, "required" | "deprecated" | "sensitive">,
+): ParameterSpecRead {
+  return { required: false, deprecated: false, sensitive: false, ...value };
+}
+
 const DURATION_RESOLUTION_SPEC: CapabilitySpecRead = {
   capability: "video.image_to_video",
   input_slots: {},
   common_options: {
-    duration_seconds: {
+    duration_seconds: parameter({
       type: "number",
       ui_component: "number",
-    },
-    resolution: {
+    }),
+    resolution: parameter({
       type: "string",
       enum: ["720p", "1080p"],
       ui_component: "select",
-    },
+    }),
   },
   native_options: {
-    seed: { type: "integer", ui_component: "number" },
+    seed: parameter({ type: "integer", ui_component: "number" }),
   },
   constraints: {
     mutually_exclusive: [],
@@ -46,12 +52,14 @@ const DURATION_RESOLUTION_SPEC: CapabilitySpecRead = {
 
 describe("uiComponentFor", () => {
   it("maps boolean to switch and enum to select", () => {
-    expect(uiComponentFor({ type: "boolean" })).toBe("switch");
-    expect(uiComponentFor({ type: "string", enum: ["a", "b"] })).toBe("select");
+    expect(uiComponentFor(parameter({ type: "boolean" }))).toBe("switch");
+    expect(uiComponentFor(parameter({ type: "string", enum: ["a", "b"] }))).toBe("select");
   });
 
   it("respects an explicit ui_component", () => {
-    expect(uiComponentFor({ type: "string", ui_component: "textarea" })).toBe("textarea");
+    expect(uiComponentFor(parameter({ type: "string", ui_component: "textarea" }))).toBe(
+      "textarea",
+    );
   });
 });
 
@@ -61,7 +69,7 @@ describe("allowedValuesFor", () => {
       allowedValuesFor(
         DURATION_RESOLUTION_SPEC,
         "resolution",
-        { type: "string", enum: ["720p", "1080p"] },
+        parameter({ type: "string", enum: ["720p", "1080p"] }),
         { duration_seconds: 10 },
       ),
     ).toEqual(["720p"]);
@@ -69,7 +77,7 @@ describe("allowedValuesFor", () => {
       allowedValuesFor(
         DURATION_RESOLUTION_SPEC,
         "resolution",
-        { type: "string", enum: ["720p", "1080p"] },
+        parameter({ type: "string", enum: ["720p", "1080p"] }),
         { duration_seconds: 5 },
       ),
     ).toEqual(["720p", "1080p"]);

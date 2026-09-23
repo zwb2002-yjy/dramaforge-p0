@@ -59,10 +59,11 @@ test("create=false is normalized without logging out; only explicit logout chang
   await expect(page.getByRole("region", { name: "新建项目" })).not.toBeVisible();
   expect(writes).toEqual([]);
   await page.goto("/settings/defaults");
-  await expect(page).toHaveURL(/\/?create=true$/);
-  await expect(page.getByRole("region", { name: "新建项目" })).toBeVisible();
-  await page.getByRole("button", { name: "取消", exact: true }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL("/settings/defaults");
+  await expect(page.getByRole("tab", { name: "默认模型" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   expect(writes).toEqual([]);
   await page.goto("/settings/account");
   await expect(page.getByText("owner@example.com")).toBeVisible();
@@ -101,11 +102,15 @@ test("director policy follows creation, not project model settings", async ({ pa
       body: { expected_version: 1, director_autonomy: "MANUAL" },
     },
   ]);
-  await page.getByRole("link", { name: "场景", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "创作流程" })
+    .getByRole("link", { name: "03 分镜制作", exact: true })
+    .click();
   await expect(policy).toHaveValue("MANUAL");
   await page.goto(`/settings/projects/${PROJECT_ID}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
   await expect(page.getByRole("combobox", { name: "导演参与度" })).toHaveCount(0);
+  await page.getByRole("link", { name: "设置", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "设置导航" }).getByRole("link")).toHaveCount(2);
   expect(errors).toEqual([]);
 });
@@ -120,7 +125,7 @@ test("workspace management belongs to Projects and no longer contains model conf
     "aria-current",
     "page",
   );
-  await page.getByTestId("workspace-management-disclosure").locator(":scope > summary").click();
+  await expect(page.getByRole("heading", { name: "工作空间", level: 1 })).toBeVisible();
   await expect(page.getByRole("region", { name: "工作空间管理" })).toBeVisible();
   await expect(page.getByTestId("workspace-model-profile-settings")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "创建空间", exact: true })).toBeVisible();
@@ -148,7 +153,8 @@ test("project model fields fit a narrow window without overlapping or overflowin
   // Close the small-window navigation through its single active control.
   await page.getByRole("link", { name: "设置", exact: true }).click();
   const controls = page.getByTestId("model-profile-settings").locator("select");
-  await expect(controls).toHaveCount(4);
+  await expect(controls).toHaveCount(3);
+  await expect(page.getByTestId("model-picker-audio.tts")).toHaveCount(0);
   const bounds = await controls.evaluateAll((elements) =>
     elements.map((element) => {
       const parent = element.closest("label")!.getBoundingClientRect();
@@ -280,7 +286,7 @@ test("return links respect production and model parents instead of relying on br
   const { writes, errors } = await setup(page);
   for (const [path, label, target] of [
     [`/projects/${PROJECT_ID}/production`, "返回项目大厅", "/"],
-    [`/projects/${PROJECT_ID}/review`, "返回制作", `/projects/${PROJECT_ID}/production`],
+    [`/projects/${PROJECT_ID}/review`, "返回作品总览", `/projects/${PROJECT_ID}/production`],
     [`/settings/projects/${PROJECT_ID}`, "返回模型连接", "/settings/models"],
   ]) {
     await page.goto(path);

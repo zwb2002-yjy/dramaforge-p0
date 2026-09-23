@@ -249,7 +249,7 @@ class ReviewDecisionBody(BaseModel):
     artifact_id: UUID
     review_node_run_id: UUID
     review_kind: str = Field(pattern="^(identity|video_drift|continuity)$")
-    decision: str = Field(pattern="^(approved|rejected)$")
+    decision: str = Field(pattern="^(approved|rejected|demo_confirmed)$")
     reason: str = Field(min_length=1, max_length=4000)
     expected_shot_version: int | None = Field(default=None, ge=1)
 
@@ -410,6 +410,8 @@ async def read_review_summary(
         actions.append("approve")
     if requirement.decision != "rejected":
         actions.append("reject")
+    if requirement.decision != "demo_confirmed":
+        actions.append("demo_confirm")
     if admission.allowed:
         actions.append("set_formal")
     return ReviewSummaryRead(
@@ -487,6 +489,7 @@ class ReviewEvidenceRequestBody(BaseModel):
 
     artifact_id: UUID
     stage: str = Field(default="formal_keyframe", pattern="^(formal_keyframe|formal_video)$")
+    force: bool = False
 
 
 class ReviewEvidenceRequestRead(BaseModel):
@@ -538,6 +541,7 @@ async def create_review_evidence(
         artifact_id=body.artifact_id,
         stage=stage,  # type: ignore[arg-type]
         created_by=user.id,
+        force=body.force,
     )
     await session.commit()
     already_running = review_run.status != "queued"

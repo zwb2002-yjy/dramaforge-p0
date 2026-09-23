@@ -5,6 +5,9 @@ type TraceRow = {
   node_key?: unknown;
   status?: unknown;
   operation_outcome_unknown?: unknown;
+  queue_position?: unknown;
+  queued_ahead?: unknown;
+  estimated_wait_seconds?: unknown;
 };
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "cancel_requested"]);
@@ -65,4 +68,28 @@ export function stageOutcomeUnknown(trace: unknown[], stage: ShotExecutionStage)
   const nodeKey = stage === "image_keyframe" ? "keyframe" : "video";
   const row = latestEffectiveTraceRows(trace).find((candidate) => candidate.node_key === nodeKey);
   return row?.operation_outcome_unknown === true;
+}
+
+export type StageQueueEstimate = {
+  position: number;
+  ahead: number;
+  estimatedWaitSeconds: number | null;
+};
+
+export function stageQueueEstimate(
+  trace: unknown[],
+  stage: ShotExecutionStage,
+): StageQueueEstimate | null {
+  const nodeKey = stage === "image_keyframe" ? "keyframe" : "video";
+  const row = latestEffectiveTraceRows(trace).find((candidate) => candidate.node_key === nodeKey);
+  if (!row || normalizedStatus(row) !== "queued" || typeof row.queue_position !== "number") {
+    return null;
+  }
+  return {
+    position: row.queue_position,
+    ahead:
+      typeof row.queued_ahead === "number" ? row.queued_ahead : Math.max(0, row.queue_position - 1),
+    estimatedWaitSeconds:
+      typeof row.estimated_wait_seconds === "number" ? row.estimated_wait_seconds : null,
+  };
 }

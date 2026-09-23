@@ -15,6 +15,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -23,6 +25,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 5s
+    restart: unless-stopped
 
   minio:
     # MinIO publishes only to quay.io; the Docker Hub `minio/minio` repository was
@@ -39,6 +43,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   # LiteLLM Proxy (fix spec §4.1/§6/§11). Official BerriAI image, pinned. The
   # Proxy is DramaForge's unified LLM scheduler: it owns Router load-balancing /
@@ -58,6 +64,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   litellm:
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0}
@@ -164,11 +172,14 @@ services:
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
-      TTS_VOICE: ${TTS_VOICE:-zh}
+      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       minio:
@@ -287,6 +298,8 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:
@@ -343,11 +356,14 @@ services:
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
-      TTS_VOICE: ${TTS_VOICE:-zh}
+      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:
@@ -388,6 +404,8 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:
@@ -396,7 +414,7 @@ services:
       - ALL
     command: ["arq", "app.workers.director.WorkerSettings"]
     healthcheck:
-      test: ["CMD", "arq", "app.workers.director.WorkerSettings", "--check"]
+      test: ["CMD", "python", "-m", "app.workers.healthcheck"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -445,11 +463,14 @@ services:
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
-      TTS_VOICE: ${TTS_VOICE:-zh}
+      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:

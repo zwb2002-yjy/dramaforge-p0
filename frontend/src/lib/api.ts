@@ -20,6 +20,10 @@ function workspaceScopedUrl(path: string): string {
   return `${API_BASE}${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
 }
 
+export function eventStreamUrl(workspaceId: string): string {
+  return `${API_BASE}/api/v1/events/stream?workspace_id=${encodeURIComponent(workspaceId)}`;
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -60,8 +64,13 @@ async function parseError(response: Response): Promise<ApiError> {
   return new ApiError(detail, response.status, code, details);
 }
 
-export async function apiGet<T>(path: string, workspaceIdOverride?: string | null): Promise<T> {
+export async function apiGet<T>(
+  path: string,
+  workspaceIdOverride?: string | null,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
+    signal,
     credentials: "include",
     headers: { Accept: "application/json", ...workspaceHeaders(workspaceIdOverride) },
   });
@@ -73,8 +82,9 @@ export async function apiGet<T>(path: string, workspaceIdOverride?: string | nul
 export async function apiGetList<T>(
   path: string,
   workspaceIdOverride?: string | null,
+  signal?: AbortSignal,
 ): Promise<T[]> {
-  const body = await apiGet<unknown>(path, workspaceIdOverride);
+  const body = await apiGet<unknown>(path, workspaceIdOverride, signal);
   if (Array.isArray(body)) return body as T[];
 
   const actual = body === null ? "null" : Array.isArray(body) ? "array" : typeof body;
@@ -129,7 +139,7 @@ export function fetchBootstrapStatus(): Promise<BootstrapStatusRead> {
   return apiGet<BootstrapStatusRead>("/api/v1/auth/bootstrap-status");
 }
 
-export type CsrfResponse = { csrf_token: string };
+export type CsrfResponse = components["schemas"]["CsrfRead"];
 export type UserRead = components["schemas"]["UserRead"];
 export type WorkspaceRead = components["schemas"]["WorkspaceRead"];
 export type ProviderConnectionRead = components["schemas"]["ConnectionRead"];
@@ -243,7 +253,12 @@ export function listProviderModelBindings(
 export async function createProviderModelBinding(
   workspaceId: string,
   connectionId: string,
-  input: { media_type: "image" | "video"; model_id: string; purpose: "keyframe" | "video" },
+  input: {
+    media_type: "image" | "video";
+    model_id: string;
+    purpose: "keyframe" | "video";
+    capability_contract_id?: string;
+  },
 ): Promise<ProviderModelBindingRead> {
   const csrf = await fetchCsrf();
   return apiSend(
@@ -304,46 +319,16 @@ export function listProjectProviderBindings(
 // ---------------------------------------------------------------------------
 
 export type ModelSlotRead = components["schemas"]["ModelSlotRead"];
-export type ProfileBindingInput = {
-  model_id: string;
-  native_options?: Record<string, unknown>;
-  enabled?: boolean;
-};
-
-export type ProfileBindingRead = {
-  slot: string;
-  model_id: string;
-  native_options: Record<string, unknown>;
-  enabled: boolean;
-  provider_id: string;
-  display_name: string;
-  configured: boolean;
-};
-
-export type ModelProfileRead = {
-  id: string;
-  workspace_id: string;
-  project_id: string | null;
-  name: string;
-  version: number;
-  is_default: boolean;
-  bindings: Record<string, ProfileBindingRead>;
-  created_at: string;
-  updated_at: string;
-};
-
-export type ModelProfileSummary = {
-  id: string;
-  workspace_id: string;
-  project_id: string | null;
-  name: string;
-  version: number;
-  is_default: boolean;
-  binding_slots: string[];
-  updated_at: string;
-};
+export type ProfileBindingInput = components["schemas"]["BindingInput"];
+export type ProfileBindingRead =
+  components["schemas"]["app__providers__model_profiles__schemas__BindingRead"];
+export type ModelProfileRead = components["schemas"]["ProfileRead"];
+export type ModelProfileSummary = components["schemas"]["ProfileSummaryRead"];
 
 export type EffectiveBindingRead = components["schemas"]["EffectiveBindingRead"];
+export type ExecutionModelPreflightStageRead =
+  components["schemas"]["ExecutionModelPreflightStageRead"];
+export type ExecutionModelPreflightRead = components["schemas"]["ExecutionModelPreflightRead"];
 export function listModelSlots(): Promise<ModelSlotRead[]> {
   return apiGetList<ModelSlotRead>("/api/v1/model-slots");
 }
@@ -441,6 +426,13 @@ export async function putProjectModelProfile(
 
 export function getEffectiveBindings(projectId: string): Promise<EffectiveBindingRead[]> {
   return apiGet(`/api/v1/projects/${projectId}/model-bindings/effective`);
+}
+
+/** Exact production resolver result; read-only and never contacts a Provider. */
+export function getExecutionModelPreflight(
+  projectId: string,
+): Promise<ExecutionModelPreflightRead> {
+  return apiGet(`/api/v1/projects/${projectId}/execution-models/preflight`);
 }
 
 export type ProjectRead = components["schemas"]["ProjectRead"];
@@ -806,46 +798,10 @@ export function artifactContentUrl(projectId: string, artifactId: string): strin
 // ---------------------------------------------------------------------------
 
 export type ModelRead = components["schemas"]["ModelRead"];
-export interface ParameterSpecRead {
-  type: "string" | "integer" | "number" | "boolean" | "array" | "object";
-  title?: string | null;
-  description?: string | null;
-  required?: boolean;
-  default?: unknown;
-  enum?: unknown[];
-  minimum?: number | null;
-  maximum?: number | null;
-  ui_component?:
-    "switch" | "select" | "number" | "slider" | "input" | "textarea" | "multi_select" | null;
-}
-
-export interface InputSlotSpecRead {
-  required: boolean;
-  minimum: number;
-  maximum?: number | null;
-  media_types: string[];
-  description?: string | null;
-}
-
-export interface ConditionalConstraintRead {
-  when: Record<string, unknown>;
-  require: string[];
-  forbid: string[];
-  allowed: Record<string, unknown[]>;
-}
-
-export interface CapabilitySpecRead {
-  capability: string;
-  input_slots: Record<string, InputSlotSpecRead>;
-  common_options: Record<string, ParameterSpecRead>;
-  native_options: Record<string, ParameterSpecRead>;
-  constraints: {
-    mutually_exclusive: string[][];
-    requires: Record<string, string[]>;
-    conditional: ConditionalConstraintRead[];
-  };
-  transport_profile_id: string;
-}
+export type ParameterSpecRead = components["schemas"]["ParameterSpec"];
+export type InputSlotSpecRead = components["schemas"]["InputSlotSpec"];
+export type ConditionalConstraintRead = components["schemas"]["ConditionalConstraint"];
+export type CapabilitySpecRead = components["schemas"]["CapabilitySpec"];
 
 export async function listModels(capability?: string): Promise<ModelRead[]> {
   const query = capability ? `?capability=${encodeURIComponent(capability)}` : "";

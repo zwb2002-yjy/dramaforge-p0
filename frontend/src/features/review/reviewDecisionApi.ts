@@ -14,13 +14,9 @@ export type ReviewDecisionRead = components["schemas"]["ReviewDecisionRead"];
 export type ReviewDecisionKind = "identity" | "video_drift" | "continuity";
 export type ReviewStage = "formal_keyframe" | "formal_video" | "delivery";
 
-export type ReviewDecisionWrite = {
-  artifact_id: string;
-  review_node_run_id: string;
+export type ReviewDecisionWrite = components["schemas"]["ReviewDecisionBody"] & {
   review_kind: ReviewDecisionKind;
-  decision: "approved" | "rejected";
-  reason: string;
-  expected_shot_version?: number | null;
+  decision: "approved" | "rejected" | "demo_confirmed";
 };
 
 export function fetchReviewSummary(
@@ -72,7 +68,7 @@ export async function createReviewDecision(
 export async function createReviewEvidence(
   projectId: string,
   shotId: string,
-  input: { artifact_id: string; stage: ReviewStage },
+  input: { artifact_id: string; stage: ReviewStage; force?: boolean },
 ): Promise<components["schemas"]["ReviewEvidenceRequestRead"]> {
   const csrf = await fetchCsrf();
   return apiSend<components["schemas"]["ReviewEvidenceRequestRead"]>(

@@ -8,6 +8,7 @@ import {
   Film,
   FolderKanban,
   Package,
+  CheckCheck,
   Scissors,
   Settings,
   UserRound,
@@ -47,7 +48,7 @@ function primarySectionFromPath(pathname: string, panel?: unknown): PrimarySecti
 
 function creationViewFromPath(pathname: string): string | null {
   const segment = pathname.match(/^\/projects\/[^/]+\/([^/]+)/)?.[1] ?? null;
-  return segment === "review" ? "production" : segment;
+  return segment;
 }
 
 function PrimaryLink({
@@ -98,12 +99,16 @@ function ContextLink({
   label,
   to,
   icon: Icon,
+  description,
+  step,
   search,
 }: {
   active: boolean;
   label: string;
   to: string;
   icon?: typeof FileText;
+  description?: string;
+  step?: string;
   search?: Record<string, unknown>;
 }) {
   return (
@@ -114,9 +119,19 @@ function ContextLink({
       activeProps={{}}
       className={active ? "active" : undefined}
       aria-current={active ? "page" : undefined}
+      aria-label={label}
     >
-      {Icon && <Icon size={17} aria-hidden="true" />}
-      <span>{label}</span>
+      {step ? (
+        <span className="df-context-step" aria-hidden="true">
+          {step}
+        </span>
+      ) : (
+        Icon && <Icon size={17} aria-hidden="true" />
+      )}
+      <span className="df-context-link-copy">
+        <span>{label}</span>
+        {description && <small>{description}</small>}
+      </span>
     </Link>
   );
 }
@@ -127,15 +142,19 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const pathname = location.pathname;
   const primary = primarySectionFromPath(pathname, location.search.panel);
   const projectId = projectIdFromPath(pathname);
-  const [secondaryOpen, setSecondaryOpen] = useState(
-    () => window.innerWidth >= 720 || primary === "settings",
-  );
+  const [secondaryOpen, setSecondaryOpen] = useState(() => window.innerWidth >= 1100);
+  useEffect(() => {
+    const wide = window.matchMedia("(min-width: 1100px)");
+    const syncNavigation = () => setSecondaryOpen(wide.matches);
+    wide.addEventListener("change", syncNavigation);
+    return () => wide.removeEventListener("change", syncNavigation);
+  }, []);
   const previousLocation = useRef(location.href);
   const previousPrimary = useRef(primary);
   useEffect(() => {
     if (previousPrimary.current !== primary) {
-      setSecondaryOpen(window.innerWidth >= 720 || primary === "settings");
-    } else if (previousLocation.current !== location.href && window.innerWidth < 720) {
+      setSecondaryOpen(window.innerWidth >= 1100);
+    } else if (previousLocation.current !== location.href && window.innerWidth < 1100) {
       setSecondaryOpen(false);
     }
     previousPrimary.current = primary;
@@ -162,7 +181,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
       queryClient.setQueryData(queryKeys.project.detail(projectId!), resolved.project);
       return resolved;
     },
-    enabled: Boolean(projectId && projectId !== "demo"),
+    enabled: Boolean(projectId),
     retry: false,
     staleTime: 60_000,
   });
@@ -171,9 +190,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const navigationProjectId =
     projectId ?? (returnTo ? projectIdFromPath(returnTo.split(/[?#]/)[0]) : null);
   const projectName =
-    navigationProjectId === "demo"
-      ? "演示项目"
-      : (projectContext.data?.project.name ?? (navigationProjectId ? "当前项目" : null));
+    projectContext.data?.project.name ?? (navigationProjectId ? "当前项目" : null);
   const settingsOrigin = primary === "settings" ? returnTo : location.href;
   const settingsSearch = settingsOrigin ? { returnTo: settingsOrigin } : {};
   const returnUrl = new URL(returnTo ?? "/", window.location.origin);
@@ -200,14 +217,12 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
         }
       : projectId && /^\/projects\/[^/]+\/scenes\/[^/]+$/.test(pathname)
         ? { to: `/projects/${projectId}/scenes`, search: {}, label: "返回场景" }
-        : projectId &&
-            creationViewFromPath(pathname) === "production" &&
-            pathname.endsWith("/review")
-          ? { to: `/projects/${projectId}/production`, search: {}, label: "返回制作" }
+        : projectId && creationViewFromPath(pathname) === "review" && pathname.endsWith("/review")
+          ? { to: `/projects/${projectId}/production`, search: {}, label: "返回作品总览" }
           : projectId || location.search.panel || location.search.create
             ? { to: "/", search: {}, label: "返回项目大厅" }
             : null;
-  const needsProjectContext = Boolean(projectId && projectId !== "demo");
+  const needsProjectContext = Boolean(projectId);
   const projectContent = needsProjectContext ? (
     projectContext.isPending ? (
       <main className="df-page">
@@ -333,32 +348,43 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
             </header>
             <nav aria-label="创作导航">
               <ContextLink
+                active={creationView === "production"}
+                label="作品总览"
+                to={`/projects/${projectId}/production`}
+                icon={Clapperboard}
+              />
+              <ContextLink
                 active={creationView === "script"}
-                label="剧本"
+                label="故事剧本"
+                step="01"
                 to={`/projects/${projectId}/script`}
                 icon={FileText}
               />
               <ContextLink
                 active={creationView === "assets"}
-                label="资产"
+                label="角色素材"
+                step="02"
                 to={`/projects/${projectId}/assets`}
                 icon={Package}
               />
               <ContextLink
                 active={creationView === "scenes"}
-                label="场景"
+                label="分镜制作"
+                step="03"
                 to={`/projects/${projectId}/scenes`}
                 icon={Film}
               />
               <ContextLink
-                active={creationView === "production"}
-                label="制作"
-                to={`/projects/${projectId}/production`}
-                icon={Clapperboard}
+                active={creationView === "review"}
+                label="审片确认"
+                step="04"
+                to={`/projects/${projectId}/review`}
+                icon={CheckCheck}
               />
               <ContextLink
                 active={creationView === "edit"}
-                label="剪辑"
+                label="剪辑成片"
+                step="05"
                 to={`/projects/${projectId}/edit`}
                 icon={Scissors}
               />

@@ -1,4 +1,5 @@
 import { artifactContentUrl } from "../../lib/api";
+import { nodeRunStatusKind } from "../../lib/runLabels";
 import { shotTypeLabel } from "../../lib/shotLabels";
 import type { ShotLite } from "./api";
 
@@ -17,14 +18,13 @@ type ShotStripProps = {
   onToggleExpanded?: () => void;
 };
 
-const FAILED_STATUSES = new Set(["failed", "error", "cancelled", "canceled"]);
-
 function hasTraceRisk(trace: unknown[]): boolean {
   return trace.some((value) => {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
     const row = value as Record<string, unknown>;
     const status = typeof row.status === "string" ? row.status.toLowerCase() : "";
-    return Boolean(row.error_code) || FAILED_STATUSES.has(status);
+    const kind = nodeRunStatusKind(status);
+    return Boolean(row.error_code) || kind === "failed" || kind === "unknown_submission";
   });
 }
 
@@ -83,7 +83,7 @@ export function ShotStrip({
               <button
                 type="button"
                 className={selected ? "active" : undefined}
-                aria-pressed={selected}
+                aria-current={selected ? "true" : undefined}
                 aria-label={`#${shot.shot_number} ${shotTypeLabel(shot.shot_type)} ${durationLabel(shot.duration_seconds)}`}
                 onClick={() => onSelectShot(shot.id)}
                 data-testid={`shot-strip-card-${shot.id}`}

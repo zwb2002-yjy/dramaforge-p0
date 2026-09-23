@@ -500,6 +500,16 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         },
       ]);
     }
+    if (path.endsWith("/workbench") && method === "GET") {
+      const shotId = path.split("/").at(-2) ?? SHOT_ID;
+      return json(route, {
+        shot: workspaceShot(state, state.shotVersion, shotId, shotId === SHOT_ID ? 1 : 2),
+        references: [],
+        candidates: shotId === SHOT_ID ? clone(state.candidates) : [],
+        trace: [],
+        old_version_warnings: [],
+      });
+    }
     if (path.endsWith("/workspace") && method === "GET") {
       return json(route, {
         scene: {
@@ -627,11 +637,31 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
             status: "completed",
             artifact_type: "image",
             mime_type: "image/png",
+            review_allowed: true,
+            review_decision_id: "88888888-8888-4888-8888-888888888888",
+            review_node_run_id: "99999999-8888-4777-8666-555555555555",
+            review_artifact_id: "aaaaaaaa-8888-4777-8666-555555555555",
+          },
+        ];
+      } else if (body.stage === "video") {
+        state.candidates = [
+          {
+            artifact_id: "candidate-video-1",
+            node_run_id: "run-video-1",
+            node_key: "video",
+            stage: "video",
+            status: "completed",
+            artifact_type: "video",
+            mime_type: "video/mp4",
+            review_allowed: true,
+            review_decision_id: "77777777-8888-4777-8666-555555555555",
+            review_node_run_id: "66666666-8888-4777-8666-555555555555",
+            review_artifact_id: "bbbbbbbb-8888-4777-8666-555555555555",
           },
         ];
       }
       return json(route, {
-        node_run_id: "run-keyframe-1",
+        node_run_id: body.stage === "video" ? "run-video-1" : "run-keyframe-1",
         graph_id: "graph-1",
         graph_version_id: "version-graph-1",
         status: "queued",
@@ -678,6 +708,18 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         version: state.shotVersion,
       });
     }
+    if (path.endsWith("/production-summary"))
+      return json(route, {
+        project_id: PROJECT_ID,
+        total_runs: 0,
+        completed_runs: 0,
+        running_runs: 0,
+        failed_runs: 0,
+        artifact_count: 0,
+        recent_failures: [],
+        has_more_failures: false,
+        stages: [],
+      });
     if (path.endsWith("/snapshot")) {
       return json(route, {
         project_id: PROJECT_ID,
@@ -716,6 +758,36 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       return json(route, []);
     if (path === "/api/v1/model-slots") return json(route, []);
     if (path.endsWith("/model-bindings/effective")) return json(route, []);
+    if (path.endsWith("/execution-models/preflight")) {
+      return json(route, {
+        project_id: PROJECT_ID,
+        ready: true,
+        stages: [
+          {
+            stage: "image_keyframe",
+            slot: "visual.keyframe",
+            purpose: "keyframe",
+            ready: true,
+            source: "project_profile",
+            requested_model_id: "provider/model-b",
+            resolved_model_id: "provider/model-b",
+            provider_model_binding_id: "77777777-7777-4777-8777-777777777777",
+            reason: null,
+          },
+          {
+            stage: "video",
+            slot: "video.shot",
+            purpose: "video",
+            ready: true,
+            source: "project_profile",
+            requested_model_id: "provider/model-b",
+            resolved_model_id: "provider/model-b",
+            provider_model_binding_id: "77777777-7777-4777-8777-777777777777",
+            reason: null,
+          },
+        ],
+      });
+    }
     if (path.endsWith("/model-profile") && method === "GET") {
       return json(route, { id: "project-profile", name: "当前项目", bindings: {}, version: 1 });
     }
@@ -869,6 +941,79 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
 
     const editSessionsPath = "/api/v1/projects/" + PROJECT_ID + "/edit-sessions";
     const editSessionPath = editSessionsPath + "/" + EDIT_SESSION_ID;
+
+    if (path === editSessionPath + "/final-films" && method === "GET") {
+      return json(route, []);
+    }
+
+    if (path === "/api/v1/projects/" + PROJECT_ID + "/final-film/prepare" && method === "POST") {
+      assertExactJson(
+        body,
+        {
+          edit_session_id: EDIT_SESSION_ID,
+          expected_timeline_version: state.editing.session.version,
+        },
+        "Final Film prepare body",
+      );
+      return json(route, {
+        project_id: PROJECT_ID,
+        edit_session_id: EDIT_SESSION_ID,
+        timeline_version: state.editing.session.version,
+        shot_ids: [SHOT_ID, SECOND_SHOT_ID],
+        node_run_ids: [],
+        preparation_fingerprint: "a".repeat(64),
+        status: "queued",
+      });
+    }
+
+    if (path === "/api/v1/projects/" + PROJECT_ID + "/final-film/render" && method === "POST") {
+      assertExactJson(
+        body,
+        {
+          edit_session_id: EDIT_SESSION_ID,
+          expected_timeline_version: state.editing.session.version,
+          name: "V1 Final Film",
+        },
+        "Final Film render body",
+      );
+      const expectedKey = `final-${EDIT_SESSION_ID}-${state.editing.session.version}-${"a".repeat(64)}`;
+      if ((await request.headerValue("idempotency-key")) !== expectedKey) {
+        throw new Error("Final Film render must use the frozen preparation identity");
+      }
+      return json(route, {
+        project_id: PROJECT_ID,
+        edit_session_id: EDIT_SESSION_ID,
+        timeline_version: state.editing.session.version,
+        node_run_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        attempt_no: 1,
+        status: "completed",
+        result: {
+          project_id: PROJECT_ID,
+          edit_session_id: EDIT_SESSION_ID,
+          timeline_version: state.editing.session.version,
+          export_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          artifact_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          node_run_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          provider_operation_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          format: "dramaforge-final-film-v1",
+          status: "completed",
+          duration_seconds: "9",
+          shot_count: 2,
+          timeline_clip_count: 2,
+          composite_artifact_ids: ["artifact-video-1", "artifact-video-2"],
+          source_commit: "e2e",
+          mime_type: "video/mp4",
+          byte_size: 9000,
+          storage_state: "available",
+          content_hash: "b".repeat(64),
+          formal_references: [],
+          subtitle_artifact_id: null,
+          subtitle_content_hash: null,
+          subtitle_byte_size: 0,
+          subtitle_cue_count: 0,
+        },
+      });
+    }
 
     if (path === editSessionsPath && method === "POST") {
       if (state.editing.created) throw new Error("EditSession creation must happen exactly once");

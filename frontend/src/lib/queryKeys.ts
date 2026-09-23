@@ -26,6 +26,8 @@ export const queryKeys = {
   project: {
     detail: (projectId: string) => ["project", projectId] as const,
     workspaceContext: (projectId: string) => ["project-workspace-context", projectId] as const,
+    creativeOptions: (workspaceId: string | null) =>
+      ["project-creative-options", workspaceId] as const,
   },
 
   scene: {
@@ -36,6 +38,7 @@ export const queryKeys = {
   },
 
   shot: {
+    voiceOptions: (projectId: string) => ["voice-options", projectId] as const,
     list: (projectId: string) => ["shots", projectId] as const,
     workbench: (projectId: string, shotId: string | null | undefined) =>
       ["shot-workbench", projectId, shotId] as const,
@@ -69,6 +72,12 @@ export const queryKeys = {
   },
 
   production: {
+    summary: (projectId: string) => ["production-summary", projectId] as const,
+    batchPreview: (projectId: string, sceneId: string | null, stage: string) =>
+      ["batch-production-preview", projectId, sceneId, stage] as const,
+    todos: (projectId: string) => ["production-todos", projectId] as const,
+    runHistory: (projectId: string) => ["production-run-history", projectId] as const,
+    artifactHistory: (projectId: string) => ["production-artifact-history", projectId] as const,
     snapshot: (projectId: string) => ["snapshot", projectId] as const,
     workflowOverview: (projectId: string) => ["workflow-overview", projectId] as const,
     provenance: (
@@ -108,9 +117,21 @@ export const queryKeys = {
       ["repair-plan", projectId, shotId] as const,
     repairs: (projectId: string, shotId: string | null | undefined) =>
       ["repairs", projectId, shotId] as const,
+    targetRepair: (
+      projectId: string,
+      shotId: string | null | undefined,
+      repairRequestId: string | null | undefined,
+    ) => ["review-target-repair", projectId, shotId, repairRequestId] as const,
+  },
+
+  maintenance: {
+    recovery: () => ["maintenance", "recovery"] as const,
   },
 
   editing: {
+    audioLibraryRoot: (projectId: string) => ["editing-audio-library", projectId] as const,
+    audioLibrary: (projectId: string, cursor: string | null) =>
+      ["editing-audio-library", projectId, cursor] as const,
     sessions: (projectId: string) => ["edit-sessions", projectId] as const,
     films: (projectId: string, sessionId: string | undefined, version: number | undefined) =>
       ["edit-final-films", projectId, sessionId, version] as const,
@@ -119,6 +140,7 @@ export const queryKeys = {
   },
 
   script: {
+    proposals: (projectId: string) => ["story-proposals", projectId] as const,
     workspace: (projectId: string) => ["script-workspace", projectId] as const,
   },
 
@@ -130,6 +152,7 @@ export const queryKeys = {
     workspaceProfile: (workspaceId: string | null, profileId: string | null) =>
       ["workspace-model-profile", workspaceId, profileId] as const,
     effectiveBindings: (projectId: string) => ["model-bindings-effective", projectId] as const,
+    executionPreflight: (projectId: string) => ["execution-model-preflight", projectId] as const,
     projectProfile: (projectId: string) => ["project-model-profile", projectId] as const,
     candidates: (projectId: string, operation: string) =>
       ["model-candidates", projectId, operation] as const,

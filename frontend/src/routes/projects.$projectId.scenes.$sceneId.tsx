@@ -10,14 +10,18 @@ export const projectSceneWorkspaceRoute = createRoute({
   path: "/scenes/$sceneId",
   validateSearch: (search: Record<string, unknown>) => ({
     shotId: typeof search.shotId === "string" ? search.shotId : undefined,
-    tool: search.tool === "director" ? "director" : undefined,
+    tool:
+      search.tool === "director" || search.tool === "prompts" || search.tool === "generate"
+        ? search.tool
+        : undefined,
+    ...(search.review === true ? { review: true as const } : {}),
   }),
   component: SceneWorkspacePage,
 });
 
 function SceneWorkspacePage() {
   const { projectId, sceneId } = projectSceneWorkspaceRoute.useParams();
-  const { shotId, tool } = projectSceneWorkspaceRoute.useSearch();
+  const { shotId, tool, review } = projectSceneWorkspaceRoute.useSearch();
   const navigate = projectSceneWorkspaceRoute.useNavigate();
   const [hasUnsavedDesign, setHasUnsavedDesign] = useState(false);
   const blocker = useBlocker({
@@ -33,6 +37,9 @@ function SceneWorkspacePage() {
         sceneId={sceneId}
         initialShotId={shotId}
         openDirector={tool === "director"}
+        openPrompts={tool === "prompts"}
+        openGenerate={tool === "generate"}
+        openCandidates={review}
         onDirtyStateChange={setHasUnsavedDesign}
         onOpenEditing={() =>
           void navigate({

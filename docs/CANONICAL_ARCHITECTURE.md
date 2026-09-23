@@ -1,7 +1,7 @@
 # CANONICAL_ARCHITECTURE — DramaForge 架构宪法
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
+Date: 2026-09-22 / Alembic head: 20260922_0077
 
 本文件定义 DramaForge **以后所有模块必须服从的架构世界观**。它是"宪法"，只回答
 "这个系统到底是什么、一个新模块应该归属哪里"。
@@ -26,7 +26,9 @@ Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
 
 ## 一、只有一条产品主流程
 
-DramaForge 的唯一产品主链：
+**产品路径的 canonical 定义在 [CREATION_FLOW.md](CREATION_FLOW.md)。** 下表是同一主链的
+**概念层摘要**（13 个概念节点），不是第二条路径；CURRENT / PRODUCT / RELEASE 中的
+主链句也只是摘要。
 
 ```text
 Project
@@ -285,16 +287,15 @@ subject / character / scene / camera / composition / lighting / motion
 `CompiledCreativeIntent` 的嵌套结构收敛为执行方案建议的 canonical 顶层字段表**，
 并明确哪些字段 canonical、哪些可选、哪些属 Provider-specific extension。
 
-### 4.3 参考意图已经在做原型语义
+### 4.3 参考意图已在契约层定义
 
-`backend/app/production/reference_intents.py` 的 `ShotReferenceIntent`
-已经承担了"引用身份而非 prompt 兜底"的语义（"deliberately carries identity
-rather than name/prompt fallback"），并已由 `CreativeIntent` 侧编译进
-ProductionCommand。
+`ShotReferenceIntent` 定义在 `backend/app/contracts/shot_reference.py`，承担
+"引用身份而非 prompt 兜底"的语义（"deliberately carries identity rather than
+name/prompt fallback"），并由 `CreativeIntent` 侧编译进 ProductionCommand。
 
-它当前**定义在 production 包内**，却被 `app/contracts/production_commands.py`
-导入，构成 contracts → production 的反向依赖。见
-[MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) 违规项 V-1。
+生产编译器旧导入路径仅重新导出同一类型。contracts → production 的反向依赖已移除，
+与 [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) §4.5、
+[ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) §4 一致。
 
 ---
 

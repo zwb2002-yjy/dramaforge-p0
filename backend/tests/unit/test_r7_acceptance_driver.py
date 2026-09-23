@@ -295,6 +295,55 @@ def test_unknown_free_video_is_revised_with_distinct_request_and_never_replayed(
     assert not any(key == "r7:test:shot-1:video" for _, _, key in requests if key)
 
 
+def test_review_submit_uses_staged_repair_api_and_marks_only_step_as_paid(tmp_path):
+    calls = []
+    with httpx.Client() as client:
+        run = driver.Acceptance(client, tmp_path / "state.json", real=True)
+        run.state["run_key"] = "test"
+        run.state["projects"] = {"template_auto": {"id": "project-1"}}
+        run.shots = lambda _project_id: [{"id": "shot-1"}]
+        run.shot = lambda _project_id, _shot_id: {
+            "formal_video_artifact_id": "formal-video-1"
+        }
+        run.read = lambda _path: {"provider_operations": []}
+        run.record_stage_decision = lambda *args, **kwargs: None
+
+        responses = {
+            "review:annotation": {"id": "annotation-1"},
+            "review:repair-plan": {
+                "annotation_count": 1,
+                "repair_options": ["rerun_video"],
+                "plan_hash": "a" * 64,
+            },
+            "review:repair-create": {"id": "repair-1"},
+            "review:repair-step-plan": {
+                "step_ordinal": 1,
+                "plan": {"plan_fingerprint": "b" * 64},
+            },
+            "review:repair-submit": {"node_run_id": "repair-run-1"},
+        }
+
+        def once(name, method, path, payload, *, paid=False, command_key=None):
+            calls.append((name, method, path, payload, paid, command_key))
+            return responses[name]
+
+        run.once = once
+        run.review_submit()
+
+    create = next(call for call in calls if call[0] == "review:repair-create")
+    preview = next(call for call in calls if call[0] == "review:repair-step-plan")
+    execute = next(call for call in calls if call[0] == "review:repair-submit")
+    assert create[2].endswith("/shots/shot-1/repairs")
+    assert create[3]["plan_hash"] == "a" * 64
+    assert preview[2].endswith("/repairs/repair-1/step-plan")
+    assert execute[2].endswith("/repairs/repair-1/steps")
+    assert execute[3]["expected_plan_fingerprint"] == "b" * 64
+    assert execute[4] is True
+    assert all(call[4] is False for call in calls if call[0] != "review:repair-submit")
+    assert run.state["review_repair"]["repair_id"] == "repair-1"
+    assert run.state["review_repair"]["repair_run_id"] == "repair-run-1"
+
+
 def test_candidate_promotion_preserves_prior_media_source_with_bounded_proof(tmp_path):
     previous = "a" * 40
     candidate = "b" * 40
@@ -332,6 +381,54 @@ def test_candidate_promotion_preserves_prior_media_source_with_bounded_proof(tmp
     assert run.state["candidate_sha"] == candidate
     assert run.state["candidate_history"][-1]["candidate_sha"] == previous
     assert run.state["assertions"]["candidate_source_equivalence"] == "PASS"
+
+
+def test_candidate_promotion_accepts_only_bounded_formal_composite_fix(tmp_path):
+    previous = "a" * 40
+    candidate = "b" * 40
+    proof_path = tmp_path / "candidate-equivalence.json"
+    changed_paths = [
+        "backend/app/execution/composite_media.py",
+        "backend/app/execution/experiment_nodes.py",
+        "backend/app/execution/local_nodes.py",
+        "backend/app/production/final_film.py",
+        "backend/tests/unit/test_composite_media.py",
+        "backend/tests/unit/test_final_film_timeline.py",
+        "backend/tests/unit/test_r7_acceptance_driver.py",
+        "scripts/prove_v1_r7_acceptance.py",
+    ]
+    proof_path.write_text(
+        json.dumps(
+            {
+                "equivalence_kind": "formal_composite_repair_isolation",
+                "previous_candidate": previous,
+                "candidate_sha": candidate,
+                "changed_paths": changed_paths,
+                "provider_submission_diff_empty": True,
+                "full_quality_gate": "PASS",
+                "formal_composite_pin_regression": "PASS",
+                "staged_repair_api_regression": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with httpx.Client() as client:
+        run = driver.Acceptance(client, tmp_path / "state.json", real=True)
+        run.state["candidate_sha"] = previous
+        run.state["assertions"].update(
+            {
+                "template_auto:formal_media": "PASS",
+                "free_assist:formal_media": "PASS",
+            }
+        )
+        run.save()
+
+        run.promote_candidate(candidate, proof_path)
+
+    assert run.state["candidate_sha"] == candidate
+    assert run.state["candidate_history"][-1]["reason"] == (
+        "formal_composite_repair_isolation"
+    )
 
 
 def test_local_editing_recovery_rejects_unrelated_failure_before_http(tmp_path):

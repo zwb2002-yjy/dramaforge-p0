@@ -17,6 +17,7 @@ from app.access.projects import ProjectService
 from app.api.deps import CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Episode, Scene, Shot
 from app.director.workflows.workflow_read_models import (
+    WorkflowOverview,
     build_project_workflow_overview,
 )
 
@@ -26,7 +27,7 @@ router = APIRouter(
 
 
 class WorkflowOverviewResponse(BaseModel):
-    overview: dict[str, object]
+    overview: WorkflowOverview
 
 
 @router.get(
@@ -86,4 +87,4 @@ async def get_workflow_overview(
         shots_by_scene=shots_by_scene,
         manifests_by_scene=manifests_by_scene,
     )
-    return WorkflowOverviewResponse(overview=overview.model_dump(mode="json"))
+    return WorkflowOverviewResponse(overview=overview)

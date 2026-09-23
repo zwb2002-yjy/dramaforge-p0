@@ -201,6 +201,44 @@ async def list_formal_candidates(
                 "created_at": artifact.created_at,
             }
         )
+
+    # Formal controls must be driven by the same server admission fact used by
+    # the mutation, not by a transient client guess after returning from the
+    # review page.  Enrich the existing candidate projection instead of
+    # introducing a second candidate/status table.
+    from app.production.review_gate import evaluate_artifact_admission
+
+    for shot_id, candidates in result.items():
+        hash_counts: dict[tuple[object, object], int] = {}
+        for candidate in candidates:
+            identity = (candidate.get("stage"), candidate.get("content_hash"))
+            hash_counts[identity] = hash_counts.get(identity, 0) + 1
+        for candidate in candidates:
+            stage = (
+                "formal_keyframe"
+                if candidate.get("stage") == "image_keyframe"
+                else "formal_video"
+            )
+            admission = await evaluate_artifact_admission(
+                session,
+                project_id=project_id,
+                shot_id=shot_id,
+                artifact_id=UUID(str(candidate["artifact_id"])),
+                stage=stage,
+            )
+            requirement = admission.requirements[0]
+            candidate.update(
+                {
+                    "review_allowed": admission.allowed,
+                    "review_decision": requirement.decision,
+                    "review_blocked_reason": requirement.blocked_reason,
+                    "review_node_run_id": requirement.review_node_run_id,
+                    "duplicate_content": hash_counts.get(
+                        (candidate.get("stage"), candidate.get("content_hash")), 0
+                    )
+                    > 1,
+                }
+            )
     return result
 
 

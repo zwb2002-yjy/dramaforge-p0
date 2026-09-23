@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import TextClause
@@ -231,13 +231,22 @@ async def list_queued_node_run_rls_scopes(
     return scopes
 
 
+# Heavy attempts are hard-bounded at 1800s. A 60s margin also outlives Arq's
+# in-progress grace/result retention. Recovery never steals a fresh attempt.
+PROVIDER_RECOVERY_LEASE = timedelta(seconds=1860)
+
+
 async def list_resumable_provider_node_run_rls_scopes(
     session: AsyncSession,
     *,
     limit: int,
     source_commit: str | None = None,
+    after_node_run_id: UUID | None = None,
+    stale_before: datetime | None = None,
 ) -> list[tuple[UUID, NodeRunRlsScope]]:
-    """Find interrupted Unified polls without exposing unrelated runtime rows."""
+    """Keyset-scan stale latest operations, exposing only persisted owner scopes."""
+    cutoff = stale_before or datetime.now(UTC) - PROVIDER_RECOVERY_LEASE
+    limit = min(max(limit, 0), 50)
     bind = session.get_bind()
     dialect = bind.dialect.name if bind is not None else ""
     if dialect == "postgresql":
@@ -246,24 +255,44 @@ async def list_resumable_provider_node_run_rls_scopes(
             text(
                 """
                 SELECT node_run_id, owner_user_id, workspace_id, project_id
-                FROM app.resumable_provider_node_run_contexts(:limit, :source_commit)
+                FROM app.resumable_provider_node_run_contexts(:limit, :source_commit,
+                    :after_node_run_id, :stale_before)
                 """
             ),
-            {"limit": limit, "source_commit": source_commit},
+            {
+                "limit": limit,
+                "source_commit": source_commit,
+                "after_node_run_id": after_node_run_id,
+                "stale_before": cutoff,
+            },
             NodeRunRlsScope,
             "node_run_id",
         )
 
-    from datetime import UTC, datetime, timedelta
-
     from app.execution.models import NodeRun, ProviderOperation
 
+    latest_operation = (
+        select(ProviderOperation.id)
+        .where(
+            ProviderOperation.node_run_id == NodeRun.id,
+            ProviderOperation.execution_path_version == "unified-v1",
+        )
+        .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
+        .limit(1)
+        .correlate(NodeRun)
+        .scalar_subquery()
+    )
     stmt = (
         select(NodeRun.id)
-        .join(ProviderOperation, ProviderOperation.node_run_id == NodeRun.id)
+        .join(ProviderOperation, ProviderOperation.id == latest_operation)
         .where(
             NodeRun.status.in_({"running", "cancel_requested"}),
-            ProviderOperation.execution_path_version == "unified-v1",
+            func.coalesce(NodeRun.started_at, NodeRun.created_at) < cutoff,
+            func.coalesce(
+                ProviderOperation.last_polled_at,
+                ProviderOperation.submitted_at,
+                ProviderOperation.created_at,
+            ) < cutoff,
             or_(
                 ProviderOperation.status.in_(
                     {"submitted", "running", "timed_out", "cancel_requested"}
@@ -271,13 +300,14 @@ async def list_resumable_provider_node_run_rls_scopes(
                 & ProviderOperation.provider_operation_id.is_not(None),
                 (ProviderOperation.status == "submission_started")
                 & ProviderOperation.provider_operation_id.is_(None)
-                & (ProviderOperation.created_at < datetime.now(UTC) - timedelta(minutes=30)),
+                & (ProviderOperation.created_at < cutoff),
             ),
         )
-        .distinct()
         .order_by(NodeRun.id)
         .limit(limit)
     )
+    if after_node_run_id is not None:
+        stmt = stmt.where(NodeRun.id > after_node_run_id)
     if source_commit is not None:
         stmt = stmt.where(NodeRun.input_snapshot["source_commit"].as_string() == source_commit)
     scopes: list[tuple[UUID, NodeRunRlsScope]] = []

@@ -2,12 +2,12 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 
 import { Button, Disclosure } from "../../components/ui";
-import type { ProjectSnapshot } from "../../lib/api";
+import { productionReadErrorMessage, type ProductionSummary } from "./api";
+import { ProductionFlowOverview } from "./ProductionFlowOverview";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { zhNode } from "../../lib/zh";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
 import type { SceneSummary } from "../scenes/api";
-import { latestEffectiveNodeRuns } from "./effectiveRuns";
 import "./production-monitor.css";
 
 type ProductionMonitorProps = {
@@ -21,18 +21,16 @@ type ProductionMonitorProps = {
     shot_type: string;
     status: string;
   }>;
-  snapshot?: ProjectSnapshot;
+  summary?: ProductionSummary;
   experimentCount?: number;
   scenesLoading?: boolean;
   scenesError?: boolean;
   shotsLoading?: boolean;
   shotsError?: boolean;
-  snapshotError?: boolean;
+  summaryError?: boolean;
+  summaryFailure?: unknown;
   onRetry?: () => void;
 };
-
-const DONE = new Set(["completed", "cached", "completed_after_cancel", "approved"]);
-const RUNNING = new Set(["queued", "running", "leased"]);
 
 type SceneFilter = "all" | "unfinished" | "risk";
 
@@ -59,23 +57,23 @@ export function ProductionMonitor({
   projectId,
   scenes,
   shots,
-  snapshot,
+  summary,
   experimentCount,
   scenesLoading = false,
   scenesError = false,
   shotsLoading = false,
   shotsError = false,
-  snapshotError = false,
+  summaryError = false,
+  summaryFailure,
   onRetry,
 }: ProductionMonitorProps) {
   const [filter, setFilter] = useState<SceneFilter>("all");
-  const runs = latestEffectiveNodeRuns(snapshot?.node_runs ?? []);
-  const completedRuns = runs.filter((run) => DONE.has(run.status)).length;
-  const runningRuns = runs.filter((run) => RUNNING.has(run.status)).length;
-  const failures = runs.filter((run) => run.status === "failed");
-  const failedRuns = failures.length;
+  const completedRuns = summary?.completed_runs ?? 0;
+  const runningRuns = summary?.running_runs ?? 0;
+  const failures = summary?.recent_failures ?? [];
+  const failedRuns = summary?.failed_runs ?? 0;
   const sceneFactsKnown = !scenesLoading && !scenesError;
-  const runFactsKnown = Array.isArray(snapshot?.node_runs) && !snapshotError;
+  const runFactsKnown = summary !== undefined && !summaryError;
   const risks = scenes.reduce((sum, scene) => sum + (scene.risk_count ?? 0), 0);
   const formalKeyframes = scenes.reduce(
     (sum, scene) => sum + (scene.formal_keyframe_count ?? 0),
@@ -113,11 +111,29 @@ export function ProductionMonitor({
 
   return (
     <section className="production-monitor" data-testid="production-monitor" aria-label="制作进度">
-      {(scenesError || shotsError || snapshotError) && (
+      {(scenesError || shotsError || summaryError) && (
         <div className="flash err" role="alert">
-          部分制作状态读取失败，相关统计暂不可用。已有场景列表可能不是最新状态。
+          {summaryError && <p>{productionReadErrorMessage(summaryFailure)}</p>}
+          {(scenesError || shotsError) && (
+            <p>部分制作状态读取失败，相关统计暂不可用。已有场景列表可能不是最新状态。</p>
+          )}
           {onRetry && <Button onClick={onRetry}>重新读取状态</Button>}
         </div>
+      )}
+      {sceneFactsKnown && scenes.length === 0 && (
+        <section
+          className="monitor-next-step"
+          data-testid="production-first-step"
+          aria-label="下一步"
+        >
+          <div>
+            <h2>先把故事变成分镜</h2>
+            <p>写下想法或导入剧本，确认建议后再制作画面。</p>
+          </div>
+          <Link className="df-btn primary" to="/projects/$projectId/script" params={{ projectId }}>
+            开始故事剧本
+          </Link>
+        </section>
       )}
       {sceneFactsKnown && scenes.length > 0 && (
         <section
@@ -191,6 +207,12 @@ export function ProductionMonitor({
         </span>
       </p>
 
+      <ProductionFlowOverview
+        projectId={projectId}
+        summary={summary}
+        unavailable={summaryError}
+        shots={!shotsLoading && !shotsError ? shots : []}
+      />
       {runFactsKnown && failedRuns > 0 && (
         <Disclosure title="查看失败执行" testId="production-failures-disclosure">
           <section className="monitor-failures" aria-label="失败执行详情">
@@ -201,14 +223,12 @@ export function ProductionMonitor({
               {failures.map((run) => {
                 const shot =
                   !shotsError && !shotsLoading
-                    ? shots.find((item) => item.id === run.input_snapshot?.shot_id)
+                    ? shots.find((item) => item.id === run.shot_id)
                     : undefined;
                 const scene = sceneFactsKnown
                   ? scenes.find((item) => item.id === shot?.scene_id)
                   : undefined;
-                const experiment =
-                  run.input_snapshot?.experiment_id ||
-                  run.input_snapshot?.execution_branch === "experiment";
+                const experiment = run.experiment_id || run.execution_branch === "experiment";
                 return (
                   <li key={run.id}>
                     <span>
@@ -230,6 +250,9 @@ export function ProductionMonitor({
                 );
               })}
             </ul>
+            {summary?.has_more_failures && (
+              <p>这里只显示最近 20 条失败执行，完整记录见下方任务历史。</p>
+            )}
           </section>
         </Disclosure>
       )}
@@ -348,7 +371,7 @@ export function ProductionMonitor({
           <div>
             <dt>媒体结果</dt>
             <dd data-testid="stat-artifacts">
-              {!snapshotError ? (snapshot?.artifacts?.length ?? "—") : "—"}
+              {!summaryError ? (summary?.artifact_count ?? "—") : "—"}
             </dd>
           </div>
           <div>

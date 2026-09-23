@@ -21,12 +21,16 @@ import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ResonanceStage } from "../resonance/ResonanceStage";
+import { BatchProductionPanel } from "../production";
 
 type SceneWorkspaceProps = {
   projectId: string;
   sceneId: string;
   initialShotId?: string;
   openDirector?: boolean;
+  openPrompts?: boolean;
+  openGenerate?: boolean;
+  openCandidates?: boolean;
   onOpenEditing?: () => void;
   onDirtyStateChange?: (dirty: boolean) => void;
 };
@@ -44,6 +48,7 @@ function sameReferences(left: ShotExecutionReference[], right: ShotExecutionRefe
 
 function draftFromShot(shot: ShotLite): ShotDesignDraft {
   return {
+    dialogue: shot.dialogue ?? "",
     image_prompt: shot.image_prompt,
     video_prompt: shot.video_prompt,
     director_state: { ...shot.director_state },
@@ -67,6 +72,9 @@ export function SceneWorkspace({
   sceneId,
   initialShotId,
   openDirector = false,
+  openPrompts = false,
+  openGenerate = false,
+  openCandidates = false,
   onOpenEditing,
   onDirtyStateChange,
 }: SceneWorkspaceProps) {
@@ -75,9 +83,9 @@ export function SceneWorkspace({
   const [referenceDrafts, setReferenceDrafts] = useState<Record<string, ShotReferenceContext>>({});
   // Context Dock / sheet / tray / strip / details are pure UI state.
   const [activeTool, setActiveTool] = useState<ContextTool | null>(
-    openDirector ? "director" : null,
+    openGenerate ? "generate" : openPrompts ? "prompts" : openDirector ? "director" : null,
   );
-  const [trayExpanded, setTrayExpanded] = useState(false);
+  const [trayExpanded, setTrayExpanded] = useState(openCandidates);
   const [stripExpanded, setStripExpanded] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [intentSeed, setIntentSeed] = useState<{
@@ -93,7 +101,7 @@ export function SceneWorkspace({
   const workspace = useQuery({
     queryKey: queryKeys.scene.workspace(projectId, sceneId),
     queryFn: () => fetchSceneWorkspace(projectId, sceneId),
-    enabled: Boolean(projectId) && Boolean(sceneId) && projectId !== "demo",
+    enabled: Boolean(projectId) && Boolean(sceneId),
     refetchInterval: (query) =>
       hasActiveSceneRuns(query.state.data?.trace as Record<string, unknown[]> | undefined)
         ? SCENE_ACTIVE_REFETCH_MS
@@ -104,8 +112,10 @@ export function SceneWorkspace({
     setSelectedShotId(initialShotId ?? null);
     setPreviewCandidate(null);
     setReferenceDrafts({});
-    setActiveTool(openDirector ? "director" : null);
-    setTrayExpanded(false);
+    setActiveTool(
+      openGenerate ? "generate" : openPrompts ? "prompts" : openDirector ? "director" : null,
+    );
+    setTrayExpanded(openCandidates);
     setStripExpanded(false);
     setDetailsOpen(false);
     setIntentSeed(null);
@@ -113,7 +123,7 @@ export function SceneWorkspace({
     setDesignDrafts({});
     setSuggestionDraft(null);
     setPendingShotId(null);
-  }, [projectId, sceneId, initialShotId, openDirector]);
+  }, [projectId, sceneId, initialShotId, openDirector, openPrompts, openGenerate, openCandidates]);
 
   useEffect(() => {
     onDirtyStateChange?.(designDirty);
@@ -306,6 +316,11 @@ export function SceneWorkspace({
         </div>
       </header>
 
+      <details className="panel batch-production-disclosure">
+        <summary>按场景批量生成</summary>
+        <BatchProductionPanel projectId={projectId} sceneId={sceneId} />
+      </details>
+
       {data && selectedShotId !== null && !selected && (
         <p role="alert">目标镜头不在此场景，请重新选择镜头。</p>
       )}
@@ -403,6 +418,10 @@ export function SceneWorkspace({
             requestedTool={activeTool}
             intentSeed={intentSeed?.shotId === selectedShotKey ? intentSeed : null}
             onClose={() => setActiveTool(null)}
+            onOpenDetails={() => {
+              setActiveTool(null);
+              setDetailsOpen(true);
+            }}
             designDirty={designDirty}
             onDesignDirtyChange={updateDesignDirty}
             designDraft={designDraft}

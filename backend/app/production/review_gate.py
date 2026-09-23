@@ -21,7 +21,7 @@ from app.execution.models import Artifact, GraphNode, NodeRun
 from app.shared.errors import ConflictError, ValidationAppError
 
 ReviewKind = Literal["identity", "video_drift", "continuity"]
-ReviewDecision = Literal["approved", "rejected"]
+ReviewDecision = Literal["approved", "rejected", "demo_confirmed"]
 
 # Review NodeRun node keys, in the vocabulary of the canonical shot pipeline.
 REVIEW_NODE_KEYS: dict[ReviewKind, str] = {
@@ -140,6 +140,7 @@ class ReviewRequirement:
     decision_reason: str | None
     applies: bool
     blocked_reason: str | None
+    decision_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -310,6 +311,7 @@ async def evaluate_artifact_admission(
         review_artifact_id=review_artifact_id,
         machine_status=machine_status,
         decision=decision.decision if decision else None,
+        decision_id=decision.id if decision else None,
         decision_reason=decision.reason if decision else None,
         applies=decision is not None,
         blocked_reason=None,
@@ -344,8 +346,8 @@ async def evaluate_artifact_admission(
             )
         return StageAdmission(allowed=True, review_kind=review_kind, requirements=[requirement])
 
-    # No human decision yet. A machine outcome that asked for a person blocks
-    # production; missing evidence is reported as "review not yet recorded".
+    # No quality approval yet. A demo-only confirmation remains visible but
+    # cannot satisfy this gate; machine evidence still awaits a human verdict.
     reason = (
         "REVIEW_AWAITING_HUMAN"
         if machine_status in _OUTCOME_UNKNOWN_STATUSES
@@ -363,6 +365,7 @@ def _with_reason(requirement: ReviewRequirement, reason: str | None) -> ReviewRe
         review_artifact_id=requirement.review_artifact_id,
         machine_status=requirement.machine_status,
         decision=requirement.decision,
+        decision_id=requirement.decision_id,
         decision_reason=requirement.decision_reason,
         applies=requirement.applies,
         blocked_reason=reason,

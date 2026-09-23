@@ -68,6 +68,8 @@ def test_branch_flow_admits_dependency_integration_but_protects_main() -> None:
     for base, head, allowed in [
         ("dev", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", True),
         ("dev", "agent/runtime-policy", True),
+        ("dev", "codex/workbench-optimization", True),
+        ("main", "codex/workbench-optimization", False),
         ("dev", "unreviewed-feature", False),
         ("main", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", False),
         ("main", "dev", True),
@@ -210,11 +212,14 @@ def test_changed_path_classifier_routes_fast_and_full_gates(tmp_path: Path) -> N
             assert actual[name] == value, case_name
 
 
-def test_ci_gates_optional_dependency_review_on_repository_capability() -> None:
+def test_ci_runs_dependency_review_without_a_silent_repository_variable_gate() -> None:
     workflow = _WORKFLOW.read_text(encoding="utf-8")
     dependency_review = _job(workflow, "dependency-review")
 
-    assert "vars.DEPENDENCY_REVIEW_ENABLED == 'true'" in dependency_review
+    assert "DEPENDENCY_REVIEW_ENABLED" not in dependency_review
+    assert "github.base_ref == 'main'" in dependency_review
+    assert "needs.policy.outputs.python_deps == 'true'" in dependency_review
+    assert "needs.policy.outputs.frontend_deps == 'true'" in dependency_review
     assert "fail-on-severity: high" in dependency_review
     assert "continue-on-error:" not in dependency_review
 

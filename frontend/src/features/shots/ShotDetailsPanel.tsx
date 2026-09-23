@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
+import { useModalDialog } from "../../components/ui/useModalDialog";
 import { fetchExecutionTrace, type ExecutionTraceRead } from "../../lib/api";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { shotStatusLabel } from "../../lib/shotLabels";
@@ -26,15 +27,7 @@ export function ShotDetailsPanel({ open, projectId, shot, trace, onClose }: Shot
   const [traceDetail, setTraceDetail] = useState<ExecutionTraceRead | null>(null);
   const [traceDetailLoading, setTraceDetailLoading] = useState(false);
   const [traceDetailError, setTraceDetailError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  const dialogRef = useModalDialog<HTMLDivElement>(open, onClose);
 
   useEffect(() => {
     setSelectedRunId(null);
@@ -69,12 +62,14 @@ export function ShotDetailsPanel({ open, projectId, shot, trace, onClose }: Shot
 
   return (
     <div
+      ref={dialogRef}
       className="qc-shot-details-sheet"
       data-testid="shot-details-sheet"
       data-shot-id={shot?.id ?? undefined}
       role="dialog"
-      aria-modal="false"
+      aria-modal="true"
       aria-label="镜头生产详情"
+      tabIndex={-1}
     >
       <header>
         <div>

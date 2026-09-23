@@ -89,6 +89,9 @@ export function experimentErrorMessage(error: unknown, stage: ExperimentStage): 
   if (error instanceof ApiError) {
     const details = error.details as { code?: unknown; issues?: unknown } | null;
     const code = typeof details?.code === "string" ? details.code : error.code;
+    if (code === "SUBMISSION_OUTCOME_UNKNOWN") {
+      return "该镜头本阶段存在待对账提交，不能通过新候选任务绕过。请先核对供应商原任务回执。";
+    }
     if (code === "MODEL_BINDING_MISSING") {
       return `所选模型没有可用于${stageLabel}阶段的绑定，请改选阶段或模型。`;
     }

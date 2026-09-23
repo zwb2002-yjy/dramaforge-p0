@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { fetchRecoveryItems, replayRecoveryItem, type RecoveryItemRead } from "./api";
 import { zhErrorParts } from "../../lib/zh";
+import { queryKeys } from "../../lib/queryKeys";
 
 const KIND_LABELS: Record<RecoveryItemRead["kind"], string> = {
   director_wakeup: "导演唤醒失败",
@@ -44,7 +45,7 @@ export function AdvancedRecoveryPanel() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const items = useQuery({
-    queryKey: ["maintenance", "recovery"],
+    queryKey: queryKeys.maintenance.recovery(),
     queryFn: fetchRecoveryItems,
     retry: false,
   });
@@ -53,7 +54,7 @@ export function AdvancedRecoveryPanel() {
     onSuccess: async (result) => {
       setError(null);
       setMessage(result.applied ? "已提交重放。" : "该项已经重放过，无需重复操作。");
-      await queryClient.invalidateQueries({ queryKey: ["maintenance", "recovery"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.maintenance.recovery() });
     },
     onError: (cause: Error) => {
       setMessage(null);

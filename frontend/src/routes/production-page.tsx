@@ -1,54 +1,66 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { Field, Select, Tab, Tabs, PageHeader } from "../components/ui";
 import { useState } from "react";
 
+import { fetchProductionSummary } from "../features/production/api";
+import { ProductionHistoryPanel } from "../features/production/ProductionHistoryPanel";
 import { ProductionMonitor } from "../features/production/ProductionMonitor";
+import { BatchProductionPanel, ProductionTodoQueue } from "../features/production";
 import { ExperimentBranchPanel } from "../features/production/ExperimentBranchPanel";
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
 import { listModelCandidates } from "../features/production/modelCandidatesApi";
+import { fetchShotWorkbench } from "../features/shots/api";
+import { stageOutcomeUnknown } from "../features/production/sceneRunState";
 import { fetchScenes } from "../features/scenes/api";
 import {
+  ApiError,
   createExperiment,
   decideExperiment,
   fetchExperiments,
   fetchProjectShots,
-  fetchSnapshot,
   listModels,
   startExperiment,
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
 
-export function ProductionPage({ projectId }: { projectId: string }) {
+export function ProductionPage({
+  projectId,
+  initialView,
+  initialShotId,
+}: {
+  projectId: string;
+  initialView?: "experiments";
+  initialShotId?: string;
+}) {
   const qc = useQueryClient();
-  const [view, setView] = useState("progress");
+  const [view, setView] = useState(initialView ?? "progress");
   const [overrideScope, setOverrideScope] = useState<"scene" | "shot">("scene");
   const views = [
-    { id: "progress", label: "进度" },
+    { id: "progress", label: "作品进度" },
     { id: "workflow", label: "生成任务" },
     { id: "experiments", label: "版本尝试" },
-    { id: "advanced", label: "高级设置" },
+    { id: "advanced", label: "导演手法" },
   ];
-  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(initialShotId ?? null);
 
-  const snapshot = useQuery({
-    queryKey: queryKeys.production.snapshot(projectId),
-    queryFn: () => fetchSnapshot(projectId),
-    enabled: projectId !== "demo",
-    refetchInterval: 4000,
+  const summary = useQuery({
+    queryKey: queryKeys.production.summary(projectId),
+    queryFn: ({ signal }) => fetchProductionSummary(projectId, signal),
+    enabled: Boolean(projectId),
+    refetchInterval: (query) => ((query.state.data?.running_runs ?? 0) > 0 ? 4000 : 30000),
   });
   const shots = useQuery({
     queryKey: queryKeys.shot.list(projectId),
     queryFn: () => fetchProjectShots(projectId),
-    enabled: projectId !== "demo",
-    refetchInterval: 4000,
+    enabled: Boolean(projectId),
+    refetchInterval: 30000,
   });
   const scenes = useQuery({
     queryKey: queryKeys.scene.list(projectId),
     queryFn: () => fetchScenes(projectId),
-    enabled: projectId !== "demo",
-    refetchInterval: 4000,
+    enabled: Boolean(projectId),
+    refetchInterval: 30000,
   });
 
   const revisionShotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
@@ -58,12 +70,11 @@ export function ProductionPage({ projectId }: { projectId: string }) {
   // the first Scene so the Owner can configure it before any Shot exists.
   const [chosenSceneId, setChosenSceneId] = useState<string | null>(null);
   const firstSceneId = scenes.data?.[0]?.id ?? null;
-  const sceneCapabilityId =
-    projectId === "demo" ? null : (chosenSceneId ?? selectedSceneId ?? firstSceneId ?? null);
+  const sceneCapabilityId = chosenSceneId ?? selectedSceneId ?? firstSceneId ?? null;
   const experiments = useQuery({
     queryKey: queryKeys.experiment.list(projectId),
     queryFn: () => fetchExperiments(projectId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const availableModels = useQuery({
     queryKey: queryKeys.model.catalog(),
@@ -75,25 +86,17 @@ export function ProductionPage({ projectId }: { projectId: string }) {
   const keyframeCandidates = useQuery({
     queryKey: queryKeys.model.candidates(projectId, "image.generate"),
     queryFn: () => listModelCandidates(projectId, "image.generate"),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const videoCandidates = useQuery({
     queryKey: queryKeys.model.candidates(projectId, "video.generate"),
     queryFn: () => listModelCandidates(projectId, "video.generate"),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
   });
 
   return (
     <div data-testid="production-mode">
-      <nav className="qc-local-tabs" aria-label="制作视图">
-        <Link to="/projects/$projectId/production" params={{ projectId }} aria-current="page">
-          生产概览
-        </Link>
-        <Link to="/projects/$projectId/review" params={{ projectId }}>
-          待审内容
-        </Link>
-      </nav>
-      <PageHeader title="制作进度" />
+      <PageHeader title="作品总览" />
 
       <Tabs label="制作内容">
         {views.map((item) => (
@@ -119,19 +122,26 @@ export function ProductionPage({ projectId }: { projectId: string }) {
           projectId={projectId}
           scenes={Array.isArray(scenes.data) ? scenes.data : []}
           shots={shots.data ?? []}
-          snapshot={snapshot.data}
+          summary={summary.data}
           experimentCount={experiments.data?.length}
           scenesLoading={scenes.isPending}
           scenesError={scenes.isError}
           shotsLoading={shots.isPending}
           shotsError={shots.isError}
-          snapshotError={snapshot.isError}
+          summaryError={summary.isError}
+          summaryFailure={summary.error}
           onRetry={() => {
             void scenes.refetch();
             void shots.refetch();
-            void snapshot.refetch();
+            void summary.refetch();
           }}
         />
+        <ProductionTodoQueue projectId={projectId} />
+        <details className="panel">
+          <summary>批量生成与预算</summary>
+          <BatchProductionPanel projectId={projectId} />
+        </details>
+        <ProductionHistoryPanel projectId={projectId} />
       </section>
       <section
         id="production-panel-workflow"
@@ -234,8 +244,13 @@ export function ProductionPage({ projectId }: { projectId: string }) {
           </Select>
         </Field>
         <ExperimentBranchPanel
+          key={revisionShotId ?? "no-shot"}
           projectId={projectId}
-          experiments={Array.isArray(experiments.data) ? experiments.data : []}
+          experiments={
+            Array.isArray(experiments.data)
+              ? experiments.data.filter((item) => item.source_shot_id === revisionShotId)
+              : []
+          }
           models={Array.isArray(availableModels.data) ? availableModels.data : []}
           modelCandidates={{
             // `undefined` keeps "not loaded yet" distinct from "no binding".
@@ -253,6 +268,7 @@ export function ProductionPage({ projectId }: { projectId: string }) {
               input.targetNodeKey,
               input.selected_model,
               input.name,
+              input.promptOverride ?? "saved-shot-prompt",
             ].join("|");
             await createExperiment(projectId, {
               idempotency_key: `experiment:${identity}`,
@@ -261,19 +277,37 @@ export function ProductionPage({ projectId }: { projectId: string }) {
               selected_model: input.selected_model,
               // The stage is part of the experiment's identity: it selects the
               // model purpose and which adoption scopes the branch can offer.
-              parameters: { target_node_key: input.targetNodeKey },
+              parameters: {
+                target_node_key: input.targetNodeKey,
+                ...(input.promptOverride ? { prompt_override: input.promptOverride } : {}),
+              },
             });
             await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
           }}
           onStartExperiment={async (experimentId, targetNodeKey) => {
+            const experiment = experiments.data?.find((item) => item.id === experimentId);
+            if (!experiment?.source_shot_id) throw new Error("实验目标镜头不可用");
+            // A new variant is not a way around an unresolved paid submission.
+            // Re-read immediately before dispatch; a failed read fails closed.
+            const workbench = await fetchShotWorkbench(projectId, experiment.source_shot_id);
+            if (
+              stageOutcomeUnknown(
+                workbench.trace,
+                targetNodeKey === "keyframe" ? "image_keyframe" : "video",
+              )
+            ) {
+              throw new ApiError("该阶段提交结果待对账", 409, "SUBMISSION_OUTCOME_UNKNOWN");
+            }
             await startExperiment(projectId, experimentId, targetNodeKey);
             await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
             await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
+            await qc.invalidateQueries({ queryKey: queryKeys.production.summary(projectId) });
           }}
           onDecideExperiment={async (experimentId, input) => {
             await decideExperiment(projectId, experimentId, input);
             await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
             await qc.invalidateQueries({ queryKey: queryKeys.production.snapshot(projectId) });
+            await qc.invalidateQueries({ queryKey: queryKeys.production.summary(projectId) });
             await qc.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) });
           }}
         />

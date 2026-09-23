@@ -37,7 +37,10 @@ export function uiComponentFor(
  * Which options does this condition depend on? Only applied when the
  * "when" keys are present in the current values.
  */
-function whenKeys(conditional: CapabilitySpecRead["constraints"]["conditional"]): string[] {
+type ConstraintSpecRead = NonNullable<CapabilitySpecRead["constraints"]>;
+type ConditionalConstraintList = NonNullable<ConstraintSpecRead["conditional"]>;
+
+function whenKeys(conditional: ConditionalConstraintList): string[] {
   const keys = new Set<string>();
   for (const condition of conditional) {
     for (const key of Object.keys(condition.when)) keys.add(key);
@@ -57,10 +60,10 @@ export function allowedValuesFor(
   values: Record<string, OptionValue>,
 ): unknown[] {
   if (!parameter.enum) return [];
-  for (const condition of spec.constraints.conditional) {
+  for (const condition of spec.constraints?.conditional ?? []) {
     const matches = Object.entries(condition.when).every(([key, value]) => values[key] === value);
     if (!matches) continue;
-    const allowed = condition.allowed[optionKey];
+    const allowed = condition.allowed?.[optionKey];
     if (allowed !== undefined) return allowed;
   }
   return parameter.enum;
@@ -75,22 +78,22 @@ export function constraintViolations(
   values: Record<string, OptionValue>,
 ): string[] {
   const violations: string[] = [];
-  for (const condition of spec.constraints.conditional) {
+  for (const condition of spec.constraints?.conditional ?? []) {
     const matches = Object.entries(condition.when).every(([key, value]) => values[key] === value);
     if (!matches) continue;
-    for (const key of Object.keys(condition.forbid)) {
+    for (const key of condition.forbid ?? []) {
       if (values[key] !== undefined) {
         violations.push(`${key} 不能与当前选项同时使用`);
       }
     }
-    for (const [optionKey, allowed] of Object.entries(condition.allowed)) {
+    for (const [optionKey, allowed] of Object.entries(condition.allowed ?? {})) {
       const current = values[optionKey];
       if (current !== undefined && !allowed.includes(current)) {
         violations.push(`${optionKey} 当前值不被该时长允许`);
       }
     }
   }
-  for (const group of spec.constraints.mutually_exclusive) {
+  for (const group of spec.constraints?.mutually_exclusive ?? []) {
     const present = group.filter((key) => values[key] !== undefined);
     if (present.length > 1) {
       violations.push(`${present.join(" / ")} 互斥，只能选择一个`);
@@ -108,15 +111,15 @@ export function renderableOptions(spec: CapabilitySpecRead): {
   common: RenderableOption[];
   native: RenderableOption[];
 } {
-  const dependentKeys = new Set(whenKeys(spec.constraints.conditional));
-  const common = Object.entries(spec.common_options).map(([key, parameter]) => ({
+  const dependentKeys = new Set(whenKeys(spec.constraints?.conditional ?? []));
+  const common = Object.entries(spec.common_options ?? {}).map(([key, parameter]) => ({
     key,
     label: parameter.title ?? key,
     parameter,
     native: false,
     constraints: dependentKeys.has(key) ? [...dependentKeys].filter((k) => k === key) : [],
   }));
-  const native = Object.entries(spec.native_options).map(([key, parameter]) => ({
+  const native = Object.entries(spec.native_options ?? {}).map(([key, parameter]) => ({
     key,
     label: parameter.title ?? key,
     parameter,
