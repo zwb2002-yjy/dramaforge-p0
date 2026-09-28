@@ -15,6 +15,7 @@ from app.api.v1 import (
     generations,
     maintenance,
     model_candidates,
+    model_inspection,
     model_profiles,
     opencut,
     production,
@@ -48,6 +49,7 @@ api_router.include_router(provider_connections.router)
 api_router.include_router(provider_references.router)
 api_router.include_router(references.router)
 api_router.include_router(model_candidates.router)
+api_router.include_router(model_inspection.router)
 api_router.include_router(generations.router)
 api_router.include_router(model_profiles.router)
 api_router.include_router(opencut.router)

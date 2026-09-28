@@ -12,7 +12,7 @@ from uuid import UUID
 
 from app.providers.capabilities import Capability
 from app.providers.contracts.common import ArtifactRef
-from app.providers.contracts.image import ImageGenerateRequest
+from app.providers.contracts.image import ImageEditRequest, ImageGenerateRequest
 from app.providers.contracts.video import (
     FirstLastFrameVideoRequest,
     ImageToVideoRequest,
@@ -121,6 +121,11 @@ def image_request_to_intent(
     request: object,
 ) -> ImageGenerationIntent:
     selection = ModelSelectionIntent(mode="explicit_binding")
+    if isinstance(request, ImageEditRequest):
+        return ImageGenerationIntent(
+            prompt=request.prompt, mode_id=request.mode_id,
+            reference_artifact_id=UUID(str(request.image.artifact_id)), selection=selection,
+        )
     if isinstance(request, ImageGenerateRequest):
         if len(request.reference_images) > 1:
             raise ValueError(

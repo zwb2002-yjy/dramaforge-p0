@@ -689,6 +689,8 @@ class AgnesImageCompiler:
     """Validates an image intent against the catalog manifest and compiles the
     wire request using the same body builder as :class:`AgnesHubClient`."""
 
+    reference_transport = "bytes"
+
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("image.generate")
         if op is None:
@@ -713,6 +715,8 @@ class AgnesImageCompiler:
             constraint = op.reference_constraints.get("reference_image")
             if constraint is None or constraint.max < 1:
                 raise ValueError("model does not accept a reference_image")
+        if intent.seed is not None:
+            raise ValueError("Agnes image catalog revision cannot express seed")
         manifest_size = op.output_constraints.get("size")
         manifest_ratio = op.output_constraints.get("aspect_ratio")
         if (
@@ -830,6 +834,8 @@ class AgnesVideoCompiler:
     """Validates a video intent against the catalog manifest and compiles the
     wire request (first-frame I2V) using the same body builder as the HubClient."""
 
+    reference_transport = "bytes"
+
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("video.generate")
         if op is None:
@@ -859,6 +865,8 @@ class AgnesVideoCompiler:
         output = intent.output
         if output.aspect_ratio not in {None, "9:16"}:
             raise ValueError("Agnes Video V2.0 catalog revision only supports 9:16")
+        if output.resolution is not None or output.seed is not None:
+            raise ValueError("Agnes Video V2.0 cannot express resolution or seed")
         if output.generate_audio not in {None, False}:
             raise ValueError("Agnes Video V2.0 compiler cannot request native audio")
         if output.duration_seconds not in {None, _AGNES_VIDEO_DURATION_SECONDS}:

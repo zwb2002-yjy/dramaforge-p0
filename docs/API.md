@@ -18,7 +18,7 @@ Migration head: 20260916_0070
 - User-facing access is the frontend gateway at port 8080; the API process is
   an internal Compose service on port 8000.
 - No compatibility endpoint is kept for retired product concepts.
-- `backend/app/api/v1/router.py` registers 26 routers and exposes `/status`.
+- `backend/app/api/v1/router.py` owns router registration and exposes `/status`.
 
 ## Route ownership
 
@@ -43,6 +43,20 @@ Migration head: 20260916_0070
 | Events | events.py | SSE subscription with Last-Event-ID resume |
 | Maintenance | maintenance.py | Owner-only recovery: list persisted failures, replay one Director wakeup or one Outbox dead letter with the expected failure identity |
 | Worker tick | worker.py | worker-only HTTP tick for local/dev when Arq runs separately |
+
+## Read-only Model Capability / Prompt Compiler
+
+- GET /projects/{project_id}/model-capabilities: exactly one explicit model_id, current media
+  stage, or text slot; returns manifest facts, bounded public controls, source/lifecycle annotations.
+- POST /projects/{project_id}/shots/{shot_id}/compile-preview: ExecutionPlanBody with a current
+  shot version, saved creative inputs only; refuses model-supplied approximation acceptance.
+  Calls existing compilers with placeholder references, never a Provider or production writer.
+- GET /projects/{project_id}/shots/{shot_id}/generations/{run_id}/snapshot: safe requested /
+  planned / compiled / observed evidence from the exact authorized run, no raw payload or secrets.
+
+Ownership: api/v1/model_inspection.py → production/model_inspection.py → existing resolvers,
+Workbench reads and provider compilers. Account status remains not_checked; compiler acceptance
+is not executable readiness. No new schema migration or second generation write path.
 
 ## Single authoritative write entry
 

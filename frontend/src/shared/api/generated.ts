@@ -1841,6 +1841,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/model-capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Model Capabilities */
+        get: operations["get_model_capabilities_api_v1_projects__project_id__model_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/compile-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Generation Compile */
+        post: operations["preview_generation_compile_api_v1_projects__project_id__shots__shot_id__compile_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shots/{shot_id}/generations/{run_id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Generation Snapshot */
+        get: operations["get_generation_snapshot_api_v1_projects__project_id__shots__shot_id__generations__run_id__snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/capabilities": {
         parameters: {
             query?: never;
@@ -2979,6 +3030,103 @@ export interface components {
             /** Display Name */
             display_name: string;
         };
+        /**
+         * CapabilitySpec
+         * @description What one concrete model supports for one capability (spec §14).
+         */
+        CapabilitySpec: {
+            capability: components["schemas"]["Capability"];
+            /** Input Slots */
+            input_slots?: {
+                [key: string]: components["schemas"]["InputSlotSpec"];
+            };
+            /** Common Options */
+            common_options?: {
+                [key: string]: components["schemas"]["ParameterSpec"];
+            };
+            /** Native Options */
+            native_options?: {
+                [key: string]: components["schemas"]["ParameterSpec"];
+            };
+            constraints?: components["schemas"]["ConstraintSpec"];
+            /** Modes */
+            modes?: {
+                [key: string]: components["schemas"]["InputModeSpec"];
+            };
+            /** Default Mode */
+            default_mode?: string | null;
+            /** Transport Profile Id */
+            transport_profile_id: string;
+        };
+        /** CompilePreview */
+        CompilePreview: {
+            /**
+             * Compile Level
+             * @default provider_contract
+             * @constant
+             */
+            compile_level: "provider_contract";
+            /**
+             * Readiness
+             * @enum {string}
+             */
+            readiness: "contract_validated" | "blocked";
+            /**
+             * Transport Verified
+             * @default false
+             * @constant
+             */
+            transport_verified: false;
+            /**
+             * Account Verified
+             * @default false
+             * @constant
+             */
+            account_verified: false;
+            /** Prompt Hash */
+            prompt_hash: string;
+            /** Semantic Hash */
+            semantic_hash: string;
+            /** Manifest Hash */
+            manifest_hash: string;
+            /** Reference Ids */
+            reference_ids: string[];
+            /** Requested Options */
+            requested_options?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Effective Options */
+            effective_options?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Transformations */
+            transformations?: string[];
+            /** Errors */
+            errors?: string[];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * ConditionalConstraint
+         * @description When ``when`` matches, ``require`` must be present, ``forbid`` must be
+         *     absent, and any key in ``allowed`` must take one of the listed values
+         *     (spec §17). E.g. ``when={"duration_seconds": 10}`` + ``allowed={
+         *     "resolution": ["720p"]}`` expresses a duration-resolution matrix (§18).
+         */
+        ConditionalConstraint: {
+            /** When */
+            when: {
+                [key: string]: unknown;
+            };
+            /** Require */
+            require?: string[];
+            /** Forbid */
+            forbid?: string[];
+            /** Allowed */
+            allowed?: {
+                [key: string]: unknown[];
+            };
+        };
         /** ConnectionCreate */
         ConnectionCreate: {
             /**
@@ -3048,6 +3196,20 @@ export interface components {
             verification_status: string;
             /** Verified At */
             verified_at: string | null;
+        };
+        /**
+         * ConstraintSpec
+         * @description Cross-field constraint set for one capability (spec §17/§18).
+         */
+        ConstraintSpec: {
+            /** Mutually Exclusive */
+            mutually_exclusive?: string[][];
+            /** Requires */
+            requires?: {
+                [key: string]: string[];
+            };
+            /** Conditional */
+            conditional?: components["schemas"]["ConditionalConstraint"][];
         };
         /**
          * ControlTranslation
@@ -4400,12 +4562,141 @@ export interface components {
             draft_text: string;
             director_evidence: components["schemas"]["DirectorInvocationEvidence"];
         };
+        /** GenerationCompileRead */
+        GenerationCompileRead: {
+            /** Plan Fingerprint */
+            plan_fingerprint: string;
+            /** Snapshot Hash */
+            snapshot_hash: string;
+            model: components["schemas"]["ModelCapabilityReport"];
+            compilation: components["schemas"]["CompilePreview"];
+            /** Observed Versions */
+            observed_versions: {
+                [key: string]: number;
+            };
+            /** Reference Plan */
+            reference_plan: components["schemas"]["PreviewReference"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** GenerationSnapshotRead */
+        GenerationSnapshotRead: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Status */
+            status: string;
+            /** Input Hash */
+            input_hash: string;
+            /** Plan Fingerprint */
+            plan_fingerprint?: string | null;
+            /** Prompt Hash */
+            prompt_hash?: string | null;
+            /** Requested Model Id */
+            requested_model_id?: string | null;
+            /** Planned Model Id */
+            planned_model_id?: string | null;
+            /** Compiled Models */
+            compiled_models?: string[];
+            /** Compiled Options */
+            compiled_options?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Operation Statuses */
+            operation_statuses?: string[];
+            /** Reference Plan */
+            reference_plan?: components["schemas"]["PreviewReference"][];
+            /** Artifact Id */
+            artifact_id?: string | null;
+            /** Artifact Hash */
+            artifact_hash?: string | null;
+            /** Observed Output */
+            observed_output?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Evidence Missing */
+            evidence_missing?: string[];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * InputModeSpec
+         * @description Mode-specific input contract inside one capability (MS4-LITE).
+         */
+        InputModeSpec: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description?: string | null;
+            /** Input Slots */
+            input_slots?: {
+                [key: string]: components["schemas"]["InputSlotSpec"];
+            };
+            /** Common Options */
+            common_options?: {
+                [key: string]: components["schemas"]["ParameterSpec"];
+            };
+            /** Native Options */
+            native_options?: {
+                [key: string]: components["schemas"]["ParameterSpec"];
+            };
+            constraints?: components["schemas"]["ConstraintSpec"];
+        };
+        /**
+         * InputSlotSpec
+         * @description One artifact input role for a capability (spec §15). Absent roles are
+         *     forbidden. ``minimum``/``maximum`` bound the number of artifacts accepted.
+         */
+        InputSlotSpec: {
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+            /**
+             * Minimum
+             * @default 0
+             */
+            minimum: number;
+            /** Maximum */
+            maximum?: number | null;
+            /** Media Types */
+            media_types?: string[];
+            /** Description */
+            description?: string | null;
+        };
         JsonValue: unknown;
+        /** LifecycleWarning */
+        LifecycleWarning: {
+            /**
+             * Code
+             * @default VENDOR_RETIREMENT_ANNOUNCED
+             */
+            code: string;
+            /**
+             * Effective At
+             * Format: date-time
+             */
+            effective_at: string;
+            source: components["schemas"]["OfficialSource"];
+            /**
+             * Message
+             * @default Vendor retirement notice; do not silently change the frozen model.
+             */
+            message: string;
+        };
         /** LoginRequest */
         LoginRequest: {
             /**
@@ -4543,6 +4834,62 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** ModelCapabilityReport */
+        ModelCapabilityReport: {
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: "1";
+            /** Model Id */
+            model_id: string;
+            /** Model Revision */
+            model_revision?: string | null;
+            /** Manifest Version */
+            manifest_version: string;
+            /** Manifest Hash */
+            manifest_hash: string;
+            /** Catalog Lifecycle */
+            catalog_lifecycle: string;
+            /** Capabilities */
+            capabilities: {
+                [key: string]: components["schemas"]["CapabilitySpec"];
+            };
+            /** Controls */
+            controls: {
+                [key: string]: "native" | "prompt_only" | "unsupported" | "unknown";
+            };
+            /**
+             * Account Status
+             * @default not_checked
+             * @constant
+             */
+            account_status: "not_checked";
+            /** Official Sources */
+            official_sources?: components["schemas"]["OfficialSource"][];
+            /** Lifecycle Warnings */
+            lifecycle_warnings?: components["schemas"]["LifecycleWarning"][];
+            /** Limitations */
+            limitations?: string[];
+        };
+        /** ModelQueryRead */
+        ModelQueryRead: {
+            /**
+             * Selection
+             * @enum {string}
+             */
+            selection: "explicit_catalog" | "current_binding" | "text_slot";
+            report: components["schemas"]["ModelCapabilityReport"];
+            /** Binding Id */
+            binding_id?: string | null;
+            /** Profile Version */
+            profile_version?: number | null;
+            /** Mode Id */
+            mode_id?: string | null;
+            /** Identity Hash */
+            identity_hash?: string | null;
+        };
         /** ModelRead */
         ModelRead: {
             /** Id */
@@ -4621,6 +4968,21 @@ export interface components {
             error_summary?: string | null;
             /** Upstream Dependencies */
             upstream_dependencies?: components["schemas"]["UpstreamDependencyRead"][];
+        };
+        /** OfficialSource */
+        OfficialSource: {
+            /** Url */
+            url: string;
+            /**
+             * Checked At
+             * Format: date
+             */
+            checked_at: string;
+            /**
+             * Status
+             * @default documented_claim
+             */
+            status: string;
         };
         /** OpenCutClip */
         OpenCutClip: {
@@ -4776,6 +5138,50 @@ export interface components {
              */
             expected_dead_lettered_at: string;
         };
+        /**
+         * ParameterSpec
+         * @description One validated option (common or native) in a capability (spec §16).
+         */
+        ParameterSpec: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "boolean" | "array" | "object";
+            /** Title */
+            title?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+            /** Default */
+            default?: unknown | null;
+            /** Enum */
+            enum?: unknown[] | null;
+            /** Minimum */
+            minimum?: number | null;
+            /** Maximum */
+            maximum?: number | null;
+            /** Min Items */
+            min_items?: number | null;
+            /** Max Items */
+            max_items?: number | null;
+            /** Ui Component */
+            ui_component?: ("switch" | "select" | "number" | "slider" | "input" | "textarea" | "multi_select") | null;
+            /**
+             * Deprecated
+             * @default false
+             */
+            deprecated: boolean;
+            /**
+             * Sensitive
+             * @default false
+             */
+            sensitive: boolean;
+        };
         /** PartialApplyInput */
         PartialApplyInput: {
             /** Decisions */
@@ -4854,6 +5260,23 @@ export interface components {
             delivery: "exact" | "approximate" | "unsupported";
             /** Reason */
             reason?: string | null;
+        };
+        /** PreviewReference */
+        PreviewReference: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "first_frame" | "last_frame" | "reference_image" | "reference_video" | "reference_audio";
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Mime Type */
+            mime_type: string;
         };
         /** ProbeRead */
         ProbeRead: {
@@ -11659,6 +12082,130 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelCandidateRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_model_capabilities_api_v1_projects__project_id__model_capabilities_get: {
+        parameters: {
+            query?: {
+                model_id?: string | null;
+                stage?: ("image_keyframe" | "video") | null;
+                slot?: components["schemas"]["ModelSlot"] | null;
+                mode_id?: string | null;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelQueryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_generation_compile_api_v1_projects__project_id__shots__shot_id__compile_preview_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecutionPlanBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationCompileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_generation_snapshot_api_v1_projects__project_id__shots__shot_id__generations__run_id__snapshot_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                shot_id: string;
+                run_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationSnapshotRead"];
                 };
             };
             /** @description Validation Error */

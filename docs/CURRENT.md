@@ -43,6 +43,16 @@ Director Runtime 负责提案和编排；Production Runtime 负责真实生产�
 文档发生冲突时，以代码、迁移、自动化测试和实际运行结果为当前事实；
 目标架构冲突记录在 `ARCHITECTURE_MAPPING.md`，不要重新引入第二套方案文档。
 
+## Director Agent 详细参考
+
+以下是现有权威文档的细化视图与尚未实施的设计，不增加第二套领域权威；
+目标/缺口归属仍由 ARCHITECTURE_MAPPING 维护，完成实施后同步收敛设计与计划。
+
+- [当前实现与职责审计](architecture/DIRECTOR_AGENT_CURRENT_STATE.md)
+- [目标架构与边界合同（未实现）](architecture/DIRECTOR_AGENT_TARGET_ARCHITECTURE.md)
+- [依赖有序实施计划（未启动）](architecture/DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md)
+- [Model Capability / Prompt Compiler 指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md)
+
 ## 历史资料规则
 
 以下内容不属于当前树的长期文档：

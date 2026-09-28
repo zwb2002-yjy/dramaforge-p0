@@ -3,6 +3,17 @@
 Status: current（入口见 [CURRENT.md](CURRENT.md)）；
 Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/0005-provider-plugin-driven-configuration.md)。
 
+## Model Capability / Prompt Compiler 详细指南
+
+[逐模型能力与编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) 维护当前
+7 个媒体 catalog 模型、LiteLLM 逻辑文本与本地 TTS 的源码合同、参考槽位、参数/Prompt
+编译链及 Agent 查询设计。它不替代 Manifest，也不证明当前账号已通过 Probe。
+供应商页面声明、项目开放子集、账户执行证据必须分别标注；官方退役公告与固定 catalog
+的差异需显式呈现，不能自动换模型、扩能力或覆盖冻结执行身份。
+模型能力查询、无副作用编译预览与生成快照已由 production/model_inspection.py 的只读service及
+api/v1/model_inspection.py 提供。预览复用原compiler，使用占位reference且不证明账号/传输就绪；
+不写NodeRun/ProviderOperation或调用Provider。Agent ToolRegistry与自主工具循环仍未实现。
+
 ## 分层
 
 | 层 | 位置 | 职责 |
