@@ -461,13 +461,19 @@ class MiniMaxImageCompiler:
             raise ValueError("MiniMax image catalog revision only supports 1024x1024")
 
     async def compile(
-        self, intent: Any, model: Any, references: list[Any], *, invoke_model_value: str
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None = None,
     ) -> Any:
         self.validate(intent, model)
         operation = model.operations["image.generate"]
         if operation.input_contracts:
             return self._compile_contract(
-                intent, model, references, invoke_model_value=invoke_model_value
+                intent, model, references, invoke_model_value=invoke_model_value, policy=policy
             )
         ref = next((item for item in references if item.role == "reference_image"), None)
         if ref is None or ref.content_url is None:
@@ -500,15 +506,22 @@ class MiniMaxImageCompiler:
         )
 
     def _compile_contract(
-        self, intent: Any, model: Any, references: list[Any], *, invoke_model_value: str
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None,
     ) -> Any:
         from app.providers.capability_resolver import (
             CapabilityResolver,
-            ProductCapabilityPolicy,
             ReferenceMetadata,
         )
         from app.providers.runtime import CompiledImageRequest
 
+        if policy is None:
+            raise ValueError("MiniMax image input contracts require an explicit product policy")
         if any(ref.role != "reference_image" for ref in references) or len(references) > 1:
             raise ValueError("MiniMax image protocol accepts one character reference at most")
         ref = references[0] if references else None
@@ -541,10 +554,7 @@ class MiniMaxImageCompiler:
             manifest=model,
             intent=intent,
             reference_metadata=metadata,
-            policy=ProductCapabilityPolicy(
-                allowed_contracts=frozenset({"text", "reference"}),
-                allowed_options=frozenset({"aspect_ratio"}),
-            ),
+            policy=policy,
         )
         ratio = plan.effective_options.get("aspect_ratio")
         if not isinstance(ratio, str):

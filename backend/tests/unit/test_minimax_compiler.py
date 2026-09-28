@@ -148,7 +148,20 @@ async def test_same_image_compiler_handles_manifest_driven_t2i_and_i2i() -> None
     }
     manifest = ModelCapabilityManifest.model_validate(revised)
     compiler = MiniMaxImageCompiler()
+    policy = ProductCapabilityPolicy(
+        allowed_contracts=frozenset({"text", "reference"}),
+        allowed_options=frozenset({"aspect_ratio"}),
+    )
 
+    with pytest.raises(ValueError, match="explicit product policy"):
+        await compiler.compile(
+            ImageGenerationIntent(
+                prompt="portrait", selection=ModelSelectionIntent(mode="explicit_binding")
+            ),
+            manifest,
+            [],
+            invoke_model_value="image-01",
+        )
     text = await compiler.compile(
         ImageGenerationIntent(
             prompt="portrait", selection=ModelSelectionIntent(mode="explicit_binding")
@@ -156,6 +169,7 @@ async def test_same_image_compiler_handles_manifest_driven_t2i_and_i2i() -> None
         manifest,
         [],
         invoke_model_value="image-01",
+        policy=policy,
     )
     assert text.wire_request["aspect_ratio"] == "9:16"
     assert text.wire_request["response_format"] == "url"
@@ -182,6 +196,7 @@ async def test_same_image_compiler_handles_manifest_driven_t2i_and_i2i() -> None
             )
         ],
         invoke_model_value="image-01",
+        policy=policy,
     )
     assert image.wire_request["subject_reference"] == [
         {"type": "character", "image_file": "https://dramaforge.example/ref.png"}
@@ -198,6 +213,7 @@ async def test_same_image_compiler_handles_manifest_driven_t2i_and_i2i() -> None
             manifest,
             [],
             invoke_model_value="image-01",
+            policy=policy,
         )
 
     revised["operations"]["image.generate"]["output_options"]["n"]["default"] = 2
@@ -209,6 +225,7 @@ async def test_same_image_compiler_handles_manifest_driven_t2i_and_i2i() -> None
             ModelCapabilityManifest.model_validate(revised),
             [],
             invoke_model_value="image-01",
+            policy=policy,
         )
 
 
