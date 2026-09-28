@@ -1,4 +1,7 @@
-"""Read-only model catalog access. Seeds are written by migrations only."""
+"""Read-only application access to the versioned model catalog.
+
+The maintenance-only catalog sync writes revisions outside the application role.
+"""
 
 from __future__ import annotations
 

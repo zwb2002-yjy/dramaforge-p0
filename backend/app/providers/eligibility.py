@@ -124,7 +124,7 @@ async def evaluate_candidate(
     # management view plus the experiment form report it as certification state.
 
     # Catalog snapshot consistency (review gate 8): the binding must reference an
-    # active catalog revision of the same provider/profile/media with a complete
+    # executable catalog revision of the same provider/profile/media with a complete
     # invoke value and a matching manifest hash.
     if binding.catalog_entry_id is None:
         _issues_add(issues, "MODEL_NOT_IN_CATALOG")
@@ -133,7 +133,7 @@ async def evaluate_candidate(
     if catalog_entry is None:
         _issues_add(issues, "MODEL_NOT_IN_CATALOG")
     else:
-        if catalog_entry.lifecycle != "active":
+        if catalog_entry.lifecycle not in {"active", "legacy", "deprecated"}:
             _issues_add(issues, "MODEL_LIFECYCLE_INACTIVE", catalog_entry.lifecycle)
         if (
             catalog_entry.provider_type != connection.provider_type

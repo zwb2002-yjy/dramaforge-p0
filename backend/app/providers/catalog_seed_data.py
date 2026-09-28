@@ -13,7 +13,9 @@ from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
 __all__ = ["SEED_MANIFESTS", "hash_manifest", "seed_manifests_for"]
 
 _LOADED_MANIFESTS = ModelCatalogLoader().load()
-SEED_MANIFESTS: list[dict[str, Any]] = [item.as_dict() for item in _LOADED_MANIFESTS]
+SEED_MANIFESTS: list[dict[str, Any]] = [
+    item.as_dict() for item in _LOADED_MANIFESTS if item.publication_lifecycle == "active"
+]
 
 
 def seed_manifests_for(*, provider_type: str) -> list[dict[str, Any]]:

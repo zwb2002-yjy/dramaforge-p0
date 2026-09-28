@@ -171,6 +171,28 @@ def test_unknown_protocol_profile_fails_registry_bootstrap() -> None:
         build_v3_registry(seed_manifests=[ModelCapabilityManifest.model_validate(unknown)])
 
 
+def test_revision_publication_keeps_legacy_manifest_bytes(tmp_path: Path) -> None:
+    catalog = tmp_path / "model_catalog"
+    copytree(CATALOG_DIR, catalog)
+    original = ModelCatalogLoader(catalog).load()[0]
+    old_hash = original.manifest_hash
+    legacy_dir = original.source_path.parent / "legacy"
+    legacy_dir.mkdir()
+    original.source_path.rename(legacy_dir / original.source_path.name)
+    revised = original.as_dict()
+    revised["model_revision"] = "next-revision"
+    (original.source_path.parent / "08-next-revision.json").write_text(
+        json.dumps(revised), encoding="utf-8"
+    )
+
+    loaded = ModelCatalogLoader(catalog).load()
+    old = next(item for item in loaded if item.identity == original.identity)
+    current = next(item for item in loaded if item.identity[3] == "next-revision")
+    assert old.manifest_hash == old_hash
+    assert old.publication_lifecycle == "legacy"
+    assert current.publication_lifecycle == "active"
+
+
 def test_frozen_migration_snapshot_matches_current_seed_hash() -> None:
     frozen = _load_frozen()
     frozen_manifests = frozen.FROZEN_0015
