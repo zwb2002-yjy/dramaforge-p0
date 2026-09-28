@@ -53,6 +53,10 @@ Ark 视频新合同的编译入口要求调用方显式传入 `ProductCapability
 可以按合同编译首帧、首尾帧与图/视频/音频参考。Workbench 只传入 Formal 首帧策略，
 因此不会自行开放其他输入。MiniMax 图片新合同已支持文生图与单角色参考图的协议
 编译，且同样要求显式产品策略；当前产品产物链只接收 URL 格式的单张结果。
+Ark 图片新合同也用同一编译器处理有序多参考 `image[]`，数量和素材类型由合同校验；
+当前工作台仍只开放单张参考。编译器要求单张 URL 结果，并拒绝无法映射到具体
+`widthxheight` 尺寸的比例要求。多参考协议字段依据
+[方舟图片生成 API](https://docs.volcengine.com/docs/ark/image-generation-api?lang=en)。
 MiniMax 视频新合同也要求显式产品策略；同一个 V2 编译器按 Manifest 的时长、分辨率、
 比例和可选 `extra` 生成 H3 / H3-Max 请求，旧 H3 revision 保持原首帧请求形状。
 Workbench 对新合同从实际素材自动选合同，不使用前端固定 `mode_id` 判定 Provider 模式；
