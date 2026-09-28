@@ -22,7 +22,7 @@ class WorkbenchContractSelection:
 
 
 def _accepts_references(
-    contract: InputContractSpec, references: Sequence[tuple[str, str]]
+    contract: InputContractSpec, references: Sequence[tuple[str, str | None]]
 ) -> bool:
     counts = Counter(role for role, _ in references)
     if len(references) < contract.minimum_total_references:
@@ -41,7 +41,7 @@ def _accepts_references(
             return False
     for role, mime_type in references:
         slot = contract.input_slots[role]
-        if slot.media_types and not any(
+        if mime_type is not None and slot.media_types and not any(
             fnmatch(mime_type.lower(), pattern.lower()) for pattern in slot.media_types
         ):
             return False
@@ -52,7 +52,7 @@ def select_workbench_contract(
     *,
     operation: OperationManifest,
     media_kind: str,
-    references: Sequence[tuple[str, str]],
+    references: Sequence[tuple[str, str | None]],
 ) -> WorkbenchContractSelection:
     """Fail closed on non-mainchain roles or ambiguous provider contracts."""
     roles = [role for role, _ in references]
