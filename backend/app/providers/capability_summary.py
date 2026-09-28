@@ -69,6 +69,15 @@ def summarize_model_capability(manifest: ModelCapabilityManifest) -> ModelCapabi
                 accepts[role] = True
                 limits[role] = constraint.max
     product_open = {role: False for role in roles}
+    if manifest.lifecycle != "active" or manifest.implementation_status != "contract_tested":
+        return ModelCapabilitySummary(
+            media_kind=manifest.media_kind,
+            accepts_text_only=accepts_text_only,
+            product_text_only=False,
+            accepts=accepts,
+            product_open=product_open,
+            limits=limits,
+        )
     if manifest.media_kind == "video":
         if operation.input_contracts:
             try:
