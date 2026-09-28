@@ -1,105 +1,32 @@
-"""Production snapshot and Outbox-Arq enqueue routes (no Adapter in API)."""
+"""Read-only production snapshots and Artifact evidence delivery."""
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
-from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.api.deps import CurrentUser, SessionDep, require_selected_workspace
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
-from app.runtime.scheduler import NodeRunScheduler
+from app.production.read_models import (
+    ArtifactRead,
+    NodeRunRead,
+    ProductionArtifactPage,
+    ProductionRunPage,
+    ProductionRunStatusRead,
+    ProductionSummaryRead,
+    ProjectSnapshot,
+    ProviderOperationRead,
+    UpstreamDependencyRead,
+)
+from app.production.read_service import ProductionReadService
 from app.shared.errors import NotFoundError, ValidationAppError
 
-router = APIRouter(
-    tags=["production"], dependencies=[Depends(require_selected_workspace)]
-)
-
-
-class NodeRunRead(BaseModel):
-    id: UUID
-    attempt_no: int
-    status: str
-    node_key: str
-    input_hash: str
-    result_artifact_id: UUID | None
-    provider_cost: str
-    output_summary: dict[str, object]
-    input_snapshot: dict[str, object] = Field(default_factory=dict)
-    idempotency_key: str = ""
-    started_at: str | None = None
-    finished_at: str | None = None
-    error_code: str | None = None
-    error_summary: str | None = None
-    upstream_dependencies: list[UpstreamDependencyRead] = Field(default_factory=list)
-
-
-class UpstreamDependencyRead(BaseModel):
-    node_key: str
-    run_id: UUID | None
-    status: str
-    result_artifact_id: UUID | None
-
-
-class ArtifactRead(BaseModel):
-    id: UUID
-    object_key: str
-    content_hash: str
-    byte_size: int
-    mime_type: str
-    storage_state: str
-    produced_by_run_id: UUID | None
-    width: int | None
-    height: int | None
-    duration_seconds: str | None
-
-
-class ProviderOperationRead(BaseModel):
-    id: UUID
-    node_run_id: UUID | None
-    operation_kind: str
-    actual_provider: str
-    actual_model: str
-    provider_request_id: str | None
-    protocol_profile: str | None
-    status: str
-    request_fingerprint: str
-    request_summary: dict[str, object]
-    response_summary: dict[str, object]
-    model_binding_id: UUID | None
-    catalog_entry_id: UUID | None
-    capability_manifest_hash: str | None
-    connection_id: UUID | None
-    provider_connection_revision_id: UUID | None
-    credential_revision_id: UUID | None
-    execution_path_version: str | None
-    provider_cost: str | None
-    currency: str
-    submitted_at: str | None
-    completed_at: str | None
-
-
-class ProjectSnapshot(BaseModel):
-    project_id: UUID
-    name: str
-    node_runs: list[NodeRunRead]
-    artifacts: list[ArtifactRead]
-    provider_operations: list[ProviderOperationRead]
-
-
-class DispatchResponse(BaseModel):
-    enqueued: int
-    job_ids: list[str]
-
-
-class EnqueueResponse(BaseModel):
-    node_run_id: UUID
-    status: str
-    job_id: str
+router = APIRouter(tags=["production"], dependencies=[Depends(require_selected_workspace)])
 
 
 def _public_provider_request_summary(operation: ProviderOperation) -> dict[str, object]:
@@ -149,9 +76,7 @@ async def get_artifact_content(
     """Stream artifact bytes for the owning user's workspace."""
     from app.storage.minio_store import get_object_store
 
-    await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     art = await session.get(Artifact, artifact_id)
     if art is None or art.project_id != project_id:
         raise NotFoundError("artifact not found")
@@ -176,9 +101,9 @@ async def get_artifact_video_frame(
     from app.consistency.video_drift import extract_video_samples
     from app.storage.minio_store import get_object_store
 
-    if role not in {"start", "mid", "end"}:
+    if role not in {"start", "mid", "end", "scene_change_1", "scene_change_2"}:
         raise ValidationAppError(
-            "video frame role must be start, mid, or end",
+            "video frame role must be start, mid, end, scene_change_1, or scene_change_2",
             details={"code": "VIDEO_FRAME_ROLE_INVALID"},
         )
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
@@ -210,9 +135,7 @@ async def project_snapshot(
     user: CurrentUser,
     session: SessionDep,
 ) -> ProjectSnapshot:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     runs = list(
         (
             await session.execute(
@@ -250,7 +173,7 @@ async def project_snapshot(
         if runs
         else []
     )
-    from app.execution.runtime_invariants import evaluate_required_dependencies
+    from app.execution.runtime_invariants import evaluate_required_dependencies_many
 
     nodes = {
         node.id: node
@@ -265,8 +188,9 @@ async def project_snapshot(
         .all()
     }
     dependency_by_run: dict[UUID, list[UpstreamDependencyRead]] = {}
+    decisions = await evaluate_required_dependencies_many(session, runs=runs)
     for run in runs:
-        decision = await evaluate_required_dependencies(session, run=run)
+        decision = decisions[run.id]
         dependency_by_run[run.id] = [
             UpstreamDependencyRead(
                 node_key=dependency.node_key,
@@ -352,52 +276,59 @@ async def project_snapshot(
     )
 
 
-@router.post(
-    "/projects/{project_id}/dispatch",
-    response_model=DispatchResponse,
-)
-async def dispatch_project_work(
+@router.get("/projects/{project_id}/production-summary", response_model=ProductionSummaryRead)
+async def production_summary(
     project_id: UUID,
     user: CurrentUser,
     session: SessionDep,
-    _: CsrfDep,
-) -> DispatchResponse:
-    """Publish Outbox + enqueue Arq jobs only — does not run Adapters."""
+) -> ProductionSummaryRead:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    sched = NodeRunScheduler(session)
-    n = await sched.dispatch_pending(
-        worker_id=f"api-enqueue:{user.id}",
+    return await ProductionReadService(session).summary(project_id=project_id)
+
+
+@router.get("/projects/{project_id}/node-runs/status", response_model=list[ProductionRunStatusRead])
+async def production_run_statuses(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    run_id: Annotated[list[UUID], Query(min_length=1, max_length=100)],
+) -> list[ProductionRunStatusRead]:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await ProductionReadService(session).statuses(project_id=project_id, run_ids=run_id)
+
+
+@router.get("/projects/{project_id}/production-history/runs", response_model=ProductionRunPage)
+async def production_run_history(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+) -> ProductionRunPage:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await ProductionReadService(session).runs(
         project_id=project_id,
+        limit=limit,
+        cursor=cursor,
     )
-    return DispatchResponse(enqueued=n, job_ids=list(sched.enqueued_job_ids))
 
 
-@router.post(
-    "/projects/{project_id}/node-runs/{node_run_id}/enqueue",
-    response_model=EnqueueResponse,
+@router.get(
+    "/projects/{project_id}/production-history/artifacts",
+    response_model=ProductionArtifactPage,
 )
-async def enqueue_node_run(
+async def production_artifact_history(
     project_id: UUID,
-    node_run_id: UUID,
     user: CurrentUser,
     session: SessionDep,
-    _: CsrfDep,
-) -> EnqueueResponse:
-    """Enqueue Worker job for a NodeRun. Adapter runs only in Worker."""
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+    usable_audio: bool = False,
+) -> ProductionArtifactPage:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    run = await session.get(NodeRun, node_run_id)
-    if run is None or run.project_id != project_id:
-        from app.shared.errors import NotFoundError
-
-        raise NotFoundError("node_run not found")
-    response_run_id = run.id
-    response_status = run.status
-    job_id = await NodeRunScheduler(session).enqueue_node_run_only(node_run_id)
-    # enqueue_node_run_only commits before publishing to Arq. PostgreSQL RLS
-    # settings are transaction-local, so refreshing here would query without
-    # the request's project scope and can race a fast Worker to a terminal state.
-    return EnqueueResponse(
-        node_run_id=response_run_id,
-        status=response_status,
-        job_id=job_id,
+    return await ProductionReadService(session).artifacts(
+        project_id=project_id,
+        limit=limit,
+        cursor=cursor,
+        usable_audio=usable_audio,
     )

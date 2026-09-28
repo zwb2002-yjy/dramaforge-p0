@@ -1,0 +1,33 @@
+{
+  "controls": [
+    "src/routes/index.tsx",
+    "src/routes/settings-page.tsx",
+    "src/routes/production-page.tsx",
+    "src/routes/design-preview-page.tsx",
+    "src/components/provider/ModelProfileSettings.tsx",
+    "src/components/provider/WorkspaceModelProfileSettings.tsx",
+    "src/components/provider/ProviderConnectionPanel.tsx",
+    "src/components/provider/TextGatewaySettings.tsx",
+    "src/features/project/CreateProjectForm.tsx",
+    "src/features/production/CreativeCapabilitiesPanel.tsx",
+    "src/features/script/ScriptWorkspace.tsx",
+    "src/features/assets/AssetCardsPanel.tsx",
+    "src/features/review/ReviewWorkspace.tsx"
+  ],
+  "pageHeaders": [
+    "src/routes/index.tsx",
+    "src/routes/settings-page.tsx",
+    "src/routes/production-page.tsx",
+    "src/features/script/ScriptWorkspace.tsx",
+    "src/features/assets/AssetCardsPanel.tsx",
+    "src/features/review/ReviewWorkspace.tsx",
+    "src/features/scenes/SceneStoryboardWall.tsx",
+    "src/features/editing/EditingWorkspace.tsx"
+  ],
+  "layoutStyles": [
+    "src/styles/index.css",
+    "src/components/workstation/navigation-shell.css",
+    "src/components/workstation/project-shell.css",
+    "src/components/workstation/project-shell-visual.css"
+  ]
+}

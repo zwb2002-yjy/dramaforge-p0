@@ -1,97 +1,49 @@
-# V1_STATUS — 当前状态权威
+# V1_STATUS — 当前 V1 / 发布状态
 
-Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
+Status: current  
+本地运行与远端分支状态核对日期：2026-09-20。
 
-## 当前发布判定：REL-01 真实验收全链通过，等待 Owner 合并
+## 当前结论
 
-**候选**：`dev` = `d47d388`。产品代码（`backend/app`、`backend/alembic`、
-`frontend/src`、`docker-compose.yml`）与接受真实验收的 `cd6f202` **逐树相同**
-（`git rev-parse <sha>:<path>` 比对为 SAME），其后只有测试断言与验收驱动器变化。
+**首版尚未正式发布完成。** 运行候选、集成 PR 和发布基线必须分开看；本地质量门通过不等于真实双路径验收或正式发布完成。
 
-**REL-01 真实 DS＋Agnes 验收：全部阶段 PASS**（Owner 授权付费、无预算上限；隔离候选栈
-`dramaf-relcand`，仅发布 `127.0.0.1:8088`，`/health.source_commit = cd6f202`）：
-
-| 阶段 | 结果 |
+| 对象 | 当前事实 |
 |---|---|
-| `preflight` | PASS（Agnes `auth_models` 真实探测 200 passed，两条绑定 `account_verified`） |
-| `story` | PASS（真实 DeepSeek，`actual_model=anthropic/deepseek-v4-flash`） |
-| `media` | PASS（真实 Agnes 关键帧＋视频，逐片过身份/漂移审查与人工批准） |
-| `editing` | PASS（交付准入逐片通过、剪辑建议采用可审计） |
-| `regressions` | PASS（负向边界 fail closed、MANUAL 不依赖导演） |
-| `delivery` | PASS（真实 MP4/SRT 下载、哈希一致、ffprobe 全真、15–30s、改字幕重导出零新增媒体调用） |
-| `review-submit` / `review-collect` | PASS（修复候选已派发并停在人工门；`review_repair` 断言通过） |
+| 发布基线 | `main` 为 `c12c3dfb89cca92a45de99a6db4ade2f0c5f19e7`；`dev` / PR #90 HEAD 为 `ca8f8b7555768b958fd372608aaf34c2ac430f3d`。PR #90 (`dev -> main`) 仍 OPEN、未合并 |
+| 当前 8080 实例 | API、dispatcher、三个 worker 与 frontend 已切换到 `dc3056e99caf1a20484e39058a5d3d8d6a40cba7` 运行候选；`GET /health` 返回 `env=production`、`db=up`，服务健康。数据库迁移头为 `20260919_0073` |
+| 优化分支集成 | `codex/workbench-optimization -> dev` 已建立 PR #94，保持 Draft，未合并。运行候选之后的 CI 分支策略与状态文档变更不属于当前运行镜像内容；最终 HEAD/checks 以该 PR 为准 |
+| 本地质量门 | 运行候选已通过完整 backend/PostgreSQL/migration、frontend（含完整未分片 Playwright）与固定 LiteLLM mock-proxy 容器门。并行重负载下的前端超时未计为通过；通过记录来自原配置的独立完整重跑 |
+| 真实制作验收 | 双路径真实验收 driver 已为 `complete=true`：模板和自由创作均完成 MP4/SRT；自由路径的一次授权 Editing 文本建议已显式采用、保存并导出，再完成仅剪辑重导出。双路径浏览器、刷新和独立登录恢复通过，重导出未新增远程图像/视频操作。既有媒体与中断恢复沿用有边界的候选等价证明并保留原始 SHA 归属，不宣称在新 SHA 重新生成全部媒体 |
 
-成片证据：`template_auto-final-film.mp4` 6.34 MB、`free_assist-final-film.mp4` 3.77 MB，
-各带 SRT，均在 `tmp/evidence/`。
+CI 仅监听指向 `dev` / `main` 的 PR 与手动 dispatch；push 本身不是质量门证明。
+PR #94 的远端检查不能替代 Owner 审查，PR #90 的旧检查也不覆盖优化分支。
 
-## 本轮修复的产品缺陷（全部由真实验收暴露，离线套件此前全绿）
+## 当前继续边界
 
-| 提交 | 缺陷 |
-|---|---|
-| `4e9113f` | Formal 选择门**不可能满足**：冻结图里没有审查节点，且关键帧阶段从不排队审查 → 设为正式关键帧对任何项目都 422，下游视频链随之停死 |
-| `fcd19a2` | 审查 run 未写 `upstream_artifact_id`，而门正是按该键解析审查 → "审查已完成"被读成"没有审查" |
-| `468d4a3` | 审查查找在有界分页里做选择，历史一多即"查无此审查" |
-| `cd6f202` | 重复导出成片撞唯一约束报 `ARTIFACT_NOT_INDEPENDENT`（产品要求重复导出回读原结果） |
-| `cef8402` | 两个 repair 端点在 `commit()` **之后**读状态；repair 表按 `app.current_project_id()` 做 RLS 且该变量是每事务的，新事务没有作用域 → 修复已建、第一步已派发并提交，响应却是 404 `repair request not found` |
+本次已完成运行候选的质量门、部署及双路径制作验收。Owner 授权的至多 ¥10、一次 Editing 文本建议已消费；没有额外文本重试或图像/视频生成授权。
+UI 已验证建议采用不等于保存、显式保存/导出、播放和刷新恢复，最终收集断言全部通过。
+不重跑已有图像/视频，不重试历史 `unknown_submission`。后续进入 Owner 候选审阅与发布流程；Agent 不批准或合并 PR，不发布。
 
-**尚未完成**：`dev → main` 合并与版本 tag 属 Owner（Agent 不自批自合）；上表未列
-的 `revise-unknown-free` / `replace-template` / `recover-local-editing` 三个阶段需
-特定前置状态（未对账的提交、并发 Artifact 竞争失败），本轮未构造，记录为未执行。
-本文件记录的是"候选可发布"，不是"已发布"。
+## 已确定的首版产品边界
 
-实施记录（不入 Git）见 `tmp/v1-release-20260915/`：`REL01_RESULT_cd6f202.md`、
-`CANDIDATE_RECORD.md` 及各 DEV-0x_RECORD.md。
+- `quality_gated` 表示质量认证/正式支持证据，不是普通执行与实验的硬准入；绑定、连接、能力不匹配仍失败关闭。
+- 项目 Provider Binding 有只读回显；Provider Connection 可启用/停用，连接删除延期。
+- 无生产者的旧 Shot Change Proposal 面板、不可达的 ProfessionalWorkbench 非实验分支和未消费的 ExperimentCompare 已移除；现行 Director Turn / Shot Suggestion 与 ExperimentBranch 路径保留。
+- 镜头 6 的旧视频提交仍须按 `unknown_submission` 保留证据，禁止技术盲重试。新的用户重生成意图必须作为新操作独立授权。
 
-## 历史 V1 主链验收记录
+## 尚需闭合的发布条件
 
-V1"统一创作主链"目标（2026-09-03 起）已完成 21 项最终完成审计，全部 PASS。
-运行时候选 `adf1b94`，证据/发布候选 `3677430`，`dev → main` PR #66 待 Owner
-审阅合并。审计覆盖（摘要）：
+1. **候选一致性**：由 Owner 确定最终候选；其运行相关内容需通过对应完整容器门和远端 required checks。后续优化不能夹带进旧候选验收。
+2. **正式入口**：在明确安排现有实例交接后，让 8080 的 gateway/API/workers 都运行该候选的 production 身份。健康状态本身不证明创作链完成。
+3. **REL-01 证据绑定**：当前运行候选的验收 driver 已为 `complete=true`，旧媒体/恢复证据通过明确的候选等价边界保留来源。Owner 仍需确认最终发布候选；若运行相关代码变化，须重新评估受影响证据，不能直接挪用当前结论。
+4. **Owner 合并**：Owner 审阅并合并受保护的 `dev -> main`；agent 不批准、不合并。
+5. **发布与安装**：成功生成版本化 Release 制品，并用该版本的 online/offline bundle 在干净目录安装验证。源码测试不能替代制品安装验证。
 
-- Legacy 硬删除与 Canonical/directory 门；
-- Idea → proposal/diff/partial apply → Canonical facts；
-- Template Start / Free Start 创建同一 Project；无模板 runtime；
-- AUTO / ASSIST / MANUAL 保持执行身份；MANUAL 无导演回归通过；
-- 主动推荐（performance/action/camera/shot/rhythm/reference）与
-  whole/partial/reject 决策；
-- Manual/locked/dirty/stale 优先级；
-- Candidate/Formal/Experiment/Repair 边界；
-- 统一 NodeRun/ProviderOperation/Artifact 血缘；
-- OpenCut/Editing 为正式尾部，两路径 Final Film（H.264/AAC + SRT）真实交付；
-- 全量质量/安全/迁移/E2E 与 commit-bound 真实 Provider Golden。
+真实 Provider probe/production/repair 每次都需要本任务明确的正数预算与 Owner 授权。历史预算不延续，
+可能已计费或 `unknown_submission` 的调用不能盲重试；当前正在运行的其他实例也不属于可自动清理的资源。
 
-## 历史 Director Runtime（D0–D8）完成记录
+## 权威与历史
 
-独立导演编排 runtime（Owner 2026-09-09 授权）已落地：runtime contracts、
-event boundary、invocation journal、LangGraph 验证、engine 迁移、
-tools/decisions UI、跨 runtime 失败矩阵、候选验收与终态对账。MANUAL 路径
-在导演服务停止时完成空项目 → MP4/SRT 全程。详见
-[DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
-
-## 之后已合入 dev 的工作
-
-- V2 导航 / Project Lobby / 设置返回语义（统一导航与项目大厅）；
-- Resonance UI、Canvas-first UI、Production 渐进披露、移动端 canvas 收敛；
-- 前端骨架对齐（设计 Token 采用、骨架约定落文档）；
-- 上下文导演交互与项目导航修复（当时记录的 HEAD 为 070faa3）。
-
-## 数据库与质量基线
-
-- Alembic 单 head：`20260915_0069`（69 个 revision）；以候选自身 `alembic heads`
-  为准。本轮新增 0067（资产入库请求身份）、0068（人工审查决定）、0069（分阶段修复步骤）。
-- CI：`policy` + `container-gates`（backend / PostgreSQL / 迁移 / OpenAPI /
-  前端 / E2E / LiteLLM 集成），Release workflow 发布版本化镜像。
-
-## 剩余工作方向
-
-- Owner 审阅并合并发布 PR **#88**（候选 `df546f6`，检查已全绿）；Agent 不自批自合。
-- DS＋Agnes 真实场景验收：按仓库规则需要逐次正数预算与 Owner 授权。
-- 发布按 [RELEASE.md](RELEASE.md) 执行；新功能开发以本目录权威文档 + 代码
-  现状为基线，不再有历史 Task Contract 序列。
-
-## 历史证据的获取方式
-
-已删除的 Task Contract、Review、Golden evidence 与执行记录保存在 Git 历史
-（`git log` / `git show`）中；它们不构成当前实现依据。正式验收证据按
-[DEVELOPMENT.md](DEVELOPMENT.md) 写入 `tmp/p0-evidence/<source-commit>/`
-（不入 Git）。
+产品与技术合同见 [CURRENT.md](CURRENT.md)；可重复验证命令见 [DEVELOPMENT.md](DEVELOPMENT.md)、
+[DEPLOYMENT.md](DEPLOYMENT.md) 与 [RELEASE.md](RELEASE.md)。先前工作区快照、旧测试计数、旧候选运行身份和逐轮执行记录
+只通过 Git 历史追溯，不在本文件继续累积互相矛盾的“当前结论”。

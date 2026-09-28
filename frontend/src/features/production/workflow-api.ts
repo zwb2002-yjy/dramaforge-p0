@@ -91,7 +91,16 @@ export type WorkflowOverviewRead = {
 export function fetchWorkflowOverview(projectId: string): Promise<WorkflowOverviewRead> {
   return apiGet<{ overview: WorkflowOverviewRead }>(
     `/api/v1/projects/${projectId}/workflow-overview`,
-  ).then((body) => body.overview);
+  ).then((body) => {
+    if (
+      !body.overview ||
+      !Array.isArray(body.overview.episodes) ||
+      !Array.isArray(body.overview.scenes)
+    ) {
+      throw new Error("生成任务回执不完整，请重新读取。");
+    }
+    return body.overview;
+  });
 }
 
 export function fetchShotWorkflowState(
@@ -106,6 +115,28 @@ export function fetchShotWorkflowState(
 // --- CC10 creative capability functional UI -----------------------------------
 
 export type CreativeProvenanceRead = Record<string, object>;
+
+export type CreativeCapabilityCatalogItem = {
+  key: string;
+  display_name: string;
+  description: string;
+  metadata: Record<string, unknown>;
+};
+
+export type CreativeCapabilityCatalogRead = {
+  genres: CreativeCapabilityCatalogItem[];
+  styles: CreativeCapabilityCatalogItem[];
+  shot_languages: CreativeCapabilityCatalogItem[];
+  quality_policies: CreativeCapabilityCatalogItem[];
+  skills: CreativeCapabilityCatalogItem[];
+  available_staged_strategies: string[];
+};
+
+export function fetchCreativeCapabilityCatalog(
+  projectId: string,
+): Promise<CreativeCapabilityCatalogRead> {
+  return apiGet(`/api/v1/projects/${projectId}/creative-capabilities/catalog`);
+}
 
 export function fetchCreativeProvenance(
   projectId: string,

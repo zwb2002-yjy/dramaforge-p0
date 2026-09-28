@@ -107,11 +107,12 @@ def test_release_workflow_packages_installable_online_and_offline_bundles() -> N
         "infra/litellm/config.yaml",
         "release.env",
         "release-manifest.json",
-        "images.tar",
+        "images.tar.gz",
     ):
         assert required in workflow
     assert "docker compose config --images" in workflow
-    assert "docker save --output" in workflow
+    assert "docker save" in workflow
+    assert "docker save --output" not in workflow
     assert 'if [[ "${#runtime_images[@]}" -ne "${#expected_images[@]}" ]]' in workflow
     for image in (
         "postgres:15-alpine",
@@ -125,6 +126,42 @@ def test_release_workflow_packages_installable_online_and_offline_bundles() -> N
     assert "minio/minio:RELEASE" not in workflow.replace("quay.io/minio/minio:RELEASE", "")
     assert "dramaforge-online-v*.zip" in workflow
     assert "dramaforge-offline-linux-amd64-v*.tar.gz" in workflow
+
+
+def test_offline_bundle_is_flat_and_carries_one_compressed_image_archive() -> None:
+    """The offline bundle must be installable exactly as documented.
+
+    `install.sh --offline` and `install.ps1 -Offline` read `release.env` and
+    `images.tar.gz` from the directory they are invoked in, and DEPLOYMENT.md
+    tells the user to extract the archive and run the installer there. So the
+    archive root has to hold the installer, `release.env` and the image archive,
+    and the image archive has to be written compressed in one pass: saving an
+    uncompressed `images.tar` and then gzipping it needs room for both copies at
+    once, which is what exhausted the runner disk and failed the bundle step.
+    """
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    pack = workflow[
+        workflow.index("- name: Create online and offline release bundles") :
+        workflow.index("- name: Create checksums")
+    ]
+    assert 'tar -czf "${offline_dir}.tar.gz" -C "$offline_dir" .' in pack
+    assert 'docker save "${runtime_images[@]}" | gzip -c > "$offline_dir/images.tar.gz"' in pack
+    assert 'gzip -t "$offline_dir/images.tar.gz"' in pack
+    assert 'tar -czf "${offline_dir}.tar.gz" "$offline_dir"' not in pack
+    assert 'images.tar"' not in pack
+    assert 'rm -rf "$online_dir" "$offline_dir"' in pack
+
+    for installer in (REPO_ROOT / "install.sh", REPO_ROOT / "install.ps1"):
+        installer_text = installer.read_text(encoding="utf-8")
+        assert "images.tar.gz" in installer_text
+        assert "images.tar'" not in installer_text
+        assert "images.tar " not in installer_text
+
+    deployment = (REPO_ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    assert "images.tar.gz" in deployment
+    assert "images.tar`" not in deployment
 
 
 def test_temporary_build_proxy_is_not_persisted_in_release_inputs() -> None:

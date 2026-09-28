@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { Button } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
+import { shotStatusLabel } from "../../lib/shotLabels";
 import {
   fetchWorkflowOverview,
   type SceneWorkflowViewRead,
@@ -24,7 +26,7 @@ const CAPABILITY_TONE: Record<string, string> = {
 const RESOLUTION_LABEL: Record<string, string> = {
   RESOLVED: "已冻结",
   UNAVAILABLE: "模板失效",
-  NONE: "未选模板",
+  NONE: "未使用模板",
 };
 
 function productionStateLabel(state: string): string {
@@ -33,10 +35,14 @@ function productionStateLabel(state: string): string {
       draft: "草稿",
       ready: "就绪",
       producing: "制作中",
+      queued: "排队中",
+      running: "生成中",
+      failed: "生成失败",
+      completed: "已完成",
       review: "待审",
       complete: "完成",
       blocked: "阻塞",
-    }[state] ?? state
+    }[state] ?? "待确认"
   );
 }
 
@@ -46,6 +52,10 @@ function productionStateTone(state: string): string {
       draft: "idle",
       ready: "done",
       producing: "running",
+      queued: "idle",
+      running: "running",
+      failed: "attention",
+      completed: "done",
       review: "running",
       complete: "done",
       blocked: "attention",
@@ -59,9 +69,7 @@ function ShotWorkflowRow({ shot }: { shot: ShotWorkflowStateRead }) {
     <li className="workflow-shot-row" data-testid={`workflow-shot-${shot.shot_number}`}>
       <span className="shot-index">{String(shot.shot_number).padStart(2, "0")}</span>
       <span className="workflow-shot-main">
-        <span className="workflow-shot-template">
-          {shot.workflow_template_key ?? shot.status ?? "未选模板"}
-        </span>
+        <span className="workflow-shot-template">创作：{shotStatusLabel(shot.status)}</span>
         <small>
           {RESOLUTION_LABEL[shot.template_resolution_status] ?? shot.template_resolution_status}
           {shot.template_version ? ` · v${shot.template_version}` : ""}
@@ -127,16 +135,24 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
   return (
     <div className="workflow-navigator" data-testid="workflow-navigator">
       <div className="workflow-navigator-header">
-        <span>镜头工作流</span>
+        <span>生成任务</span>
         <small>
           {data
             ? `${data.total_shots} 镜头 · 正式 ${data.formal_shots} · 阻塞 ${data.blocked_scenes} 场景`
             : "…"}
         </small>
       </div>
+      {data && <p className="muted">场景完成按正式视频统计；镜头创作状态不代表有任务正在运行。</p>}
+      {overview.isPending && <p role="status">正在读取生成任务…</p>}
+      {overview.isError && (
+        <div className="flash err" role="alert">
+          生成任务读取失败，不能据此判断项目没有任务。
+          <Button onClick={() => void overview.refetch()}>重新读取生成任务</Button>
+        </div>
+      )}
       <div className="workflow-episode-list">
-        {episodes.length === 0 && (
-          <p className="muted">暂无剧本。可在场景工作区导入剧本后回看镜头工作流状态。</p>
+        {overview.isSuccess && episodes.length === 0 && (
+          <p className="muted">还没有生成任务。先到剧本页准备故事，再选择镜头生成画面。</p>
         )}
         {episodes.map((episode) => (
           <section
@@ -149,7 +165,8 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
               data-testid={`workflow-episode-${episode.episode_number}-title`}
             >
               <strong>
-                EP{episode.episode_number} · {episode.title || `第 ${episode.episode_number} 集`}
+                第 {episode.episode_number} 集 ·{" "}
+                {episode.title || `第 ${episode.episode_number} 集`}
               </strong>
               <small>
                 {episode.scene_count} 场景 · {episode.total_shots} 镜头
@@ -164,9 +181,6 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
             </div>
           </section>
         ))}
-      </div>
-      <div className="workflow-nav-footer">
-        <small>未声明多角色的镜头会标记为不可双人，不会自动降级执行。</small>
       </div>
     </div>
   );

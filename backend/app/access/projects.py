@@ -16,7 +16,10 @@ from app.access.models import (
     UserProjectPreference,
     Workspace,
 )
+from app.director.creative_capabilities.creative_compiler import CreativeCapabilityCompiler
 from app.director.creative_capabilities.creative_templates import get_creative_template
+from app.director.creative_capabilities.freeze import serialize_compiled_creative_intent
+from app.director.creative_capabilities.packs_library import GENRE_PROFILES, STYLE_PACKS
 from app.shared.db import set_rls_context
 from app.shared.enums import ProjectStage
 from app.shared.errors import (
@@ -51,9 +54,7 @@ class ProjectService:
 
     async def _get_owned_workspace(self, *, workspace_id: UUID, actor: User) -> Workspace:
         self._require_selected_workspace_match(workspace_id)
-        result = await self._session.execute(
-            select(Workspace).where(Workspace.id == workspace_id)
-        )
+        result = await self._session.execute(select(Workspace).where(Workspace.id == workspace_id))
         workspace = result.scalar_one_or_none()
         if workspace is None:
             raise NotFoundError("workspace not found")
@@ -75,6 +76,8 @@ class ProjectService:
         template_key: str | None = None,
         template_version: str | None = None,
         director_autonomy: str = "ASSIST",
+        genre_key: str | None = None,
+        style_key: str | None = None,
     ) -> Project:
         if start_type not in {"TEMPLATE", "FREE"}:
             raise ValidationAppError("start_type must be TEMPLATE or FREE")
@@ -89,6 +92,12 @@ class ProjectService:
             raise ValidationAppError("aspect_ratio must be 9:16 or 16:9")
         if budget_limit < 0:
             raise ValidationAppError("budget_limit must be >= 0")
+        genre = next((item for item in GENRE_PROFILES if item.genre_key == genre_key), None)
+        style = next((item for item in STYLE_PACKS if item.style_key == style_key), None)
+        if genre_key is not None and genre is None:
+            raise ValidationAppError("不支持的创作类型")
+        if style_key is not None and style is None:
+            raise ValidationAppError("不支持的画面风格")
         await self._get_owned_workspace(workspace_id=workspace_id, actor=actor)
         existing_project_id = await self._session.scalar(
             select(Project.id).where(
@@ -143,15 +152,9 @@ class ProjectService:
             template_contract_hash=template.contract_hash if template else None,
             director_autonomy=director_autonomy,
             selected_genre=template.recommended_genre if template else None,
-            selected_style_ids=(
-                list(template.recommended_style_ids) if template else []
-            ),
-            selected_skill_ids=(
-                list(template.recommended_skill_ids) if template else []
-            ),
-            selected_shot_language=(
-                template.recommended_shot_language if template else None
-            ),
+            selected_style_ids=(list(template.recommended_style_ids) if template else []),
+            selected_skill_ids=(list(template.recommended_skill_ids) if template else []),
+            selected_shot_language=(template.recommended_shot_language if template else None),
             asset_slot_requirements=(
                 {
                     "required": list(template.required_asset_slots),
@@ -173,6 +176,19 @@ class ProjectService:
             ),
             version=1,
         )
+        # Only choices explicitly submitted by the creator become execution defaults.
+        # A template's recommendations alone retain their existing proposal-only meaning.
+        if genre is not None or style is not None:
+            if genre is not None:
+                profile.selected_genre = genre.genre_key
+            if style is not None:
+                profile.selected_style_ids = [style.style_key]
+            profile.strategy_snapshot = {
+                **dict(profile.strategy_snapshot or {}),
+                "creative_capabilities": serialize_compiled_creative_intent(
+                    CreativeCapabilityCompiler().compile(genre=genre, style=style)
+                ),
+            }
         self._session.add(profile)
         await self._session.flush()
         await self._session.refresh(project)
@@ -193,9 +209,7 @@ class ProjectService:
         )
         return project
 
-    async def list_projects_for_owner(
-        self, *, workspace_id: UUID, actor: User
-    ) -> list[Project]:
+    async def list_projects_for_owner(self, *, workspace_id: UUID, actor: User) -> list[Project]:
         await self._get_owned_workspace(workspace_id=workspace_id, actor=actor)
         result = await self._session.execute(
             select(Project)

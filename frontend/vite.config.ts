@@ -25,6 +25,13 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    watch: {
+      // Editors that write atomically create `.<name>.<pid>.<id>.tmpdir/`
+      // next to the target file and rename it into place. Watching that
+      // transient directory throws EBUSY on Windows and kills the dev server,
+      // so it is ignored; the final file is still watched normally.
+      ignored: ["**/.*.tmpdir/**", "**/*.tmpdir/**"],
+    },
     proxy: {
       // The local development gateway is published on port 8080.
       "/api": apiTarget,

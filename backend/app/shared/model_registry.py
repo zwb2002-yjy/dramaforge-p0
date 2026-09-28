@@ -17,6 +17,9 @@ def load_all_models() -> None:
     from app.editing import models as editing_models
     from app.events import models as event_models
     from app.execution import models as execution_models
+
+    # Include archival mappings for Alembic parity, not runtime business access.
+    from app.production import archive_models as production_archive_models
     from app.production import command_models
     from app.production import models as production_models
     from app.providers import catalog_models as provider_catalog_models
@@ -38,6 +41,7 @@ def load_all_models() -> None:
         event_models,
         execution_models,
         production_models,
+        production_archive_models,
         command_models,
         provider_catalog_models,
         provider_models,

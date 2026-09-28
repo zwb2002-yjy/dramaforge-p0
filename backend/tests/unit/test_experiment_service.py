@@ -1,32 +1,24 @@
-"""P5-03 Experiment creation service tests (03 §47)."""
+"""Director and HTTP share the canonical experiment draft service."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
-from app.assets.models import Shot
-from app.production.experiment_service import (
-    ExperimentCreateInput,
-    ExperimentService,
-    recompile_controls_for_model,
+from app.assets.models import Scene, Shot
+from app.director.proposal_commands import (
+    ProposalCommandError,
+    ProposalCommandRegistry,
 )
-from app.production.models import (
-    ShotExperiment,
-    ShotReferenceBinding,
-)
-from app.providers.capabilities import Capability
-from app.providers.manifest import (
-    CapabilitySpec,
-    InputSlotSpec,
-    ModelManifest,
-    SubmissionSemantics,
-)
+from app.execution.models import NodeRun
+from app.production.archive_models import ProductionExperiment, ShotExperiment
+from app.production.experiment_service import ExperimentCreateBody, create_experiment_branch
+from app.production.models import ExperimentBranch
 from app.shared.base import Base
-from app.shared.errors import ValidationAppError
+from app.shared.errors import ConflictError, NotFoundError
 from app.shared.security import hash_password
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -43,10 +35,10 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
     await engine.dispose()
 
 
-async def _seed(session: AsyncSession) -> tuple[Project, User]:
+async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
     user = User(
-        email=f"exp-{uuid4().hex}@example.com",
-        display_name="Exp",
+        email=f"prop-{uuid4().hex}@example.com",
+        display_name="Prop",
         password_hash=hash_password("x"),
     )
     session.add(user)
@@ -60,404 +52,159 @@ async def _seed(session: AsyncSession) -> tuple[Project, User]:
         aspect_ratio="9:16",
         actor=user,
     )
-    return project, user
+    from app.assets.models import Episode
 
-
-async def _shot(
-    session: AsyncSession,
-    *,
-    project: Project,
-    scene_id=None,
-    shot_number: int = 1,
-) -> Shot:
-    shot = Shot(
-        project_id=project.id,
-        scene_id=scene_id or uuid4(),
-        shot_number=shot_number,
-        version=3,
-        visual_description="Shot",
-        director_state={"camera": "static"},
-        image_prompt="keyframe prompt",
-        video_prompt="video prompt",
-    )
-    session.add(shot)
+    episode = Episode(project_id=project.id, episode_number=1)
+    session.add(episode)
     await session.flush()
-    return shot
-
-
-@pytest.mark.asyncio
-async def test_create_experiment_single_shot_snapshots_inputs(session: AsyncSession) -> None:
-    project, user = await _seed(session)
-    shot = await _shot(session, project=project)
-    session.add(
-        ShotReferenceBinding(
-            project_id=project.id,
-            shot_id=shot.id,
-            purpose="identity",
-            asset_id=uuid4(),
-            sort_order=1,
-            created_by=user.id,
-        )
+    scene = Scene(
+        episode_id=episode.id,
+        scene_number=1,
+        location_name="Studio",
+        time_of_day="day",
+        synopsis="",
     )
-    await session.flush()
-
-    experiment = await ExperimentService(session).create_experiment(
-        project=project,
-        actor=user,
-        experiment_input=ExperimentCreateInput(
-            name="A/B",
-            shot_ids=[shot.id],
-            model_overrides={"video.shot": "agnes/model-b"},
-            idempotency_key=f"exp-{uuid4().hex}",
-        ),
-    )
-    shot_exp = (
-        await session.execute(
-            select(ShotExperiment).where(ShotExperiment.production_experiment_id == experiment.id)
-        )
-    ).scalars().one()
-    assert shot_exp.source_shot_version == 3
-    assert shot_exp.director_state == {"camera": "static"}
-    assert shot_exp.prompts["image_prompt"] == "keyframe prompt"
-    assert shot_exp.model_overrides["video.shot"] == "agnes/model-b"
-    assert len(shot_exp.references) == 1
-    assert shot_exp.references[0]["purpose"] == "identity"
-    # formal shot untouched
-    await session.refresh(shot)
-    assert shot.version == 3
-
-
-@pytest.mark.asyncio
-async def test_create_experiment_scene_creates_all_shots(session: AsyncSession) -> None:
-    project, user = await _seed(session)
-    scene_id = uuid4()
-    s1 = await _shot(session, project=project, scene_id=scene_id, shot_number=1)
-    s2 = await _shot(session, project=project, scene_id=scene_id, shot_number=2)
-    experiment = await ExperimentService(session).create_experiment(
-        project=project,
-        actor=user,
-        experiment_input=ExperimentCreateInput(
-            name="Scene A/B",
-            scene_id=scene_id,
-            idempotency_key=f"exp-{uuid4().hex}",
-        ),
-    )
-    rows = (
-        await session.execute(
-            select(ShotExperiment).where(ShotExperiment.production_experiment_id == experiment.id)
-        )
-    ).scalars().all()
-    assert {row.shot_id for row in rows} == {s1.id, s2.id}
-
-
-@pytest.mark.asyncio
-async def test_create_experiment_idempotent_and_requires_shots(session: AsyncSession) -> None:
-    project, user = await _seed(session)
-    shot = await _shot(session, project=project)
-    key = f"exp-{uuid4().hex}"
-    first = await ExperimentService(session).create_experiment(
-        project=project,
-        actor=user,
-        experiment_input=ExperimentCreateInput(name="a", shot_ids=[shot.id], idempotency_key=key),
-    )
-    second = await ExperimentService(session).create_experiment(
-        project=project,
-        actor=user,
-        experiment_input=ExperimentCreateInput(name="b", shot_ids=[shot.id], idempotency_key=key),
-    )
-    assert first.id == second.id
-    with pytest.raises(ValidationAppError, match="at least one shot"):
-        await ExperimentService(session).create_experiment(
-            project=project,
-            actor=user,
-            experiment_input=ExperimentCreateInput(
-                name="c", shot_ids=[], idempotency_key=f"exp-{uuid4().hex}"
-            ),
-        )
-
-
-
-def _model_b_manifest() -> ModelManifest:
-    return ModelManifest(
-        manifest_version="1",
-        id="agnes/video-model-b",
-        provider_id="agnes",
-        model_name="video-model-b",
-        display_name="Video Model B",
-        capability_specs={
-            Capability.VIDEO_IMAGE_TO_VIDEO: CapabilitySpec(
-                capability=Capability.VIDEO_IMAGE_TO_VIDEO,
-                transport_profile_id="t1",
-                input_slots={
-                    "first_frame": InputSlotSpec(minimum=0, maximum=1, media_types=["image/*"]),
-                    "reference_image": InputSlotSpec(minimum=0, maximum=4, media_types=["image/*"]),
-                },
-                common_options={
-                    "duration_seconds": {"type": "integer", "ui_component": "number"}
-                },
-            )
-        },
-        execution_mode="async_poll",
-        submission_semantics=SubmissionSemantics(),
-    )
-
-
-def test_recompile_drops_model_a_native_options_and_preserves_semantic() -> None:
-    manifest = _model_b_manifest()
-    result = recompile_controls_for_model(
-        manifest=manifest,
-        capability=Capability.VIDEO_IMAGE_TO_VIDEO,
-        references=[],
-        common_controls={
-            "aspect_ratio": "9:16",
-            "duration_seconds": 10,
-            "seed": 7,
-            "seed_mode": "fixed",
-        },
-        mode_id="explicit_binding",
-    )
-    controls = result["common_controls"]
-    assert controls.get("aspect_ratio") == "9:16"
-    assert controls.get("duration_seconds") == 10
-    assert "seed" not in controls
-    assert "seed_mode" not in controls
-    assert result["dropped_native_options"] == ["seed", "seed_mode"]
-
-
-def test_recompile_surfaces_unsupported_reference() -> None:
-    manifest = _model_b_manifest()
-    result = recompile_controls_for_model(
-        manifest=manifest,
-        capability=Capability.VIDEO_IMAGE_TO_VIDEO,
-        references=[{"purpose": "action", "artifact_id": str(uuid4()), "mime_type": "video/mp4"}],
-        common_controls={},
-        mode_id="explicit_binding",
-    )
-    assert result["unsupported_controls"]
-
-
-
-async def _seed_with_model_b(session: AsyncSession) -> tuple[Project, User, str]:
-    from datetime import date
-
-    from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
-    from app.providers.models import ProviderConnection, ProviderModelBinding
-
-    user = User(
-        email=f"swap-{uuid4().hex}@example.com",
-        display_name="Swap",
-        password_hash=hash_password("x"),
-    )
-    session.add(user)
-    await session.flush()
-    workspace = Workspace(owner_user_id=user.id, name=f"W-{uuid4().hex[:8]}")
-    session.add(workspace)
-    await session.flush()
-    project = await ProjectService(session).create_project(
-        workspace_id=workspace.id,
-        name=f"P-{uuid4().hex[:8]}",
-        aspect_ratio="9:16",
-        actor=user,
-    )
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
-    entry = ModelCatalogEntry(
-        provider_type="agnes",
-        protocol_profile="agnes_cn_v1",
-        model_id="agnes-video-v2.0",
-        model_revision="v1",
-        display_name="Agnes Video",
-        media_kind="video",
-        lifecycle="active",
-        catalog_source="official_static",
-        capability_manifest_json=manifest,
-        option_schema_json={},
-        documented_at=date.fromisoformat("2026-08-10"),
-        contract_manifest_hash=hash_manifest(manifest),
-    )
-    session.add(entry)
-    await session.flush()
-    connection = ProviderConnection(
-        workspace_id=workspace.id,
-        provider_type="agnes",
-        display_name="Agnes",
-        base_url="https://api.agnes-ai.cn",
-        protocol_profile="agnes_cn_v1",
-        credential_id=uuid4(),
-        credential_revision=1,
-        enabled=True,
-        verification_status="verified",
-        created_by=user.id,
-        updated_by=user.id,
-    )
-    session.add(connection)
-    await session.flush()
-    binding = ProviderModelBinding(
-        workspace_id=workspace.id,
-        connection_id=connection.id,
-        media_type="video",
-        model_id="agnes-video-v2.0",
-        purpose="video",
-        enabled=True,
-        documented=True,
-        contract_tested=True,
-        account_verified=True,
-        quality_gated=True,
-        catalog_entry_id=entry.id,
-        capability_manifest_hash=entry.contract_manifest_hash,
-        remote_resource_kind="model",
-        remote_resource_id="agnes-video-v2.0",
-        invoke_model_value="agnes-video-v2.0",
-        created_by=user.id,
-        updated_by=user.id,
-    )
-    session.add(binding)
+    session.add(scene)
     await session.flush()
     shot = Shot(
         project_id=project.id,
-        scene_id=uuid4(),
+        scene_id=scene.id,
         shot_number=1,
         version=1,
-        visual_description="Swap shot",
-        director_state={"camera": "static"},
-        image_prompt="keyframe",
+        visual_description="Shot",
+        image_prompt="kf",
         video_prompt="video",
+        director_state={"camera": "static"},
     )
     session.add(shot)
     await session.flush()
-    return project, user, str(shot.id)
+    return project, shot, user
 
 
 @pytest.mark.asyncio
-async def test_create_model_swap_experiment_recompiles(session: AsyncSession) -> None:
-    project, user, shot_id = await _seed_with_model_b(session)
-    experiment = await ExperimentService(session).create_model_swap_experiment(
-        project=project,
-        actor=user,
-        experiment_input=ExperimentCreateInput(
-            name="Swap to B",
-            shot_ids=[UUID(shot_id)],
-            model_overrides={"video.shot": "agnes-video-v2.0"},
-            idempotency_key=f"swap-{uuid4().hex}",
-        ),
+@pytest.mark.parametrize("command", ["experiment.create", "shot.set_model_override"])
+async def test_director_creates_only_canonical_draft(session: AsyncSession, command: str) -> None:
+    project, shot, user = await _seed(session)
+    registry = ProposalCommandRegistry(session, actor_id=user.id)
+    payload = {"shot_id": str(shot.id), "model_overrides": {"video.shot": "agnes/model-b"}}
+    await registry.apply(
+        project_id=project.id, command=command, payload=payload, command_key="item-one"
     )
-    shot_exp = (
-        await session.execute(
-            select(ShotExperiment).where(
-                ShotExperiment.production_experiment_id == experiment.id
-            )
-        )
-    ).scalars().one()
-    assert shot_exp.model_overrides["video.shot"] == "agnes-video-v2.0"
-    assert "model_swap_recompile" in (shot_exp.comparison or {})
-    assert isinstance(shot_exp.comparison["model_swap_recompile"], dict)
-
-
-
-async def _seed_experiment_with_results(
-    session: AsyncSession,
-    *,
-    project: Project,
-    user: User,
-    keyframe_artifact_id,
-    video_artifact_id,
-    shot: Shot,
-) -> object:
-    from app.production.experiment_service import ExperimentService
-
-    experiment = await ExperimentService(session).create_experiment(
-        project=project,
-        actor=user,
-        experiment_input=ExperimentCreateInput(
-            name="adopt-me",
-            shot_ids=[shot.id],
-            idempotency_key=f"adopt-{uuid4().hex}",
-        ),
+    await registry.apply(
+        project_id=project.id, command=command, payload=payload, command_key="item-one"
     )
-    shot_exp = (
-        await session.execute(
-            select(ShotExperiment).where(
-                ShotExperiment.production_experiment_id == experiment.id
-            )
-        )
-    ).scalars().one()
-    shot_exp.keyframe_artifact_id = keyframe_artifact_id
-    shot_exp.video_artifact_id = video_artifact_id
-    await session.flush()
-    return experiment
-
-
-@pytest.mark.asyncio
-async def test_adopt_keyframe_only_keeps_old_video(session: AsyncSession) -> None:
-    project, user = await _seed(session)
-    shot = await _shot(session, project=project)
-    old_video = uuid4()
-    shot.formal_video_artifact_id = old_video
-    await session.flush()
-    new_keyframe = uuid4()
-    experiment = await _seed_experiment_with_results(
-        session,
-        project=project,
-        user=user,
-        keyframe_artifact_id=new_keyframe,
-        video_artifact_id=uuid4(),
-        shot=shot,
-    )
-    await ExperimentService(session).adopt_experiment(
-        project=project,
-        experiment_id=experiment.id,
-        scope="keyframe_only",
-    )
+    branch = (await session.scalars(select(ExperimentBranch))).one()
+    assert branch.source_shot_id == shot.id
+    assert branch.selected_model == "agnes/model-b"
+    assert branch.status == "draft"
+    assert branch.parameters["target_node_key"] == "video"
+    assert (await session.scalars(select(ProductionExperiment))).all() == []
+    assert (await session.scalars(select(ShotExperiment))).all() == []
+    assert (await session.scalars(select(NodeRun))).all() == []
     await session.refresh(shot)
-    assert shot.formal_keyframe_artifact_id == new_keyframe
-    assert shot.formal_video_artifact_id == old_video  # old video preserved
-    shot_exp = (
-        await session.execute(
-            select(ShotExperiment).where(
-                ShotExperiment.production_experiment_id == experiment.id
-            )
-        )
-    ).scalars().one()
-    assert shot_exp.comparison["adoption"]["scope"] == "keyframe_only"
-
-
-@pytest.mark.asyncio
-async def test_adopt_full_shot_and_rerun_video(session: AsyncSession) -> None:
-    project, user = await _seed(session)
-    shot = await _shot(session, project=project)
-    new_keyframe = uuid4()
-    new_video = uuid4()
-    experiment = await _seed_experiment_with_results(
-        session,
-        project=project,
-        user=user,
-        keyframe_artifact_id=new_keyframe,
-        video_artifact_id=new_video,
-        shot=shot,
-    )
-    service = ExperimentService(session)
-    await service.adopt_experiment(
-        project=project,
-        experiment_id=experiment.id,
-        scope="full_shot",
-    )
-    await session.refresh(shot)
-    assert shot.formal_keyframe_artifact_id == new_keyframe
-    assert shot.formal_video_artifact_id == new_video
-
-    # rerun video clears the formal video for regeneration
-    experiment2 = await _seed_experiment_with_results(
-        session,
-        project=project,
-        user=user,
-        keyframe_artifact_id=new_keyframe,
-        video_artifact_id=new_video,
-        shot=shot,
-    )
-    await service.adopt_experiment(
-        project=project,
-        experiment_id=experiment2.id,
-        scope="keyframe_and_rerun_video",
-    )
-    await session.refresh(shot)
+    assert shot.version == 1
+    assert shot.formal_keyframe_artifact_id is None
     assert shot.formal_video_artifact_id is None
+    # Distinct proposal item identities do not conflate separate intentions.
+    payload["model_overrides"] = {"video.shot": "agnes/model-c"}
+    await registry.apply(
+        project_id=project.id, command=command, payload=payload, command_key="item-two"
+    )
+    assert len((await session.scalars(select(ExperimentBranch))).all()) == 2
+
+
+@pytest.mark.asyncio
+async def test_canonical_director_payload_is_visible_in_context(session: AsyncSession) -> None:
+    from app.director.assistant_context import AssistantContextBuilder
+    from app.director.assistant_models import DirectorThread
+
+    project, shot, user = await _seed(session)
+    payload = {
+        "source_shot_id": str(shot.id),
+        "name": "Keyframe B",
+        "idempotency_key": "keyframe-b",
+        "selected_model": "agnes/image-b",
+        "parameters": {"target_node_key": "keyframe"},
+    }
+    await ProposalCommandRegistry(session, actor_id=user.id).apply(
+        project_id=project.id, command="experiment.create", payload=payload
+    )
+    branch = (await session.scalars(select(ExperimentBranch))).one()
+    thread = DirectorThread(
+        project_id=project.id, scope_type="shot", scope_entity_id=shot.id, created_by=user.id
+    )
+    session.add(thread)
+    await session.flush()
+    context = await AssistantContextBuilder(session).build(
+        project=project, thread=thread, current_user_message="compare"
+    )
+    assert [row["experiment_id"] for row in context.experiments] == [str(branch.id)]
+    assert context.experiments[0]["selected_model"] == "agnes/image-b"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"name": "different"},
+        {"selected_model": "agnes/other"},
+        {"parameters": {}},
+        {"source_shot_id": None},
+    ],
+)
+async def test_branch_idempotency_rejects_changed_inputs(
+    session: AsyncSession, change: dict
+) -> None:
+    project, shot, user = await _seed(session)
+    body = ExperimentCreateBody(
+        source_shot_id=shot.id, name="B", idempotency_key="same", parameters={"purpose": "identity"}
+    )
+    row = await create_experiment_branch(
+        session, project_id=project.id, actor_id=user.id, body=body
+    )
+    replay = await create_experiment_branch(
+        session, project_id=project.id, actor_id=user.id, body=body
+    )
+    assert replay.id == row.id
+    with pytest.raises(ConflictError):
+        await create_experiment_branch(
+            session, project_id=project.id, actor_id=user.id, body=body.model_copy(update=change)
+        )
+
+
+@pytest.mark.asyncio
+async def test_branch_cannot_read_another_projects_shot(session: AsyncSession) -> None:
+    project, _shot, user = await _seed(session)
+    _other, foreign_shot, _owner = await _seed(session)
+    with pytest.raises(NotFoundError):
+        await create_experiment_branch(
+            session,
+            project_id=project.id,
+            actor_id=user.id,
+            body=ExperimentCreateBody(
+                source_shot_id=foreign_shot.id, name="B", idempotency_key="foreign"
+            ),
+        )
+    assert (await session.scalars(select(ExperimentBranch))).all() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"shot_ids": []},
+        {"shot_ids": [str(uuid4()), str(uuid4())]},
+        {"model_overrides": {"video.shot": "a", "visual.keyframe": "b"}},
+        {"model_overrides": {"unknown": "a"}},
+        {"unexpected": "ignored?"},
+    ],
+)
+async def test_ambiguous_director_payload_fails_closed(session: AsyncSession, extra: dict) -> None:
+    project, shot, user = await _seed(session)
+    with pytest.raises(ProposalCommandError):
+        await ProposalCommandRegistry(session, actor_id=user.id).apply(
+            project_id=project.id,
+            command="experiment.create",
+            payload={"shot_id": str(shot.id), **extra},
+        )
+    assert (await session.scalars(select(ExperimentBranch))).all() == []

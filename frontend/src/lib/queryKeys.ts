@@ -36,6 +36,7 @@ export const queryKeys = {
   },
 
   shot: {
+    voiceOptions: (projectId: string) => ["voice-options", projectId] as const,
     list: (projectId: string) => ["shots", projectId] as const,
     workbench: (projectId: string, shotId: string | null | undefined) =>
       ["shot-workbench", projectId, shotId] as const,
@@ -69,10 +70,17 @@ export const queryKeys = {
   },
 
   production: {
+    summary: (projectId: string) => ["production-summary", projectId] as const,
+    runHistory: (projectId: string) => ["production-run-history", projectId] as const,
+    artifactHistory: (projectId: string) => ["production-artifact-history", projectId] as const,
     snapshot: (projectId: string) => ["snapshot", projectId] as const,
     workflowOverview: (projectId: string) => ["workflow-overview", projectId] as const,
-    provenance: (projectId: string, targetId: string | null | undefined) =>
-      ["creative-provenance", projectId, targetId] as const,
+    provenance: (
+      projectId: string,
+      targetId: string | null | undefined,
+      scope: "scene" | "shot" = "shot",
+    ) => ["creative-provenance", projectId, scope, targetId] as const,
+    creativeCatalog: (projectId: string) => ["creative-capability-catalog", projectId] as const,
     opencutManifest: (projectId: string) => ["opencut-manifest", projectId] as const,
     canvasRevisions: (projectId: string, shotId: string | null | undefined) =>
       ["canvas-revisions", projectId, shotId] as const,
@@ -107,6 +115,9 @@ export const queryKeys = {
   },
 
   editing: {
+    audioLibraryRoot: (projectId: string) => ["editing-audio-library", projectId] as const,
+    audioLibrary: (projectId: string, cursor: string | null) =>
+      ["editing-audio-library", projectId, cursor] as const,
     sessions: (projectId: string) => ["edit-sessions", projectId] as const,
     films: (projectId: string, sessionId: string | undefined, version: number | undefined) =>
       ["edit-final-films", projectId, sessionId, version] as const,
@@ -115,14 +126,21 @@ export const queryKeys = {
   },
 
   script: {
+    proposals: (projectId: string) => ["story-proposals", projectId] as const,
     workspace: (projectId: string) => ["script-workspace", projectId] as const,
   },
 
   model: {
     catalog: () => ["models"] as const,
     slots: () => ["model-slots"] as const,
+    workspaceProfiles: (workspaceId: string | null) =>
+      ["workspace-model-profiles", workspaceId] as const,
+    workspaceProfile: (workspaceId: string | null, profileId: string | null) =>
+      ["workspace-model-profile", workspaceId, profileId] as const,
     effectiveBindings: (projectId: string) => ["model-bindings-effective", projectId] as const,
     projectProfile: (projectId: string) => ["project-model-profile", projectId] as const,
+    candidates: (projectId: string, operation: string) =>
+      ["model-candidates", projectId, operation] as const,
   },
 
   provider: {
@@ -136,5 +154,8 @@ export const queryKeys = {
       ["provider-bindings", workspaceId, connectionId] as const,
     /** Bare prefix: invalidate bindings for every connection of a workspace. */
     bindingsRoot: (workspaceId: string | null) => ["provider-bindings", workspaceId] as const,
+    /** Read-only project → purpose → model binding view (#9). */
+    projectBindings: (projectId: string | null) =>
+      ["project-provider-bindings", projectId] as const,
   },
 } as const;

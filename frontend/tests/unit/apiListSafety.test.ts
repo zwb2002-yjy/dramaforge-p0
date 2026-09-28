@@ -3,12 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiGet, apiGetList, fetchProjectShots } from "../../src/lib/api";
 
 /**
- * A list endpoint that answers with a non-array must not reach `.find`/`.map`.
- *
- * The container gate failed with `(shots.data ?? []).find is not a function`
- * inside render: one list route answered with an object, the workspace crashed,
- * and the browser test lost its status line. These cases pin the fail-closed
- * behaviour that keeps one wrong payload from blanking a whole workspace.
+ * A list endpoint that answers with a non-array is a contract violation and
+ * must stay visible to the query error state instead of becoming a fake empty
+ * list.
  */
 function stub(body: unknown, status = 200): void {
   vi.spyOn(globalThis, "fetch").mockImplementation(() =>
@@ -32,14 +29,22 @@ describe("apiGetList", () => {
     ]);
   });
 
-  it("fails closed to [] when the endpoint answers with an object", async () => {
+  it("throws when the endpoint answers with an object", async () => {
     stub({ detail: "workspace not found" });
-    await expect(apiGetList("/api/v1/projects/p/shots")).resolves.toEqual([]);
+    await expect(apiGetList("/api/v1/projects/p/shots")).rejects.toMatchObject({
+      status: 502,
+      code: "INVALID_RESPONSE_SHAPE",
+      details: { expected: "array", actual: "object" },
+    });
   });
 
-  it("fails closed to [] when the endpoint answers with null", async () => {
+  it("throws when the endpoint answers with null", async () => {
     stub(null);
-    await expect(apiGetList("/api/v1/projects/p/shots")).resolves.toEqual([]);
+    await expect(apiGetList("/api/v1/projects/p/shots")).rejects.toMatchObject({
+      status: 502,
+      code: "INVALID_RESPONSE_SHAPE",
+      details: { expected: "array", actual: "null" },
+    });
   });
 
   it("still reports a real HTTP failure instead of pretending the list is empty", async () => {
@@ -59,11 +64,10 @@ describe("apiGetList", () => {
 });
 
 describe("fetchProjectShots", () => {
-  it("never resolves to a non-array for the shot list", async () => {
+  it("surfaces a malformed shot-list response", async () => {
     stub({ shots: [] });
-    const shots = await fetchProjectShots("project-1");
-    expect(Array.isArray(shots)).toBe(true);
-    // The crashing call site shape: `.find` must exist on the result.
-    expect(typeof shots.find).toBe("function");
+    await expect(fetchProjectShots("project-1")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE_SHAPE",
+    });
   });
 });

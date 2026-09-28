@@ -1,11 +1,18 @@
-"""V3 Unified Generation API tests (Phase 6, spec §58/§44)."""
+"""V3 Generation read-surface tests (spec §58).
+
+Media generation has one product writer (workbench execution), so this file
+only covers the read-only catalog: capabilities, models and model manifests.
+The GenerationService domain behaviour stays covered by
+tests/unit/test_v3_review_fixes.py, test_model_profile_snapshot.py and
+tests/integration/test_runtime_recovery_matrix_pg.py.
+"""
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from app.api.deps import settings_dep
@@ -13,7 +20,6 @@ from app.config import clear_settings_cache, get_settings
 from app.main import create_app
 from app.shared.base import Base
 from app.shared.db import get_session
-from app.shared.security import CSRF_HEADER
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -72,21 +78,6 @@ def _register(client: TestClient) -> str:
     workspace_id = str(client.get("/api/v1/workspaces").json()[0]["id"])
     client.headers["X-Workspace-Id"] = workspace_id
     return workspace_id
-
-
-def _create_project(client: TestClient, workspace_id: str) -> str:
-    project = client.post(
-        "/api/v1/projects",
-        json={
-            "workspace_id": workspace_id,
-            "name": "GenProject",
-            "aspect_ratio": "9:16",
-            "budget_limit": "50.00",
-        },
-        headers={CSRF_HEADER: _csrf(client)},
-    )
-    assert project.status_code == 201, project.text
-    return str(project.json()["id"])
 
 
 class TestReadSurface:
@@ -148,250 +139,3 @@ class TestReadSurface:
         _register(client)
         response = client.get("/api/v1/models", params={"capability": "nope.nope"})
         assert response.status_code == 422
-
-
-class TestGenerationCreate:
-    def test_unsupported_capability_rejected(self, api: tuple[TestClient, Any]) -> None:
-        client, _ = api
-        workspace_id = _register(client)
-        project_id = _create_project(client, workspace_id)
-        response = client.post(
-            f"/api/v1/projects/{project_id}/generations",
-            json={
-                "capability": "video.image_to_video",
-                "input": {"prompt": "p"},
-            },
-            headers={CSRF_HEADER: _csrf(client)},
-        )
-        assert response.status_code == 422
-        assert response.json()["code"] == "VALIDATION_ERROR"
-
-    def test_missing_prompt_rejected(self, api: tuple[TestClient, Any]) -> None:
-        client, _ = api
-        workspace_id = _register(client)
-        project_id = _create_project(client, workspace_id)
-        response = client.post(
-            f"/api/v1/projects/{project_id}/generations",
-            json={
-                "capability": "image.generate",
-                "input": {},
-            },
-            headers={CSRF_HEADER: _csrf(client)},
-        )
-        assert response.status_code == 422
-
-    def test_create_image_generation_and_read(
-        self, api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        client, _ = api
-        workspace_id = _register(client)
-        project_id = _create_project(client, workspace_id)
-
-        async def fake_enqueue(self: object, node_run_id: Any) -> str:
-            return f"fake-{node_run_id}"
-
-        monkeypatch.setattr(
-            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
-            fake_enqueue,
-        )
-        response = client.post(
-            f"/api/v1/projects/{project_id}/generations",
-            json={
-                "capability": "image.generate",
-                "input": {"prompt": "一片静谧的竹林"},
-            },
-            headers={CSRF_HEADER: _csrf(client)},
-        )
-        assert response.status_code == 201, response.text
-        body = response.json()
-        assert body["requested_capability"] == "image.generate"
-        operation_id = body["operation_id"]
-
-        read = client.get(f"/api/v1/projects/{project_id}/generations/{operation_id}")
-        assert read.status_code == 200
-        assert read.json()["status"] == "queued"
-
-    def test_idempotency_key_returns_same_operation(
-        self, api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        client, _ = api
-        workspace_id = _register(client)
-        project_id = _create_project(client, workspace_id)
-        key = f"idem-{uuid4().hex}"
-
-        async def fake_enqueue(self: object, node_run_id: Any) -> str:
-            return f"fake-{node_run_id}"
-
-        monkeypatch.setattr(
-            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
-            fake_enqueue,
-        )
-        headers = {CSRF_HEADER: _csrf(client), "Idempotency-Key": key}
-        first = client.post(
-            f"/api/v1/projects/{project_id}/generations",
-            json={"capability": "image.generate", "input": {"prompt": "p"}},
-            headers=headers,
-        )
-        assert first.status_code == 201, first.text
-        second = client.post(
-            f"/api/v1/projects/{project_id}/generations",
-            json={"capability": "image.generate", "input": {"prompt": "p"}},
-            headers=headers,
-        )
-        assert second.status_code == 201, second.text
-        assert first.json()["operation_id"] == second.json()["operation_id"]
-
-    def test_same_key_different_request_conflicts(
-        self, api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """BLOCK-1: same Idempotency-Key + different input is a 409
-        IDEMPOTENCY_KEY_REUSED, never a silent reuse of the first operation."""
-        client, _ = api
-        workspace_id = _register(client)
-        project_id = _create_project(client, workspace_id)
-        key = f"idem-{uuid4().hex}"
-
-        async def fake_enqueue(self: object, node_run_id: Any) -> str:
-            return f"fake-{node_run_id}"
-
-        monkeypatch.setattr(
-            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
-            fake_enqueue,
-        )
-        headers = {CSRF_HEADER: _csrf(client), "Idempotency-Key": key}
-        first = client.post(
-            f"/api/v1/projects/{project_id}/generations",
-            json={"capability": "image.generate", "input": {"prompt": "女孩走路"}},
-            headers=headers,
-        )
-        assert first.status_code == 201, first.text
-        second = client.post(
-            f"/api/v1/projects/{project_id}/generations",
-            json={"capability": "image.generate", "input": {"prompt": "汽车行驶"}},
-            headers=headers,
-        )
-        assert second.status_code == 409, second.text
-        assert second.json()["details"]["code"] == "IDEMPOTENCY_KEY_REUSED"
-        # the second request must not have created a second operation: the 409
-        # is the error body, not a generation response
-        assert "operation_id" not in second.json()
-        assert second.json()["detail"] is not None
-
-    def test_queued_cancel_is_terminal_idempotent_and_never_creates_provider_operation(
-        self, api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        client, _factory = api
-        workspace_id = _register(client)
-        project_id = _create_project(client, workspace_id)
-
-        async def fake_enqueue(self: object, node_run_id: Any) -> str:
-            return f"fake-{node_run_id}"
-
-        monkeypatch.setattr(
-            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
-            fake_enqueue,
-        )
-        created = client.post(
-            f"/api/v1/projects/{project_id}/generations",
-            json={"capability": "image.generate", "input": {"prompt": "cancel before submit"}},
-            headers={CSRF_HEADER: _csrf(client)},
-        )
-        assert created.status_code == 201, created.text
-        operation_id = created.json()["operation_id"]
-        path = f"/api/v1/projects/{project_id}/generations/{operation_id}/cancel"
-        assert client.post(path).status_code == 403
-
-        cancelled = client.post(path, headers={CSRF_HEADER: _csrf(client)})
-        assert cancelled.status_code == 200, cancelled.text
-        assert cancelled.json()["status"] == "cancelled"
-        assert cancelled.json()["provider_operation"]["provider_operation_id"] is None
-        duplicate = client.post(path, headers={CSRF_HEADER: _csrf(client)})
-        assert duplicate.status_code == 200
-        assert duplicate.json() == cancelled.json()
-        read = client.get(f"/api/v1/projects/{project_id}/generations/{operation_id}")
-        assert read.json()["status"] == "cancelled"
-
-    def test_running_cancel_stays_pending_for_same_remote_observation(
-        self, api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        client, factory = api
-        workspace_id = _register(client)
-        project_id = _create_project(client, workspace_id)
-
-        async def fake_enqueue(self: object, node_run_id: Any) -> str:
-            return f"fake-{node_run_id}"
-
-        monkeypatch.setattr(
-            "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
-            fake_enqueue,
-        )
-        created = client.post(
-            f"/api/v1/projects/{project_id}/generations",
-            json={"capability": "image.generate", "input": {"prompt": "cancel in flight"}},
-            headers={CSRF_HEADER: _csrf(client)},
-        )
-        operation_id = created.json()["operation_id"]
-
-        async def mark_running() -> None:
-            from app.execution.models import NodeRun
-
-            async with factory() as session:
-                run = await session.get(NodeRun, UUID(operation_id))
-                assert run is not None
-                run.status = "running"
-                await session.commit()
-
-        _run(mark_running())
-        path = f"/api/v1/projects/{project_id}/generations/{operation_id}/cancel"
-        first = client.post(path, headers={CSRF_HEADER: _csrf(client)})
-        assert first.status_code == 200, first.text
-        assert first.json()["status"] == "cancel_requested"
-        duplicate = client.post(path, headers={CSRF_HEADER: _csrf(client)})
-        assert duplicate.status_code == 200
-        assert duplicate.json()["status"] == "cancel_requested"
-
-
-def test_queued_cancel_is_csrf_scoped_idempotent_and_terminal(api, monkeypatch):
-    client, factory = api
-    workspace_id = _register(client)
-    project_id = _create_project(client, workspace_id)
-
-    async def enqueue(self, node_run_id):
-        return str(node_run_id)
-
-    monkeypatch.setattr(
-        "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only", enqueue
-    )
-    created = client.post(
-        f"/api/v1/projects/{project_id}/generations",
-        headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": f"cancel-{uuid4().hex}"},
-        json={"capability": "image.generate", "input": {"prompt": "portrait"}},
-    )
-    assert created.status_code == 201, created.text
-    operation_id = created.json()["operation_id"]
-    url = f"/api/v1/projects/{project_id}/generations/{operation_id}/cancel"
-    assert client.post(url).status_code == 403
-    other_response = client.post(
-        "/api/v1/projects",
-        headers={CSRF_HEADER: _csrf(client)},
-        json={
-            "workspace_id": workspace_id,
-            "name": "Other cancellation project",
-            "aspect_ratio": "9:16",
-        },
-    )
-    assert other_response.status_code == 201
-    other = other_response.json()["id"]
-    assert (
-        client.post(
-            url.replace(project_id, other), headers={CSRF_HEADER: _csrf(client)}
-        ).status_code
-        == 404
-    )
-    result = client.post(url, headers={CSRF_HEADER: _csrf(client)})
-    assert result.status_code == 200, result.text
-    assert result.json()["status"] == "cancelled"
-    replay = client.post(url, headers={CSRF_HEADER: _csrf(client)})
-    assert replay.json() == result.json()
-    read = client.get(url.removesuffix("/cancel"))
-    assert read.json()["status"] == "cancelled"

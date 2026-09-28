@@ -1,7 +1,18 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 
-import { Badge, Button, Card, Input, PageHeader, Tab, Tabs } from "../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  Tab,
+  Tabs,
+  Textarea,
+} from "../components/ui";
 
 const PALETTE = [
   { name: "Obsidian", hex: "#071013", value: "var(--df-obsidian)" },
@@ -31,7 +42,7 @@ export function DesignPreviewPage() {
         eyebrow="DramaForge"
         title="Visual System 2.0"
         actions={
-          <Link to="/" search={{ create: false }} className="df-btn ghost">
+          <Link to="/" search={{ create: undefined }} className="df-btn ghost">
             <span aria-hidden="true">←</span>
             返回项目大厅
           </Link>
@@ -76,26 +87,26 @@ export function DesignPreviewPage() {
 
       <PreviewSection title="Input">
         <div className="df-preview-form">
-          <label className="df-form-group" htmlFor="preview-title">
+          <Field className="df-form-group" htmlFor="preview-title">
             <span className="df-label">作品名</span>
             <Input id="preview-title" defaultValue="雨停之前" />
-          </label>
-          <label className="df-form-group" htmlFor="preview-idea">
+          </Field>
+          <Field className="df-form-group" htmlFor="preview-idea">
             <span className="df-label">一句话创意</span>
-            <textarea
+            <Textarea
               id="preview-idea"
               className="df-input"
               rows={3}
               defaultValue="一对多年未见的父女，在末班车上重新认识彼此。"
             />
-          </label>
-          <label className="df-form-group" htmlFor="preview-ratio">
+          </Field>
+          <Field className="df-form-group" htmlFor="preview-ratio">
             <span className="df-label">画幅</span>
-            <select id="preview-ratio" className="df-input" defaultValue="9:16">
+            <Select id="preview-ratio" className="df-input" defaultValue="9:16">
               <option value="9:16">9:16 竖屏</option>
               <option value="16:9">16:9 横屏</option>
-            </select>
-          </label>
+            </Select>
+          </Field>
         </div>
       </PreviewSection>
 

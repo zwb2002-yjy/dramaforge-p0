@@ -26,6 +26,7 @@ function json(body: unknown, status = 200): Promise<Response> {
 function mockEditingFetch(implementation: typeof fetch) {
   return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
+    if ((init?.method ?? "GET") === "GET" && url.endsWith("/assets")) return json([]);
     if (
       (init?.method ?? "GET") === "GET" &&
       (url.endsWith("/edit-sessions") || url.endsWith("/final-films"))
@@ -303,9 +304,7 @@ describe("EditingWorkspace", () => {
     expect(clip).not.toHaveTextContent(SCENE_ID);
     expect(clip).not.toHaveTextContent(SHOT_ID);
     expect(clip).not.toHaveTextContent("artifact-formal");
-    expect(
-      screen.getByText("当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("只读预览已完成的镜头，继续剪辑或新建会话。")).toBeInTheDocument();
     expect(calls).toEqual([{ method: "GET", url: "/api/v1/projects/project-1/opencut-manifest" }]);
     expect(screen.getByTestId("editing-read-only")).toHaveTextContent("只读");
     expect(screen.getByTestId("create-edit-session")).toBeEnabled();
@@ -368,6 +367,38 @@ describe("EditingWorkspace", () => {
     expect(calls).toEqual([`/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}`]);
   });
 
+  it("keeps raw identifiers out of the creative surface", async () => {
+    // The plan forbids ordinary creative UI from showing interface/database
+    // fields, hashes or internal ids; they belong in a marked read-only
+    // diagnostics block that is collapsed by default.
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/assets")) return json([]);
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-facts");
+
+    const facts = screen.getByTestId("edit-session-facts");
+    // Raw lineage fields stay inside the collapsed diagnostics block: the
+    // default-visible part of the panel carries no interface/database names.
+    const diagnostics = screen.getByTestId("edit-session-diagnostics");
+    const visible = (facts.textContent ?? "").replace(diagnostics.textContent ?? "", "");
+    expect(visible).not.toMatch(/\b(artifact_id|shot_id|scene_id|episode_id)\b/);
+    expect(visible).not.toContain("artifact-formal");
+    // The identifiers are still available, just inside the diagnostics block.
+    expect(
+      within(screen.getByTestId("edit-session-diagnostics")).getByText(SESSION_ID),
+    ).toBeInTheDocument();
+
+    // Clip audio is chosen by name, not by pasting an Artifact id.
+    const audioControl = screen.getByTestId("clip-audio-0");
+    expect(audioControl.tagName).toBe("SELECT");
+    expect(within(audioControl as HTMLElement).getByText("沿用镜头对白")).toBeInTheDocument();
+    expect(screen.getByTestId("clip-diagnostics-0")).not.toHaveAttribute("open");
+  });
+
   it("edits only local clip order/duration until an explicit save", async () => {
     const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
     mockEditingFetch((input, init) => {
@@ -424,6 +455,7 @@ describe("EditingWorkspace", () => {
     const patch = calls.find((call) => call.url.endsWith("/timeline"));
     expect(patch?.method).toBe("PATCH");
     expect(patch?.body).toEqual({
+      expected_session_version: 1,
       timeline: {
         clips: [
           {
@@ -539,6 +571,34 @@ describe("EditingWorkspace", () => {
     expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
   });
 
+  it("keeps the local draft and explains how to recover from a stale save conflict", async () => {
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-stale" });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}/timeline`)) {
+        return json(
+          {
+            detail: "edit session version conflict",
+            code: "CONFLICT",
+            details: { expected_session_version: 1, actual_session_version: 2 },
+          },
+          409,
+        );
+      }
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByLabelText("镜头 1 时长"), { target: { value: "2.25" } });
+    fireEvent.click(screen.getByTestId("save-edit-timeline"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("本地未保存草稿已保留");
+    expect(screen.getByRole("alert")).toHaveTextContent("重新加载后手动合并");
+    expect(screen.getByTestId("edit-session-dirty")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
+  });
+
   it("requests a proposal with the current session version and keeps it separate from timeline save", async () => {
     const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
     mockEditingFetch((input, init) => {
@@ -642,6 +702,7 @@ describe("EditingWorkspace", () => {
     const clips = (patchBody?.timeline as { clips: Array<Record<string, unknown>> })?.clips;
     expect(clips?.map((clip) => clip.id)).toEqual(["clip-2", "clip-1"]);
     expect(clips?.[1]).toMatchObject({ id: "clip-1", duration_seconds: 2.5 });
+    expect(patchBody?.expected_session_version).toBe(1);
     expect(patchBody).not.toHaveProperty("production_lineage");
   });
 
@@ -836,6 +897,7 @@ describe("EditingWorkspace", () => {
           timeline_version: 1,
           shot_ids: ["shot-1", "shot-2"],
           node_run_ids: [],
+          preparation_fingerprint: "a".repeat(64),
           status: "queued",
         });
       }
@@ -869,7 +931,9 @@ describe("EditingWorkspace", () => {
     expect(result).toHaveTextContent("15.233");
     const renderCall = calls.find((call) => call.url.endsWith("/final-film/render"));
     expect(renderCall?.method).toBe("POST");
-    expect(renderCall?.headers?.["Idempotency-Key"]).toBe(`final-${PROJECT_ID}-${SESSION_ID}-1`);
+    expect(renderCall?.headers?.["Idempotency-Key"]).toBe(
+      `final-${SESSION_ID}-1-${"a".repeat(64)}`,
+    );
     expect(screen.getByTestId("final-film-player")).toHaveAttribute(
       "src",
       `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-final-1/content`,
@@ -1164,5 +1228,94 @@ describe("EditingWorkspace", () => {
     await waitFor(() => expect(screen.getByText("正式素材已交付")).toBeInTheDocument());
     expect(screen.queryByText("正式素材待交付")).not.toBeInTheDocument();
     expect(requestCount).toBe(2);
+  });
+});
+
+it("does not offer an Asset identity where the renderer requires an audio Artifact", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = String(input);
+    if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+    if (url.endsWith("/assets"))
+      return json([{ id: "asset-not-an-audio-artifact", kind: "audio", name: "声音设定" }]);
+    if (url.endsWith("/edit-sessions") || url.endsWith("/final-films")) return json([]);
+    return json({});
+  });
+  renderPersistedSession();
+  const control = await screen.findByTestId("clip-audio-0");
+  await waitFor(() => expect(screen.getByTestId("edit-session-editor")).toBeInTheDocument());
+  expect(within(control).queryByRole("option", { name: "声音设定" })).not.toBeInTheDocument();
+  expect(within(control).getByRole("option", { name: "沿用镜头对白" })).toBeInTheDocument();
+});
+
+it("saves chosen audio Artifacts and an explicit mute only through timeline Save", async () => {
+  let saved = persistedSession();
+  const patches: Array<Record<string, unknown>> = [];
+  const requests: string[] = [];
+  mockEditingFetch((input, init) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(saved);
+    if (url.includes("/production-history/artifacts?"))
+      return json({
+        items: [
+          {
+            id: "artifact-real-audio",
+            object_key: "audio/result.wav",
+            content_hash: "h",
+            byte_size: 16000,
+            mime_type: "audio/wav",
+            storage_state: "available",
+            duration_seconds: "2.5",
+            produced_by_run_id: null,
+            width: null,
+            height: null,
+          },
+        ],
+        next_cursor: null,
+      });
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-audio" });
+    if (url.endsWith("/timeline")) {
+      const body = JSON.parse(String(init?.body));
+      patches.push(body);
+      saved = persistedSession(body.timeline, saved.version + 1);
+      return json(saved);
+    }
+    return json({});
+  });
+  renderPersistedSession();
+  await screen.findByTestId("edit-session-editor");
+  expect(requests.some((url) => url.includes("/production-history/artifacts"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "选择镜头 1 配音" }));
+  fireEvent.click(await screen.findByRole("button", { name: "使用音频 1" }));
+  expect(screen.getByTestId("clip-audio-0")).toHaveValue("artifact-real-audio");
+  fireEvent.click(screen.getByText("背景音乐（可选）"));
+  fireEvent.click(screen.getByRole("button", { name: "选择背景音乐" }));
+  fireEvent.click(await screen.findByRole("button", { name: "使用音频 1" }));
+  expect(patches).toEqual([]);
+  expect(screen.getByTestId("export-final-film")).toBeDisabled();
+  fireEvent.click(screen.getByTestId("save-edit-timeline"));
+  await waitFor(() => expect(patches).toHaveLength(1));
+  expect(patches[0]).toMatchObject({
+    expected_session_version: 1,
+    timeline: { metadata: { music_artifact_id: "artifact-real-audio" } },
+  });
+  expect(saved.timeline).toMatchObject({
+    clips: [
+      expect.objectContaining({ audio_id: "artifact-real-audio", muted: false }),
+      expect.objectContaining({ audio_id: "audio-2" }),
+    ],
+  });
+  expect(patches[0]).not.toHaveProperty("production_lineage");
+  await waitFor(() => expect(screen.getByTestId("save-edit-timeline")).toBeDisabled());
+  fireEvent.change(screen.getByTestId("clip-audio-0"), { target: { value: "__muted__" } });
+  expect(patches).toHaveLength(1);
+  fireEvent.click(screen.getByTestId("save-edit-timeline"));
+  await waitFor(() => expect(patches).toHaveLength(2));
+  expect(patches[1]).toMatchObject({ expected_session_version: 2 });
+  expect(saved.timeline).toMatchObject({
+    clips: [
+      expect.objectContaining({ audio_id: "", muted: true }),
+      expect.objectContaining({ audio_id: "audio-2" }),
+    ],
   });
 });

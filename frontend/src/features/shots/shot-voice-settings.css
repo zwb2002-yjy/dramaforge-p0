@@ -1,0 +1,14 @@
+.shot-voice-settings {
+  display: grid;
+  min-width: 0;
+  gap: var(--df-space-3);
+}
+
+.shot-voice-settings p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.shot-voice-settings input[type="range"] {
+  padding-inline: 0;
+}

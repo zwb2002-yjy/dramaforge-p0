@@ -33,9 +33,8 @@ def test_policy_matrix_matches_design() -> None:
 def test_runtime_and_model_selection_never_read_autonomy_policy() -> None:
     repo = Path(__file__).resolve().parents[3]
     runtime_paths = [
-        repo / "backend" / "app" / "execution" / "product_path.py",
+        *sorted((repo / "backend" / "app" / "execution").glob("*.py")),
         repo / "backend" / "app" / "providers" / "selection.py",
-        repo / "backend" / "app" / "execution" / "voice_path.py",
     ]
     for path in runtime_paths:
         source = path.read_text(encoding="utf-8")

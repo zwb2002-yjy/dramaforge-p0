@@ -47,10 +47,17 @@ image identities in `.env`. It preserves database credentials,
 before an upgrade; replacing the Fernet key makes saved Provider credentials
 unreadable.
 
+PostgreSQL connections use `DATABASE_SSL=false` for the local Compose network.
+Set it to `true` when the database endpoint requires TLS; the setting is passed
+to the API, dispatcher and Workers and is not encoded in application code.
+
 ## Complete offline install
 
 Use the architecture-specific offline release bundle, not the online bundle.
-It contains `images.tar` with the complete runtime image set. After extracting:
+It contains `images.tar.gz` with the complete runtime image set. Extract it into
+a directory and run the installer from that same directory (the archive holds the
+installer, `release.env`, the Compose files and the image archive at its top
+level):
 
 ```text
 .\install.ps1 -Offline
@@ -62,7 +69,7 @@ or:
 ./install.sh --offline
 ```
 
-The installer imports `images.tar` and layers `docker-compose.offline.yml`,
+The installer imports `images.tar.gz` and layers `docker-compose.offline.yml`,
 whose `pull_policy: never` contract covers every service. Offline installation
 means no registry access during installation. Cloud media Providers still need
 network access and user credentials; this release does not claim that the full
@@ -103,6 +110,18 @@ checked from service status and worker logs: `worker-default` consumes
 (Director turns, event intake and wakeup replay), and `worker-heavy` consumes
 `dramaforge:heavy`. Recoverable work is republished by the resident
 `dispatcher` and by the Director worker's startup recovery.
+Provider reconciliation runs in an independent dispatcher loop, not a heavy-queue cron job;
+media execution still uses the existing queue. Apply migration `20260919_0073` before
+updating the dispatcher and media workers. This rollout is not implied by a source-only push.
+
+Director health uses `python -m app.workers.healthcheck` rather than importing
+all WorkerSettings/jobs for the Arq CLI. It checks the configured queue's nonempty
+Redis heartbeat plus a positive TTL of at most 3,601,000ms (not Redis PING), with
+no retries and a 3-second total probe deadline; Docker's timeout remains 5 seconds.
+Arq's existing 3600-second refresh / 3601-second expiry window is unchanged. This
+is **queue-level liveness, not per-process readiness**: another worker on the same
+queue can maintain the heartbeat. Check worker logs and actual job progress when
+diagnosing an individual process.
 
 Named volumes `postgres_data`, `minio_data`, and `litellm_db_data` contain
 persistent state. `docker compose down` preserves them; do not use `--volumes`
@@ -116,8 +135,8 @@ entrypoint is `scripts/p0_backup_restore.py` (see
 `DIRECTOR_RUNTIME_ENGINE` selects the engine for **newly started** Director
 turns and defaults to `legacy`. It is passed to both the API (which starts
 turns) and `worker-director` (which executes them); the `langgraph` value also
-requires `DIRECTOR_CHECKPOINT_DATABASE_URL`, which only `worker-director`
-receives, plus the private `director_runtime_checkpoints` schema created by
+requires `DIRECTOR_CHECKPOINT_DATABASE_URL`, which both processes receive,
+plus the private `director_runtime_checkpoints` schema created by
 migration `20260910_0066` (role `dramaforge_director_checkpoint`, provisioned by
 `database-bootstrap`). Selecting one engine never runs the other, and the manual
 production path must still complete with the director worker stopped.

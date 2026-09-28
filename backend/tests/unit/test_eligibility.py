@@ -145,7 +145,33 @@ async def test_unverified_model_is_ineligible_with_code() -> None:
     )
     assert evaluation.eligible is False
     codes = {issue.code for issue in evaluation.issues}
-    assert {"MODEL_NOT_ACCOUNT_VERIFIED", "MODEL_QUALITY_GATE_MISSING"} <= codes
+    assert "MODEL_NOT_ACCOUNT_VERIFIED" in codes
+    # Quality certification is evidence, not an admission gate: it is reported on
+    # the evaluation and never appears as a blocking issue.
+    assert "MODEL_QUALITY_GATE_MISSING" not in codes
+    assert evaluation.certified is False
+    assert evaluation.evidence["quality_gated"] is False
+
+
+@pytest.mark.asyncio
+async def test_uncertified_but_verified_model_is_eligible() -> None:
+    """An account-verified binding runs before a human quality acceptance.
+
+    The gate that refuses execution is account verification; the quality gate is
+    certification the surfaces display (`certified`), so a missing one must not
+    make the candidate ineligible.
+    """
+    binding, entry = _pair()
+    evaluation = await evaluate_candidate(
+        object(),
+        binding=_binding(entry=entry, account_verified=True, quality_gated=False),
+        connection=_connection(),
+        catalog_entry=entry,
+        operation=VIDEO_GENERATE,
+    )
+    assert evaluation.issues == []
+    assert evaluation.eligible is True
+    assert evaluation.certified is False
 
 
 @pytest.mark.asyncio

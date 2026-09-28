@@ -111,6 +111,9 @@ async def _make_keyframe_artifact(
         if node_type == "keyframe"
         else materialized.nodes["video"]
     )
+    initial_run_status = (
+        "queued" if run_status in {"completed", "cached", "completed_after_cancel"} else run_status
+    )
     run = NodeRun(
         project_id=project.id,
         graph_version_id=version.id,
@@ -118,7 +121,7 @@ async def _make_keyframe_artifact(
         idempotency_key=f"keyframe:{uuid4().hex}",
         input_hash="a" * 64,
         attempt_no=attempt_no,
-        status=run_status,
+        status=initial_run_status,
         input_snapshot={
             "shot_id": str(shot_id),
             "stage": snapshot_stage
@@ -141,6 +144,7 @@ async def _make_keyframe_artifact(
     session.add(artifact)
     await session.flush()
     run.result_artifact_id = artifact.id
+    run.status = run_status
     await session.flush()
     return artifact
 

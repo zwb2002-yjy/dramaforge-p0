@@ -288,7 +288,9 @@ async def test_execute_repair_rerun_video_dispatches_queued_run(session: AsyncSe
         idempotency_key="repair-key-1",
     )
     assert run.status == "queued"
-    assert run.idempotency_key.startswith("workbench:video:repair:repair-key-1")
+    assert run.idempotency_key.startswith("workbench:video:repair:")
+    assert run.idempotency_key.endswith(":repair-key-1")
+    assert run.input_snapshot["workbench_plan"]["semantic_intent"]["repair_request_id"]
     snapshot = run.input_snapshot or {}
     assert snapshot["workbench_plan"]["semantic_intent"].get("repair") == "rerun_video"
 

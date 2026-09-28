@@ -5,6 +5,7 @@ import { PROJECT_ID, installProfessionalMock } from "./professional-mocks";
 test("experiment branch lifecycle: create, run, adopt candidate", async ({ page }) => {
   const state = await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
+  await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
 
   await page.getByLabel("实验名称").fill("Model B 转头验证");
@@ -18,6 +19,9 @@ test("experiment branch lifecycle: create, run, adopt candidate", async ({ page 
 
   await page.getByRole("button", { name: "采纳候选" }).click();
   await expect(page.getByText(/Model B 转头验证/)).toBeVisible();
-  await expect(page.getByText(/已采用/)).toBeVisible();
+  await expect(page.getByTestId("experiment-message")).toContainText("已采用该候选");
+  await expect(page.getByTestId(`experiment-stage-${state.experiments[0].id}`)).toContainText(
+    "已采用",
+  );
   expect(state.experiments[0].status).toBe("accepted");
 });

@@ -88,6 +88,7 @@ async def test_phase9_gate_edit_flow_preserves_lineage(session: AsyncSession) ->
     edited = await adapter.save_timeline(
         project_id=project.id, session_id=session_id,
         timeline={"clips": clips, "metadata": {"edited": True}},
+        expected_session_version=loaded.version,
     )
     assert edited.status == "draft"
 

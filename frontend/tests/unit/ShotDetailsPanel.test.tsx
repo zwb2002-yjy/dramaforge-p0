@@ -44,10 +44,32 @@ describe("ShotDetailsPanel", () => {
     const sheet = screen.getByTestId("shot-details-sheet");
     expect(sheet).toHaveAttribute("data-shot-id", "shot-1");
     expect(sheet).toHaveTextContent("#3 · v7");
-    expect(sheet).toHaveTextContent("formal-kf");
-    expect(sheet).toHaveTextContent("未确认");
+    // Status and confirmed artifacts speak product vocabulary; the stored tokens
+    // and artifact ids stay in the collapsed diagnostics block.
+    expect(screen.getByTestId("shot-details-status")).toHaveTextContent("草稿");
+    const body = (() => {
+      const clone = sheet.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll("details").forEach((element) => element.remove());
+      return clone.textContent ?? "";
+    })();
+    expect(body).toContain("已确认");
+    expect(body).toContain("未确认");
+    expect(body).not.toContain("formal-kf");
+    expect(body).not.toContain("draft");
+    const ownDiagnostics = screen.getByTestId("shot-details-diagnostics");
+    expect(ownDiagnostics).toHaveTextContent("formal-kf");
+    expect(ownDiagnostics).not.toHaveAttribute("open");
     expect(screen.getByTestId("shot-production-trace")).toHaveAttribute("data-shot-id", "shot-1");
-    expect(screen.getByTestId("shot-production-trace")).toHaveTextContent("completed");
+    // The trace speaks product vocabulary; the stored token stays in the
+    // collapsed diagnostics block instead of the ordinary surface.
+    const trace = screen.getByTestId("shot-production-trace");
+    const visible = (() => {
+      const clone = trace.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll("details").forEach((element) => element.remove());
+      return clone.textContent ?? "";
+    })();
+    expect(visible).toContain("已完成");
+    expect(visible).not.toContain("completed");
 
     fireEvent.click(screen.getByTestId("shot-details-close"));
     expect(onClose).toHaveBeenCalledTimes(1);

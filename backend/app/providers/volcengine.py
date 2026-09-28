@@ -530,93 +530,6 @@ class ArkHubClient:
         return {"amount": 0.0, "currency": "USD", "units": 1.0}
 
 
-class ArkImageAdapter:
-    provider = "volcengine"
-    protocol_profile = ARK_CN_PROFILE
-
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-        host: str | None = None,
-    ) -> None:
-        self._client = ArkHubClient(settings, transport=transport, host=host)
-        self.model = self._client._image_model
-
-    async def create(self, request: dict[str, Any]) -> dict[str, Any]:
-        return await self._client.create_image(
-            prompt=str(request.get("prompt") or ""),
-            size=str(request.get("size") or "2048x2048"),
-            reference_url=(str(request["reference_url"]) if request.get("reference_url") else None),
-            reference_artifact_id=(
-                str(request["reference_artifact_id"])
-                if request.get("reference_artifact_id")
-                else None
-            ),
-            reference_fingerprint=(
-                str(request["reference_fingerprint"])
-                if request.get("reference_fingerprint")
-                else None
-            ),
-            seed=int(request["seed"]) if request.get("seed") is not None else None,
-        )
-
-    async def poll(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.poll(remote_task_id)
-
-    async def cancel(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.cancel(remote_task_id)
-
-    async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.fetch_cost(remote_task_id)
-
-
-class ArkVideoAdapter:
-    provider = "volcengine"
-    protocol_profile = ARK_CN_PROFILE
-
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-        host: str | None = None,
-    ) -> None:
-        self._client = ArkHubClient(settings, transport=transport, host=host)
-        self.model = self._client._video_model
-
-    async def create(self, request: dict[str, Any]) -> dict[str, Any]:
-        return await self._client.create_video(
-            prompt=str(request.get("prompt") or ""),
-            image_url=(str(request["image_url"]) if request.get("image_url") else None),
-            reference_artifact_ids=[
-                str(item) for item in request.get("reference_artifact_ids", [])
-            ],
-            reference_fingerprints=[
-                str(item) for item in request.get("reference_fingerprints", [])
-            ],
-        )
-
-    async def poll(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.poll(remote_task_id)
-
-    async def poll_persisted(
-        self,
-        remote_task_id: str,
-        *,
-        query_kind: str | None,
-    ) -> dict[str, Any]:
-        _ = query_kind  # Ark polls by task id only
-        return await self._client.poll_video(remote_task_id)
-
-    async def cancel(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.cancel(remote_task_id)
-
-    async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.fetch_cost(remote_task_id)
-
-
 # ---------------------------------------------------------------------------
 # Stage B3: unified Ark Compiler + Runtime (single wire owner).
 # Only fields already backed by Contract Test / Probe / quality evidence are
@@ -646,10 +559,18 @@ class ArkImageCompiler:
     """Validates an image intent against the Ark catalog manifest and compiles
     the wire request (Seedream) using the same builder as :class:`ArkHubClient`."""
 
+    reference_transport = "public_url"
+
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("image.generate")
         if op is None:
             raise ValueError("model does not support image.generate")
+        if intent.seed is not None:
+            raise ValueError("Ark image catalog revision does not declare seed")
+        if intent.aspect_ratio not in {None, "1:1"}:
+            raise ValueError("Ark image aspect ratio must match the frozen square size")
+        if intent.size not in {None, op.output_constraints.get("size")}:
+            raise ValueError("Ark image size must match the frozen manifest")
         capabilities = set(op.capabilities)
         required = "image.t2i"
         if intent.reference_artifact_id is not None:
@@ -723,6 +644,8 @@ class ArkVideoCompiler:
     """Validates a video intent against the Ark catalog manifest and compiles
     the Seedance ``content[]`` first-frame request. No duration/ratio/audio."""
 
+    reference_transport = "public_url"
+
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("video.generate")
         if op is None:
@@ -744,10 +667,13 @@ class ArkVideoCompiler:
                 intent.output.aspect_ratio,
                 intent.output.duration_seconds,
                 intent.output.generate_audio,
+                intent.output.resolution,
+                intent.output.seed,
             )
         ):
             raise ValueError(
-                "Ark video catalog revision cannot express duration, ratio, or audio"
+                "Ark video catalog revision cannot express duration, ratio, audio, "
+                "resolution, or seed"
             )
 
     async def compile(
@@ -830,8 +756,18 @@ class ArkRuntime:
         return bool(self._key and self._enabled)
 
     async def submit_image(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="image.generate",
+        )
         if not self._configured():
             raise RuntimeError("Volcengine Ark connection is not configured")
         try:
@@ -883,8 +819,18 @@ class ArkRuntime:
         )
 
     async def submit_video(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="video.generate",
+        )
         if not self._configured():
             raise RuntimeError("Volcengine Ark connection is not configured")
         try:

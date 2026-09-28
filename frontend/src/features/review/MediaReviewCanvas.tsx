@@ -75,7 +75,7 @@ export function MediaReviewCanvas({
       onMouseDown={onMouseDown}
       onMouseUp={onMouseUp}
     >
-      <img src={imageUrl} alt="review target" className="media-review-image" />
+      <img src={imageUrl} alt="review target" className="media-review-image" draggable={false} />
       {regions.map((region, index) => (
         <div
           key={`${region.x}-${region.y}-${index}`}

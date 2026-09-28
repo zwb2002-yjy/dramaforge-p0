@@ -488,11 +488,6 @@ class ProductionModelProfileService:
                 )
             )
 
-    async def validate_bindings_api(
-        self, bindings: dict[ModelSlot, ModelSlotBinding]
-    ) -> ProfileValidationReport:
-        return self.validate_bindings(bindings)
-
     # ------------------------------------------------------------------
     # Reads / mapping
     # ------------------------------------------------------------------

@@ -386,7 +386,8 @@
   }
   .rs-stage .qc-canvas-media img,
   .rs-stage .qc-canvas-media video {
-    max-height: 38svh;
+    /* Reserve first-screen space for the project guide and intention control. */
+    max-height: var(--df-scene-compact-media-height);
   }
   .rs-intent {
     width: calc(100% - 24px);
@@ -488,10 +489,6 @@
 .rs-companion[data-state="failed"] .rs-companion-orb {
   border-color: var(--df-danger);
   color: var(--df-danger-text);
-}
-.rs-scene-world .qc-page-heading h1 {
-  font-family: var(--df-font-display);
-  font-weight: 400;
 }
 .rs-scene-world .qc-scene-card {
   padding: 12px;

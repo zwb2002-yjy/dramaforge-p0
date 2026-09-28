@@ -27,6 +27,36 @@ REPO = Path(__file__).resolve().parents[1]
 WORKSPACE = os.environ.get(
     "DRAMAFORGE_PROOF_WORKSPACE", "c00b1899-b4ac-46c7-b4c7-25a230e9ebe2"
 )
+ALEMBIC_VERSIONS = REPO / "backend" / "alembic" / "versions"
+ENTRY_PORT = int(os.environ.get("DRAMAFORGE_PROOF_ENTRY_PORT", "8080"))
+
+
+def repository_migration_head() -> str:
+    """Return the single Alembic head declared by the candidate's own migrations.
+
+    The external runtime proof binds the running services to the candidate, and
+    the release workflow refuses to ship a tree whose migrations do not resolve
+    to exactly one head, so the head is derived from the repository instead of
+    being pinned to a revision that a later migration silently invalidates.
+    """
+    revision = re.compile(r"^revision(?::[^=]+)?\s*=\s*[\"']([^\"']+)[\"']", re.MULTILINE)
+    down = re.compile(r"^down_revision(?::[^=]+)?\s*=\s*[\"']([^\"']+)[\"']", re.MULTILINE)
+    revisions: set[str] = set()
+    parents: set[str] = set()
+    for path in sorted(ALEMBIC_VERSIONS.glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        found = revision.search(text)
+        if found:
+            revisions.add(found.group(1))
+        parent = down.search(text)
+        if parent:
+            parents.add(parent.group(1))
+    heads = sorted(revisions - parents)
+    if len(heads) != 1:
+        raise RuntimeError(
+            f"expected exactly one Alembic head in {ALEMBIC_VERSIONS}, found {heads}"
+        )
+    return heads[0]
 SECRET_KEYS = {
     "authorization",
     "cookie",
@@ -1058,7 +1088,10 @@ class Acceptance:
                     timeline.setdefault("metadata", {})["director_suggestion_applied"] = advice[
                         "suggestion"
                     ]["base_session_version"]
-                return {"timeline": timeline}
+                return {
+                    "timeline": timeline,
+                    "expected_session_version": edit["version"],
+                }
 
             saved = self.once(
                 label + ":timeline-save",
@@ -1181,7 +1214,10 @@ class Acceptance:
             prefix + ":timeline-save",
             "PATCH",
             f"/projects/{project_id}/edit-sessions/{edit['id']}/timeline",
-            {"timeline": saved_step["response"]["timeline"]},
+            {
+                "timeline": saved_step["response"]["timeline"],
+                "expected_session_version": edit["version"],
+            },
         )
         prepared = self.once(
             prefix + ":tail",
@@ -1277,18 +1313,39 @@ class Acceptance:
             "video_drift",
             "formal_video",
         )
+        repair_request = self.once(
+            "review:repair-create",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/repairs",
+            {
+                "repair_option": "rerun_video",
+                "plan_hash": plan["plan_hash"],
+                "idempotency_key": self._repair_key("review-video", project_id, shot_id),
+            },
+        )
+        step_plan = self.once(
+            "review:repair-step-plan",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/repairs/{repair_request['id']}"
+            "/step-plan",
+            {"accept_approximations": False},
+        )
         repair = self.once(
             "review:repair-submit",
             "POST",
-            f"/projects/{project_id}/shots/{shot_id}/repair",
+            f"/projects/{project_id}/shots/{shot_id}/repairs/{repair_request['id']}/steps",
             {
-                "repair_option": "rerun_video",
+                "expected_plan_fingerprint": step_plan["plan"]["plan_fingerprint"],
+                "expected_step_ordinal": step_plan["step_ordinal"],
+                "accept_approximations": False,
                 # A repair request whose first step already ran is at its human
                 # gate, so re-submitting the same operation key would be answered
                 # with REPAIR_STEP_REQUIRES_REVIEW (correctly). Each explicit
                 # attempt therefore carries its own key, chosen once and kept in
                 # the state so a resume reuses it.
-                "idempotency_key": self._repair_key("review-video", project_id, shot_id),
+                "idempotency_key": self._repair_key(
+                    "review-video-step", project_id, shot_id
+                ),
             },
             paid=True,
         )
@@ -1296,6 +1353,7 @@ class Acceptance:
             "project_id": project_id,
             "shot_id": shot_id,
             "annotation_id": annotation["id"],
+            "repair_id": repair_request["id"],
             "repair_plan": sanitized(plan),
             "repair_run_id": repair["node_run_id"],
             "formal_video_before": shot["formal_video_artifact_id"],
@@ -1481,7 +1539,10 @@ class Acceptance:
                 str(timeline["clips"][0].get("subtitle") or "") + " · 复核版"
             )
             timeline.setdefault("metadata", {})["r7_editing_only_rerender"] = self.state["run_key"]
-            return {"timeline": timeline}
+            return {
+                "timeline": timeline,
+                "expected_session_version": free_edit["version"],
+            }
 
         saved = self.once(
             "free_assist:rerender-save",
@@ -1608,7 +1669,7 @@ class Acceptance:
         self.state["assertions"]["final_mp4_srt_download"] = "PASS"
         self.save()
 
-    def import_external_proof(self, kind, path):
+    def import_external_proof(self, kind, path, *, entry_port, migration_head):
         proof = json.loads(path.read_text(encoding="utf-8"))
         if proof.get("candidate_sha") != self.state.get("candidate_sha"):
             raise RuntimeError(f"{kind} proof belongs to another candidate")
@@ -1637,7 +1698,7 @@ class Acceptance:
             }
             assertions = proof.get("assertions")
             if (
-                proof.get("entry_port") != 8080
+                proof.get("entry_port") != entry_port
                 or proof.get("project_ids") != expected
                 or not isinstance(assertions, dict)
                 or not assertions
@@ -1649,8 +1710,8 @@ class Acceptance:
         elif kind == "runtime":
             services = proof.get("services")
             if (
-                proof.get("entry_port") != 8080
-                or proof.get("migration_head") != "20260908_0060"
+                proof.get("entry_port") != entry_port
+                or proof.get("migration_head") != migration_head
                 or not isinstance(services, dict)
                 or set(services)
                 != {"api", "dispatcher", "worker_default", "worker_heavy", "frontend"}
@@ -1674,25 +1735,55 @@ class Acceptance:
             raise RuntimeError("Candidate promotion requires a source-equivalence proof")
         proof = json.loads(proof_path.read_text(encoding="utf-8"))
         previous = self.state.get("candidate_sha")
-        allowed_paths = {
+        artifact_identity_paths = {
             "backend/app/execution/artifact_lineage.py",
             "backend/tests/integration/test_artifact_lineage_pg.py",
             "backend/tests/unit/test_r7_acceptance_driver.py",
             "frontend/tests/live/v1-r7-real-acceptance.spec.ts",
             "scripts/prove_v1_r7_acceptance.py",
         }
+        formal_composite_paths = {
+            "backend/app/execution/composite_media.py",
+            "backend/app/execution/experiment_nodes.py",
+            "backend/app/execution/local_nodes.py",
+            "backend/app/production/final_film.py",
+            "backend/tests/unit/test_composite_media.py",
+            "backend/tests/unit/test_final_film_timeline.py",
+            "backend/tests/unit/test_r7_acceptance_driver.py",
+            "scripts/prove_v1_r7_acceptance.py",
+        }
         changed_paths = set(proof.get("changed_paths") or [])
-        if (
-            not previous
-            or proof.get("previous_candidate") != previous
-            or proof.get("candidate_sha") != candidate_sha
-            or not changed_paths
-            or not changed_paths <= allowed_paths
-            or "backend/app/execution/artifact_lineage.py" not in changed_paths
-            or proof.get("provider_submission_diff_empty") is not True
-            or proof.get("full_quality_gate") != "PASS"
-            or proof.get("concurrent_artifact_pg_regression") != "PASS"
-        ):
+        common_valid = bool(previous) and (
+            proof.get("previous_candidate") == previous
+            and proof.get("candidate_sha") == candidate_sha
+            and bool(changed_paths)
+            and proof.get("provider_submission_diff_empty") is True
+            and proof.get("full_quality_gate") == "PASS"
+        )
+        kind = proof.get("equivalence_kind", "artifact_identity_concurrency")
+        if kind == "artifact_identity_concurrency":
+            kind_valid = (
+                changed_paths <= artifact_identity_paths
+                and "backend/app/execution/artifact_lineage.py" in changed_paths
+                and proof.get("concurrent_artifact_pg_regression") == "PASS"
+            )
+        elif kind == "formal_composite_repair_isolation":
+            required_paths = {
+                "backend/app/execution/composite_media.py",
+                "backend/app/execution/experiment_nodes.py",
+                "backend/app/execution/local_nodes.py",
+                "backend/app/production/final_film.py",
+                "scripts/prove_v1_r7_acceptance.py",
+            }
+            kind_valid = (
+                changed_paths <= formal_composite_paths
+                and required_paths <= changed_paths
+                and proof.get("formal_composite_pin_regression") == "PASS"
+                and proof.get("staged_repair_api_regression") == "PASS"
+            )
+        else:
+            kind_valid = False
+        if not common_valid or not kind_valid:
             raise RuntimeError("Candidate source-equivalence proof is incomplete")
         if self.state["assertions"].get("template_auto:formal_media") != "PASS" or self.state[
             "assertions"
@@ -1705,7 +1796,7 @@ class Acceptance:
                     label: self.state["assertions"].get(label + ":formal_media")
                     for label in ("template_auto", "free_assist")
                 },
-                "reason": "acceptance_discovered_artifact_identity_concurrency_fix",
+                "reason": kind,
             }
         )
         self.state["candidate_sha"] = candidate_sha
@@ -1954,13 +2045,19 @@ def main():
                     raise RuntimeError("Candidate promotion target already matches the checkpoint")
                 run.state["candidate_sha"] = args.candidate
                 run.save()
+        expected_migration_head = repository_migration_head()
         for kind, proof_path in (
             ("recovery", args.recovery_proof),
             ("browser", args.browser_proof),
             ("runtime", args.runtime_proof),
         ):
             if proof_path is not None:
-                run.import_external_proof(kind, proof_path)
+                run.import_external_proof(
+                    kind,
+                    proof_path,
+                    entry_port=ENTRY_PORT,
+                    migration_head=expected_migration_head,
+                )
         if args.phase != "promote-candidate":
             getattr(run, args.phase.replace("-", "_"))()
         print(

@@ -1,3 +1,5 @@
+import { reviewTargetHref } from "../review/reviewTarget";
+import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -30,7 +32,7 @@ type ShotCandidateTrayProps = {
   onConfirmed?: (result: FormalKeyframeRead | FormalVideoRead) => void | Promise<void>;
   /**
    * V2 Canvas-first (UI-1): the tray is a conditional review surface.
-   * Collapsed (default) it renders a single "Takes · N" line; it expands
+   * Collapsed (default) it renders a single "备选画面 · N" line; it expands
    * after Generate, in review, or when the user opens it from the dock.
    */
   expanded?: boolean;
@@ -89,13 +91,9 @@ export function ShotCandidateTray({
     },
     onMutate: () => setFeedback(null),
     onSuccess: async (result) => {
-      const formalArtifactId =
-        "formal_keyframe_artifact_id" in result
-          ? result.formal_keyframe_artifact_id
-          : result.formal_video_artifact_id;
       setFeedback({
         kind: "success",
-        message: `已确认 ${formalArtifactId}（Shot v${result.version}）`,
+        message: "formal_keyframe_artifact_id" in result ? "已设为正式关键帧" : "已设为正式视频",
       });
       // Keep the existing cache aliases coherent.  No browser-side Shot or
       // formal id is manufactured; the follow-up workspace read is the truth.
@@ -118,7 +116,12 @@ export function ShotCandidateTray({
     onError: (error) => {
       // Stale-version conflicts remain visible and fail closed.  We do not
       // mark a candidate formal or alter the local canvas on error.
-      setFeedback({ kind: "error", message: errorMessage(error) });
+      setFeedback({
+        kind: "error",
+        message: /has not been approved by a human review decision/.test(errorMessage(error))
+          ? "请先点击此候选的‘审查此候选’，记录人工通过，再返回设为正式版本。"
+          : errorMessage(error),
+      });
     },
   });
 
@@ -141,8 +144,7 @@ export function ShotCandidateTray({
         aria-expanded="false"
         onClick={onToggleExpanded}
       >
-        <span className="director-stage-kicker">候选</span>
-        <strong>Takes · {parsedCandidates.length}</strong>
+        <strong>备选画面 · {parsedCandidates.length}</strong>
       </button>
     );
   }
@@ -177,6 +179,11 @@ export function ShotCandidateTray({
         )}
       </header>
 
+      {parsedCandidates.length > 0 && (
+        <p className="muted">
+          使用顺序：预览候选 → 审查并通过 → 设为正式。只有正式视频可以用于成片。
+        </p>
+      )}
       {parsedCandidates.length === 0 ? (
         <p className="muted" data-testid="shot-candidate-empty">
           生产链完成后，候选媒体会出现在这里；实验分支不会混入正式候选。
@@ -218,8 +225,19 @@ export function ShotCandidateTray({
                   )}
                   <span className="qc-shot-candidate-badge">{selected ? "正在预览" : label}</span>
                 </button>
+                <a
+                  href={reviewTargetHref(projectId, {
+                    shotId: shot.id,
+                    artifactId: candidate.artifactId,
+                    stage:
+                      candidate.stage === "image_keyframe" ? "formal_keyframe" : "formal_video",
+                    reviewKind: candidate.stage === "image_keyframe" ? "identity" : "video_drift",
+                  })}
+                >
+                  审查此候选
+                </a>
                 <div className="qc-shot-candidate-meta">
-                  <span>{candidate.status}</span>
+                  <span>{nodeRunStatusLabel(candidate.status)}</span>
                   {candidate.nodeRunId && <small>Run {candidate.nodeRunId.slice(0, 8)}</small>}
                   <code>{candidate.artifactId}</code>
                 </div>
@@ -251,7 +269,8 @@ export function ShotCandidateTray({
           projectId={projectId}
           artifactId={assetCandidate.artifactId}
           defaultName={shot.shot_number ? `镜头 ${shot.shot_number}` : "未命名资产"}
-          defaultKind="character"
+          defaultKind={assetCandidate.artifactType === "video" ? "video" : "character"}
+          artifactType={assetCandidate.artifactType}
           sourceLabel={`${shotCandidateStageLabel(assetCandidate.stage)}候选`}
           shotId={shot.id}
           onCreated={async (asset) => {

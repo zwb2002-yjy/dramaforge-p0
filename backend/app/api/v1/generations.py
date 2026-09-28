@@ -1,25 +1,21 @@
-"""Unified Generation API (V3 spec §58).
+"""Read-only Generation catalog API (V3 spec §58).
 
-Read surface (capabilities / models / model manifest) comes from the V3 model
-registry; generation creation is NodeRun-backed through the existing engine
-(see :mod:`app.providers.generation_service`). Routes are project-scoped per the
-repo convention (mirrors ``model-candidates`` / ``characters``). The API never
-exposes provider headers, base URLs, raw payloads or credentials (spec §24/§64).
+Capabilities / models / model manifest come from the V3 model registry. Media
+generation has exactly one product writer — the workbench execution path
+(execution-plan -> executions -> NodeRun) — so this module deliberately has no
+create/get/cancel product surface. The API never exposes provider headers, base
+URLs, raw payloads or credentials (spec §24/§64).
 """
 
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy import select
 
-from app.access.projects import ProjectService
 from app.api.deps import (
-    CsrfDep,
-    CurrentUser,
     SelectedWorkspace,
     SessionDep,
     SettingsDep,
@@ -27,11 +23,9 @@ from app.api.deps import (
 )
 from app.providers.bootstrap import default_v3_registry
 from app.providers.capabilities import Capability
-from app.providers.generation_service import GenerationService
 from app.providers.manifest import ModelManifest
 from app.providers.models import ProviderConnection
 from app.providers.registry import ModelRegistry
-from app.providers.router import CapabilityRouter
 from app.shared.errors import NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["generations"])
@@ -62,39 +56,6 @@ class ManifestRead(BaseModel):
     execution_mode: str
     supports_cancel: bool
     capability_specs: dict[str, Any]
-
-
-class GenerationCreateBody(BaseModel):
-    capability: str = Field(min_length=1)
-    model_id: str | None = None
-    slot: str | None = None
-    input: dict[str, Any] = Field(default_factory=dict)
-    options: dict[str, Any] = Field(default_factory=dict)
-    native_options: dict[str, Any] = Field(default_factory=dict)
-
-
-class GenerationCreateResponse(BaseModel):
-    operation_id: UUID
-    status: str
-    requested_capability: str
-    requested_model: str | None
-
-
-class ProviderOperationRead(BaseModel):
-    provider_operation_id: UUID | None
-    provider: str | None
-    model: str | None
-    remote_task_id: str | None
-
-
-class GenerationOperationRead(BaseModel):
-    operation_id: UUID
-    status: str
-    requested_capability: str
-    requested_model: str | None
-    error_code: str | None
-    result_artifact_id: UUID | None
-    provider_operation: ProviderOperationRead
 
 
 _CAPABILITY_DISPLAY_NAMES: dict[Capability, str] = {
@@ -215,130 +176,4 @@ async def get_model_manifest(model_id: str) -> ManifestRead:
             str(capability): spec.model_dump(mode="json")
             for capability, spec in manifest.capability_specs.items()
         },
-    )
-
-
-@router.post(
-    "/projects/{project_id}/generations",
-    response_model=GenerationCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_selected_workspace)],
-)
-async def create_generation(
-    project_id: UUID,
-    body: GenerationCreateBody,
-    user: CurrentUser,
-    session: SessionDep,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-) -> GenerationCreateResponse:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    try:
-        capability = Capability(body.capability)
-    except ValueError as exc:
-        raise ValidationAppError(
-            f"unknown capability: {body.capability}",
-            details={"code": "UNKNOWN_CAPABILITY"},
-        ) from exc
-    service = GenerationService(session, CapabilityRouter(registry=_registry()))
-    run = await service.create_generation(
-        project=project,
-        actor=user,
-        capability=capability,
-        model_id=body.model_id,
-        slot=body.slot,
-        input_data=body.input,
-        options=body.options,
-        native_options=body.native_options,
-        idempotency_key=idempotency_key,
-    )
-    await service.enqueue(run)
-    await session.commit()
-    snapshot = dict(run.input_snapshot or {})
-    generation = snapshot.get("generation") or {}
-    resolved_model = None
-    if isinstance(generation, dict):
-        resolved_model = (
-            str(generation["requested_model"]) if generation.get("requested_model") else None
-        )
-    return GenerationCreateResponse(
-        operation_id=run.id,
-        status=run.status,
-        requested_capability=body.capability,
-        requested_model=resolved_model,
-    )
-
-
-@router.get(
-    "/projects/{project_id}/generations/{operation_id}",
-    response_model=GenerationOperationRead,
-    dependencies=[Depends(require_selected_workspace)],
-)
-async def get_generation(
-    project_id: UUID,
-    operation_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-) -> GenerationOperationRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    service = GenerationService(session, CapabilityRouter(registry=_registry()))
-    run = await service.get_generation(project=project, operation_id=operation_id)
-    return await _read_operation(session, run)
-
-
-@router.post(
-    "/projects/{project_id}/generations/{operation_id}/cancel",
-    response_model=GenerationOperationRead,
-    dependencies=[Depends(require_selected_workspace)],
-)
-async def cancel_generation(
-    project_id: UUID,
-    operation_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-) -> GenerationOperationRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    service = GenerationService(session, CapabilityRouter(registry=_registry()))
-    run = await service.cancel_generation(project=project, operation_id=operation_id)
-    response = await _read_operation(session, run)
-    await session.commit()
-    return response
-
-
-async def _read_operation(session: Any, run: Any) -> GenerationOperationRead:
-    from app.execution.models import ProviderOperation
-
-    op = await session.scalar(
-        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
-    )
-    snapshot = dict(run.input_snapshot or {})
-    generation = snapshot.get("generation") or {}
-    requested_capability = (
-        str(generation.get("capability") or "") if isinstance(generation, dict) else ""
-    )
-    requested_model = None
-    if isinstance(generation, dict):
-        requested_model = (
-            str(generation["requested_model"]) if generation.get("requested_model") else None
-        )
-    provider_op = ProviderOperationRead(
-        provider_operation_id=op.id if op is not None else None,
-        provider=op.actual_provider if op is not None else None,
-        model=op.actual_model if op is not None else None,
-        remote_task_id=op.provider_operation_id if op is not None else None,
-    )
-    return GenerationOperationRead(
-        operation_id=run.id,
-        status=run.status,
-        requested_capability=requested_capability,
-        requested_model=requested_model,
-        error_code=run.error_code,
-        result_artifact_id=run.result_artifact_id,
-        provider_operation=provider_op,
     )

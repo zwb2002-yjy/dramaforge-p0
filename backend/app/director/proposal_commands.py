@@ -28,11 +28,11 @@ from app.editing.proposal_plan import (
     SetClipSubtitleOperation,
 )
 from app.production.experiment_service import (
-    ExperimentCreateInput,
-    ExperimentService,
+    ExperimentCreateBody,
+    create_experiment_branch,
 )
 from app.production.models import ShotReferenceBinding
-from app.shared.errors import ValidationAppError
+from app.shared.errors import AppError, ValidationAppError
 
 COMMAND_WHITELIST = frozenset(
     {
@@ -769,6 +769,7 @@ async def _apply_experiment_create(
     project_id: UUID,
     payload: dict[str, Any],
     actor_id: UUID,
+    command_key: str | None = None,
 ) -> None:
     from app.access.models import Project
 
@@ -778,17 +779,56 @@ async def _apply_experiment_create(
     actor = await session.get(User, actor_id)
     if actor is None:
         raise ProposalCommandError("actor not found")
-    await ExperimentService(session).create_experiment(
-        project=project,
-        actor=actor,
-        experiment_input=ExperimentCreateInput(
-            name=str(payload.get("name", "assistant experiment")),
-            shot_ids=[UUID(str(shot_id)) for shot_id in (payload.get("shot_ids") or [])],
-            model_overrides=dict(payload.get("model_overrides") or {}),
-            idempotency_key=str(payload.get("idempotency_key") or f"assistant-{UUID(int=0)}"),
-        ),
-    )
-    await session.flush()
+    # One command creates one isolated Shot branch, never a production run.
+    data = dict(payload)
+    shot_id = data.pop("shot_id", None)
+    shot_ids = data.pop("shot_ids", None)
+    if shot_ids is not None:
+        if not isinstance(shot_ids, list) or len(shot_ids) != 1:
+            raise ProposalCommandError("experiment requires exactly one source shot")
+        if shot_id is not None and str(shot_id) != str(shot_ids[0]):
+            raise ProposalCommandError("conflicting source shots")
+        shot_id = shot_ids[0]
+    if shot_id is not None:
+        if data.get("source_shot_id") is not None and str(data["source_shot_id"]) != str(shot_id):
+            raise ProposalCommandError("conflicting source shots")
+        data["source_shot_id"] = shot_id
+    if not data.get("source_shot_id"):
+        raise ProposalCommandError("experiment requires source_shot_id")
+    overrides = data.pop("model_overrides", {})
+    if not isinstance(overrides, dict):
+        raise ProposalCommandError("model_overrides must be an object")
+    if overrides:
+        if len(overrides) != 1:
+            raise ProposalCommandError("experiment requires one model override")
+        slot, model = next(iter(overrides.items()))
+        targets = {"video.shot": "video", "visual.keyframe": "keyframe"}
+        if slot not in targets:
+            raise ProposalCommandError("unsupported experiment model slot")
+        raw_parameters = data.get("parameters", {})
+        if not isinstance(raw_parameters, dict):
+            raise ProposalCommandError("experiment parameters must be an object")
+        parameters = dict(raw_parameters)
+        if parameters.get("target_node_key", targets[slot]) != targets[slot]:
+            raise ProposalCommandError("conflicting experiment target")
+        if data.get("selected_model", model) != model:
+            raise ProposalCommandError("conflicting experiment model")
+        data["selected_model"] = model
+        data["parameters"] = {**parameters, "target_node_key": targets[slot]}
+    data.setdefault("name", "assistant experiment")
+    # Item identity separates a replay from a new, identical user intention.
+    if command_key is not None:
+        data["idempotency_key"] = command_key
+    elif not data.get("idempotency_key"):
+        raise ProposalCommandError("experiment requires a stable command key")
+    try:
+        body = ExperimentCreateBody.model_validate(data)
+    except ValidationError as exc:
+        raise ProposalCommandError("invalid experiment branch payload") from exc
+    try:
+        await create_experiment_branch(session, project_id=project_id, actor_id=actor_id, body=body)
+    except AppError as exc:
+        raise ProposalCommandError(str(exc), details={"code": exc.code}) from exc
 
 
 class ProposalCommandRegistry:
@@ -808,6 +848,7 @@ class ProposalCommandRegistry:
         command: str,
         payload: dict[str, Any],
         expected_target_version: int | None = None,
+        command_key: str | None = None,
     ) -> None:
         if not self.is_known(command):
             raise ProposalCommandError(
@@ -894,23 +935,25 @@ class ProposalCommandRegistry:
                 actor_id=self._actor_id,
             )
         elif command == "shot.set_model_override":
-            # A model override is a model-swap experiment (P5 semantics).
+            # Model changes remain isolated until the branch decision gate.
             await _apply_experiment_create(
                 self._session,
                 project_id=project_id,
                 payload={
                     **payload,
-                    "model_overrides": payload.get("model_overrides") or {},
+                    "model_overrides": payload.get("model_overrides", {}),
                     "name": "assistant model override",
-                    "idempotency_key": str(
-                        payload.get("idempotency_key") or f"assistant-override-{UUID(int=0)}"
-                    ),
                 },
                 actor_id=self._actor_id,
+                command_key=command_key,
             )
         elif command == "experiment.create":
             await _apply_experiment_create(
-                self._session, project_id=project_id, payload=payload, actor_id=self._actor_id
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                actor_id=self._actor_id,
+                command_key=command_key,
             )
         elif command in _EDIT_SESSION_VERSIONED:
             await _apply_edit_session_timeline_plan(

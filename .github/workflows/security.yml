@@ -1,31 +1,20 @@
-name: Security
+name: Scheduled Security
 
 on:
-  pull_request:
-    branches: [dev, main]
-  push:
-    branches: [dev, main]
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
+
+concurrency:
+  group: scheduled-security-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  dependency-review:
-    # The private repository currently has no Dependency Graph/Advanced
-    # Security capability. Opt in explicitly when that capability is enabled;
-    # the independent pip/npm/Trivy checks remain blocking gates.
-    if: github.event_name == 'pull_request' && vars.DEPENDENCY_REVIEW_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/dependency-review-action@v5
-        with:
-          fail-on-severity: high
-
-  secret-scan:
+  scheduled-secret-scan:
+    name: scheduled-secret-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,7 +28,8 @@ jobs:
           format: table
           exit-code: "1"
 
-  python-dependencies:
+  scheduled-python-dependencies:
+    name: scheduled-python-dependencies
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -52,7 +42,8 @@ jobs:
             python:3.14-slim-bookworm \
             sh -ec 'pip install --no-cache-dir uv pip-audit; uv export --locked --no-dev --no-emit-project --output-file /tmp/requirements-audit.txt; pip-audit --requirement /tmp/requirements-audit.txt'
 
-  frontend-dependencies:
+  scheduled-frontend-dependencies:
+    name: scheduled-frontend-dependencies
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -65,7 +56,8 @@ jobs:
             node:24.21.0-alpine3.24 \
             sh -ec 'npm ci --ignore-scripts; npm audit --omit=dev --audit-level=high'
 
-  filesystem-scan:
+  scheduled-filesystem-scan:
+    name: scheduled-filesystem-scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -84,8 +76,6 @@ jobs:
           exit-code: "1"
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
-        # The Trivy scan remains the blocking security gate. Uploading its
-        # report is best-effort while repository Code Scanning is disabled.
         continue-on-error: true
         with:
           sarif_file: trivy-results.sarif

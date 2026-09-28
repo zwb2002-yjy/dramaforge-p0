@@ -4,58 +4,21 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Asset, AssetVersion, Episode, Scene, Shot
 from app.assets.scene_service import _artifact_summary
-from app.execution.models import Artifact, NodeRun, ProviderOperation
+from app.execution.models import Artifact
 from app.production.formal_selection import list_formal_candidates
 from app.production.models import ExperimentBranch, ShotReferenceBinding
+from app.production.trace_query import (
+    load_scene_execution_traces,
+    load_shot_execution_traces,
+)
 from app.shared.errors import NotFoundError
-
-UNKNOWN_SUBMISSION_STATUS = "unknown_submission"
-
-
-async def _unknown_submission_run_ids(
-    session: AsyncSession, *, run_ids: list[UUID]
-) -> set[UUID]:
-    """Run ids whose latest ProviderOperation outcome is unknown.
-
-    Surfacing the flag from stored facts keeps the UI from offering a blind
-    retry for a submission that may already have been billed.
-    """
-    if not run_ids:
-        return set()
-    latest_attempts = (
-        await session.execute(
-            select(
-                ProviderOperation.node_run_id,
-                func.max(ProviderOperation.attempt_no).label("attempt_no"),
-            )
-            .where(ProviderOperation.node_run_id.in_(run_ids))
-            .group_by(ProviderOperation.node_run_id)
-        )
-    ).all()
-    if not latest_attempts:
-        return set()
-    pairs = {(row.node_run_id, row.attempt_no) for row in latest_attempts}
-    latest = (
-        await session.execute(
-            select(ProviderOperation).where(
-                ProviderOperation.node_run_id.in_([pair[0] for pair in pairs])
-            )
-        )
-    ).scalars().all()
-    return {
-        operation.node_run_id
-        for operation in latest
-        if operation.node_run_id is not None
-        and (operation.node_run_id, operation.attempt_no) in pairs
-        and operation.status == UNKNOWN_SUBMISSION_STATUS
-    }
 
 
 def _shot_dict(shot: Shot) -> dict[str, object]:
@@ -201,52 +164,15 @@ class SceneWorkspaceService:
     async def _load_trace(
         self, *, project_id: UUID, shot_ids: list[UUID]
     ) -> dict[str, list[dict[str, object]]]:
-        trace: dict[str, list[dict[str, object]]] = {}
         if not shot_ids:
-            return trace
-        rows = (
-            await self._session.execute(
-                select(NodeRun)
-                .where(NodeRun.project_id == project_id)
-                .order_by(NodeRun.created_at.desc())
-                .limit(2000)
-            )
-        ).scalars().all()
-        selected: list[tuple[NodeRun, dict[str, object]]] = []
-        for run in rows:
-            # Extract in Python from the JSON snapshot for portability.
-            raw = dict(run.input_snapshot or {})
-            shot_id = raw.get("shot_id")
-            if shot_id is None:
-                continue
-            try:
-                shot_uuid = UUID(str(shot_id))
-            except (TypeError, ValueError):
-                continue
-            if shot_uuid not in shot_ids:
-                continue
-            selected.append((run, raw))
-        unknown_outcomes = await _unknown_submission_run_ids(
-            self._session, run_ids=[run.id for run, _raw in selected]
+            return {}
+        traces = await load_scene_execution_traces(
+            self._session, project_id=project_id, shot_ids=shot_ids
         )
-        for run, raw in selected:
-            trace.setdefault(str(raw["shot_id"]), []).append(
-                {
-                    "node_run_id": run.id,
-                    "node_key": raw.get("node_key"),
-                    "status": run.status,
-                    "error_code": run.error_code,
-                    "finished_at": run.finished_at,
-                    "result_artifact_id": run.result_artifact_id,
-                    # A ProviderOperation whose submission outcome is unknown
-                    # needs manual reconciliation, never a blind retry.
-                    "operation_outcome_unknown": run.id in unknown_outcomes,
-                }
-            )
-        for shot_id in shot_ids:
-            trace.setdefault(str(shot_id), [])
-            trace[str(shot_id)] = trace[str(shot_id)][:20]
-        return trace
+        return {
+            str(shot_id): [entry.model_dump() for entry in entries]
+            for shot_id, entries in traces.items()
+        }
 
 
 class ShotWorkbenchService:
@@ -283,7 +209,7 @@ class ShotWorkbenchService:
                 .order_by(ShotReferenceBinding.sort_order)
             )
         ).scalars().all()
-        candidates = (
+        branch_candidates = (
             await self._session.execute(
                 select(ExperimentBranch)
                 .where(
@@ -293,6 +219,13 @@ class ShotWorkbenchService:
                 .order_by(ExperimentBranch.created_at.desc())
             )
         ).scalars().all()
+        # Keep the shot workbench aligned with the scene workspace: concrete
+        # NodeRun -> Artifact candidates are the only exact media targets.
+        # Experiment branches remain opaque and are appended below, never
+        # substituted for a media candidate.
+        candidates = list((await list_formal_candidates(
+            self._session, project_id=project_id, shot_ids=[shot.id]
+        )).get(shot.id, []))
         formal_artifact_ids = [
             artifact_id
             for artifact_id in (
@@ -311,37 +244,11 @@ class ShotWorkbenchService:
             ).scalars().all()
             artifacts = {artifact.id: artifact for artifact in rows}
 
-        trace_rows = (
-            await self._session.execute(
-                select(NodeRun)
-                .where(NodeRun.project_id == project_id)
-                .order_by(NodeRun.created_at.desc())
-                .limit(2000)
-            )
-        ).scalars().all()
-        trace: list[tuple[NodeRun, dict[str, object]]] = []
-        for run in trace_rows:
-            raw = dict(run.input_snapshot or {})
-            if raw.get("shot_id") != str(shot.id) and raw.get("shot_id") != shot.id:
-                continue
-            trace.append((run, raw))
-            if len(trace) >= 20:
-                break
-        unknown_outcomes = await _unknown_submission_run_ids(
-            self._session, run_ids=[run.id for run, _raw in trace]
-        )
         shot_trace = [
-            {
-                "node_run_id": trace_run.id,
-                "node_key": trace_raw.get("node_key"),
-                "status": trace_run.status,
-                "error_code": trace_run.error_code,
-                "error_summary": trace_run.error_summary,
-                "finished_at": trace_run.finished_at,
-                "result_artifact_id": trace_run.result_artifact_id,
-                "operation_outcome_unknown": trace_run.id in unknown_outcomes,
-            }
-            for trace_run, trace_raw in trace
+            entry.model_dump()
+            for entry in await load_shot_execution_traces(
+                self._session, project_id=project_id, shot_id=shot.id
+            )
         ]
 
         old_version_warnings: list[dict[str, object]] = []
@@ -425,7 +332,7 @@ class ShotWorkbenchService:
                     else None
                 ),
             },
-            "candidates": [
+            "candidates": candidates + [
                 {
                     "id": branch.id,
                     "name": branch.name,
@@ -433,7 +340,7 @@ class ShotWorkbenchService:
                     "status": branch.status,
                     "selected_model": branch.selected_model,
                 }
-                for branch in candidates
+                for branch in branch_candidates
             ],
             "trace": shot_trace,
             "old_version_warnings": old_version_warnings,

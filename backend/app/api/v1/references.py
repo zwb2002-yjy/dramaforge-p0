@@ -151,13 +151,21 @@ async def _validate_binding_source_ownership(
     """
 
     if asset_id is not None:
-        asset = await session.scalar(
-            select(Asset.id).where(Asset.id == asset_id, Asset.project_id == project_id)
+        asset_status = await session.scalar(
+            select(Asset.status).where(Asset.id == asset_id, Asset.project_id == project_id)
         )
-        if asset is None:
+        if asset_status is None:
             raise ValidationAppError(
                 "reference asset does not belong to the current project",
                 details={"code": "REFERENCE_PROJECT_MISMATCH"},
+            )
+        # A recycled asset is retired from production. Binding it would put a
+        # discarded asset back into a generation input (and the picker would keep
+        # offering it), so the write fails closed instead.
+        if asset_status == "recycled":
+            raise ValidationAppError(
+                "reference asset is recycled",
+                details={"code": "REFERENCE_ASSET_RECYCLED"},
             )
     if asset_version_id is not None:
         version = await session.scalar(

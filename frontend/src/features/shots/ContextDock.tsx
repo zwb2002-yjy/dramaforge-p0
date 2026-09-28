@@ -92,7 +92,7 @@ export function ContextDock({
         onClick={onToggleTray}
       >
         <Layers size={17} aria-hidden="true" />
-        Takes · {candidateCount}
+        备选画面 · {candidateCount}
       </button>
       <button
         type="button"

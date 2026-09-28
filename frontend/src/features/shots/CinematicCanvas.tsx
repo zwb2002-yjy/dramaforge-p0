@@ -122,7 +122,7 @@ export function CinematicCanvas({
       data-preview-candidate={candidate ? shotCandidateKey(candidate) : undefined}
     >
       {!shot ? (
-        <p className="qc-canvas-empty">选择镜头开始导演构图。</p>
+        <p className="qc-canvas-empty">从下方选择一个镜头。</p>
       ) : candidate ? (
         <div
           className="qc-canvas-media"
@@ -190,7 +190,7 @@ export function CinematicCanvas({
         </div>
       ) : (
         <div className="qc-canvas-empty" data-testid="shot-placeholder">
-          <h3>#{shot.shot_number} 导演构图预览</h3>
+          <h3>镜头 {shot.shot_number}</h3>
           <p>{shot.visual_description || "尚未生成关键帧。"}</p>
           {latestTrace && (
             <p
@@ -203,7 +203,7 @@ export function CinematicCanvas({
             </p>
           )}
           <p className="qc-canvas-hint" data-testid="no-formal-result">
-            尚未选择正式结果
+            还没有画面，点击下方“生成”开始
           </p>
         </div>
       )}

@@ -7,12 +7,13 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1.schemas.workbench import ShotWorkbenchRead
 from app.assets.schemas import ShotDirectorState
+from app.assets.voice import VoiceOptionsRead
 from app.contracts.domain_events import FormalSelected
 from app.contracts.production_commands import ExecutionBody, ExecutionPlanBody
 from app.execution.models import NodeRun
@@ -30,12 +31,14 @@ from app.production.repair_service import (
     RepairPlanRead,
     RepairRequestRead,
     RepairService,
+    RepairStepPlanRead,
     record_repair_adoption,
 )
 from app.production.trace import ExecutionTraceRead, build_execution_trace
 from app.production.workbench_execution import (
     WorkbenchExecutionService,
 )
+from app.providers.voice_config import voice_options
 from app.shared.errors import NotFoundError
 from app.workbench.scene_service import ShotWorkbenchService
 from app.workbench.shot_service import ShotDesignService
@@ -69,6 +72,14 @@ class ShotDesignRead(BaseModel):
     image_prompt: str
     video_prompt: str
     updated_at: datetime
+
+
+@router.get("/projects/{project_id}/voice-options", response_model=VoiceOptionsRead)
+async def get_voice_options(
+    project_id: UUID, user: CurrentUser, session: SessionDep
+) -> VoiceOptionsRead:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return voice_options()
 
 
 @router.get("/projects/{project_id}/workspace-state", response_model=WorkspaceStateRead)
@@ -202,16 +213,23 @@ async def _execution_read(session: SessionDep, run: NodeRun) -> ExecutionRead:
 
 
 @router.get(
-    "/projects/{project_id}/shots/{shot_id}/executions/receipt", response_model=ExecutionRead,
+    "/projects/{project_id}/shots/{shot_id}/executions/receipt",
+    response_model=ExecutionRead,
 )
 async def get_execution_receipt(
-    project_id: UUID, shot_id: UUID, user: CurrentUser, session: SessionDep,
+    project_id: UUID,
+    shot_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
     stage: Literal["image_keyframe", "video"],
     idempotency_key: str = Query(min_length=1, max_length=2000),
 ) -> ExecutionRead:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     run = await WorkbenchExecutionService(session, user_id=user.id).find_command_receipt(
-        project_id=project_id, shot_id=shot_id, stage=stage, command_key=idempotency_key,
+        project_id=project_id,
+        shot_id=shot_id,
+        stage=stage,
+        command_key=idempotency_key,
     )
     if run is None:
         raise NotFoundError("Execution command has no committed receipt")
@@ -230,15 +248,21 @@ async def create_execution(
     session: SessionDep,
     _csrf: CsrfDep,
     idempotency_key: str | None = Header(
-        default=None, alias="Idempotency-Key", min_length=1, max_length=2000,
+        default=None,
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=2000,
     ),
 ) -> ExecutionRead:
     """Dispatch one shot execution. The server re-validates the plan
     fingerprint / expected shot version / accepted approximations before
     creating the queued NodeRun (03 §37)."""
     receipt = await ProductionCommands(session).submit_user_execution(
-        actor=user, project_id=project_id, shot_id=shot_id,
-        body=body, command_key=idempotency_key,
+        actor=user,
+        project_id=project_id,
+        shot_id=shot_id,
+        body=body,
+        command_key=idempotency_key,
     )
     await session.commit()
     return ExecutionRead(**receipt.model_dump())
@@ -282,9 +306,15 @@ async def set_shot_formal_keyframe(
         require_review_approval=True,
     )
     await append_production_notice(
-        session, project_id=project.id, actor_id=user.id,
-        notice=FormalSelected(shot_id=shot_id, shot_version=shot.version,
-                              artifact_id=body.artifact_id, stage="image_keyframe"),
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        notice=FormalSelected(
+            shot_id=shot_id,
+            shot_version=shot.version,
+            artifact_id=body.artifact_id,
+            stage="image_keyframe",
+        ),
     )
     # If a repair produced this candidate, record that the user adopted it.
     await record_repair_adoption(
@@ -340,9 +370,12 @@ async def set_shot_formal_video(
         require_review_approval=True,
     )
     await append_production_notice(
-        session, project_id=project.id, actor_id=user.id,
-        notice=FormalSelected(shot_id=shot_id, shot_version=shot.version,
-                              artifact_id=body.artifact_id, stage="video"),
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        notice=FormalSelected(
+            shot_id=shot_id, shot_version=shot.version, artifact_id=body.artifact_id, stage="video"
+        ),
     )
     await record_repair_adoption(
         session,
@@ -378,14 +411,6 @@ async def get_execution_trace(
     )
 
 
-class RepairExecuteBody(BaseModel):
-    repair_option: Literal["rerun_video", "regenerate_keyframe_then_video"]
-    idempotency_key: str = Field(min_length=1, max_length=160)
-    # Optional: confirm a previously previewed plan. When omitted the legacy
-    # single-shot behaviour is kept for callers that predate staged repairs.
-    plan_hash: str | None = Field(default=None, min_length=64, max_length=64)
-
-
 class RepairExecuteRead(BaseModel):
     node_run_id: UUID
     status: str
@@ -401,9 +426,25 @@ class RepairCreateBody(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=160)
 
 
+class RepairStepPlanBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    accept_approximations: bool = False
+
+
 class RepairStepExecuteBody(BaseModel):
-    expected_plan_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
-    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
+    model_config = ConfigDict(extra="forbid")
+
+    expected_plan_fingerprint: str = Field(min_length=64, max_length=64)
+    expected_step_ordinal: int = Field(ge=1, le=4)
+    accept_approximations: bool = False
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+
+class RepairCloseBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Literal["completed", "abandoned"]
 
 
 @router.post(
@@ -448,10 +489,9 @@ async def create_repair(
         plan_hash=body.plan_hash,
         request_key=body.idempotency_key,
     )
+    state = await service.read_repair(project=project, shot_id=shot_id, repair_id=request.id)
     await session.commit()
-    return await service.read_repair(
-        project=project, shot_id=shot_id, repair_id=request.id
-    )
+    return state
 
 
 @router.get(
@@ -509,6 +549,8 @@ async def execute_repair_step(
         shot_id=shot_id,
         repair_id=repair_id,
         expected_plan_fingerprint=body.expected_plan_fingerprint,
+        expected_step_ordinal=body.expected_step_ordinal,
+        accept_approximations=body.accept_approximations,
         idempotency_key=body.idempotency_key,
     )
     # Read before committing: the repair tables are RLS-scoped per transaction,
@@ -526,60 +568,33 @@ async def execute_repair_step(
 
 
 @router.post(
-    "/projects/{project_id}/shots/{shot_id}/repair",
-    response_model=RepairExecuteRead,
+    "/projects/{project_id}/shots/{shot_id}/repairs/{repair_id}/step-plan",
+    response_model=RepairStepPlanRead,
 )
-async def execute_repair(
-    project_id: UUID,
-    shot_id: UUID,
-    body: RepairExecuteBody,
-    user: CurrentUser,
-    session: SessionDep,
-    _csrf: CsrfDep,
-) -> RepairExecuteRead:
-    """Execute a V1 repair rerun with an Idempotency-Key (03 §58).
-
-    With ``plan_hash`` this is the staged path: one repair request is created
-    and its first step dispatched, so the follow-up steps stay resumable. The
-    staged path stops before any step that needs a human review decision.
-    """
+async def preview_repair_step(
+    project_id: UUID, shot_id: UUID, repair_id: UUID,
+    user: CurrentUser, session: SessionDep,
+    body: RepairStepPlanBody | None = None,
+) -> RepairStepPlanRead:
+    """Read-only media plan preview; no provider submission or queued run."""
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    service = RepairService(session)
-    if body.plan_hash is None:
-        request, step, run = await service.create_and_execute_first_step(
-            project=project,
-            user=user,
-            shot_id=shot_id,
-            option=body.repair_option,
-            idempotency_key=body.idempotency_key,
-        )
-    else:
-        request = await service.create_repair(
-            project=project,
-            user=user,
-            shot_id=shot_id,
-            option=body.repair_option,
-            plan_hash=body.plan_hash,
-            request_key=body.idempotency_key,
-        )
-        request, step, run = await service.execute_step(
-            project=project,
-            user=user,
-            shot_id=shot_id,
-            repair_id=request.id,
-            idempotency_key=body.idempotency_key,
-        )
-    # Read the step state before committing. The repair tables are RLS-scoped by
-    # `app.current_project_id()`, which is set per transaction, so a read that
-    # starts a new transaction after the commit sees nothing and the whole call
-    # would fail with "repair request not found" after doing its work.
-    state = await service.read_repair(project=project, shot_id=shot_id, repair_id=request.id)
-    await session.commit()
-    return RepairExecuteRead(
-        node_run_id=run.id,
-        status=run.status,
-        repair_option=request.option,
-        repair_id=request.id,
-        step_ordinal=step.ordinal,
-        next_action=state.next_action,
+    return await RepairService(session).build_step_plan(
+        project=project, user=user, shot_id=shot_id, repair_id=repair_id,
+        accept_approximations=body.accept_approximations if body else False,
     )
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/repairs/{repair_id}/close",
+    response_model=RepairRequestRead,
+)
+async def close_repair(
+    project_id: UUID, shot_id: UUID, repair_id: UUID, body: RepairCloseBody,
+    user: CurrentUser, session: SessionDep, _csrf: CsrfDep,
+) -> RepairRequestRead:
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    state = await RepairService(session).close_repair(
+        project=project, shot_id=shot_id, repair_id=repair_id, reason=body.reason,
+    )
+    await session.commit()
+    return state

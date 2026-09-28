@@ -32,7 +32,7 @@ from app.providers.contracts.common import (
     ProviderPollResult,
     ResolvedArtifact,
 )
-from app.providers.contracts.image import ImageGenerateRequest
+from app.providers.contracts.image import ImageEditRequest, ImageGenerateRequest
 from app.providers.contracts.video import (
     FirstLastFrameVideoRequest,
     ImageToVideoRequest,
@@ -219,7 +219,11 @@ def _request_reference_roles(request: Any) -> list[tuple[str, ResolvedArtifact]]
         return ResolvedArtifact(artifact_id=artifact_id, mime_type=mime_type)
 
     roles: list[tuple[str, ResolvedArtifact]] = []
-    if isinstance(request, ImageToVideoRequest):
+    if isinstance(request, ImageEditRequest):
+        roles.append(
+            (ReferenceRole.REFERENCE_IMAGE.value, slot(request.image.artifact_id, "image/*"))
+        )
+    elif isinstance(request, ImageToVideoRequest):
         roles.append(
             (ReferenceRole.FIRST_FRAME.value, slot(request.image.artifact_id, "image/*"))
         )

@@ -10,6 +10,8 @@ import {
   type ShotDesignDraft,
   type ShotDesignFocus,
 } from "../shots/ShotDesignPanel";
+import { Disclosure } from "../../components/ui";
+import { CreativeCapabilitiesPanel } from "../production/CreativeCapabilitiesPanel";
 import { ShotProductionActions } from "../shots/ShotProductionActions";
 import type { ShotExecutionReference, ShotLite } from "../shots/api";
 import type { ContextTool } from "../shots/ContextDock";
@@ -203,6 +205,13 @@ export function DirectorSidebar({
               onDirtyChange={reportDirty}
             />
           </details>
+          <Disclosure title="导演手法与引用依据" description="查看内置方法，按镜头显式保存">
+            <CreativeCapabilitiesPanel
+              key={`methods:${shot.id}`}
+              projectId={projectId}
+              shotId={shot.id}
+            />
+          </Disclosure>
         </>
       ) : (
         <p className="muted">选择一个镜头查看设计。</p>

@@ -38,9 +38,11 @@ const settingsRouteWithChildren = settingsRoute.addChildren([
   settingsProjectRoute,
 ]);
 
+// The design-system showcase is a development tool: production builds do not
+// register the route, so a first-release user cannot reach it at all.
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   projectRouteWithChildren,
   settingsRouteWithChildren,
-  designPreviewRoute,
+  ...(import.meta.env.DEV ? [designPreviewRoute] : []),
 ]);

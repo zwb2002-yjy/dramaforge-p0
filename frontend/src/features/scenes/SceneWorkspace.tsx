@@ -44,6 +44,7 @@ function sameReferences(left: ShotExecutionReference[], right: ShotExecutionRefe
 
 function draftFromShot(shot: ShotLite): ShotDesignDraft {
   return {
+    dialogue: shot.dialogue ?? "",
     image_prompt: shot.image_prompt,
     video_prompt: shot.video_prompt,
     director_state: { ...shot.director_state },
@@ -280,7 +281,7 @@ export function SceneWorkspace({
     <div className="qc-scene-workspace" data-testid="scene-workspace">
       <header className="qc-scene-header">
         <div className="qc-scene-context" data-testid="scene-context">
-          <span className="director-stage-kicker">场景工作台</span>
+          <span className="director-stage-kicker">分镜</span>
           <h1>{data?.scene.location_name ?? "场景"}</h1>
           <span>
             {data?.scene.episode_number}.{data?.scene.scene_number} ·{" "}
@@ -318,12 +319,12 @@ export function SceneWorkspace({
       )}
       {data && hasActiveSceneRuns(data.trace as Record<string, unknown[]>) && (
         <p className="qc-scene-sync" data-testid="scene-active-sync" role="status">
-          生产进行中，页面将自动同步服务端状态。
+          正在生成，完成后会自动更新。
         </p>
       )}
       {workspace.isLoading && !data && (
         <p className="qc-scene-loading" data-testid="scene-workspace-loading">
-          正在读取场景与镜头事实…
+          正在加载画面…
         </p>
       )}
 
@@ -413,6 +414,7 @@ export function SceneWorkspace({
           />
           <ShotDetailsPanel
             open={detailsOpen}
+            projectId={projectId}
             shot={selected}
             trace={trace}
             onClose={() => setDetailsOpen(false)}

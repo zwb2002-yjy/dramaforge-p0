@@ -447,7 +447,10 @@ describe("ShotDirectorSuggestionPanel", () => {
     renderPanel();
     expect(await screen.findByTestId("shot-director-suggestion-proposal")).toBeInTheDocument();
     expect(screen.getByTestId("director-current-understanding")).toHaveTextContent("让情绪更克制");
-    expect(screen.getByTestId("director-next-action")).toHaveTextContent("review_suggestion");
+    // The checkpoint is named in creative language; the runtime action key stays
+    // out of the ordinary creative surface.
+    expect(screen.getByTestId("director-next-action")).not.toHaveTextContent("review_suggestion");
+    expect(screen.getByTestId("director-next-action")).toHaveTextContent("下一步");
     expect(screen.getByTestId("suggestion-new-image-prompt")).toHaveTextContent("new image prompt");
     expect(calls.some((call) => call.method === "POST")).toBe(false);
   });

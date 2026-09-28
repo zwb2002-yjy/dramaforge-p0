@@ -1,0 +1,41 @@
+.editing-audio-picker,
+.editing-audio-preview,
+.editing-audio-library,
+.editing-audio-library ul,
+.editing-audio-library li {
+  display: grid;
+  min-width: 0;
+  gap: var(--df-space-2);
+}
+.editing-audio-picker-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+}
+.editing-audio-picker-actions select {
+  flex: 1;
+  min-width: 0;
+}
+.editing-audio-picker audio {
+  width: 100%;
+  min-width: 0;
+}
+.editing-audio-library {
+  padding: var(--df-space-3);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-container);
+  background: var(--df-surface-tier-flat-bg);
+}
+.editing-audio-library ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.editing-audio-library li {
+  padding-block: var(--df-space-2);
+  border-top: 1px solid var(--df-border);
+}
+.editing-audio-library p {
+  margin: 0;
+}

@@ -25,7 +25,7 @@ describe("ContextDock", () => {
     expect(screen.getByTestId("context-dock-look")).toHaveTextContent("画面");
     expect(screen.getByTestId("context-dock-generate")).toHaveTextContent("生成");
     expect(screen.getByTestId("context-dock-director")).toHaveTextContent("导演");
-    expect(screen.getByTestId("context-dock-takes")).toHaveTextContent("Takes · 2");
+    expect(screen.getByTestId("context-dock-takes")).toHaveTextContent("备选画面 · 2");
     expect(screen.getByTestId("context-dock-takes")).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByTestId("context-dock-details")).toHaveTextContent("详情");
     expect(screen.getByTestId("context-dock-details")).toHaveAttribute("aria-expanded", "false");

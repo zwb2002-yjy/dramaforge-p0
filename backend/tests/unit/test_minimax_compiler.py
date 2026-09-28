@@ -189,7 +189,11 @@ async def test_runtime_submits_compiled_wire_request_verbatim_and_polls_task_id(
         protocol_profile="minimax_cn_v1",
         model_id="MiniMax-H3",
         operation="video.generate",
-        wire_request={"unexpected": "exact compiled body", "nested": {"number": 1}},
+        wire_request={
+            "model": "MiniMax-H3",
+            "unexpected": "exact compiled body",
+            "nested": {"number": 1},
+        },
         request_schema_version="2026-08-13",
         safe_request_summary={"operation": "video.i2v.first_frame"},
     )

@@ -10,7 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from app.production.reference_intents import ShotReferenceIntent
+from app.contracts.shot_reference import ShotReferenceIntent
 
 
 class ExecutionPlanBody(BaseModel):
