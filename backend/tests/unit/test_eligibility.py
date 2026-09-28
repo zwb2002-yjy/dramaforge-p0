@@ -134,6 +134,45 @@ async def test_fully_verified_candidate_is_eligible() -> None:
 
 
 @pytest.mark.asyncio
+async def test_new_input_contract_supplies_reference_role_eligibility() -> None:
+    binding, entry = _pair()
+    entry.capability_manifest_json = {
+        "operations": {
+            VIDEO_GENERATE: {
+                "operation": VIDEO_GENERATE,
+                "capabilities": ["video.i2v.first_frame"],
+                "reference_constraints": {},
+                "input_contracts": {
+                    "formal": {
+                        "input_slots": {"first_frame": {"minimum": 1, "maximum": 1}}
+                    }
+                },
+            }
+        }
+    }
+    evaluation = await evaluate_candidate(
+        object(),
+        binding=binding,
+        connection=_connection(),
+        catalog_entry=entry,
+        operation=VIDEO_GENERATE,
+        required_capabilities=frozenset({"video.i2v.first_frame"}),
+        reference_roles=frozenset({"first_frame"}),
+    )
+    assert evaluation.eligible is True
+
+    unsupported = await evaluate_candidate(
+        object(),
+        binding=binding,
+        connection=_connection(),
+        catalog_entry=entry,
+        operation=VIDEO_GENERATE,
+        reference_roles=frozenset({"reference_video"}),
+    )
+    assert any(issue.detail == "reference role reference_video" for issue in unsupported.issues)
+
+
+@pytest.mark.asyncio
 async def test_unverified_model_is_ineligible_with_code() -> None:
     binding, entry = _pair()
     evaluation = await evaluate_candidate(
