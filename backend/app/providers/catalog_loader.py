@@ -39,6 +39,7 @@ class LoadedCatalogManifest:
 
     identity: CatalogIdentity
     manifest_hash: str
+    publication_lifecycle: str
     source_path: Path
     _canonical_json: str
 
@@ -64,6 +65,7 @@ class ModelCatalogLoader:
             raise ValueError(f"model catalog is empty: {self._root}")
 
         seen: set[CatalogIdentity] = set()
+        active_models: set[tuple[str, str, str]] = set()
         loaded: list[LoadedCatalogManifest] = []
         for path in paths:
             try:
@@ -78,13 +80,22 @@ class ModelCatalogLoader:
                 manifest = ModelCapabilityManifest.model_validate(raw)
             except ValueError as exc:
                 raise ValueError(f"invalid model manifest {path}: {exc}") from exc
-            provider_dir = path.relative_to(self._root).parts[0]
+            relative_parts = path.relative_to(self._root).parts
+            provider_dir = relative_parts[0]
             if manifest.provider_type != provider_dir:
                 raise ValueError(
                     f"catalog provider directory does not match manifest: {path}"
                 )
             if not manifest.protocol_profile.strip():
                 raise ValueError(f"catalog protocol profile is empty: {path}")
+            if len(relative_parts) == 3:
+                publication_lifecycle = relative_parts[1]
+                if publication_lifecycle not in {"preview", "legacy", "deprecated", "retired"}:
+                    raise ValueError(f"unknown catalog publication directory: {path}")
+            elif len(relative_parts) == 2:
+                publication_lifecycle = manifest.lifecycle
+            else:
+                raise ValueError(f"invalid model catalog path: {path}")
             identity = (
                 manifest.provider_type,
                 manifest.protocol_profile,
@@ -94,11 +105,17 @@ class ModelCatalogLoader:
             if identity in seen:
                 raise ValueError(f"duplicate model catalog identity {identity}: {path}")
             seen.add(identity)
+            if publication_lifecycle == "active":
+                model_key = identity[:3]
+                if model_key in active_models:
+                    raise ValueError(f"multiple active revisions for model {model_key}")
+                active_models.add(model_key)
             canonical = json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str)
             loaded.append(
                 LoadedCatalogManifest(
                     identity=identity,
                     manifest_hash=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                    publication_lifecycle=publication_lifecycle,
                     source_path=path,
                     _canonical_json=canonical,
                 )

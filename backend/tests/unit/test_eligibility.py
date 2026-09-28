@@ -292,7 +292,7 @@ async def test_manifest_hash_mismatch_is_ineligible() -> None:
 @pytest.mark.asyncio
 async def test_lifecycle_and_catalog_mismatch_are_ineligible() -> None:
     entry = _agnes_video_entry()
-    entry.lifecycle = "deprecated"
+    entry.lifecycle = "retired"
     binding = _binding(entry=entry)
     evaluation = await evaluate_candidate(
         object(),
@@ -304,6 +304,16 @@ async def test_lifecycle_and_catalog_mismatch_are_ineligible() -> None:
     assert evaluation.eligible is False
     codes = {issue.code for issue in evaluation.issues}
     assert "MODEL_LIFECYCLE_INACTIVE" in codes
+
+    entry.lifecycle = "deprecated"
+    still_supported = await evaluate_candidate(
+        object(),
+        binding=binding,
+        connection=_connection(),
+        catalog_entry=entry,
+        operation=VIDEO_GENERATE,
+    )
+    assert still_supported.eligible is True
 
     ark_entry = ModelCatalogEntry(
         id=uuid4(),

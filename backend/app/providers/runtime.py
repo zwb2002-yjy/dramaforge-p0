@@ -313,7 +313,7 @@ class ProviderRuntimeResolver:
             reasons.append("CATALOG_PROTOCOL_MISMATCH")
         if entry.media_kind != binding.media_type:
             reasons.append("CATALOG_MEDIA_MISMATCH")
-        if entry.lifecycle != "active":
+        if entry.lifecycle not in {"active", "legacy", "deprecated"}:
             reasons.append("CATALOG_LIFECYCLE_UNACCEPTABLE")
         if binding.capability_manifest_hash != entry.contract_manifest_hash:
             reasons.append("MANIFEST_HASH_MISMATCH")

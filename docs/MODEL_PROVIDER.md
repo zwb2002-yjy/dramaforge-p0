@@ -22,6 +22,15 @@ JSON 文件。`catalog_loader.py` 在启动时做 schema 与身份校验；
 `catalog_seed_data.py` 仅保留旧调用方兼容入口和既有 hash 算法。现有 revision 的
 Manifest 内容和 hash 不变，历史 Alembic 快照仍独立保存。
 
+新模型或新 revision 通过 `scripts/sync_model_catalog.py` 与数据库比较：默认只预览，
+显式 `--apply` 才写入。该维护命令需要有 Catalog 写权限的数据库角色，应用运行角色
+仍只读。相同 identity 的 hash 不同会失败，必须新增 revision；重复运行保持幂等。
+文件移入供应商目录下的 `legacy/`、`deprecated/` 或 `retired/` 可改变发布状态而不
+改写不可变 Manifest。发布新的 active revision 时，旧 active 数据库行降为 legacy，
+历史 Binding 仍指向原行。preview 文件只用于记录候选，不进入当前活动模型列表。
+新 Binding 只可选择 active；已验证、供应商仍可用的既有 Binding 可在 legacy 或
+deprecated 状态继续执行。retired 状态阻止新的 Provider 提交。
+
 新 revision 可在同一 Manifest 的 operation 下声明 `input_contracts`、素材元数据界限、
 输出参数和来源证据。`CapabilityResolver` 以实际输入匹配唯一合同，再应用产品开放策略；
 V3 Validator 也从同一 Manifest 自动匹配新合同。旧 revision 未声明合同，继续使用冻结的

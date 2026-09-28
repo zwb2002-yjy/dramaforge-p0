@@ -155,6 +155,30 @@ async def test_binding_runtime_resolution_uses_requested_model_b_not_seed_order(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("lifecycle", ["legacy", "deprecated"])
+async def test_verified_existing_binding_can_use_old_catalog_revision(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    lifecycle: str,
+) -> None:
+    _connection, binding_a, _binding_b = await _seed_two_models(session)
+    entry = await session.get(ModelCatalogEntry, binding_a.catalog_entry_id)
+    assert entry is not None
+    entry.lifecycle = lifecycle
+    await session.flush()
+    runtime_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "app.providers.registry.get_plugin",
+        lambda provider_type, protocol_profile: _plugin(runtime_calls),
+    )
+    resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_model_binding(
+        model_binding_id=binding_a.id
+    )
+    assert resolved.binding is not None and resolved.binding.id == binding_a.id
+    assert len(runtime_calls) == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "invalid_field",
     ["catalog", "model", "provider", "profile", "hash", "lifecycle", "invoke"],
@@ -185,7 +209,7 @@ async def test_invalid_binding_catalog_identity_fails_before_runtime_creation(
     elif invalid_field == "hash":
         binding_b.capability_manifest_hash = "wrong" * 16
     elif invalid_field == "lifecycle":
-        entry.lifecycle = "deprecated"
+        entry.lifecycle = "retired"
     elif invalid_field == "invoke":
         binding_b.invoke_model_value = None
     await session.flush()
