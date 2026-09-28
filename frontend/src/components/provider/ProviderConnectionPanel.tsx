@@ -36,6 +36,27 @@ const CAPABILITY_LABELS: Record<string, string> = {
   video_poll_download: "视频轮询 / 下载",
 };
 
+const REFERENCE_LABELS: Record<string, string> = {
+  first_frame: "首帧",
+  last_frame: "尾帧",
+  reference_image: "参考图片",
+  reference_video: "参考视频",
+  reference_audio: "参考音频",
+};
+
+function modelCapabilityText(model: ProviderPluginRead["models"][number]): string {
+  const summary = model.capability_summary;
+  const providerInputs = Object.entries(summary.accepts ?? {})
+    .filter(([, accepted]) => accepted)
+    .map(([role]) => REFERENCE_LABELS[role] ?? role);
+  const productInputs = Object.entries(summary.product_open ?? {})
+    .filter(([, open]) => open)
+    .map(([role]) => REFERENCE_LABELS[role] ?? role);
+  if (summary.accepts_text_only) providerInputs.unshift("纯文本");
+  if (summary.product_text_only) productInputs.unshift("纯文本");
+  return `供应商声明：${providerInputs.join("、") || "无"}；当前工作台：${productInputs.join("、") || "未开放"}`;
+}
+
 export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConnectionPanelProps) {
   const queryClient = useQueryClient();
   const [apiKey, setApiKey] = useState("");
@@ -259,17 +280,22 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
 
   const pluginCapabilities = selectedPlugin?.capabilities ?? ["auth_models"];
   const pluginModels = selectedPlugin?.models ?? [];
-  const imageModels = pluginModels.filter((model) => model.media_type === "image");
-  const videoModels = pluginModels.filter((model) => model.media_type === "video");
+  const activeModels = useMemo(
+    () => (selectedPlugin?.models ?? []).filter((model) => model.lifecycle === "active"),
+    [selectedPlugin?.models],
+  );
+  const imageModels = activeModels.filter((model) => model.media_type === "image");
+  const videoModels = activeModels.filter((model) => model.media_type === "video");
+  const catalogOnlyModels = pluginModels.filter((model) => model.lifecycle !== "active");
   const activeModelsByContract = useMemo(
     () =>
       new Map(
-        (selectedPlugin?.models ?? []).map((model) => [
+        activeModels.map((model) => [
           `${model.catalog_entry_id}:${model.capability_manifest_hash}`,
           model,
         ]),
       ),
-    [selectedPlugin?.models],
+    [activeModels],
   );
   const activeModelFor = (binding: ProviderModelBindingRead) =>
     activeModelsByContract.get(`${binding.catalog_entry_id}:${binding.capability_manifest_hash}`) ??
@@ -624,6 +650,17 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
                   ))}
                 </Select>
               </div>
+              {catalogOnlyModels.length > 0 && (
+                <div className="provider-binding-list" data-testid="catalog-only-models">
+                  <strong>目录中暂不可新建绑定的模型</strong>
+                  {catalogOnlyModels.map((model) => (
+                    <p className="muted" key={model.catalog_entry_id}>
+                      {model.display_name} · {model.lifecycle} · {model.implementation_status} ·{" "}
+                      {modelCapabilityText(model)}
+                    </p>
+                  ))}
+                </div>
+              )}
               <div className="provider-binding-list">
                 {(bindings.data ?? []).map((binding) => {
                   const activeModel = activeModelFor(binding);
@@ -641,6 +678,14 @@ export function ProviderConnectionPanel({ workspaceId, projects }: ProviderConne
                           {binding.purpose} ·{" "}
                           {activeModel ? activeModel.model_revision : "历史合同"}
                         </span>
+                        {activeModel && (
+                          <p
+                            className="muted"
+                            data-testid={`binding-capabilities-${binding.purpose}`}
+                          >
+                            {modelCapabilityText(activeModel)}
+                          </p>
+                        )}
                         <div
                           className="provider-binding-states"
                           data-testid={`binding-states-${binding.purpose}`}

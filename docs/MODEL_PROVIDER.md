@@ -17,6 +17,56 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 | Reference delivery | providers/reference_delivery.py, reference_roles.py | 严格参考槽位校验、有序多参考传输（不做 `dict[role, artifact]`）、URL/bytes 决策 |
 | 文本通道 | providers/litellm_adapter.py + infra/litellm | 官方 LiteLLM Proxy 独立 Runtime，OpenAI 兼容 HTTP 面；DramaForge 不安装 litellm SDK |
 
+当前媒体模型的 Manifest 数据来自 `backend/app/providers/model_catalog/` 中的版本化
+JSON 文件。`catalog_loader.py` 在启动时做 schema 与身份校验；
+`catalog_seed_data.py` 仅保留旧调用方兼容入口和既有 hash 算法。现有 revision 的
+Manifest 内容和 hash 不变，历史 Alembic 快照仍独立保存。
+
+新模型或新 revision 通过 `scripts/sync_model_catalog.py` 与数据库比较：默认只预览，
+显式 `--apply` 才写入。该维护命令需要有 Catalog 写权限的数据库角色，应用运行角色
+仍只读。相同 identity 的 hash 不同会失败，必须新增 revision；重复运行保持幂等。
+文件移入供应商目录下的 `legacy/`、`deprecated/` 或 `retired/` 可改变发布状态而不
+改写不可变 Manifest。发布新的 active revision 时，旧 active 数据库行降为 legacy，
+历史 Binding 仍指向原行。preview 文件只用于记录候选，不进入当前活动模型列表。
+新 Binding 只可选择 active；已验证、供应商仍可用的既有 Binding 可在 legacy 或
+deprecated 状态继续执行。retired 状态阻止新的 Provider 提交。
+
+新 revision 可在同一 Manifest 的 operation 下声明 `input_contracts`、素材元数据界限、
+输出参数和来源证据。`CapabilityResolver` 以实际输入匹配唯一合同，再应用产品开放策略；
+V3 Validator 也从同一 Manifest 自动匹配新合同。旧 revision 未声明合同，继续使用冻结的
+`reference_constraints` 和既有编译路径。Workbench 对新视频合同在预览选定产品开放的
+首帧合同，并在 Worker 提交前复核；Compiler 再调用 Resolver 验证完整素材与输出参数。
+新增模型仍须完成编译、绑定和账号验证才能真实执行。
+
+Ark 视频新合同的编译入口要求调用方显式传入 `ProductCapabilityPolicy`；同一协议编译器
+可以按合同编译首帧、首尾帧与图/视频/音频参考。Workbench 只传入 Formal 首帧策略，
+因此不会自行开放其他输入。MiniMax 图片新合同已支持文生图与单角色参考图的协议
+编译，且同样要求显式产品策略；当前产品产物链只接收 URL 格式的单张结果。
+Ark 图片新合同也用同一编译器处理有序多参考 `image[]`，数量和素材类型由合同校验；
+当前工作台仍只开放单张参考。编译器要求单张 URL 结果，并拒绝无法映射到具体
+`widthxheight` 尺寸的比例要求。多参考协议字段依据
+[方舟图片生成 API](https://docs.volcengine.com/docs/ark/image-generation-api?lang=en)。
+Agnes 图片与视频编译器保留旧 revision 的冻结请求，同时可按 InputContract 编译
+2.5 候选的多图、首尾帧及视频参考请求；未核实的音频参考 wire shape 明确失败。
+2.5 的官方资料使用 `apihub.agnes-ai.com`，当前运行 Profile 使用 China host，
+因此候选仍为 preview，不能仅凭静态资料启用当前 Profile 或账号 Binding。
+MiniMax 视频新合同也要求显式产品策略；同一个 V2 编译器按 Manifest 的时长、分辨率、
+比例和可选 `extra` 生成 H3 / H3-Max 请求，旧 H3 revision 保持原首帧请求形状。
+Workbench 对新合同从实际素材自动选合同，不使用前端固定 `mode_id` 判定 Provider 模式；
+视频仍强制 Formal 首帧，当前产品策略只开放该输入。预览发现 Formal 与其他视频参考
+并存会明确失败；Worker 在提交前按已解析素材重算合同并核对冻结计划。
+`GET /api/v1/provider-plugins` 为每个 active 模型返回由 Manifest 派生的
+`capability_summary`：`accepts` 表示供应商声明，`product_open` 表示当前 Workbench
+子集，`limits` 表示参考数量上界。这是只读提示；账号可用性和 Binding 证据另行读取，
+最终生成前仍以 Resolver、Workbench 与 Worker 的校验为准。
+目录 API 也返回 preview 与历史 revision 供管理界面查看；只有 active、已通过合同测试的
+revision 会报告工作台开放子集，且只有 active revision 可新建 Binding。
+官方能力中不属于当前 `image.generate` / `video.generate` 合同的编辑、延长、组图和
+图层操作，记录在 Manifest 的 `documented_features`，不会因此变成可执行 Product 能力。
+模型及 revision 的参数矩阵由
+[generated/MODEL_SUPPORT.md](generated/MODEL_SUPPORT.md) 从目录生成；账号验证与认证
+是工作空间 Binding 的状态，静态文档不推断它们。
+
 媒体与文本接入的唯一执行路径是 ModelAdapter → Compiler → Runtime（文本为
 `litellm_adapter.py` 的 LiteLLMModelAdapter，运行面是官方 LiteLLM Proxy）。
 固定契约 fixture 在 `fixtures/providers/contracts/`（由
@@ -78,16 +128,6 @@ Settings 覆盖 resolver 已退役；历史加密记录保留，不读取、不�
 `app.providers.eligibility.evaluate_candidate` 不会因此产生 blocking issue。
 真正会 fail-closed 的是：绑定/连接停用、未登记能力文档、未通过契约测试、账号未验证、
 目录或 manifest 不匹配、以及所需能力/参考槽位缺失（决策日期 2026-09-19）。
-
-## 冻结的接入合同（真实账号）
-
-| 供应商 | 插件 / Profile | 默认视频模型 | 调用方式 | 当前产品范围 |
-|---|---|---|---|---|
-| MiniMax | `minimax/minimax_cn_v1` | `MiniMax-H3` | `POST /v2/video_generation`，异步查询并下载 | 一个公网 HTTPS 首帧，768P，5 秒，比例继承首帧，不声明原生音频 |
-| 火山方舟 | `volcengine/ark_cn_v1` | `doubao-seedance-2-0-260128` | `POST /contents/generations/tasks`，按任务 ID 查询 | 一个公网 HTTPS 首帧；音频、时长、多参考和可信素材能力尚未进入产品合同 |
-
-Seedance 1.0 Pro 旧目录项保留以避免既有绑定失效；新连接优先 Seedance 2.0。
-模型 ID 是否对账号可见以当天账号探测结果为准。
 
 ## 真实接入流程与停止条件
 

@@ -19,9 +19,11 @@ from app.api.deps import (
     SessionDep,
     require_selected_workspace,
 )
+from app.providers.capability_summary import ModelCapabilitySummary, summarize_model_capability
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.connection_service import ProviderConnectionService
+from app.providers.manifest import ModelCapabilityManifest
 from app.providers.models import (
     ProjectProviderBinding,
     ProviderCapabilityEvidence,
@@ -43,9 +45,11 @@ class ProviderPluginModelRead(BaseModel):
     media_type: str
     model_revision: str
     lifecycle: str
+    implementation_status: str
     catalog_source: str
     capabilities: list[str]
     option_schema: dict[str, object]
+    capability_summary: ModelCapabilitySummary
 
 
 class ProviderPluginRead(BaseModel):
@@ -69,9 +73,10 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
     capability probes, and model binding choices without hard-coded supplier
     names or model ids.
     """
-    entries = await ModelCatalogService(session).list_entries(lifecycle="active")
+    entries = await ModelCatalogService(session).list_entries()
     by_plugin: dict[tuple[str, str], list[ProviderPluginModelRead]] = {}
     for entry in entries:
+        manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
         operations = entry.capability_manifest_json.get("operations") or {}
         capabilities = sorted(
             {
@@ -90,9 +95,11 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 media_type=entry.media_kind,
                 model_revision=entry.model_revision,
                 lifecycle=entry.lifecycle,
+                implementation_status=manifest.implementation_status,
                 catalog_source=entry.catalog_source,
                 capabilities=capabilities,
                 option_schema=dict(entry.option_schema_json or {}),
+                capability_summary=summarize_model_capability(manifest),
             )
         )
     result: list[ProviderPluginRead] = []

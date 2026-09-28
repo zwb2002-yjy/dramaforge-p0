@@ -87,6 +87,12 @@ def normalize_image(
     intent: ImageGenerationIntent,
 ) -> NormalizationResult:
     errors: list[str] = []
+    try:
+        intent.selected_reference_ids()
+    except ValueError as exc:
+        errors.append(str(exc))
+    if intent.reference_artifact_ids:
+        errors.append("multi-reference image input is not open in the current product path")
     if intent.selection.mode != "explicit_binding":
         errors.append(f"selection mode not open in stage A+B: {intent.selection.mode}")
     if intent.purpose != "keyframe":
