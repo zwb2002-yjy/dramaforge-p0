@@ -45,15 +45,19 @@ deprecated 状态继续执行。retired 状态阻止新的 Provider 提交。
 新 revision 可在同一 Manifest 的 operation 下声明 `input_contracts`、素材元数据界限、
 输出参数和来源证据。`CapabilityResolver` 以实际输入匹配唯一合同，再应用产品开放策略；
 V3 Validator 也从同一 Manifest 自动匹配新合同。旧 revision 未声明合同，继续使用冻结的
-`reference_constraints` 和既有编译路径。Workbench 尚未改用新 Resolver，新增模型在完成
-编译、绑定和账号验证前不进入真实执行。
+`reference_constraints` 和既有编译路径。Workbench 对新视频合同在预览选定产品开放的
+首帧合同，并在 Worker 提交前复核；Compiler 再调用 Resolver 验证完整素材与输出参数。
+新增模型仍须完成编译、绑定和账号验证才能真实执行。
 
 Ark 视频新合同的编译入口要求调用方显式传入 `ProductCapabilityPolicy`；同一协议编译器
-可以按合同编译首帧、首尾帧与图/视频/音频参考，但当前 Workbench 尚未提供该策略，
-因此不会自行开放这些新输入。MiniMax 图片新合同已支持文生图与单角色参考图的协议
-编译，当前产品产物链只接收 URL 格式的单张结果。
+可以按合同编译首帧、首尾帧与图/视频/音频参考。Workbench 只传入 Formal 首帧策略，
+因此不会自行开放其他输入。MiniMax 图片新合同已支持文生图与单角色参考图的协议
+编译，且同样要求显式产品策略；当前产品产物链只接收 URL 格式的单张结果。
 MiniMax 视频新合同也要求显式产品策略；同一个 V2 编译器按 Manifest 的时长、分辨率、
 比例和可选 `extra` 生成 H3 / H3-Max 请求，旧 H3 revision 保持原首帧请求形状。
+Workbench 对新合同从实际素材自动选合同，不使用前端固定 `mode_id` 判定 Provider 模式；
+视频仍强制 Formal 首帧，当前产品策略只开放该输入。预览发现 Formal 与其他视频参考
+并存会明确失败；Worker 在提交前按已解析素材重算合同并核对冻结计划。
 
 媒体与文本接入的唯一执行路径是 ModelAdapter → Compiler → Runtime（文本为
 `litellm_adapter.py` 的 LiteLLMModelAdapter，运行面是官方 LiteLLM Proxy）。
