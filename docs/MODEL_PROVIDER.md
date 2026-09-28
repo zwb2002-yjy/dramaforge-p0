@@ -48,6 +48,11 @@ V3 Validator 也从同一 Manifest 自动匹配新合同。旧 revision 未声�
 `reference_constraints` 和既有编译路径。Workbench 尚未改用新 Resolver，新增模型在完成
 编译、绑定和账号验证前不进入真实执行。
 
+Ark 视频新合同的编译入口要求调用方显式传入 `ProductCapabilityPolicy`；同一协议编译器
+可以按合同编译首帧、首尾帧与图/视频/音频参考，但当前 Workbench 尚未提供该策略，
+因此不会自行开放这些新输入。MiniMax 图片新合同已支持文生图与单角色参考图的协议
+编译，当前产品产物链只接收 URL 格式的单张结果。
+
 媒体与文本接入的唯一执行路径是 ModelAdapter → Compiler → Runtime（文本为
 `litellm_adapter.py` 的 LiteLLMModelAdapter，运行面是官方 LiteLLM Proxy）。
 固定契约 fixture 在 `fixtures/providers/contracts/`（由
