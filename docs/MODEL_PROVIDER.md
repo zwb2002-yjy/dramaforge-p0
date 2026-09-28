@@ -47,6 +47,10 @@ MiniMax 视频新合同也要求显式产品策略；同一个 V2 编译器按 M
 Workbench 对新合同从实际素材自动选合同，不使用前端固定 `mode_id` 判定 Provider 模式；
 视频仍强制 Formal 首帧，当前产品策略只开放该输入。预览发现 Formal 与其他视频参考
 并存会明确失败；Worker 在提交前按已解析素材重算合同并核对冻结计划。
+`GET /api/v1/provider-plugins` 为每个 active 模型返回由 Manifest 派生的
+`capability_summary`：`accepts` 表示供应商声明，`product_open` 表示当前 Workbench
+子集，`limits` 表示参考数量上界。这是只读提示；账号可用性和 Binding 证据另行读取，
+最终生成前仍以 Resolver、Workbench 与 Worker 的校验为准。
 
 媒体与文本接入的唯一执行路径是 ModelAdapter → Compiler → Runtime（文本为
 `litellm_adapter.py` 的 LiteLLMModelAdapter，运行面是官方 LiteLLM Proxy）。
