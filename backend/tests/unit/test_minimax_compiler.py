@@ -10,6 +10,7 @@ import httpx
 import pytest
 from app.config import Settings
 from app.providers.capability_resolver import ProductCapabilityPolicy
+from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.catalog_seed_data import SEED_MANIFESTS
 from app.providers.intents import (
     ArtifactReferenceIntent,
@@ -27,6 +28,15 @@ def _manifest(model_id: str) -> ModelCapabilityManifest:
     return ModelCapabilityManifest.model_validate(
         next(item for item in SEED_MANIFESTS if item["model_id"] == model_id)
     )
+
+
+def _preview_manifest(model_id: str) -> ModelCapabilityManifest:
+    raw = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == model_id and item.as_dict()["lifecycle"] == "preview"
+    )
+    return ModelCapabilityManifest.model_validate(raw)
 
 
 def _video_contract_manifest(*, max_variant: bool) -> ModelCapabilityManifest:
@@ -379,6 +389,75 @@ async def test_same_minimax_video_compiler_uses_h3_and_h3_max_manifests() -> Non
     assert compiled_max.wire_request["extra"] == {"prompt_expansion_mode": "balanced"}
     assert compiled_max.safe_request_summary["matched_contract"] == "frame"
     assert "example.com" not in json.dumps(compiled_max.safe_request_summary)
+
+
+@pytest.mark.asyncio
+async def test_preview_minimax_manifests_compile_only_matching_contracts() -> None:
+    image = _preview_manifest("image-01")
+    h3 = _preview_manifest("MiniMax-H3")
+    h3_max = _preview_manifest("MiniMax-H3-Max")
+    assert {image.lifecycle, h3.lifecycle, h3_max.lifecycle} == {"preview"}
+
+    image_request = await MiniMaxImageCompiler().compile(
+        ImageGenerationIntent(
+            prompt="portrait", selection=ModelSelectionIntent(mode="explicit_binding")
+        ),
+        image,
+        [],
+        invoke_model_value=image.model_id,
+        policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"text"})),
+    )
+    assert image_request.wire_request["model"] == "image-01"
+    assert image_request.wire_request["n"] == 1
+    assert image_request.safe_request_summary["matched_contract"] == "text"
+
+    frame_id = uuid4()
+    frame = ResolvedReference(
+        role="first_frame",
+        artifact_id=frame_id,
+        content_url="https://example.com/frame.png",
+        mime_type="image/png",
+    )
+    intent = VideoGenerationIntentV1(
+        prompt="motion",
+        output=VideoOutputIntent(aspect_ratio="9:16", duration_seconds=5, resolution="768P"),
+        references=[ArtifactReferenceIntent(artifact_id=frame_id, role="first_frame")],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    policy = ProductCapabilityPolicy(allowed_contracts=frozenset({"frame", "reference"}))
+    for manifest in (h3, h3_max):
+        compiled = await MiniMaxVideoCompiler().compile(
+            intent, manifest, [frame], invoke_model_value=manifest.model_id, policy=policy
+        )
+        assert compiled.wire_request["model"] == manifest.model_id
+        assert compiled.wire_request["ratio"] == "adaptive"
+        assert compiled.safe_request_summary["matched_contract"] == "frame"
+
+        conflicting = intent.model_copy(
+            update={
+                "references": [
+                    ArtifactReferenceIntent(artifact_id=frame_id, role="first_frame"),
+                    ArtifactReferenceIntent(artifact_id=uuid4(), role="reference_video"),
+                ]
+            }
+        )
+        with pytest.raises(ValueError, match="no input contract"):
+            await MiniMaxVideoCompiler().compile(
+                conflicting,
+                manifest,
+                [
+                    frame,
+                    ResolvedReference(
+                        role="reference_video",
+                        artifact_id=conflicting.references[1].artifact_id,
+                        content_url="https://example.com/reference.mp4",
+                        mime_type="video/mp4",
+                        duration_seconds=5,
+                    ),
+                ],
+                invoke_model_value=manifest.model_id,
+                policy=policy,
+            )
 
 
 @pytest.mark.asyncio
