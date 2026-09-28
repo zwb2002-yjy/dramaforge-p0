@@ -166,9 +166,20 @@ async def evaluate_candidate(
         if not _capability_satisfied(capability, capabilities):
             _issues_add(issues, "CAPABILITY_REQUIRED_MISSING", capability)
     reference_constraints = op.get("reference_constraints") or {}
+    input_contracts = op.get("input_contracts") or {}
     for role in sorted(reference_roles):
-        constraint = reference_constraints.get(role)
-        if constraint is None or int(constraint.get("max", 0)) < 1:
+        if input_contracts:
+            supported = any(
+                isinstance(contract, dict)
+                and isinstance(contract.get("input_slots"), dict)
+                and isinstance(slot := contract["input_slots"].get(role), dict)
+                and (slot.get("maximum") is None or int(slot["maximum"]) > 0)
+                for contract in input_contracts.values()
+            )
+        else:
+            constraint = reference_constraints.get(role)
+            supported = constraint is not None and int(constraint.get("max", 0)) > 0
+        if not supported:
             _issues_add(issues, "CAPABILITY_REQUIRED_MISSING", f"reference role {role}")
     for group in op.get("exclusive_groups") or []:
         members = group.get("members") or []
