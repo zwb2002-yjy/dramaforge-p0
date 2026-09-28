@@ -75,11 +75,13 @@ def _requested_inputs(
     intent: ImageGenerationIntent | VideoGenerationIntentV1,
 ) -> tuple[list[tuple[UUID, str]], dict[str, Any]]:
     if isinstance(intent, ImageGenerationIntent):
-        references = (
-            [(intent.reference_artifact_id, "reference_image")]
-            if intent.reference_artifact_id is not None
-            else []
-        )
+        try:
+            references = [
+                (artifact_id, "reference_image")
+                for artifact_id in intent.selected_reference_ids()
+            ]
+        except ValueError as exc:
+            raise CapabilityResolutionError("IMAGE_REFERENCE_INVALID", str(exc)) from exc
         options = {
             "size": intent.size,
             "aspect_ratio": intent.aspect_ratio,

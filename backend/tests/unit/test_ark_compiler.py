@@ -20,6 +20,7 @@ from app.providers.intents import (
     VideoOutputIntent,
 )
 from app.providers.manifest import ModelCapabilityManifest
+from app.providers.normalizer import normalize_image
 from app.providers.runtime import CompiledVideoRequest, ProviderResumeToken, ResolvedReference
 from app.providers.volcengine import ArkImageCompiler, ArkRuntime, ArkVideoCompiler
 
@@ -31,6 +32,34 @@ def _video_manifest() -> ModelCapabilityManifest:
 
 def _image_manifest() -> ModelCapabilityManifest:
     raw = next(m for m in SEED_MANIFESTS if m["model_id"] == "doubao-seedream-4-0-250828")
+    return ModelCapabilityManifest.model_validate(raw)
+
+
+def _contract_image_manifest() -> ModelCapabilityManifest:
+    raw = deepcopy(next(m for m in SEED_MANIFESTS if m["model_id"] == "doubao-seedream-4-0-250828"))
+    raw["model_revision"] = "multi-image-contract-test"
+    operation = raw["operations"]["image.generate"]
+    operation["input_contracts"] = {
+        "text": {"maximum_total_references": 0},
+        "single": {
+            "input_slots": {
+                "reference_image": {"minimum": 1, "maximum": 1, "media_types": ["image/*"]}
+            },
+            "minimum_total_references": 1,
+            "maximum_total_references": 1,
+        },
+        "multi": {
+            "input_slots": {
+                "reference_image": {"minimum": 2, "maximum": 3, "media_types": ["image/*"]}
+            },
+            "minimum_total_references": 2,
+            "maximum_total_references": 3,
+        },
+    }
+    operation["output_options"] = {
+        "size": {"type": "string", "enum": ["1024x1024"], "default": "1024x1024"},
+        "response_format": {"type": "string", "enum": ["url"], "default": "url"},
+    }
     return ModelCapabilityManifest.model_validate(raw)
 
 
@@ -110,6 +139,130 @@ async def test_ark_video_compiler_uses_invoke_model_value_and_first_frame() -> N
     assert content[1]["role"] == "first_frame"
     assert content[1]["image_url"]["url"] == "https://dramaforge.example/api/v1/provider-references/tok"
     assert compiled.reference_artifact_ids == [frame_id]
+
+
+@pytest.mark.asyncio
+async def test_ark_image_contract_compiles_ordered_multi_reference_array() -> None:
+    manifest = _contract_image_manifest()
+    ids = [uuid4(), uuid4()]
+    intent = ImageGenerationIntent(
+        prompt="two characters",
+        reference_artifact_ids=ids,
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    references = [
+        ResolvedReference(
+            role="reference_image",
+            artifact_id=artifact_id,
+            content_url=f"https://example.com/{index}.png",
+            fingerprint=str(index) * 64,
+        )
+        for index, artifact_id in enumerate(ids, start=1)
+    ]
+    compiler = ArkImageCompiler()
+    with pytest.raises(ValueError, match="explicit product policy"):
+        await compiler.compile(intent, manifest, references, invoke_model_value=manifest.model_id)
+    compiled = await compiler.compile(
+        intent,
+        manifest,
+        references,
+        invoke_model_value=manifest.model_id,
+        policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"multi"})),
+    )
+    assert compiled.wire_request["image"] == [
+        "https://example.com/1.png",
+        "https://example.com/2.png",
+    ]
+    assert compiled.wire_request["size"] == "1024x1024"
+    assert compiled.reference_artifact_ids == ids
+    assert compiled.safe_request_summary["matched_contract"] == "multi"
+    assert "example.com" not in json.dumps(compiled.safe_request_summary)
+
+    with pytest.raises(ValueError, match="product policy does not open multi"):
+        await compiler.compile(
+            intent,
+            manifest,
+            references,
+            invoke_model_value=manifest.model_id,
+            policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"single"})),
+        )
+    with pytest.raises(ValueError, match="do not match creative intent"):
+        await compiler.compile(
+            intent,
+            manifest,
+            list(reversed(references)),
+            invoke_model_value=manifest.model_id,
+            policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"multi"})),
+        )
+
+
+@pytest.mark.asyncio
+async def test_ark_image_contract_rejects_count_and_untranslatable_ratio() -> None:
+    manifest = _contract_image_manifest()
+    ids = [uuid4() for _ in range(4)]
+    references = [
+        ResolvedReference(
+            role="reference_image",
+            artifact_id=artifact_id,
+            content_url=f"https://example.com/{index}.png",
+        )
+        for index, artifact_id in enumerate(ids)
+    ]
+    compiler = ArkImageCompiler()
+    policy = ProductCapabilityPolicy(allowed_contracts=frozenset({"multi"}))
+    with pytest.raises(ValueError, match="no input contract accepts"):
+        await compiler.compile(
+            ImageGenerationIntent(
+                prompt="too many",
+                reference_artifact_ids=ids,
+                selection=ModelSelectionIntent(mode="explicit_binding"),
+            ),
+            manifest,
+            references,
+            invoke_model_value=manifest.model_id,
+            policy=policy,
+        )
+    with pytest.raises(ValueError, match="no input contract accepts"):
+        await compiler.compile(
+            ImageGenerationIntent(
+                prompt="square output",
+                aspect_ratio="9:16",
+                selection=ModelSelectionIntent(mode="explicit_binding"),
+            ),
+            manifest,
+            [],
+            invoke_model_value=manifest.model_id,
+            policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"text"})),
+        )
+    raw = manifest.model_dump(mode="json")
+    raw["operations"]["image.generate"]["output_options"]["aspect_ratio"] = {
+        "type": "string",
+        "enum": ["1:1", "9:16"],
+    }
+    ratio_manifest = ModelCapabilityManifest.model_validate(raw)
+    with pytest.raises(ValueError, match="does not match requested aspect ratio"):
+        await compiler.compile(
+            ImageGenerationIntent(
+                prompt="square output",
+                aspect_ratio="9:16",
+                selection=ModelSelectionIntent(mode="explicit_binding"),
+            ),
+            ratio_manifest,
+            [],
+            invoke_model_value=manifest.model_id,
+            policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"text"})),
+        )
+
+
+def test_multi_image_intent_stays_closed_in_normal_product_selection() -> None:
+    intent = ImageGenerationIntent(
+        prompt="two characters",
+        reference_artifact_ids=[uuid4(), uuid4()],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    result = normalize_image(intent)
+    assert not result.ok
+    assert any("not open" in error for error in result.errors)
 
 
 @pytest.mark.asyncio
