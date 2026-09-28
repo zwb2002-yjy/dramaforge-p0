@@ -5014,6 +5014,27 @@ export interface components {
             /** Identity Hash */
             identity_hash?: string | null;
         };
+        /** ModelCapabilitySummary */
+        ModelCapabilitySummary: {
+            /** Media Kind */
+            media_kind: string;
+            /** Accepts Text Only */
+            accepts_text_only: boolean;
+            /** Product Text Only */
+            product_text_only: boolean;
+            /** Accepts */
+            accepts?: {
+                [key: string]: boolean;
+            };
+            /** Product Open */
+            product_open?: {
+                [key: string]: boolean;
+            };
+            /** Limits */
+            limits?: {
+                [key: string]: number;
+            };
+        };
         /** ModelRead */
         ModelRead: {
             /** Id */
@@ -5912,27 +5933,6 @@ export interface components {
             submitted_at: string | null;
             /** Completed At */
             completed_at: string | null;
-        };
-        /** ModelCapabilitySummary */
-        ModelCapabilitySummary: {
-            /** Media Kind */
-            media_kind: string;
-            /** Accepts Text Only */
-            accepts_text_only: boolean;
-            /** Product Text Only */
-            product_text_only: boolean;
-            /** Accepts */
-            accepts?: {
-                [key: string]: boolean;
-            };
-            /** Product Open */
-            product_open?: {
-                [key: string]: boolean;
-            };
-            /** Limits */
-            limits?: {
-                [key: string]: number;
-            };
         };
         /** ProviderPluginModelRead */
         ProviderPluginModelRead: {

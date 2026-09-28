@@ -57,6 +57,10 @@ Ark 图片新合同也用同一编译器处理有序多参考 `image[]`，数量
 当前工作台仍只开放单张参考。编译器要求单张 URL 结果，并拒绝无法映射到具体
 `widthxheight` 尺寸的比例要求。多参考协议字段依据
 [方舟图片生成 API](https://docs.volcengine.com/docs/ark/image-generation-api?lang=en)。
+Agnes 图片与视频编译器保留旧 revision 的冻结请求，同时可按 InputContract 编译
+2.5 候选的多图、首尾帧及视频参考请求；未核实的音频参考 wire shape 明确失败。
+2.5 的官方资料使用 `apihub.agnes-ai.com`，当前运行 Profile 使用 China host，
+因此候选仍为 preview，不能仅凭静态资料启用当前 Profile 或账号 Binding。
 MiniMax 视频新合同也要求显式产品策略；同一个 V2 编译器按 Manifest 的时长、分辨率、
 比例和可选 `extra` 生成 H3 / H3-Max 请求，旧 H3 revision 保持原首帧请求形状。
 Workbench 对新合同从实际素材自动选合同，不使用前端固定 `mode_id` 判定 Provider 模式；
@@ -68,6 +72,11 @@ Workbench 对新合同从实际素材自动选合同，不使用前端固定 `mo
 最终生成前仍以 Resolver、Workbench 与 Worker 的校验为准。
 目录 API 也返回 preview 与历史 revision 供管理界面查看；只有 active、已通过合同测试的
 revision 会报告工作台开放子集，且只有 active revision 可新建 Binding。
+官方能力中不属于当前 `image.generate` / `video.generate` 合同的编辑、延长、组图和
+图层操作，记录在 Manifest 的 `documented_features`，不会因此变成可执行 Product 能力。
+模型及 revision 的参数矩阵由
+[generated/MODEL_SUPPORT.md](generated/MODEL_SUPPORT.md) 从目录生成；账号验证与认证
+是工作空间 Binding 的状态，静态文档不推断它们。
 
 媒体与文本接入的唯一执行路径是 ModelAdapter → Compiler → Runtime（文本为
 `litellm_adapter.py` 的 LiteLLMModelAdapter，运行面是官方 LiteLLM Proxy）。
