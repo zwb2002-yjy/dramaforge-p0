@@ -11,6 +11,7 @@ import httpx
 import pytest
 from app.config import Settings
 from app.providers.capability_resolver import ProductCapabilityPolicy
+from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.catalog_seed_data import SEED_MANIFESTS
 from app.providers.intents import (
     ArtifactReferenceIntent,
@@ -96,6 +97,15 @@ def _contract_video_manifest() -> ModelCapabilityManifest:
         "resolution": {"type": "string", "enum": ["720p", "1080p"], "default": "720p"},
         "generate_audio": {"type": "boolean", "default": False},
     }
+    return ModelCapabilityManifest.model_validate(raw)
+
+
+def _seedance_25_preview_manifest() -> ModelCapabilityManifest:
+    raw = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == "doubao-seedance-2-5-260628"
+    )
     return ModelCapabilityManifest.model_validate(raw)
 
 
@@ -376,6 +386,37 @@ async def test_ark_video_contract_compiles_frame_and_mixed_references() -> None:
             invoke_model_value=manifest.model_id,
             policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"frame", "reference"})),
         )
+
+
+@pytest.mark.asyncio
+async def test_seedance_25_preview_uses_the_same_ark_video_compiler() -> None:
+    manifest = _seedance_25_preview_manifest()
+    assert manifest.lifecycle == "preview"  # Pure wire check; no Binding or Provider call.
+    frame_id = uuid4()
+    intent = VideoGenerationIntentV1(
+        prompt="slow pan",
+        references=[ArtifactReferenceIntent(artifact_id=frame_id, role="first_frame")],
+        output=VideoOutputIntent(duration_seconds=12, resolution="1080p"),
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    compiled = await ArkVideoCompiler().compile(
+        intent,
+        manifest,
+        [
+            ResolvedReference(
+                role="first_frame",
+                artifact_id=frame_id,
+                content_url="https://example.com/frame.png",
+                mime_type="image/png",
+            )
+        ],
+        invoke_model_value=manifest.model_id,
+        policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"frame"})),
+    )
+    assert compiled.wire_request["model"] == "doubao-seedance-2-5-260628"
+    assert compiled.wire_request["duration"] == 12
+    assert compiled.wire_request["resolution"] == "1080p"
+    assert compiled.wire_request["content"][1]["role"] == "first_frame"
 
 
 @pytest.mark.asyncio

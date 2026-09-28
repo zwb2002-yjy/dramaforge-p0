@@ -12,6 +12,7 @@ from app.providers.capability_resolver import (
     ProductCapabilityPolicy,
     ReferenceMetadata,
 )
+from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.catalog_seed_data import SEED_MANIFESTS
 from app.providers.intents import (
     ArtifactReferenceIntent,
@@ -136,6 +137,37 @@ def test_resolver_rejects_frame_reference_conflict_and_count_overflow() -> None:
             manifest,
             _intent([(item, "reference_image") for item in images]),
             [ReferenceMetadata(artifact_id=item, mime_type="image/png") for item in images],
+        )
+
+
+def test_seedance_25_preview_contract_records_official_reference_limits() -> None:
+    raw = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == "doubao-seedance-2-5-260628"
+    )
+    manifest = ModelCapabilityManifest.model_validate(raw)
+    assert manifest.lifecycle == "preview"
+    video_a, video_b = uuid4(), uuid4()
+    roles = [(video_a, "reference_video"), (video_b, "reference_video")]
+    assert _resolve(
+        manifest,
+        _intent(roles),
+        [
+            ReferenceMetadata(artifact_id=video_a, mime_type="video/mp4", duration_seconds=15),
+            ReferenceMetadata(artifact_id=video_b, mime_type="video/mp4", duration_seconds=15),
+        ],
+        allowed=frozenset({"reference"}),
+    ) == "reference"
+    with pytest.raises(CapabilityResolutionError, match="no input contract"):
+        _resolve(
+            manifest,
+            _intent(roles),
+            [
+                ReferenceMetadata(artifact_id=video_a, mime_type="video/mp4", duration_seconds=16),
+                ReferenceMetadata(artifact_id=video_b, mime_type="video/mp4", duration_seconds=15),
+            ],
+            allowed=frozenset({"reference"}),
         )
 
 

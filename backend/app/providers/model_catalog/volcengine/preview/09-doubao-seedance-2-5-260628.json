@@ -35,6 +35,48 @@
             "1080p"
           ]
         }
+      },
+      "input_contracts": {
+        "text": {
+          "input_slots": {},
+          "maximum_total_references": 0
+        },
+        "frame": {
+          "input_slots": {
+            "first_frame": {
+              "maximum": 1,
+              "media_types": ["image/*"]
+            },
+            "last_frame": {
+              "maximum": 1,
+              "media_types": ["image/*"]
+            }
+          },
+          "minimum_total_references": 1,
+          "maximum_total_references": 2
+        },
+        "reference": {
+          "input_slots": {
+            "reference_image": {
+              "maximum": 30,
+              "media_types": ["image/*"]
+            },
+            "reference_video": {
+              "maximum": 10,
+              "media_types": ["video/*"]
+            },
+            "reference_audio": {
+              "maximum": 10,
+              "media_types": ["audio/*"]
+            }
+          },
+          "minimum_total_references": 1,
+          "maximum_total_references": 50,
+          "max_total_duration_seconds": {
+            "reference_video": 30,
+            "reference_audio": 30
+          }
+        }
       }
     }
   },
