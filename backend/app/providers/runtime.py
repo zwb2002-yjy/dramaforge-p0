@@ -157,6 +157,10 @@ class ResolvedReference:
     content_url: str | None = None
     mime_type: str = "image/png"
     fingerprint: str | None = None
+    byte_size: int | None = None
+    duration_seconds: float | None = None
+    width: int | None = None
+    height: int | None = None
 
 
 class VideoCompiler(Protocol):

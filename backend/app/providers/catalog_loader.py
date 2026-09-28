@@ -53,7 +53,13 @@ class ModelCatalogLoader:
     def load(self) -> tuple[LoadedCatalogManifest, ...]:
         if not self._root.is_dir():
             raise ValueError(f"model catalog directory is missing: {self._root}")
-        paths = sorted(self._root.rglob("*.json"))
+        # The old seed order is observable to legacy callers that select the
+        # first image/video manifest. File prefixes preserve it without a
+        # Python model list; filename remains outside model identity and hash.
+        paths = sorted(
+            self._root.rglob("*.json"),
+            key=lambda path: (path.name, str(path.relative_to(self._root))),
+        )
         if not paths:
             raise ValueError(f"model catalog is empty: {self._root}")
 
