@@ -420,7 +420,7 @@
 }
 
 .qc-project-shell .qc-project-canvas {
-  width: min(100%, 1320px);
+  width: 100%;
 }
 
 .qc-owner-avatar {

@@ -59,15 +59,6 @@ export const indexRoute = createRoute({
   component: HomePage,
 });
 
-const STAGE_LABELS: Record<string, string> = {
-  draft: "创作准备",
-  planning: "故事规划",
-  production: "制作中",
-  review: "待审内容",
-  delivering: "交付中",
-  archived: "已归档",
-};
-
 const PROJECT_PAGE_SIZE = 12;
 
 function HomePage() {
@@ -345,7 +336,7 @@ function HomePage() {
                 <div>
                   <strong>{recentProject.name}</strong>
                   <p>
-                    {STAGE_LABELS[recentProject.stage] ?? recentProject.stage} ·{" "}
+                    画幅
                     {recentProject.aspect_ratio}
                   </p>
                 </div>
@@ -439,9 +430,7 @@ function HomePage() {
                       </span>
                       <span className="df-project-card-body">
                         <strong title={project.name}>{project.name}</strong>
-                        <p>
-                          {STAGE_LABELS[project.stage] ?? "创作中"} · {project.aspect_ratio}
-                        </p>
+                        <p>画幅 {project.aspect_ratio}</p>
                         <span className="df-project-card-enter">
                           打开作品 <ArrowUpRight size={16} aria-hidden="true" />
                         </span>

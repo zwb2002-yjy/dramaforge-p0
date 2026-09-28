@@ -16,7 +16,7 @@ for (const path of routes) {
     await page.goto(path);
     await expect(page.locator(".df-page-header h1")).toBeVisible();
     const shell = page.locator(".df-shell-content");
-    await expect(shell).toHaveCSS("background-image", /radial-gradient/);
+    await expect(shell).toHaveCSS("background-image", "none");
     const theme = await page.evaluate(() => {
       const s = getComputedStyle(document.documentElement);
       return {
@@ -25,7 +25,7 @@ for (const path of routes) {
         canvas: s.getPropertyValue("--df-surface-0").trim(),
       };
     });
-    expect(theme).toEqual({ control: "12px", card: "20px", canvas: "#17171c" });
+    expect(theme).toEqual({ control: "6px", card: "10px", canvas: "#111315" });
     for (const width of [1440, 900, 390]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(

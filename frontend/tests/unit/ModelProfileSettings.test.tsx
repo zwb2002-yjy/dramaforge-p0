@@ -55,17 +55,37 @@ function show() {
     </QueryClientProvider>,
   );
 }
-it("saves the voice selection instead of silently discarding it", async () => {
+it("hides the non-executing voice slot in both modes and preserves its historical data on media save", async () => {
+  const historicalVoice = {
+    model_id: "voice-a",
+    enabled: true,
+    native_options: { legacy: true },
+  };
+  vi.mocked(getProjectModelProfile).mockResolvedValue({
+    id: "profile-1",
+    version: 1,
+    bindings: {
+      "visual.keyframe": { model_id: "image-a", enabled: true, native_options: {} },
+      "audio.tts": historicalVoice,
+    },
+  } as never);
   show();
-  fireEvent.change(await screen.findByTestId("model-picker-audio.tts"), {
-    target: { value: "voice-a" },
+  await screen.findByTestId("model-picker-visual.character");
+  expect(screen.queryByTestId("model-picker-audio.tts")).not.toBeInTheDocument();
+  expect(screen.queryByText("默认声音模型")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "按环节配置" }));
+  expect(screen.queryByTestId("model-picker-audio.tts")).not.toBeInTheDocument();
+  expect(putProjectModelProfile).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByTestId("model-picker-visual.character"), {
+    target: { value: "image-a" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "保存模型选择" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存高级模式" }));
   await waitFor(() =>
     expect(putProjectModelProfile).toHaveBeenCalledWith("project-1", {
       bindings: {
         "visual.keyframe": { model_id: "image-a", enabled: true, native_options: {} },
-        "audio.tts": { model_id: "voice-a" },
+        "visual.character": { model_id: "image-a" },
+        "audio.tts": historicalVoice,
       },
     }),
   );

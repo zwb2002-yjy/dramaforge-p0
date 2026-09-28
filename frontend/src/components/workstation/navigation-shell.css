@@ -1,12 +1,13 @@
 .df-global-shell {
-  --df-primary-nav-width: 68px;
-  --df-context-nav-width: 220px;
+  --df-primary-nav-width: var(--df-global-rail-width);
+  --df-context-nav-width: var(--df-project-nav-width);
   min-height: 100vh;
   display: grid;
   grid-template-columns: var(--df-primary-nav-width) 0 minmax(0, 1fr);
   background: var(--df-canvas-background);
   color: var(--df-text-primary);
-  overflow-x: hidden;
+  /* Clip horizontal spill without creating a scroll container above sticky navigation. */
+  overflow-x: clip;
   transition: grid-template-columns var(--df-duration-base) var(--df-ease);
 }
 
@@ -21,7 +22,7 @@
   height: 100vh;
   min-height: 0;
   background: var(--df-surface-1);
-  border-right: 1px solid transparent;
+  border-right: 1px solid var(--df-border-subtle);
   z-index: var(--df-z-sticky);
 }
 
@@ -40,7 +41,7 @@
 .df-primary-sidebar nav > a,
 .df-primary-bottom > a,
 .df-primary-disabled {
-  width: 48px;
+  width: 40px;
   min-height: 44px;
   display: grid;
   place-items: center;
@@ -54,7 +55,7 @@
 
 .df-primary-brand {
   margin-bottom: var(--df-space-5);
-  color: var(--df-brass);
+  color: var(--df-verdigris);
 }
 
 .df-primary-sidebar > nav {
@@ -600,4 +601,20 @@
 .df-workspace-return a:hover {
   color: var(--df-text-primary);
   background: var(--df-surface-2);
+}
+
+.df-context-link-copy {
+  min-width: 0;
+  display: grid;
+  gap: var(--df-space-1);
+}
+.df-context-link-copy small {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+  font-weight: var(--df-weight-normal);
+}
+.df-context-step {
+  color: var(--df-text-muted);
+  font-family: var(--df-font-mono);
+  font-size: var(--df-text-xs);
 }

@@ -44,7 +44,10 @@ DISCOVERY = [
     (
         "list_resumable_provider_node_run_rls_scopes",
         "resumable_provider_node_run_contexts",
-        {"limit": 7, "source_commit": "exact-commit"},
+        {
+            "limit": 7, "source_commit": "exact-commit",
+            "after_node_run_id": ENTITY, "stale_before": CUTOFF,
+        },
         "node_run_id",
         db.NodeRunRlsScope,
     ),

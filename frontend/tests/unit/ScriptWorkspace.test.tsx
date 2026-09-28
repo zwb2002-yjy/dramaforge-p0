@@ -141,7 +141,7 @@ describe("ScriptWorkspace proposal-first UI", () => {
     renderWorkspace();
     expect(await screen.findByTestId("script-empty")).toBeInTheDocument();
     expect(screen.getByTestId("story-proposal-composer")).toBeInTheDocument();
-    expect(screen.getByText("剧本提案")).toBeInTheDocument();
+    expect(screen.getByText("从一个故事开始")).toBeInTheDocument();
   });
 
   it("creates a proposal and renders the typed diff", async () => {
@@ -244,4 +244,21 @@ describe("ScriptWorkspace proposal-first UI", () => {
       });
     });
   });
+});
+
+it("restores a persisted proposal after returning without generating or applying it", async () => {
+  const writes: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    if (init?.method === "POST") writes.push(url);
+    if (url.endsWith("/script")) return json(EMPTY);
+    if (url.endsWith("/story/proposals")) return json([PROPOSAL]);
+    return json({});
+  });
+  renderWorkspace();
+  fireEvent.click(await screen.findByText("继续处理已保存的提案"));
+  fireEvent.click(screen.getByRole("button", { name: "查看并确认提案" }));
+  expect(screen.getByTestId("story-proposal-preview")).toHaveTextContent("镜头");
+  expect(screen.getByTestId("story-proposal-apply-all")).toBeEnabled();
+  expect(writes).toEqual([]);
 });

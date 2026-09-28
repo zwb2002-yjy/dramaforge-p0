@@ -24,10 +24,14 @@ test("review workspace persists time and image-region annotations without changi
   );
   await page.goto(`/projects/${PROJECT_ID}/review`);
   await expect(page.getByTestId("review-workspace")).toBeVisible();
-  // Supply deterministic media metadata, not a remote provider or real video.
+  // The mock does not provide decodable video. Wait for its failure before
+  // supplying deterministic metadata, otherwise a late native error races it.
+  await expect(page.getByRole("alert").filter({ hasText: "无法加载正式视频" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存视频批注" })).toBeDisabled();
   const player = page.getByLabel("正式视频审片播放器");
   await player.evaluate((element) => {
     element.removeAttribute("src");
+    (element as HTMLVideoElement).load();
     Object.defineProperty(element, "duration", { configurable: true, value: 5 });
     element.dispatchEvent(new Event("loadedmetadata"));
   });

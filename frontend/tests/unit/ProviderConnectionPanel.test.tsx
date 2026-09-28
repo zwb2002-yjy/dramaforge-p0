@@ -46,7 +46,7 @@ const AGNES_PLUGIN = {
 describe("Provider connection contract revisions", () => {
   it("does not misreport a failed workspace query as an unconfigured provider", async () => {
     vi.mocked(listProviderConnections).mockRejectedValue(new Error("workspace context mismatch"));
-    vi.mocked(listProviderPlugins).mockResolvedValue([]);
+    vi.mocked(listProviderPlugins).mockResolvedValue([AGNES_PLUGIN]);
 
     render(
       <QueryClientProvider
@@ -57,10 +57,11 @@ describe("Provider connection contract revisions", () => {
     );
 
     expect(await screen.findByText("读取失败")).toBeInTheDocument();
-    expect(screen.getByText("连接列表加载失败：workspace context mismatch")).toBeInTheDocument();
+    expect(screen.getByText("连接列表加载失败；状态未知，不能当作未配置。")).toBeInTheDocument();
   });
 
   it("keeps historical bindings visible but only allows the active revision on new projects", async () => {
+    vi.mocked(listProjectProviderBindings).mockResolvedValue([]);
     vi.mocked(listProviderConnections).mockResolvedValue([
       {
         id: "connection-1",
@@ -180,6 +181,9 @@ describe("Provider connection contract revisions", () => {
       </QueryClientProvider>,
     );
 
+    fireEvent.click(
+      (await screen.findByTestId("provider-diagnostics-disclosure")).querySelector("summary")!,
+    );
     expect(await screen.findByText("keyframe · 历史合同")).toBeInTheDocument();
     expect(screen.getByText("keyframe · v2")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("项目 Provider 绑定"), {
@@ -193,9 +197,11 @@ describe("Provider connection contract revisions", () => {
     expect(
       within(historicalRow as HTMLElement).getByRole("button", { name: "绑定所选项目" }),
     ).toBeDisabled();
-    expect(
-      within(activeRow as HTMLElement).getByRole("button", { name: "绑定所选项目" }),
-    ).toBeEnabled();
+    await vi.waitFor(() =>
+      expect(
+        within(activeRow as HTMLElement).getByRole("button", { name: "绑定所选项目" }),
+      ).toBeEnabled(),
+    );
   });
 
   it("enables and disables the connection from the settings surface", async () => {
@@ -310,6 +316,9 @@ describe("Provider connection contract revisions", () => {
     );
 
     await screen.findByTestId("provider-connection-toggle");
+    fireEvent.click(
+      screen.getByTestId("provider-diagnostics-disclosure").querySelector("summary")!,
+    );
     fireEvent.change(screen.getByLabelText("项目 Provider 绑定"), {
       target: { value: "project-1" },
     });

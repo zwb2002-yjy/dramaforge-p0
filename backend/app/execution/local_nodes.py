@@ -117,7 +117,15 @@ async def _complete_composite_node(
         shot_id = (run.input_snapshot or {}).get("shot_id")
         if shot_id:
             shot = await session.get(Shot, UUID(str(shot_id)))
-            if shot is not None and shot.project_id == run.project_id:
+            video_input = inputs.media_inputs.get("video")
+            if (
+                shot is not None
+                and shot.project_id == run.project_id
+                and shot.formal_video_artifact_id is not None
+                and isinstance(video_input, dict)
+                and str(video_input.get("artifact_id"))
+                == str(shot.formal_video_artifact_id)
+            ):
                 shot.formal_composite_artifact_id = art.id
                 shot.version = (shot.version or 1) + 1
     node.latest_successful_run_id = run.id

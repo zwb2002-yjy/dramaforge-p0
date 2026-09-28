@@ -13,8 +13,8 @@ async function expectReadableOptions(select: Locator) {
   expect(options.length).toBeGreaterThan(0);
   for (const option of options) {
     // A translucent option lets the OS popup fall back to white under light text.
-    expect(option.background, option.text ?? "option").toBe("rgb(41, 41, 50)");
-    expect(option.foreground, option.text ?? "option").toBe("rgb(244, 241, 248)");
+    expect(option.background, option.text ?? "option").toBe("rgb(35, 40, 46)");
+    expect(option.foreground, option.text ?? "option").toBe("rgb(242, 244, 247)");
   }
 }
 

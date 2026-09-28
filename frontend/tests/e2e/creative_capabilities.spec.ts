@@ -104,6 +104,18 @@ async function installMock(
         },
       ]);
     }
+    if (path.endsWith("/production-summary"))
+      return json(route, {
+        project_id: PROJECT_ID,
+        total_runs: 0,
+        completed_runs: 0,
+        running_runs: 0,
+        failed_runs: 0,
+        artifact_count: 0,
+        recent_failures: [],
+        has_more_failures: false,
+        stages: [],
+      });
     if (path.endsWith("/snapshot"))
       return json(route, {
         project_id: PROJECT_ID,
@@ -148,7 +160,7 @@ test("creative capabilities panel reads and freezes effective intent with proven
     freezeBody = body;
   });
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await page.getByRole("tab", { name: "高级设置", exact: true }).click();
+  await page.getByRole("tab", { name: "导演手法", exact: true }).click();
   await page.getByLabel("修改范围").selectOption("shot");
 
   const shotPanel = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
@@ -190,7 +202,7 @@ test("scene creative capabilities freeze the shared configuration the Shots inhe
     { scenes: true },
   );
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await page.getByRole("tab", { name: "高级设置", exact: true }).click();
+  await page.getByRole("tab", { name: "导演手法", exact: true }).click();
 
   const scenePanel = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
   await expect(scenePanel).toBeVisible();
@@ -208,7 +220,7 @@ test("scene creative capabilities freeze the shared configuration the Shots inhe
   expect(freezeBodies[0]).not.toHaveProperty("shot_id");
 
   // The Shot scope is a separate target: its own panel still freezes the Shot.
-  await page.getByRole("tab", { name: "高级设置", exact: true }).click();
+  await page.getByRole("tab", { name: "导演手法", exact: true }).click();
   await page.getByLabel("修改范围").selectOption("shot");
   const shotPanel = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
   await shotPanel.getByRole("button", { name: "保存局部设置" }).click();

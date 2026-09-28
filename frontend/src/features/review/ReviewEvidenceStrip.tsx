@@ -29,19 +29,19 @@ export function ReviewEvidenceStrip({
   if (summary.isLoading)
     return (
       <p className="muted" role="status">
-        正在读取视频证据…
+        正在读取自动抽帧检查结果…
       </p>
     );
   if (summary.isError)
     return (
       <p className="flash err" role="alert">
-        无法读取视频证据。
+        无法读取自动抽帧检查结果；仍可直接播放视频审片。
       </p>
     );
   if (frames.length === 0) {
     return (
       <p className="muted" data-testid="review-evidence-empty">
-        当前没有可用的视频证据。
+        暂无自动抽帧检查结果，可直接播放下方视频并进行人工审片。
       </p>
     );
   }

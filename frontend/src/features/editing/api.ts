@@ -30,9 +30,12 @@ export async function fetchEditSessions(projectId: string): Promise<EditSessionS
 export async function fetchEditFinalFilms(
   projectId: string,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<FinalFilmJobRead[]> {
   const rows = await apiGetList<FinalFilmJobRead>(
     editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/final-films`),
+    undefined,
+    signal,
   );
   if (!Array.isArray(rows)) throw new Error("成片历史响应无效");
   return rows;
@@ -189,9 +192,12 @@ export async function renderFinalFilm(
 export function fetchFinalFilmStatus(
   projectId: string,
   nodeRunId: string,
+  signal?: AbortSignal,
 ): Promise<FinalFilmJobRead> {
   return apiGet<FinalFilmJobRead>(
     `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/runs/${encodeURIComponent(nodeRunId)}`,
+    undefined,
+    signal,
   );
 }
 
@@ -215,4 +221,38 @@ export async function rejectEditingDirectorSuggestion(
   if (result.proposal_id !== proposalId || result.status !== "rejected") {
     throw new Error("剪辑建议拒绝回执无效，预览已保留。");
   }
+}
+
+/** Read only ready audio Artifacts; Asset cards are not renderer input identities. */
+export async function fetchEditingAudioArtifacts(
+  projectId: string,
+  cursor: string | null = null,
+  signal?: AbortSignal,
+): Promise<components["schemas"]["ProductionArtifactPage"]> {
+  const query = new URLSearchParams({ limit: "25", usable_audio: "true" });
+  if (cursor) query.set("cursor", cursor);
+  const page = await apiGet<components["schemas"]["ProductionArtifactPage"]>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/production-history/artifacts?${query}`,
+    undefined,
+    signal,
+  );
+  if (
+    !page ||
+    !Array.isArray(page.items) ||
+    (page.next_cursor !== null &&
+      (typeof page.next_cursor !== "string" || !page.next_cursor || page.next_cursor === cursor)) ||
+    page.items.some(
+      (item) =>
+        !item ||
+        typeof item.id !== "string" ||
+        !item.id ||
+        typeof item.mime_type !== "string" ||
+        !item.mime_type.startsWith("audio/") ||
+        item.storage_state !== "available" ||
+        !item.object_key ||
+        item.byte_size <= 0,
+    )
+  )
+    throw new Error("音频列表回执不完整，请刷新并确认前后端版本一致；不要重复生成。");
+  return page;
 }

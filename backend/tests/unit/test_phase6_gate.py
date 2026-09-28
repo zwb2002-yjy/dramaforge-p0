@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from datetime import date
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
@@ -16,6 +16,8 @@ from app.production.repair_service import RepairService
 from app.shared.base import Base
 from app.shared.security import hash_password
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from repair_fixture import approve_and_adopt
 
 
 @pytest.fixture
@@ -209,23 +211,21 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
     assert keyframe_run.status == "queued"
     assert keyframe_run.input_snapshot["workbench_plan"]["stage"] == "image_keyframe"
 
-    # 4) user confirms a new keyframe candidate (new formal keyframe artifact)
-    new_keyframe = Artifact(
-        project_id=project.id, artifact_type="image", storage_state="stored",
-        object_key=f"obj/{uuid4().hex}", content_hash="c" * 64,
-        mime_type="image/png", byte_size=1,
+    # 4) the exact generated candidate is reviewed and explicitly selected Formal.
+    new_keyframe, _decision = await approve_and_adopt(
+        session, project=project, shot=shot, user=user, run=keyframe_run,
     )
-    session.add(new_keyframe)
-    await session.flush()
-    shot.formal_keyframe_artifact_id = new_keyframe.id
-    shot.formal_video_artifact_id = None  # old video pending regeneration
-    shot.version += 1
-    await session.flush()
-
-    # 5) rerun video on the new keyframe
-    video_run = await repair.execute_repair(
-        project=project, user=user, shot_id=shot.id,
-        repair_option="rerun_video",
+    repair_id = UUID(keyframe_run.input_snapshot["workbench_plan"]
+                     ["semantic_intent"]["repair_request_id"])
+    # 5) continue the same repair, not a second workflow bypassing its review gate.
+    preview = await repair.build_step_plan(
+        project=project, user=user, shot_id=shot.id, repair_id=repair_id,
+    )
+    assert preview.step_ordinal == 3
+    _, _, video_run = await repair.execute_step(
+        project=project, user=user, shot_id=shot.id, repair_id=repair_id,
+        expected_step_ordinal=preview.step_ordinal,
+        expected_plan_fingerprint=preview.plan.plan_fingerprint,
         idempotency_key="gate6-video",
     )
     assert video_run.status == "queued"

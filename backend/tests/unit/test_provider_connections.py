@@ -118,7 +118,7 @@ async def _seed_owner(session: AsyncSession) -> tuple[User, Workspace]:
 
 
 @pytest.mark.asyncio
-async def test_credential_rotation_clears_capability_and_quality_flags(
+async def test_credential_rotation_clears_flags_but_preserves_historical_evidence(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -209,7 +209,7 @@ async def test_credential_rotation_clears_capability_and_quality_flags(
                 ProviderCapabilityEvidence.connection_id == connection.id
             )
         )
-    ) is None
+    ) == evidence.id
 
     other_workspace = Workspace(
         owner_user_id=user.id,
@@ -389,9 +389,40 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
             workspace_id=workspace.id,
             connection_id=connection.id,
             actor=user,
-            capability="image_t2i",
+            capability="video_poll_download",
             model_binding_id=legacy_binding.id,
             paid_request_confirmed=True,
         )
 
     assert probe_caught.value.details["code"] == "MODEL_BINDING_CONTRACT_INACTIVE"
+
+
+def test_paid_probe_route_rejects_checkbox_consent_before_any_provider_dispatch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import Mock
+
+    from app.providers.registry import ProviderPlugin
+
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{key}")
+    clear_settings_cache()
+    workspace_id = _register_and_select_workspace(client)
+    created = client.post(
+        f"/api/v1/workspaces/{workspace_id}/provider-connections",
+        json={"api_key": "synthetic-paid-probe-test-key"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert created.status_code == 201
+    connection_id = created.json()["id"]
+    factory = Mock(side_effect=AssertionError("Provider must not be constructed"))
+    monkeypatch.setattr(ProviderPlugin, "build_client", factory)
+    rejected = client.post(
+        f"/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/probes",
+        json={"capability": "image_t2i", "paid_request_confirmed": True},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["details"]["code"] == "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"
+    factory.assert_not_called()

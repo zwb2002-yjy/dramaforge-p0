@@ -68,6 +68,8 @@ def test_branch_flow_admits_dependency_integration_but_protects_main() -> None:
     for base, head, allowed in [
         ("dev", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", True),
         ("dev", "agent/runtime-policy", True),
+        ("dev", "codex/workbench-optimization", True),
+        ("main", "codex/workbench-optimization", False),
         ("dev", "unreviewed-feature", False),
         ("main", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", False),
         ("main", "dev", True),

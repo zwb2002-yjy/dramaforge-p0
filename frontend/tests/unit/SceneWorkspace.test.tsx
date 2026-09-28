@@ -845,3 +845,116 @@ it("uses route-owned editing navigation instead of reloading a cached HTML route
   fireEvent.click(screen.getByTestId("scene-edit-entry"));
   expect(onOpenEditing).toHaveBeenCalledTimes(1);
 });
+
+it("keeps dialogue and voice drafts across sheet close and guards shot switches without generating", async () => {
+  const calls: Array<{ url: string; method: string; body: unknown }> = [];
+  // The existing character reference picker uses a read-only POST to resolve
+  // saved bindings. This is not a save, execution plan, probe, or generation.
+  const readOnlyResolutionUrls = new Set([
+    "/api/v1/projects/project-1/shots/shot-1/references/resolve",
+    "/api/v1/projects/project-1/shots/shot-2/references/resolve",
+  ]);
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ url, method, body });
+    if (url.endsWith("/auth/csrf") && method === "GET") {
+      return json({ csrf_token: "csrf-test" });
+    }
+    if (readOnlyResolutionUrls.has(url) && method === "POST") return json([]);
+    if (url.endsWith("/references") && method === "GET") return json([]);
+    if (url.endsWith("/workspace")) {
+      return json({
+        scene: {
+          id: "scene-1",
+          episode_id: "episode-1",
+          episode_number: 1,
+          scene_number: 1,
+          location_name: "Voice Studio",
+          time_of_day: "day",
+          synopsis: "intro",
+          version: 1,
+          design_state: {},
+        },
+        shots: [SHOT_1, { ...SHOT_2, dialogue: "第二个镜头的对白" }],
+        references: { "shot-1": [], "shot-2": [] },
+        candidates: { "shot-1": [], "shot-2": [] },
+        trace: { "shot-1": [], "shot-2": [] },
+      });
+    }
+    if (url.endsWith("/voice-options")) {
+      return json({
+        engine: "edge-tts",
+        enabled: true,
+        status: "configured",
+        default_voice: "catalog-a",
+        network: true,
+        service_notice: "联网神经配音·Edge（非官方服务，无SLA）；配置未验证。",
+        voices: [
+          { id: "catalog-a", label: "目录声音甲", locale: "zh-CN" },
+          { id: "catalog-b", label: "目录声音乙", locale: "zh-CN" },
+        ],
+      });
+    }
+    return json({});
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <SceneWorkspace projectId="project-1" sceneId="scene-1" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Voice Studio");
+  fireEvent.click(screen.getByTestId("context-dock-character"));
+  await screen.findByRole("option", { name: "目录声音乙 · zh-CN" });
+  fireEvent.change(screen.getByLabelText("对白／旁白文本"), {
+    target: { value: "尚未保存的对白" },
+  });
+  fireEvent.change(screen.getByLabelText("配音音色"), { target: { value: "voice:catalog-b" } });
+  fireEvent.change(screen.getByLabelText("配音语速"), { target: { value: "-9" } });
+  expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByTestId("director-sheet-close"));
+  expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("context-dock-character"));
+  expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("尚未保存的对白");
+  expect(screen.getByLabelText("配音音色")).toHaveValue("voice:catalog-b");
+  expect(screen.getByLabelText("配音语速")).toHaveValue("-9");
+
+  fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
+  expect(await screen.findByTestId("unsaved-changes-guard")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "返回保存" }));
+  expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("尚未保存的对白");
+  expect(screen.getByLabelText("配音音色")).toHaveValue("voice:catalog-b");
+  fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
+  fireEvent.click(await screen.findByRole("button", { name: "放弃并切换" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-2"),
+  );
+  expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("第二个镜头的对白");
+  expect(screen.getByLabelText("配音音色")).toHaveValue("");
+  expect(screen.getByLabelText("配音语速")).toHaveValue("0");
+  expect(calls).toContainEqual({
+    url: "/api/v1/projects/project-1/shots/shot-1/references/resolve",
+    method: "POST",
+    body: {},
+  });
+  const nonReadRequests = calls.filter(
+    (call) =>
+      call.method !== "GET" && !(call.method === "POST" && readOnlyResolutionUrls.has(call.url)),
+  );
+  // Fail with the concrete request list rather than a boolean: no Save,
+  // reference mutation, or production command may hide among allowed reads.
+  expect(nonReadRequests).toEqual([]);
+  for (const call of calls.filter((request) => request.method === "POST")) {
+    expect(call.body).toEqual({});
+  }
+  expect(
+    calls.filter((call) =>
+      ["final-film", "/execution-plan", "/executions", "/probe"].some((path) =>
+        call.url.includes(path),
+      ),
+    ),
+  ).toEqual([]);
+});

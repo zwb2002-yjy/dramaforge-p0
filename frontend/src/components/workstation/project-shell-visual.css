@@ -112,13 +112,13 @@
   }
 
   .qc-project-shell .qc-main-canvas {
-    width: min(100%, 1440px);
-    max-width: 1440px;
+    width: 100%;
+    max-width: none;
     padding: var(--df-space-6) clamp(var(--df-space-5), 3vw, var(--df-space-10)) var(--df-space-12);
   }
 
   .qc-project-shell .qc-project-canvas {
-    margin: 0 auto;
+    margin: 0;
   }
 
   .qc-project-shell .qc-content-grid.no-inspector {
@@ -895,7 +895,7 @@
     padding: var(--df-space-5);
   }
 
-  .editing-session-editor li {
+  .editing-session-editor > ol > li {
     border-color: var(--df-border-subtle);
     border-radius: var(--df-radius-container);
     background: var(--df-surface-2);
@@ -950,7 +950,7 @@
   .node-runtime-row,
   .timeline-chip,
   .editing-director-suggestion-preview,
-  .editing-session-editor li,
+  .editing-session-editor > ol > li,
   .qc-script-document,
   .qc-script-episode {
     border-radius: var(--df-radius-container);

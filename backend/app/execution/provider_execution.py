@@ -536,6 +536,10 @@ async def _execute_unified_media_node_run(
                     "query_kind": resume.query_kind,
                 }
                 run.status = "queued"
+                # This attempt is yielding to Arq, not still polling. Commit the
+                # lease release with queued so a cancel during Retry can resume
+                # the same remote task immediately without stealing an active job.
+                run.started_at = None
                 run.error_code = "PROVIDER_TASK_PENDING"
                 run.error_summary = "Remote Provider task is still running"
                 run.output_summary = {

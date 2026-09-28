@@ -95,6 +95,10 @@ class _FakeSession:
             return self.workspace
         return None
 
+    async def scalar(self, statement: object) -> NodeRun:
+        # Worker admission now locks/reloads the NodeRun before taking its lease.
+        return self.run
+
     async def commit(self) -> None:
         self.commits += 1
 

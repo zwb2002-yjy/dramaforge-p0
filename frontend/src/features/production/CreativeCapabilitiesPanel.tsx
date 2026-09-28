@@ -133,13 +133,19 @@ export function CreativeCapabilitiesPanel({
     <div className="creative-capabilities-panel" data-testid="creative-capabilities-panel">
       <header className="panel-header">
         <div>
-          <h3>局部创作设置</h3>
+          <h3>导演手法与引用依据</h3>
+          <p className="muted">
+            把内置创作方法用于当前画面。选择只是草稿，保存后才影响后续生成，不会重做已有产物。
+          </p>
         </div>
         <span className="fact-source-badge" data-testid="creative-capability-scope">
           {targetScope === "scene" ? "场景配置（镜头继承）" : "当前镜头配置"}
         </span>
       </header>
 
+      <p className="creative-method-source">
+        方法来源：平台内置创作目录，不是外部文献检索。实际采用的方法以已保存记录和每次生成的冻结配置为准。
+      </p>
       <div className="creative-capability-form">
         <Field>
           创作类型
@@ -151,6 +157,10 @@ export function CreativeCapabilitiesPanel({
               </option>
             ))}
           </Select>
+          <small className="creative-method-description">
+            {catalog.data?.genres?.find((item) => item.key === genre)?.description ??
+              "未指定局部覆盖，沿用生成时解析的配置。"}
+          </small>
         </Field>
         <Field>
           风格
@@ -162,8 +172,12 @@ export function CreativeCapabilitiesPanel({
               </option>
             ))}
           </Select>
+          <small className="creative-method-description">
+            {catalog.data?.styles?.find((item) => item.key === style)?.description ??
+              "未指定局部覆盖，沿用生成时解析的配置。"}
+          </small>
         </Field>
-        <Disclosure title="更多生成设置">
+        <Disclosure title="镜头语言、质量与创作手法">
           <Field>
             镜头语言
             <Select
@@ -178,6 +192,10 @@ export function CreativeCapabilitiesPanel({
                 </option>
               ))}
             </Select>
+            <small className="creative-method-description">
+              {catalog.data?.shot_languages?.find((item) => item.key === shotLanguage)
+                ?.description ?? "未指定局部覆盖，沿用生成时解析的配置。"}
+            </small>
           </Field>
           <Field>
             质量策略
@@ -193,6 +211,10 @@ export function CreativeCapabilitiesPanel({
                 </option>
               ))}
             </Select>
+            <small className="creative-method-description">
+              {catalog.data?.quality_policies?.find((item) => item.key === quality)?.description ??
+                "未指定局部覆盖，沿用生成时解析的配置。"}
+            </small>
           </Field>
 
           <div className="creative-skill-list">
@@ -201,10 +223,16 @@ export function CreativeCapabilitiesPanel({
               <Field key={item.key} className="creative-skill-toggle" title={item.description}>
                 <Checkbox
                   type="checkbox"
+                  aria-label={item.display_name}
                   checked={skills.includes(item.key)}
                   onChange={() => toggleSkill(item.key)}
                 />
-                <span>{item.display_name}</span>
+                <span>
+                  <strong>{item.display_name}</strong>
+                  <small className="creative-method-description">
+                    {item.description || "目录未提供方法说明。"}
+                  </small>
+                </span>
               </Field>
             ))}
           </div>
@@ -240,8 +268,17 @@ export function CreativeCapabilitiesPanel({
         )}
       </div>
 
+      {!provenance.isPending && !provenance.isError && Object.keys(prov).length === 0 && (
+        <p className="muted" role="status">
+          此范围尚未保存局部方法，生成时按项目配置解析；这里的选择尚未生效。
+        </p>
+      )}
       {prov && Object.keys(prov).length > 0 && (
-        <Disclosure title="已保存的设置" testId="creative-provenance">
+        <Disclosure
+          title="已保存的设置"
+          description="查看方法来源与实际保存的配置"
+          testId="creative-provenance"
+        >
           <small>
             {inheritedFromProject
               ? "沿用项目设置"

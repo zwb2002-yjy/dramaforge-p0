@@ -1,0 +1,88 @@
+.project-stage-guide {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--df-space-3);
+  padding-block: var(--df-space-4);
+  margin-bottom: var(--df-space-6);
+  border-bottom: 1px solid var(--df-border);
+}
+.project-stage-guide-index {
+  display: grid;
+  place-items: center;
+  width: var(--df-journey-step-size);
+  height: var(--df-journey-step-size);
+  border: 1px solid var(--df-border-strong);
+  border-radius: var(--df-radius-control);
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+  font-family: var(--df-font-mono);
+}
+.project-stage-guide-copy {
+  flex: 1;
+  min-width: 0;
+}
+.project-stage-guide-copy strong {
+  font-size: var(--df-text-md);
+}
+.project-stage-guide-copy p {
+  margin: var(--df-space-1) 0 0;
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+}
+.project-stage-guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-3);
+  align-items: flex-start;
+  max-width: var(--df-stage-guide-width);
+}
+.project-stage-guide-actions > a {
+  padding-block: var(--df-space-2);
+  font-size: var(--df-text-sm);
+  color: var(--df-verdigris);
+  text-decoration: none;
+}
+.project-stage-guide-actions ol {
+  max-width: var(--df-page-description-width);
+  margin: var(--df-space-3) 0;
+  padding-inline-start: var(--df-space-5);
+  color: var(--df-text-secondary);
+  font-size: var(--df-text-sm);
+}
+.project-stage-guide-actions li + li {
+  margin-top: var(--df-space-2);
+}
+
+.project-stage-guide-actions .df-disclosure {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .project-stage-guide {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding-block: var(--df-space-2);
+    margin-bottom: var(--df-space-3);
+  }
+  .project-stage-guide-actions {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+    max-width: none;
+  }
+  .project-stage-guide-actions .df-disclosure > summary {
+    padding: var(--df-space-2) var(--df-space-3);
+  }
+}
+
+@media (max-width: 640px) {
+  /* Focused scene media stays primary; the full explanation remains in Help. */
+  .scene-view .project-stage-guide {
+    display: block;
+    padding-block: var(--df-space-1);
+    margin-bottom: var(--df-space-1);
+  }
+  .scene-view .project-stage-guide-index,
+  .scene-view .project-stage-guide-copy {
+    display: none;
+  }
+}

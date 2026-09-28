@@ -108,9 +108,17 @@ test("portrait footage leaves the intention within the mobile first screen", asy
     image: document.querySelector('[data-testid="shot-keyframe"]')!.getBoundingClientRect().height,
     input: document.querySelector('[data-testid="resonance-intent"]')!.getBoundingClientRect()
       .bottom,
+    sections: Array.from(
+      document.querySelectorAll(
+        ".qc-project-bar, .project-stage-guide, .qc-scene-focus-header, .rs-stage, .rs-intent, .qc-cinematic-canvas",
+      ),
+    ).map((element) => ({
+      name: element.className,
+      box: element.getBoundingClientRect().toJSON(),
+    })),
   }));
   expect(layout.image).toBeLessThanOrEqual(layout.viewport * 0.38 + 1);
-  expect(layout.input).toBeLessThanOrEqual(layout.viewport);
+  expect(layout.input, JSON.stringify(layout)).toBeLessThanOrEqual(layout.viewport);
 });
 
 test("contextual intent reaches the existing director endpoint once and errors stay truthful", async ({

@@ -20,8 +20,13 @@ export const settingsRoute = createRoute({
 export const settingsIndexRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/",
-  component: () => <Navigate to="/settings/models" replace />,
+  component: SettingsIndexRedirect,
 });
+
+function SettingsIndexRedirect() {
+  const { returnTo } = settingsRoute.useSearch();
+  return <Navigate to="/settings/models" search={{ returnTo }} replace />;
+}
 
 export const settingsAccountRoute = createRoute({
   getParentRoute: () => settingsRoute,

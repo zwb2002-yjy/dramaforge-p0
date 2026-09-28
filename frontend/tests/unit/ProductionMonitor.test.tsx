@@ -76,34 +76,30 @@ const shots = [
   },
 ];
 
-const snapshot = {
+const summary = {
   project_id: "project-1",
-  name: "验收",
-  node_runs: [
-    {
-      id: "run-1",
-      node_key: "video",
-      status: "completed",
-      attempt_no: 1,
-      input_snapshot: { shot_id: "shot-1" },
-    },
+  total_runs: 3,
+  completed_runs: 1,
+  running_runs: 1,
+  failed_runs: 1,
+  artifact_count: 1,
+  has_more_failures: false,
+  stages: [],
+  recent_failures: [
     {
       id: "run-2",
       node_key: "video",
       status: "failed",
       attempt_no: 1,
-      input_snapshot: { shot_id: "shot-2" },
-    },
-    {
-      id: "run-3",
-      node_key: "subtitle",
-      status: "queued",
-      attempt_no: 1,
-      input_snapshot: { shot_id: "shot-1" },
+      shot_id: "shot-2",
+      execution_branch: "formal",
+      experiment_id: null,
+      result_artifact_id: null,
+      created_at: "2026-09-19T00:00:00Z",
+      error_code: null,
+      error_summary: null,
     },
   ],
-  artifacts: [{ id: "art-1", object_key: "kf/art-1.png", byte_size: 10 }],
-  provider_operations: [],
 };
 
 describe("ProductionMonitor", () => {
@@ -113,7 +109,7 @@ describe("ProductionMonitor", () => {
         projectId="project-1"
         scenes={scenes}
         shots={shots}
-        snapshot={snapshot as never}
+        summary={summary}
         experimentCount={3}
       />,
     );
@@ -148,40 +144,27 @@ describe("ProductionMonitor", () => {
         projectId="project-1"
         scenes={[]}
         shots={[]}
-        snapshot={undefined}
+        summary={undefined}
         experimentCount={0}
       />,
     );
     expect(screen.getByText("尚无场景。请在场景工作区创建场景与镜头。")).toBeInTheDocument();
   });
 
-  it("does not report a failed attempt after the same node succeeds", () => {
+  it("shows authoritative effective counts instead of recounting old attempts", () => {
     render(
       <ProductionMonitor
         projectId="project-1"
         scenes={[{ ...scenes[0], risk_count: 0 }]}
         shots={[shots[0]]}
-        snapshot={
-          {
-            ...snapshot,
-            node_runs: [
-              {
-                id: "retry-success",
-                node_key: "composite",
-                status: "completed",
-                attempt_no: 2,
-                input_snapshot: { shot_id: "shot-1", execution_branch: "formal" },
-              },
-              {
-                id: "old-failure",
-                node_key: "composite",
-                status: "failed",
-                attempt_no: 1,
-                input_snapshot: { shot_id: "shot-1", execution_branch: "formal" },
-              },
-            ],
-          } as never
-        }
+        summary={{
+          ...summary,
+          total_runs: 1,
+          completed_runs: 1,
+          running_runs: 0,
+          failed_runs: 0,
+          recent_failures: [],
+        }}
         experimentCount={0}
       />,
     );
@@ -197,7 +180,7 @@ it("filters risk scenes locally without changing the overview totals", () => {
       projectId="project-1"
       scenes={scenes}
       shots={shots}
-      snapshot={snapshot as never}
+      summary={summary}
       experimentCount={0}
     />,
   );
@@ -225,7 +208,7 @@ it("does not turn pending or failed queries into empty successful facts", () => 
       shots={[]}
       scenesError
       shotsError
-      snapshotError
+      summaryError
     />,
   );
   expect(screen.getByRole("alert")).toHaveTextContent("读取失败");
@@ -239,7 +222,7 @@ it("offers a next step for a zero-risk scene missing one formal video", () => {
       projectId="project-1"
       scenes={[{ ...scenes[0], shot_count: 6, formal_keyframe_count: 6, formal_video_count: 5 }]}
       shots={shots}
-      snapshot={snapshot as never}
+      summary={summary}
     />,
   );
   expect(screen.getByTestId("production-next-step")).toHaveTextContent(
@@ -260,7 +243,7 @@ it("makes failed executions inspectable without treating them as scene risks", (
       projectId="project-1"
       scenes={[scenes[0]]}
       shots={shots}
-      snapshot={snapshot as never}
+      summary={summary}
     />,
   );
   fireEvent.click(screen.getByText("查看失败执行"));
@@ -353,21 +336,17 @@ it("distinguishes experiments and handles unlocatable runs without guessing a sh
       projectId="project-1"
       scenes={scenes}
       shots={shots}
-      snapshot={
-        {
-          ...snapshot,
-          node_runs: [
-            {
-              ...snapshot.node_runs[1],
-              input_snapshot: {
-                shot_id: "removed",
-                experiment_id: "exp-1",
-                execution_branch: "experiment",
-              },
-            },
-          ],
-        } as never
-      }
+      summary={{
+        ...summary,
+        recent_failures: [
+          {
+            ...summary.recent_failures[0],
+            shot_id: "removed",
+            experiment_id: "exp-1",
+            execution_branch: "experiment",
+          },
+        ],
+      }}
     />,
   );
   fireEvent.click(screen.getByText("查看失败执行"));
@@ -383,7 +362,7 @@ it("prioritizes risks and navigates to a known failed shot without treating coun
       projectId="project-1"
       scenes={scenes}
       shots={[{ ...shots[0], scene_id: "scene-2", status: "failed" }]}
-      snapshot={snapshot as never}
+      summary={summary}
     />,
   );
   expect(screen.getByTestId("production-next-step")).toHaveTextContent("有 1 个场景存在风险");
@@ -395,13 +374,43 @@ it("prioritizes risks and navigates to a known failed shot without treating coun
   expect(screen.getByTestId("stat-failed")).toHaveTextContent("1");
 });
 
-it("hides failed-run details when the snapshot becomes unavailable while preserving scene facts", () => {
-  const props = { projectId: "project-1", scenes, shots, snapshot: snapshot as never };
+it("hides failed-run details when the summary becomes unavailable while preserving scene facts", () => {
+  const props = { projectId: "project-1", scenes, shots, summary };
   const { rerender } = render(<ProductionMonitor {...props} />);
   fireEvent.click(screen.getByText("查看失败执行"));
-  rerender(<ProductionMonitor {...props} snapshotError />);
+  rerender(<ProductionMonitor {...props} summaryError />);
   expect(screen.getByTestId("stat-failed")).toHaveTextContent("—");
   expect(screen.queryByRole("region", { name: "失败执行详情" })).not.toBeInTheDocument();
   expect(screen.getByTestId("production-next-step")).toBeInTheDocument();
   expect(screen.getByTestId("stat-formal-videos")).toHaveTextContent("1");
+});
+
+it("hides stale stage counts and failure links after a read error, then restores them on recovery", () => {
+  const props = {
+    projectId: "project-1",
+    scenes,
+    shots,
+    summary: {
+      ...summary,
+      stages: [
+        {
+          node_key: "video",
+          status_counts: { completed: 2, failed: 1 },
+          latest_failure: summary.recent_failures[0],
+        },
+      ],
+    },
+  };
+  const { rerender } = render(<ProductionMonitor {...props} />);
+  const stage = screen.getByTestId("production-stage-video");
+  expect(stage).toHaveTextContent("已完成 2");
+  expect(within(stage).getByRole("link", { name: "查看失败镜头" })).toBeInTheDocument();
+  rerender(<ProductionMonitor {...props} summaryError />);
+  expect(stage).toHaveTextContent("状态暂不可用");
+  expect(stage).not.toHaveTextContent("已完成");
+  expect(stage).not.toHaveTextContent("阻塞原因");
+  expect(within(stage).queryByRole("link", { name: "查看失败镜头" })).not.toBeInTheDocument();
+  expect(within(stage).getByRole("link", { name: "生成与选择视频" })).toBeInTheDocument();
+  rerender(<ProductionMonitor {...props} />);
+  expect(stage).toHaveTextContent("已完成 2");
 });

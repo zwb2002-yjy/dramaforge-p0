@@ -1,4 +1,12 @@
-import { Button, Checkbox, Field, Input, Textarea, PageHeader } from "../../components/ui";
+import {
+  Button,
+  Checkbox,
+  Disclosure,
+  Field,
+  Input,
+  Textarea,
+  PageHeader,
+} from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -9,6 +17,7 @@ import {
   createStoryProposal,
   fetchScriptWorkspace,
   generateStoryProposal,
+  listStoryProposals,
   type ScriptWorkspaceRead,
   type StoryProposalOperation,
   type StoryProposalRead,
@@ -65,8 +74,17 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
     enabled: Boolean(projectId) && projectId !== "demo",
   });
   const data = workspace.data as ScriptWorkspaceRead | undefined;
+  const proposals = useQuery({
+    queryKey: queryKeys.script.proposals(projectId),
+    queryFn: () => listStoryProposals(projectId),
+    enabled: Boolean(projectId) && projectId !== "demo",
+  });
+  const pendingProposals = (Array.isArray(proposals.data) ? proposals.data : []).filter(
+    (proposal) => proposal.status === "pending",
+  );
 
   const invalidateScript = () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.script.proposals(projectId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.script.workspace(projectId) });
   };
 
@@ -82,6 +100,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
       });
     },
     onSuccess: (proposal) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.script.proposals(projectId) });
       setActiveProposal(proposal);
       setSelected(Object.fromEntries(proposal.operations.map((operation) => [operation.id, true])));
       setBrief("");
@@ -102,6 +121,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
       });
     },
     onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.script.proposals(projectId) });
       setDraftText(result.draft_text);
       setActiveProposal(result.proposal);
       setSelected(
@@ -204,25 +224,11 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
         </p>
       )}
 
-      <ScriptImportPanel
-        projectId={projectId}
-        onImported={async () => {
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: queryKeys.script.workspace(projectId) }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.scene.summaries(projectId) }),
-          ]);
-        }}
-        onOpenFirstShot={() => {
-          // The refreshed Script tree is the reliable way to locate the imported
-          // Shot: the first Scene of the first Episode owns the first Shot.
-          const firstScene = data?.episodes[0]?.scenes[0];
-          if (firstScene) onOpenScene?.(firstScene.id);
-        }}
-      />
-
       <section className="qc-settings-band" data-testid="story-proposal-composer">
-        <h2>剧本提案</h2>
-        <p className="muted">填写故事方向，或直接粘贴 Markdown 剧本草稿。</p>
+        <h2>从一个故事开始</h2>
+        <p className="muted">
+          描述人物、情节与预期时长。先生成建议，检查后再采用，不会直接制作视频。
+        </p>
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -230,7 +236,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
           }}
         >
           <Field>
-            故事方向 Brief
+            故事方向
             <Textarea
               aria-label="故事方向"
               value={brief}
@@ -240,6 +246,15 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
               disabled={createMut.isPending || generateMut.isPending}
             />
           </Field>
+          <Button
+            type="button"
+            tone="primary"
+            data-testid="story-proposal-generate"
+            disabled={generateMut.isPending || createMut.isPending || !brief.trim()}
+            onClick={() => generateMut.mutate()}
+          >
+            {generateMut.isPending ? "模型正在写剧本…" : "用故事方向生成剧本"}
+          </Button>
           <Field>
             文件名
             <Input
@@ -270,14 +285,6 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
           >
             {createMut.isPending ? "生成中…" : "创建剧本提案"}
           </Button>
-          <Button
-            type="button"
-            data-testid="story-proposal-generate"
-            disabled={generateMut.isPending || createMut.isPending || !brief.trim()}
-            onClick={() => generateMut.mutate()}
-          >
-            {generateMut.isPending ? "模型正在写剧本…" : "用故事方向生成剧本"}
-          </Button>
         </form>
         {generationEvidence && (
           <p className="muted" data-testid="story-generation-evidence">
@@ -294,6 +301,58 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
         )}
       </section>
 
+      <Disclosure title="导入已有剧本" description="支持文本文件或粘贴结构化剧本">
+        <ScriptImportPanel
+          projectId={projectId}
+          onImported={async () => {
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: queryKeys.script.workspace(projectId) }),
+              queryClient.invalidateQueries({ queryKey: queryKeys.scene.summaries(projectId) }),
+            ]);
+          }}
+          onOpenFirstShot={() => {
+            // The refreshed Script tree is the reliable way to locate the imported
+            // Shot: the first Scene of the first Episode owns the first Shot.
+            const firstScene = data?.episodes[0]?.scenes[0];
+            if (firstScene) onOpenScene?.(firstScene.id);
+          }}
+        />
+      </Disclosure>
+
+      {pendingProposals.length > 0 && (
+        <Disclosure
+          title="继续处理已保存的提案"
+          description="刷新或离开页面后，提案仍保留；不会再次调用模型"
+        >
+          <ul>
+            {pendingProposals.map((proposal) => (
+              <li key={proposal.id}>
+                <span>
+                  {new Date(proposal.created_at).toLocaleString()} · {proposal.operations.length}{" "}
+                  项待确认
+                </span>
+                <Button
+                  onClick={() => {
+                    setActiveProposal(proposal);
+                    setSelected(
+                      Object.fromEntries(
+                        proposal.operations.map((operation) => [operation.id, true]),
+                      ),
+                    );
+                  }}
+                >
+                  查看并确认提案
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Disclosure>
+      )}
+      {proposals.isError && (
+        <p role="alert">
+          已保存提案读取失败。<Button onClick={() => void proposals.refetch()}>重新读取提案</Button>
+        </p>
+      )}
       {activeProposal && (
         <section className="qc-settings-band" data-testid="story-proposal-preview">
           <header>
@@ -303,7 +362,9 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
             </span>
           </header>
           {proposalOperations.length === 0 ? (
-            <p className="muted">草稿与当前正式剧本没有差异。</p>
+            <p className="muted">
+              此提案未返回可确认内容。请重新读取已保存提案，不要重复调用模型。
+            </p>
           ) : (
             <div className="qc-proposal-operation-list">
               {proposalOperations.map((operation) => (

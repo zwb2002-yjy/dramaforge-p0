@@ -280,44 +280,28 @@ async def test_plugin_extension_needs_no_service_branch(
             enabled=True,
         )
 
-    with pytest.raises(ValidationAppError) as pricing_error:
-        await service.probe(
-            workspace_id=workspace.id,
-            connection_id=connection.id,
-            actor=user,
-            capability="image_t2i",
-            model_binding_id=binding.id,
-            paid_request_confirmed=True,
-        )
-    assert pricing_error.value.details["code"] == "PROBE_PRICING_CURRENCY_REQUIRED"
-    binding.pricing_snapshot_json = {
-        "unit_amount": "0.25",
-        "currency": "USD",
-        "billing_unit": "per_generated_image",
-    }
-
-    evidence = await service.probe(
-        workspace_id=workspace.id,
-        connection_id=connection.id,
-        actor=user,
-        capability="image_t2i",
-        model_binding_id=binding.id,
-        paid_request_confirmed=True,
-    )
-    assert evidence.status == "passed"
-    assert evidence.provider_request_id == "fake-img-1"
-    assert evidence.currency == "USD"
+    # Account pricing and a boolean consent are not a per-call budget/Owner
+    # authorization contract. Even an extension plugin must fail closed.
+    for pricing in ({}, {"unit_amount": "0.25", "currency": "USD"}):
+        binding.pricing_snapshot_json = pricing
+        with pytest.raises(ValidationAppError) as denied:
+            await service.probe(
+                workspace_id=workspace.id,
+                connection_id=connection.id,
+                actor=user,
+                capability="image_t2i",
+                model_binding_id=binding.id,
+                paid_request_confirmed=True,
+            )
+        assert denied.value.details["code"] == "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"
     assert (
         await session.scalar(
             select(ProviderCapabilityEvidence.id).where(
                 ProviderCapabilityEvidence.connection_id == connection.id
             )
         )
-        is not None
-    )
-    refreshed = await session.get(ProviderModelBinding, binding.id)
-    assert refreshed is not None
-    assert refreshed.account_verified is False  # image_t2i has no purpose mapping
+    ) is None
+    assert binding.account_verified is False
 
 
 @pytest.mark.asyncio
@@ -410,26 +394,18 @@ async def test_auth_models_verifies_only_bindings_listed_by_provider(
 
 
 @pytest.mark.asyncio
-async def test_binding_scoped_probe_only_advances_probed_binding(
+async def test_binding_scoped_evidence_projection_only_advances_exact_binding(
     session: AsyncSession,
     fake_registration: ProviderPlugin,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Review gate: a binding-scoped probe proves exactly one model. A sibling
-    binding on the same connection/purpose must stay unverified."""
-    import base64
-    import hashlib
+    """A scoped evidence projection must never certify a sibling model."""
     from datetime import date
 
-    from app.access.models import Project
-    from app.execution.models import Artifact
     from app.providers.catalog_models import ModelCatalogEntry
     from app.providers.catalog_seed_data import hash_manifest
 
     _byok_env(monkeypatch)
-    png_bytes = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-    )
     user, workspace = await _seed_owner(session)
     service = ProviderConnectionService(session)
     connection = await service.create_connection(
@@ -470,11 +446,6 @@ async def test_binding_scoped_probe_only_advances_probed_binding(
         purpose="keyframe",
         enabled=True,
     )
-    binding_a.pricing_snapshot_json = {
-        "unit_amount": "0",
-        "currency": "CNY",
-        "billing_unit": "per_generated_image",
-    }
     binding_b = await service.create_model_binding(
         workspace_id=workspace.id,
         connection_id=connection.id,
@@ -484,41 +455,15 @@ async def test_binding_scoped_probe_only_advances_probed_binding(
         purpose="keyframe",
         enabled=True,
     )
-    project = Project(workspace_id=workspace.id, name="P", aspect_ratio="9:16", budget_limit=0)
-    session.add(project)
-    await session.flush()
-    artifact = Artifact(
-        project_id=project.id,
-        artifact_type="image",
-        storage_state="available",
-        object_key=f"projects/{project.id}/ref.png",
-        content_hash=hashlib.sha256(png_bytes).hexdigest(),
-        mime_type="image/png",
-        byte_size=len(png_bytes),
-    )
-    session.add(artifact)
-    await session.flush()
-
-    class _FakeStore:
-        async def get_bytes(self, *, object_key: str) -> bytes:
-            return png_bytes
-
-    monkeypatch.setattr("app.providers.connection_service.get_object_store", lambda: _FakeStore())
-
-    evidence = await service.probe(
-        workspace_id=workspace.id,
+    # Projection scope is independently testable while paid probe dispatch is
+    # unavailable. It must never certify a sibling binding on the connection.
+    await service._mark_capability_verified(
         connection_id=connection.id,
-        actor=user,
         capability="image_i2i",
+        actor=user,
         model_binding_id=binding_a.id,
-        reference_artifact_id=artifact.id,
-        paid_request_confirmed=True,
     )
-    assert evidence.status == "passed"
-    assert evidence.model_binding_id == binding_a.id
-    assert evidence.capability_manifest_hash == binding_a.capability_manifest_hash
-    assert evidence.credential_revision == connection.credential_revision
-    assert evidence.currency == "CNY"
+    await session.flush()
 
     refreshed_a = await session.get(ProviderModelBinding, binding_a.id)
     refreshed_b = await session.get(ProviderModelBinding, binding_b.id)

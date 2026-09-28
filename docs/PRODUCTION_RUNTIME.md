@@ -69,14 +69,31 @@ Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
 | 服务 | 队列 | 职责 |
 |---|---|---|
 | worker-default | `dramaforge:default` | 媒体、review、continuity 作业 |
-| worker-heavy | `dramaforge:heavy` | 重媒体作业 |
-| dispatcher | — | 常驻事务性 Outbox 分发；可恢复工作由 dispatcher 与 director worker 启动恢复重发布 |
+| worker-heavy | `dramaforge:heavy` | 重媒体作业；保留启动时的 Provider 恢复扫描 |
+| dispatcher | — | 常驻事务性 Outbox 与 queued-run 分发；独立后台循环扫描 Provider 恢复，不依赖 Director 或媒体执行槽 |
 
 ## 恢复与重试
 
 - 迁移 20260908_0057–0060 提供恢复函数/授权：可恢复导演轮次、事实对账、
   Formal 检查点、cancellation-requested Provider 工作。
 - 真实远端任务重启恢复：同一远端任务恢复时零额外 create。
+- 常驻 dispatcher 在启动时及随后每 60 秒扫描可恢复 Provider 任务；一次最多 50 行、
+  20 秒内部截止，按 NodeRun UUID keyset 游标分页并在尾部回绕。
+  扫描与 Outbox 分发是同一进程中独立的后台任务，不占用 heavy 媒体执行槽；
+  单次基础设施异常不停止后续扫描，dispatcher 停止时取消并等待两个后台任务结束。
+  游标推进至已尝试行；进程重启从头扫描，但同一稳定作业身份保持幂等。
+- 只有超过 31 分钟且远端操作长时间无更新的任务进入恢复扫描；重新锁定 NodeRun /
+  ProviderOperation 后复核状态和租约，通过原 Scheduler / Outbox 稳定作业身份恢复。
+  不把 running/cancel_requested 改回 queued，不重写 dispatch_generation，不产生第二次远端 create。
+  `NodeRun.started_at` 同时承担活跃尝试租约，running resume 会原子刷新；31 分钟来自
+  heavy Worker 的 1800 秒尝试截止加 60 秒余量，不是带 epoch 的分布式 fencing。
+  Provider 轮询超时并主动让出为 queued 时同步清空租约；Retry 窗口内收到取消后，
+  下一次执行可直接核对同一个远端任务。空租约不以 created_at 代替，也不缩短真正活跃尝试的保护窗口。
+- 迁移 20260919_0073 增加只返回所有权标识的窄 SECURITY DEFINER 4 参数扫描器，
+  在数据库侧限制最多 50 行与至少 31 分钟陈旧窗口；旧 2 参数版本保留用于滚动部署。
+  应先迁移再更新 dispatcher 与相关 Worker；恢复后的媒体任务仍使用原队列容量，扫描本身不排入媒体队列。
+- 没有远端身份的陈旧 submission_started 失败关闭为 unknown_submission；
+  单行恢复失败不阻塞尾部任务，超时后后续扫描仍会覆盖未完成项。
 - submit-unknown 或可能已计费的调用不盲目重试（幂等键由
   `providers/idempotency.py` 管理）。
 
@@ -86,3 +103,12 @@ Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
 - 媒体执行不依赖导演服务存活；MANUAL 路径在 worker-director 停止时完成
   全流程。
 - 无预算前置（budget gate 已随受控导演表面一并删除）。
+
+## 分阶段 Repair 的接续
+
+Repair 的“等待生成 / 等待审核与正式采用 / 可继续下一步 / 待明确完成”由持久事实推导。
+关键帧候选生成后必须对该 Artifact 审核并显式设为 Formal，才能预览下一步视频；
+最后的视频同样采用后，用户显式结束该修复。执行前重建并核对本步 plan fingerprint，
+冻结保存的引用与模型身份；网络响应丢失返回原步骤回执，不借机推进或重发付费请求。
+读取时刷新 NodeRun、RepairStep 与 Shot 的持久事实，复用数据库会话也不得因旧 ORM 状态继续显示等待或漏判未知提交。
+关闭或放弃修复只结束修复流程，不能取消远端执行或改写旧 Artifact。

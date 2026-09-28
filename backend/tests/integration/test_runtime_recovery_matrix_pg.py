@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -188,6 +189,10 @@ async def test_cancel_restart_never_recreates_remote_task(
             await service.cancel_generation(project=project, operation_id=run.id)
             await session.commit()
             await service.cancel_generation(project=project, operation_id=run.id)
+            # A second request still owns its FOR UPDATE lock until it finishes.
+            locked_delivery = await jobs.execute_node_run({}, str(run.id))
+            assert locked_delivery["status"] == "already_claimed"
+            await session.commit()
             result = await jobs.execute_node_run({}, str(run.id))
             assert result["status"] == "cancelled" and run.status == "cancelled"
             assert calls == {"create": 0, "poll": 0, "cancel": 0}
@@ -262,16 +267,31 @@ async def test_cancel_restart_never_recreates_remote_task(
         )
         frozen = dict(op.selection_plan["execution_identity"])
         assert calls["create"] == 1
+        enqueued = []
+
+        async def enqueue(self, node_run_id):
+            enqueued.append(node_run_id)
+            return "isolated-enqueue"
+
+        monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", enqueue)
         if outcome == "submit_unknown":
             assert op.status == "submission_started" and op.provider_operation_id is None
-            from datetime import UTC, datetime, timedelta
-
             # A fresh submission may belong to another live Worker. Do not
-            # mark it unknown until the configured 30-minute job bound expires.
+            # mark it unknown until the 31-minute safety floor expires.
             await jobs.recover_interrupted_provider_jobs({})
             await session.refresh(run)
             assert run.status == "running"
-            op.created_at = datetime.now(UTC) - timedelta(minutes=31)
+            old = datetime.now(UTC) - timedelta(minutes=32)
+            run.started_at = op.created_at = old
+            await session.commit()
+            # The real submission also persists submitted_at. A fresh Provider
+            # activity timestamp must still protect the attempt independently.
+            await jobs.recover_interrupted_provider_jobs({})
+            await session.refresh(run)
+            assert run.status == "running"
+            assert run.id not in enqueued
+            assert op.submitted_at is not None and op.last_polled_at is None
+            op.submitted_at = old
             await session.commit()
             await jobs.recover_interrupted_provider_jobs({})
             await session.refresh(op)
@@ -279,6 +299,8 @@ async def test_cancel_restart_never_recreates_remote_task(
             assert run.status == "failed"
             assert op.status == "unknown_submission"
             assert run.error_code == "PROVIDER_SUBMISSION_UNKNOWN"
+            await jobs.recover_interrupted_provider_jobs({})
+            assert run.id not in enqueued
             assert calls == {"create": 1, "poll": 0, "cancel": 0}
             return
         assert op.provider_operation_id == remote_id
@@ -290,18 +312,21 @@ async def test_cancel_restart_never_recreates_remote_task(
         binding.enabled = False
         connection.enabled = False
         await session.commit()
-        enqueued = []
-
-        async def enqueue(self, node_run_id):
-            enqueued.append(node_run_id)
-            return "isolated-enqueue"
-
-        monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", enqueue)
+        snapshot_before = dict(run.input_snapshot)
+        # The interrupted attempt is fresh: neither startup nor a periodic tick
+        # may bypass its lease, even when cancellation has been requested.
+        await jobs.recover_interrupted_provider_jobs({})
+        assert run.id not in enqueued
+        old = datetime.now(UTC) - timedelta(minutes=32)
+        run.started_at = old
+        op.created_at = op.submitted_at = op.last_polled_at = old
+        await session.commit()
         await jobs.recover_interrupted_provider_jobs({})
         assert run.id in enqueued
-        # Cancellation on a recovery-queued row must not erase its remote task.
+        # Recovery preserves cancellation and the original dispatch identity.
         await session.refresh(run)
-        assert run.status == "queued" and run.cancellation_requested_at is not None
+        assert run.status == "cancel_requested" and run.cancellation_requested_at is not None
+        assert run.input_snapshot == snapshot_before
         await GenerationService(session, SimpleNamespace()).cancel_generation(
             project=project,
             operation_id=run.id,
@@ -311,6 +336,12 @@ async def test_cancel_restart_never_recreates_remote_task(
         if outcome == "cancel_ack_lost":
             with pytest.raises(asyncio.CancelledError):
                 await jobs.execute_node_run({}, str(run.id))
+            await session.refresh(run)
+            await session.refresh(op)
+            old = datetime.now(UTC) - timedelta(minutes=32)
+            run.started_at = old
+            op.last_polled_at = old
+            await session.commit()
             await jobs.recover_interrupted_provider_jobs({})
         result = await jobs.execute_node_run({}, str(run.id))
         await session.rollback()

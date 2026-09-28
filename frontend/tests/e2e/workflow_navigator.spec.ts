@@ -233,6 +233,18 @@ async function installMock(page: Page) {
     if (path.endsWith("/shots") && request.method() === "GET") {
       return json(route, []);
     }
+    if (path.endsWith("/production-summary"))
+      return json(route, {
+        project_id: PROJECT_ID,
+        total_runs: 0,
+        completed_runs: 0,
+        running_runs: 0,
+        failed_runs: 0,
+        artifact_count: 0,
+        recent_failures: [],
+        has_more_failures: false,
+        stages: [],
+      });
     if (path.endsWith("/snapshot")) {
       return json(route, {
         project_id: PROJECT_ID,
@@ -267,6 +279,8 @@ test("professional page surfaces the wire-visible workflow navigator", async ({ 
   // The capability status is honest: UNSUPPORTED for the two-char shot.
   await expect(page.getByTestId("workflow-shot-3")).toContainText("不可双人");
   await expect(page.getByTestId("workflow-shot-3")).toContainText("已冻结");
+  await expect(page.getByTestId("workflow-shot-3")).toContainText("创作：制作中");
+  await expect(page.getByTestId("workflow-shot-3")).not.toContainText("待确认");
 
   // Scene 2 (single-character action) is PRODUCING with an EXACT capability.
   await expect(page.getByTestId("workflow-scene-2")).toBeVisible();

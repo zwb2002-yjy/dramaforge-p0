@@ -36,6 +36,7 @@ export const queryKeys = {
   },
 
   shot: {
+    voiceOptions: (projectId: string) => ["voice-options", projectId] as const,
     list: (projectId: string) => ["shots", projectId] as const,
     workbench: (projectId: string, shotId: string | null | undefined) =>
       ["shot-workbench", projectId, shotId] as const,
@@ -69,6 +70,9 @@ export const queryKeys = {
   },
 
   production: {
+    summary: (projectId: string) => ["production-summary", projectId] as const,
+    runHistory: (projectId: string) => ["production-run-history", projectId] as const,
+    artifactHistory: (projectId: string) => ["production-artifact-history", projectId] as const,
     snapshot: (projectId: string) => ["snapshot", projectId] as const,
     workflowOverview: (projectId: string) => ["workflow-overview", projectId] as const,
     provenance: (
@@ -111,6 +115,9 @@ export const queryKeys = {
   },
 
   editing: {
+    audioLibraryRoot: (projectId: string) => ["editing-audio-library", projectId] as const,
+    audioLibrary: (projectId: string, cursor: string | null) =>
+      ["editing-audio-library", projectId, cursor] as const,
     sessions: (projectId: string) => ["edit-sessions", projectId] as const,
     films: (projectId: string, sessionId: string | undefined, version: number | undefined) =>
       ["edit-final-films", projectId, sessionId, version] as const,
@@ -119,6 +126,7 @@ export const queryKeys = {
   },
 
   script: {
+    proposals: (projectId: string) => ["story-proposals", projectId] as const,
     workspace: (projectId: string) => ["script-workspace", projectId] as const,
   },
 

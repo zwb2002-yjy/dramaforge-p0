@@ -1,10 +1,19 @@
-import { PageHeader } from "../../components/ui";
+import { PageHeader, Disclosure } from "../../components/ui";
+import { EditingSourcePreview } from "./EditingSourcePreview";
+import { AudioArtifactPicker } from "./AudioArtifactPicker";
 import { FinalFilmPlayback } from "./FinalFilmPlayback";
 import "./editing-recovery.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { deliveryGateMessage } from "./deliveryGate";
+import { useEditingDirector } from "./useEditingDirector";
+import { useFinalFilmExport } from "./useFinalFilmExport";
+import {
+  useTimelineDraft,
+  type TimelineSaveInput,
+  type EditableClip,
+  type EditableMetadata,
+} from "./useTimelineDraft";
 import { EditingSessionPicker } from "./EditingSessionPicker";
 import { queryKeys } from "../../lib/queryKeys";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
@@ -12,31 +21,15 @@ import {
   ApiError,
   artifactContentUrl,
   fetchOpenCutManifest,
-  fetchProjectAssets,
-  fetchSnapshot,
   type OpenCutManifestRead,
 } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 import {
   createEditSession,
   exportEditSession,
-  fetchFinalFilmStatus,
-  fetchEditFinalFilms,
   fetchEditSession,
-  prepareFinalFilm,
-  renderFinalFilm,
-  requestEditingDirectorSuggestion,
-  rejectEditingDirectorSuggestion,
-  requestProactiveEditingDirectorSuggestion,
-  routeEditingDirectorRepair,
   saveEditTimeline,
   type EditExportRead,
-  type FinalFilmRead,
-  type FinalFilmJobRead,
-  type EditingRepairRoutingRead,
-  type EditSessionRead,
-  type EditTimelinePayload,
-  type EditingDirectorSuggestionRead,
 } from "./api";
 
 type EditingWorkspaceProps = {
@@ -48,28 +41,7 @@ type EditingWorkspaceProps = {
   onSessionSelected?: (sessionId: string) => void;
 };
 
-type EditableClip = NonNullable<EditTimelinePayload["clips"]>[number];
-type EditableMetadata = NonNullable<EditTimelinePayload["metadata"]>;
-type EditableTimeline = {
-  clips: EditableClip[];
-  metadata: EditableMetadata;
-};
 type JsonValue = components["schemas"]["JsonValue"];
-type EditingSuggestionMutationInput = {
-  projectId: string;
-  sessionId: string;
-  expectedSessionVersion: number;
-  userInstruction: string;
-  requestKey: string;
-  proactive?: boolean;
-  sequence: number;
-};
-type EditingSuggestionPreviewContext = {
-  projectId: string;
-  sessionId: string;
-  sessionVersion: number;
-};
-
 function clipsByTrack(manifest: OpenCutManifestRead | undefined) {
   return (manifest?.tracks ?? []).flatMap((track) =>
     track.clips.map((clip) => ({ track: track.name, clip })),
@@ -88,16 +60,6 @@ function formatTimelineSeconds(value: string): string {
 
 function isJsonObject(value: unknown): value is Record<string, JsonValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function editableTimeline(session: EditSessionRead): EditableTimeline {
-  const rawClips = session.timeline.clips;
-  const clips = Array.isArray(rawClips)
-    ? rawClips.filter(isJsonObject).map((clip) => ({ ...clip }) as EditableClip)
-    : [];
-  const rawMetadata = session.timeline.metadata;
-  const metadata = isJsonObject(rawMetadata) ? { ...rawMetadata } : {};
-  return { clips, metadata };
 }
 
 function clipDuration(clip: EditableClip): string {
@@ -127,10 +89,6 @@ function transitionKind(clip: EditableClip): "cut" | "crossfade" {
     return "crossfade";
   }
   return "cut";
-}
-
-function sameTimeline(left: EditableTimeline | null, right: EditableTimeline | null): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function errorMessage(error: unknown): string {
@@ -164,9 +122,6 @@ function isSessionVersion(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1;
 }
 
-const FINAL_FILM_TERMINAL_SUCCESS = new Set(["completed", "cached", "completed_after_cancel"]);
-const FINAL_FILM_TERMINAL_FAILURE = new Set(["failed", "blocked", "cancelled"]);
-
 const EDIT_SESSION_STATUS_LABEL: Record<string, string> = {
   draft: "草稿",
   active: "编辑中",
@@ -179,56 +134,6 @@ const STORAGE_STATE_LABEL: Record<string, string> = {
   deleted: "已删除",
   pending: "处理中",
 };
-
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
-
-async function waitForPreparedTail(projectId: string, nodeRunIds: string[]): Promise<void> {
-  if (nodeRunIds.length === 0) return;
-  const deadline = Date.now() + 15 * 60 * 1000;
-  while (Date.now() < deadline) {
-    const snapshot = await fetchSnapshot(projectId);
-    const runs = new Map(snapshot.node_runs.map((run) => [run.id, run]));
-    const selected = nodeRunIds.map((id) => runs.get(id));
-    if (selected.some((run) => run?.status && FINAL_FILM_TERMINAL_FAILURE.has(run.status))) {
-      throw new Error("成片尾链有任务失败，请先处理生产错误。");
-    }
-    if (selected.every((run) => run && FINAL_FILM_TERMINAL_SUCCESS.has(run.status))) return;
-    await wait(1200);
-  }
-  throw new Error("等待成片尾链超时，请到制作页查看任务状态。");
-}
-
-async function waitForFinalFilmJob(
-  projectId: string,
-  initial: FinalFilmJobRead,
-): Promise<FinalFilmRead> {
-  if (initial.result && FINAL_FILM_TERMINAL_SUCCESS.has(initial.status)) return initial.result;
-  const deadline = Date.now() + 15 * 60 * 1000;
-  let current = initial;
-  while (Date.now() < deadline) {
-    if (FINAL_FILM_TERMINAL_FAILURE.has(current.status)) {
-      throw new Error(current.error_summary || "成片渲染失败。");
-    }
-    if (current.result && FINAL_FILM_TERMINAL_SUCCESS.has(current.status)) return current.result;
-    await wait(1200);
-    current = await fetchFinalFilmStatus(projectId, initial.node_run_id);
-  }
-  throw new Error("等待成片渲染超时，请到制作页查看任务状态。");
-}
-
-function timelineForSave(
-  timeline: EditableTimeline,
-): Pick<EditTimelinePayload, "clips" | "metadata"> {
-  // Deliberately construct the allow-listed payload. A session's readonly
-  // production_lineage never enters this object, even if a caller hands the
-  // component an object with extra keys at runtime.
-  return {
-    clips: timeline.clips.map((clip) => ({ ...clip })),
-    metadata: { ...timeline.metadata },
-  };
-}
 
 /**
  * Editing workspace over the persisted EditingAdapter session.
@@ -244,34 +149,8 @@ export function EditingWorkspace({
   onSessionSelected,
 }: EditingWorkspaceProps) {
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<EditableTimeline | null>(null);
-  const [baseline, setBaseline] = useState<EditableTimeline | null>(null);
-  const [baselineVersion, setBaselineVersion] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [exported, setExported] = useState<EditExportRead | null>(null);
-  const [finalFilm, setFinalFilm] = useState<FinalFilmRead | null>(null);
-  const [finalFilmError, setFinalFilmError] = useState<string | null>(null);
-  const [finalFilmPending, setFinalFilmPending] = useState<"prepare" | "tail" | "render" | null>(
-    null,
-  );
-  const [suggestionInstruction, setSuggestionInstruction] = useState("");
-  const [suggestionPreview, setSuggestionPreview] = useState<EditingDirectorSuggestionRead | null>(
-    null,
-  );
-  const [suggestionPreviewContext, setSuggestionPreviewContext] =
-    useState<EditingSuggestionPreviewContext | null>(null);
-  const [suggestionStale, setSuggestionStale] = useState(false);
-  const [suggestionError, setSuggestionError] = useState<string | null>(null);
-  const [repairRouting, setRepairRouting] = useState<EditingRepairRoutingRead | null>(null);
-  const [repairError, setRepairError] = useState<string | null>(null);
-  const [selectedSuggestionOps, setSelectedSuggestionOps] = useState<Record<number, boolean>>({});
-  const finalFilmSequenceRef = useRef(0);
-  const finalFilmScopeRef = useRef({ projectId, sessionId });
-  finalFilmScopeRef.current = { projectId, sessionId };
-  const suggestionSequenceRef = useRef(0);
-  const suggestionIdentityRef = useRef<EditingSuggestionPreviewContext | null>(null);
-
-  const [selectedHistoryRun, setSelectedHistoryRun] = useState<string | null>(null);
   const hasSession = Boolean(sessionId);
   const manifest = useQuery({
     queryKey: queryKeys.production.opencutManifest(projectId),
@@ -283,105 +162,53 @@ export function EditingWorkspace({
     queryFn: () => fetchEditSession(projectId, sessionId!),
     enabled: Boolean(projectId) && projectId !== "demo" && hasSession,
   });
-  // Clip audio is chosen by name, never by pasting an Artifact id into a field:
-  // the raw identifier stays in the collapsed diagnostics block.
-  const projectAssets = useQuery({
-    queryKey: queryKeys.asset.root(projectId),
-    queryFn: () => fetchProjectAssets(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo" && hasSession,
-  });
-  const audioOptions = useMemo(
-    () =>
-      (Array.isArray(projectAssets.data) ? projectAssets.data : [])
-        .filter((asset) => asset.kind === "audio")
-        .map((asset) => ({ id: asset.id, label: asset.name || "未命名配音" })),
-    [projectAssets.data],
-  );
-
   const currentSessionVersion = persistedSession.data?.version;
-  const filmHistory = useQuery({
-    queryKey: queryKeys.editing.films(projectId, sessionId, currentSessionVersion),
-    queryFn: () => fetchEditFinalFilms(projectId, sessionId!),
-    enabled: projectId !== "demo" && hasSession && currentSessionVersion !== undefined,
-    retry: false,
-    refetchInterval: (query) =>
-      query.state.data?.some((job) =>
-        ["queued", "running", "cancel_requested"].includes(job.status),
-      )
-        ? 5000
-        : false,
+  const timeline = useTimelineDraft(projectId, sessionId, persistedSession.data);
+  const { draft, baseline, dirty, updateClipField, updateTimelineMetadata } = timeline;
+
+  const {
+    filmHistory,
+    displayedFilm,
+    selectHistoryRun,
+    exportFilm: runFinalFilmExport,
+    pending: finalFilmPending,
+    error: finalFilmError,
+  } = useFinalFilmExport({
+    projectId,
+    sessionId,
+    version: currentSessionVersion,
+    dirty,
   });
-  const recoveredFilm = selectedHistoryRun
-    ? filmHistory.data?.find((job) => job.node_run_id === selectedHistoryRun)?.result
-    : filmHistory.data?.find((job) => job.result)?.result;
-  const displayedFilm =
-    [finalFilm, recoveredFilm].find(
-      (film) => film?.project_id === projectId && film.edit_session_id === sessionId,
-    ) ?? null;
-
-  suggestionIdentityRef.current =
-    sessionId && isSessionVersion(currentSessionVersion)
-      ? { projectId, sessionId, sessionVersion: currentSessionVersion }
-      : null;
-
-  const dirty = useMemo(
-    () => draft !== null && baseline !== null && !sameTimeline(draft, baseline),
-    [baseline, draft],
-  );
-
-  function updateClipField(index: number, key: string, value: JsonValue) {
-    setDraft((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        clips: current.clips.map((clip, clipIndex) =>
-          clipIndex === index ? ({ ...clip, [key]: value } as EditableClip) : clip,
-        ),
-      };
-    });
-  }
-
-  function updateTimelineMetadata(key: string, value: JsonValue) {
-    setDraft((current) =>
-      current ? { ...current, metadata: { ...current.metadata, [key]: value } } : current,
-    );
-  }
 
   useEffect(() => {
-    // Route identity is the isolation boundary: never carry a local timeline
-    // or export result from session A into session B or the manifest preview.
-    setDraft(null);
-    setBaseline(null);
-    setBaselineVersion(null);
     setFeedback(null);
     setExported(null);
-    setFinalFilm(null);
-    setSelectedHistoryRun(null);
-    finalFilmSequenceRef.current += 1;
-    setFinalFilmError(null);
-    setFinalFilmPending(null);
-    setSuggestionInstruction("");
-    setSuggestionPreview(null);
-    setSuggestionPreviewContext(null);
-    setSuggestionStale(false);
-    setSuggestionError(null);
-    setRepairRouting(null);
-    setRepairError(null);
-    setSelectedSuggestionOps({});
-    suggestionSequenceRef.current += 1;
   }, [projectId, sessionId]);
 
-  useEffect(() => {
-    if (!persistedSession.data) return;
-    // A failed save leaves the query data unchanged, so this effect does not
-    // discard the user's dirty draft. If a clean session is refreshed, seed
-    // from the new server response.
-    if (dirty) return;
-    const next = editableTimeline(persistedSession.data);
-    setDraft(next);
-    setBaseline(next);
-    setBaselineVersion(persistedSession.data.version);
-  }, [dirty, persistedSession.data]);
+  const {
+    suggestionInstruction,
+    setSuggestionInstruction,
+    suggestionPreview,
+    suggestionIsStale,
+    suggestionError,
+    repairRouting,
+    repairError,
+    selectedSuggestionOps,
+    setSelectedSuggestionOps,
+    suggestionPending,
+    rejectionPending,
+    repairPending,
+    submitSuggestion,
+    submitProactiveSuggestion,
+    submitRepairRouting,
+    rejectSuggestion,
+    clearAfterSave,
+  } = useEditingDirector({
+    projectId,
+    sessionId,
+    session: persistedSession.data,
+    onFeedback: setFeedback,
+  });
 
   const create = useMutation({
     mutationFn: () => createEditSession(projectId),
@@ -396,29 +223,18 @@ export function EditingWorkspace({
   });
 
   const save = useMutation({
-    mutationFn: () => {
-      if (!sessionId || !draft) throw new Error("没有可保存的剪辑会话草稿");
-      if (!isSessionVersion(baselineVersion)) {
-        throw new Error("当前 EditSession 版本尚未加载，无法安全保存。");
-      }
-      return saveEditTimeline(projectId, sessionId, timelineForSave(draft), baselineVersion);
-    },
-    onSuccess: (saved) => {
-      const next = editableTimeline(saved);
-      setDraft(next);
-      setBaseline(next);
-      setBaselineVersion(saved.version);
+    mutationFn: (input: TimelineSaveInput) =>
+      saveEditTimeline(input.projectId, input.sessionId, input.timeline, input.expectedVersion),
+    onSuccess: (saved, input) => {
+      if (!timeline.acceptSaved(saved, input)) return;
       setFeedback("时间线已保存。");
       setExported(null);
-      setSuggestionPreview(null);
-      setSuggestionPreviewContext(null);
-      setSuggestionStale(false);
-      setSuggestionError(null);
-      setSelectedSuggestionOps({});
+      clearAfterSave();
       queryClient.setQueryData(["edit-session", projectId, sessionId], saved);
       void queryClient.invalidateQueries({ queryKey: queryKeys.editing.sessions(projectId) });
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, input: TimelineSaveInput) => {
+      if (!timeline.isCurrentSave(input)) return;
       // Keep draft/baseline untouched so failed saves leave the editor dirty.
       setFeedback(
         error instanceof ApiError && error.status === 409
@@ -427,6 +243,15 @@ export function EditingWorkspace({
       );
     },
   });
+
+  function submitSave() {
+    if (save.isPending) return;
+    try {
+      save.mutate(timeline.captureSave());
+    } catch (error: unknown) {
+      setFeedback(`保存时间线失败：${errorMessage(error)}`);
+    }
+  }
 
   const exportMutation = useMutation({
     mutationFn: () => {
@@ -442,309 +267,14 @@ export function EditingWorkspace({
     },
   });
 
-  async function runFinalFilmExport() {
-    if (dirty) {
-      setFinalFilmError("时间线有未保存修改，请先保存后再导出成片。");
-      return;
-    }
-    if (!sessionId || !isSessionVersion(currentSessionVersion)) {
-      setFinalFilmError("请先创建并加载剪辑会话后再导出成片。");
-      return;
-    }
-    const idempotencyKey = `final-${projectId}-${sessionId}-${currentSessionVersion}`;
-    const sequence = ++finalFilmSequenceRef.current;
-    const isCurrent = () =>
-      sequence === finalFilmSequenceRef.current &&
-      finalFilmScopeRef.current.projectId === projectId &&
-      finalFilmScopeRef.current.sessionId === sessionId;
-    const historyKey = queryKeys.editing.films(projectId, sessionId, currentSessionVersion);
-
-    try {
-      setFinalFilmError(null);
-      setFinalFilmPending("prepare");
-      const prepared = await prepareFinalFilm(projectId, sessionId, currentSessionVersion);
-      if (isCurrent()) setFinalFilmPending("tail");
-      await waitForPreparedTail(projectId, prepared.node_run_ids);
-      if (isCurrent()) setFinalFilmPending("render");
-      const queued = await renderFinalFilm(
-        projectId,
-        sessionId,
-        currentSessionVersion,
-        idempotencyKey,
-      );
-      void queryClient.invalidateQueries({ queryKey: historyKey });
-      const result = await waitForFinalFilmJob(projectId, queued);
-      if (isCurrent()) setFinalFilm(result);
-    } catch (error: unknown) {
-      if (isCurrent()) setFinalFilmError(`成片导出失败：${deliveryGateMessage(error)}`);
-    } finally {
-      if (isCurrent()) setFinalFilmPending(null);
-      void queryClient.invalidateQueries({ queryKey: historyKey });
-    }
-  }
-
-  const suggestionRequest = useMutation<
-    EditingDirectorSuggestionRead,
-    unknown,
-    EditingSuggestionMutationInput
-  >({
-    mutationFn: ({
-      projectId: requestProjectId,
-      sessionId: requestSessionId,
-      expectedSessionVersion,
-      userInstruction,
-      requestKey,
-      proactive = false,
-    }) =>
-      proactive
-        ? requestProactiveEditingDirectorSuggestion(
-            requestProjectId,
-            requestSessionId,
-            expectedSessionVersion,
-            requestKey,
-          )
-        : requestEditingDirectorSuggestion(requestProjectId, requestSessionId, {
-            expected_session_version: expectedSessionVersion,
-            user_instruction: userInstruction,
-            request_key: requestKey,
-          }),
-    onSuccess: (result, variables) => {
-      const currentIdentity = suggestionIdentityRef.current;
-      if (
-        variables.sequence !== suggestionSequenceRef.current ||
-        !currentIdentity ||
-        currentIdentity.projectId !== variables.projectId ||
-        currentIdentity.sessionId !== variables.sessionId ||
-        currentIdentity.sessionVersion !== variables.expectedSessionVersion
-      ) {
-        // A late response is intentionally ignored. It cannot become the
-        // preview for a newer session/version/request.
-        return;
-      }
-      setSuggestionPreview(result);
-      setSuggestionPreviewContext(currentIdentity);
-      setSuggestionStale(false);
-      setSuggestionError(null);
-      setSelectedSuggestionOps({});
-    },
-    onError: (error: unknown, variables) => {
-      const currentIdentity = suggestionIdentityRef.current;
-      if (
-        variables.sequence !== suggestionSequenceRef.current ||
-        !currentIdentity ||
-        currentIdentity.projectId !== variables.projectId ||
-        currentIdentity.sessionId !== variables.sessionId ||
-        currentIdentity.sessionVersion !== variables.expectedSessionVersion
-      ) {
-        // A late error is just as stale as a late success; it must not replace
-        // the error/preview belonging to the current route and version.
-        return;
-      }
-      setSuggestionPreview(null);
-      setSuggestionPreviewContext(null);
-      setSuggestionStale(false);
-      setSuggestionError(`建议请求失败：${errorMessage(error)}`);
-      setSelectedSuggestionOps({});
-    },
-  });
-  const suggestionRejection = useMutation({
-    mutationFn: (input: {
-      sequence: number;
-      projectId: string;
-      sessionId: string;
-      proposalId: string;
-      version: number;
-    }) =>
-      rejectEditingDirectorSuggestion(
-        input.projectId,
-        input.sessionId,
-        input.proposalId,
-        input.version,
-      ),
-    onSuccess: (_result, input) => {
-      const identity = suggestionIdentityRef.current;
-      if (
-        input.sequence !== suggestionSequenceRef.current ||
-        identity?.projectId !== input.projectId ||
-        identity?.sessionId !== input.sessionId ||
-        identity?.sessionVersion !== input.version
-      )
-        return;
-      setSuggestionPreview(null);
-      setSuggestionPreviewContext(null);
-      setSuggestionStale(false);
-      setSelectedSuggestionOps({});
-      setSuggestionError(null);
-      setFeedback("已持久拒绝当前剪辑建议，刷新后不会重新提交该分支。");
-    },
-    onError: (error: unknown, input) => {
-      const identity = suggestionIdentityRef.current;
-      if (
-        input.sequence !== suggestionSequenceRef.current ||
-        identity?.projectId !== input.projectId ||
-        identity?.sessionId !== input.sessionId ||
-        identity?.sessionVersion !== input.version
-      )
-        return;
-      setSuggestionError(`拒绝保存失败，建议预览已保留：${errorMessage(error)}`);
-    },
-  });
-  const rejectionResetRef = useRef(suggestionRejection.reset);
-  rejectionResetRef.current = suggestionRejection.reset;
-
-  const repairRoutingMutation = useMutation<
-    EditingRepairRoutingRead,
-    unknown,
-    { sequence: number }
-  >({
-    mutationFn: () => {
-      if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
-        throw new Error("无法判定修复路由：当前 EditSession 版本尚未加载。");
-      }
-      return routeEditingDirectorRepair(projectId, sessionId, {
-        expected_session_version: currentSessionVersion,
-        user_instruction: suggestionInstruction.trim(),
-      });
-    },
-    onSuccess: (result, variables) => {
-      const currentIdentity = suggestionIdentityRef.current;
-      if (
-        variables.sequence !== suggestionSequenceRef.current ||
-        !currentIdentity ||
-        currentIdentity.projectId !== projectId ||
-        currentIdentity.sessionId !== sessionId ||
-        currentIdentity.sessionVersion !== result.session_version
-      ) {
-        return;
-      }
-      setRepairRouting(result);
-      setRepairError(null);
-    },
-    onError: (error: unknown, variables) => {
-      if (variables.sequence !== suggestionSequenceRef.current) return;
-      setRepairRouting(null);
-      setRepairError(`修复路由判定失败：${errorMessage(error)}`);
-    },
-  });
-  const suggestionRequestResetRef = useRef(suggestionRequest.reset);
-  suggestionRequestResetRef.current = suggestionRequest.reset;
-  const repairRoutingMutationResetRef = useRef(repairRoutingMutation.reset);
-  repairRoutingMutationResetRef.current = repairRoutingMutation.reset;
-
-  useEffect(() => {
-    // Route changes invalidate any in-flight mutation state as well as the
-    // local preview. The sequence guard above still ignores its eventual
-    // response if the transport cannot be cancelled.
-    suggestionRequestResetRef.current();
-    repairRoutingMutationResetRef.current();
-    rejectionResetRef.current();
-  }, [projectId, sessionId]);
-
-  useEffect(() => {
-    if (!suggestionPreview || !suggestionPreviewContext) return;
-    const currentIdentity = suggestionIdentityRef.current;
-    if (
-      !currentIdentity ||
-      currentIdentity.projectId !== suggestionPreviewContext.projectId ||
-      currentIdentity.sessionId !== suggestionPreviewContext.sessionId ||
-      currentIdentity.sessionVersion !== suggestionPreviewContext.sessionVersion
-    ) {
-      setSuggestionStale(true);
-    }
-  }, [currentSessionVersion, projectId, sessionId, suggestionPreview, suggestionPreviewContext]);
-
-  const suggestionIsStale =
-    suggestionPreview !== null &&
-    suggestionPreviewContext !== null &&
-    (suggestionStale ||
-      suggestionPreviewContext.projectId !== projectId ||
-      suggestionPreviewContext.sessionId !== sessionId ||
-      suggestionPreviewContext.sessionVersion !== currentSessionVersion);
-
-  function submitSuggestion() {
-    if (suggestionRejection.isPending) return;
-    const userInstruction = suggestionInstruction.trim();
-    if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
-      setSuggestionError("无法请求建议：当前 EditSession 版本尚未加载。");
-      return;
-    }
-    if (!userInstruction) {
-      setSuggestionError("请输入导演要求后再请求建议。");
-      return;
-    }
-    const sequence = suggestionSequenceRef.current + 1;
-    suggestionSequenceRef.current = sequence;
-    setSuggestionPreview(null);
-    setSuggestionPreviewContext(null);
-    setSuggestionStale(false);
-    setSuggestionError(null);
-    suggestionRequest.mutate({
-      projectId,
-      sessionId,
-      expectedSessionVersion: currentSessionVersion,
-      userInstruction,
-      requestKey: `editing-suggestion:${globalThis.crypto.randomUUID()}`,
-      sequence,
-    });
-    setSelectedSuggestionOps({});
-  }
-
-  function submitProactiveSuggestion() {
-    if (suggestionRejection.isPending) return;
-    if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
-      setSuggestionError("无法主动分析：当前 EditSession 版本尚未加载。");
-      return;
-    }
-    const sequence = suggestionSequenceRef.current + 1;
-    suggestionSequenceRef.current = sequence;
-    setSuggestionPreview(null);
-    setSuggestionPreviewContext(null);
-    setSuggestionStale(false);
-    setSuggestionError(null);
-    suggestionRequest.mutate({
-      projectId,
-      sessionId,
-      expectedSessionVersion: currentSessionVersion,
-      userInstruction: "",
-      requestKey: `editing-proactive:${globalThis.crypto.randomUUID()}`,
-      proactive: true,
-      sequence,
-    });
-    setSelectedSuggestionOps({});
-  }
-
-  function submitRepairRouting() {
-    if (!sessionId || !persistedSession.data || !isSessionVersion(currentSessionVersion)) {
-      setRepairError("无法判定修复路由：当前 EditSession 版本尚未加载。");
-      return;
-    }
-    const sequence = suggestionSequenceRef.current + 1;
-    suggestionSequenceRef.current = sequence;
-    setRepairRouting(null);
-    setRepairError(null);
-    repairRoutingMutation.mutate({ sequence });
-  }
-
   function moveClip(index: number, offset: -1 | 1) {
-    setDraft((current) => {
-      if (!current) return current;
-      const target = index + offset;
-      if (target < 0 || target >= current.clips.length) return current;
-      const clips = current.clips.map((clip) => ({ ...clip }));
-      [clips[index], clips[target]] = [clips[target], clips[index]];
-      const orderedClips = clips.map((clip, clipIndex) =>
-        Object.prototype.hasOwnProperty.call(clip, "order")
-          ? { ...clip, order: clipIndex + 1 }
-          : clip,
-      );
-      return { ...current, clips: orderedClips };
-    });
+    timeline.moveClip(index, offset);
     setFeedback(null);
     setExported(null);
   }
 
   function applySuggestionToDraft(operationIndices: number[] | null) {
-    if (!suggestionPreview || !draft || suggestionRejection.isPending) return;
+    if (!suggestionPreview || !draft || suggestionIsStale || rejectionPending) return;
     const operations = suggestionPreview.suggestion.plan.operations;
     const indices = operationIndices ?? operations.map((_operation, index) => index);
     if (indices.length === 0) {
@@ -752,83 +282,22 @@ export function EditingWorkspace({
       return;
     }
 
-    let nextClips = draft.clips.map((clip) => ({ ...clip }));
-    for (const index of indices) {
-      const operation = operations[index];
-      if (!operation) continue;
-      if (operation.operation === "reorder_clips") {
-        const byId = new Map(
-          nextClips
-            .filter((clip) => typeof clip.id === "string")
-            .map((clip) => [clip.id as string, clip]),
-        );
-        const reordered = operation.clip_ids
-          .map((clipId) => byId.get(clipId))
-          .filter((clip): clip is EditableClip => clip !== undefined);
-        if (reordered.length !== nextClips.length) {
-          setFeedback("无法应用建议：重排片段不在当前草稿中，请重新请求。");
-          return;
-        }
-        nextClips = reordered.map((clip, order) => ({
-          ...clip,
-          order: order + 1,
-        }));
-      } else if (operation.operation === "set_clip_duration") {
-        nextClips = nextClips.map((clip) =>
-          clip.id === operation.clip_id || clipValue(clip, "shot_id") === operation.clip_id
-            ? { ...clip, duration_seconds: operation.duration_seconds }
-            : clip,
-        );
-      } else if (operation.operation === "set_clip_subtitle") {
-        nextClips = nextClips.map((clip) =>
-          clip.id === operation.clip_id || clipValue(clip, "shot_id") === operation.clip_id
-            ? { ...clip, subtitle: operation.subtitle }
-            : clip,
-        );
-      }
+    const failure = timeline.applySuggestion(
+      indices.map((index) => operations[index]).filter((op) => op !== undefined),
+      suggestionPreview.suggestion.base_session_version,
+    );
+    if (failure) {
+      setFeedback(failure);
+      return;
     }
-    setDraft({
-      ...draft,
-      clips: nextClips,
-      metadata: {
-        ...draft.metadata,
-        director_suggestion_applied: suggestionPreview.suggestion.base_session_version,
-      },
-    });
     setFeedback("建议已应用到时间线草稿；请检查后显式保存。");
     setExported(null);
-  }
-
-  function rejectSuggestion() {
-    if (
-      !suggestionPreview ||
-      !sessionId ||
-      suggestionIsStale ||
-      suggestionRejection.isPending ||
-      !isSessionVersion(currentSessionVersion)
-    )
-      return;
-    suggestionRejection.mutate({
-      sequence: suggestionSequenceRef.current,
-      projectId,
-      sessionId,
-      proposalId: suggestionPreview.proposal_id,
-      version: currentSessionVersion,
-    });
   }
 
   function updateClipDuration(index: number, value: string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed < 0) return;
-    setDraft((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        clips: current.clips.map((clip, clipIndex) =>
-          clipIndex === index ? { ...clip, duration_seconds: parsed } : { ...clip },
-        ),
-      };
-    });
+    timeline.updateClipField(index, "duration_seconds", parsed);
     setFeedback(null);
     setExported(null);
   }
@@ -846,18 +315,19 @@ export function EditingWorkspace({
   if (hasSession) {
     return (
       <div className="qc-project-page" data-testid="editing-workspace" data-session-id={sessionId}>
-        <EditingSessionPicker
-          projectId={projectId}
-          sessionId={sessionId}
-          disabled={
-            dirty || finalFilmPending !== null || save.isPending || exportMutation.isPending
-          }
-          onSelect={onSessionSelected}
-        />
-
+        <Disclosure title="切换已有剪辑" description="恢复已有时间线，不创建或重新生成">
+          <EditingSessionPicker
+            projectId={projectId}
+            sessionId={sessionId}
+            disabled={
+              dirty || finalFilmPending !== null || save.isPending || exportMutation.isPending
+            }
+            onSelect={onSessionSelected}
+          />
+        </Disclosure>
         <PageHeader title="剪辑会话" description="安排画面与声音的节奏，保留原始镜头。">
           <p className="callout" data-testid="editing-session-read-only">
-            生产血缘只读 · 不渲染媒体、不调用模型。
+            时间线编辑不会重做源素材；保存修改后，再明确导出成片。
           </p>
         </PageHeader>
 
@@ -874,331 +344,332 @@ export function EditingWorkspace({
 
         {persistedSession.data && draft && baseline && (
           <>
-            <section className="editing-session-facts" data-testid="edit-session-facts">
-              <h2>{persistedSession.data.name}</h2>
-              <dl>
-                <dt>会话编号</dt>
-                <dd data-testid="edit-session-reference">
-                  {shortReference(persistedSession.data.id)}
-                </dd>
-                <dt>状态</dt>
-                <dd>
-                  {EDIT_SESSION_STATUS_LABEL[persistedSession.data.status] ??
-                    persistedSession.data.status}
-                </dd>
-                <dt>版本</dt>
-                <dd data-testid="edit-session-version">
-                  {isSessionVersion(persistedSession.data.version)
-                    ? `v${persistedSession.data.version}`
-                    : "尚未加载"}
-                </dd>
-                <dt>镜头数量</dt>
-                <dd>{draft.clips.length}</dd>
-              </dl>
-              <details className="editing-diagnostics" data-testid="edit-session-diagnostics">
-                <summary>开发 / 诊断详情（只读）</summary>
-                <p className="muted">完整编号、生产血缘与内部字段；仅供排障，不参与创作操作。</p>
+            <EditingSourcePreview projectId={projectId} clips={draft.clips} />
+            <Disclosure title="剪辑会话信息" description="版本、状态与来源记录">
+              <section className="editing-session-facts" data-testid="edit-session-facts">
+                <h2>{persistedSession.data.name}</h2>
                 <dl>
-                  <dt>剪辑会话编号</dt>
-                  <dd>{persistedSession.data.id}</dd>
+                  <dt>会话编号</dt>
+                  <dd data-testid="edit-session-reference">
+                    {shortReference(persistedSession.data.id)}
+                  </dd>
+                  <dt>状态</dt>
+                  <dd>
+                    {EDIT_SESSION_STATUS_LABEL[persistedSession.data.status] ??
+                      persistedSession.data.status}
+                  </dd>
+                  <dt>版本</dt>
+                  <dd data-testid="edit-session-version">
+                    {isSessionVersion(persistedSession.data.version)
+                      ? `v${persistedSession.data.version}`
+                      : "尚未加载"}
+                  </dd>
+                  <dt>镜头数量</dt>
+                  <dd>{draft.clips.length}</dd>
                 </dl>
-                <h4>生产血缘（只读）</h4>
-                <pre data-testid="edit-session-lineage">
-                  {formatJson(persistedSession.data.production_lineage)}
-                </pre>
-              </details>
-            </section>
-
-            <section
-              className="editing-director-suggestion"
-              data-testid="editing-director-suggestion"
-              data-project-id={projectId}
-              data-session-id={sessionId}
-            >
-              <header>
-                <div>
-                  <p className="editing-director-suggestion-kicker">Director suggestion</p>
-                  <h2>剪辑建议预览</h2>
-                </div>
-                <span data-testid="editing-suggestion-current-version">
-                  当前 EditSession v
-                  {isSessionVersion(currentSessionVersion) ? currentSessionVersion : "—"}
-                </span>
-              </header>
-              <p className="editing-director-suggestion-note">
-                建议只形成待审核
-                Proposal，不会应用到时间线；应用后的时间线仍由下方手动编辑和显式保存控制。
-              </p>
-              <button
-                type="button"
-                data-testid="request-proactive-editing-suggestion"
-                onClick={submitProactiveSuggestion}
-                disabled={suggestionRequest.isPending || !isSessionVersion(currentSessionVersion)}
+                <details className="editing-diagnostics" data-testid="edit-session-diagnostics">
+                  <summary>开发 / 诊断详情（只读）</summary>
+                  <p className="muted">完整编号、生产血缘与内部字段；仅供排障，不参与创作操作。</p>
+                  <dl>
+                    <dt>剪辑会话编号</dt>
+                    <dd>{persistedSession.data.id}</dd>
+                  </dl>
+                  <h4>生产血缘（只读）</h4>
+                  <pre data-testid="edit-session-lineage">
+                    {formatJson(persistedSession.data.production_lineage)}
+                  </pre>
+                </details>
+              </section>
+            </Disclosure>
+            <Disclosure title="导演剪辑建议" description="按需分析节奏，建议不会自动保存或生成">
+              <section
+                className="editing-director-suggestion"
+                data-testid="editing-director-suggestion"
+                data-project-id={projectId}
+                data-session-id={sessionId}
               >
-                {suggestionRequest.isPending ? "正在分析…" : "主动分析剪辑节奏"}
-              </button>
-              <label htmlFor="editing-director-suggestion-instruction">
-                导演要求
-                <textarea
-                  id="editing-director-suggestion-instruction"
-                  data-testid="editing-director-suggestion-instruction"
-                  aria-label="剪辑导演要求"
-                  value={suggestionInstruction}
-                  onChange={(event) => setSuggestionInstruction(event.target.value)}
-                  placeholder="例如：让前两个镜头之间多留一点停顿"
-                  disabled={suggestionRequest.isPending}
-                />
-              </label>
-              <button
-                type="button"
-                data-testid="request-editing-director-suggestion"
-                onClick={submitSuggestion}
-                disabled={
-                  suggestionRequest.isPending ||
-                  !suggestionInstruction.trim() ||
-                  !isSessionVersion(currentSessionVersion)
-                }
-              >
-                {suggestionRequest.isPending ? "正在请求建议…" : "请求剪辑建议"}
-              </button>
-
-              {suggestionRequest.isPending && (
-                <p
-                  className="editing-director-suggestion-status"
-                  data-testid="editing-suggestion-pending"
-                  role="status"
-                >
-                  正在基于当前 EditSession v{currentSessionVersion} 生成建议…
+                <header>
+                  <div>
+                    <p className="editing-director-suggestion-kicker">Director suggestion</p>
+                    <h2>剪辑建议预览</h2>
+                  </div>
+                  <span data-testid="editing-suggestion-current-version">
+                    当前 EditSession v
+                    {isSessionVersion(currentSessionVersion) ? currentSessionVersion : "—"}
+                  </span>
+                </header>
+                <p className="editing-director-suggestion-note">
+                  建议只形成待审核
+                  Proposal，不会应用到时间线；应用后的时间线仍由下方手动编辑和显式保存控制。
                 </p>
-              )}
-              {suggestionError && (
-                <p
-                  className="editing-director-suggestion-error"
-                  data-testid="editing-suggestion-error"
-                  role="alert"
+                <button
+                  type="button"
+                  data-testid="request-proactive-editing-suggestion"
+                  onClick={submitProactiveSuggestion}
+                  disabled={suggestionPending || !isSessionVersion(currentSessionVersion)}
                 >
-                  {suggestionError}
-                </p>
-              )}
+                  {suggestionPending ? "正在分析…" : "主动分析剪辑节奏"}
+                </button>
+                <label htmlFor="editing-director-suggestion-instruction">
+                  导演要求
+                  <textarea
+                    id="editing-director-suggestion-instruction"
+                    data-testid="editing-director-suggestion-instruction"
+                    aria-label="剪辑导演要求"
+                    value={suggestionInstruction}
+                    onChange={(event) => setSuggestionInstruction(event.target.value)}
+                    placeholder="例如：让前两个镜头之间多留一点停顿"
+                    disabled={suggestionPending}
+                  />
+                </label>
+                <button
+                  type="button"
+                  data-testid="request-editing-director-suggestion"
+                  onClick={submitSuggestion}
+                  disabled={
+                    suggestionPending ||
+                    !suggestionInstruction.trim() ||
+                    !isSessionVersion(currentSessionVersion)
+                  }
+                >
+                  {suggestionPending ? "正在请求建议…" : "请求剪辑建议"}
+                </button>
 
-              <button
-                type="button"
-                data-testid="request-repair-routing"
-                onClick={submitRepairRouting}
-                disabled={
-                  repairRoutingMutation.isPending || !isSessionVersion(currentSessionVersion)
-                }
-              >
-                {repairRoutingMutation.isPending ? "正在判定…" : "判断是否需要生产 Repair"}
-              </button>
-              {repairError && (
-                <p
-                  className="editing-repair-routing-error"
-                  data-testid="editing-repair-routing-error"
-                  role="alert"
-                >
-                  {repairError}
-                </p>
-              )}
-              {repairRouting && (
-                <article
-                  className="editing-repair-routing-result"
-                  data-testid="editing-repair-routing-result"
-                  data-can-fix={repairRouting.can_fix_in_timeline}
-                  data-proposal-id={repairRouting.proposal_id ?? ""}
-                  data-session-version={repairRouting.session_version}
-                >
-                  <h3>
-                    {repairRouting.can_fix_in_timeline
-                      ? "可以在时间线内修复"
-                      : "需要 Production Repair"}
-                  </h3>
-                  <p data-testid="editing-repair-routing-reason">{repairRouting.reason}</p>
-                  {!repairRouting.can_fix_in_timeline && (
-                    <>
-                      <p className="callout" data-testid="editing-repair-routing-notice">
-                        Repair Proposal 已创建但不会自动执行；请到审片/镜头生产层打开 Repair Plan
-                        人工确认后执行。
-                      </p>
-                      <dl>
-                        <dt>proposal_id</dt>
-                        <dd>{repairRouting.proposal_id}</dd>
-                        <dt>item_id</dt>
-                        <dd>{repairRouting.item_id}</dd>
-                        <dt>需要修复的镜头</dt>
-                        <dd>{repairRouting.shot_ids?.join(", ") || "—"}</dd>
-                      </dl>
-                    </>
-                  )}
-                </article>
-              )}
+                {suggestionPending && (
+                  <p
+                    className="editing-director-suggestion-status"
+                    data-testid="editing-suggestion-pending"
+                    role="status"
+                  >
+                    正在基于当前 EditSession v{currentSessionVersion} 生成建议…
+                  </p>
+                )}
+                {suggestionError && (
+                  <p
+                    className="editing-director-suggestion-error"
+                    data-testid="editing-suggestion-error"
+                    role="alert"
+                  >
+                    {suggestionError}
+                  </p>
+                )}
 
-              {suggestionPreview && (
-                <article
-                  className="editing-director-suggestion-preview"
-                  data-testid="editing-suggestion-preview"
-                  data-proposal-id={suggestionPreview.proposal_id}
-                  data-item-id={suggestionPreview.item_id}
-                  data-base-session-version={suggestionPreview.suggestion.base_session_version}
+                <button
+                  type="button"
+                  data-testid="request-repair-routing"
+                  onClick={submitRepairRouting}
+                  disabled={repairPending || !isSessionVersion(currentSessionVersion)}
                 >
-                  <header>
-                    <div>
-                      <h3>Pending proposal（未应用）</h3>
-                      <p>这是待审核建议预览，不是已应用的时间线事件。</p>
-                    </div>
-                    <span data-testid="editing-suggestion-pending-status">pending</span>
-                  </header>
-                  <dl className="editing-director-suggestion-identities">
-                    <dt>proposal_id</dt>
-                    <dd data-testid="editing-suggestion-proposal-id">
-                      {suggestionPreview.proposal_id}
-                    </dd>
-                    <dt>item_id</dt>
-                    <dd data-testid="editing-suggestion-item-id">{suggestionPreview.item_id}</dd>
-                    <dt>基于版本</dt>
-                    <dd data-testid="editing-suggestion-base-version">
-                      v{suggestionPreview.suggestion.base_session_version}
-                    </dd>
-                    {suggestionPreview.director_evidence && (
+                  {repairPending ? "正在判定…" : "判断是否需要生产 Repair"}
+                </button>
+                {repairError && (
+                  <p
+                    className="editing-repair-routing-error"
+                    data-testid="editing-repair-routing-error"
+                    role="alert"
+                  >
+                    {repairError}
+                  </p>
+                )}
+                {repairRouting && (
+                  <article
+                    className="editing-repair-routing-result"
+                    data-testid="editing-repair-routing-result"
+                    data-can-fix={repairRouting.can_fix_in_timeline}
+                    data-proposal-id={repairRouting.proposal_id ?? ""}
+                    data-session-version={repairRouting.session_version}
+                  >
+                    <h3>
+                      {repairRouting.can_fix_in_timeline
+                        ? "可以在时间线内修复"
+                        : "需要 Production Repair"}
+                    </h3>
+                    <p data-testid="editing-repair-routing-reason">{repairRouting.reason}</p>
+                    {!repairRouting.can_fix_in_timeline && (
                       <>
-                        <dt>文本模型</dt>
-                        <dd data-testid="editing-suggestion-model-evidence">
-                          {suggestionPreview.director_evidence.actual_model ??
-                            suggestionPreview.director_evidence.model_id}
-                          · {suggestionPreview.director_evidence.turn_id.slice(0, 8)}
-                        </dd>
+                        <p className="callout" data-testid="editing-repair-routing-notice">
+                          Repair Proposal 已创建但不会自动执行；请到审片/镜头生产层打开 Repair Plan
+                          人工确认后执行。
+                        </p>
+                        <dl>
+                          <dt>proposal_id</dt>
+                          <dd>{repairRouting.proposal_id}</dd>
+                          <dt>item_id</dt>
+                          <dd>{repairRouting.item_id}</dd>
+                          <dt>需要修复的镜头</dt>
+                          <dd>{repairRouting.shot_ids?.join(", ") || "—"}</dd>
+                        </dl>
                       </>
                     )}
-                  </dl>
+                  </article>
+                )}
 
-                  <section
-                    className="editing-director-suggestion-operations"
-                    data-testid="editing-suggestion-operations"
+                {suggestionPreview && (
+                  <article
+                    className="editing-director-suggestion-preview"
+                    data-testid="editing-suggestion-preview"
+                    data-proposal-id={suggestionPreview.proposal_id}
+                    data-item-id={suggestionPreview.item_id}
+                    data-base-session-version={suggestionPreview.suggestion.base_session_version}
                   >
-                    <h4>Typed operations</h4>
-                    {suggestionPreview.suggestion.plan.operations.length === 0 ? (
-                      <p className="muted">没有可展示的 typed operation。</p>
-                    ) : (
-                      <ol>
-                        {suggestionPreview.suggestion.plan.operations.map((operation, index) => (
-                          <li
-                            key={`${operation.operation}-${index}`}
-                            data-testid="editing-suggestion-operation"
-                            data-operation={operation.operation}
-                          >
-                            <label>
-                              <input
-                                type="checkbox"
-                                data-testid={`editing-suggestion-op-select-${index}`}
-                                aria-label={`采用第 ${index + 1} 条剪辑操作`}
-                                checked={selectedSuggestionOps[index] === true}
-                                disabled={suggestionIsStale || suggestionRejection.isPending}
-                                onChange={(event) =>
-                                  setSelectedSuggestionOps((current) => ({
-                                    ...current,
-                                    [index]: event.target.checked,
-                                  }))
-                                }
-                              />
-                              采用
-                            </label>
-                            <strong>{operation.operation}</strong>
-                            {operation.operation === "reorder_clips" ? (
-                              <span>顺序：{operation.clip_ids.join(" → ")}</span>
-                            ) : operation.operation === "set_clip_duration" ? (
-                              <span>
-                                片段 {operation.clip_id} · 时长 {operation.duration_seconds}s
-                              </span>
-                            ) : (
-                              <span>
-                                片段 {operation.clip_id} · 字幕 {operation.subtitle || "（关闭）"}
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                    <div className="editing-suggestion-apply-actions">
-                      <button
-                        type="button"
-                        data-testid="editing-suggestion-apply-all"
-                        onClick={() => applySuggestionToDraft(null)}
-                        disabled={
-                          suggestionIsStale ||
-                          suggestionRejection.isPending ||
-                          suggestionPreview.suggestion.plan.operations.length === 0
-                        }
-                      >
-                        全部采用到草稿
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="editing-suggestion-apply-selected"
-                        onClick={() =>
-                          applySuggestionToDraft(
-                            Object.entries(selectedSuggestionOps)
-                              .filter(([, selected]) => selected)
-                              .map(([index]) => Number(index)),
-                          )
-                        }
-                        disabled={
-                          suggestionIsStale ||
-                          suggestionRejection.isPending ||
-                          !Object.values(selectedSuggestionOps).some(Boolean)
-                        }
-                      >
-                        采用所选到草稿
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="editing-suggestion-reject"
-                        onClick={rejectSuggestion}
-                        disabled={suggestionIsStale || suggestionRejection.isPending}
-                      >
-                        拒绝建议
-                      </button>
-                    </div>
-                  </section>
+                    <header>
+                      <div>
+                        <h3>Pending proposal（未应用）</h3>
+                        <p>这是待审核建议预览，不是已应用的时间线事件。</p>
+                      </div>
+                      <span data-testid="editing-suggestion-pending-status">pending</span>
+                    </header>
+                    <dl className="editing-director-suggestion-identities">
+                      <dt>proposal_id</dt>
+                      <dd data-testid="editing-suggestion-proposal-id">
+                        {suggestionPreview.proposal_id}
+                      </dd>
+                      <dt>item_id</dt>
+                      <dd data-testid="editing-suggestion-item-id">{suggestionPreview.item_id}</dd>
+                      <dt>基于版本</dt>
+                      <dd data-testid="editing-suggestion-base-version">
+                        v{suggestionPreview.suggestion.base_session_version}
+                      </dd>
+                      {suggestionPreview.director_evidence && (
+                        <>
+                          <dt>文本模型</dt>
+                          <dd data-testid="editing-suggestion-model-evidence">
+                            {suggestionPreview.director_evidence.actual_model ??
+                              suggestionPreview.director_evidence.model_id}
+                            · {suggestionPreview.director_evidence.turn_id.slice(0, 8)}
+                          </dd>
+                        </>
+                      )}
+                    </dl>
 
-                  <dl className="editing-director-suggestion-explanations">
-                    <dt>rationale / 原因</dt>
-                    <dd data-testid="editing-suggestion-rationale">
-                      {suggestionPreview.suggestion.rationale}
-                    </dd>
-                    <dt>benefit / 收益</dt>
-                    <dd data-testid="editing-suggestion-benefit">
-                      {suggestionPreview.suggestion.benefit}
-                    </dd>
-                    <dt>cost / 创作代价</dt>
-                    <dd data-testid="editing-suggestion-cost">
-                      {suggestionPreview.suggestion.cost}
-                    </dd>
-                    <dt>risk / 风险</dt>
-                    <dd data-testid="editing-suggestion-risk">
-                      {suggestionPreview.suggestion.risk}
-                    </dd>
-                    <dt>impact / 影响范围</dt>
-                    <dd data-testid="editing-suggestion-impact">
-                      {suggestionPreview.suggestion.impact}
-                    </dd>
-                  </dl>
-                  {suggestionIsStale && (
-                    <p
-                      className="editing-director-suggestion-stale"
-                      data-testid="editing-suggestion-stale"
-                      role="alert"
+                    <section
+                      className="editing-director-suggestion-operations"
+                      data-testid="editing-suggestion-operations"
                     >
-                      当前 EditSession
-                      版本已变化，这条建议已过期；请重新请求。它不会自动重试、保存或修改时间线。
-                    </p>
-                  )}
-                  <p className="editing-director-suggestion-footer">
-                    采用操作会写入时间线草稿；必须显式保存后才会成为新时间线版本。
-                  </p>
-                </article>
-              )}
-            </section>
+                      <h4>Typed operations</h4>
+                      {suggestionPreview.suggestion.plan.operations.length === 0 ? (
+                        <p className="muted">没有可展示的 typed operation。</p>
+                      ) : (
+                        <ol>
+                          {suggestionPreview.suggestion.plan.operations.map((operation, index) => (
+                            <li
+                              key={`${operation.operation}-${index}`}
+                              data-testid="editing-suggestion-operation"
+                              data-operation={operation.operation}
+                            >
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  data-testid={`editing-suggestion-op-select-${index}`}
+                                  aria-label={`采用第 ${index + 1} 条剪辑操作`}
+                                  checked={selectedSuggestionOps[index] === true}
+                                  disabled={suggestionIsStale || rejectionPending}
+                                  onChange={(event) =>
+                                    setSelectedSuggestionOps((current) => ({
+                                      ...current,
+                                      [index]: event.target.checked,
+                                    }))
+                                  }
+                                />
+                                采用
+                              </label>
+                              <strong>{operation.operation}</strong>
+                              {operation.operation === "reorder_clips" ? (
+                                <span>顺序：{operation.clip_ids.join(" → ")}</span>
+                              ) : operation.operation === "set_clip_duration" ? (
+                                <span>
+                                  片段 {operation.clip_id} · 时长 {operation.duration_seconds}s
+                                </span>
+                              ) : (
+                                <span>
+                                  片段 {operation.clip_id} · 字幕 {operation.subtitle || "（关闭）"}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      <div className="editing-suggestion-apply-actions">
+                        <button
+                          type="button"
+                          data-testid="editing-suggestion-apply-all"
+                          onClick={() => applySuggestionToDraft(null)}
+                          disabled={
+                            suggestionIsStale ||
+                            rejectionPending ||
+                            suggestionPreview.suggestion.plan.operations.length === 0
+                          }
+                        >
+                          全部采用到草稿
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="editing-suggestion-apply-selected"
+                          onClick={() =>
+                            applySuggestionToDraft(
+                              Object.entries(selectedSuggestionOps)
+                                .filter(([, selected]) => selected)
+                                .map(([index]) => Number(index)),
+                            )
+                          }
+                          disabled={
+                            suggestionIsStale ||
+                            rejectionPending ||
+                            !Object.values(selectedSuggestionOps).some(Boolean)
+                          }
+                        >
+                          采用所选到草稿
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="editing-suggestion-reject"
+                          onClick={rejectSuggestion}
+                          disabled={suggestionIsStale || rejectionPending}
+                        >
+                          拒绝建议
+                        </button>
+                      </div>
+                    </section>
 
+                    <dl className="editing-director-suggestion-explanations">
+                      <dt>rationale / 原因</dt>
+                      <dd data-testid="editing-suggestion-rationale">
+                        {suggestionPreview.suggestion.rationale}
+                      </dd>
+                      <dt>benefit / 收益</dt>
+                      <dd data-testid="editing-suggestion-benefit">
+                        {suggestionPreview.suggestion.benefit}
+                      </dd>
+                      <dt>cost / 创作代价</dt>
+                      <dd data-testid="editing-suggestion-cost">
+                        {suggestionPreview.suggestion.cost}
+                      </dd>
+                      <dt>risk / 风险</dt>
+                      <dd data-testid="editing-suggestion-risk">
+                        {suggestionPreview.suggestion.risk}
+                      </dd>
+                      <dt>impact / 影响范围</dt>
+                      <dd data-testid="editing-suggestion-impact">
+                        {suggestionPreview.suggestion.impact}
+                      </dd>
+                    </dl>
+                    {suggestionIsStale && (
+                      <p
+                        className="editing-director-suggestion-stale"
+                        data-testid="editing-suggestion-stale"
+                        role="alert"
+                      >
+                        当前 EditSession
+                        版本已变化，这条建议已过期；请重新请求。它不会自动重试、保存或修改时间线。
+                      </p>
+                    )}
+                    <p className="editing-director-suggestion-footer">
+                      采用操作会写入时间线草稿；必须显式保存后才会成为新时间线版本。
+                    </p>
+                  </article>
+                )}
+              </section>
+            </Disclosure>
             <section className="editing-session-editor" data-testid="edit-session-editor">
               <header>
                 <h2>时间线草稿</h2>
@@ -1275,34 +746,20 @@ export function EditingWorkspace({
                           }
                         />
                       </label>
-                      <label>
-                        配音
-                        <select
-                          data-testid={`clip-audio-${index}`}
-                          aria-label={`镜头 ${index + 1} 配音`}
-                          value={editableValue(clip, "audio_id")}
-                          onChange={(event) =>
-                            updateClipField(index, "audio_id", event.target.value)
-                          }
-                        >
-                          <option value="">无配音</option>
-                          {audioOptions.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.label}
-                            </option>
-                          ))}
-                          {/* A value that is not in the offered list stays selectable
-                              instead of being silently rewritten to none. */}
-                          {editableValue(clip, "audio_id") &&
-                            !audioOptions.some(
-                              (option) => option.id === editableValue(clip, "audio_id"),
-                            ) && (
-                              <option value={editableValue(clip, "audio_id")}>
-                                当前已绑定配音
-                              </option>
-                            )}
-                        </select>
-                      </label>
+                      <AudioArtifactPicker
+                        key={`${projectId}:${sessionId}:${String(clip.id ?? index)}:audio`}
+                        projectId={projectId}
+                        label={`镜头 ${index + 1} 配音`}
+                        testId={`clip-audio-${index}`}
+                        value={editableValue(clip, "audio_id")}
+                        defaultLabel="沿用镜头对白"
+                        allowMute
+                        muted={clip.muted === true}
+                        onChange={(artifactId, muted) => {
+                          updateClipField(index, "audio_id", artifactId);
+                          updateClipField(index, "muted", muted);
+                        }}
+                      />
                       <label>
                         转场
                         <select
@@ -1345,40 +802,47 @@ export function EditingWorkspace({
                   ))}
                 </ol>
               )}
-              <div className="editing-session-music" data-testid="timeline-music-controls">
-                <label>
-                  音乐 Artifact ID（可选）
-                  <input
-                    type="text"
-                    data-testid="timeline-music-artifact"
+              <Disclosure
+                title="背景音乐（可选）"
+                description="从当前项目音频中选择并试听；不加配乐也可导出"
+              >
+                <div className="editing-session-music" data-testid="timeline-music-controls">
+                  <AudioArtifactPicker
+                    key={`${projectId}:${sessionId}:music`}
+                    projectId={projectId}
+                    label="背景音乐"
+                    testId="timeline-music-artifact"
                     value={metadataValue(draft.metadata, "music_artifact_id")}
-                    onChange={(event) =>
-                      updateTimelineMetadata("music_artifact_id", event.target.value)
+                    defaultLabel="不使用背景音乐"
+                    onChange={(artifactId) =>
+                      updateTimelineMetadata("music_artifact_id", artifactId)
                     }
                   />
-                </label>
-                <label>
-                  音乐音量
-                  <input
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    data-testid="timeline-music-volume"
-                    value={
-                      draft.metadata.music_volume === undefined
-                        ? "0.12"
-                        : String(draft.metadata.music_volume)
-                    }
-                    onChange={(event) => updateTimelineMetadata("music_volume", event.target.value)}
-                  />
-                </label>
-              </div>
+                  <label>
+                    音乐音量
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      data-testid="timeline-music-volume"
+                      value={
+                        draft.metadata.music_volume === undefined
+                          ? "0.12"
+                          : String(draft.metadata.music_volume)
+                      }
+                      onChange={(event) =>
+                        updateTimelineMetadata("music_volume", event.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+              </Disclosure>
               <div className="editing-session-actions">
                 <button
                   type="button"
                   data-testid="save-edit-timeline"
-                  onClick={() => save.mutate()}
+                  onClick={submitSave}
                   disabled={!dirty || save.isPending}
                 >
                   {save.isPending ? "保存中…" : "保存时间线"}
@@ -1431,8 +895,7 @@ export function EditingWorkspace({
                       <button
                         type="button"
                         onClick={() => {
-                          setFinalFilm(null);
-                          setSelectedHistoryRun(job.node_run_id);
+                          selectHistoryRun(job.node_run_id);
                         }}
                       >
                         查看成片 · v{job.timeline_version}
