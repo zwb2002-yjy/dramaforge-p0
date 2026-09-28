@@ -56,16 +56,7 @@
             }
           },
           "minimum_total_references": 1,
-          "maximum_total_references": 2,
-          "common_options": {
-            "aspect_ratio": {
-              "type": "string",
-              "enum": [
-                "adaptive"
-              ],
-              "default": "adaptive"
-            }
-          }
+          "maximum_total_references": 2
         },
         "reference": {
           "input_slots": {

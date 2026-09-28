@@ -65,9 +65,7 @@ def _contract_image_manifest() -> ModelCapabilityManifest:
 
 
 def _contract_video_manifest() -> ModelCapabilityManifest:
-    raw = deepcopy(
-        next(m for m in SEED_MANIFESTS if m["model_id"] == "doubao-seedance-2-0-260128")
-    )
+    raw = deepcopy(next(m for m in SEED_MANIFESTS if m["model_id"] == "doubao-seedance-2-0-260128"))
     raw["model_revision"] = "protocol-contract-test"
     operation = raw["operations"]["video.generate"]
     operation["input_contracts"] = {
@@ -147,7 +145,10 @@ async def test_ark_video_compiler_uses_invoke_model_value_and_first_frame() -> N
     assert isinstance(content, list) and len(content) == 2
     assert content[1]["type"] == "image_url"
     assert content[1]["role"] == "first_frame"
-    assert content[1]["image_url"]["url"] == "https://dramaforge.example/api/v1/provider-references/tok"
+    assert (
+        content[1]["image_url"]["url"]
+        == "https://dramaforge.example/api/v1/provider-references/tok"
+    )
     assert compiled.reference_artifact_ids == [frame_id]
 
 
@@ -204,6 +205,47 @@ async def test_ark_image_contract_compiles_ordered_multi_reference_array() -> No
             invoke_model_value=manifest.model_id,
             policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"multi"})),
         )
+
+
+@pytest.mark.asyncio
+async def test_seedream_5_pro_preview_uses_the_same_ark_image_compiler() -> None:
+    raw = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == "doubao-seedream-5-0-pro-260628"
+    )
+    manifest = ModelCapabilityManifest.model_validate(raw)
+    assert manifest.lifecycle == "preview"  # Pure wire check; no Binding or Provider call.
+    ids = [uuid4(), uuid4()]
+    intent = ImageGenerationIntent(
+        prompt="two characters",
+        reference_artifact_ids=ids,
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    refs = [
+        ResolvedReference(
+            role="reference_image",
+            artifact_id=artifact_id,
+            content_url=f"https://example.com/{index}.png",
+            mime_type="image/png",
+        )
+        for index, artifact_id in enumerate(ids)
+    ]
+    compiled = await ArkImageCompiler().compile(
+        intent,
+        manifest,
+        refs,
+        invoke_model_value=manifest.model_id,
+        policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"reference"})),
+    )
+    assert compiled.wire_request["model"] == "doubao-seedream-5-0-pro-260628"
+    assert compiled.wire_request["image"] == [
+        "https://example.com/0.png",
+        "https://example.com/1.png",
+    ]
+    assert compiled.wire_request["size"] == "2K"
+    assert compiled.wire_request["output_format"] == "jpeg"
+    assert compiled.safe_request_summary["matched_contract"] == "reference"
 
 
 @pytest.mark.asyncio
@@ -362,11 +404,11 @@ async def test_ark_video_contract_compiles_frame_and_mixed_references() -> None:
     )
     content = compiled.wire_request["content"]
     assert [item["role"] for item in content[1:]] == [
-        "reference_image", "reference_video", "reference_audio"
+        "reference_image",
+        "reference_video",
+        "reference_audio",
     ]
-    assert [item["type"] for item in content[1:]] == [
-        "image_url", "video_url", "audio_url"
-    ]
+    assert [item["type"] for item in content[1:]] == ["image_url", "video_url", "audio_url"]
     assert compiled.reference_artifact_ids == [image_id, video_id, audio_id]
     assert "example.com" not in json.dumps(compiled.safe_request_summary)
 
@@ -457,7 +499,9 @@ async def test_ark_runtime_submits_compiled_video_verbatim() -> None:
                 {"type": "text", "text": "rainy street"},
                 {
                     "type": "image_url",
-                    "image_url": {"url": "https://dramaforge.example/api/v1/provider-references/tok"},
+                    "image_url": {
+                        "url": "https://dramaforge.example/api/v1/provider-references/tok"
+                    },
                     "role": "first_frame",
                 },
             ],
