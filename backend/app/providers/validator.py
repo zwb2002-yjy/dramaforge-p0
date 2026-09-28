@@ -20,6 +20,7 @@ from app.providers.contracts.video import (
 )
 from app.providers.errors import (
     InvalidOptionCombinationError,
+    ProviderError,
     UnsupportedInputSlotError,
     UnsupportedModeError,
     UnsupportedOptionError,
@@ -114,6 +115,17 @@ def _validate_input_slots(
                 },
             )
         counts = resolved_counts
+    total = sum(counts.values())
+    if total < spec.minimum_total_references:
+        raise InvalidOptionCombinationError(
+            "too few references for this input contract",
+            details={"minimum": spec.minimum_total_references, "actual": total},
+        )
+    if spec.maximum_total_references is not None and total > spec.maximum_total_references:
+        raise InvalidOptionCombinationError(
+            "too many references for this input contract",
+            details={"maximum": spec.maximum_total_references, "actual": total},
+        )
     for role, count in counts.items():
         canonical_role = canonical_reference_role(role)
         if canonical_role is None or canonical_role not in spec.input_slots:
@@ -128,6 +140,7 @@ def _validate_input_slots(
             )
 
     if resolved_references is not None:
+        duration_totals: dict[str, float] = {}
         for reference in resolved_references:
             reference_role = canonical_reference_role(reference.role)
             if reference_role is None or reference_role not in spec.input_slots:
@@ -143,6 +156,56 @@ def _validate_input_slots(
                         "media_types": slot.media_types,
                     },
                 )
+            byte_size = reference.byte_size
+            if byte_size is None and reference.content_bytes is not None:
+                byte_size = len(reference.content_bytes)
+            for field_name, value, maximum in (
+                ("byte_size", byte_size, slot.max_bytes),
+                ("duration_seconds", reference.duration_seconds, slot.max_duration_seconds),
+                ("width", reference.width, slot.max_width),
+                ("height", reference.height, slot.max_height),
+            ):
+                if maximum is not None and (value is None or value > maximum):
+                    raise InvalidOptionCombinationError(
+                        f"input slot {reference_role} exceeds or lacks {field_name} limit",
+                        details={"slot": reference_role, "field": field_name},
+                    )
+            for field_name, value, minimum in (
+                ("duration_seconds", reference.duration_seconds, slot.min_duration_seconds),
+                ("width", reference.width, slot.min_width),
+                ("height", reference.height, slot.min_height),
+            ):
+                if minimum is not None and (value is None or value < minimum):
+                    raise InvalidOptionCombinationError(
+                        f"input slot {reference_role} is below or lacks {field_name} minimum",
+                        details={"slot": reference_role, "field": field_name},
+                    )
+            if reference_role in spec.max_total_duration_seconds:
+                if reference.duration_seconds is None:
+                    raise InvalidOptionCombinationError(
+                        f"input slot {reference_role} has no duration metadata"
+                    )
+                duration_totals[reference_role] = (
+                    duration_totals.get(reference_role, 0) + reference.duration_seconds
+                )
+        for role, maximum in spec.max_total_duration_seconds.items():
+            if duration_totals.get(role, 0) > maximum:
+                raise InvalidOptionCombinationError(
+                    f"input slot {role} exceeds aggregate duration limit"
+                )
+    elif spec.max_total_duration_seconds or any(
+        slot.max_bytes is not None
+        or slot.min_duration_seconds is not None
+        or slot.max_duration_seconds is not None
+        or slot.min_width is not None
+        or slot.max_width is not None
+        or slot.min_height is not None
+        or slot.max_height is not None
+        for slot in spec.input_slots.values()
+    ):
+        raise InvalidOptionCombinationError(
+            "resolved reference metadata is required for this input contract"
+        )
 
 
 def _check_slot(slot: InputSlotSpec, role: str, count: int) -> None:
@@ -281,6 +344,40 @@ def _when_matches(when: dict[str, Any], requested: dict[str, Any]) -> bool:
 class CapabilityValidator:
     """Validates one V3 capability request against one capability/mode contract."""
 
+    def match_contract(
+        self,
+        request: Any,
+        spec: CapabilitySpec,
+        *,
+        resolved_references: list[ResolvedReference] | None = None,
+    ) -> str:
+        """Return the only valid backend input contract; fail on zero or many."""
+        matches: list[str] = []
+        reasons: dict[str, str] = {}
+        for contract_id in spec.modes:
+            try:
+                self.validate_mode(
+                    request,
+                    spec,
+                    mode_id=contract_id,
+                    resolved_references=resolved_references,
+                )
+            except ProviderError as exc:
+                reasons[contract_id] = str(exc)
+            else:
+                matches.append(contract_id)
+        if not matches:
+            raise InvalidOptionCombinationError(
+                "no input contract accepts this request",
+                details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED", "reasons": reasons},
+            )
+        if len(matches) != 1:
+            raise InvalidOptionCombinationError(
+                "multiple input contracts accept this request",
+                details={"code": "MANIFEST_CONTRACT_AMBIGUOUS", "matches": matches},
+            )
+        return matches[0]
+
     def validate_mode(
         self,
         request: Any,
@@ -288,20 +385,28 @@ class CapabilityValidator:
         *,
         mode_id: str | None = None,
         resolved_references: list[ResolvedReference] | None = None,
-    ) -> None:
+    ) -> str:
         """Validate a request against an explicit mode when modes are declared.
 
         A capability without modes retains the MS2 legacy contract. Once a
         capability declares modes, omission or mistyping of ``mode_id`` fails
         closed; the validator never guesses a mode from a flattened role set.
         """
+        selected_mode_id = (
+            self.match_contract(request, spec, resolved_references=resolved_references)
+            if spec.auto_match_contract and mode_id is None
+            else mode_id
+        )
         try:
-            selected = spec.mode_spec(mode_id)
+            selected = spec.mode_spec(selected_mode_id)
         except ValueError as exc:
-            raise UnsupportedModeError(mode_id) from exc
+            raise UnsupportedModeError(selected_mode_id) from exc
         effective = CapabilitySpec(
             capability=spec.capability,
             input_slots=selected.input_slots,
+            minimum_total_references=selected.minimum_total_references,
+            maximum_total_references=selected.maximum_total_references,
+            max_total_duration_seconds=selected.max_total_duration_seconds,
             common_options=selected.common_options,
             native_options=selected.native_options,
             constraints=selected.constraints,
@@ -312,6 +417,7 @@ class CapabilityValidator:
             effective,
             resolved_references=resolved_references,
         )
+        return selected.id
 
     def validate(
         self,
