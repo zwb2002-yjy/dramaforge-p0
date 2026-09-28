@@ -41,6 +41,8 @@ Ark 视频新合同的编译入口要求调用方显式传入 `ProductCapability
 可以按合同编译首帧、首尾帧与图/视频/音频参考，但当前 Workbench 尚未提供该策略，
 因此不会自行开放这些新输入。MiniMax 图片新合同已支持文生图与单角色参考图的协议
 编译，当前产品产物链只接收 URL 格式的单张结果。
+MiniMax 视频新合同也要求显式产品策略；同一个 V2 编译器按 Manifest 的时长、分辨率、
+比例和可选 `extra` 生成 H3 / H3-Max 请求，旧 H3 revision 保持原首帧请求形状。
 
 媒体与文本接入的唯一执行路径是 ModelAdapter → Compiler → Runtime（文本为
 `litellm_adapter.py` 的 LiteLLMModelAdapter，运行面是官方 LiteLLM Proxy）。
