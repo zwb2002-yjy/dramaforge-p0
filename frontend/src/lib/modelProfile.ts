@@ -53,7 +53,7 @@ export function simpleModeToBindings(
     const modelId = selection[group as keyof SimpleModeSelection];
     if (!modelId) continue;
     for (const slotId of slotIds) {
-      bindings[slotId] = { model_id: modelId };
+      bindings[slotId] = { model_id: modelId, enabled: true };
     }
   }
   return bindings;

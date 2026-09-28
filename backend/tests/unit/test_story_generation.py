@@ -254,6 +254,42 @@ async def test_brief_generates_parser_compatible_proposal_without_canonical_writ
 
 
 @pytest.mark.asyncio
+async def test_story_generation_accepts_parameter_wrapped_structured_output(
+    session: AsyncSession,
+) -> None:
+    """Some OpenAI-compatible models wrap valid structured JSON in `parameter`."""
+
+    project, user = await _seed(session)
+    calls = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        content = (
+            json.dumps({"parameter": json.dumps(_candidate(), ensure_ascii=False)})
+            if calls == 1
+            else "{}"
+        )
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": content}}]},
+        )
+
+    result = await StoryGenerationService(
+        session,
+        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+    ).generate_proposal(
+        project=project,
+        actor=user,
+        request=_request(key="story-turn:parameter-wrapper"),
+    )
+
+    assert calls == 1
+    assert result.draft.title == "雨夜离站"
+    assert result.evidence.schema_repair_count == 0
+
+
+@pytest.mark.asyncio
 async def test_same_request_reuses_turn_and_proposal_then_changed_brief_conflicts(
     session: AsyncSession,
 ) -> None:
@@ -340,6 +376,66 @@ async def test_partial_decisions_apply_only_selected_generated_story_items(
         "episodes": 1,
         "scenes": 1,
         "shots": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_rejected_generated_story_can_be_regenerated_from_the_same_brief(
+    session: AsyncSession,
+) -> None:
+    project, user = await _seed(session)
+    calls = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(_candidate(title=f"雨夜离站 · 版本 {calls}"))
+                        }
+                    }
+                ]
+            },
+        )
+
+    service = StoryGenerationService(
+        session,
+        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+    )
+    first = await service.generate_proposal(
+        project=project,
+        actor=user,
+        request=_request(key="story-turn:regenerate:first"),
+    )
+    await ProposalService(session, actor=user).partial_apply(
+        project=project,
+        proposal_id=first.proposal.proposal.id,
+        apply_input=PartialApplyInput(
+            decisions=[
+                ProposalDecision(item_id=item.id, decision="rejected")
+                for item in first.proposal.items
+            ]
+        ),
+    )
+
+    second = await service.generate_proposal(
+        project=project,
+        actor=user,
+        request=_request(key="story-turn:regenerate:second"),
+    )
+
+    assert calls == 2
+    assert second.draft.title == "雨夜离站 · 版本 2"
+    assert second.proposal.proposal.id != first.proposal.proposal.id
+    assert await _counts(session, project.id) == {
+        "documents": 0,
+        "episodes": 0,
+        "scenes": 0,
+        "shots": 0,
     }
 
 

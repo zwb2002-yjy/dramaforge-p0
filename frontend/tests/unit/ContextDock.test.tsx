@@ -48,7 +48,7 @@ describe("ContextDock", () => {
       />,
     );
 
-    expect(screen.getByTestId("context-dock-generate")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("context-dock-generate")).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByTestId("context-dock-character"));
     expect(onSelectTool).toHaveBeenCalledWith("character");
     fireEvent.click(screen.getByTestId("context-dock-camera"));
@@ -93,5 +93,29 @@ describe("ContextDock", () => {
     fireEvent.click(screen.getByTestId("context-dock-details"));
     expect(onToggleTray).toHaveBeenCalledTimes(1);
     expect(onToggleDetails).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses roving tab focus and activates tools from the keyboard", () => {
+    const onSelectTool = vi.fn();
+    render(
+      <ContextDock
+        activeTool={null}
+        candidateCount={0}
+        trayExpanded={false}
+        detailsOpen={false}
+        hasShot
+        onSelectTool={onSelectTool}
+        onToggleTray={vi.fn()}
+        onToggleDetails={vi.fn()}
+      />,
+    );
+
+    const prompts = screen.getByTestId("context-dock-prompts");
+    expect(prompts).toHaveAttribute("tabindex", "0");
+    expect(prompts).toHaveAttribute("aria-controls", "shot-context-sheet");
+    prompts.focus();
+    fireEvent.keyDown(prompts, { key: "ArrowRight" });
+    expect(onSelectTool).toHaveBeenCalledWith("character");
+    expect(screen.getByTestId("context-dock-character")).toHaveFocus();
   });
 });

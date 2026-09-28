@@ -15,11 +15,11 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 - 短生命周期 `agent/<task-id>` 分支 + `.worktrees/<task-id>` 用于并行隔离
   工作：从 `dev` 出发、PR 目标 `dev`。生产 hotfix 可从 `main` 出发、
   目标 `main`，事后同步回 `dev`。
-- Dependabot 常规版本更新当前暂停（各 ecosystem 的
-  `open-pull-requests-limit: 0`）；安全告警保留人工分诊，自动安全修复关闭。
-  恢复常规更新时只允许直接依赖、忽略 major 更新、使用
-  `dependabot/* -> dev` PR，并在对应依赖审计与受影响质量门通过后由 Owner
-  决定是否集成；不直接作为稳定版本更新合入 `main`。
+- Dependabot 常规版本更新按月运行，只允许直接依赖并忽略 major 更新；PR 目标为
+  `dev`。并发限额为 backend pip 3、frontend npm 3、GitHub Actions 2、backend/frontend
+  Docker 各 1。Python Docker 基线继续停留在 3.14.x，Node Docker 基线继续停留在
+  24 LTS。每个 `dependabot/* -> dev` PR 必须通过对应依赖审计与受影响质量门，再由
+  Owner 决定是否集成；不直接作为稳定版本更新合入 `main`。
 - 只有 `@zwb2002-yjy` 批准 / 合并 PR；Agent 不自批、不自合、不记录 MERGED。
 
 ### 合并提交说明检查
@@ -52,8 +52,8 @@ Fast Gate：上述六个 required checks 全部执行，其中 `container-gates`
 包含 backend/frontend、PostgreSQL migration/integration、Playwright 与 LiteLLM
 完整质量门。
 
-Dependency Review 由仓库变量 `DEPENDENCY_REVIEW_ENABLED=true` 能力门控；
-不可用时显式跳过。Python/Node 依赖审计、secret scan 与 Trivy filesystem scan
+Dependency Review 对 Python / frontend 依赖文件变更和所有 `dev -> main` PR
+自动执行，不依赖仓库变量开关。Python/Node 依赖审计、secret scan 与 Trivy filesystem scan
 在 `dev -> main` 必须执行；周度完整安全扫描由
 `.github/workflows/security.yml` 执行。
 
@@ -72,9 +72,11 @@ Dependency Review 由仓库变量 `DEPENDENCY_REVIEW_ENABLED=true` 能力门控�
 Only the frontend gateway publishes a host port. The backend API port 8000 is
 internal container networking and is not a second public entry.
 
-The application path is Project → Story/Script → Scene/Shot → Workbench
-Execution → Review/Repair → EditSession → Delivery, with proposal-only Director
-assistance available alongside it. Retired Quick, Creation and controlled
+The application path is the single creation mainchain (summary below; canonical
+definition is [CREATION_FLOW.md](CREATION_FLOW.md)):
+Project → Story/Script → Scene/Shot → Workbench Execution → Review/Repair →
+EditSession → Delivery (Final Film via Export). Proposal-only Director
+assistance is available alongside it. Retired Quick, Creation and controlled
 Director paths are not supported and are not restored by release operations.
 
 ## Local setup

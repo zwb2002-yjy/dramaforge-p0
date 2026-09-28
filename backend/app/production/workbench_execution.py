@@ -114,6 +114,7 @@ async def ensure_stage_review_run(
     artifact_id: UUID,
     stage: PlanStage,
     created_by: UUID,
+    force: bool = False,
 ) -> NodeRun:
     """Queue (or return) the review run that admits this exact Artifact.
 
@@ -157,6 +158,7 @@ async def ensure_stage_review_run(
         project=project,
         shot=shot,
         created_by=created_by,
+        force=force,
     )
     if review_run is None:
         # The published graph carries no review node for this stage, so no
@@ -193,6 +195,7 @@ async def _queue_stage_review_run(
     project: Project,
     shot: Shot,
     created_by: UUID,
+    force: bool = False,
 ) -> NodeRun | None:
     """Queue the zero-cost review run that admits this media candidate.
 
@@ -233,7 +236,7 @@ async def _queue_stage_review_run(
         .order_by(NodeRun.attempt_no.desc(), NodeRun.created_at.desc())
         .limit(1)
     )
-    if producer_review is not None:
+    if producer_review is not None and not force:
         return producer_review
     latest = await session.scalar(
         select(NodeRun)
@@ -983,8 +986,13 @@ class WorkbenchExecutionService:
             requested_binding_id=execution_input.requested_binding_id,
         )
         if resolution.status != "RESOLVED" or resolution.catalog_entry_id is None:
+            missing_model = resolution.reason or resolution.status
             raise WorkbenchExecutionError(
-                f"selected execution model is unavailable: {resolution.reason or resolution.status}"
+                f"selected execution model is unavailable: {missing_model}",
+                details={
+                    "code": missing_model,
+                    "resolution_status": resolution.status,
+                },
             )
 
         # Connection / credential revision identity for the plan (07 §16).

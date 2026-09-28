@@ -288,7 +288,6 @@ jobs:
     needs: policy
     if: >-
       github.event_name == 'pull_request' &&
-      vars.DEPENDENCY_REVIEW_ENABLED == 'true' &&
       (
         github.base_ref == 'main' ||
         needs.policy.outputs.python_deps == 'true' ||

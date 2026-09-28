@@ -22,12 +22,12 @@ function ProjectHistory({ projectId }: { projectId: string }) {
   const runs = useQuery({
     queryKey: [...queryKeys.production.runHistory(projectId), cursor],
     queryFn: ({ signal }) => fetchRunHistory(projectId, cursor, signal),
-    enabled: open && kind === "runs" && projectId !== "demo",
+    enabled: open && kind === "runs" && Boolean(projectId),
   });
   const artifacts = useQuery({
     queryKey: [...queryKeys.production.artifactHistory(projectId), cursor],
     queryFn: ({ signal }) => fetchArtifactHistory(projectId, cursor, signal),
-    enabled: open && kind === "artifacts" && projectId !== "demo",
+    enabled: open && kind === "artifacts" && Boolean(projectId),
   });
   const current = kind === "runs" ? runs : artifacts;
   function changeKind(next: "runs" | "artifacts") {

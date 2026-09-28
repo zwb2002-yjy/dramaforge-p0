@@ -133,7 +133,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
     }
     const bindings = existingInputs();
     for (const [slot, modelId] of Object.entries(advancedChoices)) {
-      if (modelId) bindings[slot] = { model_id: modelId };
+      if (modelId) bindings[slot] = { model_id: modelId, enabled: true };
       else delete bindings[slot];
     }
     save.mutate(bindings);

@@ -41,13 +41,32 @@ class OutboxDispatcher:
         *,
         max_attempts: int = 3,
         lease_seconds: int = 30,
+        retry_base_seconds: int = 5,
+        retry_max_seconds: int = 300,
         sse_hub: SseHub | None = default_sse_hub,
     ) -> None:
         self._session = session
         self._publisher = publisher or StreamPublisher()
         self._max_attempts = max_attempts
         self._lease_seconds = lease_seconds
+        self._retry_base_seconds = retry_base_seconds
+        self._retry_max_seconds = retry_max_seconds
         self._sse_hub = sse_hub
+
+    def _retry_delay(self, event_id: UUID, attempt_count: int) -> timedelta:
+        exponent = min(16, max(0, attempt_count - 1))
+        base_seconds = min(
+            self._retry_max_seconds,
+            self._retry_base_seconds * 2**exponent,
+        )
+        # Stable per-event jitter spreads retries across workers while keeping
+        # the delay deterministic for diagnostics and bounded by the cap.
+        jitter_window = max(1, base_seconds // 5)
+        seconds = min(
+            self._retry_max_seconds,
+            base_seconds + event_id.int % (jitter_window + 1),
+        )
+        return timedelta(seconds=seconds)
 
     async def reclaim_expired_leases(self, *, now: datetime | None = None) -> int:
         """Return expired LEASED rows to PENDING for retry."""
@@ -213,7 +232,10 @@ class OutboxDispatcher:
         event.status = OutboxStatus.PENDING.value
         event.locked_by = None
         event.leased_until = None
-        event.next_attempt_at = datetime.now(UTC)
+        event.next_attempt_at = datetime.now(UTC) + self._retry_delay(
+            event.event_id,
+            event.attempt_count,
+        )
         await self._session.flush()
         return None
 

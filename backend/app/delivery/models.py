@@ -112,7 +112,7 @@ class HumanReviewDecision(Base):
             "review_kind",
         ),
         CheckConstraint(
-            "decision IN ('approved','rejected')",
+            "decision IN ('approved','rejected','demo_confirmed')",
             name="ck_human_review_decision_value",
         ),
     )

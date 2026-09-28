@@ -32,7 +32,7 @@ const SIMPLE_CAPABILITIES = {
 } as const;
 
 function modelForSlots(profile: ModelProfileRead | undefined, slots: readonly string[]): string {
-  const values = slots.map((slot) => profile?.bindings[slot]?.model_id ?? "未绑定");
+  const values = slots.map((slot) => profile?.bindings?.[slot]?.model_id ?? "未绑定");
   return new Set(values).size === 1 ? values[0] : "各环节不同（保存选择将统一此组）";
 }
 

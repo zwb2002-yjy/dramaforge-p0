@@ -21,7 +21,7 @@ from app.execution.models import Artifact, GraphNode, NodeRun
 from app.shared.errors import ConflictError, ValidationAppError
 
 ReviewKind = Literal["identity", "video_drift", "continuity"]
-ReviewDecision = Literal["approved", "rejected"]
+ReviewDecision = Literal["approved", "rejected", "demo_confirmed"]
 
 # Review NodeRun node keys, in the vocabulary of the canonical shot pipeline.
 REVIEW_NODE_KEYS: dict[ReviewKind, str] = {
@@ -346,8 +346,8 @@ async def evaluate_artifact_admission(
             )
         return StageAdmission(allowed=True, review_kind=review_kind, requirements=[requirement])
 
-    # No human decision yet. A machine outcome that asked for a person blocks
-    # production; missing evidence is reported as "review not yet recorded".
+    # No quality approval yet. A demo-only confirmation remains visible but
+    # cannot satisfy this gate; machine evidence still awaits a human verdict.
     reason = (
         "REVIEW_AWAITING_HUMAN"
         if machine_status in _OUTCOME_UNKNOWN_STATUSES

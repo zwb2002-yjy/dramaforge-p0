@@ -16,6 +16,7 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret-32chars-min")
 os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
 # Keep live keys out of accidental adapter selection, including ones in root .env.
 os.environ["AGNES_ENABLED"] = "false"
+os.environ["TTS_ENABLED"] = "false"
 # Disable the canonical text gateway even when the host or root .env configures it.
 os.environ["LITELLM_GATEWAY_URL"] = ""
 os.environ["LITELLM_API_KEY"] = ""

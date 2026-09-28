@@ -39,6 +39,9 @@ class ShotExecutionTrace(BaseModel):
     finished_at: datetime | None
     result_artifact_id: UUID | None
     operation_outcome_unknown: bool
+    queue_position: int | None = None
+    queued_ahead: int | None = None
+    estimated_wait_seconds: int | None = None
 
 
 async def _unknown_submission_run_ids(
@@ -105,6 +108,30 @@ async def _load_traces(
             .limit(_SCAN_LIMIT)
         )
     ).scalars().all()
+    media_rows = [
+        run
+        for run in rows
+        if str((run.input_snapshot or {}).get("node_key") or "") in {"keyframe", "video"}
+    ]
+    queued = sorted(
+        (run for run in media_rows if run.status == "queued"),
+        key=lambda run: (run.created_at, str(run.id)),
+    )
+    queue_position = {run.id: index + 1 for index, run in enumerate(queued)}
+    running_count = sum(1 for run in media_rows if run.status == "running")
+    completed_durations = [
+        (run.finished_at - run.started_at).total_seconds()
+        for run in media_rows
+        if run.started_at is not None
+        and run.finished_at is not None
+        and run.finished_at >= run.started_at
+        and run.status in {"completed", "cached", "completed_after_cancel"}
+    ]
+    average_duration = (
+        sum(completed_durations[:50]) / len(completed_durations[:50])
+        if completed_durations
+        else None
+    )
     selected: dict[UUID, list[tuple[NodeRun, dict[str, object]]]] = {
         shot_id: [] for shot_id in shot_ids
     }
@@ -132,6 +159,19 @@ async def _load_traces(
                 finished_at=run.finished_at,
                 result_artifact_id=run.result_artifact_id,
                 operation_outcome_unknown=run.id in unknown_outcomes,
+                queue_position=queue_position.get(run.id),
+                queued_ahead=(queue_position[run.id] - 1) if run.id in queue_position else None,
+                estimated_wait_seconds=(
+                    max(
+                        0,
+                        round(
+                            ((queue_position[run.id] - 1) + running_count)
+                            * average_duration
+                        ),
+                    )
+                    if run.id in queue_position and average_duration is not None
+                    else None
+                ),
             )
             for run, raw in entries
         ]

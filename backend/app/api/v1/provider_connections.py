@@ -97,6 +97,8 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
         )
     result: list[ProviderPluginRead] = []
     for plugin in list_plugins():
+        if plugin.provider_type == "litellm":
+            continue
         models = by_plugin.get((plugin.provider_type, plugin.protocol_profile), [])
         result.append(
             ProviderPluginRead(
@@ -179,12 +181,14 @@ class ProbeRead(BaseModel):
     request_fingerprint: str
     tested_at: datetime
     error_code: str | None
+    discovered_model_ids: list[str]
 
 
 class ModelBindingCreate(BaseModel):
     media_type: Literal["image", "video"]
     model_id: str = Field(min_length=1, max_length=160)
     purpose: Literal["keyframe", "video"]
+    capability_contract_id: UUID | None = None
     enabled: bool = True
 
 
@@ -288,6 +292,7 @@ def _probe_read(evidence: ProviderCapabilityEvidence) -> ProbeRead:
         request_fingerprint=evidence.request_fingerprint,
         tested_at=evidence.tested_at,
         error_code=evidence.error_code,
+        discovered_model_ids=list(evidence.discovered_model_ids or []),
     )
 
 
@@ -518,6 +523,7 @@ async def create_model_binding(
         media_type=body.media_type,
         model_id=body.model_id,
         purpose=body.purpose,
+        capability_contract_id=body.capability_contract_id,
         enabled=body.enabled,
     )
     await session.commit()

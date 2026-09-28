@@ -17,7 +17,7 @@ export function ShotVoiceSettings({
   onChange: (value: VoiceSettings) => void;
 }) {
   const id = useId();
-  const canReadOptions = Boolean(projectId) && projectId !== "demo";
+  const canReadOptions = Boolean(projectId);
   const options = useQuery({
     queryKey: queryKeys.shot.voiceOptions(projectId),
     queryFn: ({ signal }) => fetchVoiceOptions(projectId, signal),

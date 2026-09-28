@@ -125,7 +125,7 @@ test("unified main chain: Story proposal apply reaches the same Scene Workbench"
   await page.getByTestId("story-proposal-create").click();
   await page.getByTestId("story-proposal-preview").waitFor();
   await page.getByTestId("story-proposal-apply-all").click();
-  await expect(page.getByRole("status")).toContainText("Story 更新完成");
+  await expect(page.getByRole("status")).toContainText("故事更新完成");
   await expect(page.getByTestId("script-episodes")).toContainText("双人冲突");
 
   // Same project URL identity moves into the Scene Workbench backed by the

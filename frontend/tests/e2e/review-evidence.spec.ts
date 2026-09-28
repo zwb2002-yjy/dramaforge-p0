@@ -54,7 +54,7 @@ async function installMock(page: Page, state: { evidencePosts: number; summaryCa
         review_kind: "identity",
         node_key: "identity_review",
         review_node_run_id: hasEvidence ? "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" : null,
-        review_artifact_id: null,
+        review_artifact_id: hasEvidence ? "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff" : null,
         machine_status: hasEvidence ? "needs_human" : null,
         decision: null,
         decision_reason: null,

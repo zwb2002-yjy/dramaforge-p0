@@ -442,7 +442,7 @@
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 1099px) {
   .df-global-shell,
   .df-global-shell.secondary-open {
     --df-primary-nav-width: 56px;
@@ -617,4 +617,91 @@
   color: var(--df-text-muted);
   font-family: var(--df-font-mono);
   font-size: var(--df-text-xs);
+}
+
+/* Web-first density: navigation yields to the work, not the other way round. */
+.df-page-header h1 {
+  font-size: var(--df-page-title-size);
+}
+.df-page {
+  padding: var(--df-space-6);
+}
+.df-project-lobby .df-page-header {
+  margin-bottom: var(--df-space-5);
+}
+.df-project-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--df-project-card-min)), 1fr));
+}
+.df-project-card {
+  flex-direction: row;
+  align-items: center;
+  padding: var(--df-space-4);
+  gap: var(--df-space-3);
+}
+.df-project-card .df-project-cover {
+  width: var(--df-project-card-icon-size);
+  height: var(--df-project-card-icon-size);
+  aspect-ratio: 1;
+  border-radius: var(--df-radius-control);
+  background: var(--df-surface-2);
+}
+.df-project-card-body {
+  min-width: 0;
+  padding: 0;
+}
+.df-project-card strong {
+  font-size: var(--df-text-md);
+  height: auto;
+  min-height: 3em;
+}
+.df-project-card-meta {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-sm);
+}
+.df-project-card-enter {
+  margin-top: var(--df-space-2);
+  font-size: var(--df-text-sm);
+}
+.df-project-card:hover {
+  transform: none;
+}
+.df-create-panel {
+  max-width: var(--df-form-page-max);
+  margin-inline: auto;
+}
+.df-settings-page .df-section-tabs {
+  margin-bottom: var(--df-space-5);
+}
+.df-settings-section {
+  margin-bottom: var(--df-space-4);
+}
+.df-settings-page h2 {
+  font-size: var(--df-section-title-size);
+}
+.df-settings-page .provider-panel {
+  margin-top: var(--df-space-4);
+}
+.df-settings-page [role="tabpanel"] {
+  min-width: 0;
+}
+@media (max-width: 1099px) {
+  .df-context-sidebar {
+    top: 0;
+    z-index: var(--df-z-modal);
+  }
+  .df-context-scrim {
+    inset: 0;
+    left: calc(var(--df-primary-nav-width) + var(--df-context-nav-width));
+  }
+  .df-page {
+    padding: var(--df-space-5) var(--df-space-4);
+  }
+  .df-project-filters {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .df-project-filters > label {
+    flex: 1;
+    min-width: 0;
+  }
 }

@@ -185,6 +185,32 @@ describe("HumanReviewDecisionPanel", () => {
     );
   });
 
+  it("records demo confirmation without presenting it as a quality approval", async () => {
+    const decisions: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.includes("/review-summary")) return json(summary());
+      if (url.includes("/review-decisions")) {
+        const body = JSON.parse(String(init?.body)) as { decision: string };
+        decisions.push(body.decision);
+        return json({ ...summary(), decision: "demo_confirmed", reason: "演示链路完成" }, 201);
+      }
+      return json({});
+    });
+    renderPanel();
+
+    fireEvent.change(await screen.findByLabelText("关键帧身份审查判断理由"), {
+      target: { value: "演示链路完成" },
+    });
+    fireEvent.click(screen.getByTestId("review-demo-confirm-identity"));
+
+    await waitFor(() => expect(decisions).toEqual(["demo_confirmed"]));
+    expect(await screen.findByTestId("review-decision-feedback")).toHaveTextContent(
+      "不会放行正式素材",
+    );
+  });
+
   it("refuses to record a decision when no automatic evidence exists", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);

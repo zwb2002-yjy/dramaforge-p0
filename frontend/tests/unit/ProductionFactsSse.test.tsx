@@ -3,6 +3,7 @@ import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProductionFactsSse } from "../../src/components/sse/ProductionFactsSse";
+import { setSelectedWorkspaceId } from "../../src/lib/api";
 
 type Listener = (event: Event) => void;
 
@@ -45,6 +46,7 @@ class FakeEventSource {
 
 describe("ProductionFactsSse", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     FakeEventSource.instances.length = 0;
     Object.defineProperty(globalThis, "EventSource", {
       configurable: true,
@@ -58,6 +60,7 @@ describe("ProductionFactsSse", () => {
   });
 
   it("subscribes with workspace scope and invalidates queries for the event project", async () => {
+    setSelectedWorkspaceId("stale-workspace");
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const view = render(
@@ -68,6 +71,9 @@ describe("ProductionFactsSse", () => {
 
     const source = FakeEventSource.instances[0];
     expect(source?.url).toBe("/api/v1/events/stream?workspace_id=workspace-1");
+    expect(new URL(source!.url, "http://test").searchParams.getAll("workspace_id")).toEqual([
+      "workspace-1",
+    ]);
     expect(source?.withCredentials).toBe(true);
 
     source?.emit(

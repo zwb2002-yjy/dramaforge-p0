@@ -117,12 +117,12 @@ export function AssetReferencePicker({
   const assets = useQuery({
     queryKey: queryKeys.asset.picker(projectId),
     queryFn: () => fetchProjectAssets(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const bindings = useQuery({
     queryKey: queryKeys.asset.shotReferences(projectId, shotId),
     queryFn: () => fetchShotReferences(projectId, shotId),
-    enabled: Boolean(shotId) && shotId !== "demo",
+    enabled: Boolean(shotId),
   });
 
   // Resolution is a POST in the existing API because it is a server-side
@@ -132,7 +132,7 @@ export function AssetReferencePicker({
   const resolution = useQuery({
     queryKey: queryKeys.asset.referenceResolution(projectId, shotId),
     queryFn: () => resolveShotReferences(projectId, shotId),
-    enabled: Boolean(projectId) && Boolean(shotId) && shotId !== "demo",
+    enabled: Boolean(projectId) && Boolean(shotId),
   });
 
   const resolutionQueryKey = queryKeys.asset.referenceResolution(projectId, shotId);

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Aperture, CirclePause, TriangleAlert } from "lucide-react";
 
 import { artifactContentUrl } from "../../lib/api";
+import { nodeRunExecutionStatusLabel, nodeRunStatusKind } from "../../lib/runLabels";
 import type { ShotLite } from "./api";
 import { parseShotCandidates, shotCandidateKey, type ShotCandidate } from "./shotCandidates";
 
@@ -22,11 +23,9 @@ type CinematicCanvasProps = {
 
 type TraceState = {
   status: string;
+  errorCode: string | null;
   nodeKey: string | null;
 };
-
-const ACTIVE_STATUSES = new Set(["queued", "pending", "running", "processing", "submitted"]);
-const FAILED_STATUSES = new Set(["failed", "error", "cancelled", "canceled"]);
 
 function traceStateOf(value: unknown): TraceState | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -34,33 +33,9 @@ function traceStateOf(value: unknown): TraceState | null {
   if (typeof row.status !== "string" || row.status.length === 0) return null;
   return {
     status: row.status,
+    errorCode: typeof row.error_code === "string" ? row.error_code : null,
     nodeKey: typeof row.node_key === "string" ? row.node_key : null,
   };
-}
-
-function stateLabel(status: string): string {
-  switch (status) {
-    case "queued":
-    case "pending":
-      return "执行已排队";
-    case "running":
-    case "processing":
-    case "submitted":
-      return "正在执行";
-    case "failed":
-    case "error":
-      return "执行失败";
-    case "cancelled":
-    case "canceled":
-      return "执行已取消";
-    case "completed":
-    case "cached":
-    case "completed_after_cancel":
-    case "succeeded":
-      return "执行完成，等待结果确认";
-    default:
-      return `执行状态：${status}`;
-  }
 }
 
 function latestTraceState(trace: unknown[]): TraceState | null {
@@ -104,8 +79,9 @@ export function CinematicCanvas({
   const candidate = explicitCandidate ?? (!videoId && !keyframeId ? parsedCandidates[0] : null);
   const latestTrace = latestTraceState(trace);
   const normalizedStatus = latestTrace?.status.toLowerCase() ?? "";
-  const isActive = ACTIVE_STATUSES.has(normalizedStatus);
-  const isFailed = FAILED_STATUSES.has(normalizedStatus);
+  const statusKind = nodeRunStatusKind(normalizedStatus, latestTrace?.errorCode);
+  const isActive = statusKind === "active";
+  const isFailed = statusKind === "failed" || statusKind === "unknown_submission";
 
   const selectCandidate = (next: ShotCandidate) => {
     if (selectedCandidate === undefined && previewCandidate === undefined) {
@@ -185,7 +161,7 @@ export function CinematicCanvas({
             data-status={normalizedStatus}
             role="status"
           >
-            {stateLabel(normalizedStatus)}
+            {nodeRunExecutionStatusLabel(normalizedStatus, latestTrace?.errorCode)}
           </p>
         </div>
       ) : (
@@ -199,7 +175,7 @@ export function CinematicCanvas({
               data-status={normalizedStatus}
               role="status"
             >
-              {stateLabel(normalizedStatus)}
+              {nodeRunExecutionStatusLabel(normalizedStatus, latestTrace?.errorCode)}
             </p>
           )}
           <p className="qc-canvas-hint" data-testid="no-formal-result">

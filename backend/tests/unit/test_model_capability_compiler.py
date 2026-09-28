@@ -192,7 +192,14 @@ def test_minimax_image_rejects_ratio_that_would_be_silently_replaced() -> None:
         )
 
 
-@pytest.mark.parametrize("model_id", [row["model_id"] for row in SEED_MANIFESTS])
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        row["model_id"]
+        for row in SEED_MANIFESTS
+        if row.get("catalog_source") != "protocol_contract"
+    ],
+)
 def test_every_seed_model_is_queryable_without_account_verification(model_id: str) -> None:
     from app.providers.capability_inspection import inspect_catalog_model
     from app.providers.catalog_seed_data import hash_manifest
@@ -255,7 +262,14 @@ def test_ark_image_does_not_silently_replace_portrait_with_square() -> None:
         )
 
 
-@pytest.mark.parametrize("model_id", [row["model_id"] for row in SEED_MANIFESTS])
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        row["model_id"]
+        for row in SEED_MANIFESTS
+        if row.get("catalog_source") != "protocol_contract"
+    ],
+)
 async def test_every_seed_compiler_has_a_side_effect_free_contract_preview(model_id: str) -> None:
     from app.providers.compile_preview import PreviewReference, preview_compile
     from app.providers.intents import (

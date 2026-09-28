@@ -121,6 +121,11 @@ def _ark_hub_client(settings: Settings, host: str | None) -> Any:
     return ArkHubClient(settings, host=host)
 
 
+def _openai_compatible_media_client(settings: Settings, host: str | None) -> Any:
+    from app.providers.openai_compatible_media import OpenAICompatibleMediaClient
+
+    return OpenAICompatibleMediaClient(settings, host=host)
+
 def _minimax_hub_client(settings: Settings, host: str | None) -> Any:
     from app.providers.minimax import MiniMaxHubClient
 
@@ -135,6 +140,12 @@ def _register_defaults() -> None:
         _agnes_runtime_factory,
     )
     from app.providers.catalog_seed_data import seed_manifests_for
+    from app.providers.openai_compatible_media import (
+        OPENAI_MEDIA_DEFAULT_HOST,
+        OPENAI_MEDIA_PROFILE,
+        _openai_compatible_media_compiler_factory,
+        _openai_compatible_media_runtime_factory,
+    )
 
     register_plugin(
         ProviderPlugin(
@@ -156,6 +167,46 @@ def _register_defaults() -> None:
             catalog_manifests=tuple(seed_manifests_for(provider_type="agnes")),
             runtime_factory=_agnes_runtime_factory,
             compiler_factory=_agnes_compiler_factory,
+        )
+    )
+    register_plugin(
+        ProviderPlugin(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_MEDIA_PROFILE,
+            display_name="OpenAI 兼容图像 / 视频",
+            default_base_url=OPENAI_MEDIA_DEFAULT_HOST,
+            implemented=True,
+            settings_prefix="openai_compatible_media",
+            credential_provider_key="openai_compatible_media",
+            model_contracts={
+                ("image", "keyframe"): "@contract/openai-image-v1",
+                ("video", "video"): "@contract/openai-video-v1",
+            },
+            capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
+            paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
+            image_i2i_probe_transport="bytes",
+            model_list_path="/models",
+            client_factory=_openai_compatible_media_client,
+            catalog_manifests=tuple(
+                seed_manifests_for(provider_type="openai_compatible_media")
+            ),
+            runtime_factory=_openai_compatible_media_runtime_factory,
+            compiler_factory=_openai_compatible_media_compiler_factory,
+        )
+    )
+    # Connection plugin for a workspace-scoped LiteLLM or OpenAI-compatible
+    # text gateway. Model capability plugins are registered from discovery;
+    # this record owns only URL/auth/model-list transport.
+    register_plugin(
+        ProviderPlugin(
+            provider_type="litellm",
+            protocol_profile="openai_chat_v1",
+            display_name="LiteLLM / OpenAI 兼容文本服务",
+            default_base_url="http://litellm:4000",
+            implemented=True,
+            settings_prefix="litellm",
+            credential_provider_key="litellm",
+            model_list_path="/v1/models",
         )
     )
     from app.providers.minimax import (

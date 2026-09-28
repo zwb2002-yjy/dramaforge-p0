@@ -49,7 +49,7 @@ export const settingsModelsRoute = createRoute({
 export const settingsDefaultsRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/defaults",
-  component: () => <Navigate to="/" search={{ create: true }} replace />,
+  component: LazyModelConnectionSettingsPage,
 });
 
 export const settingsProjectRoute = createRoute({

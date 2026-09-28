@@ -34,6 +34,10 @@ def test_compose_defines_required_boot0_services() -> None:
     assert "healthcheck" in services["postgres"]
     assert "healthcheck" in services["redis"]
     assert "healthcheck" in services["minio"]
+    for name in ("postgres", "redis", "minio", "litellm-db", "litellm"):
+        assert services[name]["restart"] == "unless-stopped"
+    for name in ("postgres", "redis", "minio", "litellm-db"):
+        assert services[name]["healthcheck"]["start_period"]
     provider_env = {
         "AGNES_ENABLED",
         "AGNES_API_KEY",
@@ -78,6 +82,8 @@ def test_compose_defines_required_boot0_services() -> None:
     for name in ("api", "dispatcher", "worker-default", "worker-heavy", "worker-director"):
         condition = services[name]["depends_on"]["database-bootstrap"]["condition"]
         assert condition == "service_completed_successfully"
+        assert services[name]["depends_on"]["postgres"]["condition"] == "service_healthy"
+        assert services[name]["restart"] == "unless-stopped"
         assert services[name]["security_opt"] == ["no-new-privileges:true"]
         assert services[name]["cap_drop"] == ["ALL"]
         assert "healthcheck" in services[name]

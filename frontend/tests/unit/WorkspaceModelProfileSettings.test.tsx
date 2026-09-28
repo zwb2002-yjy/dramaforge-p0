@@ -186,7 +186,7 @@ describe("Workspace model drafts", () => {
         name: SAVED_PROFILE.name,
         version: 1,
         is_default: true,
-        binding_slots: Object.keys(SAVED_PROFILE.bindings),
+        binding_slots: Object.keys(SAVED_PROFILE.bindings ?? {}),
         updated_at: SAVED_PROFILE.updated_at,
       },
     ]);
