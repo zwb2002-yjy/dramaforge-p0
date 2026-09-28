@@ -59,3 +59,10 @@ def test_image_text_and_reference_contracts_are_separate() -> None:
     assert summary.accepts_text_only is True
     assert summary.product_text_only is True
     assert summary.product_open["reference_image"] is True
+
+    revised["lifecycle"] = "preview"
+    revised["implementation_status"] = "documented"
+    preview = summarize_model_capability(ModelCapabilityManifest.model_validate(revised))
+    assert preview.accepts["reference_image"] is True
+    assert preview.product_open["reference_image"] is False
+    assert preview.product_text_only is False

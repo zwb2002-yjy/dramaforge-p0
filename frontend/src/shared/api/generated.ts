@@ -5953,6 +5953,8 @@ export interface components {
             model_revision: string;
             /** Lifecycle */
             lifecycle: string;
+            /** Implementation Status */
+            implementation_status: string;
             /** Catalog Source */
             catalog_source: string;
             /** Capabilities */

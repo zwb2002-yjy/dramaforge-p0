@@ -66,6 +66,8 @@ Workbench 对新合同从实际素材自动选合同，不使用前端固定 `mo
 `capability_summary`：`accepts` 表示供应商声明，`product_open` 表示当前 Workbench
 子集，`limits` 表示参考数量上界。这是只读提示；账号可用性和 Binding 证据另行读取，
 最终生成前仍以 Resolver、Workbench 与 Worker 的校验为准。
+目录 API 也返回 preview 与历史 revision 供管理界面查看；只有 active、已通过合同测试的
+revision 会报告工作台开放子集，且只有 active revision 可新建 Binding。
 
 媒体与文本接入的唯一执行路径是 ModelAdapter → Compiler → Runtime（文本为
 `litellm_adapter.py` 的 LiteLLMModelAdapter，运行面是官方 LiteLLM Proxy）。

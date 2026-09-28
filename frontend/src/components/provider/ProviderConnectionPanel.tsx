@@ -425,17 +425,22 @@ function ProviderConnectionEditor({
 
   const pluginCapabilities = selectedPlugin?.capabilities ?? ["auth_models"];
   const pluginModels = selectedPlugin?.models ?? [];
-  const imageModels = pluginModels.filter((model) => model.media_type === "image");
-  const videoModels = pluginModels.filter((model) => model.media_type === "video");
+  const activeModels = useMemo(
+    () => (selectedPlugin?.models ?? []).filter((model) => model.lifecycle === "active"),
+    [selectedPlugin?.models],
+  );
+  const imageModels = activeModels.filter((model) => model.media_type === "image");
+  const videoModels = activeModels.filter((model) => model.media_type === "video");
+  const catalogOnlyModels = pluginModels.filter((model) => model.lifecycle !== "active");
   const activeModelsByContract = useMemo(
     () =>
       new Map(
-        (selectedPlugin?.models ?? []).map((model) => [
+        activeModels.map((model) => [
           `${model.catalog_entry_id}:${model.capability_manifest_hash}`,
           model,
         ]),
       ),
-    [selectedPlugin?.models],
+    [activeModels],
   );
   const activeModelFor = (binding: ProviderModelBindingRead) =>
     activeModelsByContract.get(`${binding.catalog_entry_id}:${binding.capability_manifest_hash}`) ??
@@ -873,6 +878,17 @@ function ProviderConnectionEditor({
                   );
                 })}
               </div>
+              {catalogOnlyModels.length > 0 && (
+                <div className="provider-binding-list" data-testid="catalog-only-models">
+                  <strong>目录中暂不可新建绑定的模型</strong>
+                  {catalogOnlyModels.map((model) => (
+                    <p className="muted" key={model.catalog_entry_id}>
+                      {model.display_name} · {model.lifecycle} · {model.implementation_status} ·{" "}
+                      {modelCapabilityText(model)}
+                    </p>
+                  ))}
+                </div>
+              )}
               <div className="provider-binding-list">
                 {(bindings.isSuccess ? bindings.data : []).map((binding) => {
                   const activeModel = activeModelFor(binding);
