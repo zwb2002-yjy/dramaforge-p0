@@ -225,6 +225,36 @@ def _register_defaults() -> None:
 _register_defaults()
 
 
+def _validate_catalog_registration() -> None:
+    """Every file-backed manifest must belong to a registered protocol plugin."""
+    from app.providers.catalog_seed_data import SEED_MANIFESTS
+
+    declared = {
+        (
+            item["provider_type"],
+            item["protocol_profile"],
+            item["model_id"],
+            item["model_revision"],
+        )
+        for item in SEED_MANIFESTS
+    }
+    registered = {
+        (
+            item["provider_type"],
+            item["protocol_profile"],
+            item["model_id"],
+            item["model_revision"],
+        )
+        for plugin in _registry.values()
+        for item in plugin.catalog_manifests
+    }
+    if declared != registered:
+        raise ValueError("model catalog contains manifests without a registered provider profile")
+
+
+_validate_catalog_registration()
+
+
 # ---------------------------------------------------------------------------
 # V3 model registry (spec §30).
 # Distinct from the ProviderPlugin registry above: plugins describe one

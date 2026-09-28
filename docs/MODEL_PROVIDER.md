@@ -17,6 +17,11 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 | Reference delivery | providers/reference_delivery.py, reference_roles.py | 严格参考槽位校验、有序多参考传输（不做 `dict[role, artifact]`）、URL/bytes 决策 |
 | 文本通道 | providers/litellm_adapter.py + infra/litellm | 官方 LiteLLM Proxy 独立 Runtime，OpenAI 兼容 HTTP 面；DramaForge 不安装 litellm SDK |
 
+当前媒体模型的 Manifest 数据来自 `backend/app/providers/model_catalog/` 中的版本化
+JSON 文件。`catalog_loader.py` 在启动时做 schema 与身份校验；
+`catalog_seed_data.py` 仅保留旧调用方兼容入口和既有 hash 算法。现有 revision 的
+Manifest 内容和 hash 不变，历史 Alembic 快照仍独立保存。
+
 媒体与文本接入的唯一执行路径是 ModelAdapter → Compiler → Runtime（文本为
 `litellm_adapter.py` 的 LiteLLMModelAdapter，运行面是官方 LiteLLM Proxy）。
 固定契约 fixture 在 `fixtures/providers/contracts/`（由

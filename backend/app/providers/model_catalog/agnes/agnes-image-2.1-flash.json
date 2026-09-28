@@ -1,0 +1,39 @@
+{
+  "manifest_version": "2026-08-19",
+  "provider_type": "agnes",
+  "protocol_profile": "agnes_cn_v1",
+  "model_id": "agnes-image-2.1-flash",
+  "model_revision": "v2",
+  "media_kind": "image",
+  "display_name": "Agnes Image Flash",
+  "lifecycle": "active",
+  "catalog_source": "official_static",
+  "documented_at": "2026-08-19",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "capabilities": [
+        "image.t2i",
+        "image.i2i"
+      ],
+      "output_constraints": {
+        "size": "1K",
+        "aspect_ratio": "9:16",
+        "width": 736,
+        "height": 1312,
+        "response_format": "url"
+      },
+      "reference_constraints": {
+        "reference_image": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  }
+}
