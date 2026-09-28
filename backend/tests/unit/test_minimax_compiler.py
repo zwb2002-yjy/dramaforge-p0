@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from uuid import uuid4
 
 import httpx
@@ -64,6 +65,96 @@ async def test_image_compiler_requires_one_https_reference_and_builds_native_bod
     assert compiled.wire_request["aspect_ratio"] == "1:1"
     assert compiled.reference_artifact_ids == [artifact_id]
     assert "image-token" not in json.dumps(compiled.safe_request_summary)
+
+
+@pytest.mark.asyncio
+async def test_same_image_compiler_handles_manifest_driven_t2i_and_i2i() -> None:
+    source = next(item for item in SEED_MANIFESTS if item["model_id"] == "image-01")
+    revised = deepcopy(source)
+    revised["model_revision"] = "v2-test"
+    operation = revised["operations"]["image.generate"]
+    operation["capabilities"] = ["image.t2i", "image.i2i"]
+    operation["input_contracts"] = {
+        "text": {"input_slots": {}},
+        "reference": {
+            "input_slots": {"reference_image": {"minimum": 1, "maximum": 1}},
+            "minimum_total_references": 1,
+        },
+    }
+    operation["output_options"] = {
+        "aspect_ratio": {
+            "type": "string",
+            "enum": ["1:1", "9:16", "16:9"],
+            "default": "9:16",
+        },
+        "response_format": {"type": "string", "enum": ["url", "base64"], "default": "url"},
+        "n": {"type": "integer", "minimum": 1, "maximum": 9, "default": 1},
+        "prompt_optimizer": {"type": "boolean", "default": False},
+    }
+    manifest = ModelCapabilityManifest.model_validate(revised)
+    compiler = MiniMaxImageCompiler()
+
+    text = await compiler.compile(
+        ImageGenerationIntent(
+            prompt="portrait", selection=ModelSelectionIntent(mode="explicit_binding")
+        ),
+        manifest,
+        [],
+        invoke_model_value="image-01",
+    )
+    assert text.wire_request["aspect_ratio"] == "9:16"
+    assert text.wire_request["response_format"] == "url"
+    assert text.wire_request["n"] == 1
+    assert text.wire_request["prompt_optimizer"] is False
+    assert "aigc_watermark" not in text.wire_request
+    assert "subject_reference" not in text.wire_request
+    assert text.safe_request_summary["matched_contract"] == "text"
+
+    artifact_id = uuid4()
+    image = await compiler.compile(
+        ImageGenerationIntent(
+            prompt="portrait",
+            aspect_ratio="1:1",
+            reference_artifact_id=artifact_id,
+            selection=ModelSelectionIntent(mode="explicit_binding"),
+        ),
+        manifest,
+        [
+            ResolvedReference(
+                role="reference_image",
+                artifact_id=artifact_id,
+                content_url="https://dramaforge.example/ref.png",
+            )
+        ],
+        invoke_model_value="image-01",
+    )
+    assert image.wire_request["subject_reference"] == [
+        {"type": "character", "image_file": "https://dramaforge.example/ref.png"}
+    ]
+    assert image.safe_request_summary["matched_contract"] == "reference"
+
+    with pytest.raises(ValueError, match="no input contract"):
+        await compiler.compile(
+            ImageGenerationIntent(
+                prompt="portrait",
+                seed=7,
+                selection=ModelSelectionIntent(mode="explicit_binding"),
+            ),
+            manifest,
+            [],
+            invoke_model_value="image-01",
+        )
+
+    revised["operations"]["image.generate"]["output_options"]["n"]["default"] = 2
+    with pytest.raises(ValueError, match="product requires URL, one image"):
+        await compiler.compile(
+            ImageGenerationIntent(
+                prompt="portrait", selection=ModelSelectionIntent(mode="explicit_binding")
+            ),
+            ModelCapabilityManifest.model_validate(revised),
+            [],
+            invoke_model_value="image-01",
+        )
 
 
 def test_video_compiler_rejects_unsupported_outputs_and_roles() -> None:

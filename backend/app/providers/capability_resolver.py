@@ -185,16 +185,22 @@ def _check_contract(
     declared: dict[str, ParameterSpec] = {
         **operation.output_options,
         **contract.common_options,
+        **contract.native_options,
     }
-    effective = {
-        name: spec.default for name, spec in declared.items() if spec.default is not None
-    }
+    effective: dict[str, Any] = {}
+    for name, spec in declared.items():
+        if spec.default is not None:
+            try:
+                validate_parameter(name, spec.default, spec)
+            except ProviderError as exc:
+                raise ValueError(f"invalid manifest default for {name}: {exc}") from exc
+            effective[name] = spec.default
     for name, value in options.items():
-        spec = declared.get(name)
-        if spec is None:
+        requested_spec = declared.get(name)
+        if requested_spec is None:
             raise ValueError(f"undeclared output option: {name}")
         try:
-            validate_parameter(name, value, spec)
+            validate_parameter(name, value, requested_spec)
         except ProviderError as exc:
             raise ValueError(str(exc)) from exc
         effective[name] = value
