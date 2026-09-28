@@ -693,6 +693,8 @@ class AgnesImageCompiler:
         op = model.operations.get("image.generate")
         if op is None:
             raise ValueError("model does not support image.generate")
+        if op.input_contracts:
+            return
         constraints = op.output_constraints
         if (
             constraints.get("size") != _AGNES_IMAGE_SIZE
@@ -740,8 +742,17 @@ class AgnesImageCompiler:
         references: list[Any],
         *,
         invoke_model_value: str,
+        policy: Any | None = None,
     ) -> Any:
         self.validate(intent, model)
+        if model.operations["image.generate"].input_contracts:
+            return self._compile_contract(
+                intent,
+                model,
+                references,
+                invoke_model_value=invoke_model_value,
+                policy=policy,
+            )
         image_references = [
             ref for ref in references if ref.role == "reference_image"
         ]
@@ -825,6 +836,107 @@ class AgnesImageCompiler:
             reference_fingerprints=fps,
         )
 
+    def _compile_contract(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None,
+    ) -> Any:
+        from app.providers.capability_resolver import CapabilityResolver, ReferenceMetadata
+        from app.providers.runtime import CompiledImageRequest
+
+        if policy is None:
+            raise ValueError("Agnes image input contracts require an explicit product policy")
+        selected_ids = intent.selected_reference_ids()
+        if [ref.artifact_id for ref in references] != selected_ids or any(
+            ref.role != "reference_image" for ref in references
+        ):
+            raise ValueError("resolved Agnes image references do not match creative intent")
+        if len(references) == 1:
+            single = references[0]
+            if (
+                intent.reference_fingerprint is not None
+                and single.fingerprint != intent.reference_fingerprint
+            ):
+                raise ValueError("Agnes image fingerprint does not match creative intent")
+            if intent.reference_mime is not None and single.mime_type != intent.reference_mime:
+                raise ValueError("Agnes image MIME does not match creative intent")
+        metadata = [
+            ReferenceMetadata(
+                artifact_id=ref.artifact_id,
+                mime_type=ref.mime_type,
+                byte_size=ref.byte_size,
+                width=ref.width,
+                height=ref.height,
+            )
+            for ref in references
+        ]
+        plan = CapabilityResolver().resolve(
+            manifest=model,
+            intent=intent,
+            reference_metadata=metadata,
+            policy=policy,
+        )
+        size = plan.effective_options.get("size")
+        ratio = plan.effective_options.get("aspect_ratio")
+        response_format = plan.effective_options.get("response_format")
+        if not isinstance(size, str) or not isinstance(ratio, str):
+            raise ValueError("Agnes image size and ratio must be declared by the manifest")
+        if response_format != "url":
+            raise ValueError("Agnes image product requires URL response format")
+        image_values: list[str] = []
+        fingerprints: list[str] = []
+        for ref in references:
+            if ref.content_url is not None:
+                image_values.append(_require_https_reference(ref.content_url))
+            elif ref.content_bytes is not None:
+                data_uri, fingerprint = _reference_data_uri(
+                    data=ref.content_bytes,
+                    mime_type=ref.mime_type,
+                )
+                if ref.fingerprint is not None and ref.fingerprint != fingerprint:
+                    raise ValueError("Agnes image bytes do not match the resolved fingerprint")
+                image_values.append(data_uri)
+                if ref.fingerprint is None:
+                    fingerprints.append(fingerprint)
+            else:
+                raise ValueError("Agnes image reference has no bytes or URL")
+            if ref.fingerprint is not None:
+                fingerprints.append(ref.fingerprint)
+        body: dict[str, object] = {
+            "model": invoke_model_value,
+            "prompt": _require_prompt(intent.prompt),
+            "size": size,
+            "ratio": ratio,
+            "extra_body": {"response_format": response_format},
+        }
+        if image_values:
+            cast(dict[str, object], body["extra_body"])["image"] = image_values
+        summary = _compiled_summary(
+            operation="image.i2i" if image_values else "image.t2i",
+            invoke_model_value=invoke_model_value,
+            reference_artifact_ids=[str(ref.artifact_id) for ref in references],
+            reference_fingerprints=fingerprints,
+            schema_version=model.manifest_version,
+        )
+        summary["matched_contract"] = plan.matched_contract
+        summary["effective_common_options"] = {"size": size, "aspect_ratio": ratio}
+        summary["translation_transformations"] = []
+        return CompiledImageRequest(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="image.generate",
+            wire_request=cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=cast(dict[str, JsonValue], summary),
+            reference_artifact_ids=[ref.artifact_id for ref in references],
+            reference_fingerprints=fingerprints,
+        )
+
 
 class AgnesVideoCompiler:
     """Validates a video intent against the catalog manifest and compiles the
@@ -834,6 +946,8 @@ class AgnesVideoCompiler:
         op = model.operations.get("video.generate")
         if op is None:
             raise ValueError("model does not support video.generate")
+        if op.input_contracts:
+            return
         constraints = op.output_constraints
         if (
             constraints.get("aspect_ratio") != "9:16"
@@ -871,8 +985,17 @@ class AgnesVideoCompiler:
         references: list[Any],
         *,
         invoke_model_value: str,
+        policy: Any | None = None,
     ) -> Any:
         self.validate(intent, model)
+        if model.operations["video.generate"].input_contracts:
+            return self._compile_contract(
+                intent,
+                model,
+                references,
+                invoke_model_value=invoke_model_value,
+                policy=policy,
+            )
         intent_first = next(ref for ref in intent.references if ref.role == "first_frame")
         resolved_first = [ref for ref in references if ref.role == "first_frame"]
         if len(resolved_first) != 1:
@@ -930,6 +1053,118 @@ class AgnesVideoCompiler:
             safe_request_summary=cast(dict[str, JsonValue], summary),
             reference_artifact_ids=[first.artifact_id],
             reference_fingerprints=fps,
+        )
+
+    def _compile_contract(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None,
+    ) -> Any:
+        from app.providers.capability_resolver import CapabilityResolver, ReferenceMetadata
+        from app.providers.reference_roles import canonical_reference_role
+        from app.providers.runtime import CompiledVideoRequest
+
+        if policy is None:
+            raise ValueError("Agnes video input contracts require an explicit product policy")
+        selected = [
+            (item.artifact_id, canonical_reference_role(str(item.role)))
+            for item in intent.references
+        ]
+        delivered = [
+            (item.artifact_id, canonical_reference_role(str(item.role)))
+            for item in references
+        ]
+        if selected != delivered:
+            raise ValueError("resolved Agnes video references do not match creative intent")
+        metadata = [
+            ReferenceMetadata(
+                artifact_id=item.artifact_id,
+                mime_type=item.mime_type,
+                byte_size=item.byte_size,
+                duration_seconds=item.duration_seconds,
+                width=item.width,
+                height=item.height,
+            )
+            for item in references
+        ]
+        plan = CapabilityResolver().resolve(
+            manifest=model,
+            intent=intent,
+            reference_metadata=metadata,
+            policy=policy,
+        )
+        roles = {role for _, role in delivered}
+        frame_roles = {"first_frame", "last_frame"}
+        reference_roles = {"reference_image", "reference_video", "reference_audio"}
+        if roles & frame_roles and roles & reference_roles:
+            raise ValueError("Agnes frame and multimodal references are mutually exclusive")
+        if "reference_audio" in roles:
+            raise ValueError("Agnes reference audio wire shape is not verified")
+        mode = "keyframe" if roles & frame_roles else "reference" if roles else "text"
+        options = plan.effective_options
+        if set(options) - {"duration_seconds", "resolution", "aspect_ratio"}:
+            raise ValueError("Agnes video manifest declares an unsupported wire option")
+        duration = options.get("duration_seconds")
+        resolution = options.get("resolution")
+        ratio = options.get("aspect_ratio")
+        if (
+            not isinstance(duration, int)
+            or not isinstance(resolution, str)
+            or not isinstance(ratio, str)
+        ):
+            raise ValueError("Agnes video requires duration, resolution, and aspect ratio")
+        body: dict[str, object] = {
+            "model": invoke_model_value,
+            "prompt": _require_prompt(intent.prompt),
+            "mode": mode,
+            "seconds": str(duration),
+            "size": resolution,
+            "aspect_ratio": ratio,
+            "n": 1,
+        }
+        images: list[str] = []
+        videos: list[dict[str, str]] = []
+        for item, (_, role) in zip(references, delivered, strict=True):
+            if item.content_url is None:
+                raise ValueError(f"Agnes {role} requires a public HTTPS URL")
+            url = _require_https_reference(item.content_url)
+            if role in frame_roles:
+                body[role] = url
+            elif role == "reference_image":
+                images.append(url)
+            elif role == "reference_video":
+                videos.append({"url": url})
+            else:
+                raise ValueError(f"Agnes cannot compile reference role: {role}")
+        if images:
+            body["images"] = images
+        if videos:
+            body["videos"] = videos
+        fingerprints = [item.fingerprint for item in references if item.fingerprint]
+        summary = _compiled_summary(
+            operation="video.generate",
+            invoke_model_value=invoke_model_value,
+            reference_artifact_ids=[str(item.artifact_id) for item in references],
+            reference_fingerprints=fingerprints,
+            schema_version=model.manifest_version,
+        )
+        summary["matched_contract"] = plan.matched_contract
+        summary["effective_common_options"] = options
+        summary["translation_transformations"] = []
+        return CompiledVideoRequest(
+            provider_type="agnes",
+            protocol_profile=AGNES_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="video.generate",
+            wire_request=cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=cast(dict[str, JsonValue], summary),
+            reference_artifact_ids=[item.artifact_id for item in references],
+            reference_fingerprints=fingerprints,
         )
 
 

@@ -86,8 +86,9 @@ def _load_frozen() -> object:
 
 def test_all_seed_manifests_parse() -> None:
     loaded = ModelCatalogLoader().load()
-    assert len(loaded) == len(SEED_MANIFESTS)
-    assert {_identity(item.as_dict()) for item in loaded} == {
+    active = [item for item in loaded if item.publication_lifecycle == "active"]
+    assert len(active) == len(SEED_MANIFESTS)
+    assert {_identity(item.as_dict()) for item in active} == {
         _identity(manifest) for manifest in SEED_MANIFESTS
     }
     for manifest in SEED_MANIFESTS:
@@ -136,7 +137,7 @@ def test_catalog_loader_discovers_new_same_protocol_manifest(tmp_path: Path) -> 
     dummy_path.write_text(json.dumps(dummy), encoding="utf-8")
 
     loaded = ModelCatalogLoader(catalog).load()
-    manifests = [item.as_dict() for item in loaded]
+    manifests = [item.as_dict() for item in loaded if item.publication_lifecycle == "active"]
     assert _identity(dummy) in {item.identity for item in loaded}
     registry, _ = build_v3_registry(
         seed_manifests=[ModelCapabilityManifest.model_validate(item) for item in manifests]
@@ -162,6 +163,43 @@ def test_catalog_loader_rejects_duplicate_identity(tmp_path: Path) -> None:
     (provider_dir / "two.json").write_text(payload, encoding="utf-8")
     with pytest.raises(ValueError, match="duplicate model catalog identity"):
         ModelCatalogLoader(tmp_path).load()
+
+
+def test_preview_catalog_requires_explicit_implementation_status(tmp_path: Path) -> None:
+    preview = tmp_path / "minimax" / "preview"
+    preview.mkdir(parents=True)
+    manifest = dict(next(item for item in SEED_MANIFESTS if item["provider_type"] == "minimax"))
+    manifest["model_id"] = "candidate"
+    manifest["lifecycle"] = "preview"
+    path = preview / "candidate.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="implementation status"):
+        ModelCatalogLoader(tmp_path).load()
+    manifest["implementation_status"] = "documented"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    loaded = ModelCatalogLoader(tmp_path).load()
+    assert loaded[0].publication_lifecycle == "preview"
+    assert loaded[0].as_dict()["implementation_status"] == "documented"
+    manifest["implementation_status"] = "contract_tested"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert ModelCatalogLoader(tmp_path).load()[0].publication_lifecycle == "preview"
+
+
+def test_packaged_preview_catalog_has_model_evidence_and_no_active_collision() -> None:
+    loaded = ModelCatalogLoader().load()
+    previews = [item for item in loaded if item.publication_lifecycle == "preview"]
+    assert previews
+    active = {item.identity for item in loaded if item.publication_lifecycle == "active"}
+    for item in previews:
+        assert item.identity not in active
+        manifest = ModelCapabilityManifest.model_validate(item.as_dict())
+        assert manifest.lifecycle == "preview"
+        assert manifest.implementation_status in {"discovered", "documented", "contract_tested"}
+        assert manifest.evidence
+        assert all(
+            evidence.source_url.startswith("https://")
+            for evidence in manifest.evidence.values()
+        )
 
 
 def test_unknown_protocol_profile_fails_registry_bootstrap() -> None:

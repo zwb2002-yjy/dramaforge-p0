@@ -92,6 +92,13 @@ class ModelCatalogLoader:
                 publication_lifecycle = relative_parts[1]
                 if publication_lifecycle not in {"preview", "legacy", "deprecated", "retired"}:
                     raise ValueError(f"unknown catalog publication directory: {path}")
+                if publication_lifecycle == "preview" and (
+                    manifest.lifecycle != "preview"
+                    or "implementation_status" not in raw
+                ):
+                    raise ValueError(
+                        f"preview manifest must declare preview and implementation status: {path}"
+                    )
             elif len(relative_parts) == 2:
                 publication_lifecycle = manifest.lifecycle
             else:

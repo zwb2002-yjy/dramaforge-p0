@@ -131,6 +131,9 @@ class ModelCapabilityManifest(BaseModel):
     )
     documented_at: date
     operations: dict[OperationKind, OperationManifest]
+    # Official abilities outside the current generate operation vocabulary are
+    # recorded here without making them executable in the product.
+    documented_features: list[str] = Field(default_factory=list)
     evidence: dict[str, CapabilityEvidence] = Field(default_factory=dict)
     option_schema: ModelOptionSchema = Field(
         default_factory=lambda: ModelOptionSchema(namespace="")
