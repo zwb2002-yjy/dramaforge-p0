@@ -559,10 +559,18 @@ class ArkImageCompiler:
     """Validates an image intent against the Ark catalog manifest and compiles
     the wire request (Seedream) using the same builder as :class:`ArkHubClient`."""
 
+    reference_transport = "public_url"
+
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("image.generate")
         if op is None:
             raise ValueError("model does not support image.generate")
+        if intent.seed is not None:
+            raise ValueError("Ark image catalog revision does not declare seed")
+        if intent.aspect_ratio not in {None, "1:1"}:
+            raise ValueError("Ark image aspect ratio must match the frozen square size")
+        if intent.size not in {None, op.output_constraints.get("size")}:
+            raise ValueError("Ark image size must match the frozen manifest")
         capabilities = set(op.capabilities)
         required = "image.t2i"
         if intent.reference_artifact_id is not None:
@@ -636,6 +644,8 @@ class ArkVideoCompiler:
     """Validates a video intent against the Ark catalog manifest and compiles
     the Seedance ``content[]`` first-frame request. No duration/ratio/audio."""
 
+    reference_transport = "public_url"
+
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("video.generate")
         if op is None:
@@ -657,10 +667,13 @@ class ArkVideoCompiler:
                 intent.output.aspect_ratio,
                 intent.output.duration_seconds,
                 intent.output.generate_audio,
+                intent.output.resolution,
+                intent.output.seed,
             )
         ):
             raise ValueError(
-                "Ark video catalog revision cannot express duration, ratio, or audio"
+                "Ark video catalog revision cannot express duration, ratio, audio, "
+                "resolution, or seed"
             )
 
     async def compile(

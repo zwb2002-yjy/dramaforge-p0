@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.providers.contracts.image import ImageGenerateRequest
+from app.providers.contracts.image import ImageEditRequest, ImageGenerateRequest
 from app.providers.contracts.video import (
     FirstLastFrameVideoRequest,
     ImageToVideoRequest,
@@ -48,7 +48,9 @@ _COMMON_OPTION_FIELDS: frozenset[str] = frozenset(
 def _role_counts(request: Any) -> dict[str, int]:
     """Per-input-slot artifact counts, always keyed by canonical role."""
     counts: dict[str, int] = {}
-    if isinstance(request, ImageToVideoRequest):
+    if isinstance(request, ImageEditRequest):
+        counts["reference_image"] = 1
+    elif isinstance(request, ImageToVideoRequest):
         counts["first_frame"] = 1
     elif isinstance(request, FirstLastFrameVideoRequest):
         counts["first_frame"] = 1

@@ -86,7 +86,23 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 组合根分类）→ 问题 6（domain→creative 初始化依赖）→ 再逐步清剩余
 `architecture-baseline.json` 豁免。
 
-## 5. 可重复核查与门禁
+## 5. Director Agent 目标设计的详细映射
+
+Director 当前为结构化文本任务加确定性持久编排，尚无完整自主工具循环。
+本领域只保留本表作为目标映射入口；下列文档是详细参考，不是第二套架构权威：
+
+| 视图 | 用途 |
+|---|---|
+| [当前实现](architecture/DIRECTOR_AGENT_CURRENT_STATE.md) | 调用链、逐图节点行为、状态权威与保留/重构映射 |
+| [目标设计](architecture/DIRECTOR_AGENT_TARGET_ARCHITECTURE.md) | 自有 Agent Loop + 现有 TextModelPort + ToolRegistry；LangGraph 留作 durable workflow，Production 不重写 |
+| [实施计划](architecture/DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md) | P1 合同 → 只读 loop → Proposal → Workflow → Memory/Skill → 可选 MCP，逐项验收与回滚 |
+| [模型/编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) | 7 个媒体模型、逻辑文本与本地 TTS；区分源码支持、官方声明和账号证据 |
+
+Agent runtime/ToolRegistry/会话迁移仍为未实现目标；模型能力查询、compiler dry-run及生成快照
+已提供共享只读service/API（详见模型指南），并补ImageEdit/严格参数校验。没有替换模型、
+删除表或修改生产写入口。后续完成实施后继续收敛本表，过时计划仅留Git历史。
+
+## 6. 可重复核查与门禁
 
 先构建当前源码的 quality image，再运行已有信息性扫描：
 

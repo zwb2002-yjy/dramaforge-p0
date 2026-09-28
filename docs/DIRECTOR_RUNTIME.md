@@ -49,23 +49,28 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 - 导演 Worker 停止时，MANUAL 生产路径必须仍能完成全流程
   （空项目 → MP4/SRT）。
 
-## 有界 Agent loop
+## 当前有界执行与 Agent Loop 目标
 
-每次唤醒先读取最新已提交事实，再执行有限步骤：
+当前实现分成两条链，不能将目标 Agent Loop 当成已实现事实：
 
-```text
-读取事实与上下文 → 模型提出动作 → 结构与业务校验
-  ├─ 读取类 → 只读工具 → 继续
-  ├─ 建议/写入类 → 提案与授权 Gate
-  │    ├─ 等待用户 → 持久暂停（保存检查点，释放 Worker）
-  │    └─ 条件满足 → 提交业务命令（异步生产 → 持久暂停）
-  └─ 结束/受阻 → 完成或解释阻塞
-有效唤醒 → 回到读取事实
-```
+- 文本任务由 `DirectorTextRuntimeAdapter.generate_structured` 执行固定 schema
+  请求，必要时同一模型最多一次 schema 修复；调用身份和结果由 Invocation/Turn 持久化。
+- `LangGraphDirectorRuntime` 执行固定的 propose → await_decision →
+  submit_execution → await_execution → confirm_candidate 流程及拒绝/无需执行分支。
+  其中 propose 的领域 port 读取已有 Proposal/经验证 suggestion，不调用 LLM 自主选工具。
+- 当前 TextGenerateRequest 虽有 tools 字段，但消息/响应适配尚未构成完整的
+  tool-call → ToolResult → LLM 闭环，因此不宣称已实现自主领域工具 Agent。
 
-运行护栏（可调，不是产品镜头数量限制）：每轮模型调用上限、只读工具上限、
-Schema 修复上限、总时限、无进展阈值、每次唤醒最多提交 1 个生产命令。
-禁止在图节点里长期 sleep、无限轮询 NodeRun 或让模型进程等待视频完成。
+图的步数护栏、稳定命令键、租约、stop、resume fencing 和检查点继续保留。
+生产执行只能消费已有用户决定及持久授权；图节点不能长期 sleep 或轮询等视频完成。
+每次恢复通过领域 port 核实最新已提交事实，不能用 checkpoint 中的观察值反写业务真相。
+
+目标是在现有模型调用/审计基础上增量增加 DramaForge-owned Agent Loop；
+其只读工具上限、模型调用上限、可恢复工具错误及压缩策略是待实现合同，不是当前能力。
+详细[当前行为](architecture/DIRECTOR_AGENT_CURRENT_STATE.md)、
+[目标架构](architecture/DIRECTOR_AGENT_TARGET_ARCHITECTURE.md)和
+[依赖有序实施计划](architecture/DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md)
+由 [ARCHITECTURE_MAPPING](ARCHITECTURE_MAPPING.md) 统一挂接；不新建平行领域权威。
 
 ## 状态权威
 

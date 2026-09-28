@@ -438,6 +438,8 @@ class MiniMaxHubClient:
 
 
 class MiniMaxImageCompiler:
+    reference_transport = "public_url"
+
     def validate(self, intent: Any, model: Any) -> None:
         operation = model.operations.get("image.generate")
         if operation is None or "image.i2i" not in set(operation.capabilities):
@@ -450,6 +452,10 @@ class MiniMaxImageCompiler:
             or constraint.max != 1
         ):
             raise ValueError("MiniMax image generation requires exactly one reference_image")
+        if intent.aspect_ratio not in {None, "1:1"}:
+            raise ValueError("MiniMax image aspect ratio must be 1:1")
+        if intent.seed is not None:
+            raise ValueError("MiniMax image catalog revision cannot express seed")
         if intent.size not in {None, "1024x1024"}:
             raise ValueError("MiniMax image catalog revision only supports 1024x1024")
 
@@ -489,6 +495,8 @@ class MiniMaxImageCompiler:
 
 
 class MiniMaxVideoCompiler:
+    reference_transport = "public_url"
+
     def validate(self, intent: Any, model: Any) -> None:
         operation = model.operations.get("video.generate")
         if operation is None or "video.i2v.first_frame" not in set(operation.capabilities):
