@@ -17,7 +17,9 @@ from app.production.cutover_identity import (
 )
 from app.production.policy_models import ProductPolicyRevision, ProductPolicyState
 from app.production.policy_revisions import ProductPolicyContent
+from app.providers.capability_resolver import ResolvedGenerationPlan
 from app.providers.catalog_loader import hash_manifest
+from app.providers.dynamic_capability_hash import hash_connection_capability
 from app.providers.handler_registry import ExactHandlerRegistry, RegisteredHandler
 from app.providers.model_system_models import (
     ConnectionDiscoveredModel,
@@ -113,19 +115,24 @@ def _facts(*, dynamic: bool) -> dict[str, Any]:
             workspace_id=workspace_id,
             connection_discovered_model_id=discovered.id,
             capability_revision="r1",
-            capability_hash="a" * 64,
-            operations_json={},
-            input_contracts_json={},
+            capability_hash="0" * 64,
+            operations_json={"video.generate": {}},
+            input_contracts_json={"video.generate": {"first_frame": {}}},
             parameter_constraints_json={},
             evidence_json={},
             implementation_status="contract_tested",
             protocol_contract_revision_id=protocol.id,
         )
+        capability.capability_hash = hash_connection_capability(capability)
         binding.binding_target_kind = "connection_model"
         binding.connection_discovered_model_id = discovered.id
         binding.connection_model_capability_revision_id = capability.id
     else:
-        manifest = {"model_id": "model-v2", "model_revision": "r2"}
+        manifest = {
+            "model_id": "model-v2",
+            "model_revision": "r2",
+            "operations": {"video.generate": {"input_contracts": {"first_frame": {}}}},
+        }
         global_revision = ModelCapabilityRevision(
             id=uuid4(),
             provider_type=connection.provider_type,
@@ -201,6 +208,17 @@ def _facts(*, dynamic: bool) -> dict[str, Any]:
         "product_path": "workbench",
         "operation": "video.generate",
         "matched_input_contract": "first_frame",
+        "resolved_plan": ResolvedGenerationPlan(
+            provider_type="minimax",
+            protocol_profile="minimax_cn_v1",
+            model_id="model-v2",
+            model_revision="r1" if dynamic else "r2",
+            operation="video.generate",
+            matched_contract="first_frame",
+            reference_ids=(),
+            reference_roles=(),
+            effective_options={"duration_seconds": 5},
+        ),
         "resolved_references": [],
         "requested_options": {"duration_seconds": 5},
         "effective_options": {"duration_seconds": 5},
@@ -242,6 +260,22 @@ def test_freeze_denies_unlisted_model_and_disallowed_contract() -> None:
     facts["matched_input_contract"] = "reference_video"
     with pytest.raises(ValueError, match="product policy denies"):
         freeze_cutover_execution_identity(**facts)
+
+
+def test_freeze_requires_the_model_to_declare_the_technical_contract() -> None:
+    global_facts = _facts(dynamic=False)
+    global_model = global_facts["global_revision"]
+    global_model.manifest_json["operations"] = {"image.generate": {"input_contracts": {}}}
+    global_model.manifest_hash = hash_manifest(global_model.manifest_json)
+    with pytest.raises(ValueError, match="Global capability does not declare"):
+        freeze_cutover_execution_identity(**global_facts)
+
+    dynamic_facts = _facts(dynamic=True)
+    dynamic_capability = dynamic_facts["connection_capability"]
+    dynamic_capability.input_contracts_json = {"video.generate": {"reference_video": {}}}
+    dynamic_capability.capability_hash = hash_connection_capability(dynamic_capability)
+    with pytest.raises(ValueError, match="Dynamic capability does not declare"):
+        freeze_cutover_execution_identity(**dynamic_facts)
 
 
 @pytest.mark.asyncio
@@ -336,7 +370,11 @@ async def test_exact_recovery_uses_historical_facts_after_create_gates_change(
         protocol_profile=facts["connection"].protocol_profile,
         request_fingerprint=identity.request_fingerprint,
         provider_operation_id="remote-task",
-        resume_token={"cursor": "opaque"},
+        resume_token={
+            "provider_type": "minimax",
+            "protocol_profile": "minimax_cn_v1",
+            "remote_task_id": "remote-task",
+        },
         connection_id=identity.connection_id,
         provider_connection_revision_id=identity.connection_revision_id,
         credential_revision_id=identity.credential_revision_id,
@@ -380,6 +418,28 @@ async def test_exact_recovery_uses_historical_facts_after_create_gates_change(
         handler_registry=missing_registry,
     )
     assert result.gaps == ("exact_historical_handler_unavailable",)
+    operation.resume_token = {"cursor": "opaque"}
+    result = await preflight_recoverable_operation(
+        session,
+        operation=operation,
+        run=run,
+        workspace_id=facts["binding"].workspace_id,
+        handler_registry=facts["handler_registry"],
+    )
+    assert result.gaps == ("resume_token_invalid",)
+    operation.resume_token = {
+        "provider_type": "minimax",
+        "protocol_profile": "minimax_cn_v1",
+        "remote_task_id": "different-task",
+    }
+    result = await preflight_recoverable_operation(
+        session,
+        operation=operation,
+        run=run,
+        workspace_id=facts["binding"].workspace_id,
+        handler_registry=facts["handler_registry"],
+    )
+    assert result.gaps == ("resume_token_identity_mismatch",)
     operation.resume_token = None
     result = await preflight_recoverable_operation(
         session,
@@ -389,7 +449,22 @@ async def test_exact_recovery_uses_historical_facts_after_create_gates_change(
         handler_registry=facts["handler_registry"],
     )
     assert result.gaps == ("resume_token_missing",)
-    operation.resume_token = {"cursor": "opaque"}
+    operation.resume_token = {
+        "provider_type": "minimax",
+        "protocol_profile": "minimax_cn_v1",
+        "remote_task_id": "remote-task",
+    }
+    if dynamic:
+        facts["connection_capability"].operations_json["image.generate"] = {}
+        result = await preflight_recoverable_operation(
+            session,
+            operation=operation,
+            run=run,
+            workspace_id=facts["binding"].workspace_id,
+            handler_registry=facts["handler_registry"],
+        )
+        assert result.gaps == ("historical_connection_model_revision_mismatch",)
+        del facts["connection_capability"].operations_json["image.generate"]
     facts["policy"].allowed_options_json = {"video.generate": []}
     result = await preflight_recoverable_operation(
         session,
@@ -399,6 +474,16 @@ async def test_exact_recovery_uses_historical_facts_after_create_gates_change(
         handler_registry=facts["handler_registry"],
     )
     assert result.gaps == ("historical_policy_revision_mismatch",)
+    facts["policy"].allowed_options_json = {"video.generate": ["duration_seconds"]}
+    operation.status = "completed"
+    result = await preflight_recoverable_operation(
+        session,
+        operation=operation,
+        run=run,
+        workspace_id=facts["binding"].workspace_id,
+        handler_registry=facts["handler_registry"],
+    )
+    assert result.gaps == ("operation_not_recoverable",)
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,7 @@ from app.providers.execution_identity import (
     CutoverExecutionIdentitySnapshot,
     ExecutionIdentityReference,
     ExecutionIdentitySnapshot,
+    FrozenResolvedGenerationPlan,
     GlobalModelTargetIdentity,
     HandlerRevisionIdentity,
     PolicyRevisionIdentity,
@@ -140,6 +141,17 @@ def _cutover_identity(*, dynamic: bool) -> CutoverExecutionIdentitySnapshot:
         credential_revision_id=uuid4(),
         operation="video.generate",
         matched_input_contract="first_frame",
+        resolved_plan=FrozenResolvedGenerationPlan(
+            provider_type="provider",
+            protocol_profile="protocol",
+            model_id="remote-model-v2" if dynamic else "canonical-model",
+            model_revision="r1" if dynamic else "r2",
+            operation="video.generate",
+            matched_contract="first_frame",
+            reference_ids=(),
+            reference_roles=(),
+            effective_options={"duration_seconds": 5},
+        ),
         requested_options={"duration_seconds": 5},
         effective_options={"duration_seconds": 5},
         request_fingerprint="f" * 64,
@@ -176,3 +188,12 @@ def test_cutover_identity_rejects_operation_state_and_incomplete_revisions() -> 
         identity.model_copy(update={"transformations": [{"resumeToken": "secret"}]})
     with pytest.raises(ValidationError):
         identity.model_copy(update={"handler": {"handler_revision": 2}})
+    with pytest.raises(ValidationError, match="resolved generation plan differs"):
+        identity.model_copy(
+            update={
+                "resolved_plan": {
+                    **identity.resolved_plan.model_dump(mode="python"),
+                    "operation": "image.generate",
+                }
+            }
+        )

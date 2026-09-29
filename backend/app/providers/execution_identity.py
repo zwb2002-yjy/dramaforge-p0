@@ -177,6 +177,22 @@ class HandlerRevisionIdentity(BaseModel):
     implementation_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class FrozenResolvedGenerationPlan(BaseModel):
+    """JSON-safe snapshot of the technical match returned by the resolver."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider_type: str = Field(min_length=1)
+    protocol_profile: str = Field(min_length=1)
+    model_id: str = Field(min_length=1)
+    model_revision: str = Field(min_length=1)
+    operation: str = Field(min_length=1)
+    matched_contract: str = Field(min_length=1)
+    reference_ids: tuple[UUID, ...]
+    reference_roles: tuple[str, ...]
+    effective_options: dict[str, JsonValue]
+
+
 class CutoverExecutionIdentitySnapshot(BaseModel):
     """V7 frozen Create/recovery identity; not yet used by the current Worker.
 
@@ -198,6 +214,7 @@ class CutoverExecutionIdentitySnapshot(BaseModel):
     credential_revision_id: UUID
     operation: str = Field(min_length=1, max_length=120)
     matched_input_contract: str = Field(min_length=1, max_length=120)
+    resolved_plan: FrozenResolvedGenerationPlan
     resolved_references: list[ExecutionIdentityReference] = Field(default_factory=list)
     requested_options: dict[str, JsonValue] = Field(default_factory=dict)
     effective_options: dict[str, JsonValue] = Field(default_factory=dict)
@@ -211,8 +228,29 @@ class CutoverExecutionIdentitySnapshot(BaseModel):
             and self.target.remote_model_id != self.invoke_model_value
         ):
             raise ValueError("Dynamic target and invoke model identities differ")
+        if isinstance(self.target, ConnectionModelTargetIdentity):
+            if self.resolved_plan.model_id != self.target.remote_model_id:
+                raise ValueError("Dynamic resolved plan names another model")
+        elif (
+            self.resolved_plan.model_id != self.target.canonical_model_id
+            or self.resolved_plan.model_revision != self.target.model_revision
+        ):
+            raise ValueError("Global resolved plan names another model revision")
         _validate_safe_evidence(self.requested_options, path="requested_options")
         _validate_safe_evidence(self.effective_options, path="effective_options")
+        if (
+            self.resolved_plan.operation != self.operation
+            or self.resolved_plan.matched_contract != self.matched_input_contract
+            or self.resolved_plan.effective_options != self.effective_options
+            or list(self.resolved_plan.reference_ids)
+            != [reference.artifact_id for reference in self.resolved_references]
+            or list(self.resolved_plan.reference_roles)
+            != [reference.role for reference in self.resolved_references]
+        ):
+            raise ValueError("resolved generation plan differs from frozen request")
+        _validate_safe_evidence(
+            self.resolved_plan.effective_options, path="resolved_plan.effective_options"
+        )
         for index, transformation in enumerate(self.transformations):
             _validate_safe_evidence(transformation, path=f"transformations[{index}]")
         return self

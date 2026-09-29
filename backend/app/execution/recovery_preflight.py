@@ -17,6 +17,7 @@ from app.execution.models import NodeRun, ProviderOperation
 from app.production.policy_models import ProductPolicyRevision
 from app.production.policy_revisions import ProductPolicyContent
 from app.providers.catalog_loader import hash_manifest
+from app.providers.dynamic_capability_hash import hash_connection_capability
 from app.providers.execution_identity import (
     ConnectionModelTargetIdentity,
     CutoverExecutionIdentitySnapshot,
@@ -91,14 +92,29 @@ async def preflight_recoverable_operation(
     if project is None or project.workspace_id != workspace_id:
         return ExactRecoveryCheck(operation.id, run.id, ("operation_workspace_mismatch",))
     gaps: list[str] = []
+    if operation.status not in {
+        "created",
+        "submission_started",
+        "submitted",
+        "running",
+        "cancel_requested",
+        "unknown_submission",
+        "timed_out",
+    }:
+        gaps.append("operation_not_recoverable")
     if operation.status == "unknown_submission":
         gaps.append("unknown_submission_requires_manual_reconciliation")
-    if operation.status in {"submitted", "running", "cancel_requested"}:
-        if operation.provider_operation_id is None:
-            gaps.append("remote_operation_id_missing")
-        if not operation.resume_token:
-            gaps.append("resume_token_missing")
-    elif operation.status == "submission_started" and operation.provider_operation_id is None:
+    remote_required = operation.status in {"submitted", "running", "cancel_requested"}
+    if remote_required and operation.provider_operation_id is None:
+        gaps.append("remote_operation_id_missing")
+    if (
+        remote_required or operation.provider_operation_id is not None
+    ) and not operation.resume_token:
+        gaps.append("resume_token_missing")
+    if (
+        operation.status in {"submission_started", "timed_out"}
+        and operation.provider_operation_id is None
+    ):
         gaps.append("submission_outcome_unconfirmed")
     identity = _frozen_identity(operation, run)
     if identity is None:
@@ -120,6 +136,21 @@ async def preflight_recoverable_operation(
         or operation.protocol_profile != revision.protocol_profile
     ):
         gaps.append("operation_or_connection_revision_mismatch")
+    if operation.resume_token:
+        from app.providers.runtime import ProviderResumeToken
+
+        try:
+            token = ProviderResumeToken.model_validate(operation.resume_token)
+        except ValueError:
+            gaps.append("resume_token_invalid")
+        else:
+            if (
+                token.provider_type != operation.actual_provider
+                or token.protocol_profile != operation.protocol_profile
+                or token.remote_task_id != operation.provider_operation_id
+                or token.remote_secondary_id != operation.remote_secondary_id
+            ):
+                gaps.append("resume_token_identity_mismatch")
     credential = await session.get(EncryptedProviderCredential, identity.credential_revision_id)
     if credential is None or credential.workspace_id != workspace_id:
         gaps.append("historical_credential_revision_missing")
@@ -217,6 +248,7 @@ async def preflight_recoverable_operation(
             or capability.protocol_contract_revision_id
             != identity.protocol.protocol_contract_revision_id
             or capability.capability_hash != identity.target.connection_capability_hash
+            or capability.capability_hash != hash_connection_capability(capability)
         ):
             gaps.append("historical_connection_model_revision_mismatch")
     return ExactRecoveryCheck(operation.id, run.id, tuple(gaps))

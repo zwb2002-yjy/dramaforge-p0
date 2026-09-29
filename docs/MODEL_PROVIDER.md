@@ -43,6 +43,7 @@ Provider/Protocol/执行路径与冻结身份缺口，不输出远端任务 ID�
 精确映射尚未完成，不能拿它当 Runtime Cutover 的 Recovery Gate。
 `execution/recovery_preflight.py` 已提供单条操作的只读精确检查：三份冻结身份必须一致，
 历史 Connection/Credential、Policy、Protocol、模型能力和已部署 Handler 修订必须匹配。
+Dynamic 能力哈希会从不可变内容重算，ResumeToken 按运行时合同解析并与远端任务身份核对。
 它不检查当前 Lifecycle、Availability 或 Policy 撤销状态；尚未接入全 Owner 严格盘点
 及 Worker 恢复路径，因此目前仍不能作为 Cutover Gate。
 
@@ -109,7 +110,8 @@ Transport 合同计算，Handler revision 记录精确实现摘要；旧 revisio
 `CutoverExecutionIdentitySnapshot` 已能分别表达 Global 和 Connection 动态目标，并冻结
 Policy、Protocol、Handler、连接及请求身份。Production 的
 `freeze_cutover_execution_identity` 是只读构造器，会核对现有目标资格、Policy 内容哈希、
-协议内容哈希与已注册的精确 Handler。`revalidate_cutover_create` 可在提交标记事务中
+协议内容哈希、已注册的精确 Handler 与技术匹配得到的 `ResolvedGenerationPlan`。
+`revalidate_cutover_create` 可在提交标记事务中
 重新核对当前连接/凭证、可用性投影、生命周期和被冻结的修订身份；这两个入口还未
 接入 Dispatch、Create 或 Recovery，
 不能单独作为切换验收。

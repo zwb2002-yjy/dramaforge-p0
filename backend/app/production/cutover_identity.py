@@ -14,12 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.production.policy_models import ProductPolicyRevision, ProductPolicyState
 from app.production.policy_revisions import ProductPolicyContent
+from app.providers.capability_resolver import ResolvedGenerationPlan
 from app.providers.catalog_loader import hash_manifest
 from app.providers.cutover_target_eligibility import evaluate_cutover_binding_target
+from app.providers.dynamic_capability_hash import hash_connection_capability
 from app.providers.execution_identity import (
     ConnectionModelTargetIdentity,
     CutoverExecutionIdentitySnapshot,
     ExecutionIdentityReference,
+    FrozenResolvedGenerationPlan,
     GlobalModelTargetIdentity,
     HandlerRevisionIdentity,
     PolicyRevisionIdentity,
@@ -64,6 +67,7 @@ def freeze_cutover_execution_identity(
     product_path: str,
     operation: str,
     matched_input_contract: str,
+    resolved_plan: ResolvedGenerationPlan | FrozenResolvedGenerationPlan,
     resolved_references: list[ExecutionIdentityReference],
     requested_options: dict[str, JsonValue],
     effective_options: dict[str, JsonValue],
@@ -134,9 +138,31 @@ def freeze_cutover_execution_identity(
         operation_kind=operation,
     )
 
+    if (
+        resolved_plan.provider_type != connection.provider_type
+        or resolved_plan.protocol_profile != connection.protocol_profile
+        or resolved_plan.operation != operation
+        or resolved_plan.matched_contract != matched_input_contract
+        or resolved_plan.effective_options != effective_options
+        or list(resolved_plan.reference_ids)
+        != [reference.artifact_id for reference in resolved_references]
+        or list(resolved_plan.reference_roles)
+        != [reference.role for reference in resolved_references]
+    ):
+        raise ValueError("resolved generation plan does not match the frozen request")
+
     target: GlobalModelTargetIdentity | ConnectionModelTargetIdentity
     if eligibility.target_kind == "global_model":
         assert global_revision is not None
+        operations = global_revision.manifest_json.get("operations")
+        operation_manifest = operations.get(operation) if isinstance(operations, dict) else None
+        if (
+            resolved_plan.model_id != global_revision.canonical_model_id
+            or resolved_plan.model_revision != global_revision.model_revision
+            or not isinstance(operation_manifest, dict)
+            or matched_input_contract not in operation_manifest.get("input_contracts", {})
+        ):
+            raise ValueError("Global capability does not declare the matched contract")
         target = GlobalModelTargetIdentity(
             model_capability_revision_id=global_revision.id,
             canonical_model_id=global_revision.canonical_model_id,
@@ -145,6 +171,22 @@ def freeze_cutover_execution_identity(
         )
     else:
         assert discovered is not None and connection_capability is not None
+        dynamic_contracts = (
+            connection_capability.input_contracts_json.get(operation)
+            if isinstance(connection_capability.input_contracts_json, dict)
+            else None
+        )
+        if (
+            resolved_plan.model_id != discovered.remote_model_id
+            or resolved_plan.model_revision != connection_capability.capability_revision
+            or not isinstance(connection_capability.operations_json, dict)
+            or operation not in connection_capability.operations_json
+            or not isinstance(dynamic_contracts, dict)
+            or matched_input_contract not in dynamic_contracts
+            or connection_capability.capability_hash
+            != hash_connection_capability(connection_capability)
+        ):
+            raise ValueError("Dynamic capability does not declare the matched contract")
         target = ConnectionModelTargetIdentity(
             connection_discovered_model_id=discovered.id,
             connection_model_capability_revision_id=connection_capability.id,
@@ -179,6 +221,9 @@ def freeze_cutover_execution_identity(
         credential_revision_id=current_connection_revision.credential_revision_id,
         operation=operation,
         matched_input_contract=matched_input_contract,
+        resolved_plan=FrozenResolvedGenerationPlan.model_validate(
+            resolved_plan.model_dump(mode="json")
+        ),
         resolved_references=resolved_references,
         requested_options=requested_options,
         effective_options=effective_options,
@@ -323,6 +368,7 @@ async def revalidate_cutover_create(
         product_path=policy.product_path,
         operation=frozen_identity.operation,
         matched_input_contract=frozen_identity.matched_input_contract,
+        resolved_plan=frozen_identity.resolved_plan,
         resolved_references=frozen_identity.resolved_references,
         requested_options=frozen_identity.requested_options,
         effective_options=frozen_identity.effective_options,
