@@ -41,6 +41,10 @@ ExecutionIdentity 和 Recovery 的新执行链尚未切换。旧目录和旧列�
 Provider/Protocol/执行路径与冻结身份缺口，不输出远端任务 ID、ResumeToken 或请求内容。
 这是 Early Inventory；`exact_gate_ready=false` 固定表示历史 Handler 和 Protocol 的
 精确映射尚未完成，不能拿它当 Runtime Cutover 的 Recovery Gate。
+`execution/recovery_preflight.py` 已提供单条操作的只读精确检查：三份冻结身份必须一致，
+历史 Connection/Credential、Policy、Protocol、模型能力和已部署 Handler 修订必须匹配。
+它不检查当前 Lifecycle、Availability 或 Policy 撤销状态；尚未接入全 Owner 严格盘点
+及 Worker 恢复路径，因此目前仍不能作为 Cutover Gate。
 
 目录检查的模型级证据按已证明的列表范围解释：Agnes 当前只使用精确 ID 的正向证据，
 尚未证明列表覆盖全部媒体模型，缺失视为 `not_supported`；

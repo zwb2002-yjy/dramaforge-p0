@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
+from app.execution.models import NodeRun, ProviderOperation
+from app.execution.recovery_preflight import preflight_recoverable_operation
 from app.production.cutover_identity import (
     freeze_cutover_execution_identity,
     revalidate_cutover_create,
@@ -31,6 +33,7 @@ from app.providers.models import (
     ProviderConnectionRevision,
     ProviderModelBinding,
 )
+from app.security.models import EncryptedProviderCredential
 
 
 def _facts(*, dynamic: bool) -> dict[str, Any]:
@@ -307,3 +310,103 @@ async def test_create_revalidation_rejects_a_rotated_connection() -> None:
             handler_registry=facts["handler_registry"],
         )
     assert session.scalar.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dynamic", [False, True])
+async def test_exact_recovery_uses_historical_facts_after_create_gates_change(
+    dynamic: bool,
+) -> None:
+    facts = _facts(dynamic=dynamic)
+    identity = freeze_cutover_execution_identity(**facts)
+    encoded = identity.model_dump(mode="json")
+    run = NodeRun(id=uuid4(), input_snapshot={"cutover_execution_identity": encoded})
+    operation = ProviderOperation(
+        id=uuid4(),
+        node_run_id=run.id,
+        status="running",
+        operation_kind=identity.operation,
+        actual_provider="minimax",
+        actual_model=identity.invoke_model_value,
+        protocol_profile=facts["connection"].protocol_profile,
+        request_fingerprint=identity.request_fingerprint,
+        provider_operation_id="remote-task",
+        resume_token={"cursor": "opaque"},
+        connection_id=identity.connection_id,
+        provider_connection_revision_id=identity.connection_revision_id,
+        credential_revision_id=identity.credential_revision_id,
+        model_binding_id=identity.binding_id,
+        selection_plan={"cutover_execution_identity": encoded},
+        request_summary={"cutover_execution_identity": encoded},
+    )
+    facts["policy_state"].status = "revoked"
+    facts["availability"].effective_status = "not_visible"
+    if facts["publication"] is not None:
+        facts["publication"].lifecycle = "retired"
+    rows = {
+        ProviderConnectionRevision: facts["current_connection_revision"],
+        EncryptedProviderCredential: SimpleNamespace(workspace_id=facts["binding"].workspace_id),
+        ProductPolicyRevision: facts["policy"],
+        ProtocolContractRevision: facts["protocol"],
+        RuntimeHandlerRevision: facts["handler"],
+        ModelCapabilityRevision: facts["global_revision"],
+        ConnectionDiscoveredModel: facts["discovered"],
+        ConnectionModelCapabilityRevision: facts["connection_capability"],
+    }
+    session = Mock()
+    session.get = AsyncMock(side_effect=lambda model, _id: rows[model])
+    result = await preflight_recoverable_operation(
+        session,
+        operation=operation,
+        run=run,
+        workspace_id=facts["binding"].workspace_id,
+        handler_registry=facts["handler_registry"],
+    )
+    assert result.ready
+    assert result.to_json_dict()["gaps"] == []
+    assert session.get.await_count == (7 if dynamic else 6)
+    missing_registry = ExactHandlerRegistry()
+    result = await preflight_recoverable_operation(
+        session,
+        operation=operation,
+        run=run,
+        workspace_id=facts["binding"].workspace_id,
+        handler_registry=missing_registry,
+    )
+    assert result.gaps == ("exact_historical_handler_unavailable",)
+    operation.resume_token = None
+    result = await preflight_recoverable_operation(
+        session,
+        operation=operation,
+        run=run,
+        workspace_id=facts["binding"].workspace_id,
+        handler_registry=facts["handler_registry"],
+    )
+    assert result.gaps == ("resume_token_missing",)
+
+
+@pytest.mark.asyncio
+async def test_exact_recovery_rejects_inconsistent_identity_copies() -> None:
+    facts = _facts(dynamic=False)
+    identity = freeze_cutover_execution_identity(**facts)
+    encoded = identity.model_dump(mode="json")
+    run = NodeRun(id=uuid4(), input_snapshot={"cutover_execution_identity": encoded})
+    operation = ProviderOperation(
+        id=uuid4(),
+        node_run_id=run.id,
+        status="unknown_submission",
+        selection_plan={"cutover_execution_identity": encoded},
+        request_summary={"cutover_execution_identity": {**encoded, "invoke_model_value": "other"}},
+    )
+    session = Mock()
+    session.get = AsyncMock()
+    result = await preflight_recoverable_operation(
+        session,
+        operation=operation,
+        run=run,
+        workspace_id=facts["binding"].workspace_id,
+        handler_registry=facts["handler_registry"],
+    )
+    assert "exact_execution_identity_missing_or_mismatched" in result.gaps
+    assert "unknown_submission_requires_manual_reconciliation" in result.gaps
+    session.get.assert_not_awaited()
