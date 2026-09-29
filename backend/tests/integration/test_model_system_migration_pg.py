@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -49,9 +50,7 @@ pytestmark = pytest.mark.skipif(
 
 async def _admin() -> asyncpg.Connection:
     host, port = env_target()
-    return await asyncpg.connect(
-        f"postgresql://{DB_USER}:{DB_PASSWORD}@{host}:{port}/postgres"
-    )
+    return await asyncpg.connect(f"postgresql://{DB_USER}:{DB_PASSWORD}@{host}:{port}/postgres")
 
 
 def _migrate(dbname: str, command: str, target: str) -> None:
@@ -131,8 +130,10 @@ def _seed_bound_model(dbname: str) -> dict[str, str]:
                 "'minimax_cn_v1',:credential,1,true,'verified',:owner,:owner)"
             ),
             {
-                "id": ids["connection"], "workspace": ids["workspace"],
-                "credential": ids["credential"], "owner": ids["user"],
+                "id": ids["connection"],
+                "workspace": ids["workspace"],
+                "credential": ids["credential"],
+                "owner": ids["user"],
             },
         )
         connection.execute(
@@ -143,7 +144,8 @@ def _seed_bound_model(dbname: str) -> dict[str, str]:
                 "'minimax_cn_v1','https://example.invalid',:credential)"
             ),
             {
-                "id": ids["revision"], "connection": ids["connection"],
+                "id": ids["revision"],
+                "connection": ids["connection"],
                 "credential": ids["credential"],
             },
         )
@@ -159,9 +161,12 @@ def _seed_bound_model(dbname: str) -> dict[str, str]:
                 "'{}'::json,:owner,:owner)"
             ),
             {
-                "id": ids["binding"], "workspace": ids["workspace"],
-                "connection": ids["connection"], "catalog": ids["catalog"],
-                "hash": catalog.contract_manifest_hash, "owner": ids["user"],
+                "id": ids["binding"],
+                "workspace": ids["workspace"],
+                "connection": ids["connection"],
+                "catalog": ids["catalog"],
+                "hash": catalog.contract_manifest_hash,
+                "owner": ids["user"],
             },
         )
         connection.execute(
@@ -172,8 +177,11 @@ def _seed_bound_model(dbname: str) -> dict[str, str]:
                 "VALUES (:id,:project,:workspace,'video',:binding,'explicit_binding','none',:owner)"
             ),
             {
-                "id": ids["project_binding"], "project": ids["project"],
-                "workspace": ids["workspace"], "binding": ids["binding"], "owner": ids["user"],
+                "id": ids["project_binding"],
+                "project": ids["project"],
+                "workspace": ids["workspace"],
+                "binding": ids["binding"],
+                "owner": ids["user"],
             },
         )
     engine.dispose()
@@ -204,10 +212,17 @@ async def test_migration_a_preserves_binding_and_requires_new_positive_evidence(
             assert row.binding_target_kind == "global_model"
             assert str(row.model_capability_revision_id) == ids["catalog"]
             assert row.canonical_model_id == "MiniMax-H3"
-            assert str(connection.execute(
-                text("SELECT model_binding_id FROM project_provider_bindings WHERE id = :id"),
-                {"id": ids["project_binding"]},
-            ).scalar_one()) == ids["binding"]
+            assert (
+                str(
+                    connection.execute(
+                        text(
+                            "SELECT model_binding_id FROM project_provider_bindings WHERE id = :id"
+                        ),
+                        {"id": ids["project_binding"]},
+                    ).scalar_one()
+                )
+                == ids["binding"]
+            )
             availability_count = connection.execute(
                 text("SELECT count(*) FROM provider_model_availability")
             ).scalar_one()
@@ -225,13 +240,16 @@ async def test_migration_a_preserves_binding_and_requires_new_positive_evidence(
             ).one()
             assert "lifecycle" not in manifest.manifest_json
             assert manifest.implementation_status == "manifest_mapped"
-            assert connection.execute(
-                text(
-                    "SELECT lifecycle FROM model_publication_states "
-                    "WHERE model_capability_revision_id = :id"
-                ),
-                {"id": ids["catalog"]},
-            ).scalar_one() == "unknown"
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT lifecycle FROM model_publication_states "
+                        "WHERE model_capability_revision_id = :id"
+                    ),
+                    {"id": ids["catalog"]},
+                ).scalar_one()
+                == "unknown"
+            )
             for table in (
                 "connection_discovered_models",
                 "connection_model_capability_revisions",
@@ -255,11 +273,97 @@ async def test_migration_a_preserves_binding_and_requires_new_positive_evidence(
         _migrate(dbname, "upgrade", alembic_head())
         engine = create_engine(_sync_url(dbname))
         with engine.connect() as connection:
-            assert str(connection.execute(
-                text("SELECT model_binding_id FROM project_provider_bindings WHERE id = :id"),
-                {"id": ids["project_binding"]},
-            ).scalar_one()) == ids["binding"]
+            assert (
+                str(
+                    connection.execute(
+                        text(
+                            "SELECT model_binding_id FROM project_provider_bindings WHERE id = :id"
+                        ),
+                        {"id": ids["project_binding"]},
+                    ).scalar_one()
+                )
+                == ids["binding"]
+            )
         engine.dispose()
     finally:
         await admin.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
+        await admin.close()
+
+
+@pytest.mark.asyncio
+async def test_all_owner_binding_gate_covers_every_workspace_and_rejects_rls_role() -> None:
+    dbname = f"dramaforge_binding_gate_{uuid4().hex[:10]}"
+    role = f"cutover_report_test_{uuid4().hex[:10]}"
+    admin = await _admin()
+    try:
+        await admin.execute(f'CREATE DATABASE "{dbname}"')
+        _migrate(dbname, "upgrade", alembic_head())
+        ids = _seed_bound_model(dbname)
+        engine = create_engine(_sync_url(dbname))
+        other_owner_id, other_workspace_id = str(uuid4()), str(uuid4())
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users (id,email,display_name,password_hash) "
+                    "VALUES (:id,:email,'Other Owner','hash')"
+                ),
+                {
+                    "id": other_owner_id,
+                    "email": f"cutover-other-{uuid4().hex}@example.invalid",
+                },
+            )
+            connection.execute(
+                text("INSERT INTO workspaces (id,owner_user_id,name) VALUES (:id,:owner,'Other')"),
+                {"id": other_workspace_id, "owner": other_owner_id},
+            )
+        engine.dispose()
+
+        env = os.environ.copy()
+        env["DATABASE_URL"] = _async_url(dbname)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(BACKEND.parent / "scripts" / "report_model_binding_cutover.py"),
+                "--all-owners",
+                "--strict",
+            ],
+            cwd=BACKEND.parent,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["coverage"] == "all_owners"
+        assert payload["owner_count"] == 2
+        assert payload["workspace_count"] == 2
+        assert payload["binding_count"] == 1
+        assert payload["enabled_unresolved_count"] == 1
+        assert payload["enabled_blocked_count"] == 1
+        assert {row["owner_id"] for row in payload["owners"]} == {ids["user"], other_owner_id}
+
+        await admin.execute(f"CREATE ROLE \"{role}\" LOGIN PASSWORD 'test-only-password'")
+        await admin.execute(f'GRANT CONNECT ON DATABASE "{dbname}" TO "{role}"')
+        host, port = env_target()
+        env["DATABASE_URL"] = (
+            f"postgresql+asyncpg://{role}:test-only-password@{host}:{port}/{dbname}"
+        )
+        denied = subprocess.run(
+            [
+                sys.executable,
+                str(BACKEND.parent / "scripts" / "report_model_binding_cutover.py"),
+                "--all-owners",
+            ],
+            cwd=BACKEND.parent,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert denied.returncode != 0
+        assert "requires a superuser or BYPASSRLS maintenance role" in denied.stderr
+    finally:
+        await admin.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
+        await admin.execute(f'DROP ROLE IF EXISTS "{role}"')
         await admin.close()

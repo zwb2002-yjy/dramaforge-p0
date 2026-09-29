@@ -23,6 +23,11 @@ ExecutionIdentity 和 Recovery 的新执行链尚未切换。旧目录和旧列�
 及其工作空间均须覆盖，
 `enabled_unresolved_count` 或 `enabled_blocked_count` 非零都不能当作 Cutover 通过。
 该报告不运行 Provider 验证，也不解密或输出凭证。
+正式全库盘点使用 `--all-owners --strict`，要求 PostgreSQL superuser 或具备
+`BYPASSRLS` 且有只读表权限的维护账号；普通应用账号会明确失败。它在单个只读
+一致性快照内枚举所有 Owner 工作空间，再逐工作空间分类，输出 `coverage=all_owners`
+及汇总阻塞数。零工作空间、任一 enabled Binding 未解析或阻塞都会使严格模式失败。
+这只是分类与 Availability 当前投影的只读门禁，不替代现场重新验证和 Recovery Gate。
 
 `scripts/report_model_recovery_inventory.py --workspace-id <UUID> --owner-id <UUID>`
 按同一 Owner 上下文只读盘点可恢复/需人工核对的 ProviderOperation，输出候选
