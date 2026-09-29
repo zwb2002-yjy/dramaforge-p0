@@ -387,6 +387,54 @@ async def test_model_and_availability_history_rejects_mutation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_protocol_and_handler_revisions_are_separate_immutable_history() -> None:
+    dbname = f"dramaforge_protocol_history_{uuid4().hex[:10]}"
+    admin = await _admin()
+    try:
+        await admin.execute(f'CREATE DATABASE "{dbname}"')
+        _migrate(dbname, "upgrade", alembic_head())
+        protocol_id, protocol_family_id = str(uuid4()), str(uuid4())
+        handler_id, handler_family_id = str(uuid4()), str(uuid4())
+        engine = create_engine(_sync_url(dbname))
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO protocol_contract_revisions "
+                    "(id,protocol_contract_id,protocol_revision,protocol_hash,"
+                    "protocol_profile,contract_json) "
+                    "VALUES (:id,:family,1,:hash,'minimax_cn_v1','{}'::json)"
+                ),
+                {"id": protocol_id, "family": protocol_family_id, "hash": "a" * 64},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO runtime_handler_revisions "
+                    "(id,runtime_handler_id,handler_revision,handler_key,implementation_digest) "
+                    "VALUES (:id,:family,1,'minimax-video-r1',:digest)"
+                ),
+                {"id": handler_id, "family": handler_family_id, "digest": "b" * 64},
+            )
+        for table, row_id, update in (
+            ("protocol_contract_revisions", protocol_id, "protocol_hash = :changed"),
+            ("runtime_handler_revisions", handler_id, "implementation_digest = :changed"),
+        ):
+            with (
+                pytest.raises(DatabaseError, match="history is immutable"),
+                engine.begin() as connection,
+            ):
+                connection.execute(
+                    text(f"UPDATE {table} SET {update} WHERE id = :id"),
+                    {"id": row_id, "changed": "c" * 64},
+                )
+        engine.dispose()
+        _migrate(dbname, "downgrade", "20260929_0076")
+        _migrate(dbname, "upgrade", alembic_head())
+    finally:
+        await admin.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
+        await admin.close()
+
+
+@pytest.mark.asyncio
 async def test_all_owner_binding_gate_covers_every_workspace_and_rejects_rls_role() -> None:
     dbname = f"dramaforge_binding_gate_{uuid4().hex[:10]}"
     role = f"cutover_report_test_{uuid4().hex[:10]}"

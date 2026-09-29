@@ -16,6 +16,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     UniqueConstraint,
     func,
@@ -96,6 +97,49 @@ class ModelPublicationEvent(Base):
     )
 
 
+class ProtocolContractRevision(Base):
+    """Immutable wire protocol contract; separate from concrete model truth."""
+
+    __tablename__ = "protocol_contract_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "protocol_contract_id", "protocol_revision", name="uq_protocol_contract_revision"
+        ),
+        CheckConstraint("protocol_revision > 0", name="ck_protocol_contract_revision_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    protocol_contract_id: Mapped[UUID] = mapped_column(nullable=False)
+    protocol_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    protocol_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
+    contract_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class RuntimeHandlerRevision(Base):
+    """An exact deployed handler identity, including its implementation digest."""
+
+    __tablename__ = "runtime_handler_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "runtime_handler_id", "handler_revision", name="uq_runtime_handler_revision"
+        ),
+        CheckConstraint("handler_revision > 0", name="ck_runtime_handler_revision_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    runtime_handler_id: Mapped[UUID] = mapped_column(nullable=False)
+    handler_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    handler_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    implementation_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ConnectionDiscoveredModel(Base):
     __tablename__ = "connection_discovered_models"
     __table_args__ = (
@@ -121,7 +165,9 @@ class ConnectionDiscoveredModel(Base):
         ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"), nullable=False
     )
     remote_model_id: Mapped[str] = mapped_column(String(240), nullable=False)
-    protocol_contract_revision_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    protocol_contract_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("protocol_contract_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
     discovered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -153,7 +199,9 @@ class ConnectionModelCapabilityRevision(Base):
     operations_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     input_contracts_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     parameter_constraints_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    protocol_contract_revision_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    protocol_contract_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("protocol_contract_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
     evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     implementation_status: Mapped[str] = mapped_column(
         String(24), nullable=False, default="not_implemented"
@@ -230,9 +278,7 @@ class ProviderModelAvailability(Base):
         ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"), nullable=False
     )
     remote_model_id: Mapped[str] = mapped_column(String(240), nullable=False)
-    effective_status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="not_checked"
-    )
+    effective_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_checked")
     positive_evidence_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("provider_availability_evidence.id", ondelete="RESTRICT"), nullable=True
     )
