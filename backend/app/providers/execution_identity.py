@@ -26,8 +26,11 @@ _SECRET_KEY_FRAGMENTS: Final[tuple[str, ...]] = (
     "download_url",
     "grant",
     "remote_task_id",
+    "remotetaskid",
     "provider_operation_id",
+    "provideroperationid",
     "resume_token",
+    "resumetoken",
 )
 
 

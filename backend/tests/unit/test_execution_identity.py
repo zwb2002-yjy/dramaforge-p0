@@ -68,7 +68,17 @@ def test_execution_identity_rejects_secret_bearing_evidence_keys() -> None:
         _identity().model_copy(update={"effective_options": {"api_key": "must-not-persist"}})
 
 
-@pytest.mark.parametrize("key", ["remote_task_id", "provider_operation_id", "resume_token"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "remote_task_id",
+        "remoteTaskId",
+        "provider_operation_id",
+        "providerOperationId",
+        "resume_token",
+        "resumeToken",
+    ],
+)
 def test_execution_identity_rejects_provider_operation_state(key: str) -> None:
     with pytest.raises(ValidationError, match="forbidden evidence key"):
         _identity().model_copy(update={"translation_report": {"nested": {key: "operation-only"}}})
