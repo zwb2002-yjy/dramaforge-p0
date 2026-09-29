@@ -94,6 +94,11 @@ Transport 合同计算，Handler revision 记录精确实现摘要；旧 revisio
 精确 Handler 恢复能力。
 `ExactHandlerRegistry` 只接受已注册的完整 `runtime_handler_id`、revision、key 与
 实现摘要；缺失旧版本时抛错，不从当前版本替代。Registry 尚未接入 Worker 的恢复路径。
+维护侧 `providers/model_publication.py` 可在提供来源快照 ID 后发布新的 Global 能力
+revision；它保留 Manifest 原始字段（只拆出生命周期/目录来源），新发布状态始终先是
+`unknown`，不从文件目录或旧账号验证结果自动推断 active/visible。
+独立的生命周期变更需要有来源快照的 revision 和明确原因，并追加 PublicationEvent；
+该变更不修改 Manifest hash，也不能替代账号可用性复验。
 
 新 revision 可在同一 Manifest 的 operation 下声明 `input_contracts`、素材元数据界限、
 输出参数和来源证据。`CapabilityResolver` 以实际输入匹配唯一合同，再应用产品开放策略；
