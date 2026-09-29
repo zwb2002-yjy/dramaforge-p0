@@ -87,6 +87,12 @@ Manifest 内容和 hash 不变，历史 Alembic 快照仍独立保存。
 新 Binding 只可选择 active；已验证、供应商仍可用的既有 Binding 可在 legacy 或
 deprecated 状态继续执行。retired 状态阻止新的 Provider 提交。
 
+Cutover 扩展已增加独立的 `ProtocolContractRevision` 与 `RuntimeHandlerRevision`。
+维护侧通过 `providers/protocol_revisions.py` 发布新 revision，协议 hash 由规范化的
+Transport 合同计算，Handler revision 记录精确实现摘要；旧 revision 保持不变。
+现有 Dispatch / Recovery 尚未冻结或选择这些 revision，不能把存储层视为已完成的
+精确 Handler 恢复能力。
+
 新 revision 可在同一 Manifest 的 operation 下声明 `input_contracts`、素材元数据界限、
 输出参数和来源证据。`CapabilityResolver` 以实际输入匹配唯一合同，再应用产品开放策略；
 V3 Validator 也从同一 Manifest 自动匹配新合同。旧 revision 未声明合同，继续使用冻结的
