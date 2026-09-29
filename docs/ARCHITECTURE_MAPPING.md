@@ -5,6 +5,7 @@
 Production 层已增加不可变 ProductPolicyRevision 与独立撤销 State/Event 存储，
 模型能力 revision、发现事实、发布事件和可用性证据已由数据库触发器保护为不可变；
 ProtocolContractRevision 与 RuntimeHandlerRevision 已有独立、不可变存储，
+Provider 层有按精确 revision 与实现摘要查找的 Handler Registry，
 但尚未由 Dispatch 选取或冻结。现有 runtime 仍在旧准入链上。Cutover 前还必须完成
 Binding 分类、Provider 可用性复验、Policy/Protocol/Handler/ExecutionIdentity
 运行时冻结及 Recovery exact gate；

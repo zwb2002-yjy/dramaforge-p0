@@ -92,6 +92,8 @@ Cutover 扩展已增加独立的 `ProtocolContractRevision` 与 `RuntimeHandlerR
 Transport 合同计算，Handler revision 记录精确实现摘要；旧 revision 保持不变。
 现有 Dispatch / Recovery 尚未冻结或选择这些 revision，不能把存储层视为已完成的
 精确 Handler 恢复能力。
+`ExactHandlerRegistry` 只接受已注册的完整 `runtime_handler_id`、revision、key 与
+实现摘要；缺失旧版本时抛错，不从当前版本替代。Registry 尚未接入 Worker 的恢复路径。
 
 新 revision 可在同一 Manifest 的 operation 下声明 `input_contracts`、素材元数据界限、
 输出参数和来源证据。`CapabilityResolver` 以实际输入匹配唯一合同，再应用产品开放策略；
