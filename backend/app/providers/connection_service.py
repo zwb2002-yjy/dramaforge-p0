@@ -18,6 +18,11 @@ from app.access.models import Project, User
 from app.config import Settings, get_settings
 from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
+from app.providers.availability_projection import (
+    AvailabilityStatus,
+    ModelAvailabilityObservation,
+    record_model_availability,
+)
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.models import (
@@ -671,6 +676,7 @@ class ProviderConnectionService:
         error_code: str | None = None
         evidence_model_id: str | None = None
         listed_model_ids: set[str] = set()
+        catalog_received = False
         if capability == "auth_models":
             try:
                 async with httpx.AsyncClient(timeout=30.0) as http:
@@ -687,18 +693,19 @@ class ProviderConnectionService:
                         payload = response.json()
                     except ValueError:
                         payload = None
-                    raw_models = (
-                        payload.get("data") or payload.get("models")
-                        if isinstance(payload, dict)
-                        else None
-                    )
+                    raw_models = payload.get("data") if isinstance(payload, dict) else None
+                    if raw_models is None and isinstance(payload, dict):
+                        raw_models = payload.get("models")
                     if isinstance(raw_models, list):
-                        listed_model_ids = {
+                        model_ids = [
                             str(item.get("id") or item.get("model") or "").strip()
-                            for item in raw_models
                             if isinstance(item, dict)
-                        }
-                        listed_model_ids.discard("")
+                            else ""
+                            for item in raw_models
+                        ]
+                        catalog_received = all(model_ids)
+                        if catalog_received:
+                            listed_model_ids = set(model_ids)
                     if not listed_model_ids:
                         status = "failed"
                         error_code = "PROVIDER_MODELS_RESPONSE_INVALID"
@@ -844,8 +851,80 @@ class ProviderConnectionService:
             listed_model_ids=listed_model_ids,
             actor=actor,
         )
+        if capability == "auth_models":
+            await self._record_model_list_availability(
+                workspace_id=workspace_id,
+                connection=connection,
+                plugin=plugin,
+                revision=probe_revision,
+                listed_model_ids=listed_model_ids,
+                catalog_received=catalog_received,
+                http_status=http_status,
+                error_code=error_code,
+            )
         await self._session.flush()
         return evidence
+
+    async def _record_model_list_availability(
+        self,
+        *,
+        workspace_id: UUID,
+        connection: ProviderConnection,
+        plugin: ProviderPlugin,
+        revision: ProviderConnectionRevision,
+        listed_model_ids: set[str],
+        catalog_received: bool,
+        http_status: int | None,
+        error_code: str | None,
+    ) -> None:
+        """Project an explicit user-run catalog check for each exact bound model."""
+        bindings = await self._session.scalars(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.connection_id == connection.id,
+                ProviderModelBinding.invoke_model_value.is_not(None),
+            )
+        )
+        for binding in bindings:
+            remote_model_id = binding.invoke_model_value
+            if remote_model_id is None:
+                continue
+            availability: AvailabilityStatus
+            if http_status == 401:
+                availability = "auth_failed"
+            elif http_status == 403:
+                availability = "forbidden"
+            elif http_status == 404:
+                availability = "not_supported"
+            elif http_status is not None and http_status < 400 and catalog_received:
+                if plugin.availability_list_scope == "none":
+                    availability = "not_supported"
+                elif remote_model_id in listed_model_ids:
+                    availability = "visible"
+                elif plugin.availability_list_scope == "complete":
+                    availability = "not_visible"
+                else:
+                    availability = "not_supported"
+            else:
+                availability = "temporary_error"
+            await record_model_availability(
+                self._session,
+                ModelAvailabilityObservation(
+                    workspace_id=workspace_id,
+                    connection_id=connection.id,
+                    connection_revision_id=revision.id,
+                    credential_revision_id=revision.credential_revision_id,
+                    remote_model_id=remote_model_id,
+                    verifier_kind="model_list",
+                    status=availability,
+                    listed_model_ids=(
+                        tuple(sorted(listed_model_ids))
+                        if availability in {"visible", "not_visible"}
+                        else None
+                    ),
+                    error_code=error_code,
+                ),
+            )
 
     async def _apply_probe_outcome(
         self,

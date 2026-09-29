@@ -2,8 +2,8 @@
 
 Status: current
 Date: 2026-09-17
-Alembic head: 20260917_0072
-Revisions: 72
+Alembic head: 20260929_0074
+Revisions: 74
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Canonical relational graph
@@ -51,6 +51,7 @@ projects → event_log / outbox_events / outbox_dead_letters
 | Security | encrypted_provider_credentials, key_rotation_audits | app/security/models.py |
 | Provider identity | provider_connections, provider_connection_revisions, provider_capability_evidence, provider_model_bindings, project_provider_bindings, provider_quality_evidence, artifact_reference_tokens | app/providers/models.py |
 | Provider catalog/profile | provider_model_catalog_entries, production_model_profiles | app/providers/catalog_models.py, app/providers/model_profiles/orm.py |
+| Model cutover expand (not runtime authority yet) | model_capability_revisions, model_publication_states/events, connection_discovered_models, connection_model_capability_revisions, provider_availability_evidence, provider_model_availability | app/providers/model_system_models.py |
 
 A second, private schema `director_runtime_checkpoints` (LangGraph checkpoint
 tables `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`,
@@ -105,6 +106,8 @@ Migration 20260902_0051 removes:
 | 20260910_0065 | Director turn engine binding (`engine_version`, `state_schema_version`, `runtime_execution_id`, `runtime_revision`) and `director_runtime_controls`, `director_runtime_wakeups`, `director_runtime_signal_claims`. |
 | 20260917_0071 | Remove the retired `face_review` node type and unused `export_format` / `export_status` PostgreSQL enum types; `project_stage` now reuses the shared ORM enum definition. |
 | 20260917_0072 | Add a SECURITY DEFINER outbox metrics query for process-wide pending count and oldest pending age. |
+| 20260919_0073 | Add bounded keyset discovery for persisted Provider recovery. |
+| 20260929_0074 | Migration A expand: preserve ProviderModelBinding IDs and ProjectProviderBinding references; attach exact Global targets where the old catalog row maps, add connection model and availability structures, and leave unproved availability unchecked. Runtime cutover and old-column cleanup are separate gates. |
 | 20260910_0066 | Private `director_runtime_checkpoints` schema and its role. |
 | 20260916_0070 | Canonical Asset/AssetVersion lifecycle constraints, current Formal pointers, and one-time migration of legacy `metadata.tags` into `asset_tags` / `asset_tag_links`. |
 
@@ -114,7 +117,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20260917_0072.
+- Alembic has one head: 20260929_0074.
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.

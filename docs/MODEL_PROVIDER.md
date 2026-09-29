@@ -3,6 +3,42 @@
 Status: current（入口见 [CURRENT.md](CURRENT.md)）；
 Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/0005-provider-plugin-driven-configuration.md)。
 
+## 模型系统 Cutover 的当前阶段
+
+Migration A 已扩展版本化 Global 模型、Connection 动态模型和精确修订的 Availability
+证据/投影，并在原有 `ProviderModelBinding` 上增加 target identity。能由现有官方目录行
+精确映射的绑定保留原 ID 与项目引用；未映射绑定保持 unresolved。历史
+`account_verified=true` 只作旧系统提示，不能回填 `visible`。用户显式执行不付费
+`auth_models` 后，模型列表按当前连接、凭证修订和精确 remote model ID 写入新证据；
+短时错误不撤销同修订的正向投影，明确负向结果仍阻止将来的新 Create。
+当前生产 Create 仍使用既有准入路径；Global/Dynamic target、Policy、Protocol/Handler、
+ExecutionIdentity 和 Recovery 的新执行链尚未切换。旧目录和旧列暂留作回滚兼容，
+不能把 Migration A 误报为 Runtime Cutover 完成。
+旧目录的 mutable lifecycle 也未直接升级成新发布状态；未完成官方来源复核时为
+`unknown`，不得据此开放新绑定。
+
+当前可用 `scripts/report_model_binding_cutover.py --all-workspaces --owner-id <UUID>`
+在该 Owner 的全部工作空间生成只读 Binding 分类报告；`--strict` 在存在 enabled
+阻塞绑定时返回退出码 2。也可用 `--workspace-id <UUID>` 单独盘点。每个 Owner
+及其工作空间均须覆盖，
+`enabled_unresolved_count` 或 `enabled_blocked_count` 非零都不能当作 Cutover 通过。
+该报告不运行 Provider 验证，也不解密或输出凭证。
+
+`scripts/report_model_recovery_inventory.py --workspace-id <UUID> --owner-id <UUID>`
+按同一 Owner 上下文只读盘点可恢复/需人工核对的 ProviderOperation，输出候选
+Provider/Protocol/执行路径与冻结身份缺口，不输出远端任务 ID、ResumeToken 或请求内容。
+这是 Early Inventory；`exact_gate_ready=false` 固定表示历史 Handler 和 Protocol 的
+精确映射尚未完成，不能拿它当 Runtime Cutover 的 Recovery Gate。
+
+目录检查的模型级证据按已证明的列表范围解释：Agnes 当前只使用精确 ID 的正向证据，
+尚未证明列表覆盖全部媒体模型，缺失视为 `not_supported`；
+MiniMax 官方 [`GET /v1/models`](https://platform.minimax.io/docs/api-reference/models/openai/list-models)
+明确属于 OpenAI 兼容模型列表，因此精确 ID 出现可作正向证据，缺失不能断言媒体模型
+不可用；火山方舟目前没有已证实可用 BYOK Bearer Key 调用的完整媒体模型目录，
+其管理面 [`ListModelActivations`](https://docs.volcengine.com/docs/ark/list-model-activations-api?lang=en)
+要求 Access Key 鉴权，现有 `/models` TODO 不产生 `visible`。这两种未证实情形为
+`not_supported`，仍阻止新的 Provider Create。
+
 ## Model Capability / Prompt Compiler 详细指南
 
 [逐模型能力与编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) 维护当前

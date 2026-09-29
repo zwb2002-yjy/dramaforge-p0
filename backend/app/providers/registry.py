@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from app.config import Settings
 from app.providers.adapter import ModelAdapter
@@ -54,6 +54,9 @@ class ProviderPlugin:
     image_i2i_probe_transport: str = "bytes"
     # Path suffix (on default_base_url) used by the auth_models capability probe.
     model_list_path: str = "/v1/models"
+    # Whether a successful list is complete for this plugin's media models.
+    # A positive-only list can prove a present ID, but omission is inconclusive.
+    availability_list_scope: Literal["none", "positive_only", "complete"] = "none"
     client_factory: ClientFactory | None = None
     # Versioned capability manifests shipped with the plugin (current seed).
     catalog_manifests: tuple[dict[str, Any], ...] = ()
@@ -152,6 +155,9 @@ def _register_defaults() -> None:
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
             model_list_path="/v1/models",
+            # Completeness for every media model is not established by the
+            # catalog endpoint. Only an exact returned ID proves visibility.
+            availability_list_scope="positive_only",
             client_factory=_agnes_hub_client,
             catalog_manifests=tuple(seed_manifests_for(provider_type="agnes")),
             runtime_factory=_agnes_runtime_factory,
@@ -182,6 +188,7 @@ def _register_defaults() -> None:
             paid_capabilities=frozenset({"image_i2i", "video_i2v"}),
             image_i2i_probe_transport="public_url",
             model_list_path="/v1/models",
+            availability_list_scope="positive_only",
             client_factory=_minimax_hub_client,
             catalog_manifests=tuple(seed_manifests_for(provider_type="minimax")),
             runtime_factory=_minimax_runtime_factory,

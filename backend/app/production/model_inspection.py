@@ -146,13 +146,16 @@ class ModelInspectionService:
             raise NotFoundError("shot not found")
         return shot
 
-    async def _catalog(self, entry_id: UUID | None) -> ModelCapabilityManifest:
+    async def _catalog(self, entry_id: UUID | None) -> tuple[ModelCapabilityManifest, str]:
         entry = await self._session.get(ModelCatalogEntry, entry_id) if entry_id else None
         if entry is None:
             raise NotFoundError("resolved catalog not found")
         if hash_manifest(entry.capability_manifest_json) != entry.contract_manifest_hash:
             raise ValidationAppError("catalog manifest identity mismatch")
-        return ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        return (
+            ModelCapabilityManifest.model_validate(entry.capability_manifest_json),
+            entry.contract_manifest_hash,
+        )
 
     async def get_model_capabilities(
         self,
@@ -185,11 +188,11 @@ class ModelInspectionService:
                         "code": "MODEL_BINDING_UNAVAILABLE",
                     },
                 )
-            catalog = await self._catalog(resolution.catalog_entry_id)
+            catalog, catalog_hash = await self._catalog(resolution.catalog_entry_id)
             manifest = to_v3_model_manifest(catalog, transport_profile_id="inspection")
             result = ModelQueryRead(
                 selection="current_binding",
-                report=inspect_manifest(manifest, catalog=catalog),
+                report=inspect_manifest(manifest, catalog=catalog, catalog_hash=catalog_hash),
                 binding_id=resolution.provider_model_binding_id,
                 mode_id=mode_id,
                 identity_hash=hash_manifest(resolution.model_dump(mode="json")),
@@ -240,7 +243,7 @@ class ModelInspectionService:
                 execution_input=request,
                 allow_unaccepted_approximations=True,
             )
-            catalog = await self._catalog(plan.resolved_model.catalog_entry_id)
+            catalog, catalog_hash = await self._catalog(plan.resolved_model.catalog_entry_id)
             refs: list[PreviewReference] = []
             for reference in plan.planned_references:
                 artifact = await self._session.scalar(
@@ -324,6 +327,7 @@ class ModelInspectionService:
             report = inspect_manifest(
                 to_v3_model_manifest(catalog, transport_profile_id="inspection"),
                 catalog=catalog,
+                catalog_hash=catalog_hash,
             )
             return GenerationCompileRead(
                 plan_fingerprint=plan.plan_fingerprint or "",

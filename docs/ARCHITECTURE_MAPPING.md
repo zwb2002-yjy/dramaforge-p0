@@ -1,5 +1,11 @@
 # ARCHITECTURE_MAPPING — 当前代码到架构的映射
 
+模型系统单向重构当前处于 Migration A expand 阶段：新能力 revision、同一
+`ProviderModelBinding` 的 target 字段和逐模型 Availability Evidence 已落库，
+现有 runtime 仍在旧准入链上。Cutover 前还必须完成 Binding 分类、Provider
+可用性复验、Policy/Protocol/Handler/ExecutionIdentity 冻结及 Recovery exact gate；
+现阶段不得将新结构称为已投入生产的唯一模型执行系统。
+
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
 本文维护当前模块归属、能力处置与尚未解决的结构问题。某次扫描的行数、边数、

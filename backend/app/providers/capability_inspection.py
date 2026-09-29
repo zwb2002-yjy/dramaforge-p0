@@ -63,8 +63,11 @@ def inspect_manifest(
     manifest: ModelManifest,
     *,
     catalog: ModelCapabilityManifest | None = None,
+    catalog_hash: str | None = None,
 ) -> ModelCapabilityReport:
     """Project only the public contract, never arbitrary manifest metadata."""
+    if catalog is not None and catalog_hash is None:
+        raise ValueError("catalog inspection requires the original manifest hash")
     media = any(cap != Capability.TEXT_GENERATE for cap in manifest.capability_specs)
     options = {name for spec in manifest.capability_specs.values() for name in spec.common_options}
     controls: dict[str, Literal["native", "prompt_only", "unsupported", "unknown"]] = {
@@ -97,10 +100,9 @@ def inspect_manifest(
         model_id=manifest.id,
         model_revision=catalog.model_revision if catalog else None,
         manifest_version=manifest.manifest_version,
-        manifest_hash=hash_manifest(
-            catalog.model_dump(mode="json")
-            if catalog
-            else {
+        manifest_hash=catalog_hash
+        or hash_manifest(
+            {
                 "id": manifest.id,
                 "manifest_version": manifest.manifest_version,
                 "capability_specs": {
@@ -121,14 +123,14 @@ def inspect_catalog_model(
     model_id: str, *, registry: ModelRegistry | None = None
 ) -> ModelCapabilityReport:
     """Inspect a selected model; unknown IDs never fall back to another model."""
-    catalog = next(
+    catalog_row = next(
         (
-            ModelCapabilityManifest.model_validate(row)
-            for row in SEED_MANIFESTS
+            row for row in SEED_MANIFESTS
             if f"{row['provider_type']}/{row['model_id']}" == model_id
         ),
         None,
     )
+    catalog = ModelCapabilityManifest.model_validate(catalog_row) if catalog_row else None
     from app.providers.local_tts import LocalEspeakAdapter
 
     if model_id == f"{LocalEspeakAdapter.provider}/{LocalEspeakAdapter.model}":
@@ -161,4 +163,8 @@ def inspect_catalog_model(
     selected = registry.get_or_none(model_id)
     if selected is None:
         raise NotFoundError("model not found")
-    return inspect_manifest(selected.manifest, catalog=catalog)
+    return inspect_manifest(
+        selected.manifest,
+        catalog=catalog,
+        catalog_hash=hash_manifest(catalog_row) if catalog_row is not None else None,
+    )

@@ -3162,6 +3162,17 @@ export interface components {
             input_slots?: {
                 [key: string]: components["schemas"]["InputSlotSpec"];
             };
+            /**
+             * Minimum Total References
+             * @default 0
+             */
+            minimum_total_references: number;
+            /** Maximum Total References */
+            maximum_total_references?: number | null;
+            /** Max Total Duration Seconds */
+            max_total_duration_seconds?: {
+                [key: string]: number;
+            };
             /** Common Options */
             common_options?: {
                 [key: string]: components["schemas"]["ParameterSpec"];
@@ -3177,6 +3188,11 @@ export interface components {
             };
             /** Default Mode */
             default_mode?: string | null;
+            /**
+             * Auto Match Contract
+             * @default false
+             */
+            auto_match_contract: boolean;
             /** Transport Profile Id */
             transport_profile_id: string;
         };
@@ -4733,6 +4749,10 @@ export interface components {
             compiled_options?: {
                 [key: string]: components["schemas"]["JsonValue"];
             }[];
+            /** Operation Ids */
+            operation_ids?: string[];
+            /** Compiled Request Hashes */
+            compiled_request_hashes?: string[];
             /** Operation Statuses */
             operation_statuses?: string[];
             /** Reference Plan */
@@ -4768,6 +4788,17 @@ export interface components {
             input_slots?: {
                 [key: string]: components["schemas"]["InputSlotSpec"];
             };
+            /**
+             * Minimum Total References
+             * @default 0
+             */
+            minimum_total_references: number;
+            /** Maximum Total References */
+            maximum_total_references?: number | null;
+            /** Max Total Duration Seconds */
+            max_total_duration_seconds?: {
+                [key: string]: number;
+            };
             /** Common Options */
             common_options?: {
                 [key: string]: components["schemas"]["ParameterSpec"];
@@ -4798,6 +4829,20 @@ export interface components {
             maximum?: number | null;
             /** Media Types */
             media_types?: string[];
+            /** Max Bytes */
+            max_bytes?: number | null;
+            /** Min Duration Seconds */
+            min_duration_seconds?: number | null;
+            /** Max Duration Seconds */
+            max_duration_seconds?: number | null;
+            /** Min Width */
+            min_width?: number | null;
+            /** Max Width */
+            max_width?: number | null;
+            /** Min Height */
+            min_height?: number | null;
+            /** Max Height */
+            max_height?: number | null;
             /** Description */
             description?: string | null;
         };
@@ -4997,23 +5042,6 @@ export interface components {
             /** Limitations */
             limitations?: string[];
         };
-        /** ModelQueryRead */
-        ModelQueryRead: {
-            /**
-             * Selection
-             * @enum {string}
-             */
-            selection: "explicit_catalog" | "current_binding" | "text_slot";
-            report: components["schemas"]["ModelCapabilityReport"];
-            /** Binding Id */
-            binding_id?: string | null;
-            /** Profile Version */
-            profile_version?: number | null;
-            /** Mode Id */
-            mode_id?: string | null;
-            /** Identity Hash */
-            identity_hash?: string | null;
-        };
         /** ModelCapabilitySummary */
         ModelCapabilitySummary: {
             /** Media Kind */
@@ -5034,6 +5062,23 @@ export interface components {
             limits?: {
                 [key: string]: number;
             };
+        };
+        /** ModelQueryRead */
+        ModelQueryRead: {
+            /**
+             * Selection
+             * @enum {string}
+             */
+            selection: "explicit_catalog" | "current_binding" | "text_slot";
+            report: components["schemas"]["ModelCapabilityReport"];
+            /** Binding Id */
+            binding_id?: string | null;
+            /** Profile Version */
+            profile_version?: number | null;
+            /** Mode Id */
+            mode_id?: string | null;
+            /** Identity Hash */
+            identity_hash?: string | null;
         };
         /** ModelRead */
         ModelRead: {
