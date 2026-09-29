@@ -18,6 +18,7 @@ from app.providers.model_system_models import (
     ModelCapabilityRevision,
     ModelPublicationState,
     ProtocolContractRevision,
+    ProviderAvailabilityEvidence,
     ProviderModelAvailability,
 )
 from app.providers.models import (
@@ -274,6 +275,11 @@ async def build_binding_cutover_report(
         warnings: tuple[str, ...] = ()
         if target_kind != "unresolved" and connection is not None and revision is not None:
             protocol: ProtocolContractRevision | None = None
+            positive_evidence = (
+                await session.get(ProviderAvailabilityEvidence, projection.positive_evidence_id)
+                if projection is not None and projection.positive_evidence_id is not None
+                else None
+            )
             if discovered is not None and discovered.protocol_contract_revision_id is not None:
                 protocol = await session.get(
                     ProtocolContractRevision, discovered.protocol_contract_revision_id
@@ -283,6 +289,7 @@ async def build_binding_cutover_report(
                 connection=connection,
                 current_connection_revision=revision,
                 availability=projection,
+                positive_evidence=positive_evidence,
                 new_binding=False,
                 global_revision=model,
                 publication=publication,

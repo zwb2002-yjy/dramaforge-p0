@@ -12,6 +12,7 @@ from app.providers.model_system_models import (
     ModelCapabilityRevision,
     ModelPublicationState,
     ProtocolContractRevision,
+    ProviderAvailabilityEvidence,
     ProviderModelAvailability,
 )
 from app.providers.models import (
@@ -26,6 +27,7 @@ def _common() -> tuple[
     ProviderConnection,
     ProviderConnectionRevision,
     ProviderModelAvailability,
+    ProviderAvailabilityEvidence,
 ]:
     workspace_id, connection_id, credential_id, revision_id = (uuid4() for _ in range(4))
     binding = ProviderModelBinding(
@@ -65,11 +67,22 @@ def _common() -> tuple[
         positive_evidence_id=uuid4(),
         latest_evidence_id=uuid4(),
     )
-    return binding, connection, revision, availability
+    positive_evidence = ProviderAvailabilityEvidence(
+        id=availability.positive_evidence_id,
+        workspace_id=workspace_id,
+        connection_id=connection_id,
+        connection_revision_id=revision_id,
+        credential_revision_id=credential_id,
+        remote_model_id="MiniMax-H3",
+        verifier_kind="model_list",
+        status="visible",
+        listed_model_ids_json=["MiniMax-H3"],
+    )
+    return binding, connection, revision, availability, positive_evidence
 
 
 def test_global_lifecycle_and_exact_visibility_matrix() -> None:
-    binding, connection, revision, availability = _common()
+    binding, connection, revision, availability, positive_evidence = _common()
     manifest = {"model_id": "MiniMax-H3", "model_revision": "v2"}
     model = ModelCapabilityRevision(
         id=uuid4(),
@@ -94,6 +107,7 @@ def test_global_lifecycle_and_exact_visibility_matrix() -> None:
             connection=connection,
             current_connection_revision=revision,
             availability=availability,
+            positive_evidence=positive_evidence,
             new_binding=new_binding,
             global_revision=model,
             publication=publication,
@@ -119,10 +133,13 @@ def test_global_lifecycle_and_exact_visibility_matrix() -> None:
     revision.credential_revision_id = uuid4()
     assert "connection_revision_stale" in evaluate().blockers
     assert "current_model_not_visible" in evaluate().blockers
+    revision.credential_revision_id = connection.credential_id
+    positive_evidence.remote_model_id = "different-model"
+    assert "positive_model_evidence_invalid" in evaluate().blockers
 
 
 def test_dynamic_target_uses_current_discovery_without_global_lifecycle() -> None:
-    binding, connection, revision, availability = _common()
+    binding, connection, revision, availability, positive_evidence = _common()
     discovered = ConnectionDiscoveredModel(
         id=uuid4(),
         workspace_id=binding.workspace_id,
@@ -164,6 +181,7 @@ def test_dynamic_target_uses_current_discovery_without_global_lifecycle() -> Non
             connection=connection,
             current_connection_revision=revision,
             availability=availability,
+            positive_evidence=positive_evidence,
             new_binding=True,
             discovered=discovered,
             connection_capability=capability,

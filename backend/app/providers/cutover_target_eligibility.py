@@ -16,6 +16,7 @@ from app.providers.model_system_models import (
     ModelCapabilityRevision,
     ModelPublicationState,
     ProtocolContractRevision,
+    ProviderAvailabilityEvidence,
     ProviderModelAvailability,
 )
 from app.providers.models import (
@@ -39,6 +40,7 @@ def evaluate_cutover_binding_target(
     connection: ProviderConnection,
     current_connection_revision: ProviderConnectionRevision,
     availability: ProviderModelAvailability | None,
+    positive_evidence: ProviderAvailabilityEvidence | None,
     new_binding: bool,
     global_revision: ModelCapabilityRevision | None = None,
     publication: ModelPublicationState | None = None,
@@ -80,6 +82,24 @@ def evaluate_cutover_binding_target(
         or availability.positive_evidence_id is None
     ):
         blockers.append("current_model_not_visible")
+    if (
+        availability is not None
+        and availability.effective_status == "visible"
+        and (
+            positive_evidence is None
+            or positive_evidence.id != availability.positive_evidence_id
+            or positive_evidence.workspace_id != binding.workspace_id
+            or positive_evidence.connection_id != connection.id
+            or positive_evidence.connection_revision_id != current_connection_revision.id
+            or positive_evidence.credential_revision_id
+            != current_connection_revision.credential_revision_id
+            or positive_evidence.remote_model_id != binding.invoke_model_value
+            or positive_evidence.status != "visible"
+            or not isinstance(positive_evidence.listed_model_ids_json, list)
+            or binding.invoke_model_value not in positive_evidence.listed_model_ids_json
+        )
+    ):
+        blockers.append("positive_model_evidence_invalid")
 
     target_kind = binding.binding_target_kind or "unresolved"
     if target_kind == "global_model":
