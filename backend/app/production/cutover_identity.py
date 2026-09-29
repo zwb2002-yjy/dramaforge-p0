@@ -6,7 +6,11 @@ call it yet; wiring it requires the matching Create and recovery gates.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import JsonValue
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.production.policy_models import ProductPolicyRevision, ProductPolicyState
 from app.production.policy_revisions import ProductPolicyContent
@@ -37,6 +41,7 @@ from app.providers.models import (
     ProviderConnectionRevision,
     ProviderModelBinding,
 )
+from app.security.models import EncryptedProviderCredential
 
 
 def freeze_cutover_execution_identity(
@@ -176,3 +181,149 @@ def freeze_cutover_execution_identity(
         transformations=transformations,
         request_fingerprint=request_fingerprint,
     )
+
+
+async def revalidate_cutover_create(
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    frozen_identity: CutoverExecutionIdentitySnapshot,
+    handler_registry: ExactHandlerRegistry,
+) -> None:
+    """Check the frozen plan against current Create facts in the marker transaction.
+
+    Call immediately before persisting ``submission_started`` and commit that
+    marker in the same transaction. Existing remote tasks must use recovery,
+    never this Create gate. This entry point is not wired into the old Worker.
+    """
+    connection = await session.scalar(
+        select(ProviderConnection)
+        .where(
+            ProviderConnection.id == frozen_identity.connection_id,
+            ProviderConnection.workspace_id == workspace_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    binding = await session.scalar(
+        select(ProviderModelBinding)
+        .where(
+            ProviderModelBinding.id == frozen_identity.binding_id,
+            ProviderModelBinding.workspace_id == workspace_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if binding is None or connection is None:
+        raise ValueError("frozen Binding or Connection is unavailable")
+    revision = await session.scalar(
+        select(ProviderConnectionRevision)
+        .where(ProviderConnectionRevision.connection_id == connection.id)
+        .order_by(ProviderConnectionRevision.revision_no.desc())
+        .limit(1)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if revision is None or revision.id != frozen_identity.connection_revision_id:
+        raise ValueError("frozen Connection Revision is no longer current")
+    credential = await session.scalar(
+        select(EncryptedProviderCredential).where(
+            EncryptedProviderCredential.id == frozen_identity.credential_revision_id,
+            EncryptedProviderCredential.workspace_id == workspace_id,
+        )
+    )
+    from app.providers.registry import get_plugin
+
+    try:
+        plugin = get_plugin(connection.provider_type, connection.protocol_profile)
+    except LookupError as exc:
+        raise ValueError("frozen Provider plugin is unavailable") from exc
+    if credential is None or credential.provider != plugin.credential_key:
+        raise ValueError("frozen credential revision is unavailable or mismatched")
+    availability = await session.scalar(
+        select(ProviderModelAvailability)
+        .where(
+            ProviderModelAvailability.workspace_id == workspace_id,
+            ProviderModelAvailability.connection_id == connection.id,
+            ProviderModelAvailability.connection_revision_id == revision.id,
+            ProviderModelAvailability.credential_revision_id == revision.credential_revision_id,
+            ProviderModelAvailability.remote_model_id == frozen_identity.invoke_model_value,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    positive_evidence = (
+        await session.get(ProviderAvailabilityEvidence, availability.positive_evidence_id)
+        if availability is not None and availability.positive_evidence_id is not None
+        else None
+    )
+    global_revision = publication = discovered = connection_capability = None
+    if isinstance(frozen_identity.target, GlobalModelTargetIdentity):
+        global_revision = await session.get(
+            ModelCapabilityRevision, frozen_identity.target.model_capability_revision_id
+        )
+        publication = (
+            await session.scalar(
+                select(ModelPublicationState)
+                .where(ModelPublicationState.model_capability_revision_id == global_revision.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if global_revision is not None
+            else None
+        )
+    else:
+        discovered = await session.get(
+            ConnectionDiscoveredModel, frozen_identity.target.connection_discovered_model_id
+        )
+        connection_capability = await session.get(
+            ConnectionModelCapabilityRevision,
+            frozen_identity.target.connection_model_capability_revision_id,
+        )
+    policy = await session.get(
+        ProductPolicyRevision, frozen_identity.policy.product_policy_revision_id
+    )
+    policy_state = await session.scalar(
+        select(ProductPolicyState)
+        .where(
+            ProductPolicyState.policy_revision_id
+            == frozen_identity.policy.product_policy_revision_id
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    protocol = await session.get(
+        ProtocolContractRevision, frozen_identity.protocol.protocol_contract_revision_id
+    )
+    handler = await session.get(
+        RuntimeHandlerRevision, frozen_identity.handler.runtime_handler_revision_id
+    )
+    if policy is None or policy_state is None or protocol is None or handler is None:
+        raise ValueError("frozen Policy, Protocol or Handler revision is unavailable")
+    rebuilt = freeze_cutover_execution_identity(
+        binding=binding,
+        connection=connection,
+        current_connection_revision=revision,
+        latest_connection_revision_no=revision.revision_no,
+        availability=availability,
+        positive_evidence=positive_evidence,
+        global_revision=global_revision,
+        publication=publication,
+        discovered=discovered,
+        connection_capability=connection_capability,
+        policy=policy,
+        policy_state=policy_state,
+        protocol=protocol,
+        handler=handler,
+        handler_registry=handler_registry,
+        product_path=policy.product_path,
+        operation=frozen_identity.operation,
+        matched_input_contract=frozen_identity.matched_input_contract,
+        resolved_references=frozen_identity.resolved_references,
+        requested_options=frozen_identity.requested_options,
+        effective_options=frozen_identity.effective_options,
+        transformations=frozen_identity.transformations,
+        request_fingerprint=frozen_identity.request_fingerprint,
+    )
+    if rebuilt != frozen_identity:
+        raise ValueError("frozen execution identity differs from current Create facts")

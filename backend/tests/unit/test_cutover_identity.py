@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from app.production.cutover_identity import freeze_cutover_execution_identity
+from app.production.cutover_identity import (
+    freeze_cutover_execution_identity,
+    revalidate_cutover_create,
+)
 from app.production.policy_models import ProductPolicyRevision, ProductPolicyState
 from app.production.policy_revisions import ProductPolicyContent
 from app.providers.catalog_loader import hash_manifest
@@ -232,3 +236,74 @@ def test_freeze_denies_unlisted_model_and_disallowed_contract() -> None:
     facts["matched_input_contract"] = "reference_video"
     with pytest.raises(ValueError, match="product policy denies"):
         freeze_cutover_execution_identity(**facts)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dynamic", [False, True])
+async def test_create_revalidation_uses_current_rows_and_exact_frozen_identity(
+    dynamic: bool,
+) -> None:
+    facts = _facts(dynamic=dynamic)
+    identity = freeze_cutover_execution_identity(**facts)
+    credential = SimpleNamespace(provider="minimax")
+    scalar_results = [
+        facts["connection"],
+        facts["binding"],
+        facts["current_connection_revision"],
+        credential,
+        facts["availability"],
+    ]
+    get_results = [facts["positive_evidence"]]
+    if dynamic:
+        get_results.extend([facts["discovered"], facts["connection_capability"]])
+    else:
+        get_results.append(facts["global_revision"])
+        scalar_results.append(facts["publication"])
+    get_results.append(facts["policy"])
+    scalar_results.append(facts["policy_state"])
+    get_results.extend([facts["protocol"], facts["handler"]])
+    session = Mock()
+    session.scalar = AsyncMock(side_effect=scalar_results)
+    session.get = AsyncMock(side_effect=get_results)
+    await revalidate_cutover_create(
+        session,
+        workspace_id=facts["binding"].workspace_id,
+        frozen_identity=identity,
+        handler_registry=facts["handler_registry"],
+    )
+    assert session.scalar.await_count == len(scalar_results)
+    assert session.get.await_count == len(get_results)
+    locked_reads = [
+        call.args[0]
+        for call in session.scalar.await_args_list
+        if call.args[0]._for_update_arg is not None
+    ]
+    assert locked_reads
+    assert all(
+        statement.get_execution_options().get("populate_existing") for statement in locked_reads
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_revalidation_rejects_a_rotated_connection() -> None:
+    facts = _facts(dynamic=False)
+    identity = freeze_cutover_execution_identity(**facts)
+    newer_revision = ProviderConnectionRevision(
+        id=uuid4(),
+        connection_id=facts["connection"].id,
+        credential_revision_id=uuid4(),
+        provider_type="minimax",
+        protocol_profile="minimax_cn_v1",
+        base_url="https://example.invalid",
+        revision_no=3,
+    )
+    session = Mock()
+    session.scalar = AsyncMock(side_effect=[facts["connection"], facts["binding"], newer_revision])
+    with pytest.raises(ValueError, match="no longer current"):
+        await revalidate_cutover_create(
+            session,
+            workspace_id=facts["binding"].workspace_id,
+            frozen_identity=identity,
+            handler_registry=facts["handler_registry"],
+        )
+    assert session.scalar.await_count == 3

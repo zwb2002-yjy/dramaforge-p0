@@ -104,7 +104,9 @@ Transport 合同计算，Handler revision 记录精确实现摘要；旧 revisio
 `CutoverExecutionIdentitySnapshot` 已能分别表达 Global 和 Connection 动态目标，并冻结
 Policy、Protocol、Handler、连接及请求身份。Production 的
 `freeze_cutover_execution_identity` 是只读构造器，会核对现有目标资格、Policy 内容哈希、
-协议内容哈希与已注册的精确 Handler；它还未接入 Dispatch、Create 或 Recovery，
+协议内容哈希与已注册的精确 Handler。`revalidate_cutover_create` 可在提交标记事务中
+重新核对当前连接/凭证、可用性投影、生命周期和被冻结的修订身份；这两个入口还未
+接入 Dispatch、Create 或 Recovery，
 不能单独作为切换验收。
 维护侧 `providers/model_publication.py` 可在提供来源快照 ID 后发布新的 Global 能力
 revision；它保留 Manifest 原始字段（只拆出生命周期/目录来源），新发布状态始终先是
