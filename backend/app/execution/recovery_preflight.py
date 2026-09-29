@@ -12,8 +12,10 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.models import Project
 from app.execution.models import NodeRun, ProviderOperation
 from app.production.policy_models import ProductPolicyRevision
+from app.production.policy_revisions import ProductPolicyContent
 from app.providers.catalog_loader import hash_manifest
 from app.providers.execution_identity import (
     ConnectionModelTargetIdentity,
@@ -85,6 +87,9 @@ async def preflight_recoverable_operation(
     """Return only gap labels; every referenced historical revision must exist."""
     if operation.node_run_id is None or operation.node_run_id != run.id:
         raise ValueError("recovery preflight requires the owning NodeRun")
+    project = await session.get(Project, run.project_id)
+    if project is None or project.workspace_id != workspace_id:
+        return ExactRecoveryCheck(operation.id, run.id, ("operation_workspace_mismatch",))
     gaps: list[str] = []
     if operation.status == "unknown_submission":
         gaps.append("unknown_submission_requires_manual_reconciliation")
@@ -126,6 +131,23 @@ async def preflight_recoverable_operation(
         or policy.policy_hash != identity.policy.policy_hash
     ):
         gaps.append("historical_policy_revision_mismatch")
+    else:
+        try:
+            policy_content = ProductPolicyContent(
+                product_path=policy.product_path,
+                allowed_operations=frozenset(policy.allowed_operations_json),
+                allowed_contracts={
+                    key: frozenset(value) for key, value in policy.allowed_contracts_json.items()
+                },
+                allowed_options={
+                    key: frozenset(value) for key, value in policy.allowed_options_json.items()
+                },
+                constraint_overrides=policy.constraint_overrides_json,
+            )
+            if policy_content.policy_hash() != policy.policy_hash:
+                gaps.append("historical_policy_revision_mismatch")
+        except (AttributeError, TypeError, ValueError):
+            gaps.append("historical_policy_revision_mismatch")
     protocol = await session.get(
         ProtocolContractRevision, identity.protocol.protocol_contract_revision_id
     )

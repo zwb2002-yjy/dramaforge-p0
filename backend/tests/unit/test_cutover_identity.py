@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
+from app.access.models import Project
 from app.execution.models import NodeRun, ProviderOperation
 from app.execution.recovery_preflight import preflight_recoverable_operation
 from app.production.cutover_identity import (
@@ -320,7 +321,9 @@ async def test_exact_recovery_uses_historical_facts_after_create_gates_change(
     facts = _facts(dynamic=dynamic)
     identity = freeze_cutover_execution_identity(**facts)
     encoded = identity.model_dump(mode="json")
-    run = NodeRun(id=uuid4(), input_snapshot={"cutover_execution_identity": encoded})
+    run = NodeRun(
+        id=uuid4(), project_id=uuid4(), input_snapshot={"cutover_execution_identity": encoded}
+    )
     operation = ProviderOperation(
         id=uuid4(),
         node_run_id=run.id,
@@ -344,6 +347,7 @@ async def test_exact_recovery_uses_historical_facts_after_create_gates_change(
     if facts["publication"] is not None:
         facts["publication"].lifecycle = "retired"
     rows = {
+        Project: SimpleNamespace(workspace_id=facts["binding"].workspace_id),
         ProviderConnectionRevision: facts["current_connection_revision"],
         EncryptedProviderCredential: SimpleNamespace(workspace_id=facts["binding"].workspace_id),
         ProductPolicyRevision: facts["policy"],
@@ -364,7 +368,7 @@ async def test_exact_recovery_uses_historical_facts_after_create_gates_change(
     )
     assert result.ready
     assert result.to_json_dict()["gaps"] == []
-    assert session.get.await_count == (7 if dynamic else 6)
+    assert session.get.await_count == (8 if dynamic else 7)
     missing_registry = ExactHandlerRegistry()
     result = await preflight_recoverable_operation(
         session,
@@ -383,6 +387,16 @@ async def test_exact_recovery_uses_historical_facts_after_create_gates_change(
         handler_registry=facts["handler_registry"],
     )
     assert result.gaps == ("resume_token_missing",)
+    operation.resume_token = {"cursor": "opaque"}
+    facts["policy"].allowed_options_json = {"video.generate": []}
+    result = await preflight_recoverable_operation(
+        session,
+        operation=operation,
+        run=run,
+        workspace_id=facts["binding"].workspace_id,
+        handler_registry=facts["handler_registry"],
+    )
+    assert result.gaps == ("historical_policy_revision_mismatch",)
 
 
 @pytest.mark.asyncio
@@ -390,7 +404,9 @@ async def test_exact_recovery_rejects_inconsistent_identity_copies() -> None:
     facts = _facts(dynamic=False)
     identity = freeze_cutover_execution_identity(**facts)
     encoded = identity.model_dump(mode="json")
-    run = NodeRun(id=uuid4(), input_snapshot={"cutover_execution_identity": encoded})
+    run = NodeRun(
+        id=uuid4(), project_id=uuid4(), input_snapshot={"cutover_execution_identity": encoded}
+    )
     operation = ProviderOperation(
         id=uuid4(),
         node_run_id=run.id,
@@ -399,7 +415,9 @@ async def test_exact_recovery_rejects_inconsistent_identity_copies() -> None:
         request_summary={"cutover_execution_identity": {**encoded, "invoke_model_value": "other"}},
     )
     session = Mock()
-    session.get = AsyncMock()
+    session.get = AsyncMock(
+        return_value=SimpleNamespace(workspace_id=facts["binding"].workspace_id)
+    )
     result = await preflight_recoverable_operation(
         session,
         operation=operation,
@@ -409,4 +427,14 @@ async def test_exact_recovery_rejects_inconsistent_identity_copies() -> None:
     )
     assert "exact_execution_identity_missing_or_mismatched" in result.gaps
     assert "unknown_submission_requires_manual_reconciliation" in result.gaps
-    session.get.assert_not_awaited()
+    session.get.assert_awaited_once()
+    session.get = AsyncMock(return_value=SimpleNamespace(workspace_id=uuid4()))
+    wrong_workspace = await preflight_recoverable_operation(
+        session,
+        operation=operation,
+        run=run,
+        workspace_id=facts["binding"].workspace_id,
+        handler_registry=facts["handler_registry"],
+    )
+    assert wrong_workspace.gaps == ("operation_workspace_mismatch",)
+    session.get.assert_awaited_once()
