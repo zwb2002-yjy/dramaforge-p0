@@ -5,6 +5,12 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 
 ## 模型系统 Cutover 的当前阶段
 
+离线目标资格判定 `evaluate_cutover_binding_target` 已能分别检查 Global 与 Dynamic
+Binding 的当前 Connection/Availability、能力和 Lifecycle/Protocol 事实；它只返回
+阻塞原因与 warning。调用者必须提供最高版本的 Connection Revision，并在实际 Create
+边界重新核对。此判定尚未接入 Dispatch，也未组合 ProductPolicy、技术匹配或精确 Handler，
+不能单独授权 Provider Create。
+
 Migration A 已扩展版本化 Global 模型、Connection 动态模型和精确修订的 Availability
 证据/投影，并在原有 `ProviderModelBinding` 上增加 target identity。能由现有官方目录行
 精确映射的绑定保留原 ID 与项目引用；未映射绑定保持 unresolved。历史
