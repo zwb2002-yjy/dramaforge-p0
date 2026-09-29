@@ -12,6 +12,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 统一生产 Runtime 拥有媒体执行的全部事实：NodeRun、ProviderOperation、
 Artifact。没有第二套 Generation 真相，没有预算/批次前置，没有历史路径分支。
 编排侧见 [DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
+ProductPolicyRevision、ProductPolicyState/Event 的不可变存储已建立；当前 Dispatch
+尚未选取并冻结该 Revision，不能以新表存在推断新策略准入已经生效。
 
 ## 执行链
 

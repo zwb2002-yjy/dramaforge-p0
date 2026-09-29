@@ -13,7 +13,7 @@ import asyncpg
 import pytest
 from pg_support import alembic_head, alembic_parent, env_target
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DatabaseError, IntegrityError
 
 BACKEND = Path(__file__).resolve().parents[2]
 REVISION = "20260929_0074"
@@ -366,4 +366,88 @@ async def test_all_owner_binding_gate_covers_every_workspace_and_rejects_rls_rol
     finally:
         await admin.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
         await admin.execute(f'DROP ROLE IF EXISTS "{role}"')
+        await admin.close()
+
+
+@pytest.mark.asyncio
+async def test_product_policy_revision_and_event_history_cannot_be_rewritten() -> None:
+    dbname = f"dramaforge_policy_{uuid4().hex[:10]}"
+    admin = await _admin()
+    try:
+        await admin.execute(f'CREATE DATABASE "{dbname}"')
+        _migrate(dbname, "upgrade", alembic_head())
+        engine = create_engine(_sync_url(dbname))
+        revision_id, policy_id, event_id = str(uuid4()), str(uuid4()), str(uuid4())
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO product_policy_revisions "
+                    "(id,policy_id,policy_revision,policy_hash,product_path,"
+                    "allowed_operations_json,allowed_contracts_json,allowed_options_json,"
+                    "constraint_overrides_json) "
+                    "VALUES (:id,:policy_id,1,:hash,'formal_video','[\"video.generate\"]'::json,"
+                    "'{}'::json,'{}'::json,'{}'::json)"
+                ),
+                {"id": revision_id, "policy_id": policy_id, "hash": "a" * 64},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO product_policy_states (policy_revision_id,status) "
+                    "VALUES (:id,'active')"
+                ),
+                {"id": revision_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO product_policy_events "
+                    "(id,policy_revision_id,from_status,to_status,reason) "
+                    "VALUES (:event_id,:id,NULL,'active','published')"
+                ),
+                {"event_id": event_id, "id": revision_id},
+            )
+            for table in (
+                "product_policy_revisions",
+                "product_policy_states",
+                "product_policy_events",
+            ):
+                assert not connection.execute(
+                    text("SELECT has_table_privilege('dramaforge_app', :table, 'UPDATE')"),
+                    {"table": table},
+                ).scalar_one()
+        with pytest.raises(DatabaseError), engine.begin() as connection:
+            connection.execute(
+                text("UPDATE product_policy_revisions SET policy_hash = :hash WHERE id = :id"),
+                {"hash": "b" * 64, "id": revision_id},
+            )
+        with pytest.raises(DatabaseError), engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM product_policy_events WHERE id = :id"),
+                {"id": event_id},
+            )
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE product_policy_states SET status = 'revoked' "
+                    "WHERE policy_revision_id = :id"
+                ),
+                {"id": revision_id},
+            )
+            assert (
+                connection.execute(
+                    text("SELECT status FROM product_policy_states WHERE policy_revision_id = :id"),
+                    {"id": revision_id},
+                ).scalar_one()
+                == "revoked"
+            )
+        with pytest.raises(DatabaseError), engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE product_policy_states SET status = 'active' "
+                    "WHERE policy_revision_id = :id"
+                ),
+                {"id": revision_id},
+            )
+        engine.dispose()
+    finally:
+        await admin.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
         await admin.close()

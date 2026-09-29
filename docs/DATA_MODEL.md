@@ -108,6 +108,7 @@ Migration 20260902_0051 removes:
 | 20260917_0072 | Add a SECURITY DEFINER outbox metrics query for process-wide pending count and oldest pending age. |
 | 20260919_0073 | Add bounded keyset discovery for persisted Provider recovery. |
 | 20260929_0074 | Migration A expand: preserve ProviderModelBinding IDs and ProjectProviderBinding references; attach exact Global targets where the old catalog row maps, add connection model and availability structures, and leave unproved availability unchecked. Runtime cutover and old-column cleanup are separate gates. |
+| 20260929_0075 | Production-owned `product_policy_revisions`, independent `product_policy_states` and append-only `product_policy_events`. Revision/event history rejects UPDATE/DELETE; runtime does not yet select or freeze these revisions. |
 | 20260910_0066 | Private `director_runtime_checkpoints` schema and its role. |
 | 20260916_0070 | Canonical Asset/AssetVersion lifecycle constraints, current Formal pointers, and one-time migration of legacy `metadata.tags` into `asset_tags` / `asset_tag_links`. |
 
@@ -117,7 +118,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20260929_0074.
+- Alembic has one head: 20260929_0075.
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.
