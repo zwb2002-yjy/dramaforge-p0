@@ -178,6 +178,8 @@ def _facts(*, dynamic: bool) -> dict[str, Any]:
             handler_key=handler.handler_key,
             implementation_digest=handler.implementation_digest,
             factory=Mock(),
+            protocol_profile=connection.protocol_profile,
+            operation_kind="video.generate",
         )
     )
     return {

@@ -22,7 +22,17 @@ def test_exact_handler_registry_never_substitutes_the_latest_revision() -> None:
     def second(_: FrozenProviderConnection) -> ProviderRuntime:
         return cast(ProviderRuntime, object())
 
-    registry.register(RegisteredHandler(family, 1, "video", "a" * 64, first))
+    registry.register(
+        RegisteredHandler(
+            family,
+            1,
+            "video",
+            "a" * 64,
+            first,
+            protocol_profile="minimax_cn_v1",
+            operation_kind="video.generate",
+        )
+    )
     registry.register(RegisteredHandler(family, 2, "video", "b" * 64, second))
     historical = RuntimeHandlerRevision(
         runtime_handler_id=family,
@@ -31,6 +41,20 @@ def test_exact_handler_registry_never_substitutes_the_latest_revision() -> None:
         implementation_digest="a" * 64,
     )
     assert registry.resolve(historical) is first
+    assert (
+        registry.resolve_for_operation(
+            historical,
+            protocol_profile="minimax_cn_v1",
+            operation_kind="video.generate",
+        )
+        is first
+    )
+    with pytest.raises(LookupError, match="does not support"):
+        registry.resolve_for_operation(
+            historical,
+            protocol_profile="minimax_cn_v1",
+            operation_kind="image.generate",
+        )
     historical.handler_revision = 3
     with pytest.raises(LookupError, match="exact runtime handler"):
         registry.resolve(historical)

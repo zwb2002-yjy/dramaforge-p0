@@ -104,7 +104,8 @@ Transport 合同计算，Handler revision 记录精确实现摘要；旧 revisio
 现有 Dispatch / Recovery 尚未冻结或选择这些 revision，不能把存储层视为已完成的
 精确 Handler 恢复能力。
 `ExactHandlerRegistry` 只接受已注册的完整 `runtime_handler_id`、revision、key 与
-实现摘要；缺失旧版本时抛错，不从当前版本替代。Registry 尚未接入 Worker 的恢复路径。
+实现摘要；Create 与恢复预检还要求注册项声明匹配的协议 Profile 和操作。缺失旧版本
+或不相容时抛错，不从当前版本替代。Registry 尚未接入 Worker 的恢复路径。
 `CutoverExecutionIdentitySnapshot` 已能分别表达 Global 和 Connection 动态目标，并冻结
 Policy、Protocol、Handler、连接及请求身份。Production 的
 `freeze_cutover_execution_identity` 是只读构造器，会核对现有目标资格、Policy 内容哈希、

@@ -20,6 +20,8 @@ class RegisteredHandler:
     handler_key: str
     implementation_digest: str
     factory: HandlerFactory
+    protocol_profile: str | None = None
+    operation_kind: str | None = None
 
 
 class ExactHandlerRegistry:
@@ -42,3 +44,17 @@ class ExactHandlerRegistry:
         ):
             raise LookupError("exact runtime handler revision is unavailable")
         return handler.factory
+
+    def resolve_for_operation(
+        self,
+        revision: RuntimeHandlerRevision,
+        *,
+        protocol_profile: str,
+        operation_kind: str,
+    ) -> HandlerFactory:
+        """Require the exact implementation to declare this wire operation."""
+        factory = self.resolve(revision)
+        handler = self._handlers[(revision.runtime_handler_id, revision.handler_revision)]
+        if handler.protocol_profile != protocol_profile or handler.operation_kind != operation_kind:
+            raise LookupError("exact runtime handler does not support the frozen operation")
+        return factory

@@ -128,7 +128,11 @@ def freeze_cutover_execution_identity(
         raise ValueError("protocol revision does not match the selected operation")
     # A stored revision without a deployed implementation is not a runnable
     # handler. Registry resolution checks exact ID, revision, key and digest.
-    handler_registry.resolve(handler)
+    handler_registry.resolve_for_operation(
+        handler,
+        protocol_profile=protocol.protocol_profile,
+        operation_kind=operation,
+    )
 
     target: GlobalModelTargetIdentity | ConnectionModelTargetIdentity
     if eligibility.target_kind == "global_model":

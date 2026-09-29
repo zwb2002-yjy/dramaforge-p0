@@ -173,7 +173,11 @@ async def preflight_recoverable_operation(
         gaps.append("historical_handler_revision_mismatch")
     else:
         try:
-            handler_registry.resolve(handler)
+            handler_registry.resolve_for_operation(
+                handler,
+                protocol_profile=protocol.protocol_profile if protocol is not None else "",
+                operation_kind=identity.operation,
+            )
         except LookupError:
             gaps.append("exact_historical_handler_unavailable")
     if isinstance(identity.target, GlobalModelTargetIdentity):
