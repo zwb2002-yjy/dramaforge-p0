@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Final, Self
+from typing import Any, Final, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -124,6 +124,110 @@ class ExecutionIdentitySnapshot(BaseModel):
         _validate_safe_evidence(self.effective_options, path="effective_options")
         _validate_safe_evidence(self.translation_report, path="translation_report")
         return self
+
+
+class GlobalModelTargetIdentity(BaseModel):
+    """One immutable Global capability revision, independent of its invoke ID."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["global_model"] = "global_model"
+    model_capability_revision_id: UUID
+    canonical_model_id: str = Field(min_length=1, max_length=160)
+    model_revision: str = Field(min_length=1, max_length=120)
+    manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ConnectionModelTargetIdentity(BaseModel):
+    """A connection-scoped capability; it has no Global catalog identity."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["connection_model"] = "connection_model"
+    connection_discovered_model_id: UUID
+    connection_model_capability_revision_id: UUID
+    connection_capability_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    remote_model_id: str = Field(min_length=1, max_length=240)
+
+
+class PolicyRevisionIdentity(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    product_policy_revision_id: UUID
+    product_policy_id: UUID
+    policy_revision: int = Field(gt=0)
+    policy_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ProtocolRevisionIdentity(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    protocol_contract_revision_id: UUID
+    protocol_contract_id: UUID
+    protocol_revision: int = Field(gt=0)
+    protocol_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HandlerRevisionIdentity(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_handler_revision_id: UUID
+    runtime_handler_id: UUID
+    handler_revision: int = Field(gt=0)
+    implementation_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CutoverExecutionIdentitySnapshot(BaseModel):
+    """V7 frozen Create/recovery identity; not yet used by the current Worker.
+
+    The distinct target variants prevent a Dynamic model from acquiring a
+    fictitious Global catalog identity. Runtime cutover must wire this exact
+    snapshot to Dispatch, Create and recovery together.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    binding_id: UUID
+    target: GlobalModelTargetIdentity | ConnectionModelTargetIdentity = Field(discriminator="kind")
+    invoke_model_value: str = Field(min_length=1, max_length=240)
+    policy: PolicyRevisionIdentity
+    protocol: ProtocolRevisionIdentity
+    handler: HandlerRevisionIdentity
+    connection_id: UUID
+    connection_revision_id: UUID
+    credential_revision_id: UUID
+    operation: str = Field(min_length=1, max_length=120)
+    matched_input_contract: str = Field(min_length=1, max_length=120)
+    resolved_references: list[ExecutionIdentityReference] = Field(default_factory=list)
+    requested_options: dict[str, JsonValue] = Field(default_factory=dict)
+    effective_options: dict[str, JsonValue] = Field(default_factory=dict)
+    transformations: list[dict[str, JsonValue]] = Field(default_factory=list)
+    request_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_cutover_identity(self) -> CutoverExecutionIdentitySnapshot:
+        if (
+            isinstance(self.target, ConnectionModelTargetIdentity)
+            and self.target.remote_model_id != self.invoke_model_value
+        ):
+            raise ValueError("Dynamic target and invoke model identities differ")
+        _validate_safe_evidence(self.requested_options, path="requested_options")
+        _validate_safe_evidence(self.effective_options, path="effective_options")
+        for index, transformation in enumerate(self.transformations):
+            _validate_safe_evidence(transformation, path=f"transformations[{index}]")
+        return self
+
+    def model_copy(
+        self,
+        *,
+        update: Mapping[str, Any] | None = None,
+        deep: bool = False,
+    ) -> Self:
+        if update is None:
+            return super().model_copy(deep=deep)
+        data = self.model_dump(mode="python")
+        data.update(update)
+        return type(self).model_validate(data)
 
 
 @dataclass(frozen=True)

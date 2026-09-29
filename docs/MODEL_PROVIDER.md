@@ -101,6 +101,11 @@ Transport 合同计算，Handler revision 记录精确实现摘要；旧 revisio
 精确 Handler 恢复能力。
 `ExactHandlerRegistry` 只接受已注册的完整 `runtime_handler_id`、revision、key 与
 实现摘要；缺失旧版本时抛错，不从当前版本替代。Registry 尚未接入 Worker 的恢复路径。
+`CutoverExecutionIdentitySnapshot` 已能分别表达 Global 和 Connection 动态目标，并冻结
+Policy、Protocol、Handler、连接及请求身份。Production 的
+`freeze_cutover_execution_identity` 是只读构造器，会核对现有目标资格、Policy 内容哈希、
+协议内容哈希与已注册的精确 Handler；它还未接入 Dispatch、Create 或 Recovery，
+不能单独作为切换验收。
 维护侧 `providers/model_publication.py` 可在提供来源快照 ID 后发布新的 Global 能力
 revision；它保留 Manifest 原始字段（只拆出生命周期/目录来源），新发布状态始终先是
 `unknown`，不从文件目录或旧账号验证结果自动推断 active/visible。
