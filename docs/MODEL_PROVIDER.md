@@ -7,7 +7,7 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 
 离线目标资格判定 `evaluate_cutover_binding_target` 已能分别检查 Global 与 Dynamic
 Binding 的当前 Connection/Availability、能力和 Lifecycle/Protocol 事实；它只返回
-阻塞原因与 warning。调用者必须提供最高版本的 Connection Revision，并在实际 Create
+阻塞原因与 warning。只读 Binding 分类报告已复用此判定，并输出 warning。调用者必须提供最高版本的 Connection Revision，并在实际 Create
 边界重新核对。此判定尚未接入 Dispatch，也未组合 ProductPolicy、技术匹配或精确 Handler，
 不能单独授权 Provider Create。
 

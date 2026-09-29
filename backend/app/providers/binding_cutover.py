@@ -11,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.cutover_target_eligibility import evaluate_cutover_binding_target
 from app.providers.model_system_models import (
     ConnectionDiscoveredModel,
     ConnectionModelCapabilityRevision,
     ModelCapabilityRevision,
     ModelPublicationState,
+    ProtocolContractRevision,
     ProviderModelAvailability,
 )
 from app.providers.models import (
@@ -42,6 +44,7 @@ class BindingCutoverRow:
     availability: str
     classification_evidence: dict[str, str | None]
     blocking_reasons: tuple[str, ...]
+    warnings: tuple[str, ...]
 
     def to_json_dict(self) -> dict[str, object]:
         values = asdict(self)
@@ -137,6 +140,10 @@ async def build_binding_cutover_report(
                     blockers.append("credential_revision_mismatch")
 
         target_kind: BindingTargetKind = "unresolved"
+        model: ModelCapabilityRevision | None = None
+        publication: ModelPublicationState | None = None
+        discovered: ConnectionDiscoveredModel | None = None
+        capability: ConnectionModelCapabilityRevision | None = None
         if binding.binding_target_kind == "global_model":
             model = (
                 await session.get(ModelCapabilityRevision, binding.model_capability_revision_id)
@@ -150,8 +157,11 @@ async def build_binding_cutover_report(
             )
             legacy_manifest = catalog.capability_manifest_json if catalog is not None else None
             capability_manifest = (
-                {key: value for key, value in legacy_manifest.items()
-                 if key not in {"lifecycle", "catalog_source"}}
+                {
+                    key: value
+                    for key, value in legacy_manifest.items()
+                    if key not in {"lifecycle", "catalog_source"}
+                }
                 if isinstance(legacy_manifest, dict)
                 else None
             )
@@ -238,6 +248,7 @@ async def build_binding_cutover_report(
             blockers.append("binding_target_unresolved")
 
         availability = "not_checked"
+        projection: ProviderModelAvailability | None = None
         if binding.invoke_model_value is None:
             blockers.append("invoke_model_value_missing")
         elif revision is not None:
@@ -260,6 +271,31 @@ async def build_binding_cutover_report(
                 )
         if availability != "visible":
             blockers.append("availability_not_visible")
+        warnings: tuple[str, ...] = ()
+        if target_kind != "unresolved" and connection is not None and revision is not None:
+            protocol: ProtocolContractRevision | None = None
+            if discovered is not None and discovered.protocol_contract_revision_id is not None:
+                protocol = await session.get(
+                    ProtocolContractRevision, discovered.protocol_contract_revision_id
+                )
+            target_result = evaluate_cutover_binding_target(
+                binding=binding,
+                connection=connection,
+                current_connection_revision=revision,
+                availability=projection,
+                new_binding=False,
+                global_revision=model,
+                publication=publication,
+                discovered=discovered,
+                connection_capability=capability,
+                protocol=protocol,
+            )
+            blockers.extend(
+                reason
+                for reason in target_result.blockers
+                if reason != "current_model_not_visible" or availability == "visible"
+            )
+            warnings = target_result.warnings
         rows.append(
             BindingCutoverRow(
                 binding_id=binding.id,
@@ -275,6 +311,7 @@ async def build_binding_cutover_report(
                 availability=availability,
                 classification_evidence=evidence,
                 blocking_reasons=tuple(blockers),
+                warnings=warnings,
             )
         )
     return BindingCutoverReport(workspace_id=workspace_id, rows=tuple(rows))

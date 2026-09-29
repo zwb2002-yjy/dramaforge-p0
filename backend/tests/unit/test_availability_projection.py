@@ -17,8 +17,11 @@ from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.model_system_models import (
+    ConnectionDiscoveredModel,
+    ConnectionModelCapabilityRevision,
     ModelCapabilityRevision,
     ModelPublicationState,
+    ProtocolContractRevision,
     ProviderAvailabilityEvidence,
 )
 from app.providers.models import ProviderModelBinding
@@ -194,7 +197,8 @@ async def test_exact_revision_positive_and_transient_projection(
     assert "binding_target_unresolved" in unresolved.rows[0].blocking_reasons
 
     capability_manifest = {
-        key: value for key, value in legacy_manifest.items()
+        key: value
+        for key, value in legacy_manifest.items()
         if key not in {"lifecycle", "catalog_source"}
     }
     model = ModelCapabilityRevision(
@@ -237,6 +241,13 @@ async def test_exact_revision_positive_and_transient_projection(
     assert ready.enabled_blocked_count == 0
     assert ready.rows[0].binding_id == binding.id
     assert ready.rows[0].availability == "visible"
+    publication = await session.get(ModelPublicationState, model.id)
+    assert publication is not None
+    publication.lifecycle = "deprecated"
+    deprecated = await build_binding_cutover_report(session, workspace_id=workspace.id)
+    assert deprecated.enabled_blocked_count == 0
+    assert deprecated.rows[0].warnings == ("global_model_deprecated",)
+    publication.lifecycle = "active"
 
     binding.capability_manifest_hash = "b" * 64
     changed_hash = await build_binding_cutover_report(session, workspace_id=workspace.id)
@@ -246,3 +257,72 @@ async def test_exact_revision_positive_and_transient_projection(
     mismatched = await build_binding_cutover_report(session, workspace_id=workspace.id)
     assert mismatched.enabled_unresolved_count == 1
     assert "global_target_unresolved" in mismatched.rows[0].blocking_reasons
+
+    connection.provider_type = "minimax"
+    dynamic = ProviderModelBinding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        media_type="video",
+        model_id="dynamic-model",
+        purpose="dynamic-video",
+        enabled=True,
+        invoke_model_value="dynamic-model",
+        created_by=owner.id,
+        updated_by=owner.id,
+    )
+    session.add(dynamic)
+    await session.flush()
+    contract = {"operation": "video.generate"}
+    protocol = ProtocolContractRevision(
+        protocol_contract_id=uuid4(),
+        protocol_revision=1,
+        protocol_hash=hash_manifest(contract),
+        protocol_profile=connection.protocol_profile,
+        contract_json=contract,
+    )
+    session.add(protocol)
+    await session.flush()
+    discovered = ConnectionDiscoveredModel(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        connection_revision_id=second_revision.id,
+        credential_revision_id=second_revision.credential_revision_id,
+        remote_model_id="dynamic-model",
+        protocol_contract_revision_id=protocol.id,
+    )
+    session.add(discovered)
+    await session.flush()
+    dynamic_capability = ConnectionModelCapabilityRevision(
+        workspace_id=workspace.id,
+        connection_discovered_model_id=discovered.id,
+        capability_revision="v1",
+        capability_hash="d" * 64,
+        operations_json={},
+        input_contracts_json={},
+        parameter_constraints_json={},
+        evidence_json={},
+        implementation_status="contract_tested",
+        protocol_contract_revision_id=protocol.id,
+    )
+    session.add(dynamic_capability)
+    await session.flush()
+    dynamic.binding_target_kind = "connection_model"
+    dynamic.connection_discovered_model_id = discovered.id
+    dynamic.connection_model_capability_revision_id = dynamic_capability.id
+    await record_model_availability(
+        session,
+        ModelAvailabilityObservation(
+            **{
+                **exact,
+                "connection_revision_id": second_revision.id,
+                "credential_revision_id": second_revision.credential_revision_id,
+                "remote_model_id": "dynamic-model",
+            },
+            status="visible",
+            listed_model_ids=("dynamic-model",),
+        ),
+    )
+    ready_dynamic = await build_binding_cutover_report(session, workspace_id=workspace.id)
+    dynamic_row = next(row for row in ready_dynamic.rows if row.binding_id == dynamic.id)
+    assert dynamic_row.target_kind == "connection_model"
+    assert dynamic_row.blocking_reasons == ()
