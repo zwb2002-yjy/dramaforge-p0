@@ -53,6 +53,11 @@ projects → event_log / outbox_events / outbox_dead_letters
 | Provider catalog/profile | provider_model_catalog_entries, production_model_profiles | app/providers/catalog_models.py, app/providers/model_profiles/orm.py |
 | Model cutover expand (not runtime authority yet) | model_capability_revisions, model_publication_states/events, connection_discovered_models, connection_model_capability_revisions, provider_availability_evidence, provider_model_availability | app/providers/model_system_models.py |
 
+模型能力 revision、Connection 发现事实与能力 revision、发布事件和逐模型可用性证据
+在数据库中禁止 UPDATE/DELETE。来源核查或合同实现进展需要新增 revision；新的探测
+结果需要新增 Evidence，并更新单独的 Availability 投影。Migration A 回填的 Global
+revision 尚无来源快照，且只标记为 `manifest_mapped`，不能原地提升为已验证事实。
+
 A second, private schema `director_runtime_checkpoints` (LangGraph checkpoint
 tables `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`,
 `checkpoint_migrations`) is owned by the dedicated

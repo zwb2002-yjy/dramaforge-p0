@@ -291,6 +291,102 @@ async def test_migration_a_preserves_binding_and_requires_new_positive_evidence(
 
 
 @pytest.mark.asyncio
+async def test_model_and_availability_history_rejects_mutation() -> None:
+    dbname = f"dramaforge_model_history_{uuid4().hex[:10]}"
+    admin = await _admin()
+    try:
+        await admin.execute(f'CREATE DATABASE "{dbname}"')
+        _migrate(dbname, "upgrade", alembic_head())
+        ids = _seed_bound_model(dbname)
+        discovered_id, capability_id, evidence_id = (str(uuid4()) for _ in range(3))
+        engine = create_engine(_sync_url(dbname))
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO connection_discovered_models "
+                    "(id,workspace_id,connection_id,connection_revision_id,"
+                    "credential_revision_id,remote_model_id) "
+                    "VALUES (:id,:workspace,:connection,:revision,:credential,'remote-test-model')"
+                ),
+                {
+                    "id": discovered_id,
+                    "workspace": ids["workspace"],
+                    "connection": ids["connection"],
+                    "revision": ids["revision"],
+                    "credential": ids["credential"],
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO connection_model_capability_revisions "
+                    "(id,workspace_id,connection_discovered_model_id,capability_revision,"
+                    "capability_hash,operations_json,input_contracts_json,"
+                    "parameter_constraints_json,evidence_json,implementation_status) "
+                    "VALUES (:id,:workspace,:discovered,'r1',:hash,'{}'::json,'{}'::json,"
+                    "'{}'::json,'{}'::json,'manifest_mapped')"
+                ),
+                {
+                    "id": capability_id,
+                    "workspace": ids["workspace"],
+                    "discovered": discovered_id,
+                    "hash": "a" * 64,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO provider_availability_evidence "
+                    "(id,workspace_id,connection_id,connection_revision_id,"
+                    "credential_revision_id,remote_model_id,verifier_kind,status) "
+                    "VALUES (:id,:workspace,:connection,:revision,:credential,"
+                    "'remote-test-model','test','not_visible')"
+                ),
+                {
+                    "id": evidence_id,
+                    "workspace": ids["workspace"],
+                    "connection": ids["connection"],
+                    "revision": ids["revision"],
+                    "credential": ids["credential"],
+                },
+            )
+            model_id = connection.execute(
+                text("SELECT id FROM model_capability_revisions LIMIT 1")
+            ).scalar_one()
+            event_id = connection.execute(
+                text("SELECT id FROM model_publication_events LIMIT 1")
+            ).scalar_one()
+
+        for table, row_id, update in (
+            ("model_capability_revisions", model_id, "implementation_status = 'contract_tested'"),
+            ("model_publication_events", event_id, "reason = 'changed'"),
+            ("connection_discovered_models", discovered_id, "remote_model_id = 'changed'"),
+            ("connection_model_capability_revisions", capability_id, "capability_hash = :hash"),
+            ("provider_availability_evidence", evidence_id, "status = 'visible'"),
+        ):
+            with (
+                pytest.raises(DatabaseError, match="history is immutable"),
+                engine.begin() as connection,
+            ):
+                connection.execute(
+                    text(f"UPDATE {table} SET {update} WHERE id = :id"),
+                    {"id": row_id, "hash": "b" * 64},
+                )
+        with (
+            pytest.raises(DatabaseError, match="history is immutable"),
+            engine.begin() as connection,
+        ):
+            connection.execute(
+                text("DELETE FROM provider_availability_evidence WHERE id = :id"),
+                {"id": evidence_id},
+            )
+        engine.dispose()
+        _migrate(dbname, "downgrade", "20260929_0075")
+        _migrate(dbname, "upgrade", alembic_head())
+    finally:
+        await admin.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
+        await admin.close()
+
+
+@pytest.mark.asyncio
 async def test_all_owner_binding_gate_covers_every_workspace_and_rejects_rls_role() -> None:
     dbname = f"dramaforge_binding_gate_{uuid4().hex[:10]}"
     role = f"cutover_report_test_{uuid4().hex[:10]}"
