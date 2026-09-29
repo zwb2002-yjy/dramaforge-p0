@@ -248,6 +248,12 @@ async def resolve_reference_for_runtime(
             content_url=grant.url,
             mime_type=artifact.mime_type or mime_type,
             fingerprint=artifact.content_hash,
+            byte_size=artifact.byte_size,
+            duration_seconds=(
+                float(artifact.duration_seconds) if artifact.duration_seconds is not None else None
+            ),
+            width=artifact.width,
+            height=artifact.height,
         )
     if content_bytes is None:
         raise ValidationAppError(
@@ -260,6 +266,14 @@ async def resolve_reference_for_runtime(
         content_bytes=content_bytes,
         mime_type=mime_type,
         fingerprint=fingerprint,
+        byte_size=artifact.byte_size if artifact is not None else len(content_bytes),
+        duration_seconds=(
+            float(artifact.duration_seconds)
+            if artifact is not None and artifact.duration_seconds is not None
+            else None
+        ),
+        width=artifact.width if artifact is not None else None,
+        height=artifact.height if artifact is not None else None,
     )
 
 

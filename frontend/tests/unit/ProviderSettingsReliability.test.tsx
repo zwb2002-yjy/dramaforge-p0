@@ -28,9 +28,18 @@ const model: api.ProviderPluginRead["models"][number] = {
   media_type: "image",
   model_revision: "v2",
   lifecycle: "active",
+  implementation_status: "contract_tested",
   catalog_source: "official_static",
   capabilities: ["image.generate"],
   option_schema: {},
+  capability_summary: {
+    media_kind: "image",
+    accepts_text_only: true,
+    product_text_only: true,
+    accepts: { reference_image: true },
+    product_open: { reference_image: true },
+    limits: { reference_image: 1 },
+  },
 };
 const plugin: api.ProviderPluginRead = {
   provider_type: "fixture",

@@ -30,6 +30,14 @@ async function setupProviders(page: Page) {
     catalog_source: "official_static",
     capabilities: ["image.generate"],
     option_schema: {},
+    capability_summary: {
+      media_kind: "image",
+      accepts_text_only: true,
+      product_text_only: true,
+      accepts: { reference_image: true },
+      product_open: { reference_image: true },
+      limits: { reference_image: 1 },
+    },
   };
   const plugin = {
     provider_type: "fixture",

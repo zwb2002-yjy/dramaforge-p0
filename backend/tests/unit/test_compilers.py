@@ -7,6 +7,8 @@ from uuid import uuid4
 
 import pytest
 from app.providers.agnes import AgnesImageCompiler, AgnesVideoCompiler
+from app.providers.capability_resolver import ProductCapabilityPolicy
+from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.catalog_seed_data import SEED_MANIFESTS
 from app.providers.intents import (
     ArtifactReferenceIntent,
@@ -26,6 +28,39 @@ def _video_manifest() -> ModelCapabilityManifest:
 
 def _image_manifest() -> ModelCapabilityManifest:
     raw = next(m for m in SEED_MANIFESTS if m["model_id"] == "agnes-image-2.1-flash")
+    return ModelCapabilityManifest.model_validate(raw)
+
+
+def _candidate_image_manifest() -> ModelCapabilityManifest:
+    raw = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == "agnes-image-2.5-flash"
+    )
+    # Compiler fixture only: catalog publication and execution eligibility remain preview.
+    raw["lifecycle"] = "active"
+    raw["implementation_status"] = "contract_tested"
+    raw["evidence"]["synthetic_contract_fixture"] = {
+        "source_type": "contract_fixture",
+        "source_url": "https://example.invalid/synthetic-contract-fixture",
+        "checked_at": "2026-09-29",
+    }
+    return ModelCapabilityManifest.model_validate(raw)
+
+
+def _candidate_video_manifest(model_id: str = "agnes-video-2.5") -> ModelCapabilityManifest:
+    raw = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == model_id
+    )
+    raw["lifecycle"] = "active"
+    raw["implementation_status"] = "contract_tested"
+    raw["evidence"]["synthetic_contract_fixture"] = {
+        "source_type": "contract_fixture",
+        "source_url": "https://example.invalid/synthetic-contract-fixture",
+        "checked_at": "2026-09-29",
+    }
     return ModelCapabilityManifest.model_validate(raw)
 
 
@@ -189,6 +224,139 @@ async def test_image_compiler_compiles_t2i_wire_request() -> None:
         }
     ]
     assert compiled.reference_artifact_ids == []
+
+
+@pytest.mark.asyncio
+async def test_agnes_image_contract_compiles_ordered_multi_reference_without_network() -> None:
+    first_id, second_id = uuid4(), uuid4()
+    intent = ImageGenerationIntent(
+        prompt="combine portraits",
+        size="2K",
+        aspect_ratio="9:16",
+        reference_artifact_ids=[first_id, second_id],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    references = [
+        ResolvedReference(
+            role="reference_image",
+            artifact_id=first_id,
+            content_url="https://example.com/first.png",
+            mime_type="image/png",
+        ),
+        ResolvedReference(
+            role="reference_image",
+            artifact_id=second_id,
+            content_bytes=b"second-image",
+            mime_type="image/png",
+        ),
+    ]
+    compiled = await AgnesImageCompiler().compile(
+        intent,
+        _candidate_image_manifest(),
+        references,
+        invoke_model_value="agnes-image-2.5-flash",
+        policy=ProductCapabilityPolicy(
+            allowed_contracts=frozenset({"text", "reference"}),
+            allowed_options=frozenset({"size", "aspect_ratio", "response_format"}),
+        ),
+    )
+    assert compiled.wire_request["size"] == "2K"
+    assert compiled.wire_request["extra_body"]["image"][0] == "https://example.com/first.png"
+    assert compiled.wire_request["extra_body"]["image"][1].startswith("data:image/png;base64,")
+    assert compiled.reference_artifact_ids == [first_id, second_id]
+    assert "example.com" not in str(compiled.safe_request_summary)
+
+
+@pytest.mark.asyncio
+async def test_agnes_image_contract_rejects_reference_bytes_fingerprint_mismatch() -> None:
+    reference_id = uuid4()
+    intent = ImageGenerationIntent(
+        prompt="portrait",
+        reference_artifact_id=reference_id,
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="bytes do not match"):
+        await AgnesImageCompiler().compile(
+            intent,
+            _candidate_image_manifest(),
+            [
+                ResolvedReference(
+                    role="reference_image",
+                    artifact_id=reference_id,
+                    content_bytes=b"image",
+                    mime_type="image/png",
+                    fingerprint="0" * 64,
+                )
+            ],
+            invoke_model_value="agnes-image-2.5-flash",
+            policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"reference"})),
+        )
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_contract_derives_keyframe_wire_mode() -> None:
+    first_id, last_id = uuid4(), uuid4()
+    intent = VideoGenerationIntentV1(
+        prompt="camera moves slowly",
+        references=[
+            ArtifactReferenceIntent(artifact_id=first_id, role="first_frame"),
+            ArtifactReferenceIntent(artifact_id=last_id, role="last_frame"),
+        ],
+        output=VideoOutputIntent(duration_seconds=6, resolution="1080P", aspect_ratio="9:16"),
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    references = [
+        ResolvedReference(role="first_frame", artifact_id=first_id, content_url="https://example.com/a.png"),
+        ResolvedReference(role="last_frame", artifact_id=last_id, content_url="https://example.com/b.png"),
+    ]
+    compiled = await AgnesVideoCompiler().compile(
+        intent,
+        _candidate_video_manifest(),
+        references,
+        invoke_model_value="agnes-video-2.5",
+        policy=ProductCapabilityPolicy(
+            allowed_contracts=frozenset({"frame"}),
+            allowed_options=frozenset({"duration_seconds", "resolution", "aspect_ratio"}),
+        ),
+    )
+    assert compiled.wire_request == {
+        "model": "agnes-video-2.5",
+        "prompt": "camera moves slowly",
+        "mode": "keyframe",
+        "seconds": "6",
+        "size": "1080P",
+        "aspect_ratio": "9:16",
+        "n": 1,
+        "first_frame": "https://example.com/a.png",
+        "last_frame": "https://example.com/b.png",
+    }
+    assert compiled.reference_artifact_ids == [first_id, last_id]
+    assert "example.com" not in str(compiled.safe_request_summary)
+
+
+@pytest.mark.asyncio
+async def test_agnes_video_contract_rejects_unverified_audio_wire_shape() -> None:
+    audio_id = uuid4()
+    intent = VideoGenerationIntentV1(
+        prompt="rhythmic movement",
+        references=[ArtifactReferenceIntent(artifact_id=audio_id, role="reference_audio")],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="audio wire shape is not verified"):
+        await AgnesVideoCompiler().compile(
+            intent,
+            _candidate_video_manifest(),
+            [
+                ResolvedReference(
+                    role="reference_audio",
+                    artifact_id=audio_id,
+                    content_url="https://example.com/a.mp3",
+                    mime_type="audio/mpeg",
+                )
+            ],
+            invoke_model_value="agnes-video-2.5",
+            policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"reference"})),
+        )
 
 
 @pytest.mark.asyncio

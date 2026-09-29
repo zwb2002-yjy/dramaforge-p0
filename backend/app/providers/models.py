@@ -19,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.providers import model_system_models as _model_system_models  # noqa: F401
 from app.shared.base import Base
 
 
@@ -166,6 +167,19 @@ class ProviderModelBinding(Base):
             "purpose",
             name="uq_provider_model_binding_revision",
         ),
+        CheckConstraint(
+            "(binding_target_kind IS NULL AND canonical_model_id IS NULL "
+            "AND model_capability_revision_id IS NULL "
+            "AND connection_discovered_model_id IS NULL "
+            "AND connection_model_capability_revision_id IS NULL) OR "
+            "(binding_target_kind = 'global_model' AND model_capability_revision_id IS NOT NULL "
+            "AND canonical_model_id IS NOT NULL AND connection_discovered_model_id IS NULL "
+            "AND connection_model_capability_revision_id IS NULL) OR "
+            "(binding_target_kind = 'connection_model' AND model_capability_revision_id IS NULL "
+            "AND canonical_model_id IS NULL AND connection_discovered_model_id IS NOT NULL "
+            "AND connection_model_capability_revision_id IS NOT NULL)",
+            name="ck_provider_model_binding_target",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -194,6 +208,17 @@ class ProviderModelBinding(Base):
         nullable=True,
     )
     capability_manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    binding_target_kind: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    canonical_model_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    model_capability_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("model_capability_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    connection_discovered_model_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("connection_discovered_models.id", ondelete="RESTRICT"), nullable=True
+    )
+    connection_model_capability_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("connection_model_capability_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
     remote_resource_kind: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default="model"
     )

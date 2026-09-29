@@ -41,6 +41,7 @@ from app.production.execution_plan import (
 from app.production.formal_selection import require_formal_keyframe
 from app.production.models import GraphVersion, ProductionGraph, ShotReferenceBinding
 from app.production.reference_intents import (
+    PURPOSE_TO_ROLE,
     ShotReferenceIntent,
     compile_references,
 )
@@ -51,6 +52,7 @@ from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderConnectionRevision
+from app.providers.workbench_contract import select_workbench_contract
 from app.shared.enums import GraphStatus
 from app.shared.errors import ConflictError, ValidationAppError
 
@@ -1042,7 +1044,13 @@ class WorkbenchExecutionService:
                 )
             except ValidationAppError as exc:
                 raise WorkbenchExecutionError(str(exc)) from exc
-            if not any(ref.artifact_id == formal.id for ref in references):
+            requested_frames = [ref for ref in references if ref.purpose == "first_frame"]
+            if any(ref.artifact_id != formal.id for ref in requested_frames):
+                raise WorkbenchExecutionError(
+                    "submitted first frame differs from the Formal keyframe",
+                    details={"code": "FORMAL_KEYFRAME_SNAPSHOT_MISMATCH"},
+                )
+            if not requested_frames:
                 references.insert(
                     0,
                     ShotReferenceIntent(
@@ -1052,11 +1060,33 @@ class WorkbenchExecutionService:
                     ),
                 )
 
+        effective_mode_id = execution_input.mode_id
+        operation_key: Literal["image.generate", "video.generate"] = (
+            "video.generate" if execution_input.stage == "video" else "image.generate"
+        )
+        operation_manifest = capability_manifest.operations.get(operation_key)
+        if operation_manifest is not None and operation_manifest.input_contracts:
+            try:
+                selected_contract = select_workbench_contract(
+                    operation=operation_manifest,
+                    media_kind="video" if execution_input.stage == "video" else "image",
+                    references=[
+                        (PURPOSE_TO_ROLE.get(ref.purpose, ""), ref.mime_type)
+                        for ref in references
+                    ],
+                )
+            except ValueError as exc:
+                raise WorkbenchExecutionError(
+                    str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
+                ) from exc
+            effective_mode_id = selected_contract.contract_id
+            resolution = resolution.model_copy(update={"mode_id": effective_mode_id})
+
         compiled = compile_references(
             manifest=v3_manifest,
             capability=capability,
             references=references,
-            mode_id=execution_input.mode_id,
+            mode_id=effective_mode_id,
             accept_approximations=execution_input.accept_approximations,
         )
         pending_suggestions = await self._pending_creative_suggestions(
@@ -1071,7 +1101,7 @@ class WorkbenchExecutionService:
             stage=execution_input.stage,
             prompt=prompt,
             semantic_intent=semantic_intent,
-            mode_id=execution_input.mode_id,
+            mode_id=effective_mode_id,
             resolved_model=resolution,
             capability=capability,
             planned_references=compiled.planned_references,

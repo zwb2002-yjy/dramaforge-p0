@@ -18,9 +18,12 @@ import json
 from collections.abc import AsyncGenerator
 from datetime import date
 from pathlib import Path
+from shutil import copytree
 
 import pytest
 from app.providers import registry as registry_module
+from app.providers.bootstrap import build_v3_registry, transport_profile_id_for
+from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.catalog_service import ModelCatalogService
@@ -31,6 +34,35 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 BACKEND = Path(__file__).resolve().parents[2]
 CONTRACTS_DIR = BACKEND.parent / "fixtures" / "providers" / "contracts"
 FROZEN_SEEDS_PATH = BACKEND / "alembic" / "_seeds_0015.py"
+CATALOG_DIR = BACKEND / "app" / "providers" / "model_catalog"
+
+
+def _identity(manifest: dict[str, object]) -> tuple[str, str, str, str]:
+    return (
+        str(manifest["provider_type"]),
+        str(manifest["protocol_profile"]),
+        str(manifest["model_id"]),
+        str(manifest["model_revision"]),
+    )
+
+
+def _assert_fixture_completeness(
+    manifests: list[dict[str, object]], fixtures_dir: Path
+) -> None:
+    by_identity = {_identity(manifest): manifest for manifest in manifests}
+    assert len(by_identity) == len(manifests)
+    fixtures = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in fixtures_dir.glob("*.json")
+    ]
+    fixture_by_identity = {_identity(fixture["manifest"]): fixture for fixture in fixtures}
+    assert len(fixture_by_identity) == len(fixtures)
+    assert fixture_by_identity.keys() == by_identity.keys()
+    for identity, fixture in fixture_by_identity.items():
+        manifest = by_identity[identity]
+        assert fixture["manifest"] == manifest
+        assert fixture["manifest_hash"] == hash_manifest(manifest)
+        assert fixture["contract"]["wire_template"]["method"] in {"POST", "GET"}
 
 
 @pytest.fixture
@@ -53,11 +85,15 @@ def _load_frozen() -> object:
 
 
 def test_all_seed_manifests_parse() -> None:
-    assert len(SEED_MANIFESTS) == 7
+    loaded = ModelCatalogLoader().load()
+    active = [item for item in loaded if item.publication_lifecycle == "active"]
+    assert len(active) == len(SEED_MANIFESTS)
+    assert {_identity(item.as_dict()) for item in active} == {
+        _identity(manifest) for manifest in SEED_MANIFESTS
+    }
     for manifest in SEED_MANIFESTS:
         parsed = ModelCapabilityManifest.model_validate(manifest)
-        expected_revision = "v2" if parsed.model_id == "agnes-image-2.1-flash" else "v1"
-        assert parsed.model_revision == expected_revision
+        assert parsed.model_revision
         assert parsed.catalog_source == "official_static"
 
 
@@ -72,34 +108,150 @@ def test_contract_hash_is_deterministic_and_order_insensitive() -> None:
 
 
 def test_seed_manifests_match_registry_plugins() -> None:
-    agnes = registry_module.get_plugin("agnes", "agnes_cn_v1")
-    ark = registry_module.get_plugin("volcengine", "ark_cn_v1")
-    minimax = registry_module.get_plugin("minimax", "minimax_cn_v1")
-    agnes_ids = [m["model_id"] for m in agnes.catalog_manifests]
-    ark_ids = [m["model_id"] for m in ark.catalog_manifests]
-    minimax_ids = [m["model_id"] for m in minimax.catalog_manifests]
-    assert agnes_ids == ["agnes-image-2.1-flash", "agnes-video-v2.0"]
-    assert ark_ids == [
-        "doubao-seedream-4-0-250828",
-        "doubao-seedance-1-0-pro-250528",
-        "doubao-seedance-2-0-260128",
-    ]
-    assert minimax_ids == ["image-01", "MiniMax-H3"]
-    for model_id in agnes_ids + ark_ids + minimax_ids:
-        assert any(m["model_id"] == model_id for m in SEED_MANIFESTS)
+    for plugin in registry_module.list_plugins():
+        expected = {
+            _identity(manifest)
+            for manifest in SEED_MANIFESTS
+            if (manifest["provider_type"], manifest["protocol_profile"])
+            == (plugin.provider_type, plugin.protocol_profile)
+        }
+        assert {_identity(manifest) for manifest in plugin.catalog_manifests} == expected
+    for manifest in SEED_MANIFESTS:
+        registry_module.get_plugin(manifest["provider_type"], manifest["protocol_profile"])
+        assert transport_profile_id_for(
+            manifest["provider_type"], manifest["protocol_profile"], manifest["media_kind"]
+        ) is not None
 
 
 def test_contract_fixtures_match_current_seed_hash() -> None:
-    fixture_files = sorted(CONTRACTS_DIR.glob("*.json"))
-    assert len(fixture_files) == 7
-    manifest_by_id = {m["model_id"]: m for m in SEED_MANIFESTS}
-    for fixture_path in fixture_files:
-        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-        model_id = fixture["manifest"]["model_id"]
-        assert model_id in manifest_by_id
-        assert fixture["manifest_hash"] == hash_manifest(manifest_by_id[model_id])
-        assert fixture["manifest_hash"] == hash_manifest(fixture["manifest"])
-        assert fixture["contract"]["wire_template"]["method"] in {"POST", "GET"}
+    _assert_fixture_completeness(SEED_MANIFESTS, CONTRACTS_DIR)
+
+
+def test_catalog_loader_discovers_new_same_protocol_manifest(tmp_path: Path) -> None:
+    catalog = tmp_path / "model_catalog"
+    copytree(CATALOG_DIR, catalog)
+    dummy = dict(SEED_MANIFESTS[0])
+    dummy["model_id"] = "test-catalog-extension"
+    dummy["display_name"] = "Test catalog extension"
+    dummy_path = catalog / dummy["provider_type"] / "test-catalog-extension.json"
+    dummy_path.write_text(json.dumps(dummy), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="implementation status"):
+        ModelCatalogLoader(catalog).load()
+    dummy["implementation_status"] = "contract_tested"
+    dummy["evidence"] = {
+        "fixture": {
+            "source_type": "contract_fixture",
+            "source_url": "https://example.invalid/synthetic-contract-fixture",
+            "checked_at": "2026-09-29",
+        }
+    }
+    dummy_path.write_text(json.dumps(dummy), encoding="utf-8")
+
+    loaded = ModelCatalogLoader(catalog).load()
+    manifests = [item.as_dict() for item in loaded if item.publication_lifecycle == "active"]
+    assert _identity(dummy) in {item.identity for item in loaded}
+    registry, _ = build_v3_registry(
+        seed_manifests=[ModelCapabilityManifest.model_validate(item) for item in manifests]
+    )
+    assert registry.get(f"{dummy['provider_type']}/{dummy['model_id']}")
+
+    fixtures = tmp_path / "contracts"
+    copytree(CONTRACTS_DIR, fixtures)
+    with pytest.raises(AssertionError):
+        _assert_fixture_completeness(manifests, fixtures)
+    sample = json.loads((CONTRACTS_DIR / "agnes-image-2.1-flash.json").read_text("utf-8"))
+    sample["manifest"] = dummy
+    sample["manifest_hash"] = hash_manifest(dummy)
+    (fixtures / "test-catalog-extension.json").write_text(json.dumps(sample), encoding="utf-8")
+    _assert_fixture_completeness(manifests, fixtures)
+
+
+def test_catalog_loader_rejects_duplicate_identity(tmp_path: Path) -> None:
+    provider_dir = tmp_path / SEED_MANIFESTS[0]["provider_type"]
+    provider_dir.mkdir()
+    payload = json.dumps(SEED_MANIFESTS[0])
+    (provider_dir / "one.json").write_text(payload, encoding="utf-8")
+    (provider_dir / "two.json").write_text(payload, encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate model catalog identity"):
+        ModelCatalogLoader(tmp_path).load()
+
+
+def test_preview_catalog_requires_explicit_implementation_status(tmp_path: Path) -> None:
+    preview = tmp_path / "minimax" / "preview"
+    preview.mkdir(parents=True)
+    manifest = dict(next(item for item in SEED_MANIFESTS if item["provider_type"] == "minimax"))
+    manifest["model_id"] = "candidate"
+    manifest["lifecycle"] = "preview"
+    path = preview / "candidate.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="implementation status"):
+        ModelCatalogLoader(tmp_path).load()
+    manifest["implementation_status"] = "documented"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    loaded = ModelCatalogLoader(tmp_path).load()
+    assert loaded[0].publication_lifecycle == "preview"
+    assert loaded[0].as_dict()["implementation_status"] == "documented"
+    manifest["implementation_status"] = "contract_tested"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="reproducible evidence"):
+        ModelCatalogLoader(tmp_path).load()
+    manifest["evidence"] = {
+        "fixture": {
+            "source_type": "contract_fixture",
+            "source_url": "https://example.invalid/synthetic-contract-fixture",
+            "checked_at": "2026-09-29",
+        }
+    }
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert ModelCatalogLoader(tmp_path).load()[0].publication_lifecycle == "preview"
+
+
+def test_packaged_preview_catalog_has_model_evidence_and_no_active_collision() -> None:
+    loaded = ModelCatalogLoader().load()
+    previews = [item for item in loaded if item.publication_lifecycle == "preview"]
+    assert previews
+    active = {item.identity for item in loaded if item.publication_lifecycle == "active"}
+    for item in previews:
+        assert item.identity not in active
+        manifest = ModelCapabilityManifest.model_validate(item.as_dict())
+        assert manifest.lifecycle == "preview"
+        assert manifest.implementation_status in {"discovered", "documented", "contract_tested"}
+        assert manifest.evidence
+        assert all(
+            evidence.source_url.startswith("https://")
+            for evidence in manifest.evidence.values()
+        )
+
+
+def test_unknown_protocol_profile_fails_registry_bootstrap() -> None:
+    unknown = dict(SEED_MANIFESTS[0])
+    unknown["protocol_profile"] = "unregistered_profile"
+    with pytest.raises(ValueError, match="no registered transport profile"):
+        build_v3_registry(seed_manifests=[ModelCapabilityManifest.model_validate(unknown)])
+
+
+def test_revision_publication_keeps_legacy_manifest_bytes(tmp_path: Path) -> None:
+    catalog = tmp_path / "model_catalog"
+    copytree(CATALOG_DIR, catalog)
+    original = ModelCatalogLoader(catalog).load()[0]
+    old_hash = original.manifest_hash
+    legacy_dir = original.source_path.parent / "legacy"
+    legacy_dir.mkdir()
+    original.source_path.rename(legacy_dir / original.source_path.name)
+    revised = original.as_dict()
+    revised["model_revision"] = "next-revision"
+    revised["implementation_status"] = "documented"
+    (original.source_path.parent / "08-next-revision.json").write_text(
+        json.dumps(revised), encoding="utf-8"
+    )
+
+    loaded = ModelCatalogLoader(catalog).load()
+    old = next(item for item in loaded if item.identity == original.identity)
+    current = next(item for item in loaded if item.identity[3] == "next-revision")
+    assert old.manifest_hash == old_hash
+    assert old.publication_lifecycle == "legacy"
+    assert current.publication_lifecycle == "active"
 
 
 def test_frozen_migration_snapshot_matches_current_seed_hash() -> None:

@@ -442,7 +442,14 @@ class MiniMaxImageCompiler:
 
     def validate(self, intent: Any, model: Any) -> None:
         operation = model.operations.get("image.generate")
-        if operation is None or "image.i2i" not in set(operation.capabilities):
+        if operation is None:
+            raise ValueError("model does not support image.generate")
+        if operation.input_contracts:
+            required = "image.i2i" if intent.reference_artifact_id is not None else "image.t2i"
+            if required not in set(operation.capabilities):
+                raise ValueError(f"model does not support {required}")
+            return
+        if "image.i2i" not in set(operation.capabilities):
             raise ValueError("model does not support image.i2i")
         constraint = operation.reference_constraints.get("reference_image")
         if (
@@ -460,9 +467,20 @@ class MiniMaxImageCompiler:
             raise ValueError("MiniMax image catalog revision only supports 1024x1024")
 
     async def compile(
-        self, intent: Any, model: Any, references: list[Any], *, invoke_model_value: str
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None = None,
     ) -> Any:
         self.validate(intent, model)
+        operation = model.operations["image.generate"]
+        if operation.input_contracts:
+            return self._compile_contract(
+                intent, model, references, invoke_model_value=invoke_model_value, policy=policy
+            )
         ref = next((item for item in references if item.role == "reference_image"), None)
         if ref is None or ref.content_url is None:
             raise ValueError("MiniMax reference_image must be an HTTPS URL")
@@ -493,13 +511,115 @@ class MiniMaxImageCompiler:
             reference_fingerprints=fingerprints,
         )
 
+    def _compile_contract(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None,
+    ) -> Any:
+        from app.providers.capability_resolver import (
+            CapabilityResolver,
+            ReferenceMetadata,
+        )
+        from app.providers.runtime import CompiledImageRequest
+
+        if policy is None:
+            raise ValueError("MiniMax image input contracts require an explicit product policy")
+        if any(ref.role != "reference_image" for ref in references) or len(references) > 1:
+            raise ValueError("MiniMax image protocol accepts one character reference at most")
+        ref = references[0] if references else None
+        if (ref.artifact_id if ref is not None else None) != intent.reference_artifact_id:
+            raise ValueError("resolved image reference does not match creative intent")
+        if ref is not None and ref.content_url is None:
+            raise ValueError("MiniMax reference_image must be an HTTPS URL")
+        if (
+            ref is not None
+            and intent.reference_fingerprint is not None
+            and ref.fingerprint != intent.reference_fingerprint
+        ):
+            raise ValueError("resolved image fingerprint does not match creative intent")
+        if (
+            ref is not None
+            and intent.reference_mime is not None
+            and ref.mime_type != intent.reference_mime
+        ):
+            raise ValueError("resolved image MIME does not match creative intent")
+        metadata = [
+            ReferenceMetadata(
+                artifact_id=ref.artifact_id,
+                mime_type=ref.mime_type,
+                byte_size=ref.byte_size,
+                width=ref.width,
+                height=ref.height,
+            )
+        ] if ref is not None else []
+        plan = CapabilityResolver().resolve(
+            manifest=model,
+            intent=intent,
+            reference_metadata=metadata,
+            policy=policy,
+        )
+        ratio = plan.effective_options.get("aspect_ratio")
+        if not isinstance(ratio, str):
+            raise ValueError("MiniMax image aspect_ratio must be declared by the manifest")
+        response_format = plan.effective_options.get("response_format")
+        count = plan.effective_options.get("n")
+        optimizer = plan.effective_options.get("prompt_optimizer")
+        if response_format != "url" or count != 1 or not isinstance(optimizer, bool):
+            raise ValueError("MiniMax image product requires URL, one image, and prompt optimizer")
+        body: dict[str, object] = {
+            "model": invoke_model_value,
+            "prompt": _require_prompt(intent.prompt),
+            "aspect_ratio": ratio,
+            "response_format": response_format,
+            "n": count,
+            "prompt_optimizer": optimizer,
+        }
+        artifact_ids: list[Any] = []
+        fingerprints: list[str] = []
+        if ref is not None:
+            body["subject_reference"] = [
+                {"type": "character", "image_file": _require_https_reference(ref.content_url)}
+            ]
+            artifact_ids.append(ref.artifact_id)
+            if ref.fingerprint:
+                fingerprints.append(ref.fingerprint)
+        summary = _summary(
+            operation="image.i2i.character" if ref is not None else "image.t2i",
+            model=invoke_model_value,
+            artifact_ids=[str(item) for item in artifact_ids],
+            fingerprints=fingerprints,
+            schema_version=model.manifest_version,
+        )
+        summary["matched_contract"] = plan.matched_contract
+        summary["effective_common_options"] = {"aspect_ratio": ratio}
+        summary["translation_transformations"] = []
+        return CompiledImageRequest(
+            provider_type="minimax",
+            protocol_profile=MINIMAX_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="image.generate",
+            wire_request=cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=cast(dict[str, JsonValue], summary),
+            reference_artifact_ids=artifact_ids,
+            reference_fingerprints=fingerprints,
+        )
+
 
 class MiniMaxVideoCompiler:
     reference_transport = "public_url"
 
     def validate(self, intent: Any, model: Any) -> None:
         operation = model.operations.get("video.generate")
-        if operation is None or "video.i2v.first_frame" not in set(operation.capabilities):
+        if operation is None:
+            raise ValueError("model does not support video.generate")
+        if operation.input_contracts:
+            return
+        if "video.i2v.first_frame" not in set(operation.capabilities):
             raise ValueError("model does not support video.i2v.first_frame")
         frames = [ref for ref in intent.references if ref.role == "first_frame"]
         constraint = operation.reference_constraints.get("first_frame")
@@ -529,9 +649,19 @@ class MiniMaxVideoCompiler:
             )
 
     async def compile(
-        self, intent: Any, model: Any, references: list[Any], *, invoke_model_value: str
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None = None,
     ) -> Any:
         self.validate(intent, model)
+        if model.operations["video.generate"].input_contracts:
+            return self._compile_contract(
+                intent, model, references, invoke_model_value=invoke_model_value, policy=policy
+            )
         ref = next((item for item in references if item.role == "first_frame"), None)
         if ref is None or ref.content_url is None:
             raise ValueError("MiniMax first_frame must be an HTTPS URL")
@@ -585,6 +715,139 @@ class MiniMaxVideoCompiler:
                 summary,
             ),
             reference_artifact_ids=[ref.artifact_id],
+            reference_fingerprints=fingerprints,
+        )
+
+    def _compile_contract(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None,
+    ) -> Any:
+        from app.providers.capability_resolver import CapabilityResolver, ReferenceMetadata
+        from app.providers.reference_roles import canonical_reference_role
+        from app.providers.runtime import CompiledVideoRequest
+
+        if policy is None:
+            raise ValueError("MiniMax video input contracts require an explicit product policy")
+        selected = [
+            (item.artifact_id, canonical_reference_role(str(item.role)))
+            for item in intent.references
+        ]
+        delivered = [
+            (item.artifact_id, canonical_reference_role(str(item.role)))
+            for item in references
+        ]
+        if selected != delivered:
+            raise ValueError("resolved MiniMax references do not match creative intent")
+        metadata = [
+            ReferenceMetadata(
+                artifact_id=item.artifact_id,
+                mime_type=item.mime_type,
+                byte_size=item.byte_size,
+                duration_seconds=item.duration_seconds,
+                width=item.width,
+                height=item.height,
+            )
+            for item in references
+        ]
+        plan = CapabilityResolver().resolve(
+            manifest=model,
+            intent=intent,
+            reference_metadata=metadata,
+            policy=policy,
+        )
+        roles = {role for _, role in delivered}
+        frames = {"first_frame", "last_frame"}
+        reference_roles = {"reference_image", "reference_video", "reference_audio"}
+        if roles & frames and roles & reference_roles:
+            raise ValueError("MiniMax frame and multimodal references are mutually exclusive")
+        wire_roles = {
+            "first_frame": "image_url",
+            "last_frame": "image_url",
+            "reference_image": "image_url",
+            "reference_video": "video_url",
+            "reference_audio": "audio_url",
+        }
+        content: list[dict[str, object]] = [
+            {"type": "text", "text": _require_prompt(intent.prompt)}
+        ]
+        artifact_ids: list[Any] = []
+        fingerprints: list[str] = []
+        for item, (_, role) in zip(references, delivered, strict=True):
+            if role not in wire_roles or item.content_url is None:
+                raise ValueError(f"MiniMax cannot deliver reference role: {role}")
+            wire_type = wire_roles[role]
+            content.append(
+                {
+                    "type": wire_type,
+                    wire_type: {"url": _require_https_reference(item.content_url)},
+                    "role": role,
+                }
+            )
+            artifact_ids.append(item.artifact_id)
+            if item.fingerprint:
+                fingerprints.append(item.fingerprint)
+        options = plan.effective_options
+        supported_options = {
+            "resolution", "duration_seconds", "aspect_ratio", "prompt_expansion_mode"
+        }
+        if set(options) - supported_options:
+            raise ValueError("MiniMax V2 manifest declares an unsupported wire option")
+        resolution = options.get("resolution")
+        duration = options.get("duration_seconds")
+        ratio = options.get("aspect_ratio")
+        if not isinstance(resolution, str) or not isinstance(duration, int):
+            raise ValueError("MiniMax V2 requires resolution and duration")
+        if not isinstance(ratio, str):
+            raise ValueError("MiniMax V2 requires a declared aspect ratio")
+        if not roles and ratio == "adaptive":
+            raise ValueError("MiniMax text-to-video requires a concrete aspect ratio")
+        transformations: list[dict[str, object]] = []
+        if roles & frames and ratio != "adaptive":
+            transformations.append(
+                {
+                    "field": "aspect_ratio",
+                    "from_value": ratio,
+                    "to_value": "adaptive",
+                    "reason": "provider_inherits_aspect_ratio_from_frame",
+                }
+            )
+            ratio = "adaptive"
+        body: dict[str, object] = {
+            "model": invoke_model_value,
+            "content": content,
+            "resolution": resolution,
+            "duration": duration,
+            "ratio": ratio,
+        }
+        if "prompt_expansion_mode" in options:
+            expansion = options["prompt_expansion_mode"]
+            if not isinstance(expansion, str) or not expansion:
+                raise ValueError("MiniMax prompt expansion mode must be non-empty")
+            body["extra"] = {"prompt_expansion_mode": expansion}
+        summary = _summary(
+            operation="video.generate",
+            model=invoke_model_value,
+            artifact_ids=[str(item) for item in artifact_ids],
+            fingerprints=fingerprints,
+            schema_version=model.manifest_version,
+        )
+        summary["matched_contract"] = plan.matched_contract
+        summary["effective_common_options"] = options
+        summary["translation_transformations"] = transformations
+        return CompiledVideoRequest(
+            provider_type="minimax",
+            protocol_profile=MINIMAX_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="video.generate",
+            wire_request=cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=cast(dict[str, JsonValue], summary),
+            reference_artifact_ids=artifact_ids,
             reference_fingerprints=fingerprints,
         )
 

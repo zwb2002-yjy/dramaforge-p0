@@ -124,7 +124,7 @@ async def evaluate_candidate(
     # management view plus the experiment form report it as certification state.
 
     # Catalog snapshot consistency (review gate 8): the binding must reference an
-    # active catalog revision of the same provider/profile/media with a complete
+    # executable catalog revision of the same provider/profile/media with a complete
     # invoke value and a matching manifest hash.
     if binding.catalog_entry_id is None:
         _issues_add(issues, "MODEL_NOT_IN_CATALOG")
@@ -133,7 +133,7 @@ async def evaluate_candidate(
     if catalog_entry is None:
         _issues_add(issues, "MODEL_NOT_IN_CATALOG")
     else:
-        if catalog_entry.lifecycle != "active":
+        if catalog_entry.lifecycle not in {"active", "legacy", "deprecated"}:
             _issues_add(issues, "MODEL_LIFECYCLE_INACTIVE", catalog_entry.lifecycle)
         if (
             catalog_entry.provider_type != connection.provider_type
@@ -166,9 +166,20 @@ async def evaluate_candidate(
         if not _capability_satisfied(capability, capabilities):
             _issues_add(issues, "CAPABILITY_REQUIRED_MISSING", capability)
     reference_constraints = op.get("reference_constraints") or {}
+    input_contracts = op.get("input_contracts") or {}
     for role in sorted(reference_roles):
-        constraint = reference_constraints.get(role)
-        if constraint is None or int(constraint.get("max", 0)) < 1:
+        if input_contracts:
+            supported = any(
+                isinstance(contract, dict)
+                and isinstance(contract.get("input_slots"), dict)
+                and isinstance(slot := contract["input_slots"].get(role), dict)
+                and (slot.get("maximum") is None or int(slot["maximum"]) > 0)
+                for contract in input_contracts.values()
+            )
+        else:
+            constraint = reference_constraints.get(role)
+            supported = constraint is not None and int(constraint.get("max", 0)) > 0
+        if not supported:
             _issues_add(issues, "CAPABILITY_REQUIRED_MISSING", f"reference role {role}")
     for group in op.get("exclusive_groups") or []:
         members = group.get("members") or []

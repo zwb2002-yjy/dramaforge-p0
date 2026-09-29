@@ -14,6 +14,10 @@ from app.config import clear_settings_cache
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.production.service import GraphService
 from app.providers.connection_service import ProviderConnectionService
+from app.providers.model_system_models import (
+    ProviderAvailabilityEvidence,
+    ProviderModelAvailability,
+)
 from app.providers.models import (
     ProviderCapabilityEvidence,
     ProviderConnection,
@@ -233,6 +237,12 @@ async def test_explicit_auth_rejection_revokes_current_account_flags_without_era
     history = list(await session.scalars(select(ProviderCapabilityEvidence)))
     assert len(history) == 2
     assert {item.status for item in history} == {"passed", "failed"}
+    projections = list(await session.scalars(select(ProviderModelAvailability)))
+    assert len(projections) == 2
+    assert {item.effective_status for item in projections} == {
+        "auth_failed" if http_status == 401 else "forbidden"
+    }
+    assert {item.connection_revision_id for item in projections} == {revision.id}
     assert await session.scalar(select(ProviderQualityEvidence.id)) == quality.id
     stored_revision = await session.scalar(select(ProviderConnectionRevision))
     assert stored_revision is not None
@@ -274,6 +284,54 @@ async def test_transient_or_non_auth_failure_does_not_revoke_prior_account_verif
     assert connection.verification_status == "verified"
     assert connection.verified_at == prior_verified_at
     assert all(binding.account_verified for binding in bindings)
+    projections = list(await session.scalars(select(ProviderModelAvailability)))
+    assert len(projections) == 2
+    expected = "not_supported" if failure == "empty-catalog" else "not_checked"
+    assert {item.effective_status for item in projections} == {expected}
+    assert all(item.positive_evidence_id is None for item in projections)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider_type,profile,expected",
+    [
+        ("agnes", "agnes_cn_v1", ("visible", "not_supported")),
+        ("minimax", "minimax_cn_v1", ("visible", "not_supported")),
+        ("volcengine", "ark_cn_v1", ("not_supported", "not_supported")),
+    ],
+)
+async def test_model_list_scope_never_infers_unproven_media_visibility(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    provider_type: str,
+    profile: str,
+    expected: tuple[str, str],
+) -> None:
+    actor, workspace, service, connection, bindings = await _seed(
+        session, provider_type=provider_type, profile=profile
+    )
+
+    async def response() -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": bindings[0].invoke_model_value}]})
+
+    _stub_http(monkeypatch, response)
+    await service.probe(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=actor,
+        capability="auth_models",
+    )
+    projected = {
+        item.remote_model_id: item.effective_status
+        for item in await session.scalars(select(ProviderModelAvailability))
+    }
+    assert tuple(projected[binding.invoke_model_value or ""] for binding in bindings) == expected
+    evidence = list(await session.scalars(select(ProviderAvailabilityEvidence)))
+    assert len(evidence) == 2
+    assert all(
+        item.listed_model_ids_json == [bindings[0].invoke_model_value]
+        for item in evidence
+    )
 
 
 @pytest.mark.asyncio

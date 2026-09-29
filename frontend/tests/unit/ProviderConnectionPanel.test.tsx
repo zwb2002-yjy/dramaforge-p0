@@ -96,9 +96,39 @@ describe("Provider connection contract revisions", () => {
             media_type: "image",
             model_revision: "v2",
             lifecycle: "active",
+            implementation_status: "contract_tested",
             catalog_source: "official_static",
             capabilities: ["image.t2i", "image.i2i"],
             option_schema: {},
+            capability_summary: {
+              media_kind: "image",
+              accepts_text_only: true,
+              product_text_only: true,
+              accepts: { reference_image: true },
+              product_open: { reference_image: true },
+              limits: { reference_image: 1 },
+            },
+          },
+          {
+            catalog_entry_id: "catalog-preview",
+            capability_manifest_hash: "hash-preview",
+            model_id: "agnes-image-2.5-flash",
+            display_name: "Agnes Image 2.5 Flash",
+            media_type: "image",
+            model_revision: "documented-1",
+            lifecycle: "preview",
+            implementation_status: "documented",
+            catalog_source: "official_static",
+            capabilities: ["image.t2i", "image.i2i"],
+            option_schema: {},
+            capability_summary: {
+              media_kind: "image",
+              accepts_text_only: true,
+              product_text_only: false,
+              accepts: { reference_image: true },
+              product_open: { reference_image: false },
+              limits: { reference_image: 8 },
+            },
           },
         ],
       },
@@ -186,6 +216,11 @@ describe("Provider connection contract revisions", () => {
     );
     expect(await screen.findByText("keyframe · 历史合同")).toBeInTheDocument();
     expect(screen.getByText("keyframe · v2")).toBeInTheDocument();
+    expect(screen.getByTestId("catalog-only-models")).toHaveTextContent("Agnes Image 2.5 Flash");
+    expect(screen.getByLabelText("关键帧模型")).not.toHaveTextContent("Agnes Image 2.5 Flash");
+    expect(screen.getByTestId("binding-capabilities-keyframe")).toHaveTextContent(
+      "供应商声明：纯文本、参考图片；当前工作台：纯文本、参考图片",
+    );
     fireEvent.change(screen.getByLabelText("项目 Provider 绑定"), {
       target: { value: "project-1" },
     });

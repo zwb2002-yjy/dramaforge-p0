@@ -400,3 +400,7 @@ Index(
     RepairStep.__table__.c.ordinal,
 )
 Index("ix_shot_reference_bindings_shot", ShotReferenceBinding.__table__.c.shot_id)
+
+# Register Production-owned policy history through the existing Production ORM
+# entrypoint, keeping shared.model_registry's domain dependency stable.
+from app.production import policy_models as policy_models  # noqa: E402
