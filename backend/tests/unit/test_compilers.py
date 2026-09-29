@@ -40,6 +40,11 @@ def _candidate_image_manifest() -> ModelCapabilityManifest:
     # Compiler fixture only: catalog publication and execution eligibility remain preview.
     raw["lifecycle"] = "active"
     raw["implementation_status"] = "contract_tested"
+    raw["evidence"]["synthetic_contract_fixture"] = {
+        "source_type": "contract_fixture",
+        "source_url": "https://example.invalid/synthetic-contract-fixture",
+        "checked_at": "2026-09-29",
+    }
     return ModelCapabilityManifest.model_validate(raw)
 
 
@@ -51,6 +56,11 @@ def _candidate_video_manifest(model_id: str = "agnes-video-2.5") -> ModelCapabil
     )
     raw["lifecycle"] = "active"
     raw["implementation_status"] = "contract_tested"
+    raw["evidence"]["synthetic_contract_fixture"] = {
+        "source_type": "contract_fixture",
+        "source_url": "https://example.invalid/synthetic-contract-fixture",
+        "checked_at": "2026-09-29",
+    }
     return ModelCapabilityManifest.model_validate(raw)
 
 

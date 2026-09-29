@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from app.providers.manifest import ModelCapabilityManifest
+from app.providers.manifest import (
+    ModelCapabilityManifest,
+    has_reproducible_contract_evidence,
+    is_legacy_tested_manifest,
+)
 
 CatalogIdentity = tuple[str, str, str, str]
 
@@ -76,6 +80,12 @@ class ModelCatalogLoader:
                 raise ValueError(f"invalid model catalog file {path}: {exc}") from exc
             if not isinstance(raw, dict):
                 raise ValueError(f"model catalog file must contain an object: {path}")
+            if "implementation_status" not in raw and not is_legacy_tested_manifest(raw):
+                raise ValueError(f"model manifest must declare implementation status: {path}")
+            if raw.get("implementation_status") == "contract_tested" and not (
+                has_reproducible_contract_evidence(raw)
+            ):
+                raise ValueError(f"contract-tested manifest lacks reproducible evidence: {path}")
             try:
                 manifest = ModelCapabilityManifest.model_validate(raw)
             except ValueError as exc:

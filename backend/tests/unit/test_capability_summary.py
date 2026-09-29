@@ -9,6 +9,17 @@ from app.providers.catalog_seed_data import SEED_MANIFESTS
 from app.providers.manifest import ModelCapabilityManifest
 
 
+def _mark_tested(source: dict[str, object]) -> None:
+    source["implementation_status"] = "contract_tested"
+    source["evidence"] = {
+        "contract": {
+            "source_type": "contract_fixture",
+            "source_url": "https://example.invalid/synthetic-contract-fixture",
+            "checked_at": "2026-09-29",
+        }
+    }
+
+
 def test_frozen_h3_reports_only_its_declared_first_frame() -> None:
     source = next(item for item in SEED_MANIFESTS if item["model_id"] == "MiniMax-H3")
     summary = summarize_model_capability(ModelCapabilityManifest.model_validate(source))
@@ -21,6 +32,7 @@ def test_frozen_h3_reports_only_its_declared_first_frame() -> None:
 def test_new_h3_reference_capability_stays_closed_in_formal_mainchain() -> None:
     source = next(item for item in SEED_MANIFESTS if item["model_id"] == "MiniMax-H3")
     revised = deepcopy(source)
+    _mark_tested(revised)
     operation = revised["operations"]["video.generate"]
     operation["input_contracts"] = {
         "frame": {
@@ -47,6 +59,7 @@ def test_new_h3_reference_capability_stays_closed_in_formal_mainchain() -> None:
 def test_image_text_and_reference_contracts_are_separate() -> None:
     source = next(item for item in SEED_MANIFESTS if item["model_id"] == "image-01")
     revised = deepcopy(source)
+    _mark_tested(revised)
     operation = revised["operations"]["image.generate"]
     operation["input_contracts"] = {
         "text": {"maximum_total_references": 0},

@@ -93,6 +93,7 @@ async def test_new_revision_preserves_old_row_and_demotes_it_to_legacy(
     old_file.rename(legacy_dir / old_file.name)
     revised = original.as_dict()
     revised["model_revision"] = "next-revision"
+    revised["implementation_status"] = "documented"
     (old_file.parent / "08-next-revision.json").write_text(json.dumps(revised), encoding="utf-8")
     result = await sync_model_catalog(
         session, manifests=ModelCatalogLoader(catalog).load(), apply=True

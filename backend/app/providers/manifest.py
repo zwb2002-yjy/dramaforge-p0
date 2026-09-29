@@ -9,6 +9,8 @@ change adds a new revision row instead of mutating an existing one.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date
 from typing import Any, Literal
 
@@ -22,6 +24,38 @@ MediaKind = Literal["image", "video", "text", "voice"]
 Lifecycle = Literal["preview", "active", "legacy", "deprecated", "retired"]
 CatalogSource = Literal["official_static", "account_discovery", "admin_approved"]
 OperationKind = Literal["image.generate", "video.generate"]
+
+# The seven pre-cutover active revisions had no explicit implementation_status.
+# Their exact persisted payloads remain frozen; a new or edited manifest cannot
+# acquire contract_tested by omitting the field.
+LEGACY_TESTED_MANIFEST_HASHES = frozenset(
+    {
+        "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c",
+        "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025",
+        "8cec18e61bf09ca76399f6d49db38ca45a5b712c230973d16688b4ccbf19f77c",
+        "2fdf987947919fd4d797b9c0a2cbbae165571d91054c1c1e87bd87b77dde6add",
+        "9fe8be474428218ff47221413062b26d4d23e2541000611600112f09d1fcbae5",
+        "30793572ba52b743ab05b3d6237354110a4c51e1b9adb29f5a2b8b51e9e01e3e",
+        "04dd2d914a517a45bbc14a6a5ab91c525185a76b9145d8a2b5f040f6a8e00ba8",
+    }
+)
+
+
+def is_legacy_tested_manifest(raw: dict[str, Any]) -> bool:
+    if "implementation_status" in raw:
+        return False
+    encoded = json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return digest in LEGACY_TESTED_MANIFEST_HASHES
+
+
+def has_reproducible_contract_evidence(raw: dict[str, Any]) -> bool:
+    evidence = raw.get("evidence")
+    return isinstance(evidence, dict) and any(
+        isinstance(item, dict)
+        and item.get("source_type") in {"contract_fixture", "quality_evidence"}
+        for item in evidence.values()
+    )
 
 
 class OptionSpec(BaseModel):
@@ -127,7 +161,7 @@ class ModelCapabilityManifest(BaseModel):
     lifecycle: Lifecycle = "active"
     catalog_source: CatalogSource = "official_static"
     implementation_status: Literal["discovered", "documented", "contract_tested"] = (
-        "contract_tested"
+        "discovered"
     )
     documented_at: date
     operations: dict[OperationKind, OperationManifest]
@@ -138,6 +172,18 @@ class ModelCapabilityManifest(BaseModel):
     option_schema: ModelOptionSchema = Field(
         default_factory=lambda: ModelOptionSchema(namespace="")
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_exact_legacy_status(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            if is_legacy_tested_manifest(value):
+                return {**value, "implementation_status": "contract_tested"}
+            if value.get("implementation_status") == "contract_tested" and not (
+                has_reproducible_contract_evidence(value)
+            ):
+                raise ValueError("contract-tested manifest lacks reproducible evidence")
+        return value
 
 
 # ---------------------------------------------------------------------------

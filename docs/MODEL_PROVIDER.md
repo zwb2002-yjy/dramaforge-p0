@@ -38,6 +38,10 @@ MiniMax 官方 [`GET /v1/models`](https://platform.minimax.io/docs/api-reference
 其管理面 [`ListModelActivations`](https://docs.volcengine.com/docs/ark/list-model-activations-api?lang=en)
 要求 Access Key 鉴权，现有 `/models` TODO 不产生 `visible`。这两种未证实情形为
 `not_supported`，仍阻止新的 Provider Create。
+新目录 Revision 必须显式声明实施状态；声称 `contract_tested` 时还须附可复现的
+合同/质量证据。仅七个现存 active Manifest 的原始精确哈希保留旧版省略字段时的
+`contract_tested` 兼容；改动这些文件或新增型号不能继承该状态。创建 Binding
+时再次核对目录哈希、实施状态和证据。
 
 ## Model Capability / Prompt Compiler 详细指南
 

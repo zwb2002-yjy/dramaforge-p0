@@ -14,7 +14,10 @@ from app.config import clear_settings_cache
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.production.service import GraphService
 from app.providers.connection_service import ProviderConnectionService
-from app.providers.model_system_models import ProviderModelAvailability
+from app.providers.model_system_models import (
+    ProviderAvailabilityEvidence,
+    ProviderModelAvailability,
+)
 from app.providers.models import (
     ProviderCapabilityEvidence,
     ProviderConnection,
@@ -323,6 +326,12 @@ async def test_model_list_scope_never_infers_unproven_media_visibility(
         for item in await session.scalars(select(ProviderModelAvailability))
     }
     assert tuple(projected[binding.invoke_model_value or ""] for binding in bindings) == expected
+    evidence = list(await session.scalars(select(ProviderAvailabilityEvidence)))
+    assert len(evidence) == 2
+    assert all(
+        item.listed_model_ids_json == [bindings[0].invoke_model_value]
+        for item in evidence
+    )
 
 
 @pytest.mark.asyncio

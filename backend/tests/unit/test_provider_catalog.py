@@ -136,6 +136,18 @@ def test_catalog_loader_discovers_new_same_protocol_manifest(tmp_path: Path) -> 
     dummy_path = catalog / dummy["provider_type"] / "test-catalog-extension.json"
     dummy_path.write_text(json.dumps(dummy), encoding="utf-8")
 
+    with pytest.raises(ValueError, match="implementation status"):
+        ModelCatalogLoader(catalog).load()
+    dummy["implementation_status"] = "contract_tested"
+    dummy["evidence"] = {
+        "fixture": {
+            "source_type": "contract_fixture",
+            "source_url": "https://example.invalid/synthetic-contract-fixture",
+            "checked_at": "2026-09-29",
+        }
+    }
+    dummy_path.write_text(json.dumps(dummy), encoding="utf-8")
+
     loaded = ModelCatalogLoader(catalog).load()
     manifests = [item.as_dict() for item in loaded if item.publication_lifecycle == "active"]
     assert _identity(dummy) in {item.identity for item in loaded}
@@ -182,6 +194,16 @@ def test_preview_catalog_requires_explicit_implementation_status(tmp_path: Path)
     assert loaded[0].as_dict()["implementation_status"] == "documented"
     manifest["implementation_status"] = "contract_tested"
     path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="reproducible evidence"):
+        ModelCatalogLoader(tmp_path).load()
+    manifest["evidence"] = {
+        "fixture": {
+            "source_type": "contract_fixture",
+            "source_url": "https://example.invalid/synthetic-contract-fixture",
+            "checked_at": "2026-09-29",
+        }
+    }
+    path.write_text(json.dumps(manifest), encoding="utf-8")
     assert ModelCatalogLoader(tmp_path).load()[0].publication_lifecycle == "preview"
 
 
@@ -219,6 +241,7 @@ def test_revision_publication_keeps_legacy_manifest_bytes(tmp_path: Path) -> Non
     original.source_path.rename(legacy_dir / original.source_path.name)
     revised = original.as_dict()
     revised["model_revision"] = "next-revision"
+    revised["implementation_status"] = "documented"
     (original.source_path.parent / "08-next-revision.json").write_text(
         json.dumps(revised), encoding="utf-8"
     )

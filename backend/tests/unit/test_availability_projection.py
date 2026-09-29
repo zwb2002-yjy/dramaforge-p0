@@ -13,6 +13,8 @@ from app.providers.availability_projection import (
     record_model_availability,
 )
 from app.providers.binding_cutover import build_binding_cutover_report
+from app.providers.catalog_loader import hash_manifest
+from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.model_system_models import (
     ModelCapabilityRevision,
@@ -117,6 +119,15 @@ async def test_exact_revision_positive_and_transient_projection(
     assert after_denial.effective_status == "auth_failed"
 
     second_revision = await connections.create_connection_revision(connection=connection)
+    stale = await record_model_availability(
+        session,
+        ModelAvailabilityObservation(
+            **exact,
+            status="visible",
+            listed_model_ids=("MiniMax-H3",),
+        ),
+    )
+    assert stale is None
     fresh = await record_model_availability(
         session,
         ModelAvailabilityObservation(
@@ -130,7 +141,32 @@ async def test_exact_revision_positive_and_transient_projection(
     )
     assert fresh.effective_status == "not_checked"
     assert fresh.positive_evidence_id is None
-    assert await session.scalar(select(func.count()).select_from(ProviderAvailabilityEvidence)) == 5
+    assert await session.scalar(select(func.count()).select_from(ProviderAvailabilityEvidence)) == 6
+
+    legacy_manifest = {
+        "provider_type": "minimax",
+        "protocol_profile": "minimax_cn_v1",
+        "model_id": "MiniMax-H3",
+        "model_revision": "v1",
+        "media_kind": "video",
+        "lifecycle": "active",
+        "catalog_source": "official_static",
+    }
+    catalog = ModelCatalogEntry(
+        provider_type="minimax",
+        protocol_profile="minimax_cn_v1",
+        model_id="MiniMax-H3",
+        model_revision="v1",
+        media_kind="video",
+        display_name="MiniMax H3",
+        lifecycle="active",
+        catalog_source="official_static",
+        capability_manifest_json=legacy_manifest,
+        option_schema_json={},
+        contract_manifest_hash=hash_manifest(legacy_manifest),
+    )
+    session.add(catalog)
+    await session.flush()
 
     binding = ProviderModelBinding(
         workspace_id=workspace.id,
@@ -142,7 +178,11 @@ async def test_exact_revision_positive_and_transient_projection(
         documented=True,
         contract_tested=True,
         account_verified=True,
+        catalog_entry_id=catalog.id,
+        capability_manifest_hash=catalog.contract_manifest_hash,
         invoke_model_value="MiniMax-H3",
+        remote_resource_kind="model",
+        remote_resource_id="MiniMax-H3",
         created_by=owner.id,
         updated_by=owner.id,
     )
@@ -153,14 +193,19 @@ async def test_exact_revision_positive_and_transient_projection(
     assert unresolved.rows[0].availability == "not_checked"
     assert "binding_target_unresolved" in unresolved.rows[0].blocking_reasons
 
+    capability_manifest = {
+        key: value for key, value in legacy_manifest.items()
+        if key not in {"lifecycle", "catalog_source"}
+    }
     model = ModelCapabilityRevision(
+        legacy_catalog_entry_id=catalog.id,
         provider_type="minimax",
         protocol_profile="minimax_cn_v1",
         canonical_model_id="MiniMax-H3",
         model_revision="v1",
         media_kind="video",
-        manifest_json={},
-        manifest_hash="a" * 64,
+        manifest_json=capability_manifest,
+        manifest_hash=hash_manifest(capability_manifest),
         source_snapshot_id="minimax-test-snapshot",
         implementation_status="contract_tested",
     )
@@ -193,6 +238,10 @@ async def test_exact_revision_positive_and_transient_projection(
     assert ready.rows[0].binding_id == binding.id
     assert ready.rows[0].availability == "visible"
 
+    binding.capability_manifest_hash = "b" * 64
+    changed_hash = await build_binding_cutover_report(session, workspace_id=workspace.id)
+    assert changed_hash.enabled_unresolved_count == 1
+    binding.capability_manifest_hash = catalog.contract_manifest_hash
     connection.provider_type = "agnes"
     mismatched = await build_binding_cutover_report(session, workspace_id=workspace.id)
     assert mismatched.enabled_unresolved_count == 1

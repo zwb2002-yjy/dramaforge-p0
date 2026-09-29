@@ -48,7 +48,7 @@ class ModelAvailabilityObservation:
             listed = set(self.listed_model_ids)
             if (self.remote_model_id in listed) != (self.status == "visible"):
                 raise ValueError("availability status contradicts the returned model ids")
-        elif self.listed_model_ids is not None:
+        elif self.status != "not_supported" and self.listed_model_ids is not None:
             raise ValueError("failed checks cannot claim a model-list result")
 
 
@@ -63,12 +63,12 @@ def effective_availability(
 
 async def record_model_availability(
     session: AsyncSession, observation: ModelAvailabilityObservation
-) -> ProviderModelAvailability:
+) -> ProviderModelAvailability | None:
     """Append evidence and update the projection under a connection row lock.
 
     The lock serializes concurrent first observations, where no projection row
-    exists yet. A stale revision can retain its own evidence but cannot confer
-    visibility on a newer revision because the key includes both revision IDs.
+    exists yet. A stale revision retains audit evidence but never updates the
+    effective projection.
     """
     observation.validate()
     connection = await session.scalar(
@@ -105,6 +105,20 @@ async def record_model_availability(
     )
     session.add(evidence)
     await session.flush()
+    current_revision_id = await session.scalar(
+        select(ProviderConnectionRevision.id)
+        .where(ProviderConnectionRevision.connection_id == connection.id)
+        .order_by(ProviderConnectionRevision.revision_no.desc())
+        .limit(1)
+    )
+    if (
+        current_revision_id != revision.id
+        or connection.credential_id != revision.credential_revision_id
+        or connection.provider_type != revision.provider_type
+        or connection.protocol_profile != revision.protocol_profile
+        or connection.base_url != revision.base_url
+    ):
+        return None
     projection = await session.scalar(
         select(ProviderModelAvailability)
         .where(

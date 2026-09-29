@@ -23,8 +23,14 @@ from app.providers.availability_projection import (
     ModelAvailabilityObservation,
     record_model_availability,
 )
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_service import ModelCatalogService
+from app.providers.manifest import (
+    ModelCapabilityManifest,
+    has_reproducible_contract_evidence,
+    is_legacy_tested_manifest,
+)
 from app.providers.models import (
     ProjectProviderBinding,
     ProviderCapabilityEvidence,
@@ -919,7 +925,10 @@ class ProviderConnectionService:
                     status=availability,
                     listed_model_ids=(
                         tuple(sorted(listed_model_ids))
-                        if availability in {"visible", "not_visible"}
+                        if http_status is not None
+                        and http_status < 400
+                        and catalog_received
+                        and availability in {"visible", "not_visible", "not_supported"}
                         else None
                     ),
                     error_code=error_code,
@@ -1146,6 +1155,28 @@ class ProviderConnectionService:
             )
         if entry.media_kind != media_type:
             raise ValidationAppError("model binding media type mismatch")
+        if hash_manifest(entry.capability_manifest_json) != entry.contract_manifest_hash:
+            raise ValidationAppError(
+                "catalog manifest identity mismatch",
+                details={"code": "CATALOG_MANIFEST_HASH_MISMATCH"},
+            )
+        try:
+            manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        except ValueError as exc:
+            raise ValidationAppError("catalog manifest is invalid") from exc
+        if manifest.implementation_status != "contract_tested":
+            raise ValidationAppError(
+                "model binding requires a contract-tested manifest",
+                details={"code": "MODEL_CONTRACT_NOT_TESTED"},
+            )
+        if not (
+            is_legacy_tested_manifest(entry.capability_manifest_json)
+            or has_reproducible_contract_evidence(entry.capability_manifest_json)
+        ):
+            raise ValidationAppError(
+                "model binding lacks reproducible contract evidence",
+                details={"code": "MODEL_CONTRACT_EVIDENCE_MISSING"},
+            )
         operation_kind = "image.generate" if media_type == "image" else "video.generate"
         operations = entry.capability_manifest_json.get("operations") or {}
         if operation_kind not in operations:

@@ -9,6 +9,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.providers.catalog_loader import hash_manifest
+from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.model_system_models import (
     ConnectionDiscoveredModel,
     ConnectionModelCapabilityRevision,
@@ -97,6 +99,11 @@ async def build_binding_cutover_report(
             "legacy_catalog_entry_id": (
                 str(binding.catalog_entry_id) if binding.catalog_entry_id is not None else None
             ),
+            "legacy_manifest_hash": binding.capability_manifest_hash,
+            "global_manifest_hash": None,
+            "model_revision": None,
+            "remote_resource_kind": binding.remote_resource_kind,
+            "remote_resource_id": binding.remote_resource_id,
             "source_snapshot_id": None,
             "connection_revision_id": None,
             "credential_revision_id": None,
@@ -136,18 +143,47 @@ async def build_binding_cutover_report(
                 if binding.model_capability_revision_id is not None
                 else None
             )
+            catalog = (
+                await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+                if binding.catalog_entry_id is not None
+                else None
+            )
+            legacy_manifest = catalog.capability_manifest_json if catalog is not None else None
+            capability_manifest = (
+                {key: value for key, value in legacy_manifest.items()
+                 if key not in {"lifecycle", "catalog_source"}}
+                if isinstance(legacy_manifest, dict)
+                else None
+            )
+            if model is not None:
+                evidence["global_manifest_hash"] = model.manifest_hash
+                evidence["model_revision"] = model.model_revision
             if (
                 model is not None
+                and catalog is not None
+                and isinstance(legacy_manifest, dict)
+                and capability_manifest is not None
                 and connection is not None
+                and model.legacy_catalog_entry_id == catalog.id
                 and binding.canonical_model_id == model.canonical_model_id
                 and binding.model_id == model.canonical_model_id
                 and binding.media_type == model.media_kind
                 and connection.provider_type == model.provider_type
                 and connection.protocol_profile == model.protocol_profile
-                and (
-                    binding.catalog_entry_id is None
-                    or model.legacy_catalog_entry_id == binding.catalog_entry_id
-                )
+                and catalog.provider_type == model.provider_type
+                and catalog.protocol_profile == model.protocol_profile
+                and catalog.model_id == model.canonical_model_id
+                and catalog.model_revision == model.model_revision
+                and catalog.media_kind == model.media_kind
+                and capability_manifest.get("model_revision") == model.model_revision
+                and capability_manifest.get("model_id") == model.canonical_model_id
+                and binding.capability_manifest_hash == catalog.contract_manifest_hash
+                and hash_manifest(legacy_manifest) == catalog.contract_manifest_hash
+                and model.manifest_json == capability_manifest
+                and model.manifest_hash == hash_manifest(capability_manifest)
+                and binding.invoke_model_value is not None
+                and binding.remote_resource_kind is not None
+                and binding.remote_resource_id == binding.invoke_model_value
             ):
                 target_kind = "global_model"
                 evidence["source_snapshot_id"] = model.source_snapshot_id
